@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/backend/web/dist/*
+!/backend/web/dist/index.html
+
+# Local data and clones
+/data/
+/repos/
+
+# Environment
+.env
+
+# Deliverables written for reading, not for the repo
+/docs/plans/
+
+# Tooling scratch
+/.claude/
+/.playwright-mcp/
+/coverage/
+node_modules/
+
+# macOS
+.DS_Store
