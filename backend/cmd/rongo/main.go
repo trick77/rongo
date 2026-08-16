@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/config"
+	"github.com/trick77/rongo/internal/exttools"
 	"github.com/trick77/rongo/internal/httpapi"
 )
 
@@ -23,6 +24,13 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: parseLevel(cfg.LogLevel),
 	})))
+
+	tools, err := exttools.Resolve()
+	if err != nil {
+		slog.Error("required external tool missing or wrong", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("external tools resolved", "git", tools.Git, "rg", tools.Rg, "ctags", tools.Ctags)
 
 	srv := httpapi.NewServer(httpapi.Deps{})
 
