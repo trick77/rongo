@@ -12,6 +12,13 @@
 ## Locked choices (do not change without agreement)
 - Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5.
   `CGO_ENABLED=0` everywhere.
+- **Those two modules are one unit.** The vec extension is a wasm build compiled against ncruces'
+  SQLite, so a version skew breaks vector search rather than failing to compile. Bump both together
+  or neither — never one alone, never a lone Dependabot PR. Keep the same pair as peeq and loom
+  (`v0.23.3` / `v0.1.7-alpha.2`); divergence means a fix found in one repo does not transfer.
+  `v0.1.7-alpha.2` is an alpha: read its changelog before any bump.
+- A test must drive `vec0` end to end — create, insert, KNN query, assert the neighbour — so an
+  incompatible bump fails CI instead of surfacing as empty result sets in production.
 - One SQLite file is the whole datastore. No Postgres, no Redis, no vector service.
 - stdlib `net/http`. No web framework, no ORM, no router library.
 - **No tree-sitter** — needs cgo, plus a grammar and its node names per language. `ctags` gives a
