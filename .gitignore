@@ -1,31 +1,32 @@
 # ---------- Go ----------
-/bin/
+bin/
 *.exe
 *.test
 *.out
 *.prof
-# Go workspace files are per-machine
+# Per-machine workspace files.
 go.work
 go.work.sum
 
 # ---------- Frontend (Vite / React / TS) ----------
-node_modules/
-/ui/dist/
-/ui/.vite/
-/ui/tsconfig.tsbuildinfo
+node_modules
+ui/dist/
+ui/.vite/
+# tsc -b build-mode stamp file, written by the UI typecheck.
+ui/tsconfig.tsbuildinfo
 .eslintcache
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
 
 # The SPA is built into the Go binary's embed dir. Only the tracked
 # placeholder index.html belongs in git — never the built assets.
-/backend/web/dist/*
-!/backend/web/dist/index.html
+backend/web/dist/*
+!backend/web/dist/index.html
 
 # ---------- SQLite ----------
-# The WAL sidecars are as untrackable as the db itself.
+# The WAL sidecars are as untrackable as the database itself, and a bare
+# *.db rule leaves them staged by an unlucky `git add -A`.
 *.db
 *.db-wal
 *.db-shm
@@ -33,31 +34,51 @@ pnpm-debug.log*
 *.sqlite3
 
 # ---------- Runtime data ----------
-# Cloned repositories rongo indexes, and its own database.
+# The database, and the repositories rongo clones in order to index them.
+# Those clones are other people's source code — never this repo's content.
 /data/
 /repos/
 
-# ---------- Secrets & config ----------
+# ---------- Secrets ----------
 .env
+# Any .env variant — backups, per-host copies, editor swap files. A bare `.env`
+# rule leaves `.env.bak`/`.env.local` untracked-but-committable, which is how
+# real API keys and repository PATs get staged. `.env.example` carries no
+# secrets and is re-included.
 .env.*
 !.env.example
 
 # ---------- Test & coverage output ----------
-/coverage/
+coverage/
 coverage.out
 coverage.xml
 *.cobertura.xml
+# Playwright run output.
+test-results/
+playwright-report/
+
+# ---------- Agent & editor tooling ----------
+# Local Claude Code settings, and the worktrees that live under .claude/.
+.claude/
+.superpowers/
+# Playwright MCP scratch output, written to the repo root during browser-driven
+# UI verification.
+.playwright-mcp/
 
 # ---------- Deliverables written for reading, not for the repo ----------
-/docs/plans/
+docs/plans/
 
-# ---------- Tooling scratch ----------
-/.claude/
-/.playwright-mcp/
-/test-results/
-/playwright-report/
+# ---------- Stray images at the repo root ----------
+# Verification screenshots land here during UI work. They are throwaway
+# evidence and may show a logged-in session or proprietary source code on
+# screen — an unlucky `git add -A` must not commit one. The wordmark is the
+# one image that genuinely belongs at the root.
+/*.png
+/*.jpg
+/*.jpeg
+!/rongo-wide.png
 
-# ---------- Editors & OS ----------
+# ---------- OS & editors ----------
 .DS_Store
 .idea/
 *.swp
