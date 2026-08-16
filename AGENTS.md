@@ -1,58 +1,52 @@
 # rongo
 
-Codeverstehen für BA und DEV. Indexiert Repositories, klärt Mehrdeutiges zurück, antwortet belegt
-in der gewählten Rolle. Produktname immer `rongo` — nie «Rongorongo», das ist nur Etymologie.
+Answers questions about indexed code for two audiences: BA (business language) and DEV (technical).
+Product name is always `rongo`.
 
-## Arbeitsweise
-- Docs, Specs und Code-Kommentare: **Englisch**. Nutzertexte und UI-Copy: **Deutsch, Schweizer
-  Rechtschreibung** — nie `ß`.
-- Ein Feature-Branch je Phase (`feat/phase-N-...`), nie auf `master` committen.
-- TDD: erst der fehlschlagende Test, dann die kleinste Implementierung.
-- YAML immer `.yaml`, nie `.yml`. Container-Datei immer `Containerfile`.
-- Kein Test ruft ein echtes LLM, einen echten Embedding-Endpunkt oder ein echtes Git-Remote —
-  `httptest`-Attrappen, Fixture-Repo lokal mit `git` erzeugt.
+## Conventions
+- Docs, specs, code comments: English. UI copy and generated answers: German, Swiss orthography — never `ß`.
+- Feature branch per phase (`feat/phase-N-...`). Never commit to `master`.
+- TDD: failing test first, then the smallest implementation.
+- `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
+- No test hits a real LLM, embeddings endpoint or git remote — `httptest` fakes, fixture repo built
+  locally with `git`.
+- Never commit built SPA assets; only the tracked placeholder `backend/web/dist/index.html`.
 
-## Festgelegte technische Entscheide (nicht ohne Absprache ändern)
-- Modulpfad `github.com/trick77/rongo`. Go 1.26, stdlib `net/http`, kein Framework.
-- **Pure-Go SQLite**: `ncruces/go-sqlite3` plus `asg017/sqlite-vec-go-bindings/ncruces` (wasm,
-  ohne cgo) plus FTS5. `CGO_ENABLED=0` überall.
-- Genau **eine** SQLite-Datei als Datenhaltung. Kein Postgres, kein Redis, kein Vektor-Dienst.
-- Frontend React + TS + Vite + Tailwind, in das Binary eingebettet (`//go:embed`).
-- Laufzeit-Image `debian:13-slim`, nicht distroless: rongo ruft `git`, `rg` und `ctags` auf.
-- **Kein tree-sitter.** Bräuchte cgo und je Sprache Grammatik samt Knotennamen. `ctags` liefert
-  für ~150 Sprachen einen uniformen Datensatz; wo nichts kommt, greift das Zeilenfenster.
-- Konfiguration ausschliesslich über `RONGO_*`-Umgebungsvariablen.
+## Locked choices (do not change without agreement)
+- Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5.
+  `CGO_ENABLED=0` everywhere.
+- One SQLite file is the whole datastore. No Postgres, no Redis, no vector service.
+- stdlib `net/http`. No web framework, no ORM, no router library.
+- **No tree-sitter** — needs cgo, plus a grammar and its node names per language. `ctags` gives a
+  uniform record for ~150 languages; where it yields nothing, the line window is the normal path.
+- Runtime image stays non-distroless: rongo shells out to `git`, `rg`, `ctags`.
+- Config only via `RONGO_*` env vars.
 
-## Modelle
-- Zwei MiMo-Deployments, hart in `internal/llm/client.go`, **nie** als Umgebungsvariable.
-- **Pro** nur, wo ein Mensch liest: die Antwort, die Fachkarten-Zusammenfassungen.
-- **non-Pro + ShortGate** für alles andere: Verstehen, Routen, Relevanz beim Sammeln,
-  Thread-Titel, Nachfrage-Prüfschritt. Massstab ist «Ausgabe ist ID/Label», nicht «denkt nicht».
-- Beide sind Reasoning-Modelle. `WithoutThinking` und `ShortGate` sind getrennte Schalter.
-- Jeder Aufruf bekommt `WithMaxTokens`, ausser eine abgeschnittene Antwort wäre schlimmer.
-- Embeddings: OpenAI, `text-embedding-3-small`, 1536 Dimensionen.
+## Models
+- Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
+- **Pro** only where a human reads: the answer, feature-card summaries.
+- **non-Pro + `ShortGate`** for everything else: understand, route, relevance while gathering, thread
+  title, follow-up sufficiency check. The bar is "output is an id or a label", not "doesn't think".
+- Both deployments reason. `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
+- Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
 
-## Invarianten (müssen in jedem Feature halten)
-- **Nie erfinden.** Führt die Kette in nicht indexierten Code, wird das in der Antwort benannt —
-  sichtbar ist der Aufruf und die Konfiguration, nicht das Innere. Eine plausible Erfindung ist
-  der teuerste Fehler dieses Produkts.
-- **Kein Treffer heisst kein Treffer.** «Nichts gefunden» samt versuchter Begriffe, nie eine
-  Antwort aus dem, was zufällig im Kontext liegt.
-- **Jede Aussage ist belegbar.** Belegfeld nennt Repo, Datei, Zeile. Zitierte Dateien werden beim
-  Deckeln des Kontexts nie verdrängt — ein Beleg ins Leere ist schlimmer als eine lange Liste.
-- **Der Thread ist ein Protokoll.** Eine Nachfrage erzeugt eine neue Antwort; die alte wird nie
-  überschrieben. Auch eine korrigierte Rückfrage-Auswahl startet einen neuen Zug.
-- **Rückfrage nur bei echter Mehrdeutigkeit.** Hängen Kandidaten laut `repo_deps` voneinander ab,
-  ist es Zusammensetzung, keine Alternative — dann alle beantworten, nicht fragen.
-- **Repo-Grenze nur mit zwei Gründen überschreiten**: der Code referenziert das Symbol wirklich,
-  und das Zielrepo ist indexiert. Gleiches Sprungbudget, kein Rabatt.
-- Zugangsdaten für Repositories werden verschlüsselt abgelegt, nie geloggt, nie von der API
-  zurückgegeben.
+## Invariants (must hold in every feature)
+- **Never invent.** Chain leads into non-indexed code → say so in the answer: call and configuration
+  are visible, the internals are not.
+- **No hit means no hit.** "Nothing found" plus the terms tried — never an answer built from whatever
+  happens to be in context.
+- **Every claim is citable**: repo, file, line. Cited files are never evicted when capping context.
+- **The thread is a record.** A follow-up adds an answer, never rewrites one. A corrected
+  clarification choice starts a new turn.
+- **Clarify only on real ambiguity.** Candidates that depend on each other per `repo_deps` are
+  composition, not alternatives — answer all of them instead of asking.
+- **Cross a repo boundary only with two reasons**: the gathered code really references the symbol,
+  and the target repo is indexed. Same hop budget, no discount for crossing.
+- Repository credentials: encrypted at rest, never logged, never returned by the API.
 
-## Oberfläche
-- Aufklappbares trägt einen **Chevron**, der beim Öffnen um 90 Grad dreht. Kein Dreieck, kein
-  Plus/Minus, kein Symbolwechsel.
-- Aktivitätsspur als Timeline, **eine je Zug**. Eine Rückfrage beendet den Zug: Wartezustand-Knoten
-  in Ochre, nicht der Done-Haken.
-- Ochre heisst «du bist dran». Ist etwas entschieden, verliert es die Farbe.
-- Kein Boustrophedon in der Oberfläche — bewusst verworfen, Lesbarkeit schlägt Motiv.
+## UI
+- Expandable → chevron, rotates 90° on open. No triangle, no plus/minus, no glyph swap.
+- Activity trace is a timeline, **one per turn**. A clarification ends the turn: ochre waiting node,
+  not the Done check.
+- Ochre means "your move". Once something is decided, it loses the colour.
+- No boustrophedon in the UI — deliberately dropped, legibility beats motif.
