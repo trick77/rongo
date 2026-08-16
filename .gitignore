@@ -1,23 +1,64 @@
-# Build output
+# ---------- Go ----------
 /bin/
+*.exe
+*.test
+*.out
+*.prof
+# Go workspace files are per-machine
+go.work
+go.work.sum
+
+# ---------- Frontend (Vite / React / TS) ----------
+node_modules/
+/ui/dist/
+/ui/.vite/
+/ui/tsconfig.tsbuildinfo
+.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# The SPA is built into the Go binary's embed dir. Only the tracked
+# placeholder index.html belongs in git — never the built assets.
 /backend/web/dist/*
 !/backend/web/dist/index.html
 
-# Local data and clones
+# ---------- SQLite ----------
+# The WAL sidecars are as untrackable as the db itself.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---------- Runtime data ----------
+# Cloned repositories rongo indexes, and its own database.
 /data/
 /repos/
 
-# Environment
+# ---------- Secrets & config ----------
 .env
+.env.*
+!.env.example
 
-# Deliverables written for reading, not for the repo
+# ---------- Test & coverage output ----------
+/coverage/
+coverage.out
+coverage.xml
+*.cobertura.xml
+
+# ---------- Deliverables written for reading, not for the repo ----------
 /docs/plans/
 
-# Tooling scratch
+# ---------- Tooling scratch ----------
 /.claude/
 /.playwright-mcp/
-/coverage/
-node_modules/
+/test-results/
+/playwright-report/
 
-# macOS
+# ---------- Editors & OS ----------
 .DS_Store
+.idea/
+*.swp
+*~
