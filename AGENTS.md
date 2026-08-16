@@ -24,6 +24,9 @@
 - **No tree-sitter** — needs cgo, plus a grammar and its node names per language. `ctags` gives a
   uniform record for ~150 languages; where it yields nothing, the line window is the normal path.
 - Runtime image stays non-distroless: rongo shells out to `git`, `rg`, `ctags`.
+- **`ctags` must be universal-ctags.** macOS ships Apple's BSD ctags at `/usr/bin/ctags`, which
+  rejects long options outright — the dev env has no container to hide behind. Verify the binary at
+  startup and fail loudly; a wrong ctags yields an empty symbol index, not an error.
 - New config goes in a `RONGO_*` env var, nowhere else.
 
 ## Models
@@ -34,6 +37,8 @@
 - Both deployments reason. Never justify the non-Pro lane as "the model that can't think".
   `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
+- Embeddings are cached by chunk content hash. Never re-embed unchanged content — dev re-indexes the
+  whole corpus constantly, and the cache is what keeps that loop bearable.
 
 ## Invariants (must hold in every feature)
 - **Never invent.** Chain leads into non-indexed code → say so in the answer: call and configuration
