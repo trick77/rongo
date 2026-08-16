@@ -37,6 +37,9 @@
 - Both deployments reason. Never justify the non-Pro lane as "the model that can't think".
   `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
+- A BA answer is the core mechanism in three to five paragraphs — answer the question and stop. Edge
+  cases belong in a follow-up, which is cheap because the context is already gathered. DEV gets more
+  room for inline code.
 - Embeddings are cached by chunk content hash. Never re-embed unchanged content — dev re-indexes the
   whole corpus constantly, and the cache is what keeps that loop bearable.
 
@@ -52,7 +55,14 @@
   composition, not alternatives — answer all of them instead of asking.
 - **Cross a repo boundary only with two reasons**: the gathered code really references the symbol,
   and the target repo is indexed. Same hop budget, no discount for crossing.
-- Repository credentials: encrypted at rest, never logged, never returned by the API.
+- **Repository list lives in `repos.yaml`, credentials never do.** That file ends up in a repo or a
+  ticket sooner or later; tokens come only from `RONGO_*` env vars, one per forge host, injected into
+  the remote URL at fetch time and never logged. Don't build a CRUD form for repos — the Repos page
+  is read-only status.
+- **A repo dropping out of `repos.yaml` is deactivated, not deleted.** It leaves search; its index
+  stays until an explicit admin purge. A typo must not destroy hours of indexing.
+- **A share link exposes one answer, never a thread**, is individually revocable, and every live link
+  is listed in the admin view. It is the only unauthenticated output path in the product.
 
 ## UI
 - Expandable → chevron, rotates 90° on open. No triangle, no plus/minus, no glyph swap.
