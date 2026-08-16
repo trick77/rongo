@@ -1,0 +1,30 @@
+# --- Stage 1: build the SPA -------------------------------------------------
+FROM node:26-alpine AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# --- Stage 2: build the binary ---------------------------------------------
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+# The SPA lands in the embed directory before the Go build reads it.
+COPY --from=ui /backend/web/dist ./web/dist
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/rongo ./cmd/rongo
+
+# --- Stage 3: runtime -------------------------------------------------------
+# Deliberately NOT distroless: rongo shells out to git, ripgrep and
+# universal-ctags, all of which need a real userland.
+FROM debian:13-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates git ripgrep universal-ctags \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/rongo /usr/local/bin/rongo
+USER 1000:1000
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/rongo"]

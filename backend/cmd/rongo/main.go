@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,16 @@ func main() {
 		// Logging is not configured yet, so this goes to stderr directly.
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
+	}
+
+	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit; used by the container healthcheck")
+	flag.Parse()
+	if *healthcheck {
+		resp, err := http.Get("http://" + cfg.Addr + "/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
