@@ -1,0 +1,30 @@
+.PHONY: build test fe-build fe-test run dev tidy
+
+tidy:
+	cd backend && go mod tidy
+
+test:
+	cd backend && go test ./...
+
+fe-test:
+	cd ui && npx tsc -b && npm run test -- --run
+
+# vite.config.ts sets emptyOutDir:false so the tracked backend/web/dist/.gitkeep
+# survives a build (go:embed needs it); we clean the whole build output here
+# instead, explicitly, so the two halves of this workaround stay together.
+# Cleaning only dist/assets misses anything vite copies verbatim from
+# ui/public/ into dist/ root — index.html is overwritten every build, but a
+# file removed from ui/public/ later would otherwise survive in dist/ forever
+# and stay embedded in every binary.
+fe-build:
+	find backend/web/dist -mindepth 1 ! -name '.gitkeep' -delete
+	cd ui && npm ci && npm run build
+
+build: fe-build
+	cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/rongo ./cmd/rongo
+
+run:
+	cd backend && go run ./cmd/rongo
+
+dev:
+	./hack/dev.sh

@@ -1,0 +1,54 @@
+# First-run setup:
+#
+# 1. `./data` and `./repos` are gitignored and don't exist in a fresh clone.
+#    Docker creates them root-owned on first `up`, but the container runs as
+#    uid 1000 (see `user:` below) and fails with something like
+#    "sqlite: unable to open database file". Create and own them first:
+#
+#      mkdir -p data repos && chown 1000:1000 data repos
+#
+# 2. Copy .env.example to .env and set at least:
+#      BACKEND_PUBLIC_URL      the externally reachable base URL
+#      BACKEND_SESSION_SECRET  at least 16 characters, not "change-me"
+#                               (e.g. `openssl rand -base64 32`)
+#      BACKEND_AUTH_MODE       must be "token" (or "oidc" once it exists) —
+#                               "dev" refuses to start on the 0.0.0.0 address
+#                               this compose file sets, since dev mode
+#                               auto-logs in an admin with no credentials.
+#      BACKEND_ADMIN_TOKEN     required when BACKEND_AUTH_MODE=token
+services:
+  rongo:
+    build:
+      context: .
+      dockerfile: backend/Containerfile
+    image: ghcr.io/trick77/rongo:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Loopback-only on purpose: rongo answers questions about proprietary
+    # source, so it should never sit directly on a public interface. If a
+    # reverse proxy runs on a shared Docker network instead, drop the
+    # "127.0.0.1:" prefix (or replace this with `networks:` + `expose:`)
+    # and let the proxy be the only thing binding a host port.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      BACKEND_ADDR: 0.0.0.0:8080
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL}
+      BACKEND_DB_PATH: /data/rongo.db
+      BACKEND_REPO_ROOT: /repos
+      BACKEND_AUTH_MODE: ${BACKEND_AUTH_MODE}
+      BACKEND_ADMIN_TOKEN: ${BACKEND_ADMIN_TOKEN}
+      BACKEND_SESSION_SECRET: ${BACKEND_SESSION_SECRET}
+      BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
+    volumes:
+      - ./data:/data
+      - ./repos:/repos
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/rongo", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

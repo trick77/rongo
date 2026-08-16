@@ -16,7 +16,7 @@
 - `ncruces/go-sqlite3` and `asg017/sqlite-vec-go-bindings` are **one unit**: pin both, bump both together or neither, never a lone Dependabot PR. Stay on `v0.23.3` / `v0.1.7-alpha.2` — the same pair as peeq and loom.
 - One SQLite file is the whole datastore. No Postgres, no Redis, no vector service.
 - stdlib `net/http` only. No web framework, no ORM, no router library.
-- All runtime config comes from `RONGO_*` env vars. Secrets via env only, never committed.
+- All runtime config comes from `BACKEND_*` env vars. Secrets via env only, never committed.
 - Structured `slog` only. The error attribute key is **`err`**, never `error`. Log `r.URL.Path`, **never** a full URL, `RequestURI()` or a query string.
 - Docs, specs and code comments in **English**. UI copy and generated answers in **German, Swiss orthography** — never `ß`.
 - No test hits a real LLM, embeddings endpoint or git remote.
@@ -252,7 +252,7 @@ git commit -m "feat: http server skeleton with healthz, logging and recovery"
 
 ---
 
-### Task 2: Configuration from RONGO_* env vars
+### Task 2: Configuration from BACKEND_* env vars
 
 **Files:**
 - Create: `backend/internal/config/config.go`
@@ -283,7 +283,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
+		"BACKEND_SESSION_SECRET": "s3cret",
 	})
 
 	// When
@@ -308,12 +308,12 @@ func TestLoad_appliesDefaults(t *testing.T) {
 }
 
 func TestLoad_requiresSessionSecret(t *testing.T) {
-	setEnv(t, map[string]string{"RONGO_SESSION_SECRET": ""})
+	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": ""})
 
 	_, err := Load()
 
 	if err == nil {
-		t.Fatal("Load() err = nil, want an error about RONGO_SESSION_SECRET")
+		t.Fatal("Load() err = nil, want an error about BACKEND_SESSION_SECRET")
 	}
 }
 
@@ -321,9 +321,9 @@ func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 	// Given: dev mode auto-logs in an admin. Exposing that on 0.0.0.0 is an
 	// open door, so the config layer refuses it rather than trusting operators.
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "dev",
-		"RONGO_ADDR":           "0.0.0.0:8080",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "dev",
+		"BACKEND_ADDR":           "0.0.0.0:8080",
 	})
 
 	_, err := Load()
@@ -335,21 +335,21 @@ func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 
 func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "token",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "token",
 	})
 
 	_, err := Load()
 
 	if err == nil {
-		t.Fatal("Load() err = nil, want an error about RONGO_ADMIN_TOKEN")
+		t.Fatal("Load() err = nil, want an error about BACKEND_ADMIN_TOKEN")
 	}
 }
 
 func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "kerberos",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "kerberos",
 	})
 
 	_, err := Load()
@@ -371,7 +371,7 @@ Expected: FAIL — `undefined: Load`
 
 ```go
 // Package config loads rongo's runtime configuration from environment
-// variables. Every setting is RONGO_*; secrets come from the environment only.
+// variables. Every setting is BACKEND_*; secrets come from the environment only.
 package config
 
 import (
@@ -410,35 +410,35 @@ type Config struct {
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:          envOr("RONGO_ADDR", "127.0.0.1:8080"),
-		PublicURL:     envOr("RONGO_PUBLIC_URL", "http://127.0.0.1:8080"),
-		DBPath:        envOr("RONGO_DB_PATH", "./data/rongo.db"),
-		RepoRoot:      envOr("RONGO_REPO_ROOT", "./repos"),
-		AuthMode:      AuthMode(envOr("RONGO_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:    os.Getenv("RONGO_ADMIN_TOKEN"),
-		SessionSecret: os.Getenv("RONGO_SESSION_SECRET"),
-		LogLevel:      envOr("RONGO_LOG_LEVEL", "info"),
+		Addr:          envOr("BACKEND_ADDR", "127.0.0.1:8080"),
+		PublicURL:     envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
+		DBPath:        envOr("BACKEND_DB_PATH", "./data/rongo.db"),
+		RepoRoot:      envOr("BACKEND_REPO_ROOT", "./repos"),
+		AuthMode:      AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:    os.Getenv("BACKEND_ADMIN_TOKEN"),
+		SessionSecret: os.Getenv("BACKEND_SESSION_SECRET"),
+		LogLevel:      envOr("BACKEND_LOG_LEVEL", "info"),
 	}
 
 	if cfg.SessionSecret == "" {
-		return Config{}, fmt.Errorf("RONGO_SESSION_SECRET is required")
+		return Config{}, fmt.Errorf("BACKEND_SESSION_SECRET is required")
 	}
 
 	switch cfg.AuthMode {
 	case AuthModeDev:
 		if !isLoopback(cfg.Addr) {
 			return Config{}, fmt.Errorf(
-				"RONGO_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got RONGO_ADDR=%q", cfg.Addr)
+				"BACKEND_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
 		}
 	case AuthModeToken:
 		if cfg.AdminToken == "" {
-			return Config{}, fmt.Errorf("RONGO_AUTH_MODE=token requires RONGO_ADMIN_TOKEN")
+			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
 	case AuthModeOIDC:
 		// Wired in a later phase; the mode is accepted so deployments can be
 		// prepared, and the auth layer answers 501 until it exists.
 	default:
-		return Config{}, fmt.Errorf("unknown RONGO_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
+		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
 	}
 
 	return cfg, nil
@@ -509,7 +509,7 @@ func main() {
 	}
 }
 
-// parseLevel maps RONGO_LOG_LEVEL onto slog levels, defaulting to info.
+// parseLevel maps BACKEND_LOG_LEVEL onto slog levels, defaulting to info.
 func parseLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
 	case "debug":
@@ -531,37 +531,37 @@ Add `"fmt"` and `"strings"` to the import block.
 ```bash
 cat > .env.example <<'EOF'
 # rongo runtime configuration. Copy to .env and fill in.
-# Every setting is RONGO_*. Secrets live here only, never in repos.yaml.
+# Every setting is BACKEND_*. Secrets live here only, never in repos.yaml.
 
 # --- HTTP ---
-RONGO_ADDR=127.0.0.1:8080
-RONGO_PUBLIC_URL=http://127.0.0.1:8080
-RONGO_LOG_LEVEL=info
+BACKEND_ADDR=127.0.0.1:8080
+BACKEND_PUBLIC_URL=http://127.0.0.1:8080
+BACKEND_LOG_LEVEL=info
 
 # --- Storage ---
-RONGO_DB_PATH=./data/rongo.db
-RONGO_REPO_ROOT=./repos
+BACKEND_DB_PATH=./data/rongo.db
+BACKEND_REPO_ROOT=./repos
 
 # --- Auth ---
 # dev  : auto-login as admin, loopback addresses only
-# token: every request needs RONGO_ADMIN_TOKEN as a bearer token
+# token: every request needs BACKEND_ADMIN_TOKEN as a bearer token
 # oidc : production (implemented in a later phase)
-RONGO_AUTH_MODE=dev
-RONGO_ADMIN_TOKEN=
-RONGO_SESSION_SECRET=change-me
+BACKEND_AUTH_MODE=dev
+BACKEND_ADMIN_TOKEN=
+BACKEND_SESSION_SECRET=change-me
 EOF
 ```
 
 - [ ] **Step 7: Verify the guard rails by hand**
 
-Run: `cd backend && RONGO_SESSION_SECRET=x RONGO_AUTH_MODE=dev RONGO_ADDR=0.0.0.0:8080 go run ./cmd/rongo`
+Run: `cd backend && BACKEND_SESSION_SECRET=x BACKEND_AUTH_MODE=dev BACKEND_ADDR=0.0.0.0:8080 go run ./cmd/rongo`
 Expected: exits 1 with the loopback refusal on stderr.
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add backend/internal/config backend/cmd/rongo/main.go .env.example
-git commit -m "feat: load and validate runtime config from RONGO_* env vars"
+git commit -m "feat: load and validate runtime config from BACKEND_* env vars"
 ```
 
 ---
@@ -1176,7 +1176,7 @@ Add `"github.com/trick77/rongo/internal/exttools"` to the imports.
 
 - [ ] **Step 6: Verify on this machine**
 
-Run: `cd backend && RONGO_SESSION_SECRET=x go run ./cmd/rongo`
+Run: `cd backend && BACKEND_SESSION_SECRET=x go run ./cmd/rongo`
 Expected: on a machine without universal-ctags, exit 1 naming universal-ctags and the brew command. After `brew install universal-ctags`, the server starts and logs the three paths.
 
 - [ ] **Step 7: Commit**
@@ -1763,10 +1763,10 @@ Add `"path/filepath"` to the imports.
 
 - [ ] **Step 11: Verify by hand**
 
-Run: `cd backend && RONGO_SESSION_SECRET=x go run ./cmd/rongo` then `curl -s localhost:8080/api/me`
+Run: `cd backend && BACKEND_SESSION_SECRET=x go run ./cmd/rongo` then `curl -s localhost:8080/api/me`
 Expected: `{"subject":"dev-user","email":"dev@example.invalid","is_admin":true}`
 
-Run with token mode: `RONGO_SESSION_SECRET=x RONGO_AUTH_MODE=token RONGO_ADMIN_TOKEN=abc go run ./cmd/rongo`, then `curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/me`
+Run with token mode: `BACKEND_SESSION_SECRET=x BACKEND_AUTH_MODE=token BACKEND_ADMIN_TOKEN=abc go run ./cmd/rongo`, then `curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/api/me`
 Expected: `401`. With `-H 'Authorization: Bearer abc'`: `200`.
 
 - [ ] **Step 12: Commit**
@@ -2035,7 +2035,7 @@ Expected: PASS — all tests including the three SPA ones.
 
 ```bash
 cd ui && npm run build
-cd ../backend && RONGO_SESSION_SECRET=x go run ./cmd/rongo
+cd ../backend && BACKEND_SESSION_SECRET=x go run ./cmd/rongo
 ```
 Open `http://127.0.0.1:8080/` and confirm the shell renders. Then restore the placeholder, which the build overwrote:
 
@@ -2099,8 +2099,8 @@ dev:
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-DB_PATH=${RONGO_DB_PATH:-/tmp/rongo-dev.db}
-REPO_ROOT=${RONGO_REPO_ROOT:-/tmp/rongo-dev-repos}
+DB_PATH=${BACKEND_DB_PATH:-/tmp/rongo-dev.db}
+REPO_ROOT=${BACKEND_REPO_ROOT:-/tmp/rongo-dev-repos}
 
 cleanup() {
   if [ -n "${BACKEND_PID:-}" ]; then
@@ -2113,12 +2113,12 @@ mkdir -p "$REPO_ROOT"
 
 (
   cd "$ROOT/backend"
-  RONGO_SESSION_SECRET=${RONGO_SESSION_SECRET:-dev-secret} \
-  RONGO_AUTH_MODE=dev \
-  RONGO_ADDR=127.0.0.1:8080 \
-  RONGO_PUBLIC_URL=http://127.0.0.1:8080 \
-  RONGO_DB_PATH="$DB_PATH" \
-  RONGO_REPO_ROOT="$REPO_ROOT" \
+  BACKEND_SESSION_SECRET=${BACKEND_SESSION_SECRET:-dev-secret} \
+  BACKEND_AUTH_MODE=dev \
+  BACKEND_ADDR=127.0.0.1:8080 \
+  BACKEND_PUBLIC_URL=http://127.0.0.1:8080 \
+  BACKEND_DB_PATH="$DB_PATH" \
+  BACKEND_REPO_ROOT="$REPO_ROOT" \
   go run ./cmd/rongo
 ) &
 BACKEND_PID=$!
@@ -2159,7 +2159,7 @@ Checks:
 2. Temporarily put a directory containing only BSD `ctags` first on `PATH` and
    run `make run`. It must exit 1 naming universal-ctags — not start with an
    empty symbol index.
-3. `RONGO_AUTH_MODE=dev RONGO_ADDR=0.0.0.0:8080 make run` must refuse to start.
+3. `BACKEND_AUTH_MODE=dev BACKEND_ADDR=0.0.0.0:8080 make run` must refuse to start.
 4. `make build` produces `bin/rongo`; running it serves the built SPA at
    `http://127.0.0.1:8080/`.
 ```
@@ -2245,14 +2245,14 @@ services:
     tmpfs:
       - /tmp
     environment:
-      RONGO_ADDR: 0.0.0.0:8080
-      RONGO_PUBLIC_URL: ${RONGO_PUBLIC_URL}
-      RONGO_DB_PATH: /data/rongo.db
-      RONGO_REPO_ROOT: /repos
-      RONGO_AUTH_MODE: ${RONGO_AUTH_MODE}
-      RONGO_ADMIN_TOKEN: ${RONGO_ADMIN_TOKEN}
-      RONGO_SESSION_SECRET: ${RONGO_SESSION_SECRET}
-      RONGO_LOG_LEVEL: ${RONGO_LOG_LEVEL:-info}
+      BACKEND_ADDR: 0.0.0.0:8080
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL}
+      BACKEND_DB_PATH: /data/rongo.db
+      BACKEND_REPO_ROOT: /repos
+      BACKEND_AUTH_MODE: ${BACKEND_AUTH_MODE}
+      BACKEND_ADMIN_TOKEN: ${BACKEND_ADMIN_TOKEN}
+      BACKEND_SESSION_SECRET: ${BACKEND_SESSION_SECRET}
+      BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
     volumes:
       - ./data:/data
       - ./repos:/repos
