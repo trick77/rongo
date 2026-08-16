@@ -1,16 +1,13 @@
 # rongo
 
-Answers questions about indexed code for two audiences: BA (business language) and DEV (technical).
-Product name is always `rongo`.
-
 ## Conventions
-- Docs, specs, code comments: English. UI copy and generated answers: German, Swiss orthography — never `ß`.
+- Docs, specs, code comments: English. UI copy and generated answers: German, Swiss orthography —
+  never `ß`.
 - Feature branch per phase (`feat/phase-N-...`). Never commit to `master`.
 - TDD: failing test first, then the smallest implementation.
 - `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
 - No test hits a real LLM, embeddings endpoint or git remote — `httptest` fakes, fixture repo built
   locally with `git`.
-- Never commit built SPA assets; only the tracked placeholder `backend/web/dist/index.html`.
 
 ## Locked choices (do not change without agreement)
 - Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5.
@@ -20,14 +17,15 @@ Product name is always `rongo`.
 - **No tree-sitter** — needs cgo, plus a grammar and its node names per language. `ctags` gives a
   uniform record for ~150 languages; where it yields nothing, the line window is the normal path.
 - Runtime image stays non-distroless: rongo shells out to `git`, `rg`, `ctags`.
-- Config only via `RONGO_*` env vars.
+- New config goes in a `RONGO_*` env var, nowhere else.
 
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
 - **Pro** only where a human reads: the answer, feature-card summaries.
 - **non-Pro + `ShortGate`** for everything else: understand, route, relevance while gathering, thread
   title, follow-up sufficiency check. The bar is "output is an id or a label", not "doesn't think".
-- Both deployments reason. `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
+- Both deployments reason. Never justify the non-Pro lane as "the model that can't think".
+  `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
 
 ## Invariants (must hold in every feature)
@@ -49,4 +47,3 @@ Product name is always `rongo`.
 - Activity trace is a timeline, **one per turn**. A clarification ends the turn: ochre waiting node,
   not the Done check.
 - Ochre means "your move". Once something is decided, it loses the colour.
-- No boustrophedon in the UI — deliberately dropped, legibility beats motif.
