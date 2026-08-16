@@ -40,14 +40,20 @@ func TestSPA_fallsBackForClientRoutes(t *testing.T) {
 }
 
 func TestSPA_doesNotSwallowAPIRoutes(t *testing.T) {
-	// Given: an unknown /api path must stay a 404, never the SPA shell.
-	srv := NewServer(Deps{})
+	// Given: an unknown /api path — with or without a trailing segment — must
+	// stay a 404, never the SPA shell. The bare "/api" form is the one a
+	// prefix-only check on "/api/" misses.
+	for _, path := range []string{"/api/nope", "/api"} {
+		t.Run(path, func(t *testing.T) {
+			srv := NewServer(Deps{})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/nope", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+			}
+		})
 	}
 }

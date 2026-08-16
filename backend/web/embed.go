@@ -22,7 +22,10 @@ func Handler() http.Handler {
 	files := http.FileServer(http.FS(sub))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		// "/api" (no trailing slash) must also be excluded, not just "/api/" —
+		// a prefix-only check on "/api/" lets the bare form fall through to
+		// the SPA shell instead of a 404.
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
