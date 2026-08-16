@@ -20,8 +20,11 @@ func TestSPA_servesIndexAtRoot(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if !strings.Contains(rec.Body.String(), "<!doctype html>") {
-		t.Errorf("body does not look like the SPA shell: %q", rec.Body.String())
+	// A missing or placeholder build still contains "<!doctype html>", so that
+	// alone passes even when the SPA was never built. id="root" only appears
+	// in the real built index.html, so this fails loudly on a missing build.
+	if !strings.Contains(rec.Body.String(), `id="root"`) {
+		t.Errorf("body does not look like the built SPA shell: %q", rec.Body.String())
 	}
 }
 

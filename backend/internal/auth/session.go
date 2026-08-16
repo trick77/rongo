@@ -8,7 +8,9 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -89,6 +91,12 @@ func (s *Service) UserByToken(token string) (User, bool) {
 		hashToken(token),
 	).Scan(&u.ID, &u.Subject, &u.Email, &adminInt, &expiresAt)
 	if err != nil {
+		// A bad or unknown cookie is sql.ErrNoRows — expected, not logged.
+		// Anything else is a broken database, and collapsing it into the same
+		// silent "not authenticated" would hide that from operators.
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Error("session lookup failed", "err", err)
+		}
 		return User{}, false
 	}
 	exp, err := time.Parse(time.RFC3339, expiresAt)

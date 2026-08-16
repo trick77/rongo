@@ -9,10 +9,10 @@ import (
 	"github.com/trick77/rongo/web"
 )
 
-// Deps holds every collaborator the HTTP layer needs. Each field is an
-// interface declared here (consumer-side), so later phases can add the
-// indexer, the LLM client and the retriever without touching call sites.
-// A nil field means the feature is unconfigured; its endpoints answer 503.
+// Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
+// wired as its concrete *auth.Service; later phases add the indexer, the LLM
+// client and the retriever the same way, one field each. A nil field means
+// the feature is unconfigured; its endpoints answer 503.
 type Deps struct {
 	Auth *auth.Service
 }
@@ -29,7 +29,9 @@ type Server struct {
 func NewServer(deps Deps) *Server {
 	s := &Server{deps: deps, mux: http.NewServeMux()}
 	s.routes()
-	s.handler = recovery(logging(s.mux))
+	// logging outermost: a panicked request must still produce an access-log
+	// line (as a 500), so recovery has to run inside logging, not around it.
+	s.handler = logging(recovery(s.mux))
 	return s
 }
 

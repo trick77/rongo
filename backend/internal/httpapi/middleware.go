@@ -17,6 +17,13 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
+// reach optional interfaces (Flusher, Hijacker, ...) implemented by it.
+// Without this, a phase-2 SSE handler calling Flush() through the middleware
+// chain gets http.ErrNotSupported and, if that error is ignored, silently
+// buffers the whole streamed response instead of flushing it incrementally.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 // logging emits one access line per request. It logs r.URL.Path and never the
 // query string or full URL: query strings carry tokens and, later, OIDC codes.
 func logging(next http.Handler) http.Handler {

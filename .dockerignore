@@ -1,0 +1,8 @@
+.git
+ui/node_modules
+ui/tsconfig.tsbuildinfo
+docs
+bin
+data
+repos
+*.png

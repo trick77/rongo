@@ -56,15 +56,17 @@ func TestCreateSession_storesOnlyTheHash(t *testing.T) {
 		t.Fatalf("CreateSession() err = %v", err)
 	}
 
-	// Then
-	var count int
+	// Then: the stored value must be exactly hashToken(token) — not merely
+	// "not equal to the raw token", which base64, a truncated hash, a
+	// constant, or an empty string would all also satisfy.
+	var storedHash string
 	if err := svc.db.QueryRow(
-		`SELECT count(*) FROM sessions WHERE token_hash = ?`, token,
-	).Scan(&count); err != nil {
+		`SELECT token_hash FROM sessions WHERE user_id = ?`, user.ID,
+	).Scan(&storedHash); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if count != 0 {
-		t.Error("the raw token is stored in sessions.token_hash; store its SHA-256 instead")
+	if want := hashToken(token); storedHash != want {
+		t.Errorf("token_hash = %q, want %q (sha256 of the raw token)", storedHash, want)
 	}
 }
 

@@ -107,6 +107,29 @@ func TestMiddleware_tokenModeRejectsWrongToken(t *testing.T) {
 	}
 }
 
+func TestMiddleware_failsClosedForUnauthenticatedModes(t *testing.T) {
+	// Given: "oidc" (not wired yet) and any unrecognized mode must both fail
+	// closed with 401 rather than let the request through or 500.
+	for _, mode := range []string{"", "kerberos", "oidc"} {
+		t.Run(mode, func(t *testing.T) {
+			svc := newService(t)
+			svc.mode = mode
+			var reached bool
+
+			req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+			rec := httptest.NewRecorder()
+			svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
+
+			if reached {
+				t.Errorf("handler reached in mode %q, want fail-closed", mode)
+			}
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
 func TestMiddleware_acceptsSessionCookie(t *testing.T) {
 	// Given
 	svc := newService(t)
