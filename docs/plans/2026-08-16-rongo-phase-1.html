@@ -1,0 +1,2268 @@
+<meta charset="utf-8">
+<title>rongo Phase 1 Plan</title>
+<style>
+  :root {
+    --ground:#F1F2EF; --surface:#FFFFFF; --sunk:#E8EAE6;
+    --ink:#161B1C; --ink-soft:#5C6668; --ink-faint:#8B9496;
+    --hairline:#DBDED8; --accent:#106257; --accent-ink:#0C4F46;
+    --accent-wash:#DCEAE6; --ochre:#8A6412; --ochre-wash:#F2E9D2;
+    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#101415; --surface:#181D1E; --sunk:#1F2526;
+      --ink:#E6E5DE; --ink-soft:#99A2A3; --ink-faint:#6D7677;
+      --hairline:#29302F; --accent:#63BBAB; --accent-ink:#8ED3C5;
+      --accent-wash:#17302C; --ochre:#D3A752; --ochre-wash:#2E2718;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#101415; --surface:#181D1E; --sunk:#1F2526;
+    --ink:#E6E5DE; --ink-soft:#99A2A3; --ink-faint:#6D7677;
+    --hairline:#29302F; --accent:#63BBAB; --accent-ink:#8ED3C5;
+    --accent-wash:#17302C; --ochre:#D3A752; --ochre-wash:#2E2718;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--font-body); line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 26px 90px; }
+  h1 { font-size:2.1rem; letter-spacing:-0.03em; line-height:1.12; margin:0 0 12px; text-wrap:balance; }
+  h2 { font-size:1.2rem; margin:44px 0 12px; padding-bottom:6px; border-bottom:1px solid var(--hairline); letter-spacing:-0.015em; }
+  h3 { font-size:1.05rem; margin:38px 0 10px; padding:10px 0 0; border-top:2px solid var(--accent); letter-spacing:-0.01em; }
+  h4 { font-size:0.95rem; margin:22px 0 6px; }
+  p, li { max-width: 74ch; }
+  ul, ol { padding-left: 1.25em; }
+  li { margin-bottom: 5px; }
+  li > input[type=checkbox] { margin-right: 8px; accent-color: var(--accent); }
+  blockquote { margin:16px 0; padding:12px 16px; border-left:2px solid var(--ochre); background:var(--ochre-wash); border-radius:0 3px 3px 0; }
+  blockquote p { margin:0; }
+  code { font-family:var(--font-mono); font-size:0.85em; background:var(--sunk); padding:1px 4px; border-radius:2px; }
+  pre { background:var(--surface); border:1px solid var(--hairline); border-radius:3px; padding:12px 14px; overflow-x:auto; }
+  pre code { background:none; padding:0; font-size:0.8125rem; line-height:1.55; }
+  table { width:100%; border-collapse:collapse; font-size:0.9rem; margin:12px 0; }
+  th, td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--hairline); vertical-align:top; }
+  th { font-family:var(--font-mono); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--ink-faint); font-weight:400; }
+  hr { border:0; border-top:1px solid var(--hairline); margin:36px 0; }
+  strong { font-weight:600; }
+  a { color:var(--accent-ink); }
+</style>
+<div class="wrap">
+<h1>rongo Phase 1 — Grundgerüst Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> A <code>rongo</code> binary that boots from env config, applies migrations, proves the sqlite-vec stack works, refuses to start with the wrong <code>ctags</code>, authenticates a user, and serves an embedded SPA — developable with one command and no Docker.</p>
+<p><strong>Architecture:</strong> One static Go binary (<code>CGO_ENABLED=0</code>) with the Vite/React SPA embedded via <code>//go:embed</code>, one SQLite file as the entire datastore. stdlib <code>net/http</code> with Go 1.22 method routing, no framework. Every collaborator is injected through a <code>Deps</code> struct so later phases can add the indexer, LLM client and SSE lanes without reshaping the server.</p>
+<p><strong>Tech Stack:</strong> Go (module <code>github.com/trick77/rongo</code>, <code>go</code> directive <code>1.25.0</code>, build image <code>golang:1.26-alpine</code>), <code>ncruces/go-sqlite3</code> v0.23.3, <code>asg017/sqlite-vec-go-bindings</code> v0.1.7-alpha.2, React 19 + TypeScript + Vite + Tailwind v4.</p>
+<p><strong>Spec:</strong> <code>docs/plans/rongo-spec.html</code> (also published as an Artifact). Repo conventions: <code>AGENTS.md</code>.</p>
+<h2>Global Constraints</h2>
+<ul>
+<li><code>CGO_ENABLED=0</code> everywhere. Never introduce a cgo dependency.</li>
+<li><code>ncruces/go-sqlite3</code> and <code>asg017/sqlite-vec-go-bindings</code> are <strong>one unit</strong>: pin both, bump both together or neither, never a lone Dependabot PR. Stay on <code>v0.23.3</code> / <code>v0.1.7-alpha.2</code> — the same pair as peeq and loom.</li>
+<li>One SQLite file is the whole datastore. No Postgres, no Redis, no vector service.</li>
+<li>stdlib <code>net/http</code> only. No web framework, no ORM, no router library.</li>
+<li>All runtime config comes from <code>RONGO_*</code> env vars. Secrets via env only, never committed.</li>
+<li>Structured <code>slog</code> only. The error attribute key is <strong><code>err</code></strong>, never <code>error</code>. Log <code>r.URL.Path</code>, <strong>never</strong> a full URL, <code>RequestURI()</code> or a query string.</li>
+<li>Docs, specs and code comments in <strong>English</strong>. UI copy and generated answers in <strong>German, Swiss orthography</strong> — never <code>ß</code>.</li>
+<li>No test hits a real LLM, embeddings endpoint or git remote.</li>
+<li>Feature branch <code>feat/phase-1-skeleton</code>. Never commit to <code>master</code>.</li>
+<li>Commit as <code>trick77@users.noreply.github.com</code>.</li>
+</ul>
+<hr>
+<h3>Task 1: HTTP server skeleton with healthz and logging</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/go.mod</code></li>
+<li>Create: <code>backend/cmd/rongo/main.go</code></li>
+<li>Create: <code>backend/internal/httpapi/server.go</code></li>
+<li>Create: <code>backend/internal/httpapi/middleware.go</code></li>
+<li>Test: <code>backend/internal/httpapi/server_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: nothing.</p>
+</li>
+<li><p>Produces: <code>httpapi.NewServer(Deps) *Server</code> implementing <code>http.Handler</code>; <code>httpapi.Deps</code> struct (empty for now, grows each task).</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Initialise the module</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">mkdir -p backend/cmd/rongo backend/internal/httpapi
+cd backend &amp;&amp; go mod init github.com/trick77/rongo &amp;&amp; go mod edit -go=1.25.0
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Write the failing test</strong></li>
+</ul>
+<p><code>backend/internal/httpapi/server_test.go</code>:</p>
+<pre><code class="language-go">package httpapi
+
+import (
+	&quot;net/http&quot;
+	&quot;net/http/httptest&quot;
+	&quot;testing&quot;
+)
+
+func TestHealthz_returnsOK(t *testing.T) {
+	// Given
+	srv := NewServer(Deps{})
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/healthz&quot;, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusOK)
+	}
+	if got, want := rec.Body.String(), `{&quot;status&quot;:&quot;ok&quot;}`; got != want {
+		t.Errorf(&quot;body = %q, want %q&quot;, got, want)
+	}
+}
+
+func TestUnknownRoute_returns404(t *testing.T) {
+	srv := NewServer(Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/nope&quot;, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusNotFound)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/httpapi/ -run TestHealthz -v</code>
+Expected: FAIL — <code>undefined: NewServer</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Write the server</strong></li>
+</ul>
+<p><code>backend/internal/httpapi/server.go</code>:</p>
+<pre><code class="language-go">// Package httpapi wires rongo&#39;s HTTP routes onto the stdlib mux.
+package httpapi
+
+import &quot;net/http&quot;
+
+// Deps holds every collaborator the HTTP layer needs. Each field is an
+// interface declared here (consumer-side), so later phases can add the
+// indexer, the LLM client and the retriever without touching call sites.
+// A nil field means the feature is unconfigured; its endpoints answer 503.
+type Deps struct{}
+
+// Server routes requests and owns the middleware chain.
+type Server struct {
+	deps    Deps
+	mux     *http.ServeMux
+	handler http.Handler
+}
+
+// NewServer builds the router and wraps it in the middleware chain once,
+// rather than per request.
+func NewServer(deps Deps) *Server {
+	s := &amp;Server{deps: deps, mux: http.NewServeMux()}
+	s.routes()
+	s.handler = recovery(logging(s.mux))
+	return s
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+// routes is the single place every route is registered.
+func (s *Server) routes() {
+	s.mux.HandleFunc(&quot;GET /healthz&quot;, s.handleHealthz)
+}
+
+func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(&quot;Content-Type&quot;, &quot;application/json&quot;)
+	_, _ = w.Write([]byte(`{&quot;status&quot;:&quot;ok&quot;}`))
+}
+</code></pre>
+<p><code>backend/internal/httpapi/middleware.go</code>:</p>
+<pre><code class="language-go">package httpapi
+
+import (
+	&quot;log/slog&quot;
+	&quot;net/http&quot;
+	&quot;time&quot;
+)
+
+// statusRecorder captures the status code so the access log can report it.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// logging emits one access line per request. It logs r.URL.Path and never the
+// query string or full URL: query strings carry tokens and, later, OIDC codes.
+func logging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &amp;statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(rec, r)
+
+		attrs := []any{
+			&quot;method&quot;, r.Method,
+			&quot;path&quot;, r.URL.Path,
+			&quot;status&quot;, rec.status,
+			&quot;duration_ms&quot;, time.Since(start).Milliseconds(),
+		}
+		switch {
+		case rec.status &gt;= 500:
+			slog.Error(&quot;request&quot;, attrs...)
+		case rec.status &gt;= 400:
+			slog.Warn(&quot;request&quot;, attrs...)
+		default:
+			slog.Info(&quot;request&quot;, attrs...)
+		}
+	})
+}
+
+// recovery turns a panic into a 500 without killing the process.
+func recovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				slog.Error(&quot;panic recovered&quot;, &quot;err&quot;, v, &quot;path&quot;, r.URL.Path)
+				http.Error(w, &quot;internal server error&quot;, http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+</code></pre>
+<p><code>backend/cmd/rongo/main.go</code>:</p>
+<pre><code class="language-go">// Command rongo serves the API and the embedded SPA.
+package main
+
+import (
+	&quot;log/slog&quot;
+	&quot;net/http&quot;
+	&quot;os&quot;
+
+	&quot;github.com/trick77/rongo/internal/httpapi&quot;
+)
+
+func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &amp;slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
+	srv := httpapi.NewServer(httpapi.Deps{})
+
+	addr := &quot;127.0.0.1:8080&quot;
+	slog.Info(&quot;listening&quot;, &quot;addr&quot;, addr)
+	if err := http.ListenAndServe(addr, srv); err != nil {
+		slog.Error(&quot;server stopped&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/httpapi/ -v</code>
+Expected: PASS — both tests.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Verify it actually runs</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go run ./cmd/rongo &amp;</code> then <code>curl -s localhost:8080/healthz</code>
+Expected: <code>{&quot;status&quot;:&quot;ok&quot;}</code>. Kill the process afterwards.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/go.mod backend/cmd backend/internal/httpapi
+git commit -m &quot;feat: http server skeleton with healthz, logging and recovery&quot;
+</code></pre>
+<hr>
+<h3>Task 2: Configuration from RONGO_* env vars</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/internal/config/config.go</code></li>
+<li>Modify: <code>backend/cmd/rongo/main.go</code></li>
+<li>Create: <code>.env.example</code></li>
+<li>Test: <code>backend/internal/config/config_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: nothing.</p>
+</li>
+<li><p>Produces: <code>config.Load() (config.Config, error)</code>; <code>config.Config</code> with fields <code>Addr, PublicURL, DBPath, RepoRoot, AuthMode, AdminToken, SessionSecret, LogLevel</code>; <code>config.AuthMode</code> with constants <code>AuthModeDev</code>, <code>AuthModeToken</code>, <code>AuthModeOIDC</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the failing test</strong></p>
+</li>
+</ul>
+<p><code>backend/internal/config/config_test.go</code>:</p>
+<pre><code class="language-go">package config
+
+import &quot;testing&quot;
+
+func setEnv(t *testing.T, kv map[string]string) {
+	t.Helper()
+	for k, v := range kv {
+		t.Setenv(k, v)
+	}
+}
+
+func TestLoad_appliesDefaults(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		&quot;RONGO_SESSION_SECRET&quot;: &quot;s3cret&quot;,
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf(&quot;Load() err = %v, want nil&quot;, err)
+	}
+	if cfg.Addr != &quot;127.0.0.1:8080&quot; {
+		t.Errorf(&quot;Addr = %q, want %q&quot;, cfg.Addr, &quot;127.0.0.1:8080&quot;)
+	}
+	if cfg.DBPath != &quot;./data/rongo.db&quot; {
+		t.Errorf(&quot;DBPath = %q, want %q&quot;, cfg.DBPath, &quot;./data/rongo.db&quot;)
+	}
+	if cfg.RepoRoot != &quot;./repos&quot; {
+		t.Errorf(&quot;RepoRoot = %q, want %q&quot;, cfg.RepoRoot, &quot;./repos&quot;)
+	}
+	if cfg.AuthMode != AuthModeDev {
+		t.Errorf(&quot;AuthMode = %q, want %q&quot;, cfg.AuthMode, AuthModeDev)
+	}
+}
+
+func TestLoad_requiresSessionSecret(t *testing.T) {
+	setEnv(t, map[string]string{&quot;RONGO_SESSION_SECRET&quot;: &quot;&quot;})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal(&quot;Load() err = nil, want an error about RONGO_SESSION_SECRET&quot;)
+	}
+}
+
+func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
+	// Given: dev mode auto-logs in an admin. Exposing that on 0.0.0.0 is an
+	// open door, so the config layer refuses it rather than trusting operators.
+	setEnv(t, map[string]string{
+		&quot;RONGO_SESSION_SECRET&quot;: &quot;s3cret&quot;,
+		&quot;RONGO_AUTH_MODE&quot;:      &quot;dev&quot;,
+		&quot;RONGO_ADDR&quot;:           &quot;0.0.0.0:8080&quot;,
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal(&quot;Load() err = nil, want a refusal to run dev auth on a non-loopback address&quot;)
+	}
+}
+
+func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
+	setEnv(t, map[string]string{
+		&quot;RONGO_SESSION_SECRET&quot;: &quot;s3cret&quot;,
+		&quot;RONGO_AUTH_MODE&quot;:      &quot;token&quot;,
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal(&quot;Load() err = nil, want an error about RONGO_ADMIN_TOKEN&quot;)
+	}
+}
+
+func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
+	setEnv(t, map[string]string{
+		&quot;RONGO_SESSION_SECRET&quot;: &quot;s3cret&quot;,
+		&quot;RONGO_AUTH_MODE&quot;:      &quot;kerberos&quot;,
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal(&quot;Load() err = nil, want an error about an unknown auth mode&quot;)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/config/ -v</code>
+Expected: FAIL — <code>undefined: Load</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Write the config package</strong></li>
+</ul>
+<p><code>backend/internal/config/config.go</code>:</p>
+<pre><code class="language-go">// Package config loads rongo&#39;s runtime configuration from environment
+// variables. Every setting is RONGO_*; secrets come from the environment only.
+package config
+
+import (
+	&quot;fmt&quot;
+	&quot;net&quot;
+	&quot;os&quot;
+	&quot;strings&quot;
+)
+
+// AuthMode selects how rongo identifies a caller.
+type AuthMode string
+
+const (
+	// AuthModeDev auto-logs in a fixed admin. Loopback addresses only.
+	AuthModeDev AuthMode = &quot;dev&quot;
+	// AuthModeToken gates every request on a shared bearer token.
+	AuthModeToken AuthMode = &quot;token&quot;
+	// AuthModeOIDC is the production mode. The seam exists in phase 1; the
+	// implementation lands later.
+	AuthModeOIDC AuthMode = &quot;oidc&quot;
+)
+
+// Config holds all runtime settings.
+type Config struct {
+	Addr          string // HTTP listen address
+	PublicURL     string // externally reachable base URL
+	DBPath        string // path to the single SQLite file
+	RepoRoot      string // where rongo clones the repositories it indexes
+	AuthMode      AuthMode
+	AdminToken    string // required when AuthMode is token
+	SessionSecret string
+	LogLevel      string
+}
+
+// Load reads and validates the environment. It returns the first problem it
+// finds rather than starting a half-configured server.
+func Load() (Config, error) {
+	cfg := Config{
+		Addr:          envOr(&quot;RONGO_ADDR&quot;, &quot;127.0.0.1:8080&quot;),
+		PublicURL:     envOr(&quot;RONGO_PUBLIC_URL&quot;, &quot;http://127.0.0.1:8080&quot;),
+		DBPath:        envOr(&quot;RONGO_DB_PATH&quot;, &quot;./data/rongo.db&quot;),
+		RepoRoot:      envOr(&quot;RONGO_REPO_ROOT&quot;, &quot;./repos&quot;),
+		AuthMode:      AuthMode(envOr(&quot;RONGO_AUTH_MODE&quot;, string(AuthModeDev))),
+		AdminToken:    os.Getenv(&quot;RONGO_ADMIN_TOKEN&quot;),
+		SessionSecret: os.Getenv(&quot;RONGO_SESSION_SECRET&quot;),
+		LogLevel:      envOr(&quot;RONGO_LOG_LEVEL&quot;, &quot;info&quot;),
+	}
+
+	if cfg.SessionSecret == &quot;&quot; {
+		return Config{}, fmt.Errorf(&quot;RONGO_SESSION_SECRET is required&quot;)
+	}
+
+	switch cfg.AuthMode {
+	case AuthModeDev:
+		if !isLoopback(cfg.Addr) {
+			return Config{}, fmt.Errorf(
+				&quot;RONGO_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got RONGO_ADDR=%q&quot;, cfg.Addr)
+		}
+	case AuthModeToken:
+		if cfg.AdminToken == &quot;&quot; {
+			return Config{}, fmt.Errorf(&quot;RONGO_AUTH_MODE=token requires RONGO_ADMIN_TOKEN&quot;)
+		}
+	case AuthModeOIDC:
+		// Wired in a later phase; the mode is accepted so deployments can be
+		// prepared, and the auth layer answers 501 until it exists.
+	default:
+		return Config{}, fmt.Errorf(&quot;unknown RONGO_AUTH_MODE %q (want dev, token or oidc)&quot;, cfg.AuthMode)
+	}
+
+	return cfg, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != &quot;&quot; {
+		return v
+	}
+	return fallback
+}
+
+// isLoopback reports whether addr&#39;s host resolves to a loopback address. An
+// empty host (&quot;:8080&quot;) means every interface and is therefore not loopback.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || host == &quot;&quot; {
+		return false
+	}
+	if host == &quot;localhost&quot; {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil &amp;&amp; ip.IsLoopback()
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/config/ -v</code>
+Expected: PASS — all five tests.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Wire config into main</strong></li>
+</ul>
+<p>Replace the body of <code>backend/cmd/rongo/main.go</code>:</p>
+<pre><code class="language-go">// Command rongo serves the API and the embedded SPA.
+package main
+
+import (
+	&quot;log/slog&quot;
+	&quot;net/http&quot;
+	&quot;os&quot;
+
+	&quot;github.com/trick77/rongo/internal/config&quot;
+	&quot;github.com/trick77/rongo/internal/httpapi&quot;
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		// Logging is not configured yet, so this goes to stderr directly.
+		fmt.Fprintf(os.Stderr, &quot;config: %v\n&quot;, err)
+		os.Exit(1)
+	}
+
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &amp;slog.HandlerOptions{
+		Level: parseLevel(cfg.LogLevel),
+	})))
+
+	srv := httpapi.NewServer(httpapi.Deps{})
+
+	slog.Info(&quot;listening&quot;, &quot;addr&quot;, cfg.Addr, &quot;auth_mode&quot;, string(cfg.AuthMode))
+	if err := http.ListenAndServe(cfg.Addr, srv); err != nil {
+		slog.Error(&quot;server stopped&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+}
+
+// parseLevel maps RONGO_LOG_LEVEL onto slog levels, defaulting to info.
+func parseLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case &quot;debug&quot;:
+		return slog.LevelDebug
+	case &quot;warn&quot;:
+		return slog.LevelWarn
+	case &quot;error&quot;:
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+</code></pre>
+<p>Add <code>&quot;fmt&quot;</code> and <code>&quot;strings&quot;</code> to the import block.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Write <code>.env.example</code></strong></li>
+</ul>
+<pre><code class="language-bash">cat &gt; .env.example &lt;&lt;&#39;EOF&#39;
+# rongo runtime configuration. Copy to .env and fill in.
+# Every setting is RONGO_*. Secrets live here only, never in repos.yaml.
+
+# --- HTTP ---
+RONGO_ADDR=127.0.0.1:8080
+RONGO_PUBLIC_URL=http://127.0.0.1:8080
+RONGO_LOG_LEVEL=info
+
+# --- Storage ---
+RONGO_DB_PATH=./data/rongo.db
+RONGO_REPO_ROOT=./repos
+
+# --- Auth ---
+# dev  : auto-login as admin, loopback addresses only
+# token: every request needs RONGO_ADMIN_TOKEN as a bearer token
+# oidc : production (implemented in a later phase)
+RONGO_AUTH_MODE=dev
+RONGO_ADMIN_TOKEN=
+RONGO_SESSION_SECRET=change-me
+EOF
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 7: Verify the guard rails by hand</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; RONGO_SESSION_SECRET=x RONGO_AUTH_MODE=dev RONGO_ADDR=0.0.0.0:8080 go run ./cmd/rongo</code>
+Expected: exits 1 with the loopback refusal on stderr.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 8: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/internal/config backend/cmd/rongo/main.go .env.example
+git commit -m &quot;feat: load and validate runtime config from RONGO_* env vars&quot;
+</code></pre>
+<hr>
+<h3>Task 3: SQLite store and embedded migration runner</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/internal/store/store.go</code></li>
+<li>Create: <code>backend/internal/store/migrate.go</code></li>
+<li>Create: <code>backend/internal/store/migrations/0001_init.sql</code></li>
+<li>Test: <code>backend/internal/store/migrate_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: nothing.</p>
+</li>
+<li><p>Produces: <code>store.Open(path string) (*sql.DB, error)</code>; <code>store.Migrate(db *sql.DB) error</code>; <code>store.VecLiteral(v []float32) string</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Add the pinned dependencies</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">cd backend
+go get github.com/ncruces/go-sqlite3@v0.23.3
+go get github.com/asg017/sqlite-vec-go-bindings@v0.1.7-alpha.2
+go mod tidy
+</code></pre>
+<p>Verify the versions match peeq and loom exactly:</p>
+<pre><code class="language-bash">grep -E &quot;ncruces/go-sqlite3|sqlite-vec-go-bindings&quot; go.mod
+</code></pre>
+<p>Expected: <code>v0.23.3</code> and <code>v0.1.7-alpha.2</code>.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Write the failing test</strong></li>
+</ul>
+<p><code>backend/internal/store/migrate_test.go</code>:</p>
+<pre><code class="language-go">package store
+
+import (
+	&quot;database/sql&quot;
+	&quot;path/filepath&quot;
+	&quot;testing&quot;
+)
+
+// openTemp gives each test its own database file.
+func openTemp(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := Open(filepath.Join(t.TempDir(), &quot;rongo.db&quot;))
+	if err != nil {
+		t.Fatalf(&quot;Open() err = %v&quot;, err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
+	// Given
+	db := openTemp(t)
+
+	// When
+	if err := Migrate(db); err != nil {
+		t.Fatalf(&quot;first Migrate() err = %v&quot;, err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf(&quot;second Migrate() err = %v&quot;, err)
+	}
+
+	// Then: the tables exist ...
+	for _, table := range []string{&quot;users&quot;, &quot;sessions&quot;, &quot;schema_migrations&quot;} {
+		var name string
+		err := db.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type = &#39;table&#39; AND name = ?`, table,
+		).Scan(&amp;name)
+		if err != nil {
+			t.Errorf(&quot;table %q missing: %v&quot;, table, err)
+		}
+	}
+
+	// ... and the second run recorded nothing extra.
+	var applied int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&amp;applied); err != nil {
+		t.Fatalf(&quot;count migrations: %v&quot;, err)
+	}
+	if applied != 1 {
+		t.Errorf(&quot;schema_migrations rows = %d, want 1&quot;, applied)
+	}
+}
+
+func TestOpen_enablesWALAndForeignKeys(t *testing.T) {
+	db := openTemp(t)
+
+	var journalMode string
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&amp;journalMode); err != nil {
+		t.Fatalf(&quot;read journal_mode: %v&quot;, err)
+	}
+	if journalMode != &quot;wal&quot; {
+		t.Errorf(&quot;journal_mode = %q, want %q&quot;, journalMode, &quot;wal&quot;)
+	}
+
+	var foreignKeys int
+	if err := db.QueryRow(`PRAGMA foreign_keys`).Scan(&amp;foreignKeys); err != nil {
+		t.Fatalf(&quot;read foreign_keys: %v&quot;, err)
+	}
+	if foreignKeys != 1 {
+		t.Errorf(&quot;foreign_keys = %d, want 1&quot;, foreignKeys)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/store/ -v</code>
+Expected: FAIL — <code>undefined: Open</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Write the store</strong></li>
+</ul>
+<p><code>backend/internal/store/store.go</code>:</p>
+<pre><code class="language-go">// Package store opens the single SQLite database (pure-Go ncruces driver with
+// the sqlite-vec WASM build linked in) and applies the embedded migrations.
+package store
+
+import (
+	&quot;database/sql&quot;
+	&quot;fmt&quot;
+	&quot;net/url&quot;
+	&quot;strconv&quot;
+	&quot;strings&quot;
+
+	// The sqlite-vec WASM build for ncruces. It provides the SQLite WASM
+	// binary AND the vec0 virtual table plus vec_* functions, and replaces
+	// ncruces/go-sqlite3/embed. These two modules are one unit: never bump one
+	// without the other. See AGENTS.md.
+	_ &quot;github.com/asg017/sqlite-vec-go-bindings/ncruces&quot;
+	// registers the &quot;sqlite3&quot; database/sql driver.
+	_ &quot;github.com/ncruces/go-sqlite3/driver&quot;
+)
+
+// Open opens (creating if needed) the database at path with the pragmas rongo
+// relies on. Callers run Migrate separately.
+func Open(path string) (*sql.DB, error) {
+	dsn := fmt.Sprintf(
+		&quot;file:%s?_pragma=journal_mode(wal)&amp;_pragma=busy_timeout(10000)&amp;_pragma=foreign_keys(on)&quot;,
+		url.PathEscape(path),
+	)
+	db, err := sql.Open(&quot;sqlite3&quot;, dsn)
+	if err != nil {
+		return nil, fmt.Errorf(&quot;open sqlite: %w&quot;, err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf(&quot;ping sqlite: %w&quot;, err)
+	}
+	return db, nil
+}
+
+// VecLiteral encodes a float32 vector as the JSON-array text sqlite-vec
+// accepts as a bind parameter.
+func VecLiteral(v []float32) string {
+	var b strings.Builder
+	b.WriteByte(&#39;[&#39;)
+	for i, f := range v {
+		if i &gt; 0 {
+			b.WriteByte(&#39;,&#39;)
+		}
+		b.WriteString(strconv.FormatFloat(float64(f), &#39;g&#39;, -1, 32))
+	}
+	b.WriteByte(&#39;]&#39;)
+	return b.String()
+}
+</code></pre>
+<p><code>backend/internal/store/migrate.go</code>:</p>
+<pre><code class="language-go">package store
+
+import (
+	&quot;database/sql&quot;
+	&quot;embed&quot;
+	&quot;fmt&quot;
+	&quot;io/fs&quot;
+	&quot;sort&quot;
+)
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+// Migrate applies every embedded migration not yet recorded in
+// schema_migrations, each in its own transaction, in lexicographic filename
+// order.
+//
+// The recorded version is the FULL FILENAME. Never edit a migration that has
+// run anywhere real: the runner skips a recorded version, so the edit silently
+// never applies. Write the next numbered file instead.
+func Migrate(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version    TEXT PRIMARY KEY,
+		applied_at TEXT NOT NULL DEFAULT (datetime(&#39;now&#39;))
+	)`); err != nil {
+		return fmt.Errorf(&quot;create schema_migrations: %w&quot;, err)
+	}
+
+	entries, err := fs.ReadDir(migrationsFS, &quot;migrations&quot;)
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		var dummy int
+		err := db.QueryRow(`SELECT 1 FROM schema_migrations WHERE version = ?`, name).Scan(&amp;dummy)
+		if err == nil {
+			continue // already applied
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+
+		body, err := migrationsFS.ReadFile(&quot;migrations/&quot; + name)
+		if err != nil {
+			return err
+		}
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			tx.Rollback()
+			return fmt.Errorf(&quot;apply %s: %w&quot;, name, err)
+		}
+		if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, name); err != nil {
+			tx.Rollback()
+			return fmt.Errorf(&quot;record %s: %w&quot;, name, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+</code></pre>
+<p><code>backend/internal/store/migrations/0001_init.sql</code>:</p>
+<pre><code class="language-sql">-- users: one row per identity rongo has seen. subject is the stable id from
+-- the auth mode in use (the fixed dev user, or the OIDC subject later).
+CREATE TABLE users (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject    TEXT NOT NULL UNIQUE,
+    email      TEXT NOT NULL DEFAULT &#39;&#39;,
+    is_admin   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime(&#39;now&#39;))
+);
+
+-- sessions: server-side opaque tokens. Only the SHA-256 of the token is
+-- stored, so a database copy cannot be replayed as a login.
+CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime(&#39;now&#39;)),
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/store/ -v</code>
+Expected: PASS — both tests.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/internal/store backend/go.mod backend/go.sum
+git commit -m &quot;feat: sqlite store with embedded migration runner&quot;
+</code></pre>
+<hr>
+<h3>Task 4: vec0 and FTS5 smoke test</h3>
+<p>This task adds no production code. Its entire purpose is to make an
+incompatible bump of the sqlite/sqlite-vec pair fail CI instead of surfacing
+in production as silently empty result sets. Vector search is not built until
+phase 2 — the guard is needed before that, not after.</p>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Test: <code>backend/internal/store/vec_smoke_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>store.Open</code>, <code>store.VecLiteral</code> from Task 3.</p>
+</li>
+<li><p>Produces: nothing.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the test</strong></p>
+</li>
+</ul>
+<p><code>backend/internal/store/vec_smoke_test.go</code>:</p>
+<pre><code class="language-go">package store
+
+import &quot;testing&quot;
+
+// TestVec0_returnsNearestNeighbour proves the sqlite-vec WASM build is loaded
+// and functional in the ncruces driver. It is a version-skew alarm: the two
+// modules are compiled against each other, so a mismatched bump breaks vector
+// search at runtime rather than at compile time.
+func TestVec0_returnsNearestNeighbour(t *testing.T) {
+	// Given: three orthogonal unit vectors.
+	db := openTemp(t)
+	if _, err := db.Exec(`CREATE VIRTUAL TABLE vec_smoke USING vec0(embedding float[3])`); err != nil {
+		t.Fatalf(&quot;create vec0 table: %v (is the sqlite-vec build loaded?)&quot;, err)
+	}
+	vectors := []struct {
+		rowid int
+		vec   []float32
+	}{
+		{1, []float32{1, 0, 0}},
+		{2, []float32{0, 1, 0}},
+		{3, []float32{0, 0, 1}},
+	}
+	for _, v := range vectors {
+		if _, err := db.Exec(
+			`INSERT INTO vec_smoke(rowid, embedding) VALUES (?, ?)`,
+			v.rowid, VecLiteral(v.vec),
+		); err != nil {
+			t.Fatalf(&quot;insert rowid %d: %v&quot;, v.rowid, err)
+		}
+	}
+
+	// When: querying close to the first vector. vec0 requires the `k = ?`
+	// constraint to sit alongside the MATCH.
+	var rowid int
+	var distance float64
+	err := db.QueryRow(
+		`SELECT rowid, distance FROM vec_smoke
+		 WHERE embedding MATCH ? AND k = ?
+		 ORDER BY distance`,
+		VecLiteral([]float32{0.9, 0.1, 0}), 1,
+	).Scan(&amp;rowid, &amp;distance)
+
+	// Then
+	if err != nil {
+		t.Fatalf(&quot;knn query: %v&quot;, err)
+	}
+	if rowid != 1 {
+		t.Errorf(&quot;nearest rowid = %d, want 1&quot;, rowid)
+	}
+	if distance &lt;= 0 || distance &gt; 1 {
+		t.Errorf(&quot;distance = %f, want a small positive L2 distance&quot;, distance)
+	}
+}
+
+// TestFTS5_isAvailable proves FTS5 is compiled into the same WASM build. The
+// hybrid retriever in phase 2 depends on both lanes living in one driver.
+func TestFTS5_isAvailable(t *testing.T) {
+	// Given
+	db := openTemp(t)
+	if _, err := db.Exec(`CREATE VIRTUAL TABLE fts_smoke USING fts5(text)`); err != nil {
+		t.Fatalf(&quot;create fts5 table: %v (is FTS5 compiled in?)&quot;, err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO fts_smoke(rowid, text) VALUES (1, &#39;teaser mail versand&#39;), (2, &#39;gutschein ablauf&#39;)`,
+	); err != nil {
+		t.Fatalf(&quot;insert: %v&quot;, err)
+	}
+
+	// When
+	var rowid int
+	err := db.QueryRow(`SELECT rowid FROM fts_smoke WHERE text MATCH &#39;teaser&#39;`).Scan(&amp;rowid)
+
+	// Then
+	if err != nil {
+		t.Fatalf(&quot;match query: %v&quot;, err)
+	}
+	if rowid != 1 {
+		t.Errorf(&quot;rowid = %d, want 1&quot;, rowid)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Run the tests</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/store/ -run &#39;TestVec0|TestFTS5&#39; -v</code>
+Expected: PASS — both. If <code>CREATE VIRTUAL TABLE ... USING vec0</code> fails, the sqlite/sqlite-vec pin is broken; do not work around it, fix the versions.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Prove it runs without cgo</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; CGO_ENABLED=0 go test ./internal/store/ -count=1</code>
+Expected: PASS. This is the claim the whole storage choice rests on.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/internal/store/vec_smoke_test.go
+git commit -m &quot;test: vec0 and fts5 smoke tests guarding the sqlite-vec pin&quot;
+</code></pre>
+<hr>
+<h3>Task 5: External tool resolution with a universal-ctags check</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/internal/exttools/exttools.go</code></li>
+<li>Modify: <code>backend/cmd/rongo/main.go</code></li>
+<li>Test: <code>backend/internal/exttools/exttools_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: nothing.</p>
+</li>
+<li><p>Produces: <code>exttools.Resolve() (exttools.Paths, error)</code>; <code>exttools.Paths{Git, Rg, Ctags string}</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the failing test</strong></p>
+</li>
+</ul>
+<p><code>backend/internal/exttools/exttools_test.go</code>:</p>
+<pre><code class="language-go">package exttools
+
+import (
+	&quot;os&quot;
+	&quot;path/filepath&quot;
+	&quot;strings&quot;
+	&quot;testing&quot;
+)
+
+// fakeBin writes an executable shell script that prints body for --version.
+func fakeBin(t *testing.T, dir, name, body string) {
+	t.Helper()
+	script := &quot;#!/bin/sh\ncat &lt;&lt;&#39;OUT&#39;\n&quot; + body + &quot;\nOUT\n&quot;
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf(&quot;write %s: %v&quot;, name, err)
+	}
+}
+
+// onlyPath points PATH at dir so the test controls which binaries exist.
+func onlyPath(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv(&quot;PATH&quot;, dir)
+}
+
+func TestResolve_acceptsUniversalCtags(t *testing.T) {
+	// Given
+	dir := t.TempDir()
+	fakeBin(t, dir, &quot;git&quot;, &quot;git version 2.48.0&quot;)
+	fakeBin(t, dir, &quot;rg&quot;, &quot;ripgrep 15.2.0&quot;)
+	fakeBin(t, dir, &quot;ctags&quot;, &quot;Universal Ctags 6.1.0, Copyright (C) 2015-2024&quot;)
+	onlyPath(t, dir)
+
+	// When
+	paths, err := Resolve()
+
+	// Then
+	if err != nil {
+		t.Fatalf(&quot;Resolve() err = %v, want nil&quot;, err)
+	}
+	if paths.Ctags != filepath.Join(dir, &quot;ctags&quot;) {
+		t.Errorf(&quot;Ctags = %q, want %q&quot;, paths.Ctags, filepath.Join(dir, &quot;ctags&quot;))
+	}
+}
+
+func TestResolve_rejectsBSDCtags(t *testing.T) {
+	// Given: macOS ships this at /usr/bin/ctags. Accepting it would produce an
+	// empty symbol index rather than an error, which is far worse.
+	dir := t.TempDir()
+	fakeBin(t, dir, &quot;git&quot;, &quot;git version 2.48.0&quot;)
+	fakeBin(t, dir, &quot;rg&quot;, &quot;ripgrep 15.2.0&quot;)
+	fakeBin(t, dir, &quot;ctags&quot;, &quot;usage: ctags [-BFTaduwvx] [-f tagsfile] file ...&quot;)
+	onlyPath(t, dir)
+
+	// When
+	_, err := Resolve()
+
+	// Then
+	if err == nil {
+		t.Fatal(&quot;Resolve() err = nil, want a rejection of BSD ctags&quot;)
+	}
+	if !strings.Contains(err.Error(), &quot;universal-ctags&quot;) {
+		t.Errorf(&quot;error = %q, want it to name universal-ctags so the fix is obvious&quot;, err)
+	}
+}
+
+func TestResolve_reportsMissingBinary(t *testing.T) {
+	// Given: git and ctags present, rg absent.
+	dir := t.TempDir()
+	fakeBin(t, dir, &quot;git&quot;, &quot;git version 2.48.0&quot;)
+	fakeBin(t, dir, &quot;ctags&quot;, &quot;Universal Ctags 6.1.0&quot;)
+	onlyPath(t, dir)
+
+	// When
+	_, err := Resolve()
+
+	// Then
+	if err == nil {
+		t.Fatal(&quot;Resolve() err = nil, want an error naming ripgrep&quot;)
+	}
+	if !strings.Contains(err.Error(), &quot;rg&quot;) {
+		t.Errorf(&quot;error = %q, want it to name rg&quot;, err)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/exttools/ -v</code>
+Expected: FAIL — <code>undefined: Resolve</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Write the package</strong></li>
+</ul>
+<p><code>backend/internal/exttools/exttools.go</code>:</p>
+<pre><code class="language-go">// Package exttools locates the external binaries rongo shells out to and
+// verifies they are the ones it actually needs.
+//
+// The dev environment runs without a container, so the binaries come from the
+// developer&#39;s machine and cannot be assumed correct. ctags in particular: macOS
+// ships Apple&#39;s BSD ctags at /usr/bin/ctags, which rejects long options. Using
+// it would yield an empty symbol index instead of an error, so rongo refuses to
+// start rather than indexing silently wrong.
+package exttools
+
+import (
+	&quot;fmt&quot;
+	&quot;os/exec&quot;
+	&quot;strings&quot;
+)
+
+// Paths holds the resolved absolute paths of the external tools.
+type Paths struct {
+	Git   string
+	Rg    string
+	Ctags string
+}
+
+// Resolve finds every required binary and validates ctags. It returns the
+// first problem it finds, phrased so the fix is obvious from the message.
+func Resolve() (Paths, error) {
+	var p Paths
+	var err error
+
+	if p.Git, err = exec.LookPath(&quot;git&quot;); err != nil {
+		return Paths{}, fmt.Errorf(&quot;git not found in PATH: %w&quot;, err)
+	}
+	if p.Rg, err = exec.LookPath(&quot;rg&quot;); err != nil {
+		return Paths{}, fmt.Errorf(&quot;ripgrep (rg) not found in PATH: %w&quot;, err)
+	}
+	if p.Ctags, err = exec.LookPath(&quot;ctags&quot;); err != nil {
+		return Paths{}, fmt.Errorf(&quot;ctags not found in PATH (install universal-ctags): %w&quot;, err)
+	}
+	if err := verifyUniversalCtags(p.Ctags); err != nil {
+		return Paths{}, err
+	}
+	return p, nil
+}
+
+// verifyUniversalCtags checks the banner rather than trusting the filename.
+func verifyUniversalCtags(path string) error {
+	out, err := exec.Command(path, &quot;--version&quot;).CombinedOutput()
+	banner := firstLine(string(out))
+	if err != nil {
+		return fmt.Errorf(
+			&quot;%s --version failed (%q); macOS ships BSD ctags at /usr/bin/ctags — install universal-ctags (brew install universal-ctags)&quot;,
+			path, banner)
+	}
+	if !strings.Contains(string(out), &quot;Universal Ctags&quot;) {
+		return fmt.Errorf(
+			&quot;%s is not universal-ctags (reports %q); install universal-ctags (brew install universal-ctags) and make sure it precedes /usr/bin on PATH&quot;,
+			path, banner)
+	}
+	return nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, &#39;\n&#39;); i &gt;= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/exttools/ -v</code>
+Expected: PASS — all three tests.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Call it at startup</strong></li>
+</ul>
+<p>In <code>backend/cmd/rongo/main.go</code>, after the logger is configured and before the server starts:</p>
+<pre><code class="language-go">	tools, err := exttools.Resolve()
+	if err != nil {
+		slog.Error(&quot;required external tool missing or wrong&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+	slog.Info(&quot;external tools resolved&quot;, &quot;git&quot;, tools.Git, &quot;rg&quot;, tools.Rg, &quot;ctags&quot;, tools.Ctags)
+</code></pre>
+<p>Add <code>&quot;github.com/trick77/rongo/internal/exttools&quot;</code> to the imports.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Verify on this machine</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; RONGO_SESSION_SECRET=x go run ./cmd/rongo</code>
+Expected: on a machine without universal-ctags, exit 1 naming universal-ctags and the brew command. After <code>brew install universal-ctags</code>, the server starts and logs the three paths.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 7: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/internal/exttools backend/cmd/rongo/main.go
+git commit -m &quot;feat: resolve external tools and reject BSD ctags at startup&quot;
+</code></pre>
+<hr>
+<h3>Task 6: Sessions, dev auto-login and admin bearer token</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/internal/auth/session.go</code></li>
+<li>Create: <code>backend/internal/auth/service.go</code></li>
+<li>Create: <code>backend/internal/auth/middleware.go</code></li>
+<li>Modify: <code>backend/internal/httpapi/server.go</code></li>
+<li>Modify: <code>backend/cmd/rongo/main.go</code></li>
+<li>Test: <code>backend/internal/auth/session_test.go</code></li>
+<li>Test: <code>backend/internal/auth/middleware_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>store.Open</code>, <code>store.Migrate</code>.</p>
+</li>
+<li><p>Produces: <code>auth.NewService(db *sql.DB, mode config.AuthMode, adminToken string) *auth.Service</code>; <code>(*Service).Middleware(next http.Handler) http.Handler</code>; <code>auth.UserFrom(ctx context.Context) (auth.User, bool)</code>; <code>auth.User{ID int64, Subject, Email string, IsAdmin bool}</code>; cookie name <code>rongo_session</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the failing session test</strong></p>
+</li>
+</ul>
+<p><code>backend/internal/auth/session_test.go</code>:</p>
+<pre><code class="language-go">package auth
+
+import (
+	&quot;path/filepath&quot;
+	&quot;testing&quot;
+	&quot;time&quot;
+
+	&quot;github.com/trick77/rongo/internal/store&quot;
+)
+
+func newService(t *testing.T) *Service {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), &quot;rongo.db&quot;))
+	if err != nil {
+		t.Fatalf(&quot;open db: %v&quot;, err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatalf(&quot;migrate: %v&quot;, err)
+	}
+	return NewService(db, &quot;dev&quot;, &quot;&quot;)
+}
+
+func TestCreateSession_returnsTokenResolvableToUser(t *testing.T) {
+	// Given
+	svc := newService(t)
+	user, err := svc.UpsertUser(&quot;dev-user&quot;, &quot;dev@example.invalid&quot;, true)
+	if err != nil {
+		t.Fatalf(&quot;UpsertUser() err = %v&quot;, err)
+	}
+
+	// When
+	token, err := svc.CreateSession(user.ID, 30*24*time.Hour)
+	if err != nil {
+		t.Fatalf(&quot;CreateSession() err = %v&quot;, err)
+	}
+	got, ok := svc.UserByToken(token)
+
+	// Then
+	if !ok {
+		t.Fatal(&quot;UserByToken() ok = false, want true&quot;)
+	}
+	if got.ID != user.ID {
+		t.Errorf(&quot;user id = %d, want %d&quot;, got.ID, user.ID)
+	}
+}
+
+func TestCreateSession_storesOnlyTheHash(t *testing.T) {
+	// Given: a database copy must not be replayable as a login.
+	svc := newService(t)
+	user, _ := svc.UpsertUser(&quot;dev-user&quot;, &quot;dev@example.invalid&quot;, true)
+
+	// When
+	token, err := svc.CreateSession(user.ID, time.Hour)
+	if err != nil {
+		t.Fatalf(&quot;CreateSession() err = %v&quot;, err)
+	}
+
+	// Then
+	var count int
+	if err := svc.db.QueryRow(
+		`SELECT count(*) FROM sessions WHERE token_hash = ?`, token,
+	).Scan(&amp;count); err != nil {
+		t.Fatalf(&quot;query: %v&quot;, err)
+	}
+	if count != 0 {
+		t.Error(&quot;the raw token is stored in sessions.token_hash; store its SHA-256 instead&quot;)
+	}
+}
+
+func TestUserByToken_rejectsExpiredSession(t *testing.T) {
+	// Given
+	svc := newService(t)
+	user, _ := svc.UpsertUser(&quot;dev-user&quot;, &quot;dev@example.invalid&quot;, true)
+	token, _ := svc.CreateSession(user.ID, -time.Minute) // already expired
+
+	// When
+	_, ok := svc.UserByToken(token)
+
+	// Then
+	if ok {
+		t.Error(&quot;UserByToken() ok = true for an expired session, want false&quot;)
+	}
+}
+
+func TestUserByToken_rejectsUnknownToken(t *testing.T) {
+	svc := newService(t)
+
+	_, ok := svc.UserByToken(&quot;not-a-real-token&quot;)
+
+	if ok {
+		t.Error(&quot;UserByToken() ok = true for an unknown token, want false&quot;)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/auth/ -v</code>
+Expected: FAIL — <code>undefined: NewService</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Write the session layer</strong></li>
+</ul>
+<p><code>backend/internal/auth/session.go</code>:</p>
+<pre><code class="language-go">// Package auth identifies callers. Phase 1 ships the dev and token modes; the
+// OIDC seam exists so a later phase adds a mode, not a redesign.
+package auth
+
+import (
+	&quot;crypto/rand&quot;
+	&quot;crypto/sha256&quot;
+	&quot;database/sql&quot;
+	&quot;encoding/base64&quot;
+	&quot;encoding/hex&quot;
+	&quot;fmt&quot;
+	&quot;time&quot;
+)
+
+// SessionCookie is the cookie carrying the opaque session token.
+const SessionCookie = &quot;rongo_session&quot;
+
+// User is an authenticated identity.
+type User struct {
+	ID      int64
+	Subject string
+	Email   string
+	IsAdmin bool
+}
+
+// Service owns users and sessions.
+type Service struct {
+	db         *sql.DB
+	mode       string
+	adminToken string
+}
+
+// NewService builds the auth service. adminToken is only consulted in token
+// mode.
+func NewService(db *sql.DB, mode string, adminToken string) *Service {
+	return &amp;Service{db: db, mode: mode, adminToken: adminToken}
+}
+
+// UpsertUser inserts the subject or returns the existing row.
+func (s *Service) UpsertUser(subject, email string, isAdmin bool) (User, error) {
+	admin := 0
+	if isAdmin {
+		admin = 1
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO users (subject, email, is_admin) VALUES (?, ?, ?)
+		 ON CONFLICT(subject) DO UPDATE SET email = excluded.email, is_admin = excluded.is_admin`,
+		subject, email, admin,
+	); err != nil {
+		return User{}, fmt.Errorf(&quot;upsert user: %w&quot;, err)
+	}
+	var u User
+	var adminInt int
+	if err := s.db.QueryRow(
+		`SELECT id, subject, email, is_admin FROM users WHERE subject = ?`, subject,
+	).Scan(&amp;u.ID, &amp;u.Subject, &amp;u.Email, &amp;adminInt); err != nil {
+		return User{}, fmt.Errorf(&quot;read user: %w&quot;, err)
+	}
+	u.IsAdmin = adminInt == 1
+	return u, nil
+}
+
+// CreateSession mints a random token, stores only its SHA-256, and returns the
+// raw token to hand to the client exactly once.
+func (s *Service) CreateSession(userID int64, ttl time.Duration) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return &quot;&quot;, fmt.Errorf(&quot;generate session token: %w&quot;, err)
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	if _, err := s.db.Exec(
+		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)`,
+		hashToken(token), userID, time.Now().Add(ttl).UTC().Format(time.RFC3339),
+	); err != nil {
+		return &quot;&quot;, fmt.Errorf(&quot;store session: %w&quot;, err)
+	}
+	return token, nil
+}
+
+// UserByToken resolves a raw token to its user, rejecting expired sessions.
+func (s *Service) UserByToken(token string) (User, bool) {
+	var u User
+	var adminInt int
+	var expiresAt string
+	err := s.db.QueryRow(
+		`SELECT u.id, u.subject, u.email, u.is_admin, s.expires_at
+		 FROM sessions s JOIN users u ON u.id = s.user_id
+		 WHERE s.token_hash = ?`,
+		hashToken(token),
+	).Scan(&amp;u.ID, &amp;u.Subject, &amp;u.Email, &amp;adminInt, &amp;expiresAt)
+	if err != nil {
+		return User{}, false
+	}
+	exp, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil || time.Now().After(exp) {
+		return User{}, false
+	}
+	u.IsAdmin = adminInt == 1
+	return u, true
+}
+
+// DeleteSession revokes one session.
+func (s *Service) DeleteSession(token string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
+	return err
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Run the session tests</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/auth/ -run TestCreateSession -v</code>
+Expected: PASS.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Write the failing middleware test</strong></li>
+</ul>
+<p><code>backend/internal/auth/middleware_test.go</code>:</p>
+<pre><code class="language-go">package auth
+
+import (
+	&quot;net/http&quot;
+	&quot;net/http/httptest&quot;
+	&quot;testing&quot;
+	&quot;time&quot;
+)
+
+// protected reports whether the wrapped handler was reached.
+func protected(reached *bool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+func TestMiddleware_devModeAutoLogsInAsAdmin(t *testing.T) {
+	// Given
+	svc := newService(t)
+	var got User
+	var reached bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The user is attached to the request passed downstream, so it must be
+		// read here rather than from the original request.
+		got, reached = mustUser(t, r)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/me&quot;, nil)
+	rec := httptest.NewRecorder()
+	svc.Middleware(handler).ServeHTTP(rec, req)
+
+	// Then
+	if !reached {
+		t.Fatal(&quot;handler not reached; dev mode should sign the caller in&quot;)
+	}
+	if got.Subject != devSubject {
+		t.Errorf(&quot;subject = %q, want %q&quot;, got.Subject, devSubject)
+	}
+	if !got.IsAdmin {
+		t.Error(&quot;dev user is not admin, want admin&quot;)
+	}
+}
+
+// mustUser reads the authenticated user off the request context.
+func mustUser(t *testing.T, r *http.Request) (User, bool) {
+	t.Helper()
+	u, ok := UserFrom(r.Context())
+	return u, ok
+}
+
+func TestMiddleware_tokenModeRejectsMissingToken(t *testing.T) {
+	// Given
+	svc := newService(t)
+	svc.mode = &quot;token&quot;
+	svc.adminToken = &quot;s3cret-token&quot;
+	var reached bool
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/me&quot;, nil)
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&amp;reached)).ServeHTTP(rec, req)
+
+	// Then
+	if reached {
+		t.Error(&quot;handler reached without a token&quot;)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestMiddleware_tokenModeAcceptsBearerToken(t *testing.T) {
+	// Given
+	svc := newService(t)
+	svc.mode = &quot;token&quot;
+	svc.adminToken = &quot;s3cret-token&quot;
+	var reached bool
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/me&quot;, nil)
+	req.Header.Set(&quot;Authorization&quot;, &quot;Bearer s3cret-token&quot;)
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&amp;reached)).ServeHTTP(rec, req)
+
+	// Then
+	if !reached {
+		t.Fatalf(&quot;handler not reached; status = %d&quot;, rec.Code)
+	}
+}
+
+func TestMiddleware_tokenModeRejectsWrongToken(t *testing.T) {
+	svc := newService(t)
+	svc.mode = &quot;token&quot;
+	svc.adminToken = &quot;s3cret-token&quot;
+	var reached bool
+
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/me&quot;, nil)
+	req.Header.Set(&quot;Authorization&quot;, &quot;Bearer wrong&quot;)
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&amp;reached)).ServeHTTP(rec, req)
+
+	if reached {
+		t.Error(&quot;handler reached with the wrong token&quot;)
+	}
+}
+
+func TestMiddleware_acceptsSessionCookie(t *testing.T) {
+	// Given
+	svc := newService(t)
+	svc.mode = &quot;token&quot;
+	svc.adminToken = &quot;s3cret-token&quot;
+	user, _ := svc.UpsertUser(&quot;someone&quot;, &quot;someone@example.invalid&quot;, false)
+	token, _ := svc.CreateSession(user.ID, time.Hour)
+	var reached bool
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/me&quot;, nil)
+	req.AddCookie(&amp;http.Cookie{Name: SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&amp;reached)).ServeHTTP(rec, req)
+
+	// Then
+	if !reached {
+		t.Fatalf(&quot;handler not reached; status = %d&quot;, rec.Code)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/auth/ -run TestMiddleware -v</code>
+Expected: FAIL — <code>svc.Middleware undefined</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 7: Write the middleware</strong></li>
+</ul>
+<p><code>backend/internal/auth/middleware.go</code>:</p>
+<pre><code class="language-go">package auth
+
+import (
+	&quot;context&quot;
+	&quot;crypto/subtle&quot;
+	&quot;log/slog&quot;
+	&quot;net/http&quot;
+	&quot;strings&quot;
+	&quot;time&quot;
+)
+
+type contextKey struct{}
+
+var userKey contextKey
+
+// devSubject is the fixed identity dev mode signs in. config refuses dev mode
+// on a non-loopback address, so this never reaches a network.
+const devSubject = &quot;dev-user&quot;
+
+// UserFrom returns the authenticated user attached by Middleware.
+func UserFrom(ctx context.Context) (User, bool) {
+	u, ok := ctx.Value(userKey).(User)
+	return u, ok
+}
+
+// Middleware authenticates a request in whichever mode is configured and
+// attaches the user to the request context. It fails closed: any path that
+// does not positively identify a caller answers 401.
+func (s *Service) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A valid session cookie wins in every mode.
+		if c, err := r.Cookie(SessionCookie); err == nil {
+			if u, ok := s.UserByToken(c.Value); ok {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+				return
+			}
+		}
+
+		switch s.mode {
+		case &quot;dev&quot;:
+			u, err := s.UpsertUser(devSubject, &quot;dev@example.invalid&quot;, true)
+			if err != nil {
+				slog.Error(&quot;dev auto-login failed&quot;, &quot;err&quot;, err)
+				http.Error(w, &quot;internal server error&quot;, http.StatusInternalServerError)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			return
+
+		case &quot;token&quot;:
+			presented, ok := bearerToken(r)
+			// Constant-time compare: a length-independent equality check on a
+			// shared secret leaks it a byte at a time.
+			if !ok || subtle.ConstantTimeCompare([]byte(presented), []byte(s.adminToken)) != 1 {
+				http.Error(w, &quot;unauthorized&quot;, http.StatusUnauthorized)
+				return
+			}
+			u, err := s.UpsertUser(&quot;admin-token&quot;, &quot;&quot;, true)
+			if err != nil {
+				slog.Error(&quot;admin token login failed&quot;, &quot;err&quot;, err)
+				http.Error(w, &quot;internal server error&quot;, http.StatusInternalServerError)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			return
+
+		case &quot;oidc&quot;:
+			// The seam. Until the OIDC flow lands, an unauthenticated caller
+			// gets 401 rather than a misleading 500.
+			http.Error(w, &quot;unauthorized&quot;, http.StatusUnauthorized)
+			return
+
+		default:
+			http.Error(w, &quot;unauthorized&quot;, http.StatusUnauthorized)
+			return
+		}
+	})
+}
+
+// SetSessionCookie writes the session cookie. Secure is set whenever the
+// public URL is https.
+func SetSessionCookie(w http.ResponseWriter, token, publicURL string, ttl time.Duration) {
+	http.SetCookie(w, &amp;http.Cookie{
+		Name:     SessionCookie,
+		Value:    token,
+		Path:     &quot;/&quot;,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   strings.HasPrefix(publicURL, &quot;https://&quot;),
+		Expires:  time.Now().Add(ttl),
+	})
+}
+
+func bearerToken(r *http.Request) (string, bool) {
+	h := r.Header.Get(&quot;Authorization&quot;)
+	const prefix = &quot;Bearer &quot;
+	if len(h) &lt;= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return &quot;&quot;, false
+	}
+	return h[len(prefix):], true
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 8: Run the auth tests</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/auth/ -v</code>
+Expected: PASS — all tests.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 9: Add the /api/me endpoint</strong></li>
+</ul>
+<p>In <code>backend/internal/httpapi/server.go</code>, extend <code>Deps</code> and <code>routes</code>:</p>
+<pre><code class="language-go">// Deps holds every collaborator the HTTP layer needs.
+type Deps struct {
+	Auth *auth.Service
+}
+</code></pre>
+<pre><code class="language-go">func (s *Server) routes() {
+	s.mux.HandleFunc(&quot;GET /healthz&quot;, s.handleHealthz)
+	s.mux.Handle(&quot;GET /api/me&quot;, s.requireAuth(http.HandlerFunc(s.handleMe)))
+}
+
+// requireAuth is the single gate every authenticated route goes through.
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	if s.deps.Auth == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, &quot;auth unavailable&quot;, http.StatusServiceUnavailable)
+		})
+	}
+	return s.deps.Auth.Middleware(next)
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		http.Error(w, &quot;unauthorized&quot;, http.StatusUnauthorized)
+		return
+	}
+	w.Header().Set(&quot;Content-Type&quot;, &quot;application/json&quot;)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		&quot;subject&quot;:  u.Subject,
+		&quot;email&quot;:    u.Email,
+		&quot;is_admin&quot;: u.IsAdmin,
+	})
+}
+</code></pre>
+<p>Add <code>&quot;encoding/json&quot;</code> and <code>&quot;github.com/trick77/rongo/internal/auth&quot;</code> to the imports.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 10: Wire the store and auth service into main</strong></li>
+</ul>
+<p>In <code>backend/cmd/rongo/main.go</code>, between the tool check and the server:</p>
+<pre><code class="language-go">	db, err := store.Open(cfg.DBPath)
+	if err != nil {
+		slog.Error(&quot;open database&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	if err := store.Migrate(db); err != nil {
+		slog.Error(&quot;apply migrations&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+
+	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
+	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
+</code></pre>
+<p>Add the <code>auth</code> and <code>store</code> imports. Note <code>cfg.DBPath</code> defaults to <code>./data/rongo.db</code>; create the directory first:</p>
+<pre><code class="language-go">	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
+		slog.Error(&quot;create data directory&quot;, &quot;err&quot;, err)
+		os.Exit(1)
+	}
+</code></pre>
+<p>Add <code>&quot;path/filepath&quot;</code> to the imports.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 11: Verify by hand</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; RONGO_SESSION_SECRET=x go run ./cmd/rongo</code> then <code>curl -s localhost:8080/api/me</code>
+Expected: <code>{&quot;subject&quot;:&quot;dev-user&quot;,&quot;email&quot;:&quot;dev@example.invalid&quot;,&quot;is_admin&quot;:true}</code></p>
+<p>Run with token mode: <code>RONGO_SESSION_SECRET=x RONGO_AUTH_MODE=token RONGO_ADMIN_TOKEN=abc go run ./cmd/rongo</code>, then <code>curl -s -o /dev/null -w &#39;%{http_code}\n&#39; localhost:8080/api/me</code>
+Expected: <code>401</code>. With <code>-H &#39;Authorization: Bearer abc&#39;</code>: <code>200</code>.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 12: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/internal/auth backend/internal/httpapi backend/cmd/rongo/main.go
+git commit -m &quot;feat: sessions, dev auto-login and admin bearer token&quot;
+</code></pre>
+<hr>
+<h3>Task 7: Embedded SPA shell</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>ui/package.json</code>, <code>ui/vite.config.ts</code>, <code>ui/tsconfig.json</code>, <code>ui/index.html</code></li>
+<li>Create: <code>ui/src/main.tsx</code>, <code>ui/src/App.tsx</code>, <code>ui/src/index.css</code></li>
+<li>Create: <code>backend/web/embed.go</code></li>
+<li>Create: <code>backend/web/dist/index.html</code> (tracked placeholder)</li>
+<li>Modify: <code>backend/internal/httpapi/server.go</code></li>
+<li>Test: <code>backend/internal/httpapi/spa_test.go</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>httpapi.Deps</code> from Task 6.</p>
+</li>
+<li><p>Produces: <code>web.Handler() http.Handler</code> serving the embedded SPA with an index.html fallback.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Scaffold the UI</strong></p>
+</li>
+</ul>
+<pre><code class="language-bash">mkdir -p ui/src backend/web/dist
+cd ui
+npm init -y
+npm install react react-dom
+npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-dom tailwindcss @tailwindcss/vite vitest jsdom @testing-library/react
+</code></pre>
+<p><code>ui/vite.config.ts</code>:</p>
+<pre><code class="language-ts">import { defineConfig } from &quot;vite&quot;;
+import react from &quot;@vitejs/plugin-react&quot;;
+import tailwindcss from &quot;@tailwindcss/vite&quot;;
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  // The SPA is built straight into the Go binary&#39;s embed directory.
+  build: { outDir: &quot;../backend/web/dist&quot;, emptyOutDir: true },
+  server: {
+    host: &quot;127.0.0.1&quot;,
+    proxy: { &quot;/api&quot;: &quot;http://127.0.0.1:8080&quot; },
+  },
+});
+</code></pre>
+<p><code>ui/index.html</code>:</p>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang=&quot;de&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot; /&gt;
+    &lt;title&gt;rongo&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div id=&quot;root&quot;&gt;&lt;/div&gt;
+    &lt;script type=&quot;module&quot; src=&quot;/src/main.tsx&quot;&gt;&lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+<p><code>ui/src/index.css</code> — the design tokens from the mock (<code>docs/plans/rongo-ui-mock.html</code>):</p>
+<pre><code class="language-css">@import &quot;tailwindcss&quot;;
+
+@theme {
+  --color-ground: #f1f2ef;
+  --color-surface: #ffffff;
+  --color-sunk: #e8eae6;
+  --color-ink: #161b1c;
+  --color-ink-soft: #5c6668;
+  --color-ink-faint: #8b9496;
+  --color-hairline: #dbded8;
+  --color-accent: #106257;
+  --color-ochre: #8a6412;
+}
+
+body {
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;
+}
+</code></pre>
+<p><code>ui/src/main.tsx</code>:</p>
+<pre><code class="language-tsx">import { StrictMode } from &quot;react&quot;;
+import { createRoot } from &quot;react-dom/client&quot;;
+import App from &quot;./App&quot;;
+import &quot;./index.css&quot;;
+
+createRoot(document.getElementById(&quot;root&quot;)!).render(
+  &lt;StrictMode&gt;
+    &lt;App /&gt;
+  &lt;/StrictMode&gt;,
+);
+</code></pre>
+<p><code>ui/src/App.tsx</code> — the shell only; the real screens arrive in phase 4:</p>
+<pre><code class="language-tsx">export default function App() {
+  return (
+    &lt;main className=&quot;mx-auto max-w-2xl p-8&quot;&gt;
+      &lt;h1 className=&quot;text-2xl font-semibold tracking-tight&quot;&gt;rongo&lt;/h1&gt;
+      &lt;p className=&quot;mt-2 text-[var(--color-ink-soft)]&quot;&gt;
+        Noch nichts indexiert. Die Oberfläche entsteht in einer späteren Phase.
+      &lt;/p&gt;
+    &lt;/main&gt;
+  );
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Write the tracked placeholder</strong></li>
+</ul>
+<p><code>backend/web/dist/index.html</code> — this file is tracked so <code>go:embed</code> always has something to embed; built assets are gitignored.</p>
+<pre><code class="language-html">&lt;!doctype html&gt;
+&lt;html lang=&quot;de&quot;&gt;
+  &lt;head&gt;
+    &lt;meta charset=&quot;utf-8&quot; /&gt;
+    &lt;title&gt;rongo&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;p&gt;SPA not built. Run &lt;code&gt;make fe-build&lt;/code&gt;.&lt;/p&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Write the failing test</strong></li>
+</ul>
+<p><code>backend/internal/httpapi/spa_test.go</code>:</p>
+<pre><code class="language-go">package httpapi
+
+import (
+	&quot;net/http&quot;
+	&quot;net/http/httptest&quot;
+	&quot;strings&quot;
+	&quot;testing&quot;
+)
+
+func TestSPA_servesIndexAtRoot(t *testing.T) {
+	// Given
+	srv := NewServer(Deps{})
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, &quot;/&quot;, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), &quot;&lt;!doctype html&gt;&quot;) {
+		t.Errorf(&quot;body does not look like the SPA shell: %q&quot;, rec.Body.String())
+	}
+}
+
+func TestSPA_fallsBackForClientRoutes(t *testing.T) {
+	// Given: the SPA owns its own routing, so an unknown non-API path must
+	// return index.html rather than 404.
+	srv := NewServer(Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, &quot;/threads/42&quot;, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusOK)
+	}
+}
+
+func TestSPA_doesNotSwallowAPIRoutes(t *testing.T) {
+	// Given: an unknown /api path must stay a 404, never the SPA shell.
+	srv := NewServer(Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, &quot;/api/nope&quot;, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf(&quot;status = %d, want %d&quot;, rec.Code, http.StatusNotFound)
+	}
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Run test to verify it fails</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/httpapi/ -run TestSPA -v</code>
+Expected: FAIL — root returns 404.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Write the embed package</strong></li>
+</ul>
+<p><code>backend/web/embed.go</code>:</p>
+<pre><code class="language-go">// Package web serves the embedded single-page application.
+package web
+
+import (
+	&quot;embed&quot;
+	&quot;io/fs&quot;
+	&quot;net/http&quot;
+	&quot;strings&quot;
+)
+
+//go:embed all:dist
+var distFS embed.FS
+
+// Handler serves the built SPA. Any path that is not a real file falls back to
+// index.html so the client-side router can take over; /api paths are excluded
+// so a typo in an endpoint stays a 404 instead of silently returning HTML.
+func Handler() http.Handler {
+	sub, err := fs.Sub(distFS, &quot;dist&quot;)
+	if err != nil {
+		panic(&quot;web: dist directory missing from embed: &quot; + err.Error())
+	}
+	files := http.FileServer(http.FS(sub))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, &quot;/api/&quot;) {
+			http.NotFound(w, r)
+			return
+		}
+		if _, err := fs.Stat(sub, strings.TrimPrefix(r.URL.Path, &quot;/&quot;)); err != nil {
+			r = r.Clone(r.Context())
+			r.URL.Path = &quot;/&quot;
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 6: Mount it</strong></li>
+</ul>
+<p>In <code>backend/internal/httpapi/server.go</code>, add to <code>routes()</code> as the last registration:</p>
+<pre><code class="language-go">	// &quot;/&quot; is the catch-all: everything not matched above goes to the SPA.
+	s.mux.Handle(&quot;/&quot;, web.Handler())
+</code></pre>
+<p>Add <code>&quot;github.com/trick77/rongo/web&quot;</code> to the imports.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 7: Run tests to verify they pass</strong></li>
+</ul>
+<p>Run: <code>cd backend &amp;&amp; go test ./internal/httpapi/ -v</code>
+Expected: PASS — all tests including the three SPA ones.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 8: Build the real SPA and check it in the browser</strong></li>
+</ul>
+<pre><code class="language-bash">cd ui &amp;&amp; npm run build
+cd ../backend &amp;&amp; RONGO_SESSION_SECRET=x go run ./cmd/rongo
+</code></pre>
+<p>Open <code>http://127.0.0.1:8080/</code> and confirm the shell renders. Then restore the placeholder, which the build overwrote:</p>
+<pre><code class="language-bash">git checkout -- backend/web/dist/index.html
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 9: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add ui backend/web backend/internal/httpapi
+git commit -m &quot;feat: embed the SPA shell with an index.html fallback&quot;
+</code></pre>
+<hr>
+<h3>Task 8: One-command dev loop without Docker</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>Makefile</code></li>
+<li>Create: <code>hack/dev.sh</code></li>
+<li>Create: <code>docs/manual-verification.md</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: everything above.</p>
+</li>
+<li><p>Produces: <code>make dev</code>, <code>make test</code>, <code>make fe-test</code>, <code>make fe-build</code>, <code>make build</code>, <code>make run</code>, <code>make tidy</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the Makefile</strong></p>
+</li>
+</ul>
+<pre><code class="language-makefile">.PHONY: build test fe-build fe-test run dev tidy
+
+tidy:
+	cd backend &amp;&amp; go mod tidy
+
+test:
+	cd backend &amp;&amp; go test ./...
+
+fe-test:
+	cd ui &amp;&amp; npm run test -- --run
+
+fe-build:
+	cd ui &amp;&amp; npm ci &amp;&amp; npm run build
+
+build: fe-build
+	cd backend &amp;&amp; CGO_ENABLED=0 go build -ldflags=&quot;-s -w&quot; -o ../bin/rongo ./cmd/rongo
+
+run:
+	cd backend &amp;&amp; go run ./cmd/rongo
+
+dev:
+	./hack/dev.sh
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Write the dev script</strong></li>
+</ul>
+<p><code>hack/dev.sh</code> — the dev environment runs without Docker, so this starts both processes natively and Vite proxies <code>/api</code> to the backend.</p>
+<pre><code class="language-sh">#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- &quot;$(dirname -- &quot;$0&quot;)/..&quot; &amp;&amp; pwd)
+DB_PATH=${RONGO_DB_PATH:-/tmp/rongo-dev.db}
+REPO_ROOT=${RONGO_REPO_ROOT:-/tmp/rongo-dev-repos}
+
+cleanup() {
+  if [ -n &quot;${BACKEND_PID:-}&quot; ]; then
+    kill &quot;$BACKEND_PID&quot; 2&gt;/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p &quot;$REPO_ROOT&quot;
+
+(
+  cd &quot;$ROOT/backend&quot;
+  RONGO_SESSION_SECRET=${RONGO_SESSION_SECRET:-dev-secret} \
+  RONGO_AUTH_MODE=dev \
+  RONGO_ADDR=127.0.0.1:8080 \
+  RONGO_PUBLIC_URL=http://127.0.0.1:8080 \
+  RONGO_DB_PATH=&quot;$DB_PATH&quot; \
+  RONGO_REPO_ROOT=&quot;$REPO_ROOT&quot; \
+  go run ./cmd/rongo
+) &amp;
+BACKEND_PID=$!
+
+cd &quot;$ROOT/ui&quot;
+npm run dev -- --host 127.0.0.1
+</code></pre>
+<pre><code class="language-bash">chmod +x hack/dev.sh
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Write the manual verification doc</strong></li>
+</ul>
+<p><code>docs/manual-verification.md</code>:</p>
+<pre><code class="language-markdown"># Manual verification
+
+Flows that no automated test covers, because they need real binaries or a real
+browser. Run these by hand before calling a phase done.
+
+## Phase 1 — skeleton
+
+Prerequisites (the dev environment runs without Docker, so these come from your
+machine):
+
+- `git`
+- `rg` (ripgrep)
+- `ctags` — **universal-ctags**, not the BSD ctags macOS ships at
+  `/usr/bin/ctags`. Install with `brew install universal-ctags` and make sure it
+  precedes `/usr/bin` on `PATH`.
+
+Checks:
+
+1. `make dev` starts the backend and Vite; `http://127.0.0.1:5173/` shows the
+   shell and `/api/me` returns the dev user through the proxy.
+2. Temporarily put a directory containing only BSD `ctags` first on `PATH` and
+   run `make run`. It must exit 1 naming universal-ctags — not start with an
+   empty symbol index.
+3. `RONGO_AUTH_MODE=dev RONGO_ADDR=0.0.0.0:8080 make run` must refuse to start.
+4. `make build` produces `bin/rongo`; running it serves the built SPA at
+   `http://127.0.0.1:8080/`.
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Verify the dev loop end to end</strong></li>
+</ul>
+<p>Run: <code>make dev</code>
+Expected: backend logs <code>listening</code>, Vite serves on 5173, <code>curl -s localhost:5173/api/me</code> returns the dev user through the proxy. Ctrl-C stops both.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 5: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add Makefile hack/dev.sh docs/manual-verification.md
+git commit -m &quot;feat: one-command dev loop without Docker&quot;
+</code></pre>
+<hr>
+<h3>Task 9: Container image and compose file</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>backend/Containerfile</code></li>
+<li>Create: <code>compose.yaml</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: the Makefile build target.</p>
+</li>
+<li><p>Produces: a runnable image.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the Containerfile</strong></p>
+</li>
+</ul>
+<p><code>backend/Containerfile</code> — three stages. The runtime is <code>debian:13-slim</code>, not distroless, because rongo shells out to <code>git</code>, <code>rg</code> and <code>ctags</code>.</p>
+<pre><code class="language-dockerfile"># --- Stage 1: build the SPA -------------------------------------------------
+FROM node:26-alpine AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# --- Stage 2: build the binary ---------------------------------------------
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+COPY backend/ ./
+# The SPA lands in the embed directory before the Go build reads it.
+COPY --from=ui /backend/web/dist ./web/dist
+RUN CGO_ENABLED=0 go build -ldflags=&quot;-s -w&quot; -o /out/rongo ./cmd/rongo
+
+# --- Stage 3: runtime -------------------------------------------------------
+# Deliberately NOT distroless: rongo shells out to git, ripgrep and
+# universal-ctags, all of which need a real userland.
+FROM debian:13-slim
+RUN apt-get update \
+ &amp;&amp; apt-get install -y --no-install-recommends \
+      ca-certificates git ripgrep universal-ctags \
+ &amp;&amp; rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/rongo /usr/local/bin/rongo
+USER 1000:1000
+EXPOSE 8080
+ENTRYPOINT [&quot;/usr/local/bin/rongo&quot;]
+</code></pre>
+<p>Note the stage-1 output path: Vite writes to <code>../backend/web/dist</code>, so inside the <code>ui</code> stage the artefacts land at <code>/backend/web/dist</code>. Adjust the <code>WORKDIR</code> if that path does not match after the first build — verify with <code>docker build --target ui</code>.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Write compose.yaml</strong></li>
+</ul>
+<p><code>compose.yaml</code> — one service, matching peeq&#39;s shape.</p>
+<pre><code class="language-yaml">services:
+  rongo:
+    build:
+      context: .
+      dockerfile: backend/Containerfile
+    image: ghcr.io/trick77/rongo:latest
+    restart: unless-stopped
+    user: &quot;1000:1000&quot;
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      RONGO_ADDR: 0.0.0.0:8080
+      RONGO_PUBLIC_URL: ${RONGO_PUBLIC_URL}
+      RONGO_DB_PATH: /data/rongo.db
+      RONGO_REPO_ROOT: /repos
+      RONGO_AUTH_MODE: ${RONGO_AUTH_MODE}
+      RONGO_ADMIN_TOKEN: ${RONGO_ADMIN_TOKEN}
+      RONGO_SESSION_SECRET: ${RONGO_SESSION_SECRET}
+      RONGO_LOG_LEVEL: ${RONGO_LOG_LEVEL:-info}
+    volumes:
+      - ./data:/data
+      - ./repos:/repos
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;/usr/local/bin/rongo&quot;, &quot;-healthcheck&quot;]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+</code></pre>
+<p>The healthcheck needs a <code>-healthcheck</code> flag in <code>main.go</code> that requests <code>/healthz</code> on the configured address and exits 0 or 1. Add it:</p>
+<pre><code class="language-go">	healthcheck := flag.Bool(&quot;healthcheck&quot;, false, &quot;probe /healthz and exit; used by the container healthcheck&quot;)
+	flag.Parse()
+	if *healthcheck {
+		resp, err := http.Get(&quot;http://&quot; + cfg.Addr + &quot;/healthz&quot;)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+</code></pre>
+<p>Place it directly after <code>config.Load()</code> and add <code>&quot;flag&quot;</code> to the imports.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Build the image</strong></li>
+</ul>
+<p>Run: <code>docker build -f backend/Containerfile -t rongo:dev .</code>
+Expected: build succeeds. Then verify the tools are present in the runtime image:</p>
+<pre><code class="language-bash">docker run --rm --entrypoint sh rongo:dev -c &#39;git --version &amp;&amp; rg --version | head -1 &amp;&amp; ctags --version | head -1&#39;
+</code></pre>
+<p>Expected: the ctags line contains <code>Universal Ctags</code>. If it does not, the runtime image would fail the startup check — fix the apt package before moving on.</p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 4: Commit</strong></li>
+</ul>
+<pre><code class="language-bash">git add backend/Containerfile compose.yaml backend/cmd/rongo/main.go
+git commit -m &quot;feat: container image and compose file&quot;
+</code></pre>
+<hr>
+<h3>Task 10: CI workflow — HELD BACK</h3>
+<p><strong>You explicitly deferred pipeline scripts when the repository was created. Do
+not execute this task until it is released.</strong> Everything above works without
+it; the tests run locally through <code>make test</code> and <code>make fe-test</code>.</p>
+<p>When released, mirror <code>peeq/.github/workflows/ci.yaml</code>: a <code>backend</code> job running
+<code>go build</code>, <code>go vet</code>, a gofmt gate and <code>go test -race</code> (with <code>CGO_ENABLED=1</code>
+<strong>only</strong> for the race detector, never for the build), and a <code>ui</code> job running
+format check, build and vitest. Add <code>.github/dependabot.yaml</code> with the sqlite
+pair <strong>grouped into one PR</strong> — a lone bump of either module is exactly the
+failure the vec0 smoke test exists to catch, and grouping stops it reaching
+review as two separate changes.</p>
+<hr>
+<h2>Definition of done for phase 1</h2>
+<ul>
+<li><input disabled="" type="checkbox"> <code>make test</code> and <code>make fe-test</code> pass.</li>
+<li><input disabled="" type="checkbox"> <code>CGO_ENABLED=0 go test ./...</code> passes — the storage choice rests on this.</li>
+<li><input disabled="" type="checkbox"> <code>make dev</code> starts backend and Vite together, no Docker involved.</li>
+<li><input disabled="" type="checkbox"> <code>make build</code> produces <code>bin/rongo</code>; the binary serves the SPA and <code>/api/me</code>.</li>
+<li><input disabled="" type="checkbox"> <code>docker build</code> succeeds and the runtime image reports <code>Universal Ctags</code>.</li>
+<li><input disabled="" type="checkbox"> <code>docs/manual-verification.md</code> phase-1 checks all pass by hand.</li>
+<li><input disabled="" type="checkbox"> Branch <code>feat/phase-1-skeleton</code> is pushed and a PR is open against <code>master</code>.</li>
+</ul>
+
+</div>
