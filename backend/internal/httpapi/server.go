@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/web"
 )
 
 // Deps holds every collaborator the HTTP layer needs. Each field is an
@@ -40,6 +41,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+
+	// "/" is the catch-all: everything not matched above goes to the SPA.
+	s.mux.Handle("/", web.Handler())
 }
 
 // requireAuth is the single gate every authenticated route goes through.
