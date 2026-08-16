@@ -59,6 +59,15 @@
   ticket sooner or later; tokens come only from `RONGO_*` env vars, one per forge host, injected into
   the remote URL at fetch time and never logged. Don't build a CRUD form for repos — the Repos page
   is read-only status.
+- **Never default a branch to `master`.** `branch:` is optional per entry; omitted means resolve the
+  remote's default (`git ls-remote --symref origin HEAD`). The corpus is mixed — peeq/loom/rongo are
+  `master`, `ncruces/go-sqlite3` and `asg017/sqlite-vec` are `main`.
+- **One branch per entry.** A second branch is a second entry with its own name
+  (`shop-backend@release-2024.3`), so the branch is part of the identity instead of producing feature
+  cards that differ only by branch and trigger meaningless clarifications. The branch belongs in every
+  citation and forge URL.
+- **A configured branch vanishing upstream is a loud error on the Repos page**, never a silent stop —
+  otherwise the index freezes while looking healthy and answers come from months-old code.
 - **A repo dropping out of `repos.yaml` is deactivated, not deleted.** It leaves search; its index
   stays until an explicit admin purge. A typo must not destroy hours of indexing.
 - **A share link exposes one answer, never a thread**, is individually revocable, and every live link
