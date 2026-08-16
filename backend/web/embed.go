@@ -11,10 +11,13 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
-// placeholderHTML ships separately from dist/, which `vite build` empties and
-// repopulates on every `make build` (emptyOutDir: true). Embedding it inside
-// dist would mean the build permanently overwrites the tracked placeholder
-// with the built shell the first time anyone runs `make build`.
+// placeholderHTML ships separately from dist/. `vite build` runs with
+// emptyOutDir: false (see ui/vite.config.ts) so the tracked dist/.gitkeep
+// survives; the Makefile's fe-build target does `rm -rf dist/assets` instead
+// to remove stale hashed assets a build no longer produces. Embedding the
+// placeholder inside dist would mean a build permanently overwrites the
+// tracked placeholder with the built shell the first time anyone runs
+// `make build`.
 //
 //go:embed placeholder.html
 var placeholderHTML []byte
@@ -35,9 +38,15 @@ func HasBuiltIndex() bool {
 
 // Handler serves the built SPA. Any path that is not a real file falls back to
 // index.html so the client-side router can take over; /api paths are excluded
-// so a typo in an endpoint stays a 404 instead of silently returning HTML. If
-// the SPA has never been built, dist/index.html is absent (only .gitkeep is
-// tracked there) and the handler serves the placeholder instead.
+// so a typo in an endpoint stays a 404 instead of silently returning HTML.
+// /assets/ is excluded the same way: those are content-hashed files vite
+// emits, so a missing one means a browser holding a stale cached index.html
+// is asking for a chunk that no longer exists after a redeploy. Falling back
+// to the SPA shell there would return 200 text/html for a JS module request,
+// which reads to the browser as a broken script instead of the 404 a
+// reload-on-stale-chunk heuristic can act on. If the SPA has never been
+// built, dist/index.html is absent (only .gitkeep is tracked there) and the
+// handler serves the placeholder instead.
 func Handler() http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
@@ -55,11 +64,22 @@ func Handler() http.Handler {
 			return
 		}
 		if builtIndexErr != nil {
+			// Nothing under dist/ is built yet, so /assets/ can't contain a
+			// real file either; a missing built dist and a missing asset
+			// both mean "not found", not the placeholder.
+			if strings.HasPrefix(r.URL.Path, "/assets/") {
+				http.NotFound(w, r)
+				return
+			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(placeholderHTML)
 			return
 		}
 		if _, err := fs.Stat(sub, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
+			if strings.HasPrefix(r.URL.Path, "/assets/") {
+				http.NotFound(w, r)
+				return
+			}
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
 		}

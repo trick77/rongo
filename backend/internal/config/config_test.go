@@ -90,6 +90,38 @@ func TestLoad_rejectsShortSessionSecret(t *testing.T) {
 	}
 }
 
+func TestLoad_trimsAdminToken(t *testing.T) {
+	// Given: a token picked up with a trailing newline (e.g. from `echo` into
+	// an env file) must authenticate the same as one without, or every
+	// correct-looking Bearer request gets a silent 401.
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_AUTH_MODE":      "token",
+		"BACKEND_ADMIN_TOKEN":    "s3cret-token\n",
+	})
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.AdminToken != "s3cret-token" {
+		t.Errorf("AdminToken = %q, want %q", cfg.AdminToken, "s3cret-token")
+	}
+}
+
+func TestLoad_rejectsWhitespaceOnlySessionSecret(t *testing.T) {
+	// Given: 16 raw spaces satisfy the length check unless it operates on the
+	// trimmed value.
+	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": "                "})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of a whitespace-only secret")
+	}
+}
+
 func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 	// Given: dev mode auto-logs in an admin. Exposing that on 0.0.0.0 is an
 	// open door, so the config layer refuses it rather than trusting operators.

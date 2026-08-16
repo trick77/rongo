@@ -30,7 +30,7 @@ cp .env.example .env   # BACKEND_SESSION_SECRET setzen, z. B. mit
 make dev                # Backend + Vite-Devserver mit Hot Reload
 ```
 
-`make dev` startet den Backend auf `127.0.0.1:8080` und Vite auf
+`make dev` startet das Backend auf `127.0.0.1:8080` und Vite auf
 `127.0.0.1:5173`; `/api/*` wird zum Backend durchgereicht.
 
 Weitere Ziele: `make build` (Binary), `make test` (Go-Tests), `make fe-test`

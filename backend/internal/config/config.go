@@ -43,8 +43,8 @@ func Load() (Config, error) {
 		DBPath:        envOr("BACKEND_DB_PATH", "./data/rongo.db"),
 		RepoRoot:      envOr("BACKEND_REPO_ROOT", "./repos"),
 		AuthMode:      AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:    os.Getenv("BACKEND_ADMIN_TOKEN"),
-		SessionSecret: os.Getenv("BACKEND_SESSION_SECRET"),
+		AdminToken:    strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		SessionSecret: strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
 		LogLevel:      envOr("BACKEND_LOG_LEVEL", "info"),
 	}
 

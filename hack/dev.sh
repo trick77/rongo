@@ -17,6 +17,22 @@ fi
 DB_PATH=${BACKEND_DB_PATH:-/tmp/rongo-dev.db}
 REPO_ROOT=${BACKEND_REPO_ROOT:-/tmp/rongo-dev-repos}
 
+# A relative path (e.g. from .env, copied from .env.example) is meant to
+# resolve against the repo root. The backend subshell below cd's into
+# backend/ before running go, so a relative path exported as-is would
+# resolve to backend/data or backend/repos instead — while compose mounts
+# ./data and ./repos at the repo root and .gitignore anchors them there too.
+# Resolve here, once, so the path means the same thing regardless of where
+# the process actually runs.
+case "$DB_PATH" in
+  /*) ;;
+  *) DB_PATH="$ROOT/${DB_PATH#./}" ;;
+esac
+case "$REPO_ROOT" in
+  /*) ;;
+  *) REPO_ROOT="$ROOT/${REPO_ROOT#./}" ;;
+esac
+
 # Enable job control so the backend subshell gets its own process group;
 # without it, $! is the subshell's PID but `kill` on that PID alone never
 # reaches `go run`'s child (the compiled binary), which keeps holding the

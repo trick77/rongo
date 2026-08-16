@@ -52,6 +52,21 @@ func TestSPA_fallsBackForClientRoutes(t *testing.T) {
 	}
 }
 
+func TestSPA_missingAssetIs404(t *testing.T) {
+	// Given: /assets/ holds content-hashed files. A browser holding a stale
+	// cached index.html after a redeploy asks for a chunk that no longer
+	// exists; it must get a 404, not the SPA shell served as text/html.
+	srv := NewServer(Deps{})
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/nope.js", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 func TestSPA_doesNotSwallowAPIRoutes(t *testing.T) {
 	// Given: an unknown /api path — with or without a trailing segment — must
 	// stay a 404, never the SPA shell. The bare "/api" form is the one a
