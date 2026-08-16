@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/web"
 )
 
 func TestSPA_servesIndexAtRoot(t *testing.T) {
@@ -20,11 +22,19 @@ func TestSPA_servesIndexAtRoot(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	// A missing or placeholder build still contains "<!doctype html>", so that
-	// alone passes even when the SPA was never built. id="root" only appears
-	// in the real built index.html, so this fails loudly on a missing build.
-	if !strings.Contains(rec.Body.String(), `id="root"`) {
-		t.Errorf("body does not look like the built SPA shell: %q", rec.Body.String())
+	// dist/index.html is gitignored, so it can never be committed broken —
+	// but it can be legitimately absent (fresh clone, no `make fe-build` yet)
+	// or present (built). Both are valid states with their own contract:
+	// a build must keep the mount point, a fresh clone must serve the
+	// placeholder rather than something that merely looks like HTML.
+	if web.HasBuiltIndex() {
+		if !strings.Contains(rec.Body.String(), `id="root"`) {
+			t.Errorf("body does not look like the built SPA shell: %q", rec.Body.String())
+		}
+	} else {
+		if !strings.Contains(rec.Body.String(), "SPA not built") {
+			t.Errorf("body does not look like the placeholder: %q", rec.Body.String())
+		}
 	}
 }
 

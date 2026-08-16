@@ -24,6 +24,20 @@ var placeholderHTML []byte
 // so a typo in an endpoint stays a 404 instead of silently returning HTML. If
 // the SPA has never been built, dist/index.html is absent (only .gitkeep is
 // tracked there) and the handler serves the placeholder instead.
+// HasBuiltIndex reports whether the embedded dist/ contains a real built
+// index.html (as opposed to just the tracked .gitkeep). Callers — notably
+// tests — use this to know which of the two legitimate states (built vs.
+// fresh clone) the binary is actually serving, without duplicating the
+// embed.FS lookup.
+func HasBuiltIndex() bool {
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		return false
+	}
+	_, err = fs.Stat(sub, "index.html")
+	return err == nil
+}
+
 func Handler() http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
