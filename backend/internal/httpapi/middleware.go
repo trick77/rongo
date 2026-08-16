@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bufio"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -18,11 +20,33 @@ func (r *statusRecorder) WriteHeader(code int) {
 }
 
 // Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
-// reach optional interfaces (Flusher, Hijacker, ...) implemented by it.
-// Without this, a phase-2 SSE handler calling Flush() through the middleware
-// chain gets http.ErrNotSupported and, if that error is ignored, silently
-// buffers the whole streamed response instead of flushing it incrementally.
+// reach optional interfaces implemented by it. This alone does NOT make
+// statusRecorder itself satisfy those interfaces — a handler doing the
+// conventional `w.(http.Flusher)` type assertion sees statusRecorder, which
+// has no Flush method, and gets ok == false regardless of Unwrap. Flush and
+// Hijack below make the type assertion succeed too, so both the
+// http.ResponseController path and the direct interface-assertion path work
+// through this middleware.
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// Flush forwards to the wrapped ResponseWriter's Flush when it supports it.
+// Without this, a phase-2/phase-4 SSE handler doing `w.(http.Flusher)` gets
+// ok == false and, if that's ignored, silently buffers the whole streamed
+// response instead of flushing it incrementally.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack forwards to the wrapped ResponseWriter's Hijack when it supports it,
+// for completeness alongside Flush/Unwrap.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
 
 // logging emits one access line per request. It logs r.URL.Path and never the
 // query string or full URL: query strings carry tokens and, later, OIDC codes.

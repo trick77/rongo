@@ -28,6 +28,13 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # Loopback-only on purpose: rongo answers questions about proprietary
+    # source, so it should never sit directly on a public interface. If a
+    # reverse proxy runs on a shared Docker network instead, drop the
+    # "127.0.0.1:" prefix (or replace this with `networks:` + `expose:`)
+    # and let the proxy be the only thing binding a host port.
+    ports:
+      - "127.0.0.1:8080:8080"
     environment:
       BACKEND_ADDR: 0.0.0.0:8080
       BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL}

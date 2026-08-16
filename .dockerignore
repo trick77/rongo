@@ -6,3 +6,10 @@ bin
 data
 repos
 *.png
+# A stale local `make fe-build` leaves hashed assets in backend/web/dist.
+# Stage 2's `COPY backend/ ./` would pull those into the image, and the
+# later `COPY --from=ui ...` only overlays on top of them rather than
+# replacing them, so old files could survive in the embedded filesystem.
+# Excluding it here forces the image to serve only what the ui stage just
+# built.
+backend/web/dist

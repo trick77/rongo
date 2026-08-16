@@ -19,11 +19,6 @@ var distFS embed.FS
 //go:embed placeholder.html
 var placeholderHTML []byte
 
-// Handler serves the built SPA. Any path that is not a real file falls back to
-// index.html so the client-side router can take over; /api paths are excluded
-// so a typo in an endpoint stays a 404 instead of silently returning HTML. If
-// the SPA has never been built, dist/index.html is absent (only .gitkeep is
-// tracked there) and the handler serves the placeholder instead.
 // HasBuiltIndex reports whether the embedded dist/ contains a real built
 // index.html (as opposed to just the tracked .gitkeep). Callers — notably
 // tests — use this to know which of the two legitimate states (built vs.
@@ -38,6 +33,11 @@ func HasBuiltIndex() bool {
 	return err == nil
 }
 
+// Handler serves the built SPA. Any path that is not a real file falls back to
+// index.html so the client-side router can take over; /api paths are excluded
+// so a typo in an endpoint stays a 404 instead of silently returning HTML. If
+// the SPA has never been built, dist/index.html is absent (only .gitkeep is
+// tracked there) and the handler serves the placeholder instead.
 func Handler() http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {

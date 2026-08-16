@@ -2,13 +2,18 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
@@ -65,10 +70,42 @@ func main() {
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
 	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
 
-	slog.Info("listening", "addr", cfg.Addr, "auth_mode", string(cfg.AuthMode))
-	if err := http.ListenAndServe(cfg.Addr, srv); err != nil {
-		slog.Error("server stopped", "err", err)
-		os.Exit(1)
+	httpServer := &http.Server{
+		Addr:    cfg.Addr,
+		Handler: srv,
+		// Reap connections that dawdle on headers or sit idle, e.g. a
+		// misbehaving client or a scanner. Deliberately no WriteTimeout:
+		// phase 4 streams SSE responses for minutes, and a global
+		// WriteTimeout would cut those streams mid-response. Do not add one
+		// here — per-handler deadlines, if ever needed, belong at the
+		// handler level instead.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		slog.Info("listening", "addr", cfg.Addr, "auth_mode", string(cfg.AuthMode))
+		serveErr <- httpServer.ListenAndServe()
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("server stopped", "err", err)
+			os.Exit(1)
+		}
+	case sig := <-sigCh:
+		slog.Info("shutting down", "signal", sig.String())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(ctx); err != nil {
+			slog.Error("graceful shutdown failed", "err", err)
+			os.Exit(1)
+		}
 	}
 }
 
