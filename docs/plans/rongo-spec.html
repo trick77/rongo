@@ -434,12 +434,12 @@
 
   <div class="note">
     <span class="tag">Keine Zugangsdaten in der YAML</span>
-    <p>Die Datei landet über kurz oder lang in einem Repository oder in einem Ticket. Tokens stehen deshalb ausschliesslich in <code>RONGO_*</code>-Umgebungsvariablen, je Forge-Host einer; die YAML verweist höchstens auf den Namen der Variable, nie auf ihren Wert. Ein PAT wird beim Abholen in die Remote-URL eingesetzt und nie geloggt.</p>
+    <p>Die Datei landet über kurz oder lang in einem Repository oder in einem Ticket. Tokens stehen deshalb ausschliesslich in <code>BACKEND_*</code>-Umgebungsvariablen, je Forge-Host einer; die YAML verweist höchstens auf den Namen der Variable, nie auf ihren Wert. Ein PAT wird beim Abholen in die Remote-URL eingesetzt und nie geloggt.</p>
   </div>
 
   <ul>
     <li>Gelesen wird beim Start, dazu ein Admin-Knopf «Liste neu einlesen» — der Kompromiss «Änderung braucht einen Deploy» kostet sonst unnötig einen Neustart.</li>
-    <li>Voller Clone nach <code>RONGO_REPO_ROOT/&lt;name&gt;</code>. Die Historie braucht die «Warum»-Pipeline, und Quelltext ist billig auf der Platte.</li>
+    <li>Voller Clone nach <code>BACKEND_REPO_ROOT/&lt;name&gt;</code>. Die Historie braucht die «Warum»-Pipeline, und Quelltext ist billig auf der Platte.</li>
     <li><strong>Aktualisierung:</strong> Ein Poller (Standard 30 Minuten, gejittert) macht <code>git fetch</code> und vergleicht den HEAD-SHA. Unverändert → fertig. Verändert → <code>git diff --name-only</code> und nur diese Pfade neu indexieren, plus jede betroffene Fachkarte neu zusammenfassen.</li>
     <li><strong>Verschwindet ein Repository aus der Liste</strong>, wird es <em>stillgelegt</em>, nicht gelöscht: es fällt aus der Suche, sein Index bleibt liegen. Erst ein ausdrücklicher Admin-Befehl räumt ihn weg. Ein Tippfehler in der YAML darf keine Stunden Indexierung vernichten.</li>
     <li>Die Seite <strong>Repos</strong> ist damit reine Anzeige statt Pflegemaske: letzter Abgleich, HEAD-SHA, Anzahl Chunks und Fachkarten, Fehler beim letzten Lauf.</li>
@@ -613,7 +613,7 @@
     </div>
     <div>
       <div class="k">2 · Routen</div>
-      <div class="v"><b>Hybridsuche über Fachkarten</b><span>Dominiert der beste Treffer den zweiten um mehr als <code>RONGO_ROUTE_MARGIN</code>, läuft es still weiter. Sonst: <code>clarification</code>-Event mit zwei bis fünf benannten Kandidaten, und der Zug endet. Kein Treffer → «nichts gefunden» mit den versuchten Begriffen, nie eine erfundene Antwort.</span></div>
+      <div class="v"><b>Hybridsuche über Fachkarten</b><span>Dominiert der beste Treffer den zweiten um mehr als <code>BACKEND_ROUTE_MARGIN</code>, läuft es still weiter. Sonst: <code>clarification</code>-Event mit zwei bis fünf benannten Kandidaten, und der Zug endet. Kein Treffer → «nichts gefunden» mit den versuchten Begriffen, nie eine erfundene Antwort.</span></div>
     </div>
     <div>
       <div class="k">3 · Sammeln</div>

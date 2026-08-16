@@ -11,14 +11,14 @@ services:
     tmpfs:
       - /tmp
     environment:
-      RONGO_ADDR: 0.0.0.0:8080
-      RONGO_PUBLIC_URL: ${RONGO_PUBLIC_URL}
-      RONGO_DB_PATH: /data/rongo.db
-      RONGO_REPO_ROOT: /repos
-      RONGO_AUTH_MODE: ${RONGO_AUTH_MODE}
-      RONGO_ADMIN_TOKEN: ${RONGO_ADMIN_TOKEN}
-      RONGO_SESSION_SECRET: ${RONGO_SESSION_SECRET}
-      RONGO_LOG_LEVEL: ${RONGO_LOG_LEVEL:-info}
+      BACKEND_ADDR: 0.0.0.0:8080
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL}
+      BACKEND_DB_PATH: /data/rongo.db
+      BACKEND_REPO_ROOT: /repos
+      BACKEND_AUTH_MODE: ${BACKEND_AUTH_MODE}
+      BACKEND_ADMIN_TOKEN: ${BACKEND_ADMIN_TOKEN}
+      BACKEND_SESSION_SECRET: ${BACKEND_SESSION_SECRET}
+      BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
     volumes:
       - ./data:/data
       - ./repos:/repos

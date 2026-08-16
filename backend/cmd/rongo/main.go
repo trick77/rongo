@@ -72,7 +72,7 @@ func main() {
 	}
 }
 
-// parseLevel maps RONGO_LOG_LEVEL onto slog levels, defaulting to info.
+// parseLevel maps BACKEND_LOG_LEVEL onto slog levels, defaulting to info.
 func parseLevel(s string) slog.Level {
 	switch strings.ToLower(s) {
 	case "debug":

@@ -2,8 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-DB_PATH=${RONGO_DB_PATH:-/tmp/rongo-dev.db}
-REPO_ROOT=${RONGO_REPO_ROOT:-/tmp/rongo-dev-repos}
+DB_PATH=${BACKEND_DB_PATH:-/tmp/rongo-dev.db}
+REPO_ROOT=${BACKEND_REPO_ROOT:-/tmp/rongo-dev-repos}
 
 cleanup() {
   if [ -n "${BACKEND_PID:-}" ]; then
@@ -16,12 +16,12 @@ mkdir -p "$REPO_ROOT"
 
 (
   cd "$ROOT/backend"
-  RONGO_SESSION_SECRET=${RONGO_SESSION_SECRET:-dev-secret} \
-  RONGO_AUTH_MODE=dev \
-  RONGO_ADDR=127.0.0.1:8080 \
-  RONGO_PUBLIC_URL=http://127.0.0.1:8080 \
-  RONGO_DB_PATH="$DB_PATH" \
-  RONGO_REPO_ROOT="$REPO_ROOT" \
+  BACKEND_SESSION_SECRET=${BACKEND_SESSION_SECRET:-dev-secret} \
+  BACKEND_AUTH_MODE=dev \
+  BACKEND_ADDR=127.0.0.1:8080 \
+  BACKEND_PUBLIC_URL=http://127.0.0.1:8080 \
+  BACKEND_DB_PATH="$DB_PATH" \
+  BACKEND_REPO_ROOT="$REPO_ROOT" \
   go run ./cmd/rongo
 ) &
 BACKEND_PID=$!

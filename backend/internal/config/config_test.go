@@ -12,7 +12,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
+		"BACKEND_SESSION_SECRET": "s3cret",
 	})
 
 	// When
@@ -37,12 +37,12 @@ func TestLoad_appliesDefaults(t *testing.T) {
 }
 
 func TestLoad_requiresSessionSecret(t *testing.T) {
-	setEnv(t, map[string]string{"RONGO_SESSION_SECRET": ""})
+	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": ""})
 
 	_, err := Load()
 
 	if err == nil {
-		t.Fatal("Load() err = nil, want an error about RONGO_SESSION_SECRET")
+		t.Fatal("Load() err = nil, want an error about BACKEND_SESSION_SECRET")
 	}
 }
 
@@ -50,9 +50,9 @@ func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 	// Given: dev mode auto-logs in an admin. Exposing that on 0.0.0.0 is an
 	// open door, so the config layer refuses it rather than trusting operators.
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "dev",
-		"RONGO_ADDR":           "0.0.0.0:8080",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "dev",
+		"BACKEND_ADDR":           "0.0.0.0:8080",
 	})
 
 	_, err := Load()
@@ -64,21 +64,21 @@ func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 
 func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "token",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "token",
 	})
 
 	_, err := Load()
 
 	if err == nil {
-		t.Fatal("Load() err = nil, want an error about RONGO_ADMIN_TOKEN")
+		t.Fatal("Load() err = nil, want an error about BACKEND_ADMIN_TOKEN")
 	}
 }
 
 func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 	setEnv(t, map[string]string{
-		"RONGO_SESSION_SECRET": "s3cret",
-		"RONGO_AUTH_MODE":      "kerberos",
+		"BACKEND_SESSION_SECRET": "s3cret",
+		"BACKEND_AUTH_MODE":      "kerberos",
 	})
 
 	_, err := Load()

@@ -16,7 +16,7 @@
 - **No tree-sitter** — needs cgo plus a grammar and its node names per language. `ctags` gives a uniform record for ~150 languages; where it yields nothing, the line window is the normal path.
 - Runtime image stays non-distroless: rongo shells out to `git`, `rg`, `ctags`.
 - **`ctags` must be universal-ctags.** macOS ships BSD ctags at `/usr/bin/ctags`, which rejects long options, and dev runs without a container. Verify at startup and fail loudly — a wrong ctags yields an empty symbol index, not an error.
-- New config goes in a `RONGO_*` env var, nowhere else.
+- New config goes in a `BACKEND_*` env var, nowhere else.
 
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
@@ -34,7 +34,7 @@
 - **The thread is a record.** A follow-up adds an answer, never rewrites one. A corrected clarification starts a new turn.
 - **Clarify only on real ambiguity.** Candidates depending on each other per `repo_deps` are composition, not alternatives — answer all of them.
 - **Cross a repo boundary only with two reasons**: the gathered code really references the symbol, and the target repo is indexed. Same hop budget.
-- **Repo list lives in `repos.yaml`, credentials never do** — that file reaches a repo or ticket eventually. Tokens come from `RONGO_*` env vars, one per forge host, injected at fetch time, never logged. No CRUD form; the Repos page is read-only status.
+- **Repo list lives in `repos.yaml`, credentials never do** — that file reaches a repo or ticket eventually. Tokens come from `BACKEND_*` env vars, one per forge host, injected at fetch time, never logged. No CRUD form; the Repos page is read-only status.
 - **Never default a branch to `master`** — omitted `branch:` means resolve the remote default. The corpus is mixed: peeq/loom/rongo are `master`, `ncruces/go-sqlite3` and `asg017/sqlite-vec` are `main`.
 - **One branch per entry.** A second branch is a second entry with its own name (`shop-backend@release-2024.3`), so it cannot produce cards differing only by branch.
 - **A configured branch vanishing upstream is a loud error**, never a silent stop — otherwise the index freezes while looking healthy.

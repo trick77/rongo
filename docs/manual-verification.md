@@ -21,6 +21,6 @@ Checks:
 2. Temporarily put a directory containing only BSD `ctags` first on `PATH` and
    run `make run`. It must exit 1 naming universal-ctags — not start with an
    empty symbol index.
-3. `RONGO_AUTH_MODE=dev RONGO_ADDR=0.0.0.0:8080 make run` must refuse to start.
+3. `BACKEND_AUTH_MODE=dev BACKEND_ADDR=0.0.0.0:8080 make run` must refuse to start.
 4. `make build` produces `bin/rongo`; running it serves the built SPA at
    `http://127.0.0.1:8080/`.

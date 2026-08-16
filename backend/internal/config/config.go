@@ -1,5 +1,5 @@
 // Package config loads rongo's runtime configuration from environment
-// variables. Every setting is RONGO_*; secrets come from the environment only.
+// variables. Every setting is BACKEND_*; secrets come from the environment only.
 package config
 
 import (
@@ -38,35 +38,35 @@ type Config struct {
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:          envOr("RONGO_ADDR", "127.0.0.1:8080"),
-		PublicURL:     envOr("RONGO_PUBLIC_URL", "http://127.0.0.1:8080"),
-		DBPath:        envOr("RONGO_DB_PATH", "./data/rongo.db"),
-		RepoRoot:      envOr("RONGO_REPO_ROOT", "./repos"),
-		AuthMode:      AuthMode(envOr("RONGO_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:    os.Getenv("RONGO_ADMIN_TOKEN"),
-		SessionSecret: os.Getenv("RONGO_SESSION_SECRET"),
-		LogLevel:      envOr("RONGO_LOG_LEVEL", "info"),
+		Addr:          envOr("BACKEND_ADDR", "127.0.0.1:8080"),
+		PublicURL:     envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
+		DBPath:        envOr("BACKEND_DB_PATH", "./data/rongo.db"),
+		RepoRoot:      envOr("BACKEND_REPO_ROOT", "./repos"),
+		AuthMode:      AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:    os.Getenv("BACKEND_ADMIN_TOKEN"),
+		SessionSecret: os.Getenv("BACKEND_SESSION_SECRET"),
+		LogLevel:      envOr("BACKEND_LOG_LEVEL", "info"),
 	}
 
 	if cfg.SessionSecret == "" {
-		return Config{}, fmt.Errorf("RONGO_SESSION_SECRET is required")
+		return Config{}, fmt.Errorf("BACKEND_SESSION_SECRET is required")
 	}
 
 	switch cfg.AuthMode {
 	case AuthModeDev:
 		if !isLoopback(cfg.Addr) {
 			return Config{}, fmt.Errorf(
-				"RONGO_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got RONGO_ADDR=%q", cfg.Addr)
+				"BACKEND_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
 		}
 	case AuthModeToken:
 		if cfg.AdminToken == "" {
-			return Config{}, fmt.Errorf("RONGO_AUTH_MODE=token requires RONGO_ADMIN_TOKEN")
+			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
 	case AuthModeOIDC:
 		// Wired in a later phase; the mode is accepted so deployments can be
 		// prepared, and the auth layer answers 501 until it exists.
 	default:
-		return Config{}, fmt.Errorf("unknown RONGO_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
+		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
 	}
 
 	return cfg, nil
