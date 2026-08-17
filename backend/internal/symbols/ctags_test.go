@@ -131,6 +131,11 @@ func TestExtract_javaSource(t *testing.T) {
 	if run.Kind != "method" || run.Line != 13 || run.Scope != "AbandonedCartJob" {
 		t.Errorf("run = %+v, want kind method, line 13, scope AbandonedCartJob", run)
 	}
+	// ScopeKind is what makes the chunker's breadcrumb read "class
+	// AbandonedCartJob > method run" rather than just naming the scope.
+	if run.ScopeKind != "class" {
+		t.Errorf("run.ScopeKind = %q, want class", run.ScopeKind)
+	}
 }
 
 func TestExtract_unknownLanguageIsEmptyAndNoError(t *testing.T) {

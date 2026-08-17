@@ -26,11 +26,16 @@ import (
 // boundary instead of guessing "up to the line the next symbol starts on". It
 // is 0 when ctags did not report one, which the chunker treats as unknown.
 type Symbol struct {
-	Name  string
-	Kind  string
-	Scope string
-	Line  int
-	End   int
+	Name string
+	Kind string
+	// Scope is the enclosing symbol's name and ScopeKind what kind of thing it
+	// is ("class", "struct", "package"). Both are needed to render a breadcrumb
+	// like "class AbandonedCartJob > method run", which is what lets the vector
+	// lane match a question asked in business language.
+	Scope     string
+	ScopeKind string
+	Line      int
+	End       int
 }
 
 // Extractor runs universal-ctags over file bodies.
@@ -51,12 +56,13 @@ func NewExtractor(ctagsBin string) *Extractor {
 // tagRecord is one line of ctags' JSON output. Pointer fields distinguish
 // "absent" from "zero", which is what makes a missing line detectable.
 type tagRecord struct {
-	Type  string `json:"_type"`
-	Name  string `json:"name"`
-	Kind  string `json:"kind"`
-	Scope string `json:"scope"`
-	Line  *int   `json:"line"`
-	End   int    `json:"end"`
+	Type      string `json:"_type"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Scope     string `json:"scope"`
+	ScopeKind string `json:"scopeKind"`
+	Line      *int   `json:"line"`
+	End       int    `json:"end"`
 }
 
 // Extract returns the symbols ctags finds in body. path is not read; it only
@@ -120,11 +126,12 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 			return nil, fmt.Errorf("ctags %s: tag without a name or line: %s", filepath.Base(path), line)
 		}
 		out = append(out, Symbol{
-			Name:  rec.Name,
-			Kind:  rec.Kind,
-			Scope: rec.Scope,
-			Line:  *rec.Line,
-			End:   rec.End,
+			Name:      rec.Name,
+			Kind:      rec.Kind,
+			Scope:     rec.Scope,
+			ScopeKind: rec.ScopeKind,
+			Line:      *rec.Line,
+			End:       rec.End,
 		})
 	}
 	return out, nil
