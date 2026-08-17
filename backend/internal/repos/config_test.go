@@ -68,6 +68,75 @@ repositories:
 	}
 }
 
+func TestLoad_rejectsInlineSecretWithoutScheme(t *testing.T) {
+	// Given: a "https://" prefix is easy to forget when pasting a basic-auth
+	// snippet, and the URL still parses "successfully" as opaque without it.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: "user:pass@github.com/acme/shop.git"
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of credentials embedded in clone_url without a scheme")
+	}
+}
+
+func TestLoad_rejectsOAuth2StyleTokenWithoutScheme(t *testing.T) {
+	// Given: the "oauth2:TOKEN@host" form forges commonly hand out for
+	// clone-with-token snippets, pasted without "https://".
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: "oauth2:ghp_realtoken@github.com:acme/shop.git"
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of an oauth2:TOKEN@host clone_url")
+	}
+}
+
+func TestLoad_rejectsBareTokenAsScpUser(t *testing.T) {
+	// Given: no colon at all, but the "user" in the scp-style form is itself a
+	// token — token@host is what's left after someone drops the password
+	// separator by hand.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: "ghp_realtoken@github.com:acme/shop.git"
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of a token used as the scp-style user")
+	}
+}
+
+func TestLoad_acceptsScpStyleSSHRemote(t *testing.T) {
+	// Given: git@host:org/repo.git is the ordinary ssh remote form and must
+	// stay accepted — over-rejecting pushes people back toward embedding
+	// tokens in https URLs instead.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: "git@github.com:acme/repo.git"
+`)
+
+	specs, err := Load(path)
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil for a scp-style ssh remote", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("len(specs) = %d, want 1", len(specs))
+	}
+}
+
 func TestLoad_rejectsDuplicateNames(t *testing.T) {
 	path := writeYAML(t, `
 repositories:

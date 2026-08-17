@@ -6,7 +6,6 @@ package repos
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
@@ -100,24 +99,81 @@ func validateName(name string) error {
 	return nil
 }
 
+// errCredential is the message used for every rejection: the token belongs in
+// an env var named by token_env, never inline in the URL.
+func errCredential(name string) error {
+	return fmt.Errorf(
+		"%s: clone_url must not embed credentials — put the token in an env var and name it with token_env",
+		name)
+}
+
 // validateCloneURL refuses credentials embedded in the URL.
+//
+// net/url.Parse is deliberately NOT used to classify this: a string like
+// "user:pass@host/path" (no "//" after the scheme) parses successfully as an
+// OPAQUE URL with scheme="user", Host="" and User=nil, so a check built on
+// u.User silently accepts exactly the credential-bearing strings this
+// function exists to reject. Instead this walks the raw string structurally.
 func validateCloneURL(name, raw string) error {
-	if strings.TrimSpace(raw) == "" {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return fmt.Errorf("%s: clone_url is required", name)
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		// An scp-style git URL (git@host:org/repo.git) does not parse as a URL
-		// and carries no password field, so it passes.
-		if strings.Contains(raw, "@") && strings.Contains(raw, ":") {
-			return nil
-		}
-		return fmt.Errorf("%s: clone_url is not a valid URL: %w", name, err)
+
+	authority := authorityOf(trimmed)
+	at := strings.Index(authority, "@")
+	if at < 0 {
+		return nil
 	}
-	if u.User != nil {
-		return fmt.Errorf(
-			"%s: clone_url must not embed credentials — put the token in an env var and name it with token_env",
-			name)
+	userinfo := authority[:at]
+
+	if strings.Contains(userinfo, ":") {
+		// "user:password@host" — unambiguous userinfo credentials.
+		return errCredential(name)
+	}
+
+	// No colon: structurally this is scp-style "user@host" (e.g.
+	// git@github.com:acme/repo.git), which is a legitimate ssh remote and must
+	// stay accepted. Still reject it when the "user" looks like a token rather
+	// than a username. This is a heuristic backstop, not a guarantee —
+	// "token@host" is structurally indistinguishable from "user@host", so the
+	// real protection is token_env, not this check.
+	if looksLikeCredential(userinfo) {
+		return errCredential(name)
 	}
 	return nil
+}
+
+// authorityOf returns the URL's authority segment: everything after a
+// "scheme://" up to the next '/', or the whole leading segment up to the
+// first '/' when there is no "://" (covers scp-style and bare host:path
+// forms, which net/url does not parse as authorities at all).
+func authorityOf(raw string) string {
+	rest := raw
+	if i := strings.Index(rest, "://"); i >= 0 {
+		rest = rest[i+len("://"):]
+	}
+	if i := strings.Index(rest, "/"); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
+}
+
+// credentialPrefixes are common forge-issued token shapes. Seeing one as the
+// "user" in a scp-style URL means a token was pasted where a username goes.
+var credentialPrefixes = []string{"ghp_", "gho_", "ghs_", "github_pat_", "glpat-", "xoxb-"}
+
+// looksLikeCredential flags a userinfo string that reads as a token rather
+// than a username: a known forge token prefix, or simply too long for a
+// username (git@github.com is 3 chars; a token is typically 40+).
+func looksLikeCredential(userinfo string) bool {
+	if len(userinfo) > 40 {
+		return true
+	}
+	for _, p := range credentialPrefixes {
+		if strings.HasPrefix(userinfo, p) {
+			return true
+		}
+	}
+	return false
 }
