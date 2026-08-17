@@ -69,8 +69,17 @@ func New(d Deps) *Indexer {
 	if d.Selector == nil {
 		d.Selector = NewSelector(DefaultSelectOptions())
 	}
-	if d.Chunk.TargetTokens <= 0 {
-		d.Chunk = DefaultChunkOptions()
+	// Field by field, not struct by struct: replacing the whole struct would
+	// discard StripComments for a caller who set only that, and the cost of
+	// noticing is a full re-embed of the corpus.
+	if def := DefaultChunkOptions(); d.Chunk.TargetTokens <= 0 {
+		d.Chunk.TargetTokens = def.TargetTokens
+		if d.Chunk.MaxTokens <= 0 {
+			d.Chunk.MaxTokens = def.MaxTokens
+		}
+		if d.Chunk.OverlapTokens <= 0 {
+			d.Chunk.OverlapTokens = def.OverlapTokens
+		}
 	}
 	return &Indexer{
 		db: d.DB, git: d.Git, symbols: d.Symbols, embedder: d.Embedder,

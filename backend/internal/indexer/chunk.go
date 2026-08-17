@@ -3,6 +3,7 @@ package indexer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 
 	"github.com/trick77/rongo/internal/symbols"
@@ -126,7 +127,17 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 			for _, part := range splitOverlongLine(raw, opts.MaxTokens) {
 				searchPart := part
 				if opts.StripComments {
-					searchPart = stripComments(part)
+					searchPart = stripComments(path, part)
+					if strings.TrimSpace(searchPart) == "" {
+						// A window of nothing but comments — a licence header,
+						// or a boundary landing inside a long doc block. The
+						// unstripped path already refuses a blank window; this
+						// is the same case one step later. Emitting it would
+						// store a chunk whose embedded text is the breadcrumb
+						// alone, and several of them would share one content
+						// hash.
+						continue
+					}
 				}
 				text := enrich(repo, path, chain, searchPart)
 				out = append(out, Chunk{
@@ -270,22 +281,71 @@ func docStart(lines []string, line, floor int) int {
 // stripComments drops whole-line comments, keeping every line that carries
 // code.
 //
-// Deliberately line-based and syntax-blind, like docStart: a trailing comment
-// after code stays. Removing it would need a real lexer per language, and a
-// naive cut at the first "//" would mangle every URL and every string literal
-// containing one — a wrong guess there deletes code, which is far worse than
-// leaving a few words of prose behind.
-func stripComments(s string) string {
+// It does NOT reuse commentPrefixes. That set exists for docStart, which only
+// decides where a chunk begins: a wrong guess there costs a comment line.
+// Stripping is destructive, and the same set eats real code —
+//
+//	*p = v            starts with "*"
+//	--n;              starts with "--"
+//	#include <stdio.h> starts with "#"
+//	;; lisp form      starts with ";"
+//
+// — after which the file is no longer findable by an identifier that appears
+// only on that line. So the destructive set is smaller, and the ambiguous
+// prefixes are resolved by file extension rather than guessed.
+//
+// Still line-based and still syntax-blind: a trailing comment after code stays.
+// Cutting at the first "//" mid-line would need a real lexer to avoid mangling
+// every URL and string literal containing one.
+func stripComments(path, s string) string {
+	prefixes := stripPrefixesFor(path)
 	lines := strings.Split(s, "\n")
 	kept := make([]string, 0, len(lines))
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
-		if t != "" && isComment(t) {
+		if t != "" && hasCommentPrefix(t, prefixes) {
 			continue
 		}
 		kept = append(kept, l)
 	}
 	return strings.Join(kept, "\n")
+}
+
+// cStyleStripPrefixes are unambiguous in every C-descended language: "//" opens
+// a line comment, "/*" and "*/" delimit a block, and a bare "*" continues one
+// only when a separator follows — "*p" is a dereference, "* " is a comment
+// continuation.
+var cStyleStripPrefixes = []string{"//", "/*", "*/"}
+
+// hashCommentExts are the extensions where a leading "#" is a comment. C and
+// its relatives are deliberately absent: there "#" opens a preprocessor
+// directive, and treating it as prose deletes every #include in the corpus.
+var hashCommentExts = map[string]bool{
+	".py": true, ".rb": true, ".sh": true, ".bash": true, ".zsh": true,
+	".yaml": true, ".yml": true, ".toml": true, ".cfg": true, ".ini": true,
+	".pl": true, ".r": true, ".tf": true, ".dockerfile": true, ".mk": true,
+}
+
+func stripPrefixesFor(path string) []string {
+	out := cStyleStripPrefixes
+	ext := strings.ToLower(filepath.Ext(path))
+	base := strings.ToLower(filepath.Base(path))
+	if hashCommentExts[ext] || base == "makefile" || base == "containerfile" || base == "dockerfile" {
+		out = append(append([]string{}, out...), "#")
+	}
+	return out
+}
+
+// hasCommentPrefix reports whether a trimmed line opens a comment. A bare "*"
+// counts only when followed by a space or nothing, which separates a block
+// continuation from a dereference.
+func hasCommentPrefix(trimmed string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return true
+		}
+	}
+	return trimmed == "*" || strings.HasPrefix(trimmed, "* ")
 }
 
 func isComment(trimmed string) bool {

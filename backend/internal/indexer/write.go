@@ -73,12 +73,19 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 		// The keyword lane indexes SearchText, which differs from RawText only
 		// when comments were stripped. RawText stays untouched in `chunks`
 		// because that is what a citation quotes.
-		search := c.SearchText
-		if search == "" {
-			search = c.RawText
+		//
+		// No fallback to RawText: it could not tell "the producer never set
+		// SearchText" from "empty because stripping removed everything", and
+		// under the second reading it would put the comments straight back into
+		// the lane they were just removed from — silently, on exactly the
+		// chunks that are pure prose. ChunkFile drops those windows instead, so
+		// an empty SearchText here is a programming error and says so.
+		if c.SearchText == "" && c.RawText != "" {
+			return fmt.Errorf("index %s/%s chunk %d: SearchText is empty while RawText is not; "+
+				"the keyword lane would silently index the unstripped source", repo, path, c.Ordinal)
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, search); err != nil {
+			`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, c.SearchText); err != nil {
 			return fmt.Errorf("index %s/%s chunk %d keywords: %w", repo, path, c.Ordinal, err)
 		}
 	}

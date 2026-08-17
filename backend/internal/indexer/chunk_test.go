@@ -163,6 +163,87 @@ func TestChunkFile_stripCommentsKeepsTheSourceButNotTheClaim(t *testing.T) {
 	}
 }
 
+func TestStripComments_neverDeletesCode(t *testing.T) {
+	// Stripping is DESTRUCTIVE, so it may not reuse the prefix set docStart
+	// works with: that one only decides where a chunk begins, and a wrong guess
+	// there costs a comment line. Here a wrong guess deletes code, and the file
+	// stops being findable by an identifier that appears only on that line.
+	//
+	// Each case below is a line that a naive comment-prefix list eats.
+	cases := []struct {
+		name, path, in string
+		want           string
+	}{
+		{"C dereference", "src/a.go", "*p = v", "*p = v"},
+		{"pointer assignment", "src/a.go", "*out = append(*out, x)", "*out = append(*out, x)"},
+		{"decrement", "src/a.c", "--n;", "--n;"},
+		{"preprocessor", "src/a.c", "#include <stdio.h>", "#include <stdio.h>"},
+		{"lisp form", "src/a.el", ";; not stripped where ; is not known to be a comment", ";; not stripped where ; is not known to be a comment"},
+		{"modulo line", "src/a.go", "%v formatting", "%v formatting"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stripComments(c.path, c.in); got != c.want {
+				t.Errorf("stripComments(%q) = %q, want it untouched", c.in, got)
+			}
+		})
+	}
+}
+
+func TestStripComments_removesCommentsPerLanguage(t *testing.T) {
+	cases := []struct {
+		name, path, in, want string
+	}{
+		{"line comment", "a.go", "// explains\ncode()", "code()"},
+		{"block open", "a.go", "/* explains */\ncode()", "code()"},
+		{"block continuation", "a.java", "/**\n * explains\n */\ncode()", "code()"},
+		{"hash in python", "a.py", "# explains\ncode()", "code()"},
+		{"hash in shell", "a.sh", "# explains\ncode()", "code()"},
+		// A hash in C is a preprocessor directive, not a comment. Getting this
+		// wrong deletes every #include in the corpus.
+		{"hash in c stays", "a.c", "#define X 1\ncode()", "#define X 1\ncode()"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stripComments(c.path, c.in); got != c.want {
+				t.Errorf("stripComments(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestChunkFile_aWindowThatIsOnlyCommentsProducesNoChunk(t *testing.T) {
+	// A licence header strips to nothing. Emitting the remainder would store a
+	// chunk whose embedded text is the breadcrumb alone — several of them share
+	// one content hash, and they dilute every result list. The unstripped path
+	// already refuses a blank window for exactly this reason.
+	header := "// Copyright 2026\n// All rights reserved.\n// Licensed under X.\n"
+	opts := DefaultChunkOptions()
+	opts.StripComments = true
+
+	chunks := ChunkFile("shop", "master", "src/LICENSE.go", []byte(header), nil, opts)
+
+	for _, c := range chunks {
+		if strings.TrimSpace(c.SearchText) == "" {
+			t.Fatalf("chunk %d has empty SearchText; a comment-only window must not be indexed", c.Ordinal)
+		}
+	}
+}
+
+func TestNew_defaultingKeepsAnExplicitStripComments(t *testing.T) {
+	// Replacing the whole ChunkOptions struct would silently index comments for
+	// a caller who set only StripComments, and the cost of finding out is a
+	// full re-embed of the corpus.
+	ix := New(Deps{Chunk: ChunkOptions{StripComments: true}})
+
+	if !ix.chunk.StripComments {
+		t.Error("StripComments was discarded by defaulting")
+	}
+	if ix.chunk.TargetTokens != DefaultChunkOptions().TargetTokens {
+		t.Errorf("TargetTokens = %d, want the default filled in", ix.chunk.TargetTokens)
+	}
+}
+
 func TestChunkFile_defaultKeepsComments(t *testing.T) {
 	// The switch defaults to keeping comments so an existing database does not
 	// change meaning under a deployment that never set the variable.
