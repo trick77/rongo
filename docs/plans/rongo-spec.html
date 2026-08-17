@@ -375,11 +375,11 @@
       <thead><tr><th>Aufrufstelle</th><th>Modell</th><th>Begründung</th></tr></thead>
       <tbody>
         <tr><td>Verstehen</td><td>non-Pro</td><td>Ergebnis ist JSON: Absicht, Suchbegriffe, Repo-Hinweise. Niemand liest es.</td></tr>
-        <tr><td>Routen</td><td>non-Pro</td><td>Ergebnis sind Karten-IDs und ein Schwellenwert-Entscheid. Die Titel in der Rückfragekarte sind <em>nicht</em> hier generiert — sie stammen aus den Fachkarten und wurden von Pro geschrieben.</td></tr>
+        <tr><td>Routen</td><td>non-Pro</td><td>Ergebnis sind Steckbrief-IDs und ein Schwellenwert-Entscheid. Die Titel in der Rückfragekarte sind <em>nicht</em> hier generiert — sie stammen aus den Modulsteckbriefen und wurden von Pro geschrieben.</td></tr>
         <tr><td>Sammeln / Relevanz</td><td>non-Pro</td><td>Die volumenstärkste Stelle: pro Frage viele Iterationen, jede antwortet mit «verfolgen ja/nein». Hier liegt das Geld.</td></tr>
         <tr><td>Thread-Titel</td><td>non-Pro</td><td>Steht zwar auf der Seite, ist aber ein Label aus wenigen Wörtern — daher non-Pro, bewusst und nicht aus Versehen. Läuft nebenläufig zur Antwort und darf sie nie aufhalten.</td></tr>
         <tr><td><b>Antwort</b></td><td><b>Pro</b></td><td>Der einzige gestreamte Text. Auch «Als Dev neu erklären» ist Pro.</td></tr>
-        <tr><td><b>Fachkarten</b></td><td><b>Pro</b></td><td>Sie stehen in jeder Rückfragekarte und werden dort gelesen. Sie entstehen einmal je Modul und werden über alle künftigen Fragen amortisiert — teuer pro Aufruf, billig pro Nutzen.</td></tr>
+        <tr><td><b>Modulsteckbriefe</b></td><td><b>Pro</b></td><td>Sie stehen in jeder Rückfragekarte und werden dort gelesen. Sie entstehen einmal je Modul und werden über alle künftigen Fragen amortisiert — teuer pro Aufruf, billig pro Nutzen.</td></tr>
         <tr><td>Aussagen zerlegen (Phase 8)</td><td>non-Pro</td><td>Zwischenschritt; das Urteil selbst wird wieder von Pro formuliert.</td></tr>
       </tbody>
     </table>
@@ -420,7 +420,7 @@
 
   <div class="decision">
     <span class="tag">Ein Branch je Eintrag, nicht mehrere</span>
-    <p>Mehrere Branches desselben Repositories gleichzeitig zu indexieren wäre naheliegend, ist aber schädlich: es erzeugt Fachkarten, die sich <em>nur</em> im Branch unterscheiden, und damit dauernd Rückfragen ohne fachlichen Gehalt. Wer wirklich einen zweiten Branch braucht, legt einen zweiten Eintrag mit eigenem Namen an (<code>shop-backend@release-2024.3</code>). Dann ist der Branch Teil der Identität und taucht in Kandidaten, Belegen und Antwort sichtbar auf, statt als rätselhafter Doppelgänger.</p>
+    <p>Mehrere Branches desselben Repositories gleichzeitig zu indexieren wäre naheliegend, ist aber schädlich: es erzeugt Modulsteckbriefe, die sich <em>nur</em> im Branch unterscheiden, und damit dauernd Rückfragen ohne fachlichen Gehalt. Wer wirklich einen zweiten Branch braucht, legt einen zweiten Eintrag mit eigenem Namen an (<code>shop-backend@release-2024.3</code>). Dann ist der Branch Teil der Identität und taucht in Kandidaten, Belegen und Antwort sichtbar auf, statt als rätselhafter Doppelgänger.</p>
   </div>
 
   <p>Der Branch gehört damit in den <strong>Beleg</strong> (Repo, Branch, Datei, Zeile) und in die Forge-URL — sonst zeigt ein Link auf eine Zeile, die es auf dem Standard-Branch gar nicht gibt.</p>
@@ -440,9 +440,9 @@
   <ul>
     <li>Gelesen wird beim Start, dazu ein Admin-Knopf «Liste neu einlesen» — der Kompromiss «Änderung braucht einen Deploy» kostet sonst unnötig einen Neustart.</li>
     <li>Voller Clone nach <code>BACKEND_REPO_ROOT/&lt;name&gt;</code>. Die Historie braucht die «Warum»-Pipeline, und Quelltext ist billig auf der Platte.</li>
-    <li><strong>Aktualisierung:</strong> Ein Poller (Standard 30 Minuten, gejittert) macht <code>git fetch</code> und vergleicht den HEAD-SHA. Unverändert → fertig. Verändert → <code>git diff --name-only</code> und nur diese Pfade neu indexieren, plus jede betroffene Fachkarte neu zusammenfassen.</li>
+    <li><strong>Aktualisierung:</strong> Ein Poller (Standard 30 Minuten, gejittert) macht <code>git fetch</code> und vergleicht den HEAD-SHA. Unverändert → fertig. Verändert → <code>git diff --name-only</code> und nur diese Pfade neu indexieren, plus jeden betroffenen Modulsteckbrief neu zusammenfassen.</li>
     <li><strong>Verschwindet ein Repository aus der Liste</strong>, wird es <em>stillgelegt</em>, nicht gelöscht: es fällt aus der Suche, sein Index bleibt liegen. Erst ein ausdrücklicher Admin-Befehl räumt ihn weg. Ein Tippfehler in der YAML darf keine Stunden Indexierung vernichten.</li>
-    <li>Die Seite <strong>Repos</strong> ist damit reine Anzeige statt Pflegemaske: letzter Abgleich, HEAD-SHA, Anzahl Chunks und Fachkarten, Fehler beim letzten Lauf.</li>
+    <li>Die Seite <strong>Repos</strong> ist damit reine Anzeige statt Pflegemaske: letzter Abgleich, HEAD-SHA, Anzahl Chunks und Modulsteckbriefe, Fehler beim letzten Lauf.</li>
     <li>Webhooks bleiben draussen — Polling braucht keinen Ingress und keine Zustellungs-Fehlerbehandlung.</li>
   </ul>
 
@@ -455,7 +455,7 @@
     <table>
       <thead><tr><th>Ebene</th><th>Inhalt</th><th>Beantwortet</th></tr></thead>
       <tbody>
-        <tr><td><code>feature_cards</code></td><td>MiMo Pro liest ein geclustertes Modul und schreibt eine Fachkarte: deutscher Titel, drei bis fünf Sätze, Repo, Pfade, Schlüsselsymbole. Eingebettet.</td><td><em>Welchen meinst du?</em> — und schliesst die Lücke zwischen Fach- und Codevokabular, weil die Zusammenfassungen in der Sprache des BA geschrieben sind.</td></tr>
+        <tr><td><code>module_profiles</code></td><td>MiMo Pro liest ein geclustertes Modul und schreibt einen Modulsteckbrief: deutscher Titel, drei bis fünf Sätze, Repo, Pfade, Schlüsselsymbole. Eingebettet.</td><td><em>Welchen meinst du?</em> — und schliesst die Lücke zwischen Fach- und Codevokabular, weil die Zusammenfassungen in der Sprache des BA geschrieben sind.</td></tr>
         <tr><td><code>chunks</code> + <code>_vec</code> + <code>_fts</code></td><td>Code- und Doku-Chunks, eingebettet und volltextindexiert. Symbolgenau wo <code>ctags</code> etwas liefert, sonst Zeilenfenster mit Überlappung.</td><td>Die inhaltliche Antwort.</td></tr>
         <tr><td><code>repo_deps</code></td><td>Aus den Abhängigkeitsmanifesten: welche Koordinate ein Repository veröffentlicht und welche es zieht. Nicht eingebettet.</td><td>Trennt Zusammensetzung von Mehrdeutigkeit und trägt das Sammeln über Repo-Grenzen.</td></tr>
         <tr><td><code>history_docs</code></td><td>Commit-Nachrichten und PR-Texte als eigener Dokumenttyp, eingebettet.</td><td>«Warum ist das so» — mehr kostet dieser Anwendungsfall nicht.</td></tr>
@@ -465,7 +465,7 @@
 <figure class="fig"><div class="scroll">
 <svg viewBox="0 0 960 320" role="img" aria-labelledby="idx-title idx-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="idx-title">Indexierung in drei Ebenen</title>
-  <desc id="idx-desc">Der Poller holt geänderte Pfade aus dem Remote; daraus entstehen Code-Chunks, von MiMo Pro geschriebene Fachkarten und Historien-Dokumente, die alle eingebettet und in je eine Indexebene geschrieben werden.</desc>
+  <desc id="idx-desc">Der Poller holt geänderte Pfade aus dem Remote; daraus entstehen Code-Chunks, von MiMo Pro geschriebene Modulsteckbriefe und Historien-Dokumente, die alle eingebettet und in je eine Indexebene geschrieben werden.</desc>
   <defs>
       <marker id="i-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
         <polygon points="0 0, 8 3, 0 6" fill="var(--ink-faint)"/>
@@ -495,11 +495,11 @@
   <rect x="16" y="124" width="116" height="48" rx="6" fill="var(--ground)"/><rect x="16" y="124" width="116" height="48" rx="6" fill="var(--ground)" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="4,3"/><text class="nname" x="74.0" y="148.0" text-anchor="middle">Remote</text><text class="nsub" x="74.0" y="162.0" text-anchor="middle">git · PAT</text>
   <rect x="196" y="124" width="152" height="48" rx="6" fill="var(--ground)"/><rect x="196" y="124" width="152" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="148.0" text-anchor="middle">Poller</text><text class="nsub" x="272.0" y="162.0" text-anchor="middle">fetch · nur Diff</text>
   <rect x="412" y="40" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="40" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="64.0" text-anchor="middle">Code &amp; Doku</text><text class="nsub" x="484.0" y="78.0" text-anchor="middle">ctags · Chunks</text>
-  <rect x="412" y="124" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="124" width="144" height="48" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="484.0" y="148.0" text-anchor="middle">Fachkarte</text><text class="nsub" x="484.0" y="162.0" text-anchor="middle">MiMo Pro schreibt</text>
+  <rect x="412" y="124" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="124" width="144" height="48" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="484.0" y="148.0" text-anchor="middle">Modulsteckbrief</text><text class="nsub" x="484.0" y="162.0" text-anchor="middle">MiMo Pro schreibt</text>
   <rect x="412" y="208" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="208" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="232.0" text-anchor="middle">Historie</text><text class="nsub" x="484.0" y="246.0" text-anchor="middle">git log · PR-Text</text>
   <rect x="620" y="124" width="128" height="48" rx="6" fill="var(--ground)"/><rect x="620" y="124" width="128" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="684.0" y="148.0" text-anchor="middle">Einbetten</text><text class="nsub" x="684.0" y="162.0" text-anchor="middle">OpenAI · 1536</text>
   <rect x="812" y="44" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="44" width="132" height="44" rx="6" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="878.0" y="66.0" text-anchor="middle">chunks</text><text class="nsub" x="878.0" y="80.0" text-anchor="middle">+ FTS5</text>
-  <rect x="812" y="126" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="126" width="132" height="44" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="878.0" y="148.0" text-anchor="middle">feature_cards</text><text class="nsub" x="878.0" y="162.0" text-anchor="middle">Routing-Ebene</text>
+  <rect x="812" y="126" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="126" width="132" height="44" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="878.0" y="148.0" text-anchor="middle">module_profiles</text><text class="nsub" x="878.0" y="162.0" text-anchor="middle">Routing-Ebene</text>
   <rect x="812" y="210" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="210" width="132" height="44" rx="6" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="878.0" y="232.0" text-anchor="middle">history_docs</text><text class="nsub" x="878.0" y="246.0" text-anchor="middle">für «warum»</text>
 
   <line x1="16" y1="278" x2="944" y2="278" stroke="var(--hairline)" stroke-width="0.8"/>
@@ -530,9 +530,9 @@
           <td>An Überschriften.</td>
         </tr>
         <tr>
-          <td><b>Fachkarte</b></td>
+          <td><b>Modulsteckbrief</b></td>
           <td>Deutscher Titel plus Zusammenfassung plus Schlüsselsymbole.</td>
-          <td>Ein Modul, eine Karte.</td>
+          <td>Ein Modul, ein Steckbrief.</td>
         </tr>
         <tr>
           <td>Historien-Dokument</td>
@@ -548,7 +548,7 @@
     </table>
   </div>
 
-  <p>Die Fachkarte ist die einzige Einheit, bei der <em>beide</em> Seiten Fachsprache sind — Frage und Karte. Deshalb trägt sie das Routen, und die Code-Chunks dienen der Antwort, nicht der Zuordnung.</p>
+  <p>Der Modulsteckbrief ist die einzige Einheit, bei der <em>beide</em> Seiten Fachsprache sind — Frage und Steckbrief. Deshalb trägt er das Routen, und die Code-Chunks dienen der Antwort, nicht der Zuordnung.</p>
 
   <div class="decision">
     <span class="tag">Kein tree-sitter, kein AST</span>
@@ -593,7 +593,7 @@
 
   <rect x="16" y="48" width="116" height="52" rx="6" fill="var(--ground)"/><rect x="16" y="48" width="116" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="74.0" y="74.0" text-anchor="middle">Frage</text><text class="nsub" x="74.0" y="88.0" text-anchor="middle">Rolle: BA/DEV</text>
   <rect x="196" y="48" width="152" height="52" rx="6" fill="var(--ground)"/><rect x="196" y="48" width="152" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="74.0" text-anchor="middle">Verstehen</text><text class="nsub" x="272.0" y="88.0" text-anchor="middle">non-Pro · JSON</text>
-  <rect x="412" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="412" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="74.0" text-anchor="middle">Routen</text><text class="nsub" x="484.0" y="88.0" text-anchor="middle">Fachkarten-Suche</text>
+  <rect x="412" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="412" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="74.0" text-anchor="middle">Routen</text><text class="nsub" x="484.0" y="88.0" text-anchor="middle">Steckbrief-Suche</text>
   <rect x="628" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="628" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="700.0" y="74.0" text-anchor="middle">Sammeln</text><text class="nsub" x="700.0" y="88.0" text-anchor="middle">Chunks · Dateien</text>
   <rect x="836" y="48" width="108" height="52" rx="6" fill="var(--ground)"/><rect x="836" y="48" width="108" height="52" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="890.0" y="74.0" text-anchor="middle">Antwort</text><text class="nsub" x="890.0" y="88.0" text-anchor="middle">Pro · Stream</text>
   <rect x="412" y="180" width="144" height="56" rx="6" fill="var(--ground)"/><rect x="412" y="180" width="144" height="56" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="484.0" y="208.0" text-anchor="middle">Rückfrage</text><text class="nsub" x="484.0" y="222.0" text-anchor="middle">hält den Zug an</text>
@@ -613,7 +613,7 @@
     </div>
     <div>
       <div class="k">2 · Routen</div>
-      <div class="v"><b>Hybridsuche über Fachkarten</b><span>Dominiert der beste Treffer den zweiten um mehr als <code>BACKEND_ROUTE_MARGIN</code>, läuft es still weiter. Sonst: <code>clarification</code>-Event mit zwei bis fünf benannten Kandidaten, und der Zug endet. Kein Treffer → «nichts gefunden» mit den versuchten Begriffen, nie eine erfundene Antwort.</span></div>
+      <div class="v"><b>Hybridsuche über Modulsteckbriefe</b><span>Dominiert der beste Treffer den zweiten um mehr als <code>BACKEND_ROUTE_MARGIN</code>, läuft es still weiter. Sonst: <code>clarification</code>-Event mit zwei bis fünf benannten Kandidaten, und der Zug endet. Kein Treffer → «nichts gefunden» mit den versuchten Begriffen, nie eine erfundene Antwort.</span></div>
     </div>
     <div>
       <div class="k">3 · Sammeln</div>
@@ -663,7 +663,7 @@
 
 <section>
   <h2>Fragen über mehrere Repositories</h2>
-  <p>Mehrere gut punktende Fachkarten heissen zweierlei, und die beiden sehen für einen reinen Punktzahl-Vergleich gleich aus:</p>
+  <p>Mehrere gut punktende Modulsteckbriefe heissen zweierlei, und die beiden sehen für einen reinen Punktzahl-Vergleich gleich aus:</p>
 
   <div class="table-wrap">
     <table>
@@ -672,7 +672,7 @@
         <tr>
           <td><b>Mehrdeutigkeit</b><br><span class="hint">Alternativen</span></td>
           <td>Drei unabhängige Teaser-Mail-Mechanismen in drei Produkten.</td>
-          <td>Rückfragen. Genau eine Karte ist gemeint.</td>
+          <td>Rückfragen. Genau ein Steckbrief ist gemeint.</td>
         </tr>
         <tr>
           <td><b>Zusammensetzung</b><br><span class="hint">Teile eines Ganzen</span></td>
@@ -689,8 +689,8 @@
   <p>Nicht am Modellurteil allein — dafür gibt es ein hartes Signal. Beim Indexieren werden die <strong>Abhängigkeitsmanifeste</strong> gelesen (<code>pom.xml</code>, <code>build.gradle</code>, <code>package.json</code>, <code>go.mod</code>, <code>requirements.txt</code>, <code>*.csproj</code>) und in eine Tabelle <code>repo_deps</code> geschrieben: Wer veröffentlicht welche Koordinate, und wer zieht sie. Daraus folgt unmittelbar:</p>
   <ul>
     <li>Hängt Kandidat A laut Manifest an Kandidat B, sind es <strong>keine Alternativen</strong> — dann ist es Zusammensetzung, ohne dass ein Modell darüber urteilen muss.</li>
-    <li>Besteht keine Abhängigkeit und unterscheidet sich das fachliche Thema der Karten, ist es Mehrdeutigkeit — es wird zurückgefragt.</li>
-    <li>Nur im Restfall entscheidet das Routen-Modell, und dann mit den Karten <em>und</em> der Abhängigkeitslage im Prompt.</li>
+    <li>Besteht keine Abhängigkeit und unterscheidet sich das fachliche Thema der Steckbriefe, ist es Mehrdeutigkeit — es wird zurückgefragt.</li>
+    <li>Nur im Restfall entscheidet das Routen-Modell, und dann mit den Steckbriefen <em>und</em> der Abhängigkeitslage im Prompt.</li>
   </ul>
 
   <h3>Sammeln über Repo-Grenzen</h3>
@@ -717,7 +717,7 @@
 <section>
   <h2>Nachfragen</h2>
   <p>Eine Nachfrage erzeugt <strong>immer eine neue Antwort im Thread</strong>. Die vorherige wird nie überschrieben — sie kann längst weitergeleitet oder in ein Ticket kopiert worden sein. Der Thread ist ein Protokoll, kein Arbeitsdokument.</p>
-  <p>Ob dafür neu gesucht werden muss, entscheidet ein billiger Prüfschritt auf non-Pro: Er bekommt die Nachfrage und ein <em>Inventar</em> des bereits Gesammelten — Dateiliste, Symbole, Fachkarte — und antwortet mit «reicht» oder «hole zusätzlich». Daraus ergeben sich drei Fälle:</p>
+  <p>Ob dafür neu gesucht werden muss, entscheidet ein billiger Prüfschritt auf non-Pro: Er bekommt die Nachfrage und ein <em>Inventar</em> des bereits Gesammelten — Dateiliste, Symbole, Modulsteckbrief — und antwortet mit «reicht» oder «hole zusätzlich». Daraus ergeben sich drei Fälle:</p>
 
   <div class="table-wrap">
     <table>
@@ -730,12 +730,12 @@
         </tr>
         <tr>
           <td><b>Vertiefung im selben Mechanismus</b><br><span class="hint">«Was passiert bei mehreren offenen Warenkörben?»</span></td>
-          <td>Der Prüfschritt verlangt Nachschlag: gezieltes Nachsammeln <em>innerhalb</em> der gewählten Fachkarte, ohne neues Routen und ohne neue Rückfrage. Der Kontext wächst.</td>
+          <td>Der Prüfschritt verlangt Nachschlag: gezieltes Nachsammeln <em>innerhalb</em> des gewählten Modulsteckbriefs, ohne neues Routen und ohne neue Rückfrage. Der Kontext wächst.</td>
           <td>non-Pro-Prüfung, etwas Sammeln, ein Pro-Aufruf.</td>
         </tr>
         <tr>
           <td><b>Anderer Mechanismus</b><br><span class="hint">«Und wie ist das im Newsletter?»</span></td>
-          <td>Verlässt die Fachkarte. Es wird neu geroutet — und darf dabei erneut eine Rückfrage auslösen, mit allem, was dazugehört.</td>
+          <td>Verlässt den Modulsteckbrief. Es wird neu geroutet — und darf dabei erneut eine Rückfrage auslösen, mit allem, was dazugehört.</td>
           <td>Voller Durchlauf.</td>
         </tr>
       </tbody>
@@ -776,7 +776,7 @@
         <tr><td><code>llm_calls</code></td><td>eine Zeile je Aufruf: Nachricht, Schritt (<code>understand</code>, <code>route</code>, <code>embed</code>, <code>answer</code>, <code>summarize</code>), Modell bzw. Deployment, Prompt-, Completion- und Reasoning-Token, errechnete Kosten in USD, Dauer.</td></tr>
         <tr><td>Nachricht</td><td>Summe ihrer Aufrufe — das ist der Wert am Antwortfuss, aufklappbar nach Modell.</td></tr>
         <tr><td>Thread, Nutzer, Tag</td><td>Aggregate darüber, auf der Kosten-Seite.</td></tr>
-        <tr><td>Repository</td><td>Indexierungskosten (Embeddings + Fachkarten von Pro), dem Repo zugerechnet statt einer Nachricht.</td></tr>
+        <tr><td>Repository</td><td>Indexierungskosten (Embeddings + Modulsteckbriefe von Pro), dem Repo zugerechnet statt einer Nachricht.</td></tr>
       </tbody>
     </table>
   </div>
@@ -794,7 +794,7 @@
   <ol class="phases">
     <li><b>Grundgerüst</b><span>Repo, Go-Modul <code>github.com/trick77/rongo</code>, Config, Migrationsrunner, Store, Auth (dev + Admin-Token, OIDC-Naht gelegt), eingebettete SPA-Hülle, Containerfile, compose.yaml, CI mit peeqs Coverage-Gates.</span></li>
     <li><b>Indexierung</b><span>Repo-Registrierung, Clone/Fetch/Diff-Poller, <code>ctags</code>- und <code>rg</code>-Aufrufe, Chunking, Embedding-Client, Hybridsuche portiert aus <code>peeq/backend/internal/rag</code>. Endet mit der Messung small gegen large.</span></li>
-    <li><b>Fachkarten</b><span>Clustering, deutsche Zusammenfassungen von Pro, Karten-Embeddings, Neuzusammenfassung bei Diff.</span></li>
+    <li><b>Modulsteckbriefe</b><span>Clustering, deutsche Zusammenfassungen von Pro, Steckbrief-Embeddings, Neuzusammenfassung bei Diff.</span></li>
     <li><b>Frage-Pipeline «wie»</b><span>Verstehen → Routen → Sammeln → Streamen, SSE-Events, Thread-Persistenz, Rückfrage-Rundlauf, Rollenwahl, Belegfeld. Das erste wirklich benutzbare Release.</span></li>
     <li><b>Kostenerfassung</b><span><code>llm_calls</code> pro Aufruf, mitgelieferter litellm-Katalog, Übersteuerungstabelle für die MiMo-Deployments, Kosten-Seite mit Aufschlüsselung nach Modell.</span></li>
     <li><b>«Warum»</b><span>Historie indexiert und ins Sammeln gemischt. Klein, gleiche Pipeline.</span></li>
@@ -822,9 +822,8 @@
 <section>
   <h2>Bewusst offen gelassen</h2>
   <ul>
-    <li>Grösse des Embedding-Modells — wird am Ende von Phase 2 gemessen, nicht jetzt ausdiskutiert.</li>
-    <li>Granularität des Fachkarten-Clusterings (Paket, Verzeichnis, vom Modell vorgeschlagen) — braucht den echten Korpus.</li>
-    <li>Gepflegtes oder gelerntes Glossar über den Kartenzusammenfassungen — nur falls Phase 4 zeigt, dass die reine Modell-Brücke an echten Fragen scheitert.</li>
+    <li>Granularität des Modulsteckbrief-Clusterings (Paket, Verzeichnis, vom Modell vorgeschlagen) — braucht den echten Korpus.</li>
+    <li>Gepflegtes oder gelerntes Glossar über den Steckbrief-Zusammenfassungen — nur falls Phase 4 zeigt, dass die reine Modell-Brücke an echten Fragen scheitert.</li>
   </ul>
 </section>
 
