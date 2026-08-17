@@ -1,0 +1,317 @@
+// Package llm talks to rongo's two MiMo deployments over an OpenAI-compatible
+// chat completions endpoint.
+//
+// Ported from loom's client, which had already worked out the parts that matter
+// here, and cut down to what rongo's pipeline needs: one completion call and one
+// streaming call. No tools, no image path.
+package llm
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// The two deployments are hardcoded, never configurable. rongo targets MiMo
+// specifically; a deployment name in an environment variable would let a
+// misconfigured host answer with a model nobody chose, and the failure would
+// look like a quality problem rather than a configuration one.
+//
+// ShortGateDeployment is the SAME reasoning family as Pro. It is picked because
+// it queues less, not because it cannot think — see ShortGate.
+const (
+	ProDeployment       = "mimo-v2.5-pro"
+	ShortGateDeployment = "mimo-v2.5"
+)
+
+// defaultMaxTokens caps a call that names no budget of its own. Every request
+// carries a cap: an uncapped one can run until the context dies, and the bill is
+// where that shows up first.
+const defaultMaxTokens = 4096
+
+const maxErrorBodyBytes = 8 << 10
+
+// Config holds the endpoint settings. The deployment names are not here on
+// purpose.
+type Config struct {
+	BaseURL string
+	APIKey  string
+	Timeout time.Duration
+	// IdleTimeout aborts a stream when no frame arrives within the window.
+	// Zero disables the watchdog; the coarse Timeout still applies.
+	IdleTimeout time.Duration
+	Logger      *slog.Logger
+}
+
+// Message is one OpenAI-compatible chat message.
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// Usage is what one call cost, as the upstream reported it. Returned rather
+// than stored: the llm_calls table is a later phase.
+type Usage struct {
+	Prompt     int `json:"prompt_tokens"`
+	Completion int `json:"completion_tokens"`
+	Total      int `json:"total_tokens"`
+}
+
+type thinkingOption struct {
+	Type string `json:"type"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+type chatRequest struct {
+	Model               string          `json:"model"`
+	Messages            []Message       `json:"messages"`
+	Stream              bool            `json:"stream,omitempty"`
+	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
+	Thinking            *thinkingOption `json:"thinking,omitempty"`
+	MaxCompletionTokens int             `json:"max_completion_tokens"`
+}
+
+// callOptions is what the Option funcs assemble.
+type callOptions struct {
+	model     string
+	thinking  *thinkingOption
+	maxTokens int
+}
+
+// Option adjusts a single call.
+type Option func(*callOptions)
+
+// ShortGate routes this call to the non-Pro deployment, which queues less.
+//
+// It says nothing about reasoning. Both deployments are the same reasoning
+// family and both think when asked to; suppressing thought is WithoutThinking,
+// a separate switch. Never describe this as "the model that cannot think" — the
+// bar for using it is "the output is an id or a label", not "no thought needed".
+func ShortGate() Option {
+	return func(o *callOptions) { o.model = ShortGateDeployment }
+}
+
+// WithoutThinking disables MiMo's native reasoning for this call. It does not
+// change the deployment: a Pro call can be asked not to think, and a short-gate
+// call can be asked to.
+func WithoutThinking() Option {
+	return func(o *callOptions) { o.thinking = &thinkingOption{Type: "disabled"} }
+}
+
+// WithMaxTokens caps the completion. Use it wherever a truncated reply is not
+// worse than a long one.
+func WithMaxTokens(n int) Option {
+	return func(o *callOptions) { o.maxTokens = n }
+}
+
+// Client calls the chat completions endpoint.
+type Client struct {
+	baseURL     string
+	apiKey      string
+	http        *http.Client
+	idleTimeout time.Duration
+	log         *slog.Logger
+}
+
+// NewClient builds a Client. hc may be nil, in which case one is made with the
+// configured timeout.
+func NewClient(cfg Config, hc *http.Client) *Client {
+	if hc == nil {
+		timeout := cfg.Timeout
+		if timeout <= 0 {
+			timeout = 5 * time.Minute
+		}
+		hc = &http.Client{Timeout: timeout}
+	}
+	log := cfg.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Client{
+		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:      cfg.APIKey,
+		http:        hc,
+		idleTimeout: cfg.IdleTimeout,
+		log:         log,
+	}
+}
+
+func resolve(opts []Option) callOptions {
+	o := callOptions{model: ProDeployment, maxTokens: defaultMaxTokens}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	if o.maxTokens <= 0 {
+		o.maxTokens = defaultMaxTokens
+	}
+	return o
+}
+
+// Complete runs one non-streaming call and returns the assistant's content.
+func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (string, Usage, error) {
+	resp, err := c.post(ctx, msgs, resolve(opts), false)
+	if err != nil {
+		return "", Usage{}, err
+	}
+	defer resp.Body.Close()
+
+	var out struct {
+		Choices []struct {
+			Message Message `json:"message"`
+		} `json:"choices"`
+		Usage Usage `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", Usage{}, fmt.Errorf("decode chat completion: %w", err)
+	}
+	if len(out.Choices) == 0 {
+		return "", out.Usage, errors.New("chat completion carried no choices")
+	}
+	return out.Choices[0].Message.Content, out.Usage, nil
+}
+
+// Stream runs one streaming call, handing each content delta to onToken as it
+// arrives. Only the final answer streams; every other step is an ordinary
+// request.
+func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string), opts ...Option) (Usage, error) {
+	// The watchdog is armed here, not merely configured. An upstream that
+	// stalls after the first delta would otherwise hold the reader on a
+	// half-written answer until the coarse HTTP timeout — minutes of a cursor
+	// that looks like it is still thinking.
+	if c.idleTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+	}
+
+	resp, err := c.post(ctx, msgs, resolve(opts), true)
+	if err != nil {
+		return Usage{}, err
+	}
+	defer resp.Body.Close()
+
+	// beat is called for every frame that arrives; the timer fires only when
+	// none has for the whole window.
+	beat := func() {}
+	if c.idleTimeout > 0 {
+		timer := time.AfterFunc(c.idleTimeout, func() { _ = resp.Body.Close() })
+		defer timer.Stop()
+		beat = func() { timer.Reset(c.idleTimeout) }
+	}
+
+	var usage Usage
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	for sc.Scan() {
+		beat()
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var frame struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+			Usage *Usage `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
+			// A malformed frame is not worth killing a half-written answer for.
+			c.log.Warn("unparseable stream frame", "err", err)
+			continue
+		}
+		if frame.Usage != nil && frame.Usage.Total > 0 {
+			usage = *frame.Usage
+		}
+		for _, ch := range frame.Choices {
+			if ch.Delta.Content != "" && onToken != nil {
+				onToken(ch.Delta.Content)
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return usage, fmt.Errorf("read stream: %w", redactURL(err))
+	}
+	return usage, nil
+}
+
+func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream bool) (*http.Response, error) {
+	body := chatRequest{
+		Model:               o.model,
+		Messages:            msgs,
+		Stream:              stream,
+		Thinking:            o.thinking,
+		MaxCompletionTokens: o.maxTokens,
+	}
+	if stream {
+		body.StreamOptions = &streamOptions{IncludeUsage: true}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal chat request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("create chat request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, redactURL(err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		// The upstream may echo request headers back in an error body. Strip
+		// the key before it reaches a log line.
+		return nil, fmt.Errorf("chat completion failed with status %d: %s",
+			resp.StatusCode, c.redactKey(string(msg)))
+	}
+	return resp, nil
+}
+
+// redactKey removes the API key from text that is about to be quoted into an
+// error. An upstream that echoes the Authorization header would otherwise put
+// the credential into every log line that touches the failure.
+func (c *Client) redactKey(s string) string {
+	if c.apiKey == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
+}
+
+// redactURL keeps a transport error from carrying the full request URL, which
+// can hold query parameters. Same rule as the embedding client: scheme and host
+// are enough to tell an operator where it failed.
+func redactURL(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	where := "the model endpoint"
+	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
+		where = u.Scheme + "://" + u.Host
+	}
+	return fmt.Errorf("%s %s: %w", uerr.Op, where, uerr.Err)
+}

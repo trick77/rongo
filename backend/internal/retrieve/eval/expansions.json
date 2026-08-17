@@ -1,0 +1,226 @@
+[
+  {
+    "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
+    "texts": [
+      "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
+      "Speicherplatzprüfung Download-Start verhindern Festspeicherüberprüfung Speicherkapazitätsprüfung",
+      "diskSpaceCheck availableSpace downloadStart storageCapacity peeq checkDiskSpace minRequiredSpace DiskSpaceValidator"
+    ]
+  },
+  {
+    "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
+    "texts": [
+      "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
+      "Extractor-Fehler Sequenz Videoextraktion fehlgeschlagen Aufeinanderfolgende Extraktionsfehler Wiederholte Medienfehlerbehandlung",
+      "Extractor MediaExtractor onError MediaCodec reset release error_count ExoPlayer"
+    ]
+  },
+  {
+    "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
+    "texts": [
+      "In welchem Format erwartet yt-dlp die Cookie-Datei?",
+      "Cookie-Dateiformat Cookies.txt-Struktur Netscape-Cookie-Format yt-dlp Cookie-Eingabe",
+      "cookies.txt Netscape http.cookiejar MozillaCookieJar load_cookies cookie_file extract_cookies"
+    ]
+  },
+  {
+    "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
+    "texts": [
+      "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
+      "API-Token Anzeige Token erneut anzeigen API-Token einsehen",
+      "ApiToken getApiToken showApiToken api_token token_display accessToken"
+    ]
+  },
+  {
+    "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
+    "texts": [
+      "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
+      "Apple TV Zugriff ohne Authentifizierung Mediendatei ohne Login abrufen Apple TV AirPlay Discovery Protokoll Anonymes Streaming auf Apple TV",
+      "AirPlay HTTPServer MLMediaItem MLMediaLibraryService AppleTVSetup nowPlayingInfo MPNowPlayingInfoCenter NSNetService"
+    ]
+  },
+  {
+    "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
+    "texts": [
+      "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
+      "peeq Abmeldeverhalten gelöschter Kanäle Anzahl Scans bis zur Abmeldung peeq Auto-Deaktivierung entfernter Sender",
+      "peeq scan channel delete unregister remove threshold count"
+    ]
+  },
+  {
+    "question": "DeadScanThreshold",
+    "texts": [
+      "DeadScanThreshold",
+      "DeadScanThreshold Variable DeadScan Threshold Wert Dead Scan Schwellenwert",
+      "DeadScanThreshold dead_scan_threshold DEAD_SCAN_THRESHOLD threshold scanThreshold maxDeadScans"
+    ]
+  },
+  {
+    "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
+    "texts": [
+      "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
+      "availability Mapping yt-dlp availability translation peeqs availability conversion yt-dlp availability to peeqs",
+      "availability map translate convert yt_dlp peeqs Availability AvailabilityMapper"
+    ]
+  },
+  {
+    "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
+    "texts": [
+      "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
+      "Zufällige Intervalle bei Hintergrundaufgaben Randomisierung der Loop-Intervalle Stochastische Zeitspannen für Hintergrundprozesse",
+      "BackgroundLoop randomInterval jitter Timer scheduling backgroundTask dispatch_after TimeInterval"
+    ]
+  },
+  {
+    "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
+    "texts": [
+      "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
+      "Ergebnisliste zusammenführen Treffer kombinieren Vektor- und Volltext-Suche Suchergebnisse sortieren",
+      "mergeResults combineHits vectorSearch fullTextSearch ResultList sort rank RelevanceScoring"
+    ]
+  },
+  {
+    "question": "FuseWeighted",
+    "texts": [
+      "FuseWeighted",
+      "FuseWeighted Implementierung gewichtete Fusion gewichteter Fuse Algorithmus FuseWeighted Kombination",
+      "FuseWeighted Fuse Weight fuse_weighted WeightedFuse fuse_weights FuseMethod"
+    ]
+  },
+  {
+    "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
+    "texts": [
+      "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
+      "Token-Anzahl Schätzung Chunk-Tokenizer Entfernung Token-Zählung ohne Download lokalisierte Token-Schätzung",
+      "tokenize encode count estimate tokenizer chunk token_count tokenizer_download"
+    ]
+  },
+  {
+    "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
+    "texts": [
+      "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
+      "maximale Anzahl von Texten pro Embedding-Anfrage Batch-Größe bei Embedding-Requests Begrenzung der Textanzahl in einem Embedding-Aufruf Anzahl der Dokumente in einem Embedding-Request",
+      "batchSize maxBatchSize embeddingRequest texts maxTexts requestLimit embeddingInput"
+    ]
+  },
+  {
+    "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
+    "texts": [
+      "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
+      "Kanalfilter Reihenfolge Nachbarschaftssuche Verzögerung Kanalfilter Filterung nach Discovery Phasing Kanalfilter",
+      "ChannelFilter NeighborDiscovery DiscoveryService filterPhases applyFilter discoveryComplete onDiscoveryFinished startFiltering"
+    ]
+  },
+  {
+    "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+    "texts": [
+      "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+      "Datenbank-PRAGMAs SQLite-Initialisierung PRAGMA-Einstellungen Datenbanköffnung konfigurieren",
+      "PRAGMA openDatabase sqlite3 Database Peeq PRAGMA journal_mode PRAGMA foreign_keys"
+    ]
+  },
+  {
+    "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
+    "texts": [
+      "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
+      "Erkennung angewandter Migration Migrationsstatus überprüfen Migration bereits ausgeführt Gebrauchte Migrations erkennen",
+      "Migration applied migrated check has_migration migration_status applied_migrations schema_version"
+    ]
+  },
+  {
+    "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
+    "texts": [
+      "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
+      "Stopwort-Filterung Suchbegriff-Vorverarbeitung Keyword-Suche Aufbereitung",
+      "stopwords filter tokenize preprocess searchQuery keywords"
+    ]
+  },
+  {
+    "question": "Wie meldet sich ein Benutzer per OIDC an?",
+    "texts": [
+      "Wie meldet sich ein Benutzer per OIDC an?",
+      "OpenID Connect Authentication Flow OIDC Login Prozess Benutzerauthentifizierung via OIDC Authorization Code Flow",
+      "OpenIDConnect OIDC AuthorizationCodeFlow TokenEndpoint UserInfoEndpoint IDToken AuthenticationService OAuthService"
+    ]
+  },
+  {
+    "question": "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
+    "texts": [
+      "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
+      "Thread-Titel formatieren Anführungszeichen aus Text entfernen Titel-Bereinigung in Nachrichten String-Bereinigung von Zitaten",
+      "title thread strip replace sanitize clean quote markdown"
+    ]
+  },
+  {
+    "question": "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
+    "texts": [
+      "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
+      "Speicherort hochgeladene Datei Zielpfad Upload Benutzerverzeichnis Dateisystem Lokalisierung Upload",
+      "upload save path userVolume file url FileManager write"
+    ]
+  },
+  {
+    "question": "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
+    "texts": [
+      "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
+      "maximale Thumbnail-Groesse generiertes Artefakt generierte Artefakt-Vorschaubildgroesse Hoechstgroesse Thumbnail fuer Artefakt",
+      "thumbnail artifact maxSize maxThumbnailSize generateThumbnail ARTIFACT_THUMBNAIL_MAX_SIZE"
+    ]
+  },
+  {
+    "question": "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
+    "texts": [
+      "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
+      "Benutzer-Direktive Länge Direktive Überlänge Benutzerbefehl zu lang Eingabe Überschreitung",
+      "MAX_COMMAND_LENGTH BufferOverflow CommandParser InputValidator truncate too_long SIZE_MAX"
+    ]
+  },
+  {
+    "question": "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
+    "texts": [
+      "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
+      "Thread Share-Links Thread öffentliche Links Thread freigegebene Verknüpfungen",
+      "Thread Share Link public shareLink ThreadShare ShareLink"
+    ]
+  },
+  {
+    "question": "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
+    "texts": [
+      "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
+      "Standardanzahl Volltexttreffer Standardergebnisanzahl Nachrichtensuche Standardlimit Volltextsuche",
+      "defaultLimit pageSize maxResults fullTextSearch newsSearch resultCount"
+    ]
+  },
+  {
+    "question": "ResolveOutputPath",
+    "texts": [
+      "ResolveOutputPath",
+      "Output-Pfad auflösen Zielverzeichnis bestimmen Ausgabepfad ermitteln Speicherort berechnen",
+      "ResolveOutputPath outputPath BuildOutputPath GetOutputPath OutputDirectory DestinationPath"
+    ]
+  },
+  {
+    "question": "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
+    "texts": [
+      "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
+      "Dateiname bereinigen Dateinamen validieren Dateinamen escapen Sonderzeichen entfernen",
+      "sanitize_filename clean_filename validate_filename escape_filename invalid_chars reserved_chars path_security"
+    ]
+  },
+  {
+    "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
+    "texts": [
+      "Wie sichert man eine laufende SQLite-Datenbank online?",
+      "SQLite Datenbanksicherung Online Backup live Datenbank sichern fliegendes Backup",
+      "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_pagecount VACUUM INTO SQLITE_DBCONFIG_DEFENSIVE PRAGMA wal_checkpoint"
+    ]
+  },
+  {
+    "question": "ZeroBlob",
+    "texts": [
+      "ZeroBlob",
+      "null blob representation empty blob value zero-length binary data",
+      "ZeroBlob zeroBlob ZERO_BLOB kZeroBlob empty_blob Blob::Zero SQLiteZeroBlob"
+    ]
+  }
+]

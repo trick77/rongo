@@ -21,10 +21,27 @@ type Embedder interface {
 // Query is one search.
 type Query struct {
 	Text string
+	// Texts replaces Text when set: the question phrased several ways, each
+	// getting its own semantic lane before fusion. The understanding step fills
+	// it with the business-language restatement and the guessed code
+	// vocabulary, which is the bridge a raw question does not build — "Apple TV"
+	// never embeds near "AirPlay" on its own.
+	//
+	// The raw question belongs in here too, first. A model's guess is a guess,
+	// and a wrong one must not be able to replace what was actually asked.
+	Texts []string
 	// Repos restricts the search. Empty means the whole corpus.
 	Repos []string
 	// K is how many hits to return. Zero means 10.
 	K int
+}
+
+// texts is what the lanes actually search for.
+func (q Query) texts() []string {
+	if len(q.Texts) > 0 {
+		return q.Texts
+	}
+	return []string{q.Text}
 }
 
 // Retriever answers a Query by fusing the semantic and keyword lanes.
@@ -55,16 +72,16 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // would be indistinguishable from a broken database, and the answer layer would
 // have to guess which one it was looking at.
 func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
-	return r.searchTexts(ctx, []string{q.Text}, q.Repos, q.K)
+	return r.searchTexts(ctx, q.texts(), q.Repos, q.K)
 }
 
 // searchTexts is Search over SEVERAL phrasings of one question.
 //
-// It takes a slice even though Query carries a single string today, because
-// phase 4 embeds the expanded query twice — once in business phrasing, once
-// with guessed code vocabulary — and merges both result lists. Structuring it
-// this way now means that arrives as another lane rather than as a reshaping of
-// this function.
+// Phase 2 shaped it this way in advance, and phase 4 fills it: the understanding
+// step hands in the raw question, the business-language restatement and the
+// guessed code vocabulary, and each becomes its own semantic lane before fusion.
+// That arrived as another lane rather than as a reshaping of this function,
+// which is what the slice was for.
 func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []string, k int) ([]Hit, error) {
 	if k <= 0 {
 		k = 10

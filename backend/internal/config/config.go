@@ -57,6 +57,15 @@ type Config struct {
 	// document — the defaults here are a starting point, not a finding.
 	ModuleMinChunks int
 	ModuleMaxChunks int
+	// The MiMo endpoint. The two deployment NAMES are hardcoded in
+	// internal/llm and deliberately not settings: a deployment name in the
+	// environment lets a misconfigured host answer with a model nobody chose.
+	LLMBaseURL string
+	LLMAPIKey  string
+	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
+	// them one question walks the corpus.
+	GatherMaxHops     int
+	GatherTokenBudget int
 	// Embedding endpoint. EmbedDim is also the width the vec0 table is built
 	// with, so changing it means a new database, not a restart — store.BuiltDim
 	// makes a mismatch a loud failure rather than a wrong answer.
@@ -101,6 +110,10 @@ func Load() (Config, error) {
 		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
 		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
 		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
+		LLMAPIKey:         strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
+		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
 		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
 		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),

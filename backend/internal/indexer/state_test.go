@@ -50,6 +50,60 @@ func TestSyncSpecs_insertsAndUpdates(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
+	// Omitting `branch:` means "the remote's default", which is resolved once
+	// and recorded. The next sync — every boot, every reload of the list — must
+	// not wipe it: the branch travels with every citation, and a forge URL
+	// without it may 404 off the default branch.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	spec := repos.Spec{Name: "peeq", CloneURL: "file:///x", Enabled: true}
+	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+	if err := s.SetBranch(ctx, "peeq", "master"); err != nil {
+		t.Fatalf("SetBranch: %v", err)
+	}
+
+	// When: the same list is read again, unchanged.
+	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// Then
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 || all[0].Branch != "master" {
+		t.Fatalf("branch = %q, want the resolved master kept", all[0].Branch)
+	}
+}
+
+func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
+	// The other half: naming a branch in the YAML overrides whatever was
+	// resolved earlier, or a corrected entry would never take effect.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if err := s.SyncSpecs(ctx, []repos.Spec{{Name: "shop", CloneURL: "file:///x", Enabled: true}}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+	if err := s.SetBranch(ctx, "shop", "master"); err != nil {
+		t.Fatalf("SetBranch: %v", err)
+	}
+
+	if err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop", CloneURL: "file:///x", Branch: "release-2024.3", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	all, _ := s.All(ctx)
+	if all[0].Branch != "release-2024.3" {
+		t.Errorf("branch = %q, want the explicitly configured one", all[0].Branch)
+	}
+}
+
 func TestSyncSpecs_deactivatesRatherThanDeletes(t *testing.T) {
 	// Given: peeq was indexed, then dropped out of repos.yaml. Its index must
 	// survive — a typo in the YAML must not destroy hours of indexing.

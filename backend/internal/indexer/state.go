@@ -72,7 +72,14 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) error {
 			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				clone_url = excluded.clone_url,
-				branch    = excluded.branch,
+				-- An omitted branch: means "the remote's default", which is
+				-- resolved once and recorded here. Copying the empty value over
+				-- it would wipe that on every boot and every reload of the
+				-- list, and the branch travels with every citation — a forge
+				-- URL without it may 404 off the default branch. A branch named
+				-- in the YAML still wins, or a corrected entry would never take
+				-- effect.
+				branch    = CASE WHEN excluded.branch <> '' THEN excluded.branch ELSE repo_state.branch END,
 				enabled   = excluded.enabled,
 				token_env = excluded.token_env`,
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv,
