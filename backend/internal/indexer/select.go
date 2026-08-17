@@ -17,6 +17,10 @@ const (
 	SkipBinary    Decision = "binary"
 	SkipTooLarge  Decision = "too_large"
 	SkipSecret    Decision = "secret"
+	// SkipEmpty is not a selector verdict — the pipeline records it for a file
+	// that passed selection but produced no chunk, because it is blank. It
+	// shares this vocabulary so the answer layer renders one set of reasons.
+	SkipEmpty Decision = "empty"
 )
 
 // SelectOptions tunes the selector.

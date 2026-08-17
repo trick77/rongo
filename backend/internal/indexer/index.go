@@ -184,8 +184,11 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 
 	chunks := ChunkFile(st.Name, st.Branch, path, body, syms, ix.chunk)
 	if len(chunks) == 0 {
-		// An empty or blank file: recorded, with no content to search.
-		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, "", len(body))
+		// An empty or blank file. It is recorded with a REASON rather than with
+		// an empty one: a file row carrying no skip reason and no chunks would
+		// be indistinguishable from a file the pipeline silently failed on, and
+		// "this file exists but was not indexed" has to say why.
+		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(SkipEmpty), len(body))
 	}
 
 	vecs, err := ix.vectors(ctx, chunks)
