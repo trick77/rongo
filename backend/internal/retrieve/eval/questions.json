@@ -1,170 +1,971 @@
 [
   {
     "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/download/freebytes.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/download/freebytes.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/failmonitor/monitor.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/failmonitor/monitor.go"
+        ]
+      }
+    ]
   },
   {
     "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/cookie/netscape.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/cookie/netscape.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/apitoken/apitoken.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/apitoken/apitoken.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/playbackgrant/store.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/playbackgrant/store.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/channels/staleness.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/channels/staleness.go"
+        ]
+      }
+    ]
   },
   {
     "question": "DeadScanThreshold",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/channels/staleness.go"],
-    "kind": "identifier"
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/channels/staleness.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/videos/availability.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/videos/availability.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/sched/sched.go"],
-    "kind": "why"
+    "kind": "why",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/sched/sched.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/hybrid.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/hybrid.go"
+        ]
+      }
+    ]
   },
   {
     "question": "FuseWeighted",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/hybrid.go"],
-    "kind": "identifier"
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/hybrid.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/chunk.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/chunk.go"
+        ],
+        "verified": "chunk.go:38-51 estimateTokens, ~4 Zeichen pro Token, Kommentar nennt tiktoken"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/rag/chunk.go"
+        ],
+        "verified": "chunk.go:32-45 estimateTokens, zeichengleiche Implementierung samt Kommentar"
+      }
+    ],
+    "note": "Beide Repositories tragen dieselbe Funktion samt identischem Kommentar. Keine Abhaengigkeit zwischen ihnen, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/embed.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/embed.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/store.go", "backend/internal/rag/filter.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/store.go",
+          "backend/internal/rag/filter.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/store/store.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/store/migrate.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/migrate.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/rag/stopwords.go", "backend/internal/rag/query.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/stopwords.go",
+          "backend/internal/rag/query.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie meldet sich ein Benutzer per OIDC an?",
-    "expect_repo": "peeq",
-    "expect_paths": ["backend/internal/auth/oidc.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/auth/oidc.go"
+        ],
+        "verified": "oidc.go:15-17 peeq_oidc_state/nonce, OIDCBackend mit AuthCodeURL/Exchange/VerifyClaims"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/auth/oidc.go"
+        ],
+        "verified": "oidc.go:15-17 loom_oidc_state/nonce, gleiche OIDCBackend-Schnittstelle"
+      }
+    ],
+    "note": "Zwei eigenstaendige Anmeldungen, bis auf die Cookie-Namen gleich gebaut. Die Frage nennt kein Produkt, also ist genau ein Steckbrief gemeint und rongo muss fragen welcher."
   },
   {
     "question": "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/chat/title_normalizer.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/title_normalizer.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/artifact/upload_path.go"],
-    "kind": "where"
+    "kind": "where",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/upload_path.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/artifact/thumbnail.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/thumbnail.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/chat/user_directives_store.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/user_directives_store.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/chat/share_store.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/share_store.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/chat/message_search_store.go"],
-    "kind": "what"
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/message_search_store.go"
+        ]
+      }
+    ]
   },
   {
     "question": "ResolveOutputPath",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/artifact/path.go"],
-    "kind": "identifier"
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/path.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
-    "expect_repo": "loom",
-    "expect_paths": ["backend/internal/artifact/path.go", "backend/internal/artifact/upload_path.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/path.go",
+          "backend/internal/artifact/upload_path.go"
+        ]
+      }
+    ]
   },
   {
     "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
-    "expect_repo": "go-sqlite3",
-    "expect_paths": ["backup.go"],
-    "kind": "how"
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "backup.go"
+        ]
+      }
+    ]
   },
   {
     "question": "ZeroBlob",
-    "expect_repo": "go-sqlite3",
-    "expect_paths": ["blob.go"],
-    "kind": "identifier"
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "blob.go"
+        ]
+      }
+    ]
+  },
+  {
+    "question": "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/sponsorblock/sponsorblock.go"
+        ],
+        "verified": "sponsorblock.go:29-48 Categories-Liste plus Wanted; poi_highlight und hook im Kommentar begruendet ausgeschlossen"
+      }
+    ]
+  },
+  {
+    "question": "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/subtitles/vtt.go"
+        ],
+        "verified": "vtt.go:177-212 nonSpeechMaxWPM 25, nonSpeechMinMarkerRatio 0.25, IsNonSpeech verlangt beides"
+      }
+    ]
+  },
+  {
+    "question": "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/scan/scheduler.go"
+        ],
+        "verified": "scheduler.go:473 unavailableRecheckWindow = 14 * 24h"
+      }
+    ]
+  },
+  {
+    "question": "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/scan/scheduler.go"
+        ],
+        "verified": "scheduler.go:480 maxUnavailableProbes = 3, je Probe ein eigener yt-dlp-Aufruf"
+      }
+    ]
+  },
+  {
+    "question": "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/scan/scheduler.go"
+        ],
+        "verified": "scheduler.go:1148 backCatalogueGrace = 3 * 24h, isBackCatalogue vergleicht publishedAt gegen baselinedAt"
+      }
+    ]
+  },
+  {
+    "question": "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
+    "kind": "why",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/summarize/summarizer.go"
+        ],
+        "verified": "summarizer.go:130-143 summaryMaxTokens 8000 mit Thinking an, keypointsMaxTokens 16000 mit Thinking aus"
+      }
+    ]
+  },
+  {
+    "question": "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/download/worker.go"
+        ],
+        "verified": "worker.go:38-46 autoDownloadPriority = 0, alles darueber kommt von einem Menschen und geht auf die interaktive Spur"
+      }
+    ]
+  },
+  {
+    "question": "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/download/worker.go"
+        ],
+        "verified": "worker.go:30-36 metadataPreflightTimeout = 2 * time.Minute"
+      }
+    ]
+  },
+  {
+    "question": "Wie gross ist das laengste Seitenmass eines Artefakt-Vorschaubilds?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/thumbnail.go"
+        ],
+        "verified": "thumbnail.go:15 ThumbnailMaxDimension = 144, doppelt so gross wie die 36px-Kachel"
+      }
+    ]
+  },
+  {
+    "question": "Wo liegen die Vorschaubilder, damit sie nie eine echte Benutzerdatei ueberschreiben?",
+    "kind": "where",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/thumbnail.go"
+        ],
+        "verified": "thumbnail.go:17-24 thumbnailReservedDir = .loom/thumbnails, ein Praefix das keine Benutzereingabe erreichen kann"
+      }
+    ]
+  },
+  {
+    "question": "Warum bekommt ein SVG kein Vorschaubild?",
+    "kind": "why",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/artifact/thumbnail.go"
+        ],
+        "verified": "thumbnail.go:26-30 rasterImageMIMEs ohne image/svg+xml, Begruendung im Kommentar: Vektor, ohnehin winzig"
+      }
+    ]
+  },
+  {
+    "question": "Wie viel Text darf die automatisch erzeugte Benutzer-Erinnerung hoechstens umfassen?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/model.go"
+        ],
+        "verified": "model.go:81 MaxUserMemoryLength = 6000, in llm/project_memory.go:22 als userMemoryBudgetChars gespiegelt"
+      }
+    ]
+  },
+  {
+    "question": "Was unterscheidet eine abgeleitete Erinnerung von einer ausdruecklichen Anweisung des Benutzers?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/model.go"
+        ],
+        "verified": "model.go:62-95 UserMemory ist abgeleitet und nur lesbar, UserDirective wird diktiert und hart abgelehnt statt gekuerzt"
+      }
+    ]
+  },
+  {
+    "question": "Wie viele Threads liefert eine Seite der Threadliste hoechstens?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/chat/cursor.go"
+        ],
+        "verified": "cursor.go:22-26 maxThreadLimit = 1000"
+      }
+    ]
+  },
+  {
+    "question": "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "ext/bloom/bloom.go"
+        ],
+        "verified": "bloom.go:22-27 CREATE VIRTUAL TABLE foo USING bloom_filter(nElements, falseProb, kHashes)"
+      }
+    ]
+  },
+  {
+    "question": "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "ext/array/array.go"
+        ],
+        "verified": "array.go:14-22 Register bindet die Liste ueber BindPointer an die tabellenwertige Funktion array"
+      }
+    ]
+  },
+  {
+    "question": "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "ext/csv/csv.go"
+        ],
+        "verified": "csv.go:1-31 virtuelle CSV-Tabelle nach RFC 4180, Register und RegisterFS"
+      }
+    ]
+  },
+  {
+    "question": "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "ext/blobio/blob.go"
+        ],
+        "verified": "blob.go:12-25 readblob/writeblob/openblob als SQL-Funktionen ueber inkrementelles Blob-I/O"
+      }
+    ]
+  },
+  {
+    "question": "Wie werden Texte fuer die Suche in Chunks geschnitten?",
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/chunk.go"
+        ],
+        "verified": "chunk.go:33-35 DefaultChunkOptions 600/800/75 Tokens, Chunk schneidet auf Wortgrenzen"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/rag/chunk.go"
+        ],
+        "verified": "chunk.go:27-29 dieselben Werte, dieselbe Chunk-Funktion"
+      }
+    ],
+    "note": "Zwei getrennte Produkte mit derselben Chunk-Strategie. Keines haengt am anderen."
+  },
+  {
+    "question": "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:21-25 DSN mit journal_mode(wal), busy_timeout(10000), foreign_keys(on)"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:19-23 zeichengleicher DSN"
+      }
+    ],
+    "note": "Die Frage nennt kein Produkt. Mit Produktnamen waere sie eindeutig — genau das macht sie zum Testfall fuer die Rueckfrage."
+  },
+  {
+    "question": "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/migrate.go"
+        ],
+        "verified": "migrate.go:17-41 Tabelle schema_migrations, SELECT 1 ... WHERE version = ?"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/store/migrate.go"
+        ],
+        "verified": "migrate.go:16-40 gleiche Tabelle, gleiche Abfrage"
+      }
+    ],
+    "note": "Dieselbe Frage steht bereits einmal mit Produktnamen im Satz und ist dort eindeutig."
+  },
+  {
+    "question": "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/sse/sse.go"
+        ],
+        "verified": "sse.go:29-34 X-Accel-Buffering: no, samt Kommentar zu Traefik"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/sse/sse.go"
+        ],
+        "verified": "sse.go:27-34 identischer Block"
+      }
+    ],
+    "note": "Zwei eigenstaendige SSE-Writer. Kein Manifest verbindet sie."
+  },
+  {
+    "question": "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/auth/session.go"
+        ],
+        "verified": "session.go:143 hashToken, session.go:109-120 CookieFor mit HttpOnly und SameSite Lax"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/auth/session.go"
+        ],
+        "verified": "session.go:137 hashToken, session.go:103-114 gleiche Cookie-Flags"
+      }
+    ],
+    "note": "Zwei getrennte Sitzungsverwaltungen, bis auf den Cookie-Namen gleich."
+  },
+  {
+    "question": "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/auth/middleware.go"
+        ],
+        "verified": "middleware.go:32-56 RequireAuth, dreimal writeJSONError mit 401 unauthorized"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/auth/middleware.go"
+        ],
+        "verified": "middleware.go:31-55 gleicher Aufbau, zusaetzlich RequireAdmin"
+      }
+    ],
+    "note": "Gleiche Antwort, zwei unabhaengige Implementierungen."
+  },
+  {
+    "question": "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/config/config.go"
+        ],
+        "verified": "config.go:148 env(\"BACKEND_ADDR\", \":8080\")"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/config/config.go"
+        ],
+        "verified": "config.go:135 env(\"BACKEND_ADDR\", \":8080\")"
+      }
+    ],
+    "note": "Gleicher Standardwert in zwei Produkten, gelesen von je einer eigenen env-Funktion."
+  },
+  {
+    "question": "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/llm/stream.go"
+        ],
+        "verified": "stream.go:40-43 maxStreamLine = 1 << 20, gesetzt in sc.Buffer"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/llm/stream.go"
+        ],
+        "verified": "stream.go:300 scanner.Buffer(..., 1024*1024)"
+      }
+    ],
+    "note": "Dieselbe Grenze, zweimal unabhaengig gezogen."
+  },
+  {
+    "question": "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
+    "kind": "what",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/rag/embed.go"
+        ],
+        "verified": "embed.go:21-24 maxEmbedErrorBody = 4 << 10"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/rag/embed.go"
+        ],
+        "verified": "embed.go:18-21 maxEmbedErrorBody = 4 << 10"
+      }
+    ],
+    "note": "Gleiche Konstante, gleicher Name, zwei Repositories."
+  },
+  {
+    "question": "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
+    "kind": "how",
+    "resolution": "ambiguous",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:37-50 VecLiteral, JSON-Array aus float32"
+      },
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/rag/store.go"
+        ],
+        "verified": "store.go:44-52 vecLiteral, gleiche Kodierung, andere Paketebene"
+      }
+    ],
+    "note": "Gleiche Aufgabe, in peeq im store-Paket und in loom im rag-Paket. Die Ablage unterscheidet sich, die Antwort ist trotzdem zweimal richtig."
+  },
+  {
+    "question": "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
+    "kind": "how",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:21-25 busy_timeout(10000) im DSN"
+      },
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "driver/driver.go",
+          "conn.go"
+        ],
+        "verified": "driver.go:187 c.pragmas = query.Has(\"_pragma\"), driver.go:249-253 der Standard von einer Minute entfaellt dadurch, conn.go:366 BusyTimeout und die Warteschleife darunter"
+      }
+    ],
+    "note": "peeq deklariert github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:8, und das Repository ist indexiert. Die Antwort braucht beide Haelften: peeq setzt den Wert, der Treiber setzt ihn um und laesst wegen _pragma seinen eigenen Standard weg."
+  },
+  {
+    "question": "Wer registriert den Treiber, den loom mit sql.Open(\"sqlite3\", ...) anspricht?",
+    "kind": "how",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:5-15 blanker Import von ncruces/go-sqlite3/driver, danach sql.Open(\"sqlite3\", dsn)"
+      },
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "driver/driver.go"
+        ],
+        "verified": "driver.go:120-122 init ruft sql.Register(driverName, &SQLite{})"
+      }
+    ],
+    "note": "loom deklariert github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:9. Der blanke Import allein erklaert nichts; die init-Funktion im anderen Repository ist die zweite Haelfte."
+  },
+  {
+    "question": "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
+    "kind": "how",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:21-25 baut die URL mit _pragma=journal_mode(wal)"
+      },
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "driver/driver.go"
+        ],
+        "verified": "driver.go:180-188 zerlegt die Query, driver.go:261-263 fuehrt die PRAGMAs auf der Verbindung aus"
+      }
+    ],
+    "note": "Eine Kette ueber die Repo-Grenze entlang derselben Abhaengigkeit aus peeqs go.mod."
+  },
+  {
+    "question": "Wie lange wartet loom, wenn die Datenbankdatei gerade gesperrt ist?",
+    "kind": "what",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "loom",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:19-23 busy_timeout(10000), also zehn Sekunden"
+      },
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "conn.go",
+          "driver/driver.go"
+        ],
+        "verified": "conn.go:366-370 BusyTimeout rechnet in Millisekunden, Xgo_busy_timeout darunter schlaeft in Stufen bis die Frist erreicht ist"
+      }
+    ],
+    "note": "Der Wert steht in loom, das Verhalten im Treiber. Nur eine der beiden Haelften zu nennen beantwortet die Frage nicht."
+  },
+  {
+    "question": "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
+    "kind": "what",
+    "resolution": "composition",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "store.go:21-25 foreign_keys(on) als drittes _pragma"
+      },
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "driver/driver.go"
+        ],
+        "verified": "driver.go:187 erkennt _pragma, driver.go:261-263 setzt die PRAGMAs beim Verbindungsaufbau"
+      }
+    ],
+    "note": "Ohne den Treiberteil bleibt offen, ob der Parameter ueberhaupt jemals ausgefuehrt wird."
   }
 ]

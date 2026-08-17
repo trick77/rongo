@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/embed"
@@ -39,15 +40,64 @@ import (
 	"github.com/trick77/rongo/internal/symbols"
 )
 
-// Question is one entry of the fixed question set. expect_paths are the files
-// whose content actually answers it — read and verified, never guessed: a
-// question whose expected path was a guess makes the whole measurement
-// worthless.
+// Resolution says how a question is meant to be answered. It is the part the
+// old shape could not express: "either-or, and asking is the right reaction"
+// does not fit into one repository plus a list of paths.
+type Resolution string
+
+const (
+	// ResolutionUnique: one candidate. Exactly one file (or a small set of
+	// files inside one repository) answers the question.
+	ResolutionUnique Resolution = "unique"
+	// ResolutionAmbiguous: several INDEPENDENT candidates. The right reaction
+	// is to ask which one is meant; answering one of them silently is wrong.
+	ResolutionAmbiguous Resolution = "ambiguous"
+	// ResolutionComposition: several candidates that are parts of ONE
+	// mechanism. Asking would be wrong — it forces a choice between halves of
+	// the truth — and every part belongs in the answer.
+	ResolutionComposition Resolution = "composition"
+)
+
+// Candidate is one place that answers a question, in one repository.
+//
+// paths are the files whose content actually answers it — read and verified,
+// never guessed: a question whose expected path was a guess makes the whole
+// measurement worthless. Verified records what was read to establish that, so
+// a later reader can check the claim instead of trusting it.
+type Candidate struct {
+	Repo     string   `json:"repo"`
+	Paths    []string `json:"paths"`
+	Verified string   `json:"verified,omitempty"`
+}
+
+// Question is one entry of the fixed question set.
 type Question struct {
-	Text        string   `json:"question"`
-	ExpectRepo  string   `json:"expect_repo"`
-	ExpectPaths []string `json:"expect_paths"`
-	Kind        string   `json:"kind"`
+	Text       string      `json:"question"`
+	Kind       string      `json:"kind"`
+	Resolution Resolution  `json:"resolution"`
+	Candidates []Candidate `json:"candidates"`
+	// Note carries why a question is ambiguous or a composition — for the
+	// composition cases, which repository depends on which, and where that is
+	// declared.
+	Note string `json:"note,omitempty"`
+}
+
+// repos lists the repositories a question's candidates live in, in order.
+func (q Question) repos() []string {
+	out := make([]string, 0, len(q.Candidates))
+	for _, c := range q.Candidates {
+		out = append(out, c.Repo)
+	}
+	return out
+}
+
+// paths renders the candidates for a log line.
+func (q Question) paths() string {
+	parts := make([]string, 0, len(q.Candidates))
+	for _, c := range q.Candidates {
+		parts = append(parts, c.Repo+":"+strings.Join(c.Paths, ","))
+	}
+	return strings.Join(parts, " | ")
 }
 
 func requireEval(t *testing.T) {
@@ -323,9 +373,9 @@ func TestEvalMeasure(t *testing.T) {
 		if res.rank > 0 {
 			rank = strconv.Itoa(res.rank)
 		}
-		t.Logf("%-5s %-6d %-8s %-8.3f %s [%s %v]", rank, res.hits,
+		t.Logf("%-5s %-6d %-8s %-8.3f %s [%s %s]", rank, res.hits,
 			fmt.Sprintf("%d/%d", res.barred, evalCandidates), res.nearest,
-			res.q.Text, res.q.ExpectRepo, res.q.ExpectPaths)
+			res.q.Text, res.q.Resolution, res.q.paths())
 	}
 }
 
@@ -340,14 +390,31 @@ func rankOrLast(rank int) int {
 	return rank
 }
 
-// rankOfExpected returns the 1-based rank of the first hit that is one of the
-// question's expected files in the expected repository, or 0.
+// rankOfExpected returns the 1-based rank of the first hit belonging to ANY of
+// the question's candidates, or 0.
+//
+// For a unique question that is exactly what it always was. For the other two
+// it is the weakest possible reading — "the search found one of the places" —
+// and the cohort metrics below say the sharper thing.
 func rankOfExpected(hits []retrieve.Hit, q Question) int {
+	best := 0
+	for _, c := range q.Candidates {
+		r := rankOfCandidate(hits, c)
+		if r > 0 && (best == 0 || r < best) {
+			best = r
+		}
+	}
+	return best
+}
+
+// rankOfCandidate returns the 1-based rank of the first hit that is one of this
+// candidate's files in this candidate's repository, or 0.
+func rankOfCandidate(hits []retrieve.Hit, c Candidate) int {
 	for i, h := range hits {
-		if h.Repo != q.ExpectRepo {
+		if h.Repo != c.Repo {
 			continue
 		}
-		for _, want := range q.ExpectPaths {
+		for _, want := range c.Paths {
 			if h.Path == want {
 				return i + 1
 			}
@@ -356,29 +423,95 @@ func rankOfExpected(hits []retrieve.Hit, q Question) int {
 	return 0
 }
 
+// candidatesFound counts how many of a question's candidates the hit list
+// surfaces at all. For an ambiguous question this is the number that matters:
+// a search that returns only one of the alternatives gives the clarification
+// step nothing to ask about.
+func candidatesFound(hits []retrieve.Hit, q Question) int {
+	n := 0
+	for _, c := range q.Candidates {
+		if rankOfCandidate(hits, c) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
 // TestQuestionSetIsWellFormed runs WITHOUT an endpoint: it is the guard that a
 // question set edited months from now still has the shape the harness reads.
+//
+// The resolution rules are the substance here. An ambiguous question with one
+// candidate is not ambiguous, and a composition question with one candidate is
+// not a composition — either would be scored as an ordinary question and quietly
+// report the wrong thing.
 func TestQuestionSetIsWellFormed(t *testing.T) {
 	questions := loadQuestions(t)
-	if len(questions) < 20 {
-		t.Errorf("question set has %d entries, want at least 20", len(questions))
+	// The floor the two measurement documents ask for. At 28 a single question
+	// was 3.6 points, which is why "three gained, three lost" could not be read
+	// either way.
+	if len(questions) < 50 {
+		t.Errorf("question set has %d entries, want at least 50", len(questions))
 	}
 	seen := map[string]bool{}
 	repoCount := map[string]int{}
+	byResolution := map[Resolution]int{}
+
 	for _, q := range questions {
-		if q.Text == "" || q.ExpectRepo == "" || len(q.ExpectPaths) == 0 {
+		if q.Text == "" || q.Kind == "" {
 			t.Errorf("incomplete question: %+v", q)
+			continue
 		}
 		if seen[q.Text] {
 			t.Errorf("duplicate question: %q", q.Text)
 		}
 		seen[q.Text] = true
-		repoCount[q.ExpectRepo]++
+
+		switch q.Resolution {
+		case ResolutionUnique:
+			if len(q.Candidates) != 1 {
+				t.Errorf("%q is unique but has %d candidates", q.Text, len(q.Candidates))
+			}
+		case ResolutionAmbiguous, ResolutionComposition:
+			if len(q.Candidates) < 2 {
+				t.Errorf("%q is %s but has %d candidate(s) — one candidate is neither",
+					q.Text, q.Resolution, len(q.Candidates))
+			}
+			if q.Note == "" {
+				// Why a question is ambiguous, or which repository depends on
+				// which, is the part a later reader cannot reconstruct.
+				t.Errorf("%q is %s and carries no note", q.Text, q.Resolution)
+			}
+		default:
+			t.Errorf("%q has resolution %q, want unique, ambiguous or composition", q.Text, q.Resolution)
+		}
+		byResolution[q.Resolution]++
+
+		inQuestion := map[string]bool{}
+		for _, c := range q.Candidates {
+			if c.Repo == "" || len(c.Paths) == 0 {
+				t.Errorf("%q has an incomplete candidate: %+v", q.Text, c)
+			}
+			key := c.Repo + "\x00" + strings.Join(c.Paths, ",")
+			if inQuestion[key] {
+				t.Errorf("%q names the same candidate twice: %s %v", q.Text, c.Repo, c.Paths)
+			}
+			inQuestion[key] = true
+			repoCount[c.Repo]++
+		}
 	}
+
 	if len(repoCount) < 3 {
 		t.Errorf("questions cover %d repositories (%v), want the whole dev corpus", len(repoCount), repoCount)
 	}
-	fmt.Fprintf(os.Stderr, "question set: %d questions across %v\n", len(questions), repoCount)
+	// Phase 4b is graded on these two, so a set without them cannot grade it.
+	if byResolution[ResolutionAmbiguous] == 0 {
+		t.Error("no ambiguous question: the clarification step cannot be measured against this set")
+	}
+	if byResolution[ResolutionComposition] == 0 {
+		t.Error("no composition question: nothing checks that rongo does NOT ask when the parts belong together")
+	}
+	fmt.Fprintf(os.Stderr, "question set: %d questions across %v, by resolution %v\n",
+		len(questions), repoCount, byResolution)
 }
 
 // evalChunkOptions honours BACKEND_INDEX_COMMENTS so the comment-free arm can
