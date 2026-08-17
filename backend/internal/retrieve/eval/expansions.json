@@ -3,224 +3,488 @@
     "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
     "texts": [
       "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
-      "Speicherplatzprüfung Download-Start verhindern Festspeicherüberprüfung Speicherkapazitätsprüfung",
-      "diskSpaceCheck availableSpace downloadStart storageCapacity peeq checkDiskSpace minRequiredSpace DiskSpaceValidator"
+      "Speicherplatzprüfung vor Download Festsplattenkapazitätsprüfung Free disk space validation Storage availability check",
+      "DiskSpace availableSpace freeSpace statfs NSFileManager NSURL fileSystemAttributes download"
     ]
   },
   {
     "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
     "texts": [
       "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
-      "Extractor-Fehler Sequenz Videoextraktion fehlgeschlagen Aufeinanderfolgende Extraktionsfehler Wiederholte Medienfehlerbehandlung",
-      "Extractor MediaExtractor onError MediaCodec reset release error_count ExoPlayer"
+      "Video Extractor error handling consecutive video extraction failures Extractor failure cascade behavior video extraction error sequence",
+      "VideoExtractor ExtractorException MediaExtractor ExoPlayer MediaCodec PlaybackException ExtractorRendererException MediaSource"
     ]
   },
   {
     "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
     "texts": [
       "In welchem Format erwartet yt-dlp die Cookie-Datei?",
-      "Cookie-Dateiformat Cookies.txt-Struktur Netscape-Cookie-Format yt-dlp Cookie-Eingabe",
-      "cookies.txt Netscape http.cookiejar MozillaCookieJar load_cookies cookie_file extract_cookies"
+      "Cookie-Datei Format Cookie-Datei Spezifikation yt-dlp Cookie Option Browser Cookies importieren",
+      "cookiesfrombrowser cookiejar http.cookiejar MozillaCookieJar load_cookies options parse_cookie"
     ]
   },
   {
     "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
     "texts": [
       "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
-      "API-Token Anzeige Token erneut anzeigen API-Token einsehen",
-      "ApiToken getApiToken showApiToken api_token token_display accessToken"
+      "API-Token Anzeige Token Darstellung nach Erzeugung API-Token später einsehen",
+      "APIToken token showToken displayToken tokenID secret accessToken getToken"
     ]
   },
   {
     "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
     "texts": [
       "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
-      "Apple TV Zugriff ohne Authentifizierung Mediendatei ohne Login abrufen Apple TV AirPlay Discovery Protokoll Anonymes Streaming auf Apple TV",
-      "AirPlay HTTPServer MLMediaItem MLMediaLibraryService AppleTVSetup nowPlayingInfo MPNowPlayingInfoCenter NSNetService"
+      "Medienzugriff ohne Authentifizierung AirPlay unauthenticated media Apple TV Anmeldefreier Zugriff Mediendatei ohne Login",
+      "AirPlay AVPlayer MediaServer HTTPServer URLSession noAuth anonymousAccess mediaURL"
     ]
   },
   {
     "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
     "texts": [
       "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
-      "peeq Abmeldeverhalten gelöschter Kanäle Anzahl Scans bis zur Abmeldung peeq Auto-Deaktivierung entfernter Sender",
-      "peeq scan channel delete unregister remove threshold count"
+      "Scan-Intervall Auto-Abmeldung Threshold deaktivierter Kanal self-removal deleted channel",
+      "scanCount channelDelete unsubscribe maxScans threshold cleanup staleChannel"
     ]
   },
   {
     "question": "DeadScanThreshold",
     "texts": [
       "DeadScanThreshold",
-      "DeadScanThreshold Variable DeadScan Threshold Wert Dead Scan Schwellenwert",
-      "DeadScanThreshold dead_scan_threshold DEAD_SCAN_THRESHOLD threshold scanThreshold maxDeadScans"
+      "Toter Scan Schwellenwert Dead Scan Threshold Lebenszeichen-Überwachung Schwellenwert Dead-Scan-Schwelle",
+      "DeadScanThreshold DEAD_SCAN_THRESHOLD deadScanThreshold scanThreshold SCANNING"
     ]
   },
   {
     "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
     "texts": [
       "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
-      "availability Mapping yt-dlp availability translation peeqs availability conversion yt-dlp availability to peeqs",
-      "availability map translate convert yt_dlp peeqs Availability AvailabilityMapper"
+      "availability mapping yt-dlp availability custom availability availability translation",
+      "availability yt_dlp peeq Availability map_availability translate_availability availability_map yt_dlp_availability"
     ]
   },
   {
     "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
     "texts": [
       "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
-      "Zufällige Intervalle bei Hintergrundaufgaben Randomisierung der Loop-Intervalle Stochastische Zeitspannen für Hintergrundprozesse",
-      "BackgroundLoop randomInterval jitter Timer scheduling backgroundTask dispatch_after TimeInterval"
+      "Hintergrund-Schleifen zufälliges Intervall zufällige Periodizität Hintergrund-Loops variabler Zeitablauf Hintergrund-Tasks",
+      "BackgroundTask Timer interval random jitter dispatch schedule WorkItem"
     ]
   },
   {
     "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
     "texts": [
       "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
-      "Ergebnisliste zusammenführen Treffer kombinieren Vektor- und Volltext-Suche Suchergebnisse sortieren",
-      "mergeResults combineHits vectorSearch fullTextSearch ResultList sort rank RelevanceScoring"
+      "Ergebnisliste kombinieren Treffer fusionieren Hybrid-Suche Relevanz排序",
+      "HybridSearch MergeResults ScoredResult RankingFunction SemanticQuery FullTextQuery VectorQuery ResultSet"
     ]
   },
   {
     "question": "FuseWeighted",
     "texts": [
       "FuseWeighted",
-      "FuseWeighted Implementierung gewichtete Fusion gewichteter Fuse Algorithmus FuseWeighted Kombination",
-      "FuseWeighted Fuse Weight fuse_weighted WeightedFuse fuse_weights FuseMethod"
+      "weighted fuse operation fuse weight calculation weighted union merge with weights",
+      "FuseWeighted fuse weight merge weighted union operation FuseOperation"
     ]
   },
   {
     "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
     "texts": [
       "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
-      "Token-Anzahl Schätzung Chunk-Tokenizer Entfernung Token-Zählung ohne Download lokalisierte Token-Schätzung",
-      "tokenize encode count estimate tokenizer chunk token_count tokenizer_download"
+      "Token-Anzahl schätzen Chunk-Länge berechnen Tokenizer-freie Schätzung Token-Count Approximation",
+      "tokenize encode num_tokens count_tokens approximate_tokens estimate_length max_tokens split_by_tokens"
     ]
   },
   {
     "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
     "texts": [
       "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
-      "maximale Anzahl von Texten pro Embedding-Anfrage Batch-Größe bei Embedding-Requests Begrenzung der Textanzahl in einem Embedding-Aufruf Anzahl der Dokumente in einem Embedding-Request",
-      "batchSize maxBatchSize embeddingRequest texts maxTexts requestLimit embeddingInput"
+      "maximale Textanzahl Embedding Request Batch-Limit für Textembeddings Höchstzahl Eingabetexte pro Anfrage",
+      "maxBatchSize maxInputCount embeddingLimit requestPayload maxTexts batchLimit"
     ]
   },
   {
     "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
     "texts": [
       "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
-      "Kanalfilter Reihenfolge Nachbarschaftssuche Verzögerung Kanalfilter Filterung nach Discovery Phasing Kanalfilter",
-      "ChannelFilter NeighborDiscovery DiscoveryService filterPhases applyFilter discoveryComplete onDiscoveryFinished startFiltering"
+      "Kanalfilter Reihenfolge Nachbarschaftssuche Filterung nach Neighbor Discovery Channel Filter Priorität",
+      "ChannelFilter NeighborDiscovery channel filter neighbor scan priority queue"
     ]
   },
   {
     "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
     "texts": [
       "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
-      "Datenbank-PRAGMAs SQLite-Initialisierung PRAGMA-Einstellungen Datenbanköffnung konfigurieren",
-      "PRAGMA openDatabase sqlite3 Database Peeq PRAGMA journal_mode PRAGMA foreign_keys"
+      "SQLite PRAGMAs Datenbankinitialisierung Datenbankkonfiguration beim Öffnen PRAGMA Einstellungen beim Start SQLite Setup beim Öffnen",
+      "PRAGMA sqlite3_open sqlite3_exec openDatabase setupDatabase configureDatabase WAL journal_mode foreign_keys"
     ]
   },
   {
     "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
     "texts": [
       "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
-      "Erkennung angewandter Migration Migrationsstatus überprüfen Migration bereits ausgeführt Gebrauchte Migrations erkennen",
-      "Migration applied migrated check has_migration migration_status applied_migrations schema_version"
+      "Migrationsstatus erkennen angewendete Migration identifizieren Migrationshistorie prüfen Bereits ausgeführte Migrationen",
+      "MigrationsManager applied_migrations migration_record check_applied schema_version has_applied migration_log applied_at"
     ]
   },
   {
     "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
     "texts": [
       "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
-      "Stopwort-Filterung Suchbegriff-Vorverarbeitung Keyword-Suche Aufbereitung",
-      "stopwords filter tokenize preprocess searchQuery keywords"
+      "Stopwort-Entfernung Keyword-Filterung Text-Vorverarbeitung Suchquery-Bereinigung",
+      "stopwords filter remove clean sanitize query text preprocess"
     ]
   },
   {
     "question": "Wie meldet sich ein Benutzer per OIDC an?",
     "texts": [
       "Wie meldet sich ein Benutzer per OIDC an?",
-      "OpenID Connect Authentication Flow OIDC Login Prozess Benutzerauthentifizierung via OIDC Authorization Code Flow",
-      "OpenIDConnect OIDC AuthorizationCodeFlow TokenEndpoint UserInfoEndpoint IDToken AuthenticationService OAuthService"
+      "OIDC-Login OpenID Connect Authentifizierung Benutzeranmeldung über OIDC OIDC-Flow",
+      "OpenIDConnect OIDCProvider AuthorizationCode TokenEndpoint AuthenticationService UserProfile TokenValidation OAuthFlow"
     ]
   },
   {
     "question": "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
     "texts": [
       "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
-      "Thread-Titel formatieren Anführungszeichen aus Text entfernen Titel-Bereinigung in Nachrichten String-Bereinigung von Zitaten",
-      "title thread strip replace sanitize clean quote markdown"
+      "Thread-Titel bereinigen Anführungszeichen entfernen Titel normalisieren Formatierung korrigieren",
+      "title clean strip trim sanitize format thread quote"
     ]
   },
   {
     "question": "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
     "texts": [
       "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
-      "Speicherort hochgeladene Datei Zielpfad Upload Benutzerverzeichnis Dateisystem Lokalisierung Upload",
-      "upload save path userVolume file url FileManager write"
+      "Dateipfad hochgeladene Datei Speicherort Benutzer-Volume Zielverzeichnis Upload",
+      "FileManager documentsDirectory applicationSupportDirectory cachesDirectory temporaryDirectory URL PathComponent HomeDirectory"
     ]
   },
   {
     "question": "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
     "texts": [
       "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
-      "maximale Thumbnail-Groesse generiertes Artefakt generierte Artefakt-Vorschaubildgroesse Hoechstgroesse Thumbnail fuer Artefakt",
-      "thumbnail artifact maxSize maxThumbnailSize generateThumbnail ARTIFACT_THUMBNAIL_MAX_SIZE"
+      "maximale Thumbnail-Größe Artefakt-Thumbnail-Größenbeschränkung größte Thumbnail-Dimension",
+      "MAX_THUMBNAIL_SIZE thumbnailSize generateThumbnail ARTIFACT_THUMBNAIL maxWidth maxHeight"
     ]
   },
   {
     "question": "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
     "texts": [
       "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
-      "Benutzer-Direktive Länge Direktive Überlänge Benutzerbefehl zu lang Eingabe Überschreitung",
-      "MAX_COMMAND_LENGTH BufferOverflow CommandParser InputValidator truncate too_long SIZE_MAX"
+      "Benutzer-Direktive Längenbegrenzung Input-Validierung Länge Maximale Zeichenanzahl Direktive Überlange Benutzereingabe",
+      "UserDirective MaxDirectiveLength validateInput InputTooLongException DirectiveParser userInput MAX_LENGTH checkLength"
     ]
   },
   {
     "question": "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
     "texts": [
       "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
-      "Thread Share-Links Thread öffentliche Links Thread freigegebene Verknüpfungen",
-      "Thread Share Link public shareLink ThreadShare ShareLink"
+      "Thread Share-Links öffentlich geteilte Threads mehrere Freigaben pro Thread Share-Links für einen Thread",
+      "thread shareLink publicLink threadId permission visibility"
     ]
   },
   {
     "question": "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
     "texts": [
       "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
-      "Standardanzahl Volltexttreffer Standardergebnisanzahl Nachrichtensuche Standardlimit Volltextsuche",
-      "defaultLimit pageSize maxResults fullTextSearch newsSearch resultCount"
+      "Standardanzahl Volltextergebnisse Vorgabewert Nachrichtensuche limit fulltext search results default fulltext hit count",
+      "fulltext searchResults limit defaultLimit SearchController hits resultCount maxResults"
     ]
   },
   {
     "question": "ResolveOutputPath",
     "texts": [
       "ResolveOutputPath",
-      "Output-Pfad auflösen Zielverzeichnis bestimmen Ausgabepfad ermitteln Speicherort berechnen",
-      "ResolveOutputPath outputPath BuildOutputPath GetOutputPath OutputDirectory DestinationPath"
+      "ResolveOutputPath Methode implementieren Ausgabepfad bestimmen OutputPath Auflösung Pfad für Ausgabe erzeugen",
+      "ResolveOutputPath OutputPath GetOutputPath BuildTarget ProjectFile OutputDirectory ResolvePath"
     ]
   },
   {
     "question": "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
     "texts": [
       "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
-      "Dateiname bereinigen Dateinamen validieren Dateinamen escapen Sonderzeichen entfernen",
-      "sanitize_filename clean_filename validate_filename escape_filename invalid_chars reserved_chars path_security"
+      "Dateinamen-Bereinigung Zeichen-Escaping Sicherheits-Filterung",
+      "sanitize escape clean fileName path valid characters filter"
     ]
   },
   {
     "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
     "texts": [
       "Wie sichert man eine laufende SQLite-Datenbank online?",
-      "SQLite Datenbanksicherung Online Backup live Datenbank sichern fliegendes Backup",
-      "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_pagecount VACUUM INTO SQLITE_DBCONFIG_DEFENSIVE PRAGMA wal_checkpoint"
+      "SQLite Backup API Online Backup Laufende Datenbank sichern Hot Backup",
+      "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_remaining sqlite3_backup_pagecount SQLITE_DBCONFIG_DEFENSIVE VACUUM INTO"
     ]
   },
   {
     "question": "ZeroBlob",
     "texts": [
       "ZeroBlob",
-      "null blob representation empty blob value zero-length binary data",
-      "ZeroBlob zeroBlob ZERO_BLOB kZeroBlob empty_blob Blob::Zero SQLiteZeroBlob"
+      "ZeroBlob implementation empty blob creation zero-length blob handling",
+      "ZeroBlob Blob empty length data constructor emptyBlob zeroBlob"
+    ]
+  },
+  {
+    "question": "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
+    "texts": [
+      "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
+      "SponsorBlock Kategorien Video-Sponsoren-Typen Sponsoren-Unterbrechungen Werbung-Kategorien",
+      "SponsorBlock SponsorCategory SponsorType sponsor_categories getSponsors requestSponsorBlock SponsorBlockAPI skipSegments"
+    ]
+  },
+  {
+    "question": "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
+    "texts": [
+      "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
+      "Audioklassifizierung Musik-Erkennung Spracherkennung Medieninhaltanalyse",
+      "AudioClassifier MusicDetector SpeechDetector CMAudioAnalyser AVAudioEngine SoundAnalysis isMusic isSpeech"
+    ]
+  },
+  {
+    "question": "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
+    "texts": [
+      "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
+      "parked video availability check retry limit unavailable video video retry policy availability check frequency limit",
+      "videoAvailability retryCount maxRetries availabilityCheck parkedVideo checkAvailability retryPolicy unavailable"
+    ]
+  },
+  {
+    "question": "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
+    "texts": [
+      "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
+      "Anzahl geprüfter Videos pro Scan Begrenzung verifizierter Medien Kapazität eines Vorgangs",
+      "scanVideos maxVideos verificationLimit processVideos iterationCap verifyAll"
+    ]
+  },
+  {
+    "question": "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
+    "texts": [
+      "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
+      "Definition altes Material Alterungskriterien Video Archivierungspolitik",
+      "oldFootage isNew ageThreshold archivePolicy videoAge ingestionDate retentionDays"
+    ]
+  },
+  {
+    "question": "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
+    "texts": [
+      "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
+      "Token-Limit Kernpunkte vs Zusammenfassung unterschiedliche Token-Budgets Budget-Verteilung Kernpunkte Zusammenfassung",
+      "maxTokens tokenBudget summaryPrompt keyPointsPrompt extractionConfig budgetAllocation getModelSettings"
+    ]
+  },
+  {
+    "question": "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
+    "texts": [
+      "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
+      "Download-Warteschlange Leererkennung Auftragswarteschlange Statuspruefung Queue Leerlaufidentifikation Download-Queue Beobachtung",
+      "DownloadQueue isIdle waitingClients pendingOperations activeDownloads queueStatus hasWaitingClients observers"
+    ]
+  },
+  {
+    "question": "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
+    "texts": [
+      "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
+      "Metadaten-Vorprüfungsdauer Download-Vorabvalidierung Vorprüfung Zeitbeschränkung Metadaten Validierungszeit",
+      "metadata precheck timeout duration download limit threshold maxDuration"
+    ]
+  },
+  {
+    "question": "Wie gross ist das laengste Seitenmass eines Artefakt-Vorschaubilds?",
+    "texts": [
+      "Wie gross ist das laengste Seitenmass eines Artefakt-Vorschaubilds?",
+      "maximale Bildgröße Vorschaubild Seitenlänge Artefakt-Thumb Längste Kante Thumbnail maximale Pixelabmessung Vorschaugrafik",
+      "previewImage maxSize sideLength thumbnail artifact imageDimension previewSize MAX_PREVIEW"
+    ]
+  },
+  {
+    "question": "Wo liegen die Vorschaubilder, damit sie nie eine echte Benutzerdatei ueberschreiben?",
+    "texts": [
+      "Wo liegen die Vorschaubilder, damit sie nie eine echte Benutzerdatei ueberschreiben?",
+      "Speicherort Vorschaubilder Pfad Miniaturansichten Verzeichnis Thumbnail Cache Ablageorte für Vorschaudateien",
+      "thumbnailCachePath previewImageDirectory thumbnails cacheDirectory applicationSupport NSCachesDirectory URLForDirectory writeToDirectory"
+    ]
+  },
+  {
+    "question": "Warum bekommt ein SVG kein Vorschaubild?",
+    "texts": [
+      "Warum bekommt ein SVG kein Vorschaubild?",
+      "SVG thumbnail preview SVG image preview generation SVG display as icon",
+      "SVG thumbnail preview image icon render"
+    ]
+  },
+  {
+    "question": "Wie viel Text darf die automatisch erzeugte Benutzer-Erinnerung hoechstens umfassen?",
+    "texts": [
+      "Wie viel Text darf die automatisch erzeugte Benutzer-Erinnerung hoechstens umfassen?",
+      "maximale Textlaenge Benutzererinnerung Hoechstlaenge automatische Erinnerung Zeichenbegrenzung Nutzerhinweis",
+      "maxLength reminder messageLength userNotification textLimit CHARACTER_LIMIT"
+    ]
+  },
+  {
+    "question": "Was unterscheidet eine abgeleitete Erinnerung von einer ausdruecklichen Anweisung des Benutzers?",
+    "texts": [
+      "Was unterscheidet eine abgeleitete Erinnerung von einer ausdruecklichen Anweisung des Benutzers?",
+      "implizite vs explizite Benutzeranweisung abgeleiteter Kontext vs direkter Befehl inferierte versus deklarierte Intention",
+      "Memory inferredMemory explicitInstruction UserIntent Context IntentHandler delegate"
+    ]
+  },
+  {
+    "question": "Wie viele Threads liefert eine Seite der Threadliste hoechstens?",
+    "texts": [
+      "Wie viele Threads liefert eine Seite der Threadliste hoechstens?",
+      "maximale Threadanzahl pro Seite Threadlistenseitengröße Maximale Threads pro Seite Page-Size Threadübersicht",
+      "threadsPerPage PAGE_SIZE maxThreadsPerPage threadListPageSize MAX_THREADS_PER_PAGE threads_per_page THREADS_PER_PAGE kPageSize"
+    ]
+  },
+  {
+    "question": "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
+    "texts": [
+      "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
+      "Bloom-Filter-Tabellen in SQLite erstellen SQLite Bloom-Filter-Indizes konfigurieren SQLite Datenbankoptimierung mit Bloom-Filters",
+      "CREATE TABLE sqlite_master PRAGMA WITHOUT ROWID BLOOM FILTER CREATE INDEX sqlite_stat1 ANALYZE"
+    ]
+  },
+  {
+    "question": "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
+    "texts": [
+      "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
+      "Go Slice als SQL Parameter übergeben Listen in SQL Queries verwenden In-Klausel mit dynamischen Werten",
+      "sqlx Query In Prepare Named Slice Placeholder Bind"
+    ]
+  },
+  {
+    "question": "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
+    "texts": [
+      "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
+      "CSV import als SQL-Tabelle CSV-Datei als Datenbanktabelle lesen CSV-Daten direkt in SQL laden CSV als SQL-Quelle verwenden",
+      "LOAD DATA INFILE COPY pgsql psql sqlite3 ATTACH DATABASE CREATE TABLE AS IMPORT FOREIGN SCHEMA"
+    ]
+  },
+  {
+    "question": "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
+    "texts": [
+      "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
+      "Blob Streaming partielles Schreiben in Blob ungepuffertes Schreiben Datenstrom in Blob speichern",
+      "Blob stream write blob upload put createWriteStream writable"
+    ]
+  },
+  {
+    "question": "Wie werden Texte fuer die Suche in Chunks geschnitten?",
+    "texts": [
+      "Wie werden Texte fuer die Suche in Chunks geschnitten?",
+      "Text-Segmentierung fürsuchindex Dokumentenpartitionierung Chunking-Strategie für Volltextsuche",
+      "chunk split tokenize index ingest pipeline text"
+    ]
+  },
+  {
+    "question": "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
+    "texts": [
+      "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
+      "SQLite PRAGMA Werte SQLite Datenbank Konfiguration SQLite Timeouts und Journaling SQLite Verbindungsoptionen",
+      "PRAGMA SQLite sqlite3_open sqlite3_db_config journal_mode busy_timeout foreign_keys synchronous"
+    ]
+  },
+  {
+    "question": "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
+    "texts": [
+      "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
+      "Migration Status erkennen Vollständige Migration prüfen Migrationshistorie abfragen Bereits ausgeführte Migration identifizieren",
+      "MigrationState isMigrated migrationVersion hasCompletedMigration MigrationHistory MigrationStatus migratedAt checkMigrationStatus"
+    ]
+  },
+  {
+    "question": "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
+    "texts": [
+      "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
+      "Proxy-Verhalten beeinflussen Streaming-Header Pufferung durch中间 proxies verhindern HTTP-Header für Ereignisstrom",
+      "Cache-Control X-Accel-Buffering Transfer-Encoding chunked Connection keep-alive Transfer-Encoding: chunked Cache-Control: no-store"
+    ]
+  },
+  {
+    "question": "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
+    "texts": [
+      "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
+      "session token storage token persistence token database storage session token table",
+      "session_token token_storage save_session create_session TokenStore SessionTokenRepository create_table session_tokens"
+    ]
+  },
+  {
+    "question": "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
+    "texts": [
+      "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
+      "ungültige Sitzung Antwort Server Reaktion ohne Session HTTP Response bei ungültiger Session Fehlerbehandlung ungültige Sitzung",
+      "Unauthorized Forbidden SessionFilter AuthenticationException HttpStatus 401 403 access denied"
+    ]
+  },
+  {
+    "question": "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
+    "texts": [
+      "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
+      "default port configuration standard listening port fallback port",
+      "defaultPort port listen configuration bind network"
+    ]
+  },
+  {
+    "question": "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
+    "texts": [
+      "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
+      "maximale Zeilenlänge Output-Längenlimit Antwortstrom-Beschränkung",
+      "max_tokens max_output_tokens max_length line_length truncation GenerationConfig"
+    ]
+  },
+  {
+    "question": "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
+    "texts": [
+      "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
+      "maximale Länge Fehlertext Limit Fehlermeldung Embedding Service Kapazität Error-Response",
+      "error_message ErrorMessage embedding_service EmbeddingService MAX_ERROR_LENGTH response_body error_response max_length"
+    ]
+  },
+  {
+    "question": "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
+    "texts": [
+      "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
+      "Vektor als Text kodieren sqlite-vec Eingabeformat textuelle Vektorrepräsentation String-Konvertierung für Vektordatenbank",
+      "sqlite_vec vec_version vec_distance vec_length vec_from_json vec_to_json JSON TEXT"
+    ]
+  },
+  {
+    "question": "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
+    "texts": [
+      "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
+      "Datenbankzugriff gleichzeitige Schreibvorgaenge Konzurrenzsteuerung Parallelzugriff",
+      "Database WriteOperation Concurrency Lock Transaction Thread DispatchQueue CoreData"
+    ]
+  },
+  {
+    "question": "Wer registriert den Treiber, den loom mit sql.Open(\"sqlite3\", ...) anspricht?",
+    "texts": [
+      "Wer registriert den Treiber, den loom mit sql.Open(\"sqlite3\", ...) anspricht?",
+      "Treiberregistrierung sqlite3 database/sql Treiber laden sql.Open sqlite3 Driver Treibereinbindung sqlite",
+      "sql.Open driver.Open sqlite3 database/sql RegisterDriver DriverContext init()"
+    ]
+  },
+  {
+    "question": "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
+    "texts": [
+      "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
+      "SQLite WAL Modus Write-Ahead Logging Datenbankparameter URL Parameter Parsing",
+      "journal_mode SQLITE_DBCONFIG sqlite3_db_config wal PRAGMA connection_string parse_query_parameter"
+    ]
+  },
+  {
+    "question": "Wie lange wartet loom, wenn die Datenbankdatei gerade gesperrt ist?",
+    "texts": [
+      "Wie lange wartet loom, wenn die Datenbankdatei gerade gesperrt ist?",
+      "Datenbanksperrung Wartezeit Lock-Timeout Loom Retry-Intervall bei Datenbanksperre",
+      "lock retry timeout database fileLock SQLite DBLock wait"
+    ]
+  },
+  {
+    "question": "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
+    "texts": [
+      "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
+      "Foreign Key Constraints aktiv Referenzielle Integrität FK-Prüfung Fremdschlüssel-Bedingungen",
+      "ForeignKeyConstraint referential_integrity foreign_key enableForeignKeyConstraints pragma enforce_foreign_keys"
     ]
   }
 ]

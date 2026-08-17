@@ -59,13 +59,32 @@ func TestExpandQuestions(t *testing.T) {
 	}, nil)
 	u := ask.NewUnderstander(c)
 
+	// Retried, and the file is written BEFORE anything fails. The model
+	// occasionally replies with something that is not JSON — one such reply on
+	// the last question once threw away sixty successful calls, because the
+	// whole run failed before writing. Paid-for work is kept; the gap is
+	// reported instead of being paved over with the raw question, which would
+	// look like an expansion that expanded nothing.
 	var out []expansion
+	var failed []string
 	for _, q := range loadQuestions(t) {
-		got, err := u.Understand(context.Background(), q.Text)
-		if err != nil {
-			t.Fatalf("understand %q: %v", q.Text, err)
+		var texts []string
+		var last error
+		for attempt := 1; attempt <= expandAttempts; attempt++ {
+			got, err := u.Understand(context.Background(), q.Text)
+			if err == nil {
+				texts = got.SearchTexts(q.Text)
+				break
+			}
+			last = err
+			t.Logf("RETRY %d/%d %s: %v", attempt, expandAttempts, short(q.Text), err)
+			time.Sleep(time.Duration(attempt) * time.Second)
 		}
-		texts := got.SearchTexts(q.Text)
+		if texts == nil {
+			failed = append(failed, q.Text)
+			t.Errorf("understand %q: %v", q.Text, last)
+			continue
+		}
 		t.Logf("EXPANDED %-60s -> %v", short(q.Text), texts[1:])
 		out = append(out, expansion{Question: q.Text, Texts: texts})
 	}
@@ -77,7 +96,17 @@ func TestExpandQuestions(t *testing.T) {
 	if err := os.WriteFile(expansionsFile, body, 0o644); err != nil {
 		t.Fatalf("write %s: %v", expansionsFile, err)
 	}
+	if len(failed) > 0 {
+		// Loud on purpose: the arms that read this file fail on a missing
+		// entry, and a measurement quietly run on 60 of 61 questions is worse
+		// than one that does not run.
+		t.Logf("%d question(s) have no expansion: %v", len(failed), failed)
+	}
 }
+
+// expandAttempts is how often one question's understanding step is retried
+// before it counts as missing.
+const expandAttempts = 3
 
 // TestEvalMeasureExpansion compares searching the raw question against
 // searching the question plus its expansion, on the same index.
