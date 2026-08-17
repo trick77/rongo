@@ -20,7 +20,7 @@
 
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
-- **Pro** only where a human reads: the answer, feature-card summaries.
+- **Pro** only where a human reads: the answer, Modulsteckbrief summaries.
 - **non-Pro + `ShortGate`** for the rest: understand, route, relevance while gathering, thread title, follow-up sufficiency check. Bar is "output is an id or a label", not "doesn't think".
 - Both deployments reason. Never justify the non-Pro lane as "the model that can't think". `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
