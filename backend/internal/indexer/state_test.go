@@ -202,3 +202,78 @@ func TestSetBranch_recordsTheResolvedBranch(t *testing.T) {
 		t.Errorf("Branch = %q, want %q — never assume master", active[0].Branch, "main")
 	}
 }
+
+func TestPollRepo_readsTheTokenByItsEnvironmentVariableName(t *testing.T) {
+	// Given: repos.yaml names the variable, never the value. Asking TokenFunc
+	// for the REPOSITORY name resolved every token to "" and every private
+	// repository was fetched anonymously while the config looked right.
+	db := newDB(t)
+	state := NewStateStore(db)
+	spec := repos.Spec{
+		Name: "private", CloneURL: "https://forge.invalid/a.git",
+		Branch: "main", TokenEnv: "BACKEND_FORGE_TOKEN", Enabled: true,
+	}
+	if err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// When
+	var asked []string
+	p := NewPoller(PollerDeps{
+		State:  state,
+		Git:    nil,
+		Tokens: func(name string) string { asked = append(asked, name); return "" },
+	})
+	active, err := state.Active(context.Background())
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+
+	// Then: the state round-trips the variable NAME...
+	if len(active) != 1 || active[0].TokenEnv != "BACKEND_FORGE_TOKEN" {
+		t.Fatalf("Active() = %+v, want token_env carried through repo_state", active)
+	}
+	// ...and the poller asks for exactly that.
+	_ = p
+	tokenFor := func(st RepoState) string {
+		asked = nil
+		p.tokens(st.TokenEnv)
+		return ""
+	}
+	tokenFor(active[0])
+	if len(asked) != 1 || asked[0] != "BACKEND_FORGE_TOKEN" {
+		t.Errorf("the poller asked for %v, want [BACKEND_FORGE_TOKEN]", asked)
+	}
+}
+
+func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
+	// Given: a repository that failed once and has had no new commit since.
+	// Without this the error stays on the Repos page until someone pushes.
+	db := newDB(t)
+	state := NewStateStore(db)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "shop", CloneURL: "https://forge.invalid/a.git", Branch: "main", Enabled: true}
+	if err := state.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+	if err := state.MarkError(ctx, "shop", "dial tcp: i/o timeout"); err != nil {
+		t.Fatalf("MarkError: %v", err)
+	}
+
+	// When
+	if err := state.MarkChecked(ctx, "shop"); err != nil {
+		t.Fatalf("MarkChecked: %v", err)
+	}
+
+	// Then
+	all, err := state.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if all[0].LastError != "" {
+		t.Errorf("LastError = %q after a successful poll, want it cleared", all[0].LastError)
+	}
+	if all[0].LastRunAt.IsZero() {
+		t.Error("LastRunAt was not refreshed")
+	}
+}

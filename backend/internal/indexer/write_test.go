@@ -61,7 +61,7 @@ func TestReplaceFile_writesAllFourTablesWithMatchingRowids(t *testing.T) {
 	testee := NewWriter(db)
 
 	// When
-	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java",
+	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java", 64,
 		sampleChunks(), [][]float32{vec(1), vec(2)},
 		[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}})
 
@@ -98,7 +98,7 @@ func TestReplaceFile_isAtomic(t *testing.T) {
 	testee := NewWriter(db)
 
 	// When
-	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java",
+	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java", 64,
 		sampleChunks(), [][]float32{vec(1), {1, 2}}, nil)
 
 	// Then
@@ -130,7 +130,7 @@ func TestReplaceFile_replacesRatherThanAccumulates(t *testing.T) {
 	ctx := context.Background()
 	write := func() {
 		t.Helper()
-		if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java",
+		if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
 			sampleChunks(), [][]float32{vec(1), vec(2)},
 			[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}}); err != nil {
 			t.Fatalf("ReplaceFile() err = %v", err)
@@ -164,7 +164,7 @@ func TestDeleteFile_clearsAllThreeChunkTables(t *testing.T) {
 	db := writeDB(t)
 	testee := NewWriter(db)
 	ctx := context.Background()
-	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java",
+	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
 		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestRecordSkipped_clearsChunksOfAFileThatUsedToBeIndexed(t *testing.T) {
 	db := writeDB(t)
 	testee := NewWriter(db)
 	ctx := context.Background()
-	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java",
+	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
 		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
@@ -270,7 +270,7 @@ func TestReplaceFile_rejectsAVectorCountMismatch(t *testing.T) {
 	db := writeDB(t)
 
 	// When
-	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A.java", "abc", "java",
+	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A.java", "abc", "java", 64,
 		sampleChunks(), [][]float32{vec(1)}, nil)
 
 	// Then

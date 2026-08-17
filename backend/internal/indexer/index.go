@@ -198,7 +198,7 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		// been embedded, and no later run would notice.
 		return fmt.Errorf("embed %s/%s: %w", st.Name, path, err)
 	}
-	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, chunks, vecs, syms)
+	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, len(body), chunks, vecs, syms)
 }
 
 // vectors resolves one file's chunks to vectors, embedding only the misses.

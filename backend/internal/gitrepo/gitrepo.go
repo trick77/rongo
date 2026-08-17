@@ -53,15 +53,30 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return fmt.Errorf("create repository root: %w", err)
 	}
-	_, err := c.run(ctx, c.root, "clone", "--quiet", authURL(spec.CloneURL, token), dir)
-	return err
+	if _, err := c.run(ctx, c.root, "clone", "--quiet", authURL(spec.CloneURL, token), dir); err != nil {
+		return err
+	}
+	// git PERSISTS the clone URL as remote.origin.url, credentials and all, so
+	// a token would sit in .git/config on disk from here on. Every later
+	// command passes its own URL, so the stored one is only ever a liability:
+	// overwrite it with the bare URL immediately.
+	if token != "" {
+		if _, err := c.run(ctx, dir, "remote", "set-url", "origin", spec.CloneURL); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DefaultBranch asks the remote which branch it considers default. Never assume
 // master: this corpus mixes master and main, and the repositories on main are
 // exactly the third-party ones the cross-repo logic needs.
-func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec) (string, error) {
-	out, err := c.run(ctx, c.root, "ls-remote", "--symref", spec.CloneURL, "HEAD")
+//
+// It takes the token because a private repository cannot answer this
+// anonymously: without it, an entry that omits `branch:` could never resolve
+// one and would never be indexed at all.
+func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token string) (string, error) {
+	out, err := c.run(ctx, c.root, "ls-remote", "--symref", authURL(spec.CloneURL, token), "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -88,9 +103,22 @@ func (c *Client) Fetch(ctx context.Context, spec repos.Spec, token string) error
 // A missing branch yields ErrBranchGone so the poller can tell "branch deleted"
 // apart from "network hiccup".
 func (c *Client) HeadSHA(ctx context.Context, spec repos.Spec, branch string) (string, error) {
+	// --verify --quiet exits 1 with NO output and NO stderr when the ref is
+	// simply absent, which is the case this reports as ErrBranchGone. Anything
+	// else — an unreadable checkout, a broken git — is a DIFFERENT problem, and
+	// collapsing it into "branch deleted" would put a confident wrong diagnosis
+	// on the Repos page while discarding the real error text.
 	out, err := c.run(ctx, c.Dir(spec), "rev-parse", "--verify", "--quiet",
 		"refs/remotes/origin/"+branch)
-	if err != nil || strings.TrimSpace(out) == "" {
+	if err != nil {
+		if !strings.Contains(err.Error(), "exit status 1") {
+			return "", err
+		}
+		if _, checkErr := c.run(ctx, c.Dir(spec), "rev-parse", "--git-dir"); checkErr != nil {
+			return "", fmt.Errorf("%s: repository unreadable: %w", spec.Name, checkErr)
+		}
+	}
+	if strings.TrimSpace(out) == "" {
 		return "", fmt.Errorf("%s: branch %q: %w", spec.Name, branch, ErrBranchGone)
 	}
 	return strings.TrimSpace(out), nil
@@ -100,11 +128,18 @@ func (c *Client) HeadSHA(ctx context.Context, spec repos.Spec, branch string) (s
 // keeps a push from costing a full re-index. It stays valid across a branch
 // change too, because both commits live in the same object store.
 func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]string, error) {
-	out, err := c.run(ctx, c.Dir(spec), "diff", "--name-only", fromSHA+".."+toSHA)
+	// core.quotePath=false: by default git C-quotes any path with a non-ASCII
+	// byte ("f\303\244hig.go"), and the quoted form is not a path — a later
+	// `git show <sha>:<path>` fails on it, so every umlaut file would drop out
+	// of the index as merely "unreadable". A German corpus is full of them.
+	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
+		"diff", "--name-only", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
-	return nonEmptyLines(out), nil
+	// Never nil: a nil path list means "index everything" to the pipeline, so
+	// an empty diff would trigger a full re-index of the whole repository.
+	return append([]string{}, nonEmptyLines(out)...), nil
 }
 
 // Change is one path in a diff, and whether the newer commit still has it.
@@ -123,11 +158,12 @@ type Change struct {
 // detect renames only produces a three-field record to parse for the same
 // outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
-	out, err := c.run(ctx, c.Dir(spec), "diff", "--name-status", "--no-renames", fromSHA+".."+toSHA)
+	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
+		"diff", "--name-status", "--no-renames", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
-	var changes []Change
+	changes := []Change{}
 	for _, line := range nonEmptyLines(out) {
 		status, path, ok := strings.Cut(line, "\t")
 		if !ok {
@@ -143,7 +179,8 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 
 // ListPaths lists every tracked path at a commit, for the initial full index.
 func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]string, error) {
-	out, err := c.run(ctx, c.Dir(spec), "ls-tree", "-r", "--name-only", sha)
+	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
+		"ls-tree", "-r", "--name-only", sha)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +214,7 @@ func (c *Client) run(ctx context.Context, dir string, args ...string) (string, e
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// redact keeps an injected token out of an error that will be logged.
-		return stdout.String(), fmt.Errorf("git %s: %w: %s", args[0], err,
+		return stdout.String(), fmt.Errorf("git %s: %w: %s", subcommand(args), err,
 			redact(stderr.String()))
 	}
 	return stdout.String(), nil
@@ -213,6 +250,19 @@ var credentialInURL = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]+@
 // see TestRedact_realisticGitErrorShapes, which pins every one of them.
 func redact(s string) string {
 	return credentialInURL.ReplaceAllString(s, "${1}REDACTED@")
+}
+
+// subcommand finds the git subcommand in args, skipping any leading `-c key=value`
+// pairs, so an error message names "diff" rather than "-c".
+func subcommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-c" {
+			i++
+			continue
+		}
+		return args[i]
+	}
+	return "git"
 }
 
 func nonEmptyLines(s string) []string {

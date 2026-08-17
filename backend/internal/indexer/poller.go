@@ -103,8 +103,15 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 }
 
 func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
-	spec := repos.Spec{Name: st.Name, CloneURL: st.CloneURL, Branch: st.Branch, Enabled: true}
-	token := p.tokens(st.Name)
+	spec := repos.Spec{
+		Name: st.Name, CloneURL: st.CloneURL, Branch: st.Branch,
+		TokenEnv: st.TokenEnv, Enabled: true,
+	}
+	// The ENVIRONMENT VARIABLE NAME, not the repository name: TokenFunc reads
+	// the environment, and passing the repository name here resolved every
+	// token to the empty string, so every private repository was fetched
+	// anonymously while repos.yaml looked correctly configured.
+	token := p.tokens(st.TokenEnv)
 
 	if err := p.git.EnsureCloned(ctx, spec, token); err != nil {
 		return err
@@ -114,7 +121,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	// Repos page shows what is actually being indexed. Never assume master.
 	branch := st.Branch
 	if branch == "" {
-		resolved, err := p.git.DefaultBranch(ctx, spec)
+		resolved, err := p.git.DefaultBranch(ctx, spec, token)
 		if err != nil {
 			return err
 		}
@@ -142,7 +149,11 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	}
 
 	if head == st.LastSHA {
-		return nil
+		// Nothing new, but the poll SUCCEEDED — so a last_error left by an
+		// earlier network failure has to go. Returning early without clearing
+		// it left a healthy repository showing a permanent error until someone
+		// happened to push to it.
+		return p.state.MarkChecked(ctx, st.Name)
 	}
 
 	var paths []string

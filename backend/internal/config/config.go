@@ -58,6 +58,21 @@ type Config struct {
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
+	// The embedding dimension is the one integer setting that may NOT fall back
+	// silently: it is baked into the vec0 table when the database is created,
+	// so a typo ("3O72" with a letter O) would build a 1536-wide table while
+	// the operator believes it is 3072, and the mistake surfaces much later as
+	// a per-request dimension mismatch.
+	embedDim := 1536
+	if v := strings.TrimSpace(os.Getenv("BACKEND_EMBED_DIM")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return Config{}, fmt.Errorf(
+				"BACKEND_EMBED_DIM = %q is not a positive number of dimensions; it is baked into the vector table when the database is created, so it must not be guessed", v)
+		}
+		embedDim = n
+	}
+
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
 		PublicURL: envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
@@ -71,7 +86,7 @@ func Load() (Config, error) {
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
 		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
 		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		EmbedDim:          envIntOr("BACKEND_EMBED_DIM", 1536),
+		EmbedDim:          embedDim,
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
@@ -96,12 +111,6 @@ func Load() (Config, error) {
 			"BACKEND_SESSION_SECRET must be at least 16 characters; generate one with `openssl rand -base64 32`")
 	}
 
-	// EmbedDim is not a tunable that may quietly fall back: it is baked into the
-	// vec0 table at migration time, so a bad value would build a database that
-	// every later insert rejects.
-	if cfg.EmbedDim <= 0 {
-		return Config{}, fmt.Errorf("BACKEND_EMBED_DIM must be a positive number of dimensions")
-	}
 	if cfg.IndexEnabled && cfg.EmbedBaseURL == "" {
 		return Config{}, fmt.Errorf(
 			"BACKEND_EMBED_BASE_URL is required while indexing is enabled; set it, or set BACKEND_INDEX_ENABLED=false to run without indexing")

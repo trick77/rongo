@@ -139,15 +139,35 @@ func TestLoad_allowsNoEmbeddingEndpointWhenIndexingIsOff(t *testing.T) {
 	}
 }
 
-func TestLoad_rejectsANonPositiveEmbedDim(t *testing.T) {
-	// Given: the dimension is baked into the vec0 table at migration time, so a
-	// bad value builds a database every later insert rejects. envIntOr falls
-	// back rather than failing, which is why the zero case is spelled out here:
-	// it must not silently become 1536 under a value the operator chose.
+func TestLoad_rejectsAMalformedEmbedDim(t *testing.T) {
+	// Given: the dimension is baked into the vec0 table when the database is
+	// created. Falling back the way every other integer setting does would let
+	// "3O72" (letter O) build a 1536-wide table while the operator believes it
+	// is 3072 — and the mistake would only surface much later, as a dimension
+	// mismatch on every insert.
+	for _, bad := range []string{"0", "-1", "3O72", "big"} {
+		setEnv(t, map[string]string{
+			"BACKEND_SESSION_SECRET": validSecret,
+			"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+			"BACKEND_EMBED_DIM":      bad,
+		})
+
+		// When
+		_, err := Load()
+
+		// Then
+		if err == nil {
+			t.Errorf("Load() err = nil for BACKEND_EMBED_DIM=%q, want a refusal", bad)
+		}
+	}
+}
+
+func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
+	// Given
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET": validSecret,
 		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_EMBED_DIM":      "0",
+		"BACKEND_EMBED_DIM":      "3072",
 	})
 
 	// When
@@ -155,10 +175,10 @@ func TestLoad_rejectsANonPositiveEmbedDim(t *testing.T) {
 
 	// Then
 	if err != nil {
-		t.Fatalf("Load() err = %v, want the documented fallback", err)
+		t.Fatalf("Load() err = %v, want nil", err)
 	}
-	if cfg.EmbedDim != 1536 {
-		t.Errorf("EmbedDim = %d, want the 1536 fallback", cfg.EmbedDim)
+	if cfg.EmbedDim != 3072 {
+		t.Errorf("EmbedDim = %d, want 3072", cfg.EmbedDim)
 	}
 }
 

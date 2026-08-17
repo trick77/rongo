@@ -3,6 +3,8 @@ package gitrepo
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +63,7 @@ func TestDefaultBranch_resolvesFromRemoteNotAssumed(t *testing.T) {
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Enabled: true}
 
 	// When
-	branch, err := c.DefaultBranch(context.Background(), spec)
+	branch, err := c.DefaultBranch(context.Background(), spec, "")
 
 	// Then
 	if err != nil {
@@ -258,4 +260,146 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	}()
+}
+
+// dumbHTTPRemote publishes a repository over plain HTTP, which is the only
+// scheme authURL injects a token into — a local path never carries one, so a
+// file-path fixture cannot exercise the credential path at all. "Dumb" HTTP
+// needs no CGI and no network beyond loopback.
+func dumbHTTPRemote(t *testing.T, src string) string {
+	t.Helper()
+	root := t.TempDir()
+	bare := filepath.Join(root, "repo.git")
+	gitRun(t, root, "clone", "--quiet", "--bare", src, bare)
+	gitRun(t, bare, "update-server-info")
+	srv := httptest.NewServer(http.FileServer(http.Dir(root)))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/repo.git"
+}
+
+func TestEnsureCloned_leavesNoCredentialInGitConfig(t *testing.T) {
+	// Given: a clone over http carrying a token in its URL. git PERSISTS the
+	// clone URL as remote.origin.url, so without a fix-up the token sits in
+	// .git/config on disk from then on — the one place the invariant says it
+	// must never be, and every later command passes its own URL anyway.
+	src := fixtureRepo(t)
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: dumbHTTPRemote(t, src), Branch: "main", Enabled: true}
+
+	// When
+	if err := c.EnsureCloned(context.Background(), spec, "ghp_realsecret"); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+
+	// Then
+	body, err := os.ReadFile(filepath.Join(c.Dir(spec), ".git", "config"))
+	if err != nil {
+		t.Fatalf("read .git/config: %v", err)
+	}
+	if contains(string(body), "ghp_realsecret") {
+		t.Errorf(".git/config holds the token:\n%s", body)
+	}
+	if !contains(string(body), spec.CloneURL) {
+		t.Errorf(".git/config lost the remote entirely:\n%s", body)
+	}
+}
+
+func TestListPaths_handlesNonAsciiFilenames(t *testing.T) {
+	// Given: git C-quotes any path with a non-ASCII byte by default
+	// ("f\303\244hig.go"), and the quoted form is NOT a path — git show then
+	// fails on it, so the file drops out of the index while merely looking
+	// unreadable. A German corpus is full of these.
+	src := fixtureRepo(t)
+	writeAndCommit(t, src, "verfügbarkeit.go", "package a\n", "umlaut")
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	sha, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+
+	// When
+	paths, err := c.ListPaths(ctx, spec, sha)
+	if err != nil {
+		t.Fatalf("ListPaths() err = %v", err)
+	}
+
+	// Then: the name comes back usable, and it round-trips through ReadFile.
+	var found string
+	for _, p := range paths {
+		if contains(p, "verf") {
+			found = p
+		}
+	}
+	if found != "verfügbarkeit.go" {
+		t.Fatalf("ListPaths() returned %q, want the decoded name; paths = %v", found, paths)
+	}
+	if _, err := c.ReadFile(ctx, spec, sha, found); err != nil {
+		t.Errorf("ReadFile(%q) err = %v — the listed path is not usable", found, err)
+	}
+}
+
+func TestChangedPaths_emptyDiffIsEmptyNotNil(t *testing.T) {
+	// Given: a new commit that changes no file (an empty commit, an amend, a
+	// revert to the same tree). A nil path list means "index everything" to the
+	// pipeline, so nil here re-reads and re-chunks the entire repository.
+	src := fixtureRepo(t)
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	before, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+	gitRun(t, src, "commit", "-q", "--allow-empty", "-m", "empty")
+	if err := c.Fetch(ctx, spec, ""); err != nil {
+		t.Fatalf("Fetch() err = %v", err)
+	}
+	after, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+
+	// When
+	changed, err := c.ChangedPaths(ctx, spec, before, after)
+
+	// Then
+	if err != nil {
+		t.Fatalf("ChangedPaths() err = %v", err)
+	}
+	if changed == nil {
+		t.Error("ChangedPaths() = nil for an empty diff; the pipeline reads nil as a full re-index")
+	}
+	if len(changed) != 0 {
+		t.Errorf("ChangedPaths() = %v, want no paths", changed)
+	}
+}
+
+func TestHeadSHA_aBrokenCheckoutIsNotReportedAsAMissingBranch(t *testing.T) {
+	// Given: a checkout directory that is not a repository at all. Reporting
+	// this as ErrBranchGone puts a confident wrong diagnosis on the Repos page
+	// ("configured branch not found") and discards the real error.
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: "/nonexistent", Branch: "main", Enabled: true}
+	if err := os.MkdirAll(c.Dir(spec), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	_, err := c.HeadSHA(context.Background(), spec, "main")
+
+	// Then
+	if err == nil {
+		t.Fatal("HeadSHA() err = nil, want a failure")
+	}
+	if errors.Is(err, ErrBranchGone) {
+		t.Errorf("HeadSHA() err = %v, want the real error rather than ErrBranchGone", err)
+	}
 }

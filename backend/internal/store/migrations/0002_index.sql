@@ -7,6 +7,12 @@ CREATE TABLE repo_state (
     clone_url   TEXT NOT NULL,
     branch      TEXT NOT NULL DEFAULT '',
     enabled     INTEGER NOT NULL DEFAULT 1,
+    -- token_env is the NAME of the environment variable holding this
+    -- repository's forge token, copied from repos.yaml. The value is never
+    -- stored here, or anywhere else on disk. Without this column the poller has
+    -- no way to know which variable to read, and every private repository is
+    -- fetched anonymously.
+    token_env   TEXT NOT NULL DEFAULT '',
     last_sha    TEXT NOT NULL DEFAULT '',
     last_run_at TEXT NOT NULL DEFAULT '',
     -- last_error is surfaced on the Repos page. A configured branch that

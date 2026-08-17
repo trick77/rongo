@@ -29,7 +29,12 @@ func NewWriter(db *sql.DB) *Writer {
 
 // ReplaceFile replaces everything stored for one path: its file row, its
 // symbols and its chunks. len(vecs) must equal len(chunks).
-func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string,
+// size is the file's own byte length. It is passed in rather than derived from
+// the chunks, because the chunk windows OVERLAP: summing their text inflates the
+// figure by roughly the overlap fraction, and RecordSkipped stores the true
+// length — the same column would then mean two different things depending on
+// which path wrote it.
+func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, size int,
 	chunks []Chunk, vecs [][]float32, syms []symbols.Symbol) error {
 	if len(chunks) != len(vecs) {
 		return fmt.Errorf("index %s/%s: %d chunks but %d vectors", repo, path, len(chunks), len(vecs))
@@ -40,7 +45,7 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string,
 	}
 	defer tx.Rollback()
 
-	fileID, err := upsertFile(ctx, tx, repo, path, sha, lang, byteLen(chunks), "")
+	fileID, err := upsertFile(ctx, tx, repo, path, sha, lang, size, "")
 	if err != nil {
 		return err
 	}
@@ -188,15 +193,4 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 		return err
 	}
 	return nil
-}
-
-// byteLen is the indexed size recorded on the file row: the raw source the
-// chunks cover, not the enriched text, because that is what a reader would
-// recognise as the file's size.
-func byteLen(chunks []Chunk) int {
-	n := 0
-	for _, c := range chunks {
-		n += len(c.RawText)
-	}
-	return n
 }

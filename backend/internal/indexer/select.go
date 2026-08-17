@@ -111,17 +111,22 @@ var secretPatterns = []*regexp.Regexp{
 // layer can say "that file exists but was not indexed" — the "never invent"
 // invariant applied to the index itself.
 func (s *Selector) Select(p string, body []byte) (Decision, string) {
-	// Secrets first. Every other verdict is about usefulness; this one is about
-	// not shipping a credential to a third-party embedding endpoint, so it wins
-	// regardless of where the file lives.
-	if pat := matchSecret(body); pat != "" {
-		return SkipSecret, "matches a credential pattern (" + pat + ")"
+	// The two cheap, certain verdicts go first. Both are decided in one pass or
+	// none, while the secret scan runs eight regexes over the WHOLE body — so
+	// putting it first meant fully scanning a 500 MB blob only to skip it as
+	// too_large anyway, and labelling a binary that happened to match a pattern
+	// "secret" when "binary" is the true reason.
+	if len(body) > s.opts.MaxBytes {
+		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated"
 	}
 	if isBinary(body) {
 		return SkipBinary, "contains NUL bytes"
 	}
-	if len(body) > s.opts.MaxBytes {
-		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated"
+	// Secrets next, and ahead of every remaining verdict: those are about
+	// usefulness, this one is about not shipping a credential to a third-party
+	// embedding endpoint, so it wins regardless of where the file lives.
+	if pat := matchSecret(body); pat != "" {
+		return SkipSecret, "matches a credential pattern (" + pat + ")"
 	}
 	if seg := vendoredSegment(p); seg != "" {
 		return SkipVendored, "lives under " + seg + "/"

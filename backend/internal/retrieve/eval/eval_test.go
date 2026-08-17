@@ -166,7 +166,7 @@ func TestEvalIndex(t *testing.T) {
 		}
 		branch := st.Branch
 		if branch == "" {
-			branch, err = gitc.DefaultBranch(ctx, spec)
+			branch, err = gitc.DefaultBranch(ctx, spec, token)
 			if err != nil {
 				t.Fatalf("resolve the branch of %s: %v", st.Name, err)
 			}
