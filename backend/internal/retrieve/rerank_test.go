@@ -54,6 +54,25 @@ func equal(a, b []string) bool {
 	return true
 }
 
+func TestQueryTexts_expansionsAreSearchedAndTheQuestionStaysFirst(t *testing.T) {
+	// A Query carrying expansions must search all of them; one without must
+	// still search the raw question. Getting this wrong is silent — the search
+	// keeps returning results, only without the bridge.
+	q := Query{Text: "Wie kommt ein Apple TV an die Datei?"}
+	if got := q.texts(); len(got) != 1 || got[0] != q.Text {
+		t.Fatalf("texts() = %v, want the raw question", got)
+	}
+
+	q.Texts = []string{q.Text, "Freigabe fuer externe Abspielgeraete", "AirPlay playbackgrant"}
+	got := q.texts()
+	if len(got) != 3 {
+		t.Fatalf("texts() = %v, want all three phrasings", got)
+	}
+	if got[0] != q.Text {
+		t.Errorf("texts()[0] = %q, want the raw question first — a guess must not replace it", got[0])
+	}
+}
+
 func TestRerankByModule_aModuleWithSeveralHitsOutranksALoneNeighbour(t *testing.T) {
 	// Given
 	idx := NewModuleIndex(corpusModules())
