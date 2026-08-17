@@ -15,6 +15,11 @@ Same corpus, same index (`text-embedding-3-small`, 1536, `/tmp/rongo-eval-small.
 read the indexed file first, then write the question it answers, and record in
 the question record the line that was read. Nothing is guessed.
 
+Provenance therefore starts with the new questions: the 33 added here carry a
+`verified` line naming what was read, the 28 inherited ones do not, because
+their expected paths were established in phase 2 and only their *ambiguity* was
+re-checked here. The file is knowingly two-tier on that field.
+
 The record shape changed, because the old one could not say what phase 4b will
 be graded on. `expect_repo` plus `expect_paths` cannot express «either-or, and
 asking is the right reaction». Every question now carries a list of candidates
@@ -145,10 +150,18 @@ Ambiguous cohort, n=12, «at least two of the alternatives are present»:
 | **expanded + walk** | **0.833 (10/12)** | **21/24** |
 
 So in ten of twelve cases phase 4b will have both alternatives in front of it
-and can ask which is meant. In the other two it would see one candidate and
-answer confidently — which is the failure this cohort exists to make visible.
-The remaining miss is «Wie lang darf eine einzelne Zeile im Antwortstrom des
-Modells hoechstens sein?», where neither `llm/stream.go` is gathered at all.
+and can ask which is meant. The other two fail in opposite ways, and only one of
+them is the failure this cohort exists to expose:
+
+- **«Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?»** gathers
+  loom's `config.go` and not peeq's. This is the real case: rongo would answer
+  confidently from one of two equally right places — and it would even give the
+  *correct value*, because both default to `:8080`. A reader has no way to tell
+  that the other half exists. That is the quiet version of the failure, not the
+  loud one.
+- **«Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens
+  sein?»** gathers neither `llm/stream.go`. Nothing is found, so rongo says
+  nothing was found. That is the invariant working, not a wrong answer.
 
 **This is not a recall number and must not be read as one.** It says nothing
 about whether rongo *does* ask — nothing asks today. It says whether the
