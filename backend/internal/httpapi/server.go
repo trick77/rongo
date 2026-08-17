@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -24,6 +25,9 @@ type Deps struct {
 	// this deployment cannot answer questions, which its routes say with a 503.
 	Ask     Asker
 	Threads *threads.Store
+	// Titler names a thread. Optional: without it the sidebar keeps the first
+	// words of the question, which is a worse label but never a broken one.
+	Titler func(ctx context.Context, question string) string
 }
 
 // Server routes requests and owns the middleware chain.

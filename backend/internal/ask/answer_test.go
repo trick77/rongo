@@ -102,6 +102,23 @@ func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	}
 }
 
+func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
+	// The DEV prompt asks for short snippets, and `args[1]` inside one is an
+	// index expression. Reading it as a marker would put a reference under the
+	// answer that the model never made — checkable-looking and false.
+	c, _, _ := streamUpstream(t,
+		"Der Aufruf steht in store.go [2]:\n\n```go\nname := args[1]\nvalue := parts[1]\n```\n")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceDev, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if len(got.Citations) != 1 || got.Citations[0].Marker != 2 {
+		t.Fatalf("citations = %+v, want only the marker outside the code block", got.Citations)
+	}
+}
+
 func TestAnswer_swissOrthographyIsEnforcedOnTheStream(t *testing.T) {
 	// The fixture MUST contain ß, or this test passes without the rule. The
 	// model is instructed in German and still slips; normalising as the tokens

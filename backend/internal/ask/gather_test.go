@@ -199,6 +199,78 @@ func TestGather_theBudgetNeverEvictsASearchHit(t *testing.T) {
 	}
 }
 
+func TestGather_ignoresANameThatHalfTheCorpusDefines(t *testing.T) {
+	// Measured on the real index: Close is defined in 31 files, err in 23. A
+	// name that many files define says nothing about which one this code
+	// depends on, and following them burns the budget on whatever sorts first.
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "hit.go", 0, 1, 10, "target",
+		"func target() { defer f.Close(); NewGrant() }")
+	// Six files define Close. One defines NewGrant.
+	for _, p := range []string{"aa.go", "ab.go", "ac.go", "ad.go", "ae.go", "af.go"} {
+		seedChunk(t, db, p, 0, 1, 10, "Close", "func Close() {}")
+		seedSymbol(t, db, p, "Close", 1)
+	}
+	seedChunk(t, db, "zz_grant.go", 0, 1, 10, "NewGrant", "func NewGrant() {}")
+	seedSymbol(t, db, "zz_grant.go", "NewGrant", 1)
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		Gather(context.Background(), []retrieve.Hit{hitFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if !has(got, "zz_grant.go") {
+		t.Errorf("sources = %v, want the selective name followed despite sorting last", paths(got))
+	}
+	for _, s := range got {
+		if strings.HasPrefix(s.Path, "a") {
+			t.Errorf("sources = %v, want the over-defined name ignored", paths(got))
+			break
+		}
+	}
+}
+
+func TestGather_crossesARepoBoundaryOnTheSamePath(t *testing.T) {
+	// Two repositories routinely share a path. Excluding the path everywhere
+	// instead of only in this repository would make a shared-library reference
+	// unreachable — and the corpus is explicitly multi-repo.
+	db := gatherDB(t)
+	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('commons', 'file:///y', 'master')`); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+	hitID := seedChunk(t, db, "internal/config/config.go", 0, 1, 10, "Load", "func Load() { ParseYAML() }")
+	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('commons', 'internal/config/config.go', 'sha')`)
+	if err != nil {
+		t.Fatalf("seed other repo file: %v", err)
+	}
+	fileID, _ := res.LastInsertId()
+	if _, err := db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
+		VALUES (?, 0, 1, 10, 'ParseYAML', 'e', 'func ParseYAML() {}', 'h-commons')`, fileID); err != nil {
+		t.Fatalf("seed other repo chunk: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO symbols (file_id, name, kind, line) VALUES (?, 'ParseYAML', 'func', 1)`, fileID); err != nil {
+		t.Fatalf("seed other repo symbol: %v", err)
+	}
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		Gather(context.Background(), []retrieve.Hit{hitFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	var reached bool
+	for _, s := range got {
+		if s.Repo == "commons" && s.Path == "internal/config/config.go" {
+			reached = true
+		}
+	}
+	if !reached {
+		t.Errorf("sources = %v, want the same path in the OTHER repository reachable", paths(got))
+	}
+}
+
 func TestGather_returnsNothingForNoHits(t *testing.T) {
 	// "No hit means no hit." Gathering must not invent a starting point.
 	got, err := NewGatherer(gatherDB(t), GatherOptions{MaxHops: 2, TokenBudget: 1000}).

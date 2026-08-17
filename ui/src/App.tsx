@@ -30,9 +30,16 @@ export default function App() {
         </nav>
       </header>
 
-      {page === "fragen" ? (
+      {/*
+        Ask stays mounted and is hidden, never unmounted. Switching to Repos
+        mid-answer would otherwise discard the thread on screen while the stream
+        keeps writing into a dead component — and the conversation is only
+        recoverable through a history view that does not exist yet.
+      */}
+      <div hidden={page !== "fragen"}>
         <Ask />
-      ) : (
+      </div>
+      {page === "repos" && (
         <>
           <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
             Reine Anzeige. Die Repository-Liste wird in <code>repos.yaml</code> gepflegt,

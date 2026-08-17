@@ -189,6 +189,40 @@ func TestStream_deliversTokensOneByOne(t *testing.T) {
 	}
 }
 
+func TestStream_anUpstreamThatStallsIsAbandoned(t *testing.T) {
+	// An upstream that sends one delta and then goes quiet used to hold the
+	// reader on a half-written answer until the coarse HTTP timeout — minutes
+	// of a cursor that looks like it is still thinking. The watchdog was
+	// configured and documented but never armed; this test is what says it is.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl := http.NewResponseController(w)
+		frame, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "Der "}}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		_ = fl.Flush()
+		// ...and then nothing, for longer than the watchdog window.
+		time.Sleep(2 * time.Second)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(Config{BaseURL: srv.URL, IdleTimeout: 150 * time.Millisecond}, srv.Client())
+
+	var seen []string
+	start := time.Now()
+	_, _ = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}},
+		func(tok string) { seen = append(seen, tok) })
+	elapsed := time.Since(start)
+
+	if elapsed > time.Second {
+		t.Errorf("Stream took %v, want it abandoned near the idle window", elapsed)
+	}
+	if len(seen) != 1 || seen[0] != "Der " {
+		t.Errorf("tokens = %q, want the one delta that did arrive", seen)
+	}
+}
+
 func TestStream_requestsUsageInTheStream(t *testing.T) {
 	c, got := fakeUpstream(t, "x")
 	_, _ = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})

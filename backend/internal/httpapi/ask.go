@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -19,6 +20,17 @@ import (
 type Asker interface {
 	Run(ctx context.Context, question string, audience ask.Audience, ev ask.Events) (ask.Answer, error)
 }
+
+// turnFailed is what a failed turn says, in the stream AND in the stored
+// record. The underlying error may quote an upstream response body, and the
+// thread history is served back to the browser too — a generic message in one
+// place and the raw text in the other would leak it through the other door.
+const turnFailed = "Der Zug ist fehlgeschlagen."
+
+// errNotYours separates "this thread is not yours" from "the query failed".
+// Collapsing them turns a locked database into a 403 and hands its text to the
+// browser.
+var errNotYours = errors.New("thread does not belong to this user")
 
 type askRequest struct {
 	ThreadID int64  `json:"thread_id"`
@@ -60,8 +72,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	thread, err := s.thread(ctx, u.Subject, req)
+	if errors.Is(err, errNotYours) {
+		// Refused, not explained: whether the id exists at all is not something
+		// to confirm to someone who does not own it.
+		http.Error(w, "no such thread", http.StatusForbidden)
+		return
+	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		// A locked database is not a permissions problem, and its text is not
+		// for the browser — the same rule the error event below follows.
+		slog.Error("resolve thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), req.Question)
@@ -90,22 +111,42 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	send("thread", map[string]any{"thread_id": thread.ID, "title": thread.Title, "message_id": msg.ID})
 
+	// The title is written alongside the answer and never in front of it. It is
+	// a label; the answer must not wait for it, and a title that never arrives
+	// is not a failure anyone needs to see.
+	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
+		go func(id int64, question string) {
+			bg := context.WithoutCancel(ctx)
+			if title := s.deps.Titler(bg, question); title != "" {
+				if err := s.deps.Threads.SetTitle(bg, id, title); err != nil {
+					slog.Warn("set thread title failed", "err", err)
+				}
+			}
+		}(thread.ID, req.Question)
+	}
+
+	// The record is written on a context that outlives the request. A reader
+	// who closes the tab mid-answer cancels r.Context(), and writing the
+	// outcome on it would leave a row with neither an answer nor an error —
+	// indistinguishable from a turn still in flight.
+	record := context.WithoutCancel(ctx)
+
 	answer, err := s.deps.Ask.Run(ctx, req.Question, audience, ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
 	if err != nil {
 		slog.Error("turn failed", "err", err)
-		if ferr := s.deps.Threads.Fail(ctx, msg.ID, err.Error()); ferr != nil {
+		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 			slog.Error("record turn failure failed", "err", ferr)
 		}
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
-		send("error", map[string]any{"message": "Der Zug ist fehlgeschlagen."})
+		send("error", map[string]any{"message": turnFailed})
 		return
 	}
 
-	if err := s.deps.Threads.Finish(ctx, msg.ID, answer.Text, answer.Citations); err != nil {
+	if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
 		slog.Error("record answer failed", "err", err)
 	}
 	send("citations", answer.Citations)
@@ -125,7 +166,7 @@ func (s *Server) thread(ctx context.Context, subject string, req askRequest) (th
 		return threads.Thread{}, err
 	}
 	if !owns {
-		return threads.Thread{}, fmt.Errorf("no such thread")
+		return threads.Thread{}, errNotYours
 	}
 	return threads.Thread{ID: req.ThreadID}, nil
 }

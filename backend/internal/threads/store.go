@@ -88,18 +88,25 @@ func (s *Store) SetTitle(ctx context.Context, id int64, title string) error {
 // AddQuestion appends a question and returns the message it created. The answer
 // arrives later, through Finish.
 func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, question string) (Message, error) {
-	var next int
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?`, threadID).Scan(&next); err != nil {
-		return Message{}, fmt.Errorf("next ordinal: %w", err)
-	}
-	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO messages (thread_id, ordinal, audience, question) VALUES (?,?,?,?)`,
-		threadID, next, audience, question)
+	// The ordinal is computed inside the INSERT, not read and then written.
+	// Two tabs submitting on one thread would otherwise compute the same number
+	// and the second would hit UNIQUE (thread_id, ordinal) — a 500 for a thing
+	// people do routinely.
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO messages (thread_id, ordinal, audience, question)
+		VALUES (?, (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?), ?, ?)`,
+		threadID, threadID, audience, question)
 	if err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return Message{}, fmt.Errorf("add question: %w", err)
+	}
+	var next int
+	if err := s.db.QueryRowContext(ctx, `SELECT ordinal FROM messages WHERE id = ?`, id).Scan(&next); err != nil {
+		return Message{}, fmt.Errorf("add question: %w", err)
+	}
 	return Message{ID: id, Ordinal: next, Audience: audience, Question: question}, nil
 }
 

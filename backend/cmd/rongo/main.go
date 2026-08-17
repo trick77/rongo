@@ -172,15 +172,19 @@ func main() {
 	// Without a model endpoint rongo still serves the Repos page and the index;
 	// the question routes answer 503 rather than failing per request.
 	if cfg.LLMBaseURL != "" {
+		models := llm.NewClient(llm.Config{
+			BaseURL:     cfg.LLMBaseURL,
+			APIKey:      cfg.LLMAPIKey,
+			IdleTimeout: 90 * time.Second,
+		}, nil)
 		deps.Ask = ask.NewPipeline(
-			llm.NewClient(llm.Config{
-				BaseURL:     cfg.LLMBaseURL,
-				APIKey:      cfg.LLMAPIKey,
-				IdleTimeout: 90 * time.Second,
-			}, nil),
+			models,
 			retrieve.New(db, embedder),
 			ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		)
+		deps.Titler = func(ctx context.Context, question string) string {
+			return ask.Title(ctx, models, question)
+		}
 	} else {
 		slog.Warn("BACKEND_LLM_BASE_URL is unset; questions cannot be answered")
 	}

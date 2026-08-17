@@ -186,16 +186,36 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 // arrives. Only the final answer streams; every other step is an ordinary
 // request.
 func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string), opts ...Option) (Usage, error) {
+	// The watchdog is armed here, not merely configured. An upstream that
+	// stalls after the first delta would otherwise hold the reader on a
+	// half-written answer until the coarse HTTP timeout — minutes of a cursor
+	// that looks like it is still thinking.
+	if c.idleTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+	}
+
 	resp, err := c.post(ctx, msgs, resolve(opts), true)
 	if err != nil {
 		return Usage{}, err
 	}
 	defer resp.Body.Close()
 
+	// beat is called for every frame that arrives; the timer fires only when
+	// none has for the whole window.
+	beat := func() {}
+	if c.idleTimeout > 0 {
+		timer := time.AfterFunc(c.idleTimeout, func() { _ = resp.Body.Close() })
+		defer timer.Stop()
+		beat = func() { timer.Reset(c.idleTimeout) }
+	}
+
 	var usage Usage
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
+		beat()
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
 			continue

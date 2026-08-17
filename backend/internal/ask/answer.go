@@ -157,7 +157,12 @@ func renderSources(question string, sources []Source) string {
 // — worse than no marker at all, because it looks checkable.
 func citationsFor(text string, sources []Source) []Citation {
 	used := map[int]bool{}
-	for _, m := range markerRe.FindAllStringSubmatch(text, -1) {
+	// Code blocks are excluded first. The DEV prompt asks for short snippets,
+	// and `args[1]` or `parts[2]` inside one is an index expression, not a
+	// citation — minting an entry for it would put a reference under the answer
+	// that the model never made, which is the same fabrication this function
+	// exists to prevent.
+	for _, m := range markerRe.FindAllStringSubmatch(withoutCode(text), -1) {
 		n, err := strconv.Atoi(m[1])
 		if err != nil || n < 1 || n > len(sources) {
 			continue
@@ -175,6 +180,32 @@ func citationsFor(text string, sources []Source) []Citation {
 	sort.Slice(out, func(i, j int) bool { return out[i].Marker < out[j].Marker })
 	return out
 }
+
+// withoutCode blanks fenced blocks and inline spans so a marker-shaped
+// expression inside code cannot be read as a citation. Blanked rather than
+// removed, because nothing else here depends on offsets and a blank keeps the
+// surrounding prose intact.
+func withoutCode(s string) string {
+	var b strings.Builder
+	rest := s
+	for {
+		open := strings.Index(rest, "```")
+		if open < 0 {
+			break
+		}
+		b.WriteString(rest[:open])
+		rest = rest[open+3:]
+		if end := strings.Index(rest, "```"); end >= 0 {
+			rest = rest[end+3:]
+		} else {
+			rest = "" // an unclosed fence swallows the remainder, as it should
+		}
+	}
+	b.WriteString(rest)
+	return inlineCodeRe.ReplaceAllString(b.String(), " ")
+}
+
+var inlineCodeRe = regexp.MustCompile("`[^`\n]*`")
 
 // swiss applies Swiss orthography. ß maps to ss in every position, which is the
 // whole of the rule.

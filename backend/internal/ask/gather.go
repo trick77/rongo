@@ -31,6 +31,12 @@ type Source struct {
 	Hop int
 }
 
+// maxDefiners is how many files may define a name before following it is
+// pointless. Measured on the real corpus: at 4 it drops Close (31 files), err
+// (23) and Error (10) while keeping a genuine service method, which is defined
+// once or twice.
+const maxDefiners = 4
+
 // GatherOptions bounds the walk. Both bounds exist because a mechanism spread
 // over a handler, a service and a template is exactly what plain top-k misses —
 // and following references without a cap walks the whole corpus instead.
@@ -101,9 +107,12 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 				}
 				cost := estimateTokens(ref.Text)
 				if spent+cost > g.opts.TokenBudget {
-					// Budget reached. The walk stops rather than trimming a
-					// hit, so what the answer cites is always present.
-					continue
+					// Budget reached. The walk STOPS rather than trimming what
+					// is already gathered, so what the answer cites is always
+					// present — and stopping means stopping: continuing would
+					// keep querying the rest of the frontier for rows that can
+					// never be taken.
+					return out, nil
 				}
 				seen[ref.ChunkID] = true
 				ref.Hop = hop
@@ -132,21 +141,35 @@ func (g *Gatherer) referenced(ctx context.Context, from Source) ([]Source, error
 		return nil, nil
 	}
 
+	// Names defined all over the corpus are filtered out by how common they
+	// are, not by a hand-kept stoplist. Measured on the real index: Close is
+	// defined in 31 files, err in 23, Error in 10. Following those pulls in
+	// alphabetically-first junk until the budget is gone, and the module the
+	// question is about never gets reached. A name that thirty files define
+	// says nothing about which one this code depends on.
 	q := `
-SELECT DISTINCT c.id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, s.name
+WITH selective AS (
+    SELECT s.name
+    FROM symbols s
+    WHERE s.name IN (` + placeholders(len(names)) + `)
+    GROUP BY s.name
+    HAVING COUNT(DISTINCT s.file_id) <= ?
+)
+SELECT DISTINCT c.id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
+       (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2 WHERE s2.name = s.name) AS definers
 FROM symbols s
+JOIN selective sel ON sel.name = s.name
 JOIN files f  ON f.id = s.file_id
 JOIN repo_state r ON r.name = f.repo
 JOIN chunks c ON c.file_id = f.id AND s.line BETWEEN c.start_line AND c.end_line
-WHERE s.name IN (` + placeholders(len(names)) + `)
-  AND f.path <> ?
-ORDER BY f.path, c.ordinal`
+WHERE NOT (f.repo = ? AND f.path = ?)
+ORDER BY definers ASC, f.path, c.ordinal`
 
-	args := make([]any, 0, len(names)+1)
+	args := make([]any, 0, len(names)+3)
 	for _, n := range names {
 		args = append(args, n)
 	}
-	args = append(args, from.Path)
+	args = append(args, maxDefiners, from.Repo, from.Path)
 
 	rows, err := g.db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -158,8 +181,9 @@ ORDER BY f.path, c.ordinal`
 	for rows.Next() {
 		var s Source
 		var sym string
+		var definers int
 		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.Symbol,
-			&s.StartLine, &s.EndLine, &s.Text, &sym); err != nil {
+			&s.StartLine, &s.EndLine, &s.Text, &sym, &definers); err != nil {
 			return nil, fmt.Errorf("scan reference: %w", err)
 		}
 		s.Reason = "reference:" + sym
