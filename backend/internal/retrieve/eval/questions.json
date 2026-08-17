@@ -1,0 +1,170 @@
+[
+  {
+    "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/download/freebytes.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/failmonitor/monitor.go"],
+    "kind": "how"
+  },
+  {
+    "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/cookie/netscape.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/apitoken/apitoken.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/playbackgrant/store.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/channels/staleness.go"],
+    "kind": "what"
+  },
+  {
+    "question": "DeadScanThreshold",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/channels/staleness.go"],
+    "kind": "identifier"
+  },
+  {
+    "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/videos/availability.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/sched/sched.go"],
+    "kind": "why"
+  },
+  {
+    "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/hybrid.go"],
+    "kind": "how"
+  },
+  {
+    "question": "FuseWeighted",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/hybrid.go"],
+    "kind": "identifier"
+  },
+  {
+    "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/chunk.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/embed.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/store.go", "backend/internal/rag/filter.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/store/store.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/store/migrate.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/rag/stopwords.go", "backend/internal/rag/query.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Wie meldet sich ein Benutzer per OIDC an?",
+    "expect_repo": "peeq",
+    "expect_paths": ["backend/internal/auth/oidc.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/chat/title_normalizer.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/artifact/upload_path.go"],
+    "kind": "where"
+  },
+  {
+    "question": "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/artifact/thumbnail.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/chat/user_directives_store.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/chat/share_store.go"],
+    "kind": "what"
+  },
+  {
+    "question": "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/chat/message_search_store.go"],
+    "kind": "what"
+  },
+  {
+    "question": "ResolveOutputPath",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/artifact/path.go"],
+    "kind": "identifier"
+  },
+  {
+    "question": "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
+    "expect_repo": "loom",
+    "expect_paths": ["backend/internal/artifact/path.go", "backend/internal/artifact/upload_path.go"],
+    "kind": "how"
+  },
+  {
+    "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
+    "expect_repo": "go-sqlite3",
+    "expect_paths": ["backup.go"],
+    "kind": "how"
+  },
+  {
+    "question": "ZeroBlob",
+    "expect_repo": "go-sqlite3",
+    "expect_paths": ["blob.go"],
+    "kind": "identifier"
+  }
+]
