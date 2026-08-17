@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -31,26 +32,33 @@ type Config struct {
 	// ReposFile is the path to the repository list. Its entries carry no
 	// secrets: tokens are named by token_env and read from the environment,
 	// because that file ends up in a repository or a ticket eventually.
-	ReposFile     string
-	AuthMode      AuthMode
-	AdminToken    string // required when AuthMode is token
-	SessionSecret string // reserved: not read by anything yet — see the check below
-	LogLevel      string
+	ReposFile string
+	// IndexMaxFileBytes is the ceiling above which a file is skipped WHOLE
+	// rather than truncated: half a file produces confidently wrong answers
+	// about the other half.
+	IndexMaxFileBytes int
+	AuthMode          AuthMode
+	AdminToken        string // required when AuthMode is token
+	SessionSecret     string // reserved: not read by anything yet — see the check below
+	LogLevel          string
 }
 
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:          envOr("BACKEND_ADDR", "127.0.0.1:8080"),
-		PublicURL:     envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
-		DBPath:        envOr("BACKEND_DB_PATH", "./data/rongo.db"),
-		RepoRoot:      envOr("BACKEND_REPO_ROOT", "./repos"),
-		ReposFile:     envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
-		AuthMode:      AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:    strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		SessionSecret: strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:      envOr("BACKEND_LOG_LEVEL", "info"),
+		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
+		PublicURL: envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
+		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
+		RepoRoot:  envOr("BACKEND_REPO_ROOT", "./repos"),
+		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
+		// 1 MiB. A source file above that is machine-written or a data blob,
+		// not something a person asks how it works.
+		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
+		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
 	}
 
 	// SessionSecret is currently unused — sessions are 256-bit random tokens
@@ -89,6 +97,22 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// envIntOr reads a positive integer setting. A malformed or non-positive value
+// falls back to the default rather than failing the boot: an indexing tunable
+// is not worth refusing to start over, and the value is logged at debug level
+// by the caller if it matters.
+func envIntOr(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func envOr(key, fallback string) string {
