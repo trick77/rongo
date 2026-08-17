@@ -164,6 +164,35 @@ func TestEmbed_errorCarriesStatusAndACappedBody(t *testing.T) {
 	}
 }
 
+func TestEmbed_aTransportErrorNeverCarriesTheURL(t *testing.T) {
+	// Given: a base URL with a credential in its query string, which some
+	// OpenAI-compatible deployments use, pointing at a port nothing listens on.
+	// net/http wraps EVERY transport failure in a *url.Error carrying the full
+	// URL, and that error is what the caller logs — so the plain wrapped error
+	// is a credential in a log line.
+	testee := NewClient(Config{
+		BaseURL: "http://127.0.0.1:1/v1?api-key=s3cret-key-value",
+		Model:   "m", Dim: 4,
+		HeartbeatInterval: -1,
+	}, &http.Client{Timeout: 2 * time.Second})
+
+	// When
+	_, err := testee.Embed(context.Background(), []string{"a"})
+
+	// Then
+	if err == nil {
+		t.Fatal("Embed() err = nil, want a connection failure")
+	}
+	if strings.Contains(err.Error(), "s3cret-key-value") || strings.Contains(err.Error(), "api-key") {
+		t.Errorf("the error carries the query string: %q", err)
+	}
+	// The host survives: "which endpoint was unreachable" is the whole
+	// diagnostic value of the message.
+	if !strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Errorf("error = %q, want it to name the host it could not reach", err)
+	}
+}
+
 func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 	// Given: an endpoint that never answers.
 	block := make(chan struct{})

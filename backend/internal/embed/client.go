@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -142,9 +144,8 @@ func (c *Client) embedOne(ctx context.Context, inputs []string) ([][]float32, er
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		// The URL is never logged or wrapped in: it may carry a key in a query
-		// string on some deployments.
-		return nil, fmt.Errorf("embed request failed after %s: %w", time.Since(started).Round(time.Millisecond), err)
+		return nil, fmt.Errorf("embed request failed after %s: %w",
+			time.Since(started).Round(time.Millisecond), redactURL(err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -183,6 +184,28 @@ func (c *Client) embedOne(ctx context.Context, inputs []string) ([][]float32, er
 		"duration_ms", time.Since(started).Milliseconds(),
 		"tokens_in", parsed.Usage.PromptTokens)
 	return out, nil
+}
+
+// redactURL strips the request URL out of a transport error, keeping the
+// scheme and host.
+//
+// net/http wraps every transport failure in a *url.Error carrying the FULL
+// URL, and that error is what a caller logs. Some OpenAI-compatible
+// deployments carry their key in a query string, so the plain wrapped error is
+// a credential in a log line — the rule is "never log a token, a full URL, or
+// a query string", and this is the one place in this package that would break
+// it. The host survives because "which endpoint was unreachable" is the whole
+// diagnostic value of the message.
+func redactURL(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	where := "the embedding endpoint"
+	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
+		where = u.Scheme + "://" + u.Host
+	}
+	return fmt.Errorf("%s %s: %w", uerr.Op, where, uerr.Err)
 }
 
 // startHeartbeat logs at intervals while a request is in flight and returns a
