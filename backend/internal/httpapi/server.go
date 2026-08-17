@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/web"
 )
 
@@ -19,6 +20,10 @@ type Deps struct {
 	// repository status, which its endpoint says with a 503 rather than an
 	// empty list.
 	Repos RepoStatusSource
+	// Ask runs the question pipeline; Threads persists the record. Nil means
+	// this deployment cannot answer questions, which its routes say with a 503.
+	Ask     Asker
+	Threads *threads.Store
 }
 
 // Server routes requests and owns the middleware chain.
@@ -48,6 +53,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
+	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
+	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
+	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	s.mux.Handle("/", web.Handler())

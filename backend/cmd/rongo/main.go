@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/embed"
@@ -23,11 +24,14 @@ import (
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
+	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
+	"github.com/trick77/rongo/internal/threads"
 )
 
 func main() {
@@ -154,10 +158,33 @@ func main() {
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
 
-	srv := httpapi.NewServer(httpapi.Deps{
-		Auth:  authSvc,
-		Repos: repostatus.New(db, moduleOpts(cfg)),
-	})
+	embedder := embed.NewClient(embed.Config{
+		BaseURL: cfg.EmbedBaseURL,
+		APIKey:  cfg.EmbedAPIKey,
+		Model:   cfg.EmbedModel,
+		Dim:     cfg.EmbedDim,
+	}, nil)
+	deps := httpapi.Deps{
+		Auth:    authSvc,
+		Repos:   repostatus.New(db, moduleOpts(cfg)),
+		Threads: threads.NewStore(db),
+	}
+	// Without a model endpoint rongo still serves the Repos page and the index;
+	// the question routes answer 503 rather than failing per request.
+	if cfg.LLMBaseURL != "" {
+		deps.Ask = ask.NewPipeline(
+			llm.NewClient(llm.Config{
+				BaseURL:     cfg.LLMBaseURL,
+				APIKey:      cfg.LLMAPIKey,
+				IdleTimeout: 90 * time.Second,
+			}, nil),
+			retrieve.New(db, embedder),
+			ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
+		)
+	} else {
+		slog.Warn("BACKEND_LLM_BASE_URL is unset; questions cannot be answered")
+	}
+	srv := httpapi.NewServer(deps)
 
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
