@@ -70,8 +70,23 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	if err := store.Migrate(db); err != nil {
+	if err := store.Migrate(db, cfg.EmbedDim); err != nil {
 		slog.Error("apply migrations", "err", err)
+		os.Exit(1)
+	}
+	// The vec0 table's width is fixed when the database is created. Pointing a
+	// differently configured process at an existing file is a loud failure
+	// here rather than a rejected insert on every chunk much later — and, worse,
+	// a semantic lane that silently answers nothing.
+	builtDim, err := store.BuiltDim(db)
+	if err != nil {
+		slog.Error("read the vector table's dimension", "err", err)
+		os.Exit(1)
+	}
+	if builtDim != cfg.EmbedDim {
+		slog.Error("this database was built for a different embedding model",
+			"built_dim", builtDim, "configured_dim", cfg.EmbedDim,
+			"fix", "point BACKEND_DB_PATH at a fresh file, or set BACKEND_EMBED_DIM back")
 		os.Exit(1)
 	}
 

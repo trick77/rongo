@@ -36,6 +36,28 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// BuiltDim reports the dimension chunks_vec was actually created with, so a
+// boot can refuse a database built for another embedding model instead of
+// failing later on every insert.
+//
+// pragma_table_info reports an empty type for vec0 virtual-table columns on
+// this sqlite-vec build (v0.1.7-alpha.2), so the dimension cannot come from
+// there. It IS in the table's original DDL, which SQLite keeps verbatim in
+// sqlite_master.sql — parse the bracketed dimension out of that.
+func BuiltDim(db *sql.DB) (int, error) {
+	var ddl string
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chunks_vec'`).Scan(&ddl)
+	if err != nil {
+		return 0, fmt.Errorf("read chunks_vec schema: %w", err)
+	}
+	open := strings.IndexByte(ddl, '[')
+	closing := strings.IndexByte(ddl, ']')
+	if open < 0 || closing <= open {
+		return 0, fmt.Errorf("could not determine the chunks_vec dimension from its schema %q", ddl)
+	}
+	return strconv.Atoi(ddl[open+1 : closing])
+}
+
 // VecLiteral encodes a float32 vector as the JSON-array text sqlite-vec
 // accepts as a bind parameter.
 func VecLiteral(v []float32) string {

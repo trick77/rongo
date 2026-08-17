@@ -15,7 +15,7 @@ func newService(t *testing.T) *Service {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db); err != nil {
+	if err := store.Migrate(db, 1536); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return NewService(db, "dev", "")

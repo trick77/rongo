@@ -37,10 +37,22 @@ type Config struct {
 	// rather than truncated: half a file produces confidently wrong answers
 	// about the other half.
 	IndexMaxFileBytes int
-	AuthMode          AuthMode
-	AdminToken        string // required when AuthMode is token
-	SessionSecret     string // reserved: not read by anything yet — see the check below
-	LogLevel          string
+	// IndexEnabled switches the whole indexing side off, for a deployment that
+	// only serves the UI. It defaults to ON, and while it is on an embedding
+	// endpoint is mandatory: an indexer that cannot embed produces a repository
+	// list that looks configured and an index that stays empty.
+	IndexEnabled bool
+	// Embedding endpoint. EmbedDim is also the width the vec0 table is built
+	// with, so changing it means a new database, not a restart — store.BuiltDim
+	// makes a mismatch a loud failure rather than a wrong answer.
+	EmbedBaseURL  string
+	EmbedAPIKey   string
+	EmbedModel    string
+	EmbedDim      int
+	AuthMode      AuthMode
+	AdminToken    string // required when AuthMode is token
+	SessionSecret string // reserved: not read by anything yet — see the check below
+	LogLevel      string
 }
 
 // Load reads and validates the environment. It returns the first problem it
@@ -55,6 +67,11 @@ func Load() (Config, error) {
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
 		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
+		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
+		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
+		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
+		EmbedDim:          envIntOr("BACKEND_EMBED_DIM", 1536),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
@@ -77,6 +94,17 @@ func Load() (Config, error) {
 	if len(cfg.SessionSecret) < 16 {
 		return Config{}, fmt.Errorf(
 			"BACKEND_SESSION_SECRET must be at least 16 characters; generate one with `openssl rand -base64 32`")
+	}
+
+	// EmbedDim is not a tunable that may quietly fall back: it is baked into the
+	// vec0 table at migration time, so a bad value would build a database that
+	// every later insert rejects.
+	if cfg.EmbedDim <= 0 {
+		return Config{}, fmt.Errorf("BACKEND_EMBED_DIM must be a positive number of dimensions")
+	}
+	if cfg.IndexEnabled && cfg.EmbedBaseURL == "" {
+		return Config{}, fmt.Errorf(
+			"BACKEND_EMBED_BASE_URL is required while indexing is enabled; set it, or set BACKEND_INDEX_ENABLED=false to run without indexing")
 	}
 
 	switch cfg.AuthMode {
@@ -113,6 +141,21 @@ func envIntOr(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// envBoolOr reads an on/off setting. Anything unrecognised falls back to the
+// default rather than failing the boot.
+func envBoolOr(key string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func envOr(key, fallback string) string {

@@ -22,10 +22,10 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 	db := openTemp(t)
 
 	// When
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, 1536); err != nil {
 		t.Fatalf("first Migrate() err = %v", err)
 	}
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, 1536); err != nil {
 		t.Fatalf("second Migrate() err = %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&afterSecond); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, 1536); err != nil {
 		t.Fatalf("third Migrate() err = %v", err)
 	}
 	var afterThird int

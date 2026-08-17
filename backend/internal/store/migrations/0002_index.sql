@@ -76,8 +76,14 @@ CREATE INDEX idx_chunks_hash ON chunks(content_hash);
 -- chunks_vec: the semantic lane. rowid == chunks.id. vec0 cannot appear in
 -- triggers or FK cascades, so this 1:1 bridging is maintained by hand, in the
 -- same transaction as the chunks write.
+--
+-- The dimension is substituted by store.Migrate from BACKEND_EMBED_DIM rather
+-- than hardcoded: text-embedding-3-small is 1536 and -large is 3072, and the
+-- two are compared by measurement. store.BuiltDim reads the dimension back out
+-- of this DDL, so a database built for one model cannot be used quietly with
+-- another.
 CREATE VIRTUAL TABLE chunks_vec USING vec0(
-    embedding float[1536]
+    embedding float[{{EMBED_DIM}}]
 );
 
 -- chunks_fts: the keyword lane over the RAW text, keyed 1:1 by rowid ==
