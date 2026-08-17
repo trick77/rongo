@@ -840,9 +840,19 @@
   <p>
     Dazu eine Korrektur an der Begründung dieser Phase: Die Zahl recall@20 = 0.857, aus der
     «die Antwort ist schon da, nur schlecht sortiert» abgeleitet wurde, gehört zu
-    <code>text-embedding-3-large</code>. Unter dem eingesetzten <code>-small</code> sind es 0.786 —
-    <b>sechs der 28 Fragen haben gar keinen richtigen Treffer im Kandidatensatz</b>. Das ist ein
-    Fundproblem, an dem weder Umsortieren noch ein Steckbrief darüber etwas ändert.
+    <code>text-embedding-3-large</code>. Unter dem eingesetzten <code>-small</code> sind es 0.786,
+    sechs der 28 Fragen verfehlen also die Top 20. <b>Fünf davon werden sehr wohl gefunden</b> — auf
+    den fusionierten Rängen 23 bis 52, drei von ihnen über die semantische Spur. Nur
+    <code>freebytes.go</code> wird gar nicht gefunden. Es bleibt also ein Sortierproblem, und die
+    Modularme hatten die Gelegenheit, es zu lösen, und haben sie nicht genutzt.
+  </p>
+  <p>
+    Wichtig für die Einordnung: Der Messharness sucht mit der <b>rohen Frage</b>. Das Design tut das
+    nicht — Schritt 1 «Verstehen» erzeugt erweiterte Suchbegriffe samt geratenem Codevokabular, und
+    laut Abschnitt «Anfrageseite» geht die Anfrage zweimal hinein, einmal in Fachsprache und einmal
+    in Codevokabular. Genau diese Brücke fehlt den sechs Fragen: <em>Apple TV → AirPlay</em>,
+    <em>Platte voll → statfs</em>. Sie ist entworfen, ungebaut und gehört zu Phase 4. Alle Zahlen
+    hier beschreiben deshalb eine Konfiguration, die das Design nie vorgeschlagen hat.
   </p>
   <p>
     Deshalb entsteht <code>module_profiles</code> vorerst nicht. Die Routing-Ebene existiert, um die

@@ -64,11 +64,29 @@ not in the candidate set.
 ### A correction to the reasoning that motivated this phase
 
 The phase-3 plan argued from "recall@20 = 0.857, so the answer is already in the
-list and only badly ordered". That figure is `text-embedding-3-large`'s. Under
-the model actually deployed, `-small`, recall@20 is 0.786: **six of 28 questions
-have no correct hit in the top 60 candidates at all**, `rag/stopwords.go` among
-them. For those it is a retrieval failure, not a ranking failure, and no amount
-of reordering — or of module profiles above it — addresses them.
+list and only badly ordered". That figure is `text-embedding-3-large`'s; under
+the model actually deployed it is 0.786, so six of 28 questions miss.
+
+**Where those six actually are** — measured afterwards with `K=200`, which is
+the thing to check before calling anything a retrieval failure:
+
+| Question | expected file | fused rank | found by |
+|---|---|---|---|
+| Platte fast voll | `peeq download/freebytes.go` | **not found** | — |
+| Extractor-Fehler | `peeq failmonitor/monitor.go` | 34 | `keyword:any` |
+| Apple TV | `peeq playbackgrant/store.go` | 52 | `keyword:any` |
+| Stopwörter | `peeq rag/stopwords.go` | 23 | `semantic` |
+| Upload-Pfad | `loom artifact/upload_path.go` | 25 | `semantic` |
+| Share-Links | `loom chat/share_store.go` | 23 | `semantic` |
+
+**Five of the six are found and merely ranked too low**, three of them by the
+semantic lane at ranks 23–25 — just outside the cut. Only `freebytes.go` is a
+genuine miss. So this is a ranking problem after all, and the earlier reading of
+these numbers as "the answer is not in the candidate set" was wrong: rank 0 in
+the harness means "not in the fused top 20", not "not retrieved".
+
+That the module arms do not rescue them is therefore a real result, not a
+tautology — they had the chance and did not take it.
 
 ### Consequence
 
@@ -148,6 +166,26 @@ rather than papered over:
   `go-sqlite3/.github` and `loom/docs/superpowers/specs` all became modules.
   They cost nothing today because no profile is generated, but they are
   candidates nobody will ever ask about.
+
+## What this harness does not measure
+
+It searches with the **raw question**. The design does not: step 1 of the
+question pipeline (`Verstehen`) produces *«erweiterte Suchbegriffe samt
+geratenem Codevokabular»*, and the spec's «Anfrageseite» row says the query goes
+in twice — once in business language, once with guessed code vocabulary — and
+both result lists are merged.
+
+That is exactly the bridge these questions need: *Apple TV → AirPlay*,
+*Platte voll → statfs, free bytes*. It is designed, it is unbuilt, and it is
+phase 4. Every number here therefore describes a configuration the design never
+proposed, and the six failures above should be re-measured once query expansion
+exists before any of them is treated as a property of the index.
+
+Worth noting for that re-measurement: `playbackgrant/store.go` contains both
+"AirPlay" and "Apple TV" **literally**, in its package doc comment. The bridge
+was never missing for that question — the keyword lane holds the file at rank 15
+of its OR rung, and fusion places it at 52. This is also a second, quieter
+argument for keeping comments in the search lanes.
 
 ## Reproducing
 
