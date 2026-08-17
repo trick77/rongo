@@ -82,15 +82,6 @@ type Question struct {
 	Note string `json:"note,omitempty"`
 }
 
-// repos lists the repositories a question's candidates live in, in order.
-func (q Question) repos() []string {
-	out := make([]string, 0, len(q.Candidates))
-	for _, c := range q.Candidates {
-		out = append(out, c.Repo)
-	}
-	return out
-}
-
 // paths renders the candidates for a log line.
 func (q Question) paths() string {
 	parts := make([]string, 0, len(q.Candidates))
@@ -262,7 +253,14 @@ func tokenEnvOf(specs []repos.Spec, name string) string {
 type result struct {
 	q    Question
 	rank int // 1-based rank of the first expected hit; 0 means not found
-	hits int
+	// firstRank scores against the FIRST candidate only. For a unique question
+	// it equals rank; for the two that were reclassified as ambiguous it is
+	// what the earlier documents measured, which is what makes the anchor arm
+	// comparable to them.
+	firstRank int
+	// found is how many of the question's candidates the hit list surfaces.
+	found int
+	hits  int
 	// barred is how many rows the distance bound dropped from the SEMANTIC
 	// LANE — measured on the lane itself, never on Search's output.
 	//
@@ -332,34 +330,33 @@ func TestEvalMeasure(t *testing.T) {
 			nearest = loose[0].Distance
 		}
 		results = append(results, result{
-			q:       q,
-			rank:    rankOfExpected(hits, q),
-			hits:    len(hits),
-			barred:  len(loose) - len(bounded),
-			nearest: nearest,
+			q:         q,
+			rank:      rankOfExpected(hits, q),
+			firstRank: rankOfCandidate(hits, q.Candidates[0]),
+			found:     candidatesFound(hits, q),
+			hits:      len(hits),
+			barred:    len(loose) - len(bounded),
+			nearest:   nearest,
 		})
 	}
 
-	var recall5, recall20 int
-	var mrr float64
-	for _, res := range results {
-		if res.rank > 0 {
-			mrr += 1 / float64(res.rank)
-			if res.rank <= 20 {
-				recall20++
-			}
-			if res.rank <= 5 {
-				recall5++
-			}
-		}
-	}
-	n := float64(len(results))
-
 	t.Logf("")
 	t.Logf("model=%s dim=%d questions=%d max_distance=%v", model, dim, len(results), r.MaxDistance)
-	t.Logf("recall@5  = %.3f (%d/%d)", float64(recall5)/n, recall5, len(results))
-	t.Logf("recall@20 = %.3f (%d/%d)", float64(recall20)/n, recall20, len(results))
-	t.Logf("MRR       = %.3f", mrr/n)
+
+	// The headline is the unique cohort. Mixing the other two in would silently
+	// change what recall@5 means against every earlier document.
+	reportRanks(t, "unique cohort", filterResults(results, func(res result) bool {
+		return res.q.Resolution == ResolutionUnique
+	}))
+
+	// The anchor. Same questions, same scoring as phase 2/3/4a — it must come
+	// back 0.679 / 0.786 / 0.476, and if it does not, nothing else on this page
+	// can be compared with anything published before it.
+	anchor := loadAnchorCohort(t)
+	reportRanks(t, "anchor: the original 28, first candidate only",
+		filterResults(results, func(res result) bool { return anchor[res.q.Text] }))
+
+	reportCohorts(t, results)
 
 	// Per-question detail, worst first: a bad QUESTION has to stay
 	// distinguishable from bad retrieval, and only the list makes that visible.
@@ -382,6 +379,113 @@ func TestEvalMeasure(t *testing.T) {
 // evalCandidates matches retrieve's own per-lane candidate count, so the
 // barred figure describes the lane the search actually used.
 const evalCandidates = 40
+
+// anchorFile names the questions the published measurements ran on.
+const anchorFile = "anchor-cohort.json"
+
+// loadAnchorCohort reads the question texts the earlier documents measured.
+func loadAnchorCohort(t *testing.T) map[string]bool {
+	t.Helper()
+	body, err := os.ReadFile(anchorFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", anchorFile, err)
+	}
+	var doc struct {
+		Questions []string `json:"questions"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("parse %s: %v", anchorFile, err)
+	}
+	out := map[string]bool{}
+	for _, q := range doc.Questions {
+		out[q] = true
+	}
+	return out
+}
+
+func filterResults(in []result, keep func(result) bool) []result {
+	var out []result
+	for _, r := range in {
+		if keep(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// reportRanks prints recall@5, recall@20 and MRR for one cohort.
+//
+// The anchor cohort is scored against the first candidate; every other cohort
+// against any candidate. They are the same number wherever a question has one
+// candidate, which is all but two of the set.
+func reportRanks(t *testing.T, label string, rows []result) {
+	t.Helper()
+	if len(rows) == 0 {
+		return
+	}
+	anchor := strings.HasPrefix(label, "anchor")
+	var recall5, recall20 int
+	var mrr float64
+	for _, res := range rows {
+		rank := res.rank
+		if anchor {
+			rank = res.firstRank
+		}
+		if rank > 0 {
+			mrr += 1 / float64(rank)
+			if rank <= 20 {
+				recall20++
+			}
+			if rank <= 5 {
+				recall5++
+			}
+		}
+	}
+	n := float64(len(rows))
+	t.Logf("")
+	t.Logf("--- %s (n=%d)", label, len(rows))
+	t.Logf("recall@5  = %.3f (%d/%d)", float64(recall5)/n, recall5, len(rows))
+	t.Logf("recall@20 = %.3f (%d/%d)", float64(recall20)/n, recall20, len(rows))
+	t.Logf("MRR       = %.3f", mrr/n)
+}
+
+// reportCohorts prints what the two new kinds of question ask of the search.
+//
+// They are NOT recall numbers and must not be read as such. An ambiguous
+// question is served when the search puts at least two of its alternatives on
+// the table; a composition question when it puts all of the parts there.
+func reportCohorts(t *testing.T, results []result) {
+	t.Helper()
+	var ambigN, ambigServed, ambigFound, ambigTotal int
+	var compN, compComplete, compFound, compTotal int
+	for _, res := range results {
+		switch res.q.Resolution {
+		case ResolutionAmbiguous:
+			ambigN++
+			ambigFound += res.found
+			ambigTotal += len(res.q.Candidates)
+			if res.found >= 2 {
+				ambigServed++
+			}
+		case ResolutionComposition:
+			compN++
+			compFound += res.found
+			compTotal += len(res.q.Candidates)
+			if res.found == len(res.q.Candidates) {
+				compComplete++
+			}
+		}
+	}
+	if ambigN > 0 {
+		t.Logf("")
+		t.Logf("--- ambiguous (n=%d): two or more alternatives in the top 20 = %.3f (%d/%d), candidates %d/%d",
+			ambigN, float64(ambigServed)/float64(ambigN), ambigServed, ambigN, ambigFound, ambigTotal)
+	}
+	if compN > 0 {
+		t.Logf("--- composition (n=%d): all parts in the top 20 = %.3f (%d/%d), parts %d/%d",
+			compN, float64(compComplete)/float64(compN), compComplete, compN, compFound, compTotal)
+	}
+}
 
 func rankOrLast(rank int) int {
 	if rank == 0 {
