@@ -70,8 +70,15 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 			`INSERT INTO chunks_vec (rowid, embedding) VALUES (?, ?)`, id, store.VecLiteral(vecs[i])); err != nil {
 			return fmt.Errorf("index %s/%s chunk %d vector: %w", repo, path, c.Ordinal, err)
 		}
+		// The keyword lane indexes SearchText, which differs from RawText only
+		// when comments were stripped. RawText stays untouched in `chunks`
+		// because that is what a citation quotes.
+		search := c.SearchText
+		if search == "" {
+			search = c.RawText
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, c.RawText); err != nil {
+			`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, search); err != nil {
 			return fmt.Errorf("index %s/%s chunk %d keywords: %w", repo, path, c.Ordinal, err)
 		}
 	}

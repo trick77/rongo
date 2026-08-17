@@ -123,6 +123,7 @@ func main() {
 		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{MaxBytes: cfg.IndexMaxFileBytes}),
+		Chunk:    chunkOptions(cfg),
 	})
 
 	poller := indexer.NewPoller(indexer.PollerDeps{
@@ -209,4 +210,13 @@ func parseLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// chunkOptions applies the comment switch to the default sizing. Comments are
+// kept unless BACKEND_INDEX_COMMENTS=0: the search lanes then carry code only,
+// while chunks.raw_text keeps the untouched source for citations.
+func chunkOptions(cfg config.Config) indexer.ChunkOptions {
+	o := indexer.DefaultChunkOptions()
+	o.StripComments = !cfg.IndexComments
+	return o
 }

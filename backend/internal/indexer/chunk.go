@@ -18,12 +18,16 @@ import (
 // keyword lane indexes and what a citation quotes: that lane has to match the
 // literal identifier the user typed.
 type Chunk struct {
-	Ordinal     int
-	StartLine   int
-	EndLine     int
-	Symbol      string
-	Text        string
-	RawText     string
+	Ordinal   int
+	StartLine int
+	EndLine   int
+	Symbol    string
+	Text      string
+	RawText   string
+	// SearchText is what the keyword lane indexes. It equals RawText unless
+	// comments were stripped, in which case RawText still holds the untouched
+	// source: a citation must quote the real file, never a doctored one.
+	SearchText  string
 	TokenCount  int
 	ContentHash string
 }
@@ -33,6 +37,19 @@ type ChunkOptions struct {
 	TargetTokens  int
 	MaxTokens     int
 	OverlapTokens int
+	// StripComments removes whole-line comments from the text that is embedded
+	// and full-text indexed, leaving only code in the search lanes.
+	//
+	// The reason is correctness before recall: a comment goes stale, is wrong,
+	// or is missing entirely, and a stale one pulls the vector towards a claim
+	// no line of code has to honour. An answer built on it is convincingly
+	// wrong, which the spec names as the most expensive failure this product
+	// can have. What that principle costs in hit rate is a measured arm in the
+	// eval harness, not an assumption.
+	//
+	// Defaults to false so an existing database does not change meaning under a
+	// deployment that never set BACKEND_INDEX_COMMENTS.
+	StripComments bool
 }
 
 // DefaultChunkOptions targets ~600 tokens with an 800 ceiling and ~75 tokens of
@@ -107,7 +124,11 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 			}
 			chain := symbolChain(r.sym)
 			for _, part := range splitOverlongLine(raw, opts.MaxTokens) {
-				text := enrich(repo, path, chain, part)
+				searchPart := part
+				if opts.StripComments {
+					searchPart = stripComments(part)
+				}
+				text := enrich(repo, path, chain, searchPart)
 				out = append(out, Chunk{
 					Ordinal:     len(out),
 					StartLine:   w.start,
@@ -115,8 +136,9 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 					Symbol:      r.sym.Name,
 					Text:        text,
 					RawText:     part,
+					SearchText:  searchPart,
 					TokenCount:  estimateTokens(text),
-					ContentHash: contentHash(repo, path, chain, part),
+					ContentHash: contentHash(repo, path, chain, searchPart),
 				})
 			}
 		}
@@ -243,6 +265,27 @@ func docStart(lines []string, line, floor int) int {
 		start = l
 	}
 	return start
+}
+
+// stripComments drops whole-line comments, keeping every line that carries
+// code.
+//
+// Deliberately line-based and syntax-blind, like docStart: a trailing comment
+// after code stays. Removing it would need a real lexer per language, and a
+// naive cut at the first "//" would mangle every URL and every string literal
+// containing one — a wrong guess there deletes code, which is far worse than
+// leaving a few words of prose behind.
+func stripComments(s string) string {
+	lines := strings.Split(s, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t != "" && isComment(t) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "\n")
 }
 
 func isComment(trimmed string) bool {

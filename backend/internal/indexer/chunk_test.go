@@ -123,6 +123,54 @@ func TestChunkFile_cutsAtSymbolBoundaries(t *testing.T) {
 	}
 }
 
+func TestChunkFile_stripCommentsKeepsTheSourceButNotTheClaim(t *testing.T) {
+	// Given: a doc comment carrying business vocabulary the code itself never
+	// says. That is precisely what makes it dangerous — it steers the vector
+	// towards a claim no line of code has to honour, and it goes stale silently.
+	const claim = "abandoned carts"
+	on := chunkFor(t, ChunkFile("shop", "master", "src/A.java",
+		[]byte(javaSource), javaSymbols(), DefaultChunkOptions()), "run")
+	if !strings.Contains(on.Text, claim) {
+		t.Fatalf("fixture is useless: the embedded text does not contain %q with comments on", claim)
+	}
+
+	// When
+	opts := DefaultChunkOptions()
+	opts.StripComments = true
+	off := chunkFor(t, ChunkFile("shop", "master", "src/A.java",
+		[]byte(javaSource), javaSymbols(), opts), "run")
+
+	// Then: gone from what is searched...
+	if strings.Contains(off.Text, claim) {
+		t.Errorf("embedded text still contains %q", claim)
+	}
+	if strings.Contains(off.SearchText, claim) {
+		t.Errorf("keyword-lane text still contains %q", claim)
+	}
+	// ...and still there in what a citation quotes, because the source is the
+	// source and rongo must never show a doctored file to a reader.
+	if !strings.Contains(off.RawText, claim) {
+		t.Errorf("RawText lost %q — a citation must quote the real file", claim)
+	}
+	if !strings.Contains(off.SearchText, "sender.send()") {
+		t.Errorf("SearchText lost the code itself: %q", off.SearchText)
+	}
+	// The embedding cache is keyed by content hash. If stripping did not change
+	// it, a re-index would hand back vectors that were computed WITH the
+	// comments and the whole arm would measure nothing.
+	if off.ContentHash == on.ContentHash {
+		t.Error("ContentHash unchanged by stripping — the embedding cache would serve the old vectors")
+	}
+}
+
+func TestChunkFile_defaultKeepsComments(t *testing.T) {
+	// The switch defaults to keeping comments so an existing database does not
+	// change meaning under a deployment that never set the variable.
+	if DefaultChunkOptions().StripComments {
+		t.Error("DefaultChunkOptions strips comments; the safe default is to keep them")
+	}
+}
+
 func TestChunkFile_coversEveryLineExactlyOnce(t *testing.T) {
 	// Given: symbol regions must partition the file. A gap loses code silently
 	// — the answer layer would report "not found" for something that is indexed.
