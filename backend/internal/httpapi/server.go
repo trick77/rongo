@@ -15,6 +15,10 @@ import (
 // the feature is unconfigured; its endpoints answer 503.
 type Deps struct {
 	Auth *auth.Service
+	// Repos backs the Repos page. Nil means this deployment cannot report
+	// repository status, which its endpoint says with a 503 rather than an
+	// empty list.
+	Repos RepoStatusSource
 }
 
 // Server routes requests and owns the middleware chain.
@@ -43,6 +47,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
+	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	s.mux.Handle("/", web.Handler())

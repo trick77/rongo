@@ -23,7 +23,9 @@ import (
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
+	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 )
@@ -123,6 +125,7 @@ func main() {
 		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{MaxBytes: cfg.IndexMaxFileBytes}),
+		Chunk:    chunkOptions(cfg),
 	})
 
 	poller := indexer.NewPoller(indexer.PollerDeps{
@@ -151,7 +154,10 @@ func main() {
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
 
-	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
+	srv := httpapi.NewServer(httpapi.Deps{
+		Auth:  authSvc,
+		Repos: repostatus.New(db, moduleOpts(cfg)),
+	})
 
 	httpServer := &http.Server{
 		Addr:    cfg.Addr,
@@ -209,4 +215,20 @@ func parseLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// chunkOptions applies the comment switch to the default sizing. Comments are
+// kept unless BACKEND_INDEX_COMMENTS=0: the search lanes then carry code only,
+// while chunks.raw_text keeps the untouched source for citations.
+func chunkOptions(cfg config.Config) indexer.ChunkOptions {
+	o := indexer.DefaultChunkOptions()
+	o.StripComments = !cfg.IndexComments
+	return o
+}
+
+// moduleOpts are the clustering constants. The Repos page and the routing layer
+// must be given the same ones, or the count on the page describes a cut nobody
+// searches against.
+func moduleOpts(cfg config.Config) modules.Opts {
+	return modules.Opts{MinChunks: cfg.ModuleMinChunks, MaxChunks: cfg.ModuleMaxChunks}
 }

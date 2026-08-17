@@ -42,6 +42,21 @@ type Config struct {
 	// endpoint is mandatory: an indexer that cannot embed produces a repository
 	// list that looks configured and an index that stays empty.
 	IndexEnabled bool
+	// IndexComments keeps whole-line comments in the text that is embedded and
+	// full-text indexed. Setting BACKEND_INDEX_COMMENTS=0 leaves only code in
+	// the search lanes; the source itself is stored untouched either way, so a
+	// citation always quotes the real file.
+	//
+	// Changing this changes every chunk's content hash, so flipping it costs a
+	// full re-embed of the corpus. That is intended: reusing vectors computed
+	// with comments under a setting that excludes them would be silently wrong.
+	IndexComments bool
+	// ModuleMinChunks and ModuleMaxChunks are the module cut: below the first a
+	// directory is folded into its parent, above the second it is split again.
+	// Calibrated against the real corpus and recorded in the measurement
+	// document — the defaults here are a starting point, not a finding.
+	ModuleMinChunks int
+	ModuleMaxChunks int
 	// Embedding endpoint. EmbedDim is also the width the vec0 table is built
 	// with, so changing it means a new database, not a restart — store.BuiltDim
 	// makes a mismatch a loud failure rather than a wrong answer.
@@ -83,6 +98,9 @@ func Load() (Config, error) {
 		// not something a person asks how it works.
 		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
 		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
 		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
 		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),

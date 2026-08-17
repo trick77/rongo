@@ -41,8 +41,59 @@ func vec(marker float32) []float32 {
 
 func sampleChunks() []Chunk {
 	return []Chunk{
-		{Ordinal: 0, StartLine: 1, EndLine: 4, Symbol: "run", Text: "enriched one", RawText: "public void run() {}", TokenCount: 5, ContentHash: "h1"},
-		{Ordinal: 1, StartLine: 5, EndLine: 9, Symbol: "seen", Text: "enriched two", RawText: "public int seen() { return 0; }", TokenCount: 6, ContentHash: "h2"},
+		{Ordinal: 0, StartLine: 1, EndLine: 4, Symbol: "run", Text: "enriched one",
+			RawText: "public void run() {}", SearchText: "public void run() {}", TokenCount: 5, ContentHash: "h1"},
+		{Ordinal: 1, StartLine: 5, EndLine: 9, Symbol: "seen", Text: "enriched two",
+			RawText: "public int seen() { return 0; }", SearchText: "public int seen() { return 0; }", TokenCount: 6, ContentHash: "h2"},
+	}
+}
+
+func TestReplaceFile_refusesAChunkWithoutSearchText(t *testing.T) {
+	// A fallback to RawText here would put the comments straight back into the
+	// lane they were just removed from, on exactly the chunks that are pure
+	// prose, and nothing would say so.
+	db := writeDB(t)
+	chunks := []Chunk{{Ordinal: 0, StartLine: 1, EndLine: 2, Text: "e", RawText: "// only a comment", ContentHash: "h"}}
+
+	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A.java", "sha", "java", 10,
+		chunks, [][]float32{vec(1)}, nil)
+
+	if err == nil {
+		t.Fatal("ReplaceFile accepted a chunk with an empty SearchText")
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks`); n != 0 {
+		t.Errorf("%d chunks written despite the error, want 0", n)
+	}
+}
+
+func TestReplaceFile_keywordLaneIndexesSearchTextNotTheComment(t *testing.T) {
+	// Given: a chunk whose comment was stripped. RawText keeps the comment for
+	// citations; the keyword lane must not be able to match on it, or the
+	// principle holds only for the vector lane and the full-text lane quietly
+	// answers from prose.
+	db := writeDB(t)
+	w := NewWriter(db)
+	chunks := []Chunk{{
+		Ordinal: 0, StartLine: 1, EndLine: 3, Symbol: "run",
+		RawText:     "// sends the teaser mail\nvoid run() { sender.send(); }",
+		SearchText:  "void run() { sender.send(); }",
+		Text:        "enriched",
+		ContentHash: "h1",
+	}}
+	if err := w.ReplaceFile(context.Background(), "shop", "src/A.java", "sha", "java", 10,
+		chunks, [][]float32{vec(1)}, nil); err != nil {
+		t.Fatalf("ReplaceFile: %v", err)
+	}
+
+	// Then
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'teaser'`); n != 0 {
+		t.Errorf("keyword lane matched the stripped comment %d times, want 0", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'sender'`); n != 1 {
+		t.Errorf("keyword lane matched the code %d times, want 1", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks WHERE raw_text LIKE '%teaser%'`); n != 1 {
+		t.Errorf("chunks.raw_text lost the comment (%d rows) — a citation must quote the real file", n)
 	}
 }
 

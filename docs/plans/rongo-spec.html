@@ -794,7 +794,7 @@
   <ol class="phases">
     <li><b>Grundgerüst</b><span>Repo, Go-Modul <code>github.com/trick77/rongo</code>, Config, Migrationsrunner, Store, Auth (dev + Admin-Token, OIDC-Naht gelegt), eingebettete SPA-Hülle, Containerfile, compose.yaml, CI mit peeqs Coverage-Gates.</span></li>
     <li><b>Indexierung</b><span>Repo-Registrierung, Clone/Fetch/Diff-Poller, <code>ctags</code>- und <code>rg</code>-Aufrufe, Chunking, Embedding-Client, Hybridsuche portiert aus <code>peeq/backend/internal/rag</code>. Endet mit der Messung small gegen large.</span></li>
-    <li><b>Modulsteckbriefe</b><span>Clustering, deutsche Zusammenfassungen von Pro, Steckbrief-Embeddings, Neuzusammenfassung bei Diff.</span></li>
+    <li><b>Modulebene</b><span>Deterministisches Clustering, Repos-Seite, Messung der Modulebene. <b>Die Steckbrief-Erzeugung ist nicht gebaut worden</b> — siehe den Nachtrag unten.</span></li>
     <li><b>Frage-Pipeline «wie»</b><span>Verstehen → Routen → Sammeln → Streamen, SSE-Events, Thread-Persistenz, Rückfrage-Rundlauf, Rollenwahl, Belegfeld. Das erste wirklich benutzbare Release.</span></li>
     <li><b>Kostenerfassung</b><span><code>llm_calls</code> pro Aufruf, mitgelieferter litellm-Katalog, Übersteuerungstabelle für die MiMo-Deployments, Kosten-Seite mit Aufschlüsselung nach Modell.</span></li>
     <li><b>«Warum»</b><span>Historie indexiert und ins Sammeln gemischt. Klein, gleiche Pipeline.</span></li>
@@ -820,9 +820,65 @@
 </section>
 
 <section>
+  <h2>Nachtrag Phase 3: die Routing-Ebene ist gemessen und vorerst nicht gebaut</h2>
+  <p>
+    Phase 3 sollte <code>module_profiles</code> beim Indexieren erzeugen. Vorher wurde die These
+    geprüft, auf der alles darüber steht — <em>Bewertung auf Modulebene verbessert die Reihenfolge</em>
+    —, und zwar ohne einen einzigen Modellaufruf: Chunk-Treffer nach Modul gruppieren und danach neu
+    ordnen. Sechs Arme gegen dieselben 28 Fragen, Kriterium vorab festgelegt.
+    Ergebnis in <code>docs/measurements/2026-08-17-module-ranking-and-comments.md</code>:
+    <b>kein Arm schlägt die reine Chunk-Suche</b> (recall@5 0.679 gegen 0.607 im besten Modularm,
+    0.214 im schlechtesten).
+  </p>
+  <p>
+    Zwei Ursachen, beide in den Daten sichtbar. Grosse Module gewinnen über ihre Grösse:
+    <code>peeq/backend/internal/httpapi</code> hat 1135 Chunks und begräbt einen einzelnen sehr guten
+    Treffer unter zwanzig mittelmässigen. Und die milde Variante — ein gedämpfter Bonus statt einer
+    Umgruppierung — hilft zwar genau der Fehlerform aus Phase 2 (<code>rag/hybrid.go</code>
+    Rang 7 → 2), beschädigt aber mehr Fragen, als sie repariert.
+  </p>
+  <p>
+    Dazu eine Korrektur an der Begründung dieser Phase: Die Zahl recall@20 = 0.857, aus der
+    «die Antwort ist schon da, nur schlecht sortiert» abgeleitet wurde, gehört zu
+    <code>text-embedding-3-large</code>. Unter dem eingesetzten <code>-small</code> sind es 0.786,
+    sechs der 28 Fragen verfehlen also die Top 20. <b>Fünf davon werden sehr wohl gefunden</b> — auf
+    den fusionierten Rängen 23 bis 52, drei von ihnen über die semantische Spur. Nur
+    <code>freebytes.go</code> wird gar nicht gefunden. Es bleibt also ein Sortierproblem, und die
+    Modularme hatten die Gelegenheit, es zu lösen, und haben sie nicht genutzt.
+  </p>
+  <p>
+    Wichtig für die Einordnung: Der Messharness sucht mit der <b>rohen Frage</b>. Das Design tut das
+    nicht — Schritt 1 «Verstehen» erzeugt erweiterte Suchbegriffe samt geratenem Codevokabular, und
+    laut Abschnitt «Anfrageseite» geht die Anfrage zweimal hinein, einmal in Fachsprache und einmal
+    in Codevokabular. Genau diese Brücke fehlt den sechs Fragen: <em>Apple TV → AirPlay</em>,
+    <em>Platte voll → statfs</em>. Sie ist entworfen, ungebaut und gehört zu Phase 4. Alle Zahlen
+    hier beschreiben deshalb eine Konfiguration, die das Design nie vorgeschlagen hat.
+  </p>
+  <p>
+    Deshalb entsteht <code>module_profiles</code> vorerst nicht. Die Routing-Ebene existiert, um die
+    Antwortqualität zu heben; ihre billigste Vorstufe senkt sie messbar, und 700–7000 Pro-Aufrufe für
+    die volle Fassung sind damit nicht zu rechtfertigen. Was bleibt, ist das deterministische
+    Clustering: es kostet nichts, und die Repos-Seite zählt damit. Die Rückfrage aus Abschnitt
+    «Ablauf einer Frage» braucht in Phase 4 eine andere Quelle für ihre benannten Kandidaten als
+    vorberechnete Steckbriefe.
+  </p>
+  <p>
+    Offen bleibt der Gegentest: Der Fragenkatalog hat 28 Einträge und <b>keinen einzigen echten
+    Mehrdeutigkeitsfall</b> — jede Frage hat genau ein richtiges Repo und genau eine richtige Datei.
+    Der Nutzen einer Routing-Ebene liegt aber gerade dort. Mit einem Korpus, in dem sich Repositories
+    fachlich überschneiden, ist die Frage neu zu stellen.
+  </p>
+
   <h2>Bewusst offen gelassen</h2>
   <ul>
-    <li>Granularität des Modulsteckbrief-Clusterings (Paket, Verzeichnis, vom Modell vorgeschlagen) — braucht den echten Korpus.</li>
+    <li>
+      <s>Granularität des Modulsteckbrief-Clusterings</s> — <b>entschieden</b>: Verzeichnis, mit
+      Faltregel unter <code>BACKEND_MODULE_MIN_CHUNKS</code> und Splitregel über
+      <code>BACKEND_MODULE_MAX_CHUNKS</code>. Am echten Korpus 137 Module (peeq 52, loom 39,
+      go-sqlite3 46). Zwei bekannte Schwächen: ein flaches Verzeichnis lässt sich nicht splitten
+      (<code>httpapi</code>, 53 Dateien auf einer Ebene), und der Selector überspringt
+      Punkt-Verzeichnisse nicht, weshalb <code>.github/workflows</code> als Modul auftaucht.
+    </li>
     <li>Gepflegtes oder gelerntes Glossar über den Steckbrief-Zusammenfassungen — nur falls Phase 4 zeigt, dass die reine Modell-Brücke an echten Fragen scheitert.</li>
   </ul>
 </section>

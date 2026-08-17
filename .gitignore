@@ -88,3 +88,8 @@ docs/plans/
 .idea/
 *.swp
 *~
+
+# The live repository list. repos.example.yaml is the tracked template; this is
+# the operator's own copy and carries real clone URLs and token_env names for
+# internal forges. Same leak class the .env rules above guard against.
+repos.yaml

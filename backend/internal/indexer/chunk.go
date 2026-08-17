@@ -3,6 +3,7 @@ package indexer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"strings"
 
 	"github.com/trick77/rongo/internal/symbols"
@@ -18,12 +19,16 @@ import (
 // keyword lane indexes and what a citation quotes: that lane has to match the
 // literal identifier the user typed.
 type Chunk struct {
-	Ordinal     int
-	StartLine   int
-	EndLine     int
-	Symbol      string
-	Text        string
-	RawText     string
+	Ordinal   int
+	StartLine int
+	EndLine   int
+	Symbol    string
+	Text      string
+	RawText   string
+	// SearchText is what the keyword lane indexes. It equals RawText unless
+	// comments were stripped, in which case RawText still holds the untouched
+	// source: a citation must quote the real file, never a doctored one.
+	SearchText  string
 	TokenCount  int
 	ContentHash string
 }
@@ -33,6 +38,19 @@ type ChunkOptions struct {
 	TargetTokens  int
 	MaxTokens     int
 	OverlapTokens int
+	// StripComments removes whole-line comments from the text that is embedded
+	// and full-text indexed, leaving only code in the search lanes.
+	//
+	// The reason is correctness before recall: a comment goes stale, is wrong,
+	// or is missing entirely, and a stale one pulls the vector towards a claim
+	// no line of code has to honour. An answer built on it is convincingly
+	// wrong, which the spec names as the most expensive failure this product
+	// can have. What that principle costs in hit rate is a measured arm in the
+	// eval harness, not an assumption.
+	//
+	// Defaults to false so an existing database does not change meaning under a
+	// deployment that never set BACKEND_INDEX_COMMENTS.
+	StripComments bool
 }
 
 // DefaultChunkOptions targets ~600 tokens with an 800 ceiling and ~75 tokens of
@@ -107,7 +125,21 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 			}
 			chain := symbolChain(r.sym)
 			for _, part := range splitOverlongLine(raw, opts.MaxTokens) {
-				text := enrich(repo, path, chain, part)
+				searchPart := part
+				if opts.StripComments {
+					searchPart = stripComments(path, part)
+					if strings.TrimSpace(searchPart) == "" {
+						// A window of nothing but comments — a licence header,
+						// or a boundary landing inside a long doc block. The
+						// unstripped path already refuses a blank window; this
+						// is the same case one step later. Emitting it would
+						// store a chunk whose embedded text is the breadcrumb
+						// alone, and several of them would share one content
+						// hash.
+						continue
+					}
+				}
+				text := enrich(repo, path, chain, searchPart)
 				out = append(out, Chunk{
 					Ordinal:     len(out),
 					StartLine:   w.start,
@@ -115,8 +147,9 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 					Symbol:      r.sym.Name,
 					Text:        text,
 					RawText:     part,
+					SearchText:  searchPart,
 					TokenCount:  estimateTokens(text),
-					ContentHash: contentHash(repo, path, chain, part),
+					ContentHash: contentHash(repo, path, chain, searchPart),
 				})
 			}
 		}
@@ -243,6 +276,76 @@ func docStart(lines []string, line, floor int) int {
 		start = l
 	}
 	return start
+}
+
+// stripComments drops whole-line comments, keeping every line that carries
+// code.
+//
+// It does NOT reuse commentPrefixes. That set exists for docStart, which only
+// decides where a chunk begins: a wrong guess there costs a comment line.
+// Stripping is destructive, and the same set eats real code —
+//
+//	*p = v            starts with "*"
+//	--n;              starts with "--"
+//	#include <stdio.h> starts with "#"
+//	;; lisp form      starts with ";"
+//
+// — after which the file is no longer findable by an identifier that appears
+// only on that line. So the destructive set is smaller, and the ambiguous
+// prefixes are resolved by file extension rather than guessed.
+//
+// Still line-based and still syntax-blind: a trailing comment after code stays.
+// Cutting at the first "//" mid-line would need a real lexer to avoid mangling
+// every URL and string literal containing one.
+func stripComments(path, s string) string {
+	prefixes := stripPrefixesFor(path)
+	lines := strings.Split(s, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if t != "" && hasCommentPrefix(t, prefixes) {
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// cStyleStripPrefixes are unambiguous in every C-descended language: "//" opens
+// a line comment, "/*" and "*/" delimit a block, and a bare "*" continues one
+// only when a separator follows — "*p" is a dereference, "* " is a comment
+// continuation.
+var cStyleStripPrefixes = []string{"//", "/*", "*/"}
+
+// hashCommentExts are the extensions where a leading "#" is a comment. C and
+// its relatives are deliberately absent: there "#" opens a preprocessor
+// directive, and treating it as prose deletes every #include in the corpus.
+var hashCommentExts = map[string]bool{
+	".py": true, ".rb": true, ".sh": true, ".bash": true, ".zsh": true,
+	".yaml": true, ".yml": true, ".toml": true, ".cfg": true, ".ini": true,
+	".pl": true, ".r": true, ".tf": true, ".dockerfile": true, ".mk": true,
+}
+
+func stripPrefixesFor(path string) []string {
+	out := cStyleStripPrefixes
+	ext := strings.ToLower(filepath.Ext(path))
+	base := strings.ToLower(filepath.Base(path))
+	if hashCommentExts[ext] || base == "makefile" || base == "containerfile" || base == "dockerfile" {
+		out = append(append([]string{}, out...), "#")
+	}
+	return out
+}
+
+// hasCommentPrefix reports whether a trimmed line opens a comment. A bare "*"
+// counts only when followed by a space or nothing, which separates a block
+// continuation from a dereference.
+func hasCommentPrefix(trimmed string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return true
+		}
+	}
+	return trimmed == "*" || strings.HasPrefix(trimmed, "* ")
 }
 
 func isComment(trimmed string) bool {
