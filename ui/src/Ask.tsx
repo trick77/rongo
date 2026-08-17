@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Markdown from "./markdown";
 
 type Citation = {
   marker: number;
@@ -18,6 +19,34 @@ type Turn = {
   error: string;
   done: boolean;
 };
+
+/** Message is one stored turn, as GET /api/threads/{id} serves it. */
+type Message = {
+  id: number;
+  ordinal: number;
+  audience: string;
+  question: string;
+  answer: string;
+  error: string;
+  citations: Citation[] | null;
+};
+
+/**
+ * A stored turn renders exactly as it was answered — including the failure,
+ * which stays in the record. It is finished by definition, so it carries no
+ * status line.
+ */
+function storedTurn(m: Message): Turn {
+  return {
+    question: m.question,
+    audience: m.audience === "dev" ? "dev" : "ba",
+    text: m.answer ?? "",
+    citations: m.citations ?? [],
+    status: "",
+    error: m.error ?? "",
+    done: true,
+  };
+}
 
 /**
  * Parses an SSE body incrementally. The whole point of streaming is that the
@@ -63,16 +92,85 @@ function Chevron() {
   );
 }
 
-export default function Ask() {
+export default function Ask({
+  threadId: openThread = null,
+  onThread = () => {},
+  onActivity = () => {},
+  onBusy = () => {},
+}: {
+  /** The thread to show, or null for a fresh one. */
+  threadId?: number | null;
+  /** Reports the thread this view is on; null means the id led nowhere. */
+  onThread?: (id: number | null) => void;
+  /** Something changed that the thread list should see. */
+  onActivity?: () => void;
+  /** Reports whether a turn is in flight, so the thread list can lock. */
+  onBusy?: (busy: boolean) => void;
+}) {
   const [question, setQuestion] = useState("");
   const [audience, setAudience] = useState<"ba" | "dev">("ba");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
-  const threadId = useRef<number | null>(null);
+  const threadId = useRef<number | null>(openThread);
+  // shown is the thread whose turns are already on screen. Without it the
+  // stream's own thread event — which travels up to the parent and back down as
+  // a prop — would re-trigger the loader and replace the half-written answer
+  // with the stored record, which does not have it yet.
+  //
+  // It starts undefined rather than at openThread: a thread restored from the
+  // last session has to be LOADED on the first render, not assumed present.
+  const shown = useRef<number | null | undefined>(undefined);
+  // Which load is the current one. StrictMode mounts every effect twice, so a
+  // cleanup that cancelled the in-flight request would cancel the ONLY request
+  // — the second run sees the id as already shown and starts none. Cancelling
+  // by sequence instead of by cleanup also settles the real race: switching
+  // threads while a slower load is in the air.
+  const loadSeq = useRef(0);
 
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
   }
+
+  // Announced upwards as well as kept locally: switching threads mid-stream
+  // would swap the turn list under patchLast, and the tokens still arriving
+  // would be written into the wrong conversation.
+  function markBusy(b: boolean) {
+    setBusy(b);
+    onBusy(b);
+  }
+
+  useEffect(() => {
+    if (openThread === shown.current) return;
+    shown.current = openThread;
+    threadId.current = openThread;
+    if (openThread === null) {
+      setTurns([]);
+      return;
+    }
+    const seq = ++loadSeq.current;
+    (async () => {
+      try {
+        const res = await fetch(`/api/threads/${openThread}`);
+        const list = res.ok ? await res.json() : null;
+        if (seq !== loadSeq.current) return;
+        // A thread that is not yours, or no longer exists, comes back as an
+        // empty list with status 200 — the owner check sits inside the query.
+        // Rendering that as an empty thread would keep a dead id around
+        // forever, so it is handed back as "no thread".
+        if (!Array.isArray(list) || list.length === 0) {
+          setTurns([]);
+          shown.current = null;
+          threadId.current = null;
+          onThread(null);
+          return;
+        }
+        setTurns(list.map(storedTurn));
+      } catch {
+        // Nothing to show and nothing to say: the input stays usable.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openThread]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,7 +182,7 @@ export default function Ask() {
       { question: q, audience, text: "", citations: [], status: "", error: "", done: false },
     ]);
     setQuestion("");
-    setBusy(true);
+    markBusy(true);
 
     try {
       const res = await fetch("/api/ask", {
@@ -105,18 +203,30 @@ export default function Ask() {
         buffer += decoder.decode(value, { stream: true });
         buffer = drain(buffer, (name, data) => {
           const payload = data ? JSON.parse(data) : {};
-          if (name === "thread") threadId.current = payload.thread_id;
-          else if (name === "status") patchLast((t) => ({ ...t, status: payload.step }));
+          if (name === "thread") {
+            threadId.current = payload.thread_id;
+            shown.current = payload.thread_id;
+            onThread(payload.thread_id);
+            // The placeholder title is written by Create, so the entry can
+            // appear in the list the moment the question is sent.
+            onActivity();
+          } else if (name === "status") patchLast((t) => ({ ...t, status: payload.step }));
           else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
           else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true }));
-          else if (name === "done") patchLast((t) => ({ ...t, done: true, status: "" }));
+          else if (name === "done") {
+            patchLast((t) => ({ ...t, done: true, status: "" }));
+            // The model-written title replaces the placeholder in a background
+            // goroutine that has no way to push it here. Without this the
+            // sidebar shows the truncated question until the next reload.
+            onActivity();
+          }
         });
       }
     } catch {
       patchLast((t) => ({ ...t, error: "Die Verbindung ist abgebrochen.", done: true }));
     } finally {
-      setBusy(false);
+      markBusy(false);
     }
   }
 
@@ -135,7 +245,7 @@ export default function Ask() {
             </p>
           )}
 
-          {turn.text && <p className="mt-3 whitespace-pre-wrap">{turn.text}</p>}
+          {turn.text && <Markdown text={turn.text} />}
 
           {turn.error && (
             <p role="alert" className="mt-3 text-[var(--color-ochre)]">

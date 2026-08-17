@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -133,5 +134,126 @@ describe("Ask", () => {
       const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
       expect(body.thread_id).toBe(42);
     });
+  });
+});
+
+/**
+ * Routes by URL, because Ask now talks to two endpoints: it streams from
+ * /api/ask and reads a stored thread from /api/threads/{id}. A stub that
+ * answered both the same way would let a component that confuses them pass.
+ */
+function routedFetch(messages: unknown, frames: string[] = []) {
+  const encoder = new TextEncoder();
+  const mock = vi.fn(async (url: string) => {
+    if (String(url).startsWith("/api/threads/")) {
+      return { ok: true, status: 200, json: async () => messages };
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          let i = 0;
+          return {
+            async read() {
+              if (i >= frames.length) return { done: true, value: undefined };
+              return { done: false, value: encoder.encode(frames[i++]) };
+            },
+          };
+        },
+      },
+    };
+  });
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
+const storedTurn = {
+  id: 9,
+  ordinal: 0,
+  audience: "dev",
+  question: "Wie kommt ein Apple TV an die Datei?",
+  answer: "Ueber einen Grant [1].",
+  error: "",
+  citations: [
+    {
+      marker: 1,
+      repo: "peeq",
+      branch: "master",
+      path: "backend/internal/playbackgrant/store.go",
+      start_line: 3,
+      end_line: 40,
+    },
+  ],
+  created_at: "2026-08-17T10:00:00Z",
+};
+
+describe("Ask, ein gespeicherter Thread", () => {
+  // Rendered the way main.tsx mounts the app. StrictMode runs every effect
+  // twice, and the first version of the loader cancelled its own only request
+  // in the cleanup between the two runs: the tests passed, the real app came
+  // back from a reload with an empty thread.
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  it("stellt einen alten Zug samt Belegen aus dem Protokoll her", async () => {
+    routedFetch([storedTurn]);
+    strict(<Ask threadId={7} />);
+
+    expect(await screen.findByText(/Ueber einen Grant/)).toBeTruthy();
+    expect(screen.getByText(/Wie kommt ein Apple TV an die Datei/)).toBeTruthy();
+    expect(screen.getByText(/store\.go:3-40/)).toBeTruthy();
+    // A restored turn is finished. A status line would claim something is
+    // still running.
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("stellt die Rolle wieder her, mit der die Frage beantwortet wurde", async () => {
+    routedFetch([storedTurn]);
+    strict(<Ask threadId={7} />);
+    expect(await screen.findByText("Developer")).toBeTruthy();
+  });
+
+  // Messages() puts the subject inside the WHERE clause and returns an empty
+  // list for a thread that is not yours or no longer exists — 200, not 403.
+  // Waiting for an error status would leave a dead id in localStorage forever.
+  it("gibt eine tote Thread-Nummer zurueck, statt einen leeren Thread zu zeigen", async () => {
+    routedFetch([]);
+    const onThread = vi.fn();
+    strict(<Ask threadId={999} onThread={onThread} />);
+    await waitFor(() => expect(onThread).toHaveBeenCalledWith(null));
+  });
+
+  it("laedt den eigenen laufenden Thread nicht mitten im Stream neu", async () => {
+    // The stream's thread event reports the id back upwards; if that round trip
+    // re-triggered the loader, the half-written answer would be replaced by the
+    // stored record, which does not have it yet.
+    const mock = routedFetch(
+      [storedTurn],
+      [ev("thread", { thread_id: 42 }), ev("token", { text: "Der Versand laeuft." }), ev("done", {})],
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(<Ask threadId={null} onThread={() => {}} />);
+    await user.type(screen.getByLabelText("Frage"), "Wie?");
+    await user.click(screen.getByRole("button", { name: "Fragen" }));
+    await screen.findByText(/Der Versand laeuft/);
+
+    rerender(<Ask threadId={42} onThread={() => {}} />);
+    await waitFor(() =>
+      expect(mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/")).length).toBe(0),
+    );
+    expect(screen.getByText(/Der Versand laeuft/)).toBeTruthy();
+  });
+
+  it("meldet den Thread nach oben, sobald er angelegt ist, und wenn der Zug fertig ist", async () => {
+    routedFetch([], [ev("thread", { thread_id: 42 }), ev("token", { text: "So." }), ev("done", {})]);
+    const onActivity = vi.fn();
+    const user = userEvent.setup();
+    render(<Ask threadId={null} onActivity={onActivity} />);
+    await user.type(screen.getByLabelText("Frage"), "Wie?");
+    await user.click(screen.getByRole("button", { name: "Fragen" }));
+
+    // Twice: once so the placeholder title appears immediately, once at the end
+    // so the model-written title replaces it.
+    await waitFor(() => expect(onActivity).toHaveBeenCalledTimes(2));
   });
 });
