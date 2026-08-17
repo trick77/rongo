@@ -152,6 +152,7 @@ func TestEvalIndex(t *testing.T) {
 		}, nil),
 		Cache:  embed.NewCache(db, model, dim),
 		Writer: indexer.NewWriter(db),
+		Chunk:  evalChunkOptions(),
 	})
 
 	active, err := state.Active(ctx)
@@ -378,4 +379,14 @@ func TestQuestionSetIsWellFormed(t *testing.T) {
 		t.Errorf("questions cover %d repositories (%v), want the whole dev corpus", len(repoCount), repoCount)
 	}
 	fmt.Fprintf(os.Stderr, "question set: %d questions across %v\n", len(questions), repoCount)
+}
+
+// evalChunkOptions honours BACKEND_INDEX_COMMENTS so the comment-free arm can
+// be indexed from the same harness. Stripping changes every content hash, so
+// that arm needs its OWN database file: reusing this one would serve vectors
+// computed with comments and the arm would measure nothing.
+func evalChunkOptions() indexer.ChunkOptions {
+	o := indexer.DefaultChunkOptions()
+	o.StripComments = os.Getenv("BACKEND_INDEX_COMMENTS") == "0"
+	return o
 }
