@@ -74,14 +74,20 @@ Three of the four are the same shape: the answering file is one of several in a 
 talk about the same subject, and the *right* one loses to its neighbours. That is a chunking and
 ranking problem, not an embedding problem, and swapping models does not touch it.
 
-Two further observations from the run:
+Two further observations, both measured on the **semantic lane itself** (`SearchVector` at 40
+candidates, bounded at 1.25 vs unbounded) rather than on `Search`'s output. That distinction is
+not pedantry: `Search` truncates to K, so both lanes saturate and a difference taken there is 0
+by construction — the first version of this harness reported exactly that and it meant nothing.
 
-- **The distance bound barred nothing** — `barred = 0` on all 28 questions, at
-  `BACKEND_SEARCH_MAX_DISTANCE = 1.25`. The bound is doing no work on this corpus, so it is not
-  hiding a recall failure behind a constant. It stays, because it is the only reason an empty
-  result is possible at all, but it is not currently a tuning lever.
-- **Every question filled all 20 slots.** Recall is limited by ranking, not by the lanes
-  returning too little.
+- **The distance bound is barely binding, and only for `-large`.** Under `-small` it removed
+  nothing at all: `barred = 0/40` on every question, with the nearest chunk between 0.93 and
+  1.17. Under `-large` it removed rows for 3 of 28 questions (13/40, 15/40 and 20/40), nearest
+  distances 0.96 to 1.20. So the bound is not hiding a recall failure behind a constant under
+  either model — but note how little headroom there is: the nearest chunk for a *successful*
+  question routinely sits at 1.05-1.17, so tightening this constant much below 1.25 would start
+  cutting good lanes, which is exactly the mis-calibration peeq documents having made twice.
+- **Every question filled all 20 result slots** under both models. Recall is limited by ranking,
+  not by the lanes returning too little.
 
 ## When to revisit
 

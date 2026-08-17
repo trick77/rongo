@@ -209,10 +209,22 @@ func tokenEnvOf(specs []repos.Spec, name string) string {
 
 // result is one question's outcome.
 type result struct {
-	q      Question
-	rank   int // 1-based rank of the first expected hit; 0 means not found
-	hits   int
-	barred int // hits the distance bound dropped from the semantic lane
+	q    Question
+	rank int // 1-based rank of the first expected hit; 0 means not found
+	hits int
+	// barred is how many rows the distance bound dropped from the SEMANTIC
+	// LANE — measured on the lane itself, never on Search's output.
+	//
+	// Measuring it through Search reports nothing: each lane fetches
+	// evalCandidates rows and Search then truncates to K, so a bounded and an
+	// unbounded search both come back with exactly K on a corpus this size and
+	// the difference is 0 by construction rather than by observation. The
+	// distinction matters: a recall failure that is really this constant has to
+	// be visible as such, or the model comparison measures the constant.
+	barred int
+	// nearest is the distance of the closest chunk in the whole corpus for this
+	// question, which says whether the bound is anywhere near binding.
+	nearest float64
 }
 
 // TestEvalMeasure reports recall@5, recall@20 and MRR for the configured model.
@@ -241,8 +253,7 @@ func TestEvalMeasure(t *testing.T) {
 		}
 		r.MaxDistance = d
 	}
-	unbounded := retrieve.New(db, client)
-	unbounded.MaxDistance = -1
+	lanes := retrieve.NewStore(db)
 
 	questions := loadQuestions(t)
 	results := make([]result, 0, len(questions))
@@ -251,18 +262,30 @@ func TestEvalMeasure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("search %q: %v", q.Text, err)
 		}
-		// How much of this question's outcome is the distance bound rather than
-		// the model: a recall failure that is really this constant has to be
-		// visible as such, or the comparison measures the constant.
-		loose, err := unbounded.Search(ctx, retrieve.Query{Text: q.Text, K: 20})
+		// The same lane, once bounded and once not, at the same candidate
+		// count: the difference IS what the bound removed.
+		vecs, err := client.Embed(ctx, []string{q.Text})
 		if err != nil {
-			t.Fatalf("unbounded search %q: %v", q.Text, err)
+			t.Fatalf("embed %q: %v", q.Text, err)
+		}
+		bounded, err := lanes.SearchVector(ctx, vecs[0], evalCandidates, r.MaxDistance, nil)
+		if err != nil {
+			t.Fatalf("bounded lane %q: %v", q.Text, err)
+		}
+		loose, err := lanes.SearchVector(ctx, vecs[0], evalCandidates, -1, nil)
+		if err != nil {
+			t.Fatalf("unbounded lane %q: %v", q.Text, err)
+		}
+		var nearest float64
+		if len(loose) > 0 {
+			nearest = loose[0].Distance
 		}
 		results = append(results, result{
-			q:      q,
-			rank:   rankOfExpected(hits, q),
-			hits:   len(hits),
-			barred: len(loose) - len(hits),
+			q:       q,
+			rank:    rankOfExpected(hits, q),
+			hits:    len(hits),
+			barred:  len(loose) - len(bounded),
+			nearest: nearest,
 		})
 	}
 
@@ -293,16 +316,21 @@ func TestEvalMeasure(t *testing.T) {
 		return rankOrLast(results[i].rank) > rankOrLast(results[j].rank)
 	})
 	t.Logf("")
-	t.Logf("%-5s %-6s %-6s %s", "rank", "hits", "barred", "question")
+	t.Logf("%-5s %-6s %-8s %-8s %s", "rank", "hits", "barred", "nearest", "question")
 	for _, res := range results {
 		rank := "MISS"
 		if res.rank > 0 {
 			rank = strconv.Itoa(res.rank)
 		}
-		t.Logf("%-5s %-6d %-6d %s [%s %v]", rank, res.hits, res.barred,
+		t.Logf("%-5s %-6d %-8s %-8.3f %s [%s %v]", rank, res.hits,
+			fmt.Sprintf("%d/%d", res.barred, evalCandidates), res.nearest,
 			res.q.Text, res.q.ExpectRepo, res.q.ExpectPaths)
 	}
 }
+
+// evalCandidates matches retrieve's own per-lane candidate count, so the
+// barred figure describes the lane the search actually used.
+const evalCandidates = 40
 
 func rankOrLast(rank int) int {
 	if rank == 0 {

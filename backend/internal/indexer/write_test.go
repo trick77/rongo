@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/store"
@@ -104,6 +105,12 @@ func TestReplaceFile_isAtomic(t *testing.T) {
 	if err == nil {
 		t.Fatal("ReplaceFile() err = nil, want the dimension rejected")
 	}
+	// The rejection must come from vec0 DURING the transaction, not from a
+	// pre-flight guard: only then does this exercise the rollback at all. The
+	// count guard cannot fire here — a wrong WIDTH is not a wrong COUNT.
+	if !strings.Contains(err.Error(), "chunk 1") {
+		t.Errorf("error = %q, want the failure to name the chunk it died on, i.e. to have happened mid-transaction", err)
+	}
 	for _, q := range []string{
 		`SELECT COUNT(*) FROM files`,
 		`SELECT COUNT(*) FROM chunks`,
@@ -178,6 +185,12 @@ func TestDeleteFile_clearsAllThreeChunkTables(t *testing.T) {
 		if n := countOf(t, db, q); n != 0 {
 			t.Errorf("%s = %d after DeleteFile, want 0", q, n)
 		}
+	}
+	// Row count zero and index clean are not the same claim for fts5: the
+	// tokens live in a separate b-tree, and a term left behind there keeps
+	// answering searches about code that is gone.
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE raw_text MATCH ?`, `"seen"`); n != 0 {
+		t.Errorf("a term from the deleted chunk still matches (%d hits); the fts5 index was not cleared", n)
 	}
 }
 

@@ -21,10 +21,12 @@ import (
 // Symbol is one ctags record: what it is called, what kind of thing it is,
 // what encloses it, and where it lives in the file.
 //
-// End is the symbol's last line. ctags supplies it with --fields=+e for the
-// languages that track scope, and it lets the chunker cut at a real symbol
-// boundary instead of guessing "up to the line the next symbol starts on". It
-// is 0 when ctags did not report one, which the chunker treats as unknown.
+// End is the symbol's last line, which ctags supplies with --fields=+e for the
+// languages that track scope. It is what lets the chunker tell a CONTAINER from
+// a leaf — a Java class encloses its methods and is not itself a unit of
+// retrieval, while a Go struct with only fields is — by asking whether another
+// symbol starts inside this one's range. It is 0 where ctags reported none, and
+// the chunker then falls back to matching scope names.
 type Symbol struct {
 	Name string
 	Kind string
