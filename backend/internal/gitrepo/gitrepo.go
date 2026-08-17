@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/trick77/rongo/internal/repos"
@@ -162,23 +163,22 @@ func authURL(raw, token string) string {
 	return u.String()
 }
 
-// redact replaces the userinfo of anything URL-shaped in text that is about to
-// be logged. git quotes the remote it failed against, and that remote carries
-// the injected token.
+// credentialInURL matches the userinfo segment of any URL-shaped substring:
+// a scheme, "://", everything up to an "@" that is not a slash or whitespace.
+var credentialInURL = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/@\s]+@`)
+
+// redact strips the userinfo from anything URL-shaped in text about to be
+// logged. git quotes the remote it failed against, and that remote carries the
+// token injected by authURL.
+//
+// This deliberately works on the raw string rather than splitting into fields
+// and calling url.Parse: git wraps the remote in single quotes and often
+// appends a colon, so the field is not a parseable URL and url.Parse returns an
+// error with a nil User. An earlier version did exactly that and leaked the
+// token through all three of git's common authentication-failure messages —
+// see TestRedact_realisticGitErrorShapes, which pins every one of them.
 func redact(s string) string {
-	var b strings.Builder
-	for i, field := range strings.Fields(s) {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		if u, err := url.Parse(field); err == nil && u.User != nil {
-			u.User = url.User("REDACTED")
-			b.WriteString(u.String())
-			continue
-		}
-		b.WriteString(field)
-	}
-	return b.String()
+	return credentialInURL.ReplaceAllString(s, "${1}REDACTED@")
 }
 
 func nonEmptyLines(s string) []string {
