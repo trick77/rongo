@@ -91,10 +91,24 @@ source so citations still quote the real file. Verified on the two databases:
 (trailing comments after code survive by design), and all 371 still carry it in
 `raw_text`.
 
+**Decision: comments stay in the search lanes.** `BACKEND_INDEX_COMMENTS`
+defaults to `1`. The switch stays in the code, and so does this measurement, so
+the question can be reopened with a number rather than an argument.
+
 | Baseline arm | recall@5 | recall@20 | MRR |
 |---|---|---|---|
 | comments in the search lanes | 0.679 | 0.786 | 0.476 |
-| **comments removed** | **0.536** | **0.679** | **0.340** |
+| **comments removed** | **0.536** | **0.679** | **0.342** |
+
+> **Measured twice.** The first run used a stripper that also deleted code —
+> it reused the prefix set built for `docStart`, so `*p = v`, `--n;`,
+> `#include <stdio.h>` and `;; lisp` all vanished from the search lanes. That
+> made the arm invalid, because it conflated losing prose with losing code.
+> After the fix (extension-aware prefixes, a bare `*` only when a separator
+> follows) the corpus was re-indexed and re-measured. The numbers came back
+> unchanged: recall@5 0.536 both times, MRR 0.340 → 0.342. The deleted lines
+> were not the ones carrying the distinguishing identifiers for these 28
+> questions. The bug was real and is fixed; its effect on this metric was not.
 
 Four questions leave the top 5, three leave the top 20, and MRR falls 29 %
 relative. Nine questions now have no correct hit at all, against six before.
