@@ -12,13 +12,17 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/exttools"
+	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/httpapi"
+	"github.com/trick77/rongo/internal/indexer"
+	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store"
 )
 
@@ -51,6 +55,10 @@ func main() {
 	}
 	slog.Info("external tools resolved", "git", tools.Git, "rg", tools.Rg, "ctags", tools.Ctags)
 
+	// ctx is the process-wide root: startup work and the background workers all
+	// hang off it, so a shutdown cancels everything from one place.
+	ctx := context.Background()
+
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 		slog.Error("create data directory", "err", err)
 		os.Exit(1)
@@ -68,6 +76,45 @@ func main() {
 	}
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
+
+	// The repository list is loaded on a best-effort basis. A missing or broken
+	// repos.yaml must NOT stop the server: the operator needs the Repos page to
+	// come up and tell them what is wrong with the file. Refusing to boot would
+	// hide the diagnosis behind the very thing that failed.
+	state := indexer.NewStateStore(db)
+	if specs, err := repos.Load(cfg.ReposFile); err != nil {
+		slog.Warn("repository list unavailable; indexing is idle until it is fixed",
+			"path", cfg.ReposFile, "err", err)
+	} else if err := state.SyncSpecs(ctx, specs); err != nil {
+		slog.Error("recording the repository list failed", "err", err)
+		os.Exit(1)
+	} else {
+		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
+	}
+
+	poller := indexer.NewPoller(indexer.PollerDeps{
+		State: state,
+		Git:   gitrepo.New(tools.Git, cfg.RepoRoot),
+		// The indexing pipeline lands in a later task. Until then the poller
+		// keeps checkouts current and records state, and reports that it
+		// indexed nothing rather than pretending it did.
+		Index: func(context.Context, indexer.RepoState, string, []string) (indexer.Counts, error) {
+			return indexer.Counts{}, nil
+		},
+		// Tokens are read from the environment by the variable name the YAML
+		// entry declared. The value never appears in repos.yaml.
+		Tokens: func(tokenEnv string) string { return os.Getenv(tokenEnv) },
+	})
+
+	pollCtx, stopPolling := context.WithCancel(ctx)
+	defer stopPolling()
+	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		poller.Run(pollCtx)
+	}()
+
 	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
 
 	httpServer := &http.Server{
@@ -100,13 +147,18 @@ func main() {
 		}
 	case sig := <-sigCh:
 		slog.Info("shutting down", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := httpServer.Shutdown(ctx); err != nil {
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			slog.Error("graceful shutdown failed", "err", err)
 			os.Exit(1)
 		}
 	}
+
+	// Stop the background workers and wait for them, so a shutdown cannot leave
+	// a git command or a half-written transaction behind.
+	stopPolling()
+	workers.Wait()
 }
 
 // parseLevel maps BACKEND_LOG_LEVEL onto slog levels, defaulting to info.
