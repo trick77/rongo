@@ -22,10 +22,10 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 	db := openTemp(t)
 
 	// When
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, 1536); err != nil {
 		t.Fatalf("first Migrate() err = %v", err)
 	}
-	if err := Migrate(db); err != nil {
+	if err := Migrate(db, 1536); err != nil {
 		t.Fatalf("second Migrate() err = %v", err)
 	}
 
@@ -40,13 +40,27 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 		}
 	}
 
-	// ... and the second run recorded nothing extra.
-	var applied int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&applied); err != nil {
+	// ... and the second run recorded nothing extra. Asserted as "unchanged by
+	// the second run" rather than against a fixed number, so adding a migration
+	// does not require editing this test — the property under test is
+	// idempotency, not the migration count.
+	var afterSecond int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&afterSecond); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if applied != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1", applied)
+	if err := Migrate(db, 1536); err != nil {
+		t.Fatalf("third Migrate() err = %v", err)
+	}
+	var afterThird int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&afterThird); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if afterThird != afterSecond {
+		t.Errorf("schema_migrations rows = %d after a third run, want %d — Migrate is not idempotent",
+			afterThird, afterSecond)
+	}
+	if afterSecond == 0 {
+		t.Error("no migrations recorded at all; the runner did not apply anything")
 	}
 }
 

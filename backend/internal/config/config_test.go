@@ -18,6 +18,13 @@ var allBackendEnvVars = []string{
 	"BACKEND_ADMIN_TOKEN",
 	"BACKEND_SESSION_SECRET",
 	"BACKEND_LOG_LEVEL",
+	"BACKEND_INDEX_ENABLED",
+	"BACKEND_INDEX_MAX_FILE_BYTES",
+	"BACKEND_REPOS_FILE",
+	"BACKEND_EMBED_BASE_URL",
+	"BACKEND_EMBED_API_KEY",
+	"BACKEND_EMBED_MODEL",
+	"BACKEND_EMBED_DIM",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
@@ -34,6 +41,7 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
 	})
 
 	// When
@@ -42,6 +50,12 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	// Then
 	if err != nil {
 		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.EmbedModel != "text-embedding-3-small" || cfg.EmbedDim != 1536 {
+		t.Errorf("embedding defaults = %s/%d, want text-embedding-3-small/1536", cfg.EmbedModel, cfg.EmbedDim)
+	}
+	if !cfg.IndexEnabled {
+		t.Error("IndexEnabled = false, want indexing on by default")
 	}
 	if cfg.Addr != "127.0.0.1:8080" {
 		t.Errorf("Addr = %q, want %q", cfg.Addr, "127.0.0.1:8080")
@@ -90,12 +104,91 @@ func TestLoad_rejectsShortSessionSecret(t *testing.T) {
 	}
 }
 
+func TestLoad_requiresAnEmbeddingEndpointWhileIndexing(t *testing.T) {
+	// Given: indexing on, no endpoint. An indexer that cannot embed leaves a
+	// repository list that looks configured and an index that stays empty.
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+	})
+
+	// When
+	_, err := Load()
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a demand for BACKEND_EMBED_BASE_URL")
+	}
+}
+
+func TestLoad_allowsNoEmbeddingEndpointWhenIndexingIsOff(t *testing.T) {
+	// Given: the escape hatch for a deployment that only serves the UI.
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_INDEX_ENABLED":  "false",
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.IndexEnabled {
+		t.Error("IndexEnabled = true, want it off")
+	}
+}
+
+func TestLoad_rejectsAMalformedEmbedDim(t *testing.T) {
+	// Given: the dimension is baked into the vec0 table when the database is
+	// created. Falling back the way every other integer setting does would let
+	// "3O72" (letter O) build a 1536-wide table while the operator believes it
+	// is 3072 — and the mistake would only surface much later, as a dimension
+	// mismatch on every insert.
+	for _, bad := range []string{"0", "-1", "3O72", "big"} {
+		setEnv(t, map[string]string{
+			"BACKEND_SESSION_SECRET": validSecret,
+			"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+			"BACKEND_EMBED_DIM":      bad,
+		})
+
+		// When
+		_, err := Load()
+
+		// Then
+		if err == nil {
+			t.Errorf("Load() err = nil for BACKEND_EMBED_DIM=%q, want a refusal", bad)
+		}
+	}
+}
+
+func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_EMBED_DIM":      "3072",
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.EmbedDim != 3072 {
+		t.Errorf("EmbedDim = %d, want 3072", cfg.EmbedDim)
+	}
+}
+
 func TestLoad_trimsAdminToken(t *testing.T) {
 	// Given: a token picked up with a trailing newline (e.g. from `echo` into
 	// an env file) must authenticate the same as one without, or every
 	// correct-looking Bearer request gets a silent 401.
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
 		"BACKEND_AUTH_MODE":      "token",
 		"BACKEND_ADMIN_TOKEN":    "s3cret-token\n",
 	})

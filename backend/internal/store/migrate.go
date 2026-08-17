@@ -6,19 +6,30 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// embedDimPlaceholder is substituted in every migration before it is applied.
+// Only the vec0 table uses it: vec0 needs its dimension in the DDL, and the
+// dimension is a configuration choice (1536 for text-embedding-3-small, 3072
+// for -large), not a schema constant.
+const embedDimPlaceholder = "{{EMBED_DIM}}"
+
 // Migrate applies every embedded migration not yet recorded in
 // schema_migrations, each in its own transaction, in lexicographic filename
-// order.
+// order. embedDim is the vector width the vec0 table is built with.
 //
 // The recorded version is the FULL FILENAME. Never edit a migration that has
 // run anywhere real: the runner skips a recorded version, so the edit silently
 // never applies. Write the next numbered file instead.
-func Migrate(db *sql.DB) error {
+func Migrate(db *sql.DB, embedDim int) error {
+	if embedDim <= 0 {
+		return fmt.Errorf("migrate: embed dimension must be positive, got %d", embedDim)
+	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    TEXT PRIMARY KEY,
 		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -52,11 +63,12 @@ func Migrate(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
+		sqlText := strings.ReplaceAll(string(body), embedDimPlaceholder, strconv.Itoa(embedDim))
 		tx, err := db.Begin()
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(string(body)); err != nil {
+		if _, err := tx.Exec(sqlText); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("apply %s: %w", name, err)
 		}

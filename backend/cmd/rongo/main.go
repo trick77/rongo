@@ -12,14 +12,20 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
+	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/exttools"
+	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/httpapi"
+	"github.com/trick77/rongo/internal/indexer"
+	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/symbols"
 )
 
 func main() {
@@ -51,6 +57,10 @@ func main() {
 	}
 	slog.Info("external tools resolved", "git", tools.Git, "rg", tools.Rg, "ctags", tools.Ctags)
 
+	// ctx is the process-wide root: startup work and the background workers all
+	// hang off it, so a shutdown cancels everything from one place.
+	ctx := context.Background()
+
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 		slog.Error("create data directory", "err", err)
 		os.Exit(1)
@@ -62,12 +72,85 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	if err := store.Migrate(db); err != nil {
+	if err := store.Migrate(db, cfg.EmbedDim); err != nil {
 		slog.Error("apply migrations", "err", err)
+		os.Exit(1)
+	}
+	// The vec0 table's width is fixed when the database is created. Pointing a
+	// differently configured process at an existing file is a loud failure
+	// here rather than a rejected insert on every chunk much later — and, worse,
+	// a semantic lane that silently answers nothing.
+	builtDim, err := store.BuiltDim(db)
+	if err != nil {
+		slog.Error("read the vector table's dimension", "err", err)
+		os.Exit(1)
+	}
+	if builtDim != cfg.EmbedDim {
+		slog.Error("this database was built for a different embedding model",
+			"built_dim", builtDim, "configured_dim", cfg.EmbedDim,
+			"fix", "point BACKEND_DB_PATH at a fresh file, or set BACKEND_EMBED_DIM back")
 		os.Exit(1)
 	}
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
+
+	// The repository list is loaded on a best-effort basis. A missing or broken
+	// repos.yaml must NOT stop the server: the operator needs the Repos page to
+	// come up and tell them what is wrong with the file. Refusing to boot would
+	// hide the diagnosis behind the very thing that failed.
+	state := indexer.NewStateStore(db)
+	if specs, err := repos.Load(cfg.ReposFile); err != nil {
+		slog.Warn("repository list unavailable; indexing is idle until it is fixed",
+			"path", cfg.ReposFile, "err", err)
+	} else if err := state.SyncSpecs(ctx, specs); err != nil {
+		slog.Error("recording the repository list failed", "err", err)
+		os.Exit(1)
+	} else {
+		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
+	}
+
+	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
+	pipeline := indexer.New(indexer.Deps{
+		DB:      db,
+		Git:     gitClient,
+		Symbols: symbols.NewExtractor(tools.Ctags),
+		Embedder: embed.NewClient(embed.Config{
+			BaseURL: cfg.EmbedBaseURL,
+			APIKey:  cfg.EmbedAPIKey,
+			Model:   cfg.EmbedModel,
+			Dim:     cfg.EmbedDim,
+		}, nil),
+		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Writer:   indexer.NewWriter(db),
+		Selector: indexer.NewSelector(indexer.SelectOptions{MaxBytes: cfg.IndexMaxFileBytes}),
+	})
+
+	poller := indexer.NewPoller(indexer.PollerDeps{
+		State: state,
+		Git:   gitClient,
+		Index: pipeline.IndexRepo,
+		// Tokens are read from the environment by the variable name the YAML
+		// entry declared. The value never appears in repos.yaml.
+		Tokens: func(tokenEnv string) string { return os.Getenv(tokenEnv) },
+	})
+
+	// Indexing can be switched off for a deployment that only serves the UI.
+	// The server still comes up and the Repos page still shows what is
+	// configured; nothing is fetched or embedded.
+	pollCtx, stopPolling := context.WithCancel(ctx)
+	defer stopPolling()
+	var workers sync.WaitGroup
+	if cfg.IndexEnabled {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			poller.Run(pollCtx)
+		}()
+	} else {
+		slog.Warn("indexing is disabled; no repository will be fetched or embedded",
+			"fix", "set BACKEND_INDEX_ENABLED=true")
+	}
+
 	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
 
 	httpServer := &http.Server{
@@ -100,13 +183,18 @@ func main() {
 		}
 	case sig := <-sigCh:
 		slog.Info("shutting down", "signal", sig.String())
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := httpServer.Shutdown(ctx); err != nil {
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			slog.Error("graceful shutdown failed", "err", err)
 			os.Exit(1)
 		}
 	}
+
+	// Stop the background workers and wait for them, so a shutdown cannot leave
+	// a git command or a half-written transaction behind.
+	stopPolling()
+	workers.Wait()
 }
 
 // parseLevel maps BACKEND_LOG_LEVEL onto slog levels, defaulting to info.
