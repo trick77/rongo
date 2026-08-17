@@ -392,7 +392,7 @@
   </div>
 
   <h3>Embeddings</h3>
-  <p>OpenAI <code>text-embedding-3-small</code>, 1536 Dimensionen. Empfehlung <code>small</code>, dreimal günstiger; die Fachkarten tragen die Routing-Last. Wird am Ende von Phase 2 gemessen statt behauptet.</p>
+  <p>OpenAI <code>text-embedding-3-small</code>, 1536 Dimensionen. <strong>Entschieden und gemessen</strong> am Ende von Phase 2: <code>docs/measurements/2026-08-17-embedding-model.md</code>. 28 Fragen gegen den Dev-Korpus, beide Modelle je einmal indexiert. <code>large</code> liegt auf allen drei Kennzahlen vorne (recall@5 0.714 vs 0.679, recall@20 0.857 vs 0.786, MRR 0.538 vs 0.476), der Unterschied ist bei 28 Fragen aber nicht von Rauschen zu unterscheiden (McNemar p ≈ 0.63 bzw. 1.0). Bei einem Gleichstand gewinnt die günstigere und schnellere Option: <code>small</code> kostet ein Sechstel, braucht die halbe Vektor-Ablage und indexiert den Korpus in 450 statt 675 Sekunden. Vier Fragen scheitern bei <em>beiden</em> Modellen — das ist ein Chunking- und Ranking-Problem, kein Embedding-Problem.</p>
 
 </section>
 
