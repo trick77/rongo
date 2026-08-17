@@ -74,6 +74,57 @@ func TestRerankByModule_aModuleWithSeveralHitsOutranksALoneNeighbour(t *testing.
 	}
 }
 
+func TestRerankByModule_blendNeverBuriesAStrongLoneHit(t *testing.T) {
+	// The measured failure of the grouping variants: they move EVERY hit of the
+	// best-standing module to the front, so a module with twenty mediocre hits
+	// buries a single excellent one from elsewhere. Questions that ranked first
+	// fell out of the top 20 entirely.
+	//
+	// The blend adds module corroboration to a hit's own score instead of
+	// reordering wholesale, so the best hit can only be overtaken by a hit that
+	// is itself close behind.
+	idx := NewModuleIndex([]modules.Module{
+		{Repo: "peeq", Key: "backend/internal/httpapi", Paths: []string{
+			"backend/internal/httpapi/a.go", "backend/internal/httpapi/b.go",
+			"backend/internal/httpapi/c.go", "backend/internal/httpapi/d.go",
+		}},
+		{Repo: "peeq", Key: "backend/internal/cookie", Paths: []string{
+			"backend/internal/cookie/netscape.go",
+		}},
+	})
+	hits := []Hit{
+		{Repo: "peeq", Path: "backend/internal/cookie/netscape.go", Score: 0.90},
+		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.20},
+		{Repo: "peeq", Path: "backend/internal/httpapi/b.go", Score: 0.19},
+		{Repo: "peeq", Path: "backend/internal/httpapi/c.go", Score: 0.18},
+		{Repo: "peeq", Path: "backend/internal/httpapi/d.go", Score: 0.17},
+	}
+
+	got := RerankByModule(hits, idx, RerankOpts{Score: ScoreBlend, Alpha: 0.3})
+
+	if got[0].Path != "backend/internal/cookie/netscape.go" {
+		t.Errorf("order = %v, want the strong lone hit still first", paths(got))
+	}
+}
+
+func TestRerankByModule_blendPromotesTheCorroboratedFileOverItsNeighbour(t *testing.T) {
+	// The phase-2 failure shape, at close scores: the answering file sits in a
+	// package where several files score, and loses narrowly to a neighbour from
+	// a package where exactly one file scores. Here the blend must help.
+	idx := NewModuleIndex(corpusModules())
+	hits := []Hit{
+		{Repo: "peeq", Path: "backend/internal/sched/jitter.go", Score: 0.82},
+		{Repo: "peeq", Path: "backend/internal/rag/hybrid.go", Score: 0.80},
+		{Repo: "peeq", Path: "backend/internal/rag/store.go", Score: 0.78},
+	}
+
+	got := RerankByModule(hits, idx, RerankOpts{Score: ScoreBlend, Alpha: 0.3})
+
+	if got[0].Path != "backend/internal/rag/hybrid.go" {
+		t.Errorf("order = %v, want the corroborated file first", paths(got))
+	}
+}
+
 func TestRerankByModule_scoreVariantsAreNotInterchangeable(t *testing.T) {
 	// A guard against a measurement that compares two arms which are the same
 	// by construction: if every variant produced this order, the comparison in

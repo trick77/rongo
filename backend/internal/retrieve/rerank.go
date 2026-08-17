@@ -1,6 +1,7 @@
 package retrieve
 
 import (
+	"math"
 	"sort"
 
 	"github.com/trick77/rongo/internal/modules"
@@ -31,11 +32,24 @@ const (
 	ScoreBest ModuleScore = "best"
 	// ScoreCount counts the module's hits, ignoring how well they scored.
 	ScoreCount ModuleScore = "count"
+	// ScoreBlend keeps Search's ordering of individual hits and only adds a
+	// corroboration bonus to each hit's own score.
+	//
+	// The three variants above all reorder WHOLESALE: every hit of the
+	// best-standing module moves to the front. Measured against the question
+	// set that is far worse than plain chunk ranking (recall@5 0.214 against
+	// 0.679), and the mechanism is visible in the module list — httpapi holds
+	// 1135 chunks, so a big module wins on sheer size and buries a single
+	// excellent hit from elsewhere under twenty mediocre ones.
+	ScoreBlend ModuleScore = "blend"
 )
 
 // RerankOpts carries the choice of module score.
 type RerankOpts struct {
 	Score ModuleScore
+	// Alpha is how strongly ScoreBlend weighs corroboration. 0 disables the
+	// bonus entirely, which reproduces Search's own order.
+	Alpha float64
 }
 
 // ModuleIndex maps an indexed file to the module that owns it. The key is repo
@@ -84,11 +98,13 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 
 	score := map[string]float64{}
 	first := map[string]int{}
+	count := map[string]int{}
 	for i, h := range hits {
 		g := idx.group(h)
 		if _, seen := first[g]; !seen {
 			first[g] = i
 		}
+		count[g]++
 		switch o.Score {
 		case ScoreBest:
 			if h.Score > score[g] {
@@ -102,6 +118,35 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 	}
 
 	out := append([]Hit{}, hits...)
+
+	if o.Score == ScoreBlend {
+		// Corroboration is damped with a logarithm and counts only the hits
+		// BESIDES this one, so a lone hit gets no bonus at all and a module
+		// with twenty hits does not get twenty times the standing of one with
+		// two. Multiplicative, because the fused RRF scores have no meaningful
+		// absolute scale to add a constant to.
+		boost := make(map[string]float64, len(count))
+		for g, n := range count {
+			boost[g] = 1 + o.Alpha*math.Log1p(float64(n-1))
+		}
+		blended := make([]float64, len(out))
+		for i, h := range out {
+			blended[i] = h.Score * boost[idx.group(h)]
+		}
+		order := make([]int, len(out))
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool {
+			return blended[order[a]] > blended[order[b]]
+		})
+		ranked := make([]Hit, len(out))
+		for i, j := range order {
+			ranked[i] = out[j]
+		}
+		return ranked
+	}
+
 	sort.SliceStable(out, func(a, b int) bool {
 		ga, gb := idx.group(out[a]), idx.group(out[b])
 		if ga == gb {

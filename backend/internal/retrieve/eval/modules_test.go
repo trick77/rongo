@@ -131,6 +131,7 @@ func TestModuleList(t *testing.T) {
 type arm struct {
 	name  string
 	score retrieve.ModuleScore
+	alpha float64
 }
 
 type armResult struct {
@@ -164,11 +165,17 @@ func TestEvalMeasureModules(t *testing.T) {
 	idx := retrieve.NewModuleIndex(mods)
 	questions := loadQuestions(t)
 
+	// Fixed before the run so the outcome cannot be picked afterwards: the
+	// module layer is worth building on only if an arm beats the baseline's
+	// recall@5. Two blend strengths are a coarse sweep, not a hunt for the
+	// number that flatters the result — no further alphas are tried.
 	arms := []arm{
 		{name: "baseline", score: ""},
 		{name: "module-sum", score: retrieve.ScoreSum},
 		{name: "module-best", score: retrieve.ScoreBest},
 		{name: "module-count", score: retrieve.ScoreCount},
+		{name: "blend-0.15", score: retrieve.ScoreBlend, alpha: 0.15},
+		{name: "blend-0.40", score: retrieve.ScoreBlend, alpha: 0.40},
 	}
 	out := map[string]*armResult{}
 	for _, a := range arms {
@@ -185,7 +192,7 @@ func TestEvalMeasureModules(t *testing.T) {
 		for _, a := range arms {
 			ranked := hits
 			if a.score != "" {
-				ranked = retrieve.RerankByModule(hits, idx, retrieve.RerankOpts{Score: a.score})
+				ranked = retrieve.RerankByModule(hits, idx, retrieve.RerankOpts{Score: a.score, Alpha: a.alpha})
 			}
 			out[a.name].add(q, cut(ranked, 20))
 		}
@@ -208,17 +215,16 @@ func TestEvalMeasureModules(t *testing.T) {
 	// an aggregate over 28 questions hides a change in four of them.
 	t.Logf("")
 	t.Logf("per-question rank, baseline first (0 = not in the top %d)", 20)
-	t.Logf("%-10s %-12s %-12s %-13s %s", "baseline", "module-sum", "module-best", "module-count", "question")
+	t.Logf("%-10s %-12s %-12s %s", "baseline", "blend-0.15", "blend-0.40", "question")
 	base := out["baseline"]
 	sort.SliceStable(questions, func(i, j int) bool {
 		return rankOrLast(base.rank[questions[i].Text]) > rankOrLast(base.rank[questions[j].Text])
 	})
 	for _, q := range questions {
-		t.Logf("%-10d %-12d %-12d %-13d %s",
+		t.Logf("%-10d %-12d %-12d %s",
 			base.rank[q.Text],
-			out["module-sum"].rank[q.Text],
-			out["module-best"].rank[q.Text],
-			out["module-count"].rank[q.Text],
+			out["blend-0.15"].rank[q.Text],
+			out["blend-0.40"].rank[q.Text],
 			short(q.Text))
 	}
 }
