@@ -24,10 +24,14 @@ const (
 
 // Config holds all runtime settings.
 type Config struct {
-	Addr          string // HTTP listen address
-	PublicURL     string // externally reachable base URL
-	DBPath        string // path to the single SQLite file
-	RepoRoot      string // where rongo clones the repositories it indexes
+	Addr      string // HTTP listen address
+	PublicURL string // externally reachable base URL
+	DBPath    string // path to the single SQLite file
+	RepoRoot  string // where rongo clones the repositories it indexes
+	// ReposFile is the path to the repository list. Its entries carry no
+	// secrets: tokens are named by token_env and read from the environment,
+	// because that file ends up in a repository or a ticket eventually.
+	ReposFile     string
 	AuthMode      AuthMode
 	AdminToken    string // required when AuthMode is token
 	SessionSecret string // reserved: not read by anything yet — see the check below
@@ -42,6 +46,7 @@ func Load() (Config, error) {
 		PublicURL:     envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
 		DBPath:        envOr("BACKEND_DB_PATH", "./data/rongo.db"),
 		RepoRoot:      envOr("BACKEND_REPO_ROOT", "./repos"),
+		ReposFile:     envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
 		AuthMode:      AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:    strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		SessionSecret: strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
