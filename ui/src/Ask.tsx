@@ -141,17 +141,28 @@ export default function Ask({
 
   useEffect(() => {
     if (openThread === shown.current) return;
+    // Bumped FIRST, on every run — including the one that opens a fresh thread.
+    // A load already in the air belongs to the thread that was just left, and
+    // without this it would still be applied when it lands, putting the
+    // previous conversation on screen under a different thread id.
+    const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
     if (openThread === null) {
       setTurns([]);
       return;
     }
-    const seq = ++loadSeq.current;
     (async () => {
       try {
         const res = await fetch(`/api/threads/${openThread}`);
-        const list = res.ok ? await res.json() : null;
+        if (!res.ok) {
+          // 503, 500 and 401 mean "not right now", not "not yours". Treating
+          // them as a dead thread would drop the bookmark on a passing blip and
+          // the conversation would be gone on the next reload.
+          if (seq === loadSeq.current) setTurns([]);
+          return;
+        }
+        const list = await res.json();
         if (seq !== loadSeq.current) return;
         // A thread that is not yours, or no longer exists, comes back as an
         // empty list with status 200 — the owner check sits inside the query.
@@ -166,7 +177,11 @@ export default function Ask({
         }
         setTurns(list.map(storedTurn));
       } catch {
-        // Nothing to show and nothing to say: the input stays usable.
+        // The turns are cleared rather than left standing: the ids have already
+        // moved to the new thread, and a visible conversation that belongs to
+        // the old one would send the next question somewhere the reader is not
+        // looking.
+        if (seq === loadSeq.current) setTurns([]);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -176,6 +191,13 @@ export default function Ask({
     e.preventDefault();
     const q = question.trim();
     if (!q || busy) return;
+
+    // A thread load still in the air would replace the whole turn list when it
+    // lands, dropping the turn appended just below — and every token after that
+    // would be patched into the last STORED answer instead, corrupting a
+    // finished turn on screen while this question disappeared. Retiring the
+    // load is what the reader expects anyway: they have moved on.
+    loadSeq.current++;
 
     setTurns((prev) => [
       ...prev,

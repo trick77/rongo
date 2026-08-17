@@ -332,7 +332,7 @@ func TestEvalMeasure(t *testing.T) {
 		results = append(results, result{
 			q:         q,
 			rank:      rankOfExpected(hits, q),
-			firstRank: rankOfCandidate(hits, q.Candidates[0]),
+			firstRank: firstCandidateRank(hits, q),
 			found:     candidatesFound(hits, q),
 			hits:      len(hits),
 			barred:    len(loose) - len(bounded),
@@ -345,7 +345,7 @@ func TestEvalMeasure(t *testing.T) {
 
 	// The headline is the unique cohort. Mixing the other two in would silently
 	// change what recall@5 means against every earlier document.
-	reportRanks(t, "unique cohort", filterResults(results, func(res result) bool {
+	reportRanks(t, "unique cohort", false, filterResults(results, func(res result) bool {
 		return res.q.Resolution == ResolutionUnique
 	}))
 
@@ -353,7 +353,7 @@ func TestEvalMeasure(t *testing.T) {
 	// back 0.679 / 0.786 / 0.476, and if it does not, nothing else on this page
 	// can be compared with anything published before it.
 	anchor := loadAnchorCohort(t)
-	reportRanks(t, "anchor: the original 28, first candidate only",
+	reportRanks(t, "anchor: the original 28, first candidate only", true,
 		filterResults(results, func(res result) bool { return anchor[res.q.Text] }))
 
 	reportCohorts(t, results)
@@ -415,20 +415,21 @@ func filterResults(in []result, keep func(result) bool) []result {
 
 // reportRanks prints recall@5, recall@20 and MRR for one cohort.
 //
-// The anchor cohort is scored against the first candidate; every other cohort
-// against any candidate. They are the same number wherever a question has one
-// candidate, which is all but two of the set.
-func reportRanks(t *testing.T, label string, rows []result) {
+// firstOnly scores against the first candidate instead of any of them. It is a
+// parameter and not a guess from the label: keying the anchor arm's scoring off
+// its own log text would mean that renaming the line silently changes the two
+// reclassified questions' scores, which is the exact comparability that arm
+// exists to guarantee.
+func reportRanks(t *testing.T, label string, firstOnly bool, rows []result) {
 	t.Helper()
 	if len(rows) == 0 {
 		return
 	}
-	anchor := strings.HasPrefix(label, "anchor")
 	var recall5, recall20 int
 	var mrr float64
 	for _, res := range rows {
 		rank := res.rank
-		if anchor {
+		if firstOnly {
 			rank = res.firstRank
 		}
 		if rank > 0 {
@@ -509,6 +510,17 @@ func rankOfExpected(hits []retrieve.Hit, q Question) int {
 		}
 	}
 	return best
+}
+
+// firstCandidateRank scores against the first candidate, or 0 when a question
+// has none. A candidate-less question is what TestQuestionSetIsWellFormed
+// reports in plain words; indexing into the slice here would beat it to it with
+// an index-out-of-range panic in the middle of a measurement run.
+func firstCandidateRank(hits []retrieve.Hit, q Question) int {
+	if len(q.Candidates) == 0 {
+		return 0
+	}
+	return rankOfCandidate(hits, q.Candidates[0])
 }
 
 // rankOfCandidate returns the 1-based rank of the first hit that is one of this

@@ -185,7 +185,8 @@ Two mechanisms, both visible:
 
 **The reference walk cannot cross this boundary.** `Gatherer.referenced` follows
 a name only when the gathered text mentions it and at most four files define it
-(`gather.go:113`). The seam here is `sql.Open("sqlite3", dsn)` and a blank
+(`maxDefiners`, `gather.go:38`, applied at `gather.go:172`). The seam here is
+`sql.Open("sqlite3", dsn)` and a blank
 import — neither is a symbol hop. The design's rule that a repository boundary
 is crossed only when the gathered code really references the symbol is exactly
 what blocks it: the code references a *string*.

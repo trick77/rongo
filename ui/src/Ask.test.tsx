@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
 
@@ -242,6 +242,105 @@ describe("Ask, ein gespeicherter Thread", () => {
       expect(mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/")).length).toBe(0),
     );
     expect(screen.getByText(/Der Versand laeuft/)).toBeTruthy();
+  });
+
+  /**
+   * Like routedFetch, but the thread load only resolves when the test releases
+   * it. Every bug below lives in the window between sending that request and
+   * its answer arriving, and a fake that resolves immediately closes exactly
+   * that window.
+   */
+  function slowThreadFetch(messages: unknown, frames: string[] = [], status = 200) {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const encoder = new TextEncoder();
+    const mock = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/threads/")) {
+        await gate;
+        return { ok: status >= 200 && status < 300, status, json: async () => messages };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            let i = 0;
+            return {
+              async read() {
+                if (i >= frames.length) return { done: true, value: undefined };
+                return { done: false, value: encoder.encode(frames[i++]) };
+              },
+            };
+          },
+        },
+      };
+    });
+    vi.stubGlobal("fetch", mock);
+    return { mock, release: () => release() };
+  }
+
+  it("wirft einen abgewaehlten Thread nicht nachtraeglich auf den Schirm", async () => {
+    // Thread waehlen, dann «Neue Frage», bevor die Antwort da ist. Die
+    // eintreffende Antwort gehoert zu einem Thread, der nicht mehr offen ist.
+    const { release } = slowThreadFetch([storedTurn]);
+    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    rerender(<Ask threadId={null} onThread={() => {}} />);
+    // Released and then flushed: a plain waitFor can poll before the resolved
+    // promise's continuation has run and pass on a component that is about to
+    // render the wrong thread.
+    release();
+    await act(async () => {});
+    expect(screen.queryByText(/Ueber einen Grant/)).toBeNull();
+  });
+
+  it("ueberschreibt einen laufenden Zug nicht mit dem gespeicherten Protokoll", async () => {
+    // Reload auf einen gemerkten Thread, und der Backend ist langsam: die Frage
+    // ist schon abgeschickt, wenn das Protokoll eintrifft. Ohne Schutz faellt
+    // der laufende Zug weg und die weiteren Token landen in einer fertigen,
+    // gespeicherten Antwort.
+    const { release } = slowThreadFetch([storedTurn], [
+      ev("thread", { thread_id: 7 }),
+      ev("token", { text: "Die neue Antwort." }),
+      ev("done", {}),
+    ]);
+    const user = userEvent.setup();
+    render(<Ask threadId={7} onThread={() => {}} />);
+    await user.type(screen.getByLabelText("Frage"), "Und jetzt?");
+    await user.click(screen.getByRole("button", { name: "Fragen" }));
+    await screen.findByText(/Die neue Antwort/);
+
+    release();
+    await act(async () => {});
+    expect(screen.getByText(/Die neue Antwort/)).toBeTruthy();
+    expect(screen.getByText("Und jetzt?")).toBeTruthy();
+  });
+
+  it("vergisst den Thread nicht, wenn der Server kurz stolpert", async () => {
+    // 503 heisst «gerade nicht», nicht «gibt es nicht». Nur 200 mit leerer
+    // Liste heisst, dass der Thread einem nicht gehoert oder weg ist.
+    const { release } = slowThreadFetch(null, [], 503);
+    const onThread = vi.fn();
+    render(<Ask threadId={7} onThread={onThread} />);
+    release();
+    await act(async () => {});
+    expect(onThread).not.toHaveBeenCalledWith(null);
+  });
+
+  it("zeigt nach einem gescheiterten Wechsel nicht den alten Thread weiter", async () => {
+    // Von Thread 7 auf 8 wechseln und das Netz faellt aus. Sieht man weiter
+    // Thread 7, geht die naechste Frage stillschweigend in Thread 8.
+    routedFetch([storedTurn]);
+    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    await screen.findByText(/Ueber einen Grant/);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
+    rerender(<Ask threadId={8} onThread={() => {}} />);
+    await waitFor(() => expect(screen.queryByText(/Ueber einen Grant/)).toBeNull());
   });
 
   it("meldet den Thread nach oben, sobald er angelegt ist, und wenn der Zug fertig ist", async () => {
