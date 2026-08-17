@@ -107,6 +107,40 @@ func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toS
 	return nonEmptyLines(out), nil
 }
 
+// Change is one path in a diff, and whether the newer commit still has it.
+type Change struct {
+	Path    string
+	Deleted bool
+}
+
+// ChangedEntries is ChangedPaths with the delete/modify distinction the indexer
+// needs: a deleted path must have its rows removed, a modified one re-read.
+//
+// --name-only cannot tell the two apart, and treating a failed read as a
+// deletion would conflate a broken checkout with code that is genuinely gone —
+// the index would quietly drop files that still exist. --no-renames is
+// deliberate: to an indexer a rename IS a delete plus an add, and asking git to
+// detect renames only produces a three-field record to parse for the same
+// outcome.
+func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
+	out, err := c.run(ctx, c.Dir(spec), "diff", "--name-status", "--no-renames", fromSHA+".."+toSHA)
+	if err != nil {
+		return nil, err
+	}
+	var changes []Change
+	for _, line := range nonEmptyLines(out) {
+		status, path, ok := strings.Cut(line, "\t")
+		if !ok {
+			return nil, fmt.Errorf("unparseable diff record %q", line)
+		}
+		changes = append(changes, Change{
+			Path:    strings.TrimSpace(path),
+			Deleted: strings.HasPrefix(status, "D"),
+		})
+	}
+	return changes, nil
+}
+
 // ListPaths lists every tracked path at a commit, for the initial full index.
 func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]string, error) {
 	out, err := c.run(ctx, c.Dir(spec), "ls-tree", "-r", "--name-only", sha)

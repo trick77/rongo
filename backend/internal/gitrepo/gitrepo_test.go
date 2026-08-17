@@ -109,6 +109,54 @@ func TestChangedPaths_reportsOnlyTheDiff(t *testing.T) {
 	}
 }
 
+func TestChangedEntries_separatesDeletionsFromModifications(t *testing.T) {
+	// Given: a repository with two files.
+	src := fixtureRepo(t)
+	writeAndCommit(t, src, "gone.txt", "doomed\n", "add gone")
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	before, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+
+	// When: one file is modified and the other deleted in the same push.
+	writeAndCommit(t, src, "a.txt", "changed\n", "modify a")
+	gitRun(t, src, "rm", "-q", "gone.txt")
+	gitRun(t, src, "commit", "-qm", "delete gone")
+	if err := c.Fetch(ctx, spec, ""); err != nil {
+		t.Fatalf("Fetch() err = %v", err)
+	}
+	after, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+	changes, err := c.ChangedEntries(ctx, spec, before, after)
+
+	// Then: --name-only cannot tell these apart, and an indexer that guesses
+	// either keeps answering about deleted code or drops files that still exist.
+	if err != nil {
+		t.Fatalf("ChangedEntries() err = %v", err)
+	}
+	got := map[string]bool{}
+	for _, ch := range changes {
+		got[ch.Path] = ch.Deleted
+	}
+	if len(got) != 2 {
+		t.Fatalf("ChangedEntries() = %v, want two entries", changes)
+	}
+	if got["a.txt"] {
+		t.Error("a.txt is reported as deleted, but it was modified")
+	}
+	if !got["gone.txt"] {
+		t.Error("gone.txt is not reported as deleted; its chunks would keep answering queries")
+	}
+}
+
 func TestHeadSHA_reportsErrBranchGone(t *testing.T) {
 	// Given: a configured branch that does not exist upstream. This must be an
 	// identifiable error — a silent stop freezes the index while every status

@@ -18,12 +18,14 @@ import (
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
+	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/exttools"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/symbols"
 )
 
 func main() {
@@ -107,28 +109,47 @@ func main() {
 		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
 	}
 
+	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
+	pipeline := indexer.New(indexer.Deps{
+		DB:      db,
+		Git:     gitClient,
+		Symbols: symbols.NewExtractor(tools.Ctags),
+		Embedder: embed.NewClient(embed.Config{
+			BaseURL: cfg.EmbedBaseURL,
+			APIKey:  cfg.EmbedAPIKey,
+			Model:   cfg.EmbedModel,
+			Dim:     cfg.EmbedDim,
+		}, nil),
+		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Writer:   indexer.NewWriter(db),
+		Selector: indexer.NewSelector(indexer.SelectOptions{MaxBytes: cfg.IndexMaxFileBytes}),
+	})
+
 	poller := indexer.NewPoller(indexer.PollerDeps{
 		State: state,
-		Git:   gitrepo.New(tools.Git, cfg.RepoRoot),
-		// The indexing pipeline lands in a later task. Until then the poller
-		// keeps checkouts current and records state, and reports that it
-		// indexed nothing rather than pretending it did.
-		Index: func(context.Context, indexer.RepoState, string, []string) (indexer.Counts, error) {
-			return indexer.Counts{}, nil
-		},
+		Git:   gitClient,
+		Index: pipeline.IndexRepo,
 		// Tokens are read from the environment by the variable name the YAML
 		// entry declared. The value never appears in repos.yaml.
 		Tokens: func(tokenEnv string) string { return os.Getenv(tokenEnv) },
 	})
 
+	// Indexing can be switched off for a deployment that only serves the UI.
+	// The server still comes up and the Repos page still shows what is
+	// configured; nothing is fetched or embedded.
 	pollCtx, stopPolling := context.WithCancel(ctx)
 	defer stopPolling()
 	var workers sync.WaitGroup
-	workers.Add(1)
-	go func() {
-		defer workers.Done()
-		poller.Run(pollCtx)
-	}()
+	if cfg.IndexEnabled {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			poller.Run(pollCtx)
+		}()
+	} else {
+		slog.Warn("indexing is disabled; no repository will be fetched or embedded",
+			"fix", "set BACKEND_INDEX_ENABLED=true")
+	}
 
 	srv := httpapi.NewServer(httpapi.Deps{Auth: authSvc})
 
