@@ -25,6 +25,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_EMBED_API_KEY",
 	"BACKEND_EMBED_MODEL",
 	"BACKEND_EMBED_DIM",
+	"BACKEND_ROUTE_MARGIN",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
@@ -179,6 +180,45 @@ func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
 	}
 	if cfg.EmbedDim != 3072 {
 		t.Errorf("EmbedDim = %d, want 3072", cfg.EmbedDim)
+	}
+}
+
+func TestLoad_appliesRouteMarginDefault(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.RouteMargin != 0.25 {
+		t.Errorf("RouteMargin = %v, want 0.25", cfg.RouteMargin)
+	}
+}
+
+func TestLoad_acceptsAnExplicitRouteMargin(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_ROUTE_MARGIN":   "0.4",
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.RouteMargin != 0.4 {
+		t.Errorf("RouteMargin = %v, want 0.4", cfg.RouteMargin)
 	}
 }
 

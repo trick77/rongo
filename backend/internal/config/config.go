@@ -57,6 +57,10 @@ type Config struct {
 	// document — the defaults here are a starting point, not a finding.
 	ModuleMinChunks int
 	ModuleMaxChunks int
+	// RouteMargin is how far the leading candidate must be ahead before a
+	// turn answers without asking. The value comes out of the phase 4b
+	// routing measurement, not out of a guess.
+	RouteMargin float64
 	// The MiMo endpoint. The two deployment NAMES are hardcoded in
 	// internal/llm and deliberately not settings: a deployment name in the
 	// environment lets a misconfigured host answer with a model nobody chose.
@@ -110,6 +114,7 @@ func Load() (Config, error) {
 		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
 		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
 		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
 		LLMAPIKey:         strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
@@ -181,6 +186,21 @@ func envIntOr(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// envFloatOr reads a positive float setting. A malformed or non-positive
+// value falls back to the default rather than failing the boot, for the same
+// reason envIntOr does.
+func envFloatOr(key string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return fallback
+	}
+	return f
 }
 
 // envBoolOr reads an on/off setting. Anything unrecognised falls back to the
