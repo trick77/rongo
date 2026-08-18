@@ -18,7 +18,7 @@ import (
 // Asker runs one question end to end. An interface so the HTTP layer can be
 // tested without a model endpoint.
 type Asker interface {
-	Run(ctx context.Context, question string, audience ask.Audience, ev ask.Events) (ask.Answer, error)
+	Run(ctx context.Context, question string, audience ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 }
 
 // turnFailed is what a failed turn says, in the stream AND in the stored
@@ -131,7 +131,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// indistinguishable from a turn still in flight.
 	record := context.WithoutCancel(ctx)
 
-	answer, err := s.deps.Ask.Run(ctx, req.Question, audience, ask.Events{
+	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
@@ -142,6 +142,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
+		send("error", map[string]any{"message": turnFailed})
+		return
+	}
+	if clar != nil {
+		// Task 8 turns this into a real clarification event and stores it.
+		// Until then, a turn that ends by asking is treated as a failed turn.
+		slog.Error("turn ended in a clarification", "candidates", len(clar.Candidates))
+		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
+			slog.Error("record turn failure failed", "err", ferr)
+		}
 		send("error", map[string]any{"message": turnFailed})
 		return
 	}

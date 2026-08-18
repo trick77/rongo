@@ -25,10 +25,10 @@ type fakeAsker struct {
 	gotAud    ask.Audience
 }
 
-func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
 	if f.err != nil {
-		return ask.Answer{}, f.err
+		return ask.Answer{}, nil, f.err
 	}
 	if ev.OnStatus != nil {
 		ev.OnStatus("verstehen")
@@ -40,7 +40,7 @@ func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Ev
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text, Citations: f.citations}, nil
+	return ask.Answer{Text: text, Citations: f.citations}, nil, nil
 }
 
 func askDB(t *testing.T) *sql.DB {

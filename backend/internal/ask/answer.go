@@ -42,6 +42,10 @@ type Answer struct {
 	Text      string
 	Citations []Citation
 	Usage     llm.Usage
+	// Sources is what the answer was written from, so a caller can store it
+	// and later re-explain the same turn for the other audience without
+	// searching or gathering again.
+	Sources []Source
 }
 
 // Answerer writes the answer. This is the only step that runs on Pro, and the
@@ -124,6 +128,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Text:      text.String(),
 		Citations: citationsFor(text.String(), sources),
 		Usage:     usage,
+		Sources:   sources,
 	}, nil
 }
 
