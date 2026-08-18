@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.7-alpha.2
 	github.com/ncruces/go-sqlite3 v0.23.3
+	golang.org/x/mod v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

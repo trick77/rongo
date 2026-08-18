@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./markdown";
+import Clarify, { type ClarifyCandidate } from "./Clarify";
+import Trace, { type TraceState } from "./Trace";
 
 type Citation = {
   marker: number;
@@ -10,14 +12,35 @@ type Citation = {
   end_line: number;
 };
 
+/** The clarification a turn ended with, as this view needs it: the id of the
+ * message that carries the card (used to resume it) and its candidates. */
+type TurnClarification = {
+  messageId: number;
+  candidates: ClarifyCandidate[];
+};
+
 type Turn = {
   question: string;
   audience: "ba" | "dev";
   text: string;
   citations: Citation[];
   status: string;
+  // Every "status" event in order, for the trace panel — not just the latest
+  // one, which is all the old single status line kept.
+  steps: string[];
   error: string;
   done: boolean;
+  // The id of the message this turn was recorded as, once known. Reexplain
+  // needs it; a turn still in flight has none yet.
+  messageId: number | null;
+  clarification: TurnClarification | null;
+  // The candidate picked on this turn's card, or null before a choice. Once
+  // set it stays — picking a different candidate later starts a NEW turn,
+  // never rewriting this one.
+  chosenIdx: number | null;
+  // True for a turn created in this session. A turn restored from the
+  // record carries no live trace — it is finished by definition.
+  live: boolean;
 };
 
 /** Message is one stored turn, as GET /api/threads/{id} serves it. */
@@ -29,12 +52,19 @@ type Message = {
   answer: string;
   error: string;
   citations: Citation[] | null;
+  clarification: { id: number; candidates: ClarifyCandidate[] } | null;
+  from_candidate_idx: number;
+  // The clarification this message resolved, or 0 when it did not resume
+  // one. The link the backend actually stored — matching on it, not on
+  // position, is what tells two clarifications open in the same thread
+  // apart.
+  from_clarification_id: number;
 };
 
 /**
  * A stored turn renders exactly as it was answered — including the failure,
  * which stays in the record. It is finished by definition, so it carries no
- * status line.
+ * live trace.
  */
 function storedTurn(m: Message): Turn {
   return {
@@ -43,9 +73,62 @@ function storedTurn(m: Message): Turn {
     text: m.answer ?? "",
     citations: m.citations ?? [],
     status: "",
+    steps: [],
     error: m.error ?? "",
     done: true,
+    messageId: m.id,
+    clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
+    chosenIdx: null,
+    live: false,
   };
+}
+
+/**
+ * A fresh, in-flight turn — asked, resumed from a candidate, or
+ * re-explained. All three start the same way: no answer yet, no steps yet.
+ */
+function freshTurn(question: string, audience: "ba" | "dev"): Turn {
+  return {
+    question,
+    audience,
+    text: "",
+    citations: [],
+    status: "",
+    steps: [],
+    error: "",
+    done: false,
+    messageId: null,
+    clarification: null,
+    chosenIdx: null,
+    live: true,
+  };
+}
+
+/**
+ * Marks each clarification's chosen candidate from the link the backend
+ * actually stored (from_clarification_id → from_candidate_idx), never from
+ * position: two clarifications can be open in the same thread at once, and
+ * the older one can be the one resolved second, so "the next message"
+ * points at the wrong card.
+ */
+function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
+  const chosenByClarification = new Map<number, number>();
+  for (const m of list) {
+    if (m.from_clarification_id) chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+  }
+  return turns.map((t, i) => {
+    const clarId = list[i].clarification?.id;
+    if (clarId == null) return t;
+    const idx = chosenByClarification.get(clarId);
+    return idx === undefined ? t : { ...t, chosenIdx: idx };
+  });
+}
+
+/** The trace's three states — the turn does not merely finish or not, it can
+ * also end by asking, and that closes on the waiting node, not the check. */
+function traceState(turn: Turn): TraceState {
+  if (turn.clarification) return "waiting";
+  return turn.done ? "done" : "running";
 }
 
 /**
@@ -72,11 +155,14 @@ function forgeLine(c: Citation): string {
   return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
 }
 
-/** Chevron, rotating 90 degrees on open. No triangle, no plus/minus. */
-function Chevron() {
+/**
+ * Chevron, rotating 90 degrees on open. No triangle, no plus/minus, and the
+ * same glyph in both states — only the rotation changes.
+ */
+export function Chevron({ open = false }: { open?: boolean }) {
   return (
     <svg
-      className="chev inline-block h-3 w-3 transition-transform"
+      className={"chev inline-block h-3 w-3 transition-transform " + (open ? "rotate-90" : "")}
       viewBox="0 0 12 12"
       aria-hidden="true"
     >
@@ -175,7 +261,7 @@ export default function Ask({
           onThread(null);
           return;
         }
-        setTurns(list.map(storedTurn));
+        setTurns(linkChosenCandidates(list, list.map(storedTurn)));
       } catch {
         // The turns are cleared rather than left standing: the ids have already
         // moved to the new thread, and a visible conversation that belongs to
@@ -187,30 +273,19 @@ export default function Ask({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openThread]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const q = question.trim();
-    if (!q || busy) return;
-
-    // A thread load still in the air would replace the whole turn list when it
-    // lands, dropping the turn appended just below — and every token after that
-    // would be patched into the last STORED answer instead, corrupting a
-    // finished turn on screen while this question disappeared. Retiring the
-    // load is what the reader expects anyway: they have moved on.
-    loadSeq.current++;
-
-    setTurns((prev) => [
-      ...prev,
-      { question: q, audience, text: "", citations: [], status: "", error: "", done: false },
-    ]);
-    setQuestion("");
+  /**
+   * Streams one turn's SSE response into the LAST entry of `turns`. Shared by
+   * asking, resuming a clarification and re-explaining — all three post,
+   * stream the same event vocabulary, and land in a turn appended just
+   * before the call.
+   */
+  async function stream(url: string, body: object) {
     markBusy(true);
-
     try {
-      const res = await fetch("/api/ask", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, audience, thread_id: threadId.current ?? 0 }),
+        body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
         patchLast((t) => ({ ...t, error: `Der Server antwortete mit ${res.status}.`, done: true }));
@@ -232,12 +307,24 @@ export default function Ask({
             // The placeholder title is written by Create, so the entry can
             // appear in the list the moment the question is sent.
             onActivity();
-          } else if (name === "status") patchLast((t) => ({ ...t, status: payload.step }));
-          else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
+          } else if (name === "status") {
+            patchLast((t) => ({ ...t, status: payload.step, steps: [...t.steps, payload.step] }));
+          } else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
-          else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true }));
+          else if (name === "clarification") {
+            patchLast((t) => ({
+              ...t,
+              messageId: payload.message_id,
+              clarification: { messageId: payload.message_id, candidates: payload.candidates ?? [] },
+            }));
+          } else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true }));
           else if (name === "done") {
-            patchLast((t) => ({ ...t, done: true, status: "" }));
+            patchLast((t) => ({
+              ...t,
+              done: true,
+              status: "",
+              messageId: payload.message_id ?? t.messageId,
+            }));
             // The model-written title replaces the placeholder in a background
             // goroutine that has no way to push it here. Without this the
             // sidebar shows the truncated question until the next reload.
@@ -252,6 +339,67 @@ export default function Ask({
     }
   }
 
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = question.trim();
+    if (!q || busy) return;
+
+    // A thread load still in the air would replace the whole turn list when it
+    // lands, dropping the turn appended just below — and every token after that
+    // would be patched into the last STORED answer instead, corrupting a
+    // finished turn on screen while this question disappeared. Retiring the
+    // load is what the reader expects anyway: they have moved on.
+    loadSeq.current++;
+
+    setTurns((prev) => [...prev, freshTurn(q, audience)]);
+    setQuestion("");
+
+    await stream("/api/ask", { question: q, audience, thread_id: threadId.current ?? 0 });
+  }
+
+  /**
+   * A choice on a clarification card does two things: it marks the card that
+   * asked, and it starts a NEW turn for the answer. Nothing about the card
+   * is overwritten — picking a different candidate later repeats exactly
+   * this, appending yet another turn.
+   */
+  async function chooseCandidate(turnIndex: number, idx: number) {
+    if (busy) return;
+    const turn = turns[turnIndex];
+    if (!turn.clarification) return;
+
+    loadSeq.current++;
+    setTurns((prev) => [
+      ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
+      freshTurn(turn.question, turn.audience),
+    ]);
+
+    await stream("/api/ask", {
+      thread_id: threadId.current ?? 0,
+      question: turn.question,
+      audience: turn.audience,
+      clarification_message_id: turn.clarification.messageId,
+      choice: idx,
+    });
+  }
+
+  /**
+   * Re-explaining is a NEW turn for the other audience, from sources a prior
+   * turn already gathered — never a rewrite, and never a fresh /api/ask
+   * question.
+   */
+  async function reexplain(turnIndex: number) {
+    if (busy) return;
+    const turn = turns[turnIndex];
+    if (!turn.messageId) return;
+    const nextAudience: "ba" | "dev" = turn.audience === "dev" ? "ba" : "dev";
+
+    loadSeq.current++;
+    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience)]);
+
+    await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
+  }
+
   return (
     <div>
       {turns.map((turn, i) => (
@@ -261,10 +409,17 @@ export default function Ask({
             {turn.audience === "ba" ? "Business Analyst" : "Developer"}
           </p>
 
-          {turn.status && !turn.done && (
-            <p role="status" aria-live="polite" className="mt-3 text-sm text-[var(--color-ink-soft)]">
-              {turn.status}…
-            </p>
+          {/* A restored turn is finished by definition and carries no live
+              trace — only a turn asked, resumed or re-explained in THIS
+              session does. */}
+          {turn.live && <Trace steps={turn.steps} state={traceState(turn)} />}
+
+          {turn.clarification && (
+            <Clarify
+              candidates={turn.clarification.candidates}
+              chosenIdx={turn.chosenIdx}
+              onChoose={(idx) => chooseCandidate(i, idx)}
+            />
           )}
 
           {turn.text && <Markdown text={turn.text} />}
@@ -291,6 +446,19 @@ export default function Ask({
                 ))}
               </ul>
             </details>
+          )}
+
+          {/* Re-explaining needs a stored answer to build from — never on a
+              turn that failed or ended by asking. */}
+          {turn.done && turn.messageId && !turn.error && !turn.clarification && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => reexplain(i)}
+              className="mt-3 rounded border border-[var(--color-hairline)] px-3 py-1 text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] disabled:opacity-50"
+            >
+              {turn.audience === "dev" ? "Als BA neu erklären" : "Als Dev neu erklären"}
+            </button>
           )}
         </article>
       ))}

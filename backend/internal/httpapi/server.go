@@ -6,10 +6,35 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/web"
 )
+
+// Threads is everything the HTTP layer needs from the thread record. An
+// interface, not the concrete *threads.Store, so a test can fake a single
+// method's failure (a Clarify that cannot write, for instance) without
+// carrying a whole database through it. *threads.Store satisfies this
+// structurally.
+type Threads interface {
+	Create(ctx context.Context, subject, question string) (threads.Thread, error)
+	SetTitle(ctx context.Context, id int64, title string) error
+	AddQuestion(ctx context.Context, threadID int64, audience, question string) (threads.Message, error)
+	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
+	Fail(ctx context.Context, messageID int64, msg string) error
+	List(ctx context.Context, subject string) ([]threads.Thread, error)
+	Message(ctx context.Context, subject string, messageID int64) (threads.Message, bool, error)
+	Messages(ctx context.Context, subject string, threadID int64) ([]threads.Message, error)
+	Owns(ctx context.Context, subject string, threadID int64) (bool, error)
+	Clarify(ctx context.Context, messageID int64, c ask.Clarification) (int64, error)
+	Clarification(ctx context.Context, subject string, messageID int64) (*threads.Clarification, error)
+	CandidateHits(ctx context.Context, subject string, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error)
+	LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error
+	SaveSources(ctx context.Context, messageID int64, sources []ask.Source) error
+	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
+}
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
 // wired as its concrete *auth.Service; later phases add the indexer, the LLM
@@ -24,7 +49,7 @@ type Deps struct {
 	// Ask runs the question pipeline; Threads persists the record. Nil means
 	// this deployment cannot answer questions, which its routes say with a 503.
 	Ask     Asker
-	Threads *threads.Store
+	Threads Threads
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string) string
@@ -60,6 +85,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
+	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	s.mux.Handle("/", web.Handler())

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,9 +13,14 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/threads"
 )
+
+// testSubject is the identity dev auth mode signs in under. Every seed
+// helper that does not take an explicit owner uses it.
+const testSubject = "dev-user"
 
 // fakeAsker drives the handler without a model endpoint. It emits its tokens
 // one at a time, so a handler that assembles the answer before writing fails.
@@ -23,12 +29,25 @@ type fakeAsker struct {
 	citations []ask.Citation
 	err       error
 	gotAud    ask.Audience
+
+	// clarification, when set, makes Run end the turn by asking instead of
+	// answering.
+	clarification *ask.Clarification
+
+	resumeTokens []string
+	resumeErr    error
+
+	reexplainTokens []string
+	reexplainErr    error
 }
 
-func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
 	if f.err != nil {
-		return ask.Answer{}, f.err
+		return ask.Answer{}, nil, f.err
+	}
+	if f.clarification != nil {
+		return ask.Answer{}, f.clarification, nil
 	}
 	if ev.OnStatus != nil {
 		ev.OnStatus("verstehen")
@@ -40,7 +59,290 @@ func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Ev
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text, Citations: f.citations}, nil
+	return ask.Answer{Text: text, Citations: f.citations}, nil, nil
+}
+
+// Resume answers from the candidate's own hits — it never searches, which is
+// the whole point of a resumed turn.
+func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
+	f.gotAud = aud
+	if f.resumeErr != nil {
+		return ask.Answer{}, f.resumeErr
+	}
+	var text string
+	for _, tok := range f.resumeTokens {
+		text += tok
+		if ev.OnToken != nil {
+			ev.OnToken(tok)
+		}
+	}
+	// A resumed turn always carries the sources it was written from, so the
+	// handler has something to persist for a later re-explain.
+	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
+}
+
+func (f *fakeAsker) Reexplain(_ context.Context, _ string, aud ask.Audience, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
+	f.gotAud = aud
+	if f.reexplainErr != nil {
+		return ask.Answer{}, f.reexplainErr
+	}
+	var text string
+	for _, tok := range f.reexplainTokens {
+		text += tok
+		if ev.OnToken != nil {
+			ev.OnToken(tok)
+		}
+	}
+	return ask.Answer{Text: text}, nil
+}
+
+// withAskerAsking makes Run end the turn with a two-candidate clarification.
+func withAskerAsking() func(*fakeAsker) {
+	return func(f *fakeAsker) {
+		f.clarification = &ask.Clarification{
+			Understanding: ask.Understanding{CodeTerms: []string{"auth"}},
+			Candidates: []ask.Candidate{
+				{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
+					Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
+				{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
+					Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
+			},
+		}
+	}
+}
+
+func withAskerResuming() func(*fakeAsker) {
+	return func(f *fakeAsker) { f.resumeTokens = []string{"Die ", "Antwort."} }
+}
+
+func withAskerReexplaining() func(*fakeAsker) {
+	return func(f *fakeAsker) { f.reexplainTokens = []string{"Die ", "Erklaerung."} }
+}
+
+// newTestServer builds a server over a fresh dev-auth store, wired to a
+// fakeAsker shaped by opts.
+func newTestServer(t *testing.T, opts ...func(*fakeAsker)) *Server {
+	t.Helper()
+	srv, _, _ := newTestServerWithDB(t, opts...)
+	return srv
+}
+
+// newTestServerWithStore is newTestServer plus the store, for tests that seed
+// data or read back what a turn recorded.
+func newTestServerWithStore(t *testing.T, opts ...func(*fakeAsker)) (*Server, *threads.Store) {
+	t.Helper()
+	srv, st, _ := newTestServerWithDB(t, opts...)
+	return srv, st
+}
+
+// newTestServerWithDB additionally exposes the raw database, for seeding rows
+// (chunks, files, repo_state) no threads.Store method writes.
+func newTestServerWithDB(t *testing.T, opts ...func(*fakeAsker)) (*Server, *threads.Store, *sql.DB) {
+	t.Helper()
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	// Both users have to exist before a thread references them: threads have
+	// a foreign key on the owning subject.
+	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+		t.Fatalf("seed dev user: %v", err)
+	}
+	if _, err := svc.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+	f := &fakeAsker{}
+	for _, o := range opts {
+		o(f)
+	}
+	st := threads.NewStore(db)
+	return NewServer(Deps{Auth: svc, Ask: f, Threads: st}), st, db
+}
+
+func doSSE(t *testing.T, srv *Server, path, body string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	return rec.Body.String()
+}
+
+func doStatus(t *testing.T, srv *Server, path, body string) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	return rec.Code
+}
+
+// seedClarification seeds a thread, its question and the clarification it
+// ended with, owned by testSubject.
+func seedClarification(t *testing.T, store *threads.Store) (msgID, clarID int64) {
+	t.Helper()
+	return seedClarificationOwnedBy(t, store, testSubject)
+}
+
+func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string) (msgID, clarID int64) {
+	t.Helper()
+	ctx := context.Background()
+	th, err := store.Create(ctx, subject, "wie ist die Anmeldung geloest?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "wie ist die Anmeldung geloest?")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
+		Understanding: ask.Understanding{CodeTerms: []string{"auth"}},
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
+				Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
+			{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
+				Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	return msg.ID, clarID
+}
+
+// threadOf resolves the thread a clarifying message belongs to, the same way
+// the handler does: through the subject-scoped Clarification read.
+func threadOf(t *testing.T, store *threads.Store, msgID int64) int64 {
+	t.Helper()
+	clar, err := store.Clarification(context.Background(), testSubject, msgID)
+	if err != nil {
+		t.Fatalf("clarification: %v", err)
+	}
+	if clar == nil {
+		t.Fatalf("no clarification for message %d", msgID)
+	}
+	return clar.ThreadID
+}
+
+// seedAnsweredMessageWithSources seeds a finished turn whose answer has real,
+// joinable sources — a repo, a file and a chunk row, not just a bare chunk id.
+func seedAnsweredMessageWithSources(t *testing.T, store *threads.Store, db *sql.DB) int64 {
+	t.Helper()
+	ctx := context.Background()
+	chunkID := seedChunk(t, db)
+	th, err := store.Create(ctx, testSubject, "frage")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.SaveSources(ctx, msg.ID, []ask.Source{{ChunkID: chunkID, Reason: "hit"}}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+	return msg.ID
+}
+
+// seedAnsweredMessageWithoutSources seeds a finished turn that never had its
+// sources saved — standing in for a chunk a re-index later removed.
+func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64 {
+	t.Helper()
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "frage")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	return msg.ID
+}
+
+// seedAnsweredMessageWithOneVanishedSource seeds a finished turn whose answer
+// was written from two chunks, then simulates a re-index removing one of
+// them — standing in for the common case: a re-index removes SOME of the
+// evidence, not all of it.
+func seedAnsweredMessageWithOneVanishedSource(t *testing.T, store *threads.Store, db *sql.DB) int64 {
+	t.Helper()
+	ctx := context.Background()
+	chunkA := seedChunk(t, db)
+	chunkB := seedChunkAt(t, db, "b.go")
+	th, err := store.Create(ctx, testSubject, "frage")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.SaveSources(ctx, msg.ID, []ask.Source{
+		{ChunkID: chunkA, Reason: "hit"},
+		{ChunkID: chunkB, Reason: "hit"},
+	}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM chunks WHERE id = ?`, chunkB); err != nil {
+		t.Fatalf("delete chunk: %v", err)
+	}
+	return msg.ID
+}
+
+// seedChunkAt is seedChunk for a second file in the same repo, so a message
+// can have two sources.
+func seedChunkAt(t *testing.T, db *sql.DB, path string) int64 {
+	t.Helper()
+	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', ?, 'def')`, path)
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	fileID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	res, err = db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
+		VALUES (?, 0, 1, 5, '', 'package b', 'package b', 'hash2')`, fileID)
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	chunkID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	return chunkID
+}
+
+func seedChunk(t *testing.T, db *sql.DB) int64 {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url) VALUES ('peeq', 'https://example.invalid/peeq.git')`); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', 'a.go', 'abc')`)
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	fileID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	res, err = db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
+		VALUES (?, 0, 1, 5, '', 'package a', 'package a', 'hash1')`, fileID)
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	chunkID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	return chunkID
 }
 
 func askDB(t *testing.T) *sql.DB {
@@ -259,4 +561,212 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+func TestAskStreamsAClarificationAndEndsTheTurn(t *testing.T) {
+	// Given a pipeline that asks
+	srv := newTestServer(t, withAskerAsking())
+
+	// When
+	body := doSSE(t, srv, "/api/ask", `{"question":"wie ist die Anmeldung geloest?"}`)
+
+	// Then
+	if !strings.Contains(body, "event: clarification") {
+		t.Fatalf("no clarification event in:\n%s", body)
+	}
+	if strings.Contains(body, "event: token") {
+		t.Error("a turn that asks streams no answer")
+	}
+	if !strings.Contains(body, "event: done") {
+		t.Error("the turn must end, or the browser waits forever")
+	}
+}
+
+// clarifyFailingThreads wraps a real store but makes Clarify fail, standing
+// in for a write that could not commit (disk full, a busy database). It
+// still needs every other method of the Threads interface, which the
+// embedded *threads.Store supplies.
+type clarifyFailingThreads struct {
+	*threads.Store
+}
+
+func (c *clarifyFailingThreads) Clarify(context.Context, int64, ask.Clarification) (int64, error) {
+	return 0, errors.New("disk full")
+}
+
+func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
+	// Given a pipeline that ends by asking, but a store that cannot write
+	// the clarification
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	st := threads.NewStore(db)
+	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &clarifyFailingThreads{Store: st}}
+	withAskerAsking()(deps.Ask.(*fakeAsker))
+
+	// When
+	rec := postAsk(t, deps, `{"question":"wie ist die Anmeldung geloest?"}`)
+
+	// Then no clarification event ships — a card whose candidates were never
+	// stored would offer choices resuming them cannot honour
+	body := rec.Body.String()
+	if strings.Contains(body, "event: clarification") {
+		t.Errorf("a clarification event shipped despite the failed write:\n%s", body)
+	}
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("no error event:\n%s", body)
+	}
+	// And the turn is recorded as failed, not left answerless and errorless
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: list=%+v err=%v", list, err)
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("Messages: msgs=%+v err=%v", msgs, err)
+	}
+	if msgs[0].Error == "" {
+		t.Errorf("message = %+v, want it recorded as failed", msgs[0])
+	}
+}
+
+func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
+	// Given a stored clarification
+	srv, store := newTestServerWithStore(t, withAskerResuming())
+	msgID, clarID := seedClarification(t, store)
+
+	// When the reader picks the second candidate
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"wie ist die Anmeldung geloest?","clarification_message_id":%d,"choice":1}`, msgID))
+
+	// Then
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("a chosen candidate must produce an answer:\n%s", body)
+	}
+	// and the new turn records where it came from
+	msgs, err := store.Messages(context.Background(), testSubject, threadOf(t, store, msgID))
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	last := msgs[len(msgs)-1]
+	if last.FromCandidateIdx != 1 {
+		t.Errorf("new turn records candidate %d, want 1", last.FromCandidateIdx)
+	}
+	_ = clarID
+}
+
+func TestChoiceOutOfRangeIsRefusedNotGuessed(t *testing.T) {
+	srv, store := newTestServerWithStore(t, withAskerResuming())
+	msgID, _ := seedClarification(t, store)
+
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":7}`, msgID))
+	if code != http.StatusBadRequest {
+		t.Errorf("status %d, want 400 — answering from a candidate nobody offered is worse than refusing", code)
+	}
+}
+
+func TestAClarificationOfSomeoneElsesThreadIsRefused(t *testing.T) {
+	// The id comes from the browser. Whether it exists is not something to
+	// confirm to someone who does not own it.
+	srv, store := newTestServerWithStore(t, withAskerResuming())
+	msgID, _ := seedClarificationOwnedBy(t, store, "someone-else")
+
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":0}`, msgID))
+	if code != http.StatusForbidden {
+		t.Errorf("status %d, want 403", code)
+	}
+}
+
+func TestReexplainStreamsFromTheStoredSources(t *testing.T) {
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithSources(t, store, db)
+
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("want a streamed answer:\n%s", body)
+	}
+}
+
+func TestReexplainAddsANewTurnAndLeavesThePreviousAnswerUntouched(t *testing.T) {
+	// Given a finished turn with sources
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithSources(t, store, db)
+	orig, found, err := store.Message(context.Background(), testSubject, msgID)
+	if err != nil || !found {
+		t.Fatalf("Message: found=%v err=%v", found, err)
+	}
+
+	// When re-explaining for the dev audience
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("want a streamed answer:\n%s", body)
+	}
+
+	// Then the thread has one more message
+	msgs, err := store.Messages(context.Background(), testSubject, orig.ThreadID)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %+v, want the original turn plus the re-explained one", msgs)
+	}
+
+	// and the previous answer is untouched
+	if msgs[0].ID != orig.ID || msgs[0].Answer != orig.Answer || msgs[0].Audience != orig.Audience {
+		t.Errorf("previous turn = %+v, want it unchanged from %+v", msgs[0], orig)
+	}
+
+	// and the new turn carries the requested audience, its own sources and
+	// never resumed a clarification
+	last := msgs[len(msgs)-1]
+	if last.ID == orig.ID {
+		t.Fatal("re-explain must create a new message, not rewrite the old one")
+	}
+	if last.Audience != "dev" {
+		t.Errorf("new turn audience = %q, want dev", last.Audience)
+	}
+	if last.FromCandidateIdx != -1 {
+		t.Errorf("new turn FromCandidateIdx = %d, want -1 — it did not resume a clarification", last.FromCandidateIdx)
+	}
+	newSources, _, err := store.Sources(context.Background(), testSubject, last.ID)
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	if len(newSources) == 0 {
+		t.Error("the new turn must have its own sources, so it can itself be re-explained later")
+	}
+}
+
+func TestReexplainSaysSoWhenTheBasisIsGone(t *testing.T) {
+	srv, store := newTestServerWithStore(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithoutSources(t, store)
+
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("a vanished basis is an error, never the same question answered from other code:\n%s", body)
+	}
+}
+
+func TestReexplainSaysSoWhenOnlyPartOfTheBasisIsGone(t *testing.T) {
+	// A re-index usually removes SOME chunks, not all of them. Answering from
+	// the survivors would be the same question answered from different code
+	// than the reader was shown — a silent substitution, exactly what the
+	// invariants forbid.
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithOneVanishedSource(t, store, db)
+
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("a partially vanished basis is an error, never an answer from the surviving source:\n%s", body)
+	}
+	if !strings.Contains(body, basisGone) {
+		t.Errorf("want the basisGone message, not the generic turnFailed one:\n%s", body)
+	}
+	if strings.Contains(body, "event: token") {
+		t.Errorf("a partially vanished basis must not stream an answer:\n%s", body)
+	}
 }

@@ -883,6 +883,112 @@
   </ul>
 </section>
 
+<section>
+  <h2>Nachtrag Phase 4b: geroutet wird, aber das Fragen verdient sich noch nichts</h2>
+  <p>
+    Phase 3s Nachtrag hatte offen gelassen, woher die Rückfrage in Phase 4 ihre benannten Kandidaten
+    nimmt, wenn nicht aus <code>module_profiles</code>. Antwort: aus per-Zug-Benennung über den
+    deterministischen Modul-Clustern. Kein Steckbrief wird beim Indexieren vorgeschrieben; wenn die
+    Rückfragekarte tatsächlich erscheint, bekommt jeder Kandidat aus seinen eigenen Top-Chunks einen
+    deutschen Titel und eine Zeile Zusammenfassung, geschrieben von einem non-Pro-Aufruf. Das ist die
+    andere Quelle, die dort gefordert war — und billiger als die verworfene volle Fassung, weil sie
+    nur dann läuft, wenn der Leser sie auch sieht.
+  </p>
+  <p>
+    <code>repo_deps</code> ist jetzt gefüllt, aus jedem <code>go.mod</code> im Baum eines
+    Repositories. Es ist die deterministische Stufe aus «Woran rongo die beiden unterscheidet», die
+    Zusammensetzung ohne Modellaufruf von Mehrdeutigkeit trennt.
+  </p>
+
+  <h3>Die geforderte Messung: non-Pro gegen Pro</h3>
+  <p>
+    Die Spec verlangte vor der Festschreibung genau diese Zahl. Gemessen in
+    <code>docs/measurements/2026-08-18-routing.md</code>, 61 Fragen:
+  </p>
+  <table>
+    <thead>
+      <tr><th>Richter-Deployment</th><th>gesamt</th><th><code>ambiguous</code> (soll fragen)</th><th><code>unique</code>+<code>composition</code> (soll nicht fragen)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>non-Pro (<code>ShortGate</code>)</td><td>0.656 (40/61)</td><td>0.583 (7/12)</td><td>0.673 (33/49)</td></tr>
+      <tr><td>Pro</td><td>0.672 (41/61)</td><td>0.667 (8/12)</td><td>0.673 (33/49)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Eine Frage Unterschied auf 61 — Pro findet einen echten Mehrdeutigkeitsfall mehr, ist sonst
+    identisch, inklusive derselben <code>composition</code>-Fehlerform. Das ist kein Grund, das
+    Routing-Urteil auf das teure Deployment zu heben, und die Bedingung der Spec für die
+    Festschreibung von non-Pro im Routen ist damit erfüllt.
+  </p>
+
+  <h3>Das unbequeme Ergebnis</h3>
+  <p>
+    Ein Router, der nie fragt, erreicht auf diesem Katalog <b>0.803</b> — besser als jede hier
+    gemessene Konfiguration mit Margin, weil 49 der 61 Fragen keine Rückfrage wollen. Beim
+    Standardwert <code>BACKEND_ROUTE_MARGIN = 0.25</code> kauft die Kette <b>16 falsche Rückfragen für
+    7 richtige</b> und fragt bei 8 von 44 Fragen nach, die per Definition genau eine Antwort haben.
+  </p>
+  <p>
+    Der Fehler liegt nicht im Urteil über die Kandidaten, sondern in dem, was die Kandidaten
+    <em>sind</em>. Zwei Repositories, die beide ein Paket <code>store</code> haben, erzeugen zwei
+    Kandidaten, die auf der Ebene, die die Karte zeigt, gleich aussehen.
+  </p>
+  <div class="note">
+    <span class="tag">Die Margin bleibt bei 0.25</span>
+    <p>
+      Nicht, weil 0.25 in der Sweep-Tabelle gewinnt — sie tut es nicht, 0.10 scored am besten. Sondern
+      weil 0.10 nur gewinnt, indem es weniger fragt, und die Metrik auf einem zu 80 %
+      «nicht fragen»-Katalog Schweigen belohnt. Die Margin nach dieser Tabelle zu wählen würde den
+      Router darauf trimmen, sich selbst abzuschalten. Der Standard bleibt, bis die Kandidatenschicht
+      selbst behoben ist.
+    </p>
+  </div>
+
+  <h3>Was Routing nicht beschädigt</h3>
+  <p>
+    Auf dem nicht-fragenden Pfad wird die Antwort weiterhin aus der vollständigen Trefferliste
+    gebaut. Belegtreue über die Fragen, bei denen der Router nicht nachgefragt hat, liegt bei
+    <b>0.944</b> (34/36) gegen die publizierte 0.955 — eine Frage Unterschied. Über alle 44
+    <code>unique</code>-Fragen gerechnet sind es nur 0.773: ein Fünftel der eindeutigen Fragen
+    erreicht auf dem ersten Zug gar keine Antwort, weil stattdessen eine Rückfrage zurückkommt.
+  </p>
+
+  <h3><code>composition</code> unverändert bei 0/5</h3>
+  <p>
+    Wie im Phase-4b-Design vor dem Code vorhergesagt. <code>repo_deps</code> hält den Router davon
+    ab, danach zu fragen; es macht die Fragen dadurch nicht beantwortbar. Die Nahtstelle ist
+    <code>sql.Open("sqlite3", …)</code> plus ein Blank-Import — eine <em>Zeichenkette</em>, kein
+    Symbol.
+  </p>
+
+  <h3>Ein alter Fehler, jetzt sichtbar gemacht</h3>
+  <p>
+    Der manuelle Testlauf zeigt eine Verwechslung, die Phase 4b nicht verursacht, aber sichtbar
+    macht. Auf der Rückfragekarte wählte der Leser den Kandidaten <b>peeq</b>; die Antwort zitierte
+    für eine Aussage über peeq <code>loom/backend/internal/auth/session.go:129-141</code> — obwohl
+    peeq sein eigenes, byteidentisches <code>randomToken</code> in
+    <code>session.go:135-141</code> besitzt. Der Referenz-Walk des Gatherers (Phase 4a) folgt
+    Symbolnamen über Repository-Grenzen hinweg; die Spec-Bedingung «der gesammelte Code referenziert
+    das Symbol tatsächlich» ist namensbasiert, nicht auflösungsbasiert.
+  </p>
+  <p>
+    Der Mechanismus ist vorbestehend. Die Rückfragekarte macht ihn erst zu einem greifbaren Problem,
+    weil sie verspricht, welcher Mechanismus gewählt wurde — und die Zitation dann auf Code aus dem
+    jeweils anderen zeigt. Das ist ein reproduzierbarer Verstoss gegen «jede Aussage ist zitierbar,
+    und eine Zitation zeigt auf den Code, um den es in der Aussage tatsächlich geht». Er gehört zur
+    Kandidatenschicht, die dieser Nachtrag bereits für eine spätere Phase offen lässt, nicht in
+    diesen Zug allein.
+  </p>
+
+  <h3>Offen für eine spätere Phase</h3>
+  <p>
+    Zwei Hebel, beide unbenutzt: die Kandidaten-Körnung — Modul-Identität ist möglicherweise so grob
+    wie die schon widerlegte Modul-<em>Bewertung</em> aus Phase 3 —, und der Richter, dem nie gezeigt
+    wird, was zwei Kandidaten tatsächlich unterscheiden würde: <code>Understanding.Repos</code> ist
+    berechnet und steht nicht im Prompt.
+  </p>
+</section>
+
 <footer>
   <span>rongo · Design &amp; Umsetzungsplan</span>
   <span>16. August 2026</span>

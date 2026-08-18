@@ -64,6 +64,46 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
+	db := openTemp(t)
+	if err := Migrate(db, 1536); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	var files int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&files); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if files != 1 {
+		t.Errorf("schema_migrations has %d rows, want 1 — the schema is one file now", files)
+	}
+
+	for _, table := range []string{
+		"users", "sessions", "repo_state", "files", "symbols", "chunks",
+		"embed_cache", "repo_deps", "threads", "messages", "citations",
+		"clarifications", "clarification_candidates", "message_sources",
+	} {
+		var name string
+		err := db.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+		if err != nil {
+			t.Errorf("table %s missing after migrate: %v", table, err)
+		}
+	}
+
+	// The two columns that carry a resumed turn back to the card it came from.
+	for _, col := range []string{"from_clarification_id", "from_candidate_idx"} {
+		var n int
+		if err := db.QueryRow(
+			`SELECT count(*) FROM pragma_table_info('messages') WHERE name=?`, col).Scan(&n); err != nil {
+			t.Fatalf("pragma messages: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("messages.%s missing", col)
+		}
+	}
+}
+
 func TestOpen_enablesWALAndForeignKeys(t *testing.T) {
 	db := openTemp(t)
 

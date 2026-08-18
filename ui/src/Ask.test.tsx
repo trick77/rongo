@@ -35,9 +35,17 @@ const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.string
 
 afterEach(() => vi.unstubAllGlobals());
 
+// Mounted under StrictMode, like every test in this file and like main.tsx
+// mounts the real app: StrictMode runs each effect twice, and a component
+// that only tolerates a single run passes here while coming back empty on a
+// real reload.
 async function ask(text: string) {
   const user = userEvent.setup();
-  render(<Ask />);
+  render(
+    <StrictMode>
+      <Ask />
+    </StrictMode>,
+  );
   await user.type(screen.getByLabelText("Frage"), text);
   await user.click(screen.getByRole("button", { name: "Fragen" }));
   return user;
@@ -144,7 +152,7 @@ describe("Ask", () => {
  */
 function routedFetch(messages: unknown, frames: string[] = []) {
   const encoder = new TextEncoder();
-  const mock = vi.fn(async (url: string) => {
+  const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
     if (String(url).startsWith("/api/threads/")) {
       return { ok: true, status: 200, json: async () => messages };
     }
@@ -354,5 +362,233 @@ describe("Ask, ein gespeicherter Thread", () => {
     // Twice: once so the placeholder title appears immediately, once at the end
     // so the model-written title replaces it.
     await waitFor(() => expect(onActivity).toHaveBeenCalledTimes(2));
+  });
+});
+
+/**
+ * Answers several POSTs in a row, one SSE stream per call, while routing
+ * /api/threads/{id} to a fixed stored record. Choosing a candidate and
+ * re-explaining both post a SECOND time in the same test, and the queue is
+ * what tells the two calls apart.
+ */
+function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
+  const encoder = new TextEncoder();
+  let next = 0;
+  const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
+    if (String(url).startsWith("/api/threads/")) {
+      return { ok: true, status: 200, json: async () => threadsJson };
+    }
+    const frames = responses[next++] ?? [];
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          let i = 0;
+          return {
+            async read() {
+              if (i >= frames.length) return { done: true, value: undefined };
+              return { done: false, value: encoder.encode(frames[i++]) };
+            },
+          };
+        },
+      },
+    };
+  });
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
+describe("Ask, die Klaerfrage und das Neu-Erklaeren", () => {
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  const loginCandidate = {
+    idx: 0,
+    title: "Ueber den Login-Service",
+    summary: "Die Anmeldung laeuft ueber den zentralen Login-Service.",
+    repo: "peeq",
+    branch: "master",
+  };
+  const legacyCandidate = {
+    idx: 1,
+    title: "Ueber den Legacy-Adapter",
+    summary: "Der alte Adapter meldet Nutzer direkt gegen LDAP an.",
+    repo: "peeq-legacy",
+    branch: "master",
+  };
+
+  it("rendert bei einer Klaerfrage die Karte und beendet die Spur des Zugs im Warte-Zustand", async () => {
+    queuedPostFetch([
+      [
+        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("status", { step: "verstehen" }),
+        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("done", { message_id: 5 }),
+      ],
+    ]);
+
+    await ask("Wie ist die Anmeldung geloest?");
+
+    expect(await screen.findByText("Wie ist das gemeint?")).toBeTruthy();
+    expect(screen.getByText("Ueber den Login-Service")).toBeTruthy();
+    expect(screen.getByText("Ueber den Legacy-Adapter")).toBeTruthy();
+    // The waiting node, not the check: a person is being waited on.
+    expect(screen.getByRole("status").textContent).toContain("Wartet auf Auswahl");
+    expect(screen.getByRole("status").textContent).not.toContain("Fertig");
+  });
+
+  it("schickt beim Waehlen eines Kandidaten die Wahl und streamt die Antwort in einen neuen Zug", async () => {
+    const mock = queuedPostFetch([
+      [
+        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("done", { message_id: 5 }),
+      ],
+      [
+        ev("thread", { thread_id: 7, message_id: 6 }),
+        ev("token", { text: "Die Anmeldung laeuft ueber den Login-Service." }),
+        ev("done", { message_id: 6 }),
+      ],
+    ]);
+
+    const user = await ask("Wie ist die Anmeldung geloest?");
+    await screen.findByText("Ueber den Login-Service");
+
+    await user.click(screen.getByText("Ueber den Login-Service"));
+
+    await screen.findByText(/Die Anmeldung laeuft ueber den Login-Service/);
+    // The card itself is marked, not overwritten — it still shows both
+    // candidates when reopened, the chosen one included.
+    expect(await screen.findByText(/Gewählt: Ueber den Login-Service/)).toBeTruthy();
+
+    const postBodies = mock.mock.calls
+      .filter((c) => c[1]?.method === "POST")
+      .map((c) => JSON.parse(String(c[1]?.body)));
+    expect(postBodies[1]).toMatchObject({
+      thread_id: 7,
+      clarification_message_id: 5,
+      choice: 0,
+    });
+  });
+
+  const clarifyingMessage = {
+    id: 5,
+    ordinal: 0,
+    audience: "ba",
+    question: "Wie ist die Anmeldung geloest?",
+    answer: "",
+    error: "",
+    citations: [],
+    clarification: { id: 50, candidates: [loginCandidate, legacyCandidate] },
+    from_candidate_idx: -1,
+    from_clarification_id: 0,
+    created_at: "2026-08-17T10:00:00Z",
+  };
+  const resumedMessage = {
+    id: 6,
+    ordinal: 1,
+    audience: "ba",
+    question: "Wie ist die Anmeldung geloest?",
+    answer: "Die Anmeldung laeuft ueber den Login-Service.",
+    error: "",
+    citations: [],
+    clarification: null,
+    from_candidate_idx: 0,
+    from_clarification_id: 50,
+    created_at: "2026-08-17T10:01:00Z",
+  };
+
+  it("rendert eine gespeicherte Karte nach dem Neuladen zusammengeklappt", async () => {
+    // GET /api/threads/{id} carries the clarification; without this a reload
+    // shows a turn that looks stuck forever.
+    routedFetch([clarifyingMessage, resumedMessage]);
+    strict(<Ask threadId={7} />);
+
+    expect(await screen.findByText(/Gewählt: Ueber den Login-Service/)).toBeTruthy();
+    expect(screen.queryByText("Wie ist das gemeint?")).toBeNull();
+    // A restored turn carries no live trace.
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("markiert bei zwei offenen Klaerfragen die richtige Karte, auch wenn die AELTERE zuletzt aufgeloest wird", async () => {
+    // c1 opens, c2 opens, then r1 resolves c1 — the OLDER one, resolved
+    // SECOND. A heuristic that reads "the next message" would look at c2 for
+    // c1's answer and never find it, leaving c1 stuck open forever, and would
+    // never notice c2 was left open at all.
+    const c1 = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      question: "Wie ist die Anmeldung geloest?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: { id: 100, candidates: [loginCandidate, legacyCandidate] },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    const c2 = {
+      id: 11,
+      ordinal: 1,
+      audience: "ba",
+      question: "Wie wird die Rechnung erzeugt?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 101,
+        candidates: [
+          { idx: 0, title: "Ueber den Billing-Job", summary: "Ein Batch-Job.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Ueber den Checkout", summary: "Direkt beim Checkout.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:01:00Z",
+    };
+    const r1 = {
+      id: 12,
+      ordinal: 2,
+      audience: "ba",
+      question: "Wie ist die Anmeldung geloest?",
+      answer: "Die Anmeldung laeuft ueber den Login-Service.",
+      error: "",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: 0,
+      from_clarification_id: 100,
+      created_at: "2026-08-17T10:02:00Z",
+    };
+    routedFetch([c1, c2, r1]);
+    strict(<Ask threadId={7} />);
+
+    // c1's card is collapsed and marked with the choice r1 recorded.
+    expect(await screen.findByText(/Gewählt: Ueber den Login-Service/)).toBeTruthy();
+    // c2 was never resolved, so its card is still open, asking.
+    expect(screen.getByText("Wie ist das gemeint?")).toBeTruthy();
+    expect(screen.getByText("Ueber den Billing-Job")).toBeTruthy();
+  });
+
+  it("postet beim Neu-Erklaeren an die Reexplain-Route und nie an /api/ask", async () => {
+    const mock = routedFetch([storedTurn], [
+      ev("thread", { thread_id: 3, message_id: 20 }),
+      ev("token", { text: "Antwort fuer BA." }),
+      ev("done", { message_id: 20 }),
+    ]);
+    strict(<Ask threadId={7} />);
+    await screen.findByText(/Ueber einen Grant/);
+
+    const user = userEvent.setup();
+    // storedTurn is audience "dev", so the button offers the BA re-explain.
+    await user.click(screen.getByRole("button", { name: "Als BA neu erklären" }));
+
+    await screen.findByText(/Antwort fuer BA/);
+
+    const postCalls = mock.mock.calls.filter((c) => c[1]?.method === "POST");
+    expect(postCalls.length).toBe(1);
+    expect(String(postCalls[0][0])).toBe("/api/messages/9/reexplain");
+    expect(JSON.parse(String(postCalls[0][1]?.body))).toEqual({ audience: "ba" });
+    expect(mock.mock.calls.some((c) => String(c[0]).startsWith("/api/ask"))).toBe(false);
   });
 });
