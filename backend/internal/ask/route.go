@@ -1,9 +1,17 @@
 package ask
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
+	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/modules"
+	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -64,4 +72,268 @@ func dominates(cs []Candidate, margin float64) bool {
 // module key without pulling in path/filepath's OS-specific behaviour.
 func lastSlash(p string) int {
 	return strings.LastIndexByte(p, '/')
+}
+
+// maxCandidates is how many the card may offer. The spec says two to five;
+// more than five is not a question anyone answers, it is a list.
+const maxCandidates = 5
+
+// routeMaxTokens caps the judgement, nameMaxTokens the per-candidate naming.
+// Both replies are short structured objects; a longer one means the model
+// started explaining itself to nobody.
+const (
+	routeMaxTokens = 128
+	nameMaxTokens  = 160
+)
+
+// judgeMarker is a phrase unique to the judge's prompt. Tests use it to tell
+// the two calls apart.
+const judgeMarker = "Alternativen oder Teile eines Ganzen"
+
+const judgeSystem = `Du entscheidest, ob zwei oder mehr Fundstellen ` + judgeMarker + ` sind.
+
+Antworte AUSSCHLIESSLICH mit JSON: {"decision":"ask"} oder {"decision":"compose"}.
+
+  ask      Die Fundstellen sind unabhaengige Mechanismen, die dasselbe leisten.
+           Genau einer ist gemeint, und es waere falsch zu raten.
+  compose  Die Fundstellen sind Teile EINES Mechanismus: eine ruft die andere,
+           eine ist die gemeinsame Bibliothek, eine ist die Fassade.
+
+Im Zweifel "ask": eine Rueckfrage kostet einen Klick, eine zusammengesetzte
+Antwort ueber unabhaengige Mechanismen ist schlicht falsch.`
+
+const nameSystem = `Du benennst einen Kandidaten fuer eine Rueckfrage.
+
+Antworte AUSSCHLIESSLICH mit JSON: {"title":"...","summary":"..."}
+
+  title    Hoechstens sechs Woerter, deutsch, fachlich. NICHT der Verzeichnisname.
+           Der Leser sieht das Repository schon daneben stehen.
+  summary  Ein Satz, was dieser Code tut.
+
+Zwei Kandidaten muessen sich am Titel unterscheiden lassen, auch wenn beide im
+selben Paketnamen liegen.`
+
+// Decision is what routing produced: either an answer can be composed from
+// every candidate, or the reader has to be asked which one is meant.
+type Decision struct {
+	Ask        bool
+	Candidates []Candidate
+}
+
+// Router decides whether a turn can be answered or has to ask.
+type Router struct {
+	llm    *llm.Client
+	db     *sql.DB
+	margin float64
+	// clusterOpts is the SAME module cut the Repos page counts with — it comes
+	// from config, not a value this package invents for itself, so routing
+	// never sees a module nobody else in the product can see.
+	clusterOpts modules.Opts
+}
+
+// NewRouter builds a Router.
+func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Router {
+	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo}
+}
+
+// Route runs the ladder: margin, then the manifest, then — only in the rest
+// case — the model.
+func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit) (Decision, error) {
+	moduleOf, err := r.moduleLookup(ctx, hits)
+	if err != nil {
+		return Decision{}, err
+	}
+	cs := candidates(hits, moduleOf)
+	if dominates(cs, r.margin) {
+		return Decision{Ask: false, Candidates: cs}, nil
+	}
+	if len(cs) > maxCandidates {
+		cs = cs[:maxCandidates]
+	}
+
+	related, err := r.anyDependency(ctx, cs)
+	if err != nil {
+		return Decision{}, err
+	}
+	if related {
+		// Composition, established from manifests. No model is asked, because
+		// there is nothing left to judge.
+		return Decision{Ask: false, Candidates: cs}, nil
+	}
+
+	ask, err := r.judge(ctx, question, cs)
+	if err != nil {
+		return Decision{}, err
+	}
+	if !ask {
+		return Decision{Ask: false, Candidates: cs}, nil
+	}
+	named, err := r.name(ctx, question, cs)
+	if err != nil {
+		return Decision{}, err
+	}
+	return Decision{Ask: true, Candidates: named}, nil
+}
+
+// moduleLookup builds the moduleOf closure candidates() needs, from a single
+// Cluster call per distinct repository in hits. A path the cluster does not
+// know (because indexing never wrote it, or because the cluster query found
+// nothing for the repo at all) falls back to its own directory.
+func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(repo, path string) string, error) {
+	byRepo := map[string]map[string]string{}
+	seen := map[string]bool{}
+	for _, h := range hits {
+		if seen[h.Repo] {
+			continue
+		}
+		seen[h.Repo] = true
+		mods, err := modules.Cluster(ctx, r.db, h.Repo, r.clusterOpts)
+		if err != nil {
+			return nil, fmt.Errorf("cluster %s: %w", h.Repo, err)
+		}
+		paths := map[string]string{}
+		for _, m := range mods {
+			for _, p := range m.Paths {
+				paths[p] = m.Key
+			}
+		}
+		byRepo[h.Repo] = paths
+	}
+	return func(repo, path string) string {
+		if key, ok := byRepo[repo][path]; ok {
+			return key
+		}
+		if i := lastSlash(path); i >= 0 {
+			return path[:i]
+		}
+		return "."
+	}, nil
+}
+
+// anyDependency reports whether any ordered pair of distinct repositories
+// among the candidates is joined by a manifest edge. This is a hard signal:
+// when one repo requires what another publishes, the two are parts of one
+// mechanism, and no model needs to be asked.
+func (r *Router) anyDependency(ctx context.Context, cs []Candidate) (bool, error) {
+	for i, a := range cs {
+		for j, b := range cs {
+			if i == j || a.Repo == b.Repo {
+				continue
+			}
+			ok, err := repodeps.DependsOn(ctx, r.db, a.Repo, b.Repo)
+			if err != nil {
+				return false, fmt.Errorf("depends on %s -> %s: %w", a.Repo, b.Repo, err)
+			}
+			if ok {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// judgeDecision is the shape of the judge's reply.
+type judgeDecision struct {
+	Decision string `json:"decision"`
+}
+
+// judge asks the model whether the candidates are alternatives or parts of one
+// mechanism. A reply that fails to decode means ask, never a crash: asking
+// costs the reader one click, silently composing unrelated mechanisms does
+// not recover.
+func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Frage: %s\n\nKandidaten:\n", question)
+	for i, c := range cs {
+		fmt.Fprintf(&b, "%d. Repository %s, Modul %s\n", i+1, c.Repo, c.ModuleKey)
+		for _, h := range firstN(c.Hits, 2) {
+			excerpt := excerptOf(h.RawText, 200)
+			fmt.Fprintf(&b, "   - %s: %s\n", h.Path, excerpt)
+		}
+	}
+
+	out, _, err := r.llm.Complete(ctx, []llm.Message{
+		{Role: "system", Content: judgeSystem},
+		{Role: "user", Content: b.String()},
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithMaxTokens(routeMaxTokens))
+	if err != nil {
+		return false, fmt.Errorf("judge candidates: %w", err)
+	}
+
+	var got judgeDecision
+	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+		// Not a crash and not a silent compose: a decision that could not be
+		// read is treated exactly like "ask", the safe side of the ladder.
+		return true, nil
+	}
+	return got.Decision != "compose", nil
+}
+
+// nameResult is the shape of a naming reply.
+type nameResult struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
+// name runs one Complete per candidate concurrently, each seeing that
+// candidate's top three hits. A candidate whose naming call fails keeps its
+// module key as the title and an empty summary rather than failing the turn.
+func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]Candidate, error) {
+	named := make([]Candidate, len(cs))
+	copy(named, cs)
+
+	var wg sync.WaitGroup
+	for i := range named {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c := &named[i]
+			c.Title = c.ModuleKey
+			c.Summary = ""
+
+			var b strings.Builder
+			fmt.Fprintf(&b, "Frage: %s\n\nKandidat: Repository %s, Modul %s\n", question, c.Repo, c.ModuleKey)
+			for _, h := range firstN(c.Hits, 3) {
+				excerpt := excerptOf(h.RawText, 200)
+				fmt.Fprintf(&b, "- %s: %s\n", h.Path, excerpt)
+			}
+
+			out, _, err := r.llm.Complete(ctx, []llm.Message{
+				{Role: "system", Content: nameSystem},
+				{Role: "user", Content: b.String()},
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithMaxTokens(nameMaxTokens))
+			if err != nil {
+				return
+			}
+			var got nameResult
+			if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+				return
+			}
+			if got.Title != "" {
+				c.Title = got.Title
+			}
+			c.Summary = got.Summary
+		}(i)
+	}
+	wg.Wait()
+	return named, nil
+}
+
+// firstN returns at most n hits.
+func firstN(hits []retrieve.Hit, n int) []retrieve.Hit {
+	if len(hits) <= n {
+		return hits
+	}
+	return hits[:n]
+}
+
+// excerptOf trims raw chunk text to a short excerpt, so a judge or naming
+// prompt does not carry whole files.
+func excerptOf(s string, n int) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
