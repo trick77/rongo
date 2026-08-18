@@ -26,6 +26,12 @@ const embedDimPlaceholder = "{{EMBED_DIM}}"
 // The recorded version is the FULL FILENAME. Never edit a migration that has
 // run anywhere real: the runner skips a recorded version, so the edit silently
 // never applies. Write the next numbered file instead.
+//
+// One exception is on the record: in phase 4b the three original changesets
+// were squashed back into 0001_init.sql, because nothing had run anywhere real
+// — no deployment, no shared database, only dev and eval files that get
+// rebuilt. Every database predating that squash is unusable and must be
+// recreated. The rule above holds from there on.
 func Migrate(db *sql.DB, embedDim int) error {
 	if embedDim <= 0 {
 		return fmt.Errorf("migrate: embed dimension must be positive, got %d", embedDim)
