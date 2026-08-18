@@ -491,3 +491,19 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 			*models, llm.ShortGateDeployment)
 	}
 }
+
+// TestNameSystemForbidsSharpS pins the Swiss-orthography rule on the naming
+// prompt: title and summary are both reader-visible, so nameSystem must
+// forbid ß exactly like answerCommon does for the answer text. No LLM call —
+// this only inspects the prompt string.
+func TestNameSystemForbidsSharpS(t *testing.T) {
+	if !strings.Contains(nameSystem, "ß") {
+		t.Fatalf("nameSystem must name the forbidden character ß, got:\n%s", nameSystem)
+	}
+	if !strings.Contains(nameSystem, "ss") {
+		t.Fatalf("nameSystem must tell the model to use ss instead, got:\n%s", nameSystem)
+	}
+	if strings.Count(nameSystem, "ß") != 1 {
+		t.Fatalf("nameSystem should mention ß only where it forbids it, not use it itself, got:\n%s", nameSystem)
+	}
+}

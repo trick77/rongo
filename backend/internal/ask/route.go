@@ -102,7 +102,8 @@ Antworte AUSSCHLIESSLICH mit JSON: {"decision":"ask"} oder {"decision":"compose"
 Im Zweifel "ask": eine Rueckfrage kostet einen Klick, eine zusammengesetzte
 Antwort ueber unabhaengige Mechanismen ist schlicht falsch.`
 
-const nameSystem = `Du benennst einen Kandidaten fuer eine Rueckfrage.
+const nameSystem = `Du benennst einen Kandidaten fuer eine Rueckfrage, auf Deutsch in
+Schweizer Rechtschreibung. Verwende nie das Zeichen ß, immer ss.
 
 Antworte AUSSCHLIESSLICH mit JSON: {"title":"...","summary":"..."}
 
