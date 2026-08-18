@@ -352,3 +352,86 @@ func TestRouteNamingFailureKeepsTheModuleKeyAsTitle(t *testing.T) {
 		}
 	}
 }
+
+// testLLMWithModel is testLLM plus the deployment name each request carried,
+// so a test can tell ShortGate and Pro calls apart the same way
+// understand_test.go's modelUpstream does.
+func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	var models []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(body, &req)
+		var prompt string
+		for _, m := range req.Messages {
+			prompt += m.Content + "\n"
+		}
+		mu.Lock()
+		models = append(models, req.Model)
+		content := fn(prompt)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &models
+}
+
+func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
+	// Matches what is deployed: the judge is a one-word decision, not worth
+	// the Pro queue.
+	c, models := testLLMWithModel(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			return `{"decision":"compose"}`
+		}
+		return `{"title":"T","summary":"S"}`
+	})
+	r := newTestRouter(t, c, testDBWithDeps(t, nil))
+
+	if _, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
+		{Repo: "loom", Path: "b/y.go", Score: 0.49},
+	}); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
+		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ShortGateDeployment)
+	}
+}
+
+func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
+	// The phase 4b eval harness needs the judge on Pro to measure it against
+	// ShortGate; WithJudgeDeployment(nil) is how it asks for that — nil means
+	// "no override", which resolves to the client's default, Pro.
+	c, models := testLLMWithModel(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			return `{"decision":"ask"}`
+		}
+		return `{"title":"T","summary":"S"}`
+	})
+	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(nil)
+
+	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
+		{Repo: "loom", Path: "b/y.go", Score: 0.49},
+	})
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.Ask {
+		t.Fatal("the judge said ask")
+	}
+	if len(*models) == 0 || (*models)[0] != llm.ProDeployment {
+		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ProDeployment)
+	}
+}

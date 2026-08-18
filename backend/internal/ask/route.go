@@ -129,39 +129,105 @@ type Router struct {
 	// from config, not a value this package invents for itself, so routing
 	// never sees a module nobody else in the product can see.
 	clusterOpts modules.Opts
+	// judgeDeployment selects which MiMo deployment decides ask-vs-compose.
+	// Production always runs on ShortGate — see the phase 4b spec's routing
+	// section, which asks for the queue-light deployment because the output
+	// is a one-word decision. WithJudgeDeployment overrides it so the eval
+	// harness can measure that choice against Pro before relying on it; no
+	// production caller uses the override.
+	judgeDeployment llm.Option
 }
 
-// NewRouter builds a Router.
+// NewRouter builds a Router. The judge runs on ShortGate, matching what is
+// deployed; see WithJudgeDeployment to change that for a measurement.
 func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Router {
-	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo}
+	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: llm.ShortGate()}
+}
+
+// WithJudgeDeployment overrides the deployment the ask-vs-compose judge runs
+// on. Pass nil for the client's default (Pro). This exists for the phase 4b
+// eval harness, which the spec requires to measure the judge's decision
+// against Pro before non-Pro is written in — production never calls it.
+func (r *Router) WithJudgeDeployment(opt llm.Option) *Router {
+	r.judgeDeployment = opt
+	return r
+}
+
+// Ranked is the routing ladder's model-free rungs: every hit grouped into a
+// candidate, and — restricted to what a card could ever show — whether any
+// two are joined by a manifest dependency.
+//
+// Exported so the eval harness's margin sweep can compute this ONCE per
+// question and reuse it at every margin: neither the grouping nor the
+// dependency check depends on margin, only whether the ladder goes on to the
+// judge does.
+type Ranked struct {
+	// All is every candidate, uncapped — what Dominates tests against, same as
+	// Route.
+	All []Candidate
+	// Capped is All cut to maxCandidates: what the manifest check and the
+	// judge see, exactly as Route uses it.
+	Capped []Candidate
+	// Related reports whether any two of Capped are joined by a manifest
+	// dependency — Route's composition rung.
+	Related bool
+}
+
+// Rank runs the ladder's first two rungs: grouping hits into candidates and
+// checking for a manifest dependency between them. Neither calls a model.
+func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) {
+	moduleOf, err := r.moduleLookup(ctx, hits)
+	if err != nil {
+		return Ranked{}, err
+	}
+	all := candidates(hits, moduleOf)
+	capped := all
+	if len(capped) > maxCandidates {
+		capped = capped[:maxCandidates]
+	}
+	related, err := r.anyDependency(ctx, capped)
+	if err != nil {
+		return Ranked{}, err
+	}
+	return Ranked{All: all, Capped: capped, Related: related}, nil
+}
+
+// Dominates reports whether the leading candidate in cs is far enough ahead of
+// the runner-up to answer without asking, at the given margin — the rule
+// Route applies at its first rung. Exported for the eval harness's margin
+// sweep.
+func Dominates(cs []Candidate, margin float64) bool {
+	return dominates(cs, margin)
+}
+
+// Judge asks the model whether cs are independent alternatives or parts of one
+// mechanism — Route's last rung before naming. Exported so the eval harness
+// can call it once per question and reuse the answer across every margin in
+// its sweep, rather than paying for the model call at each one.
+func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
+	return r.judge(ctx, question, cs)
 }
 
 // Route runs the ladder: margin, then the manifest, then — only in the rest
-// case — the model.
+// case — the model. Built entirely on Rank, Dominates and Judge, so there is
+// one implementation of the ladder rather than one Route follows and another
+// the eval harness approximates.
 func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit) (Decision, error) {
-	moduleOf, err := r.moduleLookup(ctx, hits)
+	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		return Decision{}, err
 	}
-	cs := candidates(hits, moduleOf)
-	if dominates(cs, r.margin) {
-		return Decision{Ask: false, Candidates: cs}, nil
+	if Dominates(ranked.All, r.margin) {
+		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
-	if len(cs) > maxCandidates {
-		cs = cs[:maxCandidates]
-	}
-
-	related, err := r.anyDependency(ctx, cs)
-	if err != nil {
-		return Decision{}, err
-	}
-	if related {
+	cs := ranked.Capped
+	if ranked.Related {
 		// Composition, established from manifests. No model is asked, because
 		// there is nothing left to judge.
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
 
-	ask, err := r.judge(ctx, question, cs)
+	ask, err := r.Judge(ctx, question, cs)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -252,10 +318,14 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithMaxTokens(routeMaxTokens)}
+	if r.judgeDeployment != nil {
+		opts = append(opts, r.judgeDeployment)
+	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: judgeSystem},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithMaxTokens(routeMaxTokens))
+	}, opts...)
 	if err != nil {
 		return false, fmt.Errorf("judge candidates: %w", err)
 	}
