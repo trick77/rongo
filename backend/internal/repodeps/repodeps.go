@@ -47,15 +47,25 @@ func Parse(goMod []byte) (string, []string, error) {
 // Replace rather than insert: a repository that drops a dependency must stop
 // depending on it, or the routing step keeps suppressing a clarification that
 // has become correct.
+//
+// A manifest that fails to parse is skipped, not fatal to the whole call:
+// every edge read from a manifest that DID parse is still written, atomically,
+// in the same transaction. Losing a good edge because a sibling manifest is
+// broken would make the router ask a clarifying question where composition
+// actually holds, which is worse than the alternative. Sync still returns a
+// non-nil error naming the skipped paths so the caller can log a warning — but
+// that error does NOT mean nothing was written; callers must not treat it as
+// "no-op" and must still let the successful rows stand. If every manifest for
+// a repository is unparsable, no rows are written for it at all.
 func Sync(ctx context.Context, db *sql.DB, repo string, mods map[string][]byte) error {
 	type row struct{ coordinate, direction string }
 	var rows []row
+	var skipped []string
 	for path, body := range mods {
 		publishes, requires, err := Parse(body)
 		if err != nil {
-			// One unparsable manifest must not throw away the others. It is
-			// logged by the caller; here it is simply not an edge.
-			return fmt.Errorf("%s: %w", path, err)
+			skipped = append(skipped, fmt.Sprintf("%s: %v", path, err))
+			continue
 		}
 		rows = append(rows, row{publishes, "publishes"})
 		for _, r := range requires {
@@ -79,7 +89,13 @@ func Sync(ctx context.Context, db *sql.DB, repo string, mods map[string][]byte) 
 			return fmt.Errorf("insert repo_deps: %w", err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if len(skipped) > 0 {
+		return fmt.Errorf("skipped %d unparsable go.mod file(s): %s", len(skipped), strings.Join(skipped, "; "))
+	}
+	return nil
 }
 
 // DependsOn reports whether a pulls something b publishes.

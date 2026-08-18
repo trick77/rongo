@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/store"
@@ -142,6 +143,55 @@ func TestDependsOnAcceptsASubpackagePath(t *testing.T) {
 	mustSync(t, db, "go-sqlite3", "module github.com/ncruces/go-sqlite3\n")
 
 	assertDepends(t, db, "loom", "go-sqlite3", true)
+}
+
+func TestSyncWritesTheGoodManifestAndReportsTheBrokenOne(t *testing.T) {
+	// Given a repository with two go.mod files, one that parses and one that
+	// does not. Losing the good edges because a sibling manifest is broken
+	// would force the router to ask a clarifying question where composition
+	// actually holds — worse than the alternative.
+	db := testDB(t)
+	ctx := context.Background()
+
+	err := Sync(ctx, db, "peeq", map[string][]byte{
+		"backend/go.mod": []byte("module github.com/trick77/peeq\n\nrequire github.com/ncruces/go-sqlite3 v0.23.3\n"),
+		"tools/go.mod":   []byte("not a go.mod at all"),
+	})
+
+	// Then: an error names the skipped path, but the good manifest's edges
+	// still landed.
+	if err == nil {
+		t.Fatal("want a non-nil error naming the skipped manifest")
+	}
+	if !strings.Contains(err.Error(), "tools/go.mod") {
+		t.Errorf("error %q does not name the skipped path", err.Error())
+	}
+
+	mustSync(t, db, "go-sqlite3", "module github.com/ncruces/go-sqlite3\n")
+	assertDepends(t, db, "peeq", "go-sqlite3", true)
+}
+
+func TestSyncWritesNoRowsWhenTheOnlyManifestIsBroken(t *testing.T) {
+	// Given a repository whose single go.mod does not parse.
+	db := testDB(t)
+	ctx := context.Background()
+
+	err := Sync(ctx, db, "peeq", map[string][]byte{
+		"backend/go.mod": []byte("not a go.mod at all"),
+	})
+	if err == nil {
+		t.Fatal("want a non-nil error for the unparsable manifest")
+	}
+
+	// Then: repo_deps holds zero rows for peeq — there is nothing to compose
+	// or route with.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repo_deps WHERE repo = ?`, "peeq").Scan(&count); err != nil {
+		t.Fatalf("count repo_deps: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("repo_deps rows for peeq = %d, want 0", count)
+	}
 }
 
 func TestSyncReplacesTheRepositorysRows(t *testing.T) {
