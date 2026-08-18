@@ -584,6 +584,56 @@ func TestReexplainStreamsFromTheStoredSources(t *testing.T) {
 	}
 }
 
+func TestReexplainAddsANewTurnAndLeavesThePreviousAnswerUntouched(t *testing.T) {
+	// Given a finished turn with sources
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithSources(t, store, db)
+	orig, found, err := store.Message(context.Background(), testSubject, msgID)
+	if err != nil || !found {
+		t.Fatalf("Message: found=%v err=%v", found, err)
+	}
+
+	// When re-explaining for the dev audience
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("want a streamed answer:\n%s", body)
+	}
+
+	// Then the thread has one more message
+	msgs, err := store.Messages(context.Background(), testSubject, orig.ThreadID)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %+v, want the original turn plus the re-explained one", msgs)
+	}
+
+	// and the previous answer is untouched
+	if msgs[0].ID != orig.ID || msgs[0].Answer != orig.Answer || msgs[0].Audience != orig.Audience {
+		t.Errorf("previous turn = %+v, want it unchanged from %+v", msgs[0], orig)
+	}
+
+	// and the new turn carries the requested audience, its own sources and
+	// never resumed a clarification
+	last := msgs[len(msgs)-1]
+	if last.ID == orig.ID {
+		t.Fatal("re-explain must create a new message, not rewrite the old one")
+	}
+	if last.Audience != "dev" {
+		t.Errorf("new turn audience = %q, want dev", last.Audience)
+	}
+	if last.FromCandidateIdx != -1 {
+		t.Errorf("new turn FromCandidateIdx = %d, want -1 — it did not resume a clarification", last.FromCandidateIdx)
+	}
+	newSources, err := store.Sources(context.Background(), testSubject, last.ID)
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	if len(newSources) == 0 {
+		t.Error("the new turn must have its own sources, so it can itself be re-explained later")
+	}
+}
+
 func TestReexplainSaysSoWhenTheBasisIsGone(t *testing.T) {
 	srv, store := newTestServerWithStore(t, withAskerReexplaining())
 	msgID := seedAnsweredMessageWithoutSources(t, store)

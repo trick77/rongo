@@ -276,7 +276,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 // handleReexplain re-answers a finished turn's question for the other
 // audience, from the sources the original turn already gathered — no search,
-// no gather, just a second generation over the same evidence.
+// no gather, just a second generation over the same evidence. A successful
+// re-explain is a NEW turn in the thread, not a rewrite: the thread is a
+// record, and an earlier answer may already have been forwarded or pasted
+// into a ticket.
 func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Ask == nil || s.deps.Threads == nil {
 		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
@@ -325,6 +328,35 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The vanished-basis path writes nothing: it is decided before the new
+	// turn is created, so a re-index that removed the evidence never leaves
+	// a message with neither an answer nor an error.
+	if len(sources) == 0 {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		rc := http.NewResponseController(w)
+		body, _ := json.Marshal(map[string]any{"message": basisGone})
+		// A vanished basis is its own message, not the generic turnFailed:
+		// the pipeline never ran, and the truth is that the code the answer
+		// was written from is no longer indexed.
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
+		_ = rc.Flush()
+		return
+	}
+
+	// A successful re-explain is a NEW turn in the thread, not a rewrite: the
+	// thread is a record, and an earlier answer may already have been
+	// forwarded or pasted into a ticket. from_candidate_idx stays at its
+	// default -1 — this turn did not resume a clarification.
+	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), msg.Question)
+	if err != nil {
+		slog.Error("record re-explain question failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -339,13 +371,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		_ = rc.Flush()
 	}
 
-	if len(sources) == 0 {
-		// A vanished basis is its own message, not the generic turnFailed:
-		// the pipeline never ran, and the truth is that the code the answer
-		// was written from is no longer indexed.
-		send("error", map[string]any{"message": basisGone})
-		return
-	}
+	// The record is written on a context that outlives the request, the same
+	// as every other write in this package.
+	record := context.WithoutCancel(ctx)
 
 	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, sources, ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
@@ -353,12 +381,24 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("reexplain failed", "err", err)
+		if ferr := s.deps.Threads.Fail(record, newMsg.ID, turnFailed); ferr != nil {
+			slog.Error("record turn failure failed", "err", ferr)
+		}
 		send("error", map[string]any{"message": turnFailed})
 		return
 	}
+	if err := s.deps.Threads.Finish(record, newMsg.ID, answer.Text, answer.Citations); err != nil {
+		slog.Error("record answer failed", "err", err)
+	}
+	// The same sources, not answer.Sources: a re-explain answers from exactly
+	// what the original turn gathered, so the new turn can itself be
+	// re-explained later from that same, unchanged evidence.
+	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
+		slog.Error("record sources failed", "err", err)
+	}
 	send("citations", answer.Citations)
 	send("usage", answer.Usage)
-	send("done", map[string]any{"message_id": msg.ID})
+	send("done", map[string]any{"message_id": newMsg.ID})
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

@@ -27,7 +27,11 @@ type Thread struct {
 
 // Message is one question and the answer it got.
 type Message struct {
-	ID        int64          `json:"id"`
+	ID int64 `json:"id"`
+	// ThreadID is the thread this message belongs to. Re-explaining reads it
+	// off a bare message id to add the new turn to the same thread, the same
+	// way a resumed clarification does.
+	ThreadID  int64          `json:"thread_id"`
 	Ordinal   int            `json:"ordinal"`
 	Audience  string         `json:"audience"`
 	Question  string         `json:"question"`
@@ -204,10 +208,10 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var m Message
 	var created string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -245,6 +249,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
+		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, m)
 	}
