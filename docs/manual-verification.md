@@ -25,3 +25,30 @@ Checks:
    must refuse to start on the address, not on a missing session secret.
 4. `make build` produces `bin/rongo`; running it serves the built SPA at
    `http://127.0.0.1:8080/`.
+
+## Phase 4b — routing and clarification
+
+`make dev` (or `hack/dev.sh`); dev auth logs in automatically, no login form.
+UI at `http://127.0.0.1:5173/`.
+
+Checks:
+
+1. Ask a question that several independent modules could answer. A card
+   titled "Wie ist das gemeint?" appears with an ochre border and one row per
+   candidate (title, repo · branch, summary) — the turn does not answer on
+   its own.
+2. Click a candidate. The card collapses to "Gewählt: {title}" with a
+   hairline border, the chosen row carries a "Gewählt" badge, and the answer
+   streams below it.
+3. Open the "Woher weiss rongo das?" details block once the answer is done.
+   It lists a "N Belege" count and one `repo · path:start-end (branch)` line
+   per source — plain text, not a link. Pick one line and confirm the file
+   and line range against the repo on disk (or the forge) by hand.
+4. Reload the page. The thread reloads with the same clarification card
+   already collapsed on "Gewählt: {title}" — no re-asking, no flash of the
+   open card.
+5. On that answered turn, click "Als Dev neu erklären" (visible only once
+   the turn is done, unclarified, and error-free). Watch the network tab or
+   backend log: no retrieval/search call fires, only the re-explain request
+   on the stored sources. A new turn appears below with the DEV answer; the
+   original BA answer stays untouched above it.
