@@ -35,9 +35,17 @@ const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.string
 
 afterEach(() => vi.unstubAllGlobals());
 
+// Mounted under StrictMode, like every test in this file and like main.tsx
+// mounts the real app: StrictMode runs each effect twice, and a component
+// that only tolerates a single run passes here while coming back empty on a
+// real reload.
 async function ask(text: string) {
   const user = userEvent.setup();
-  render(<Ask />);
+  render(
+    <StrictMode>
+      <Ask />
+    </StrictMode>,
+  );
   await user.type(screen.getByLabelText("Frage"), text);
   await user.click(screen.getByRole("button", { name: "Fragen" }));
   return user;
@@ -471,8 +479,9 @@ describe("Ask, die Klaerfrage und das Neu-Erklaeren", () => {
     answer: "",
     error: "",
     citations: [],
-    clarification: { candidates: [loginCandidate, legacyCandidate] },
+    clarification: { id: 50, candidates: [loginCandidate, legacyCandidate] },
     from_candidate_idx: -1,
+    from_clarification_id: 0,
     created_at: "2026-08-17T10:00:00Z",
   };
   const resumedMessage = {
@@ -485,6 +494,7 @@ describe("Ask, die Klaerfrage und das Neu-Erklaeren", () => {
     citations: [],
     clarification: null,
     from_candidate_idx: 0,
+    from_clarification_id: 50,
     created_at: "2026-08-17T10:01:00Z",
   };
 
@@ -498,6 +508,66 @@ describe("Ask, die Klaerfrage und das Neu-Erklaeren", () => {
     expect(screen.queryByText("Wie ist das gemeint?")).toBeNull();
     // A restored turn carries no live trace.
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("markiert bei zwei offenen Klaerfragen die richtige Karte, auch wenn die AELTERE zuletzt aufgeloest wird", async () => {
+    // c1 opens, c2 opens, then r1 resolves c1 — the OLDER one, resolved
+    // SECOND. A heuristic that reads "the next message" would look at c2 for
+    // c1's answer and never find it, leaving c1 stuck open forever, and would
+    // never notice c2 was left open at all.
+    const c1 = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      question: "Wie ist die Anmeldung geloest?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: { id: 100, candidates: [loginCandidate, legacyCandidate] },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    const c2 = {
+      id: 11,
+      ordinal: 1,
+      audience: "ba",
+      question: "Wie wird die Rechnung erzeugt?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 101,
+        candidates: [
+          { idx: 0, title: "Ueber den Billing-Job", summary: "Ein Batch-Job.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Ueber den Checkout", summary: "Direkt beim Checkout.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:01:00Z",
+    };
+    const r1 = {
+      id: 12,
+      ordinal: 2,
+      audience: "ba",
+      question: "Wie ist die Anmeldung geloest?",
+      answer: "Die Anmeldung laeuft ueber den Login-Service.",
+      error: "",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: 0,
+      from_clarification_id: 100,
+      created_at: "2026-08-17T10:02:00Z",
+    };
+    routedFetch([c1, c2, r1]);
+    strict(<Ask threadId={7} />);
+
+    // c1's card is collapsed and marked with the choice r1 recorded.
+    expect(await screen.findByText(/Gewählt: Ueber den Login-Service/)).toBeTruthy();
+    // c2 was never resolved, so its card is still open, asking.
+    expect(screen.getByText("Wie ist das gemeint?")).toBeTruthy();
+    expect(screen.getByText("Ueber den Billing-Job")).toBeTruthy();
   });
 
   it("postet beim Neu-Erklaeren an die Reexplain-Route und nie an /api/ask", async () => {

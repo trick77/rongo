@@ -52,8 +52,13 @@ type Message = {
   answer: string;
   error: string;
   citations: Citation[] | null;
-  clarification: { candidates: ClarifyCandidate[] } | null;
+  clarification: { id: number; candidates: ClarifyCandidate[] } | null;
   from_candidate_idx: number;
+  // The clarification this message resolved, or 0 when it did not resume
+  // one. The link the backend actually stored — matching on it, not on
+  // position, is what tells two clarifications open in the same thread
+  // apart.
+  from_clarification_id: number;
 };
 
 /**
@@ -100,18 +105,22 @@ function freshTurn(question: string, audience: "ba" | "dev"): Turn {
 }
 
 /**
- * Stored turns carry no back-link from a clarification to the choice that
- * resolved it — only the resuming message's own from_candidate_idx. A
- * clarification is resolved by the very next message in the thread, since
- * resuming always continues the same thread right after asking.
+ * Marks each clarification's chosen candidate from the link the backend
+ * actually stored (from_clarification_id → from_candidate_idx), never from
+ * position: two clarifications can be open in the same thread at once, and
+ * the older one can be the one resolved second, so "the next message"
+ * points at the wrong card.
  */
 function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
+  const chosenByClarification = new Map<number, number>();
+  for (const m of list) {
+    if (m.from_clarification_id) chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+  }
   return turns.map((t, i) => {
-    const next = list[i + 1];
-    if (list[i].clarification && next && next.from_candidate_idx !== -1) {
-      return { ...t, chosenIdx: next.from_candidate_idx };
-    }
-    return t;
+    const clarId = list[i].clarification?.id;
+    if (clarId == null) return t;
+    const idx = chosenByClarification.get(clarId);
+    return idx === undefined ? t : { ...t, chosenIdx: idx };
   });
 }
 

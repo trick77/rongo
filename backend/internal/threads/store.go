@@ -43,8 +43,13 @@ type Message struct {
 	Clarification *Clarification `json:"clarification,omitempty"`
 	// FromCandidateIdx is the candidate this turn resumed from, or -1 when it
 	// did not resume a clarification.
-	FromCandidateIdx int       `json:"from_candidate_idx"`
-	CreatedAt        time.Time `json:"created_at"`
+	FromCandidateIdx int `json:"from_candidate_idx"`
+	// FromClarificationID is the clarification this turn resumed from, or 0
+	// when it did not resume one. It is what lets a reload mark the right
+	// candidate on the right card: two clarifications can be open in one
+	// thread at once, and position alone cannot tell them apart.
+	FromClarificationID int64     `json:"from_clarification_id"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 // Clarification is the card a turn ended with: what rongo understood, and
@@ -207,17 +212,19 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 func (s *Store) Message(ctx context.Context, subject string, messageID int64) (Message, bool, error) {
 	var m Message
 	var created string
+	var fromClar sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read message: %w", err)
 	}
+	m.FromClarificationID = fromClar.Int64
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
@@ -233,7 +240,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ?
 		ORDER BY m.ordinal`, threadID, subject)
@@ -246,9 +253,11 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	for rows.Next() {
 		var m Message
 		var created string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created); err != nil {
+		var fromClar sql.NullInt64
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
+		m.FromClarificationID = fromClar.Int64
 		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, m)
