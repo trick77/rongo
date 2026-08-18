@@ -961,6 +961,25 @@
     Symbol.
   </p>
 
+  <h3>Ein alter Fehler, jetzt sichtbar gemacht</h3>
+  <p>
+    Der manuelle Testlauf zeigt eine Verwechslung, die Phase 4b nicht verursacht, aber sichtbar
+    macht. Auf der Rückfragekarte wählte der Leser den Kandidaten <b>peeq</b>; die Antwort zitierte
+    für eine Aussage über peeq <code>loom/backend/internal/auth/session.go:129-141</code> — obwohl
+    peeq sein eigenes, byteidentisches <code>randomToken</code> in
+    <code>session.go:135-141</code> besitzt. Der Referenz-Walk des Gatherers (Phase 4a) folgt
+    Symbolnamen über Repository-Grenzen hinweg; die Spec-Bedingung «der gesammelte Code referenziert
+    das Symbol tatsächlich» ist namensbasiert, nicht auflösungsbasiert.
+  </p>
+  <p>
+    Der Mechanismus ist vorbestehend. Die Rückfragekarte macht ihn erst zu einem greifbaren Problem,
+    weil sie verspricht, welcher Mechanismus gewählt wurde — und die Zitation dann auf Code aus dem
+    jeweils anderen zeigt. Das ist ein reproduzierbarer Verstoss gegen «jede Aussage ist zitierbar,
+    und eine Zitation zeigt auf den Code, um den es in der Aussage tatsächlich geht». Er gehört zur
+    Kandidatenschicht, die dieser Nachtrag bereits für eine spätere Phase offen lässt, nicht in
+    diesen Zug allein.
+  </p>
+
   <h3>Offen für eine spätere Phase</h3>
   <p>
     Zwei Hebel, beide unbenutzt: die Kandidaten-Körnung — Modul-Identität ist möglicherweise so grob
