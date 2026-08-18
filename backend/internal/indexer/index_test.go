@@ -57,11 +57,22 @@ public class AbandonedCartJob {
 // vendored file and one plain text file, and returns its path.
 func fixtureCorpus(t *testing.T) string {
 	t.Helper()
+	return fixtureCorpusFiles(t, map[string]string{
+		"src/shop/cart/AbandonedCartJob.java": cartJava,
+		"node_modules/left-pad/index.js":      "module.exports = function(){}\n",
+		"README.md":                           "# shop backend\n\nDer Warenkorb wird nach 24 Stunden aufgegeben.\n",
+	})
+}
+
+// fixtureCorpusFiles builds a local repository from an arbitrary path->body
+// map and returns its path.
+func fixtureCorpusFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main")
-	write(t, dir, "src/shop/cart/AbandonedCartJob.java", cartJava)
-	write(t, dir, "node_modules/left-pad/index.js", "module.exports = function(){}\n")
-	write(t, dir, "README.md", "# shop backend\n\nDer Warenkorb wird nach 24 Stunden aufgegeben.\n")
+	for path, body := range files {
+		write(t, dir, path, body)
+	}
 	git(t, dir, "add", "-A")
 	git(t, dir, "commit", "-qm", "initial")
 	return dir
@@ -123,6 +134,14 @@ type harness struct {
 
 func newHarness(t *testing.T, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
 	t.Helper()
+	return newHarnessFiles(t, nil, symbolExtractor)
+}
+
+// newHarnessFiles is newHarness with the fixture's file set overridable, for
+// tests that need a tree shape fixtureCorpus does not provide (e.g. a
+// go.mod). A nil files map falls back to fixtureCorpus's default tree.
+func newHarnessFiles(t *testing.T, files map[string]string, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
+	t.Helper()
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
 		t.Skip("git not available")
@@ -140,7 +159,12 @@ func newHarness(t *testing.T, symbolExtractor func(SymbolExtractor) SymbolExtrac
 		t.Fatalf("migrate: %v", err)
 	}
 
-	src := fixtureCorpus(t)
+	var src string
+	if files != nil {
+		src = fixtureCorpusFiles(t, files)
+	} else {
+		src = fixtureCorpus(t)
+	}
 	spec := repos.Spec{Name: "shop", CloneURL: src, Branch: "main", Enabled: true}
 	state := NewStateStore(db)
 	if err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
@@ -369,4 +393,51 @@ type failingEmbedder struct{}
 
 func (failingEmbedder) Embed(context.Context, []string) ([][]float32, error) {
 	return nil, fmt.Errorf("embedding endpoint unreachable")
+}
+
+func TestIndexRepoRecordsTheDependenciesFromGoMod(t *testing.T) {
+	// Given a fixture repository whose tree holds a go.mod
+	h := newHarnessFiles(t, map[string]string{
+		"backend/go.mod":  "module github.com/trick77/peeq\n\nrequire github.com/ncruces/go-sqlite3 v0.23.3\n",
+		"backend/main.go": "package main\n\nfunc main() {}\n",
+	}, nil)
+	st := h.stateOf(t)
+
+	// When
+	if _, err := h.ix.IndexRepo(context.Background(), st, h.head(t), nil); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	// Then
+	var publishes, requires int
+	if err := h.db.QueryRow(
+		`SELECT
+		   sum(direction = 'publishes'), sum(direction = 'requires')
+		 FROM repo_deps WHERE repo = ?`, h.spec.Name).Scan(&publishes, &requires); err != nil {
+		t.Fatalf("read repo_deps: %v", err)
+	}
+	if publishes != 1 || requires != 1 {
+		t.Errorf("repo_deps has %d published / %d required, want 1 / 1", publishes, requires)
+	}
+}
+
+func TestIndexRepoSurvivesAnUnparsableGoMod(t *testing.T) {
+	// A broken manifest is a missing edge, never a failed index run: the
+	// corpus is other people's code and one bad file must not stop indexing.
+	h := newHarnessFiles(t, map[string]string{
+		"go.mod":  "this is not a go.mod\n",
+		"main.go": "package main\n",
+	}, nil)
+	st := h.stateOf(t)
+
+	if _, err := h.ix.IndexRepo(context.Background(), st, h.head(t), nil); err != nil {
+		t.Fatalf("index must not fail on a broken manifest: %v", err)
+	}
+	var n int
+	if err := h.db.QueryRow(`SELECT count(*) FROM repo_deps WHERE repo = ?`, h.spec.Name).Scan(&n); err != nil {
+		t.Fatalf("read repo_deps: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("repo_deps has %d rows for a broken manifest, want 0", n)
+	}
 }

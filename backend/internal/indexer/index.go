@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"path"
 
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/symbols"
 )
@@ -103,6 +105,8 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		return Counts{}, err
 	}
 
+	ix.syncDeps(ctx, spec, st, sha)
+
 	for _, tg := range targets {
 		if ctx.Err() != nil {
 			return Counts{}, ctx.Err()
@@ -118,6 +122,36 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		}
 	}
 	return ix.totals(ctx, st.Name)
+}
+
+// syncDeps records what this repository publishes and pulls. A failure here is
+// logged and swallowed: repo_deps is a routing hint, and losing it degrades a
+// clarification decision. Failing the index run over it would take the whole
+// repository out of search for a manifest problem.
+func (ix *Indexer) syncDeps(ctx context.Context, spec repos.Spec, st RepoState, sha string) {
+	paths, err := ix.git.ListPaths(ctx, spec, sha)
+	if err != nil {
+		ix.log.Warn("list paths for repo_deps failed", "repo", st.Name, "err", err)
+		return
+	}
+	mods := map[string][]byte{}
+	for _, p := range paths {
+		if path.Base(p) != "go.mod" {
+			continue
+		}
+		body, err := ix.git.ReadFile(ctx, spec, sha, p)
+		if err != nil {
+			ix.log.Warn("read go.mod failed", "repo", st.Name, "path", p, "err", err)
+			continue
+		}
+		mods[p] = body
+	}
+	if len(mods) == 0 {
+		return
+	}
+	if err := repodeps.Sync(ctx, ix.db, st.Name, mods); err != nil {
+		ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
+	}
 }
 
 // target is one path this run has to deal with, and whether it is gone.
