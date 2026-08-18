@@ -259,7 +259,7 @@ func TestClarifyStoresTheCardAndServesItBackWithTheThread(t *testing.T) {
 	}
 
 	// And the hits the card was built from come back for the resumed turn
-	u, hits, err := s.CandidateHits(ctx, id, 1)
+	u, hits, err := s.CandidateHits(ctx, testSubject, id, 1)
 	if err != nil {
 		t.Fatalf("candidate hits: %v", err)
 	}
@@ -282,11 +282,11 @@ func TestChoosingASecondCandidateLeavesTheFirstTurnUntouched(t *testing.T) {
 	}
 
 	a, _ := s.AddQuestion(ctx, threadID, "ba", "frage")
-	if err := s.LinkChoice(ctx, a.ID, id, 0); err != nil {
+	if err := s.LinkChoice(ctx, testSubject, a.ID, id, 0); err != nil {
 		t.Fatalf("link first choice: %v", err)
 	}
 	b, _ := s.AddQuestion(ctx, threadID, "ba", "frage")
-	if err := s.LinkChoice(ctx, b.ID, id, 1); err != nil {
+	if err := s.LinkChoice(ctx, testSubject, b.ID, id, 1); err != nil {
 		t.Fatalf("link second choice: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func TestSourcesComeBackAndAVanishedChunkIsSimplyMissing(t *testing.T) {
 	deleteChunk(t, db, 2)
 
 	// When
-	got, err := s.Sources(ctx, msg.ID)
+	got, err := s.Sources(ctx, testSubject, msg.ID)
 
 	// Then
 	if err != nil {
@@ -329,5 +329,85 @@ func TestSourcesComeBackAndAVanishedChunkIsSimplyMissing(t *testing.T) {
 	}
 	if got[0].Text == "" {
 		t.Error("a source must come back with its text, or the answer cannot be rewritten from it")
+	}
+}
+
+func TestAForeignSubjectGetsNothingFromClarificationCandidateHitsOrSources(t *testing.T) {
+	// A raw id off the wire must never answer for a thread it does not own —
+	// the store re-checks ownership itself rather than trusting a handler to
+	// have already done so.
+	const other = "bruno"
+	s, ctx, threadID, db := newThreadStore(t)
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "frage")
+	id, err := s.Clarify(ctx, msg.ID, twoCandidateClarification())
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	insertChunk(t, db, 1, "peeq", "a.go", "package a")
+	if err := s.SaveSources(ctx, msg.ID, []ask.Source{{ChunkID: 1, Reason: "hit"}}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+
+	// Then: bruno, who owns none of this, gets nothing back
+	clar, err := s.Clarification(ctx, other, msg.ID)
+	if err != nil {
+		t.Fatalf("Clarification: %v", err)
+	}
+	if clar != nil {
+		t.Error("a foreign subject got another user's clarification card")
+	}
+	if _, _, err := s.CandidateHits(ctx, other, id, 0); err == nil {
+		t.Error("CandidateHits gave a foreign subject another user's hits")
+	}
+	got, err := s.Sources(ctx, other, msg.ID)
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Sources gave a foreign subject %d sources, want none", len(got))
+	}
+
+	// And the rightful owner still gets everything, unaffected by the checks
+	clar, err = s.Clarification(ctx, testSubject, msg.ID)
+	if err != nil || clar == nil {
+		t.Fatalf("Clarification for the owner: %+v, %v", clar, err)
+	}
+	if _, hits, err := s.CandidateHits(ctx, testSubject, id, 0); err != nil || len(hits) != 1 {
+		t.Errorf("CandidateHits for the owner: hits=%v, err=%v", hits, err)
+	}
+	if got, err := s.Sources(ctx, testSubject, msg.ID); err != nil || len(got) != 1 {
+		t.Errorf("Sources for the owner: got=%v, err=%v", got, err)
+	}
+}
+
+func TestLinkChoiceRefusesToPairAMessageAndAClarificationFromDifferentThreads(t *testing.T) {
+	// No handler is trusted to have paired two browser-supplied ids
+	// correctly: a mismatched pair would silently attribute an answer to a
+	// card it never came from.
+	s, ctx, threadA, _ := newThreadStore(t)
+	threadB, err := s.Create(ctx, testSubject, "andere frage")
+	if err != nil {
+		t.Fatalf("create second thread: %v", err)
+	}
+	msgA, _ := s.AddQuestion(ctx, threadA, "ba", "frage")
+	id, err := s.Clarify(ctx, msgA.ID, twoCandidateClarification())
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	msgB, _ := s.AddQuestion(ctx, threadB.ID, "ba", "andere frage")
+
+	// When: msgB belongs to threadB, id's clarification belongs to threadA
+	err = s.LinkChoice(ctx, testSubject, msgB.ID, id, 0)
+
+	// Then: refused, and nothing was linked
+	if err == nil {
+		t.Fatal("LinkChoice linked a message to a clarification from another thread")
+	}
+	msgs, err := s.Messages(ctx, testSubject, threadB.ID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if msgs[0].FromCandidateIdx != -1 {
+		t.Errorf("FromCandidateIdx = %d, want -1 — the cross-thread link must not have taken effect", msgs[0].FromCandidateIdx)
 	}
 }

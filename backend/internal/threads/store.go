@@ -226,7 +226,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 			return nil, err
 		}
 		out[i].Citations = cites
-		clar, err := s.Clarification(ctx, out[i].ID)
+		clar, err := s.Clarification(ctx, subject, out[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -311,12 +311,20 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 }
 
 // Clarification returns the card a message ended with, or nil when the
-// message did not end in one.
-func (s *Store) Clarification(ctx context.Context, messageID int64) (*Clarification, error) {
+// message did not end in one, or the message does not belong to a thread
+// owned by subject. A foreign id yields nil, never someone else's card — the
+// caller (Messages) already knows the subject, but every entry point that
+// takes a bare id off the wire re-checks it here rather than trusting a
+// handler to have done so.
+func (s *Store) Clarification(ctx context.Context, subject string, messageID int64) (*Clarification, error) {
 	var c Clarification
 	var understanding string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, understanding FROM clarifications WHERE message_id = ?`, messageID).
+	err := s.db.QueryRowContext(ctx, `
+		SELECT c.id, c.understanding
+		FROM clarifications c
+		JOIN messages m ON m.id = c.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE c.message_id = ? AND t.user_subject = ?`, messageID, subject).
 		Scan(&c.ID, &understanding)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -354,14 +362,18 @@ func (s *Store) Clarification(ctx context.Context, messageID int64) (*Clarificat
 // CandidateHits returns the understanding and the hits one candidate on a
 // card was built from, for the resumed turn: the answer must be built from
 // exactly what the card offered, not a fresh search that could rank
-// differently.
-func (s *Store) CandidateHits(ctx context.Context, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error) {
+// differently. A clarification that does not belong to a thread owned by
+// subject yields sql.ErrNoRows, wrapped like any other read failure — never
+// another user's hits.
+func (s *Store) CandidateHits(ctx context.Context, subject string, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error) {
 	var understanding, hits string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT c.understanding, cc.hits
 		FROM clarification_candidates cc
 		JOIN clarifications c ON c.id = cc.clarification_id
-		WHERE cc.clarification_id = ? AND cc.idx = ?`, clarificationID, idx).
+		JOIN messages m ON m.id = c.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE cc.clarification_id = ? AND cc.idx = ? AND t.user_subject = ?`, clarificationID, idx, subject).
 		Scan(&understanding, &hits)
 	if err != nil {
 		return ask.Understanding{}, nil, fmt.Errorf("read candidate hits: %w", err)
@@ -380,12 +392,34 @@ func (s *Store) CandidateHits(ctx context.Context, clarificationID int64, idx in
 // LinkChoice records which candidate a new turn resumed from. It is stored on
 // the new message, never as a `chosen` flag on the clarification: picking a
 // second candidate later is a second turn, and the first is never overwritten.
-func (s *Store) LinkChoice(ctx context.Context, messageID, clarificationID int64, idx int) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE messages SET from_clarification_id = ?, from_candidate_idx = ? WHERE id = ?`,
-		clarificationID, idx, messageID)
+//
+// The UPDATE only fires when messageID and clarificationID both resolve into
+// the SAME thread owned by subject. A handler is never trusted to have paired
+// two browser-supplied ids correctly: a mismatched pair would silently
+// attribute an answer to a card it never came from, which corrupts the record
+// this whole task exists to keep honest. A mismatch — cross-thread,
+// cross-user, or either id simply wrong — updates zero rows and errors.
+func (s *Store) LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE messages SET from_clarification_id = ?, from_candidate_idx = ?
+		WHERE id = ?
+		  AND thread_id = (
+		      SELECT t.id
+		      FROM threads t
+		      JOIN messages cm ON cm.thread_id = t.id
+		      JOIN clarifications cl ON cl.message_id = cm.id
+		      WHERE cl.id = ? AND t.user_subject = ?
+		  )`,
+		clarificationID, idx, messageID, clarificationID, subject)
 	if err != nil {
 		return fmt.Errorf("link choice: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("link choice: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("link choice: message %d and clarification %d are not in the same thread owned by this subject", messageID, clarificationID)
 	}
 	return nil
 }
@@ -410,16 +444,20 @@ func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.
 
 // Sources resolves an answer's chunk ids back to their text, ordered by hop
 // then chunk id. A chunk a re-index removed no longer joins and is silently
-// omitted — the caller decides what an incomplete set means.
-func (s *Store) Sources(ctx context.Context, messageID int64) ([]ask.Source, error) {
+// omitted — the caller decides what an incomplete set means. A message that
+// does not belong to a thread owned by subject yields an empty slice, the
+// same shape as "no sources yet", never another user's evidence.
+func (s *Store) Sources(ctx context.Context, subject string, messageID int64) ([]ask.Source, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ms.chunk_id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, ms.reason, ms.hop
 		FROM message_sources ms
 		JOIN chunks c ON c.id = ms.chunk_id
 		JOIN files f ON f.id = c.file_id
 		JOIN repo_state r ON r.name = f.repo
-		WHERE ms.message_id = ?
-		ORDER BY ms.hop, ms.chunk_id`, messageID)
+		JOIN messages m ON m.id = ms.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE ms.message_id = ? AND t.user_subject = ?
+		ORDER BY ms.hop, ms.chunk_id`, messageID, subject)
 	if err != nil {
 		return nil, fmt.Errorf("read sources: %w", err)
 	}
