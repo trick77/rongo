@@ -507,3 +507,43 @@ func TestNameSystemForbidsSharpS(t *testing.T) {
 		t.Fatalf("nameSystem should mention ß only where it forbids it, not use it itself, got:\n%s", nameSystem)
 	}
 }
+
+// TestNameNormalisesSharpSInTitleAndSummary pins the guarantee, not just the
+// request: even when the model ignores nameSystem's instruction and replies
+// with ß anyway (as it did on the running card), the candidate that comes
+// back from name() must carry ss in both Title and Summary — the same
+// runtime normalisation answer.go applies to streamed answer tokens and
+// title.go applies to thread titles. No LLM call: the fake server returns a
+// canned reply containing ß.
+func TestNameNormalisesSharpSInTitleAndSummary(t *testing.T) {
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		return `{"title":"Ausschließlich SQL-Migration","summary":"Enthält Migrationsskripte einschließlich Indizes."}`
+	}), testDBWithDeps(t, nil))
+
+	cs := []Candidate{
+		{Repo: "peeq", ModuleKey: "backend/internal/store", Hits: []retrieve.Hit{
+			{Repo: "peeq", Path: "backend/internal/store/migrate.go", Score: 0.5},
+		}},
+	}
+
+	named, err := r.name(context.Background(), "wie migriert peeq das schema?", cs)
+	if err != nil {
+		t.Fatalf("name() err = %v", err)
+	}
+	if len(named) != 1 {
+		t.Fatalf("name() returned %d candidates, want 1", len(named))
+	}
+	got := named[0]
+	if strings.Contains(got.Title, "ß") {
+		t.Errorf("Title still contains ß: %q", got.Title)
+	}
+	if strings.Contains(got.Summary, "ß") {
+		t.Errorf("Summary still contains ß: %q", got.Summary)
+	}
+	if !strings.Contains(got.Title, "Ausschliesslich") {
+		t.Errorf("Title = %q, want ß normalised to ss (Ausschliesslich)", got.Title)
+	}
+	if !strings.Contains(got.Summary, "einschliesslich") {
+		t.Errorf("Summary = %q, want ß normalised to ss (einschliesslich)", got.Summary)
+	}
+}

@@ -396,9 +396,9 @@ func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]C
 				return
 			}
 			if got.Title != "" {
-				c.Title = got.Title
+				c.Title = swiss(got.Title)
 			}
-			c.Summary = got.Summary
+			c.Summary = swiss(got.Summary)
 		}(i)
 	}
 	wg.Wait()
