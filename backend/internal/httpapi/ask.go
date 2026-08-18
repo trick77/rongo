@@ -12,6 +12,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -19,6 +20,12 @@ import (
 // tested without a model endpoint.
 type Asker interface {
 	Run(ctx context.Context, question string, audience ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error)
+	// Resume continues a turn from the hits one clarification candidate was
+	// built from — no search, no routing.
+	Resume(ctx context.Context, question string, audience ask.Audience, hits []retrieve.Hit, ev ask.Events) (ask.Answer, error)
+	// Reexplain answers the same question for the other audience from sources
+	// a prior turn already gathered, without searching or gathering again.
+	Reexplain(ctx context.Context, question string, audience ask.Audience, sources []ask.Source, ev ask.Events) (ask.Answer, error)
 }
 
 // turnFailed is what a failed turn says, in the stream AND in the stored
@@ -26,6 +33,12 @@ type Asker interface {
 // thread history is served back to the browser too — a generic message in one
 // place and the raw text in the other would leak it through the other door.
 const turnFailed = "Der Zug ist fehlgeschlagen."
+
+// basisGone is what a re-explain says when the code an answer was written
+// from is no longer indexed. Not turnFailed: the pipeline never ran, and
+// telling the reader "der Zug ist fehlgeschlagen" would claim a failure that
+// did not happen — the truth is the material itself is gone.
+const basisGone = "Die Grundlage dieser Antwort ist nicht mehr indexiert."
 
 // errNotYours separates "this thread is not yours" from "the query failed".
 // Collapsing them turns a locked database into a 403 and hands its text to the
@@ -36,6 +49,30 @@ type askRequest struct {
 	ThreadID int64  `json:"thread_id"`
 	Question string `json:"question"`
 	Audience string `json:"audience"`
+	// ClarificationMessageID and Choice resume a turn that previously ended
+	// by asking: the id of the message that carried the clarification card,
+	// and the index of the candidate the reader picked.
+	ClarificationMessageID int64 `json:"clarification_message_id"`
+	Choice                 int   `json:"choice"`
+}
+
+// wireCandidate is one entry on the clarification card as the browser sees
+// it: no hits (large, and the browser has no use for them) and no
+// Understanding (internal reasoning nobody reads).
+type wireCandidate struct {
+	Idx     int    `json:"idx"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	Repo    string `json:"repo"`
+	Branch  string `json:"branch"`
+}
+
+func wireCandidates(cands []ask.Candidate) []wireCandidate {
+	out := make([]wireCandidate, len(cands))
+	for i, c := range cands {
+		out[i] = wireCandidate{Idx: i, Title: c.Title, Summary: c.Summary, Repo: c.Repo, Branch: c.Branch}
+	}
+	return out
 }
 
 // handleAsk answers a question over SSE.
@@ -71,20 +108,65 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	thread, err := s.thread(ctx, u.Subject, req)
-	if errors.Is(err, errNotYours) {
-		// Refused, not explained: whether the id exists at all is not something
-		// to confirm to someone who does not own it.
-		http.Error(w, "no such thread", http.StatusForbidden)
-		return
+
+	// Resuming a clarification is validated in full BEFORE the thread is
+	// touched: an out-of-range choice or a foreign clarification must come
+	// back as 400/403, decided before the first byte of the SSE stream is
+	// written, because after that the status code is fixed.
+	var resume *threads.Clarification
+	var resumeHits []retrieve.Hit
+	if req.ClarificationMessageID != 0 {
+		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
+		if err != nil {
+			slog.Error("resolve clarification failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if c == nil {
+			// Refused, not explained: whether the id exists at all is not
+			// something to confirm to someone who does not own it.
+			http.Error(w, "no such clarification", http.StatusForbidden)
+			return
+		}
+		if req.Choice < 0 || req.Choice >= len(c.Candidates) {
+			// Answering from a candidate nobody offered is worse than
+			// refusing: it would look like an answer to the question asked.
+			http.Error(w, "choice out of range", http.StatusBadRequest)
+			return
+		}
+		_, hits, err := s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
+		if err != nil {
+			slog.Error("resolve candidate hits failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		resume = c
+		resumeHits = hits
 	}
-	if err != nil {
-		// A locked database is not a permissions problem, and its text is not
-		// for the browser — the same rule the error event below follows.
-		slog.Error("resolve thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
+
+	var thread threads.Thread
+	if resume != nil {
+		// A resumed turn continues the thread the clarification was asked
+		// in — the reader is still in the same conversation, just answering
+		// a question rongo asked.
+		thread = threads.Thread{ID: resume.ThreadID}
+	} else {
+		t, err := s.thread(ctx, u.Subject, req)
+		if errors.Is(err, errNotYours) {
+			http.Error(w, "no such thread", http.StatusForbidden)
+			return
+		}
+		if err != nil {
+			// A locked database is not a permissions problem, and its text is
+			// not for the browser — the same rule the error event below
+			// follows.
+			slog.Error("resolve thread failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		thread = t
 	}
+
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), req.Question)
 	if err != nil {
 		slog.Error("record question failed", "err", err)
@@ -131,10 +213,37 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// indistinguishable from a turn still in flight.
 	record := context.WithoutCancel(ctx)
 
-	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, ask.Events{
+	events := ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
-	})
+	}
+
+	if resume != nil {
+		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, resumeHits, events)
+		if err != nil {
+			slog.Error("resumed turn failed", "err", err)
+			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
+				slog.Error("record turn failure failed", "err", ferr)
+			}
+			send("error", map[string]any{"message": turnFailed})
+			return
+		}
+		if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
+			slog.Error("record answer failed", "err", err)
+		}
+		if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
+			slog.Error("record sources failed", "err", err)
+		}
+		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, req.Choice); err != nil {
+			slog.Error("link choice failed", "err", err)
+		}
+		send("citations", answer.Citations)
+		send("usage", answer.Usage)
+		send("done", map[string]any{"message_id": msg.ID})
+		return
+	}
+
+	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, events)
 	if err != nil {
 		slog.Error("turn failed", "err", err)
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
@@ -146,18 +255,106 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if clar != nil {
-		// Task 8 turns this into a real clarification event and stores it.
-		// Until then, a turn that ends by asking is treated as a failed turn.
-		slog.Error("turn ended in a clarification", "candidates", len(clar.Candidates))
-		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
-			slog.Error("record turn failure failed", "err", ferr)
+		if _, cerr := s.deps.Threads.Clarify(record, msg.ID, *clar); cerr != nil {
+			slog.Error("record clarification failed", "err", cerr)
 		}
-		send("error", map[string]any{"message": turnFailed})
+		send("clarification", map[string]any{"message_id": msg.ID, "candidates": wireCandidates(clar.Candidates)})
+		send("done", map[string]any{"message_id": msg.ID})
 		return
 	}
 
 	if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
 		slog.Error("record answer failed", "err", err)
+	}
+	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
+		slog.Error("record sources failed", "err", err)
+	}
+	send("citations", answer.Citations)
+	send("usage", answer.Usage)
+	send("done", map[string]any{"message_id": msg.ID})
+}
+
+// handleReexplain re-answers a finished turn's question for the other
+// audience, from the sources the original turn already gathered — no search,
+// no gather, just a second generation over the same evidence.
+func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Ask == nil || s.deps.Threads == nil {
+		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "malformed message id", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Audience string `json:"audience"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "malformed request", http.StatusBadRequest)
+		return
+	}
+	audience := ask.AudienceBA
+	if req.Audience == string(ask.AudienceDev) {
+		audience = ask.AudienceDev
+	}
+
+	ctx := r.Context()
+	msg, found, err := s.deps.Threads.Message(ctx, u.Subject, id)
+	if err != nil {
+		slog.Error("resolve message failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		// Whether the message exists is not something to confirm to someone
+		// who does not own it.
+		http.Error(w, "no such message", http.StatusForbidden)
+		return
+	}
+	sources, err := s.deps.Threads.Sources(ctx, u.Subject, id)
+	if err != nil {
+		slog.Error("resolve sources failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+	send := func(event string, payload any) {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
+		_ = rc.Flush()
+	}
+
+	if len(sources) == 0 {
+		// A vanished basis is its own message, not the generic turnFailed:
+		// the pipeline never ran, and the truth is that the code the answer
+		// was written from is no longer indexed.
+		send("error", map[string]any{"message": basisGone})
+		return
+	}
+
+	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, sources, ask.Events{
+		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
+		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
+	})
+	if err != nil {
+		slog.Error("reexplain failed", "err", err)
+		send("error", map[string]any{"message": turnFailed})
+		return
 	}
 	send("citations", answer.Citations)
 	send("usage", answer.Usage)

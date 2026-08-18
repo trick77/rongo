@@ -60,6 +60,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
+	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	s.mux.Handle("/", web.Handler())

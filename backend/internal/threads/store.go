@@ -48,7 +48,11 @@ type Message struct {
 // included here — they are large and never sent to the browser; fetch them
 // with CandidateHits for the resumed turn only.
 type Clarification struct {
-	ID            int64             `json:"id"`
+	ID int64 `json:"id"`
+	// ThreadID is the thread the clarifying message belongs to. A resumed turn
+	// continues THIS thread rather than opening a new one — the reader is
+	// still in the same conversation, just answering a question rongo asked.
+	ThreadID      int64             `json:"thread_id"`
 	Understanding ask.Understanding `json:"understanding"`
 	Candidates    []Candidate       `json:"candidates"`
 }
@@ -192,6 +196,33 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	return out, rows.Err()
 }
 
+// Message returns one turn by id, or false when it does not belong to a
+// thread owned by subject. Re-explaining needs the original question text to
+// re-run the answerer from stored sources, without the caller having to load
+// the whole thread to find one message in it.
+func (s *Store) Message(ctx context.Context, subject string, messageID int64) (Message, bool, error) {
+	var m Message
+	var created string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.created_at
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
+		Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &created)
+	if err == sql.ErrNoRows {
+		return Message{}, false, nil
+	}
+	if err != nil {
+		return Message{}, false, fmt.Errorf("read message: %w", err)
+	}
+	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	cites, err := s.citations(ctx, m.ID)
+	if err != nil {
+		return Message{}, false, err
+	}
+	m.Citations = cites
+	return m, true, nil
+}
+
 // Messages returns a thread's turns in order, with their citations.
 func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([]Message, error) {
 	// The subject is part of the query rather than checked afterwards: a thread
@@ -320,12 +351,12 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 	var c Clarification
 	var understanding string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, c.understanding
+		SELECT c.id, m.thread_id, c.understanding
 		FROM clarifications c
 		JOIN messages m ON m.id = c.message_id
 		JOIN threads t ON t.id = m.thread_id
 		WHERE c.message_id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&c.ID, &understanding)
+		Scan(&c.ID, &c.ThreadID, &understanding)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
