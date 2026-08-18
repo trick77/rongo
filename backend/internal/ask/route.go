@@ -144,23 +144,27 @@ func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Rout
 	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: llm.ShortGate()}
 }
 
-// WithJudgeDeployment overrides the deployment the ask-vs-compose judge runs
-// on. Pass nil for the client's default (Pro). This exists for the phase 4b
-// eval harness, which the spec requires to measure the judge's decision
+// WithJudgeDeployment returns a COPY of the Router with the ask-vs-compose
+// judge's deployment overridden — pass nil for the client's default (Pro).
+// It does not mutate the receiver: nothing in the product may point the
+// shared, production Router at Pro by accident, so selecting a different
+// judge deployment means deliberately building a second Router rather than
+// silently changing the one everything else uses. This exists for the phase
+// 4b eval harness, which the spec requires to measure the judge's decision
 // against Pro before non-Pro is written in — production never calls it.
 func (r *Router) WithJudgeDeployment(opt llm.Option) *Router {
-	r.judgeDeployment = opt
-	return r
+	cp := *r
+	cp.judgeDeployment = opt
+	return &cp
 }
 
-// Ranked is the routing ladder's model-free rungs: every hit grouped into a
-// candidate, and — restricted to what a card could ever show — whether any
-// two are joined by a manifest dependency.
+// Ranked is the routing ladder's grouping rung: every hit gathered into a
+// candidate, both uncapped and cut to what a card could ever show. It never
+// runs a database query or a model call.
 //
 // Exported so the eval harness's margin sweep can compute this ONCE per
-// question and reuse it at every margin: neither the grouping nor the
-// dependency check depends on margin, only whether the ladder goes on to the
-// judge does.
+// question and reuse it at every margin: the grouping does not depend on
+// margin, only whether the ladder goes on past it does.
 type Ranked struct {
 	// All is every candidate, uncapped — what Dominates tests against, same as
 	// Route.
@@ -168,13 +172,12 @@ type Ranked struct {
 	// Capped is All cut to maxCandidates: what the manifest check and the
 	// judge see, exactly as Route uses it.
 	Capped []Candidate
-	// Related reports whether any two of Capped are joined by a manifest
-	// dependency — Route's composition rung.
-	Related bool
 }
 
-// Rank runs the ladder's first two rungs: grouping hits into candidates and
-// checking for a manifest dependency between them. Neither calls a model.
+// Rank runs the ladder's first rung: grouping hits into candidates. It calls
+// no model and makes no manifest-dependency query — see Related for that,
+// which Route only calls once the margin does NOT dominate. Keeping the query
+// out of Rank is what keeps the common fast path free of it.
 func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) {
 	moduleOf, err := r.moduleLookup(ctx, hits)
 	if err != nil {
@@ -185,11 +188,7 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 	if len(capped) > maxCandidates {
 		capped = capped[:maxCandidates]
 	}
-	related, err := r.anyDependency(ctx, capped)
-	if err != nil {
-		return Ranked{}, err
-	}
-	return Ranked{All: all, Capped: capped, Related: related}, nil
+	return Ranked{All: all, Capped: capped}, nil
 }
 
 // Dominates reports whether the leading candidate in cs is far enough ahead of
@@ -198,6 +197,17 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 // sweep.
 func Dominates(cs []Candidate, margin float64) bool {
 	return dominates(cs, margin)
+}
+
+// Related reports whether any two of cs are joined by a manifest dependency —
+// Route's composition rung. This is the expensive, O(n²) database query the
+// ladder is ordered to avoid on the common path: Route only calls it after
+// Dominates has already said no, and callers that reproduce the ladder
+// outside Route (the eval harness's margin sweep) must keep that ordering —
+// calling it unconditionally is exactly the regression this method's
+// separation from Rank exists to prevent.
+func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
+	return r.anyDependency(ctx, cs)
 }
 
 // Judge asks the model whether cs are independent alternatives or parts of one
@@ -209,9 +219,9 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 }
 
 // Route runs the ladder: margin, then the manifest, then — only in the rest
-// case — the model. Built entirely on Rank, Dominates and Judge, so there is
-// one implementation of the ladder rather than one Route follows and another
-// the eval harness approximates.
+// case — the model. Built on Rank, Dominates, Related and Judge in the same
+// order it always ran them, so the common fast path — one candidate clearly
+// ahead — still does no database query and no model call.
 func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
@@ -221,7 +231,12 @@ func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit
 		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
 	cs := ranked.Capped
-	if ranked.Related {
+
+	related, err := r.Related(ctx, cs)
+	if err != nil {
+		return Decision{}, err
+	}
+	if related {
 		// Composition, established from manifests. No model is asked, because
 		// there is nothing left to judge.
 		return Decision{Ask: false, Candidates: cs}, nil

@@ -177,6 +177,35 @@ func TestRouteAnswersWithoutAskingWhenOneCandidateDominates(t *testing.T) {
 	}
 }
 
+// TestRouteFastPathMakesNoDependencyQuery pins the ladder's ordering: the
+// manifest-dependency check is an O(n^2) set of database round trips, and
+// Route must not pay for it when the margin already dominates. repo_deps is
+// dropped from the database, so ANY call into Related/anyDependency would
+// fail with a "no such table" error — a passing Route() here is the proof
+// that the fast path never reaches it, not just an assumption about the code
+// that happens to hold today.
+func TestRouteFastPathMakesNoDependencyQuery(t *testing.T) {
+	db := testDBWithDeps(t, nil)
+	if _, err := db.Exec(`DROP TABLE repo_deps`); err != nil {
+		t.Fatalf("drop repo_deps: %v", err)
+	}
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("no model call may happen when the margin is clear; got %q", prompt)
+		return ""
+	}), db)
+
+	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
+		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
+	})
+	if err != nil {
+		t.Fatalf("route: %v — the dominant path must never reach the dependency query, which cannot run without repo_deps", err)
+	}
+	if got.Ask {
+		t.Error("a dominant candidate must not produce a question")
+	}
+}
+
 func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 	// Given two close candidates in repositories joined by a manifest. This is
 	// composition: asking would force the reader to pick half a mechanism.
@@ -433,5 +462,32 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	}
 	if len(*models) == 0 || (*models)[0] != llm.ProDeployment {
 		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ProDeployment)
+	}
+}
+
+// TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver guards against a
+// shared, production Router being silently pointed at Pro: WithJudgeDeployment
+// must hand back a new Router and leave the one it was called on running the
+// deployment it already had.
+func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
+	c, models := testLLMWithModel(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			return `{"decision":"compose"}`
+		}
+		return `{"title":"T","summary":"S"}`
+	})
+	base := newTestRouter(t, c, testDBWithDeps(t, nil))
+	_ = base.WithJudgeDeployment(nil) // a second Router, deliberately discarded here
+
+	if _, err := base.Route(context.Background(), "frage", []retrieve.Hit{
+		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
+		{Repo: "loom", Path: "b/y.go", Score: 0.49},
+	}); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
+		t.Errorf("the original Router ran the judge on %v, want it still on %q — WithJudgeDeployment must not mutate it",
+			*models, llm.ShortGateDeployment)
 	}
 }

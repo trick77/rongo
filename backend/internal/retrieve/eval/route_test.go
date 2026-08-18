@@ -31,57 +31,68 @@ func resolutionExpectsAsk(res Resolution) bool {
 }
 
 // askAt reproduces Router.Route's ask/answer decision for ONE margin, from
-// data computed once per question: Rank's output (the grouped candidates and
-// the manifest-dependency check, neither of which depends on margin) and, if
-// the ladder needs it at all, the judge's single answer.
+// data computed once per question: the grouped candidates (Rank, no
+// database or model call), the manifest-dependency check (Related, run at
+// most once regardless of how many margins are swept), and — only if the
+// ladder needs it at all — the judge's single answer.
 //
-// This is what lets the margin sweep below avoid paying for the judge call at
-// every one of six margins: askAt is called six times, r.Judge at most once.
-func askAt(ranked ask.Ranked, margin float64, judged bool) bool {
-	if ask.Dominates(ranked.All, margin) {
+// This is what lets the margin sweep below avoid re-running Related and the
+// judge at every one of six margins: askAt is called six times, Related and
+// Judge at most once each.
+func askAt(all []ask.Candidate, margin float64, related, judged bool) bool {
+	if ask.Dominates(all, margin) {
 		return false
 	}
-	if ranked.Related {
+	if related {
 		return false
 	}
 	return judged
 }
 
-// needsJudge reports whether ANY of margins would reach the judge rung for
-// this ranking — i.e. whether askAt would ever read judged for one of them.
-// Checking every margin, not just the loosest or the strictest, is what makes
-// this correct regardless of how the sweep's margins are chosen.
-func needsJudge(ranked ask.Ranked, margins []float64) bool {
-	if ranked.Related {
-		return false
-	}
+// anyMarginNeedsLadder reports whether at least one margin in margins fails
+// to dominate this ranking — i.e. whether the ladder needs to go on past
+// Dominates (into Related, and possibly Judge) for ANY of margins. Checking
+// every margin, not just the loosest or the strictest, is what makes this
+// correct regardless of how the sweep's margins are chosen: Dominates is not
+// guaranteed monotonic in margin for every possible sweep shape.
+func anyMarginNeedsLadder(all []ask.Candidate, margins []float64) bool {
 	for _, m := range margins {
-		if !ask.Dominates(ranked.All, m) {
+		if !ask.Dominates(all, m) {
 			return true
 		}
 	}
 	return false
 }
 
-// rankAndJudge runs Rank once and, only if some margin in margins would reach
-// the judge rung, Judge once. Every accuracy figure for this question at any
-// of margins is then derived from the two return values via askAt, with no
-// further model call — the bookkeeping the margin sweep and the ShortGate/Pro
-// comparison both build on.
-func rankAndJudge(ctx context.Context, t *testing.T, r *ask.Router, question string, hits []retrieve.Hit, margins []float64) (ask.Ranked, bool) {
+// rankRoute reproduces Router.Route's ladder ONCE per question, for every
+// margin in margins at once: Rank always runs (cheap, in-memory); Related — an
+// O(n^2) set of database queries — and Judge — a paid model call — run only
+// when at least one margin in margins would actually reach that rung, exactly
+// as Route()'s own short-circuit does. The three returned values are then fed
+// into askAt for as many margins as the caller wants, at no further database
+// or model cost.
+func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string, hits []retrieve.Hit, margins []float64) (all []ask.Candidate, related, judged bool) {
 	t.Helper()
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		t.Fatalf("rank %q: %v", question, err)
 	}
-	if !needsJudge(ranked, margins) {
-		return ranked, false
+	all = ranked.All
+	if !anyMarginNeedsLadder(all, margins) {
+		return all, false, false
 	}
-	judged, err := r.Judge(ctx, question, ranked.Capped)
+	related, err = r.Related(ctx, ranked.Capped)
+	if err != nil {
+		t.Fatalf("related %q: %v", question, err)
+	}
+	if related {
+		return all, true, false
+	}
+	judged, err = r.Judge(ctx, question, ranked.Capped)
 	if err != nil {
 		t.Fatalf("judge %q: %v", question, err)
 	}
-	return ranked, judged
+	return all, false, judged
 }
 
 // llmClientForRouting builds the model client the routing arms share. Skips —
@@ -198,9 +209,9 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 // Trefferquote des Routens wird gegen Pro gemessen, bevor non-Pro dort
 // festgeschrieben wird. Behaupten reicht hier nicht."
 //
-// Both arms share one Rank per question (no margin dependency, no model
-// call) and call Judge only when the ladder would actually reach it — never
-// Route()'s naming step, which nothing here reads.
+// Both arms share one Rank per question (no margin dependency, no database
+// or model call) and call Related/Judge only when the ladder would actually
+// reach them — never Route()'s naming step, which nothing here reads.
 func TestEvalMeasureRouting(t *testing.T) {
 	requireEval(t)
 	dim := embedDim(t)
@@ -230,11 +241,11 @@ func TestEvalMeasureRouting(t *testing.T) {
 		hits := hitsFor(t, ctx, r, expansions, q)
 		want := resolutionExpectsAsk(q.Resolution)
 
-		sRanked, sJudged := rankAndJudge(ctx, t, shortGate, q.Text, hits, []float64{margin})
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: askAt(sRanked, margin, sJudged)})
+		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin})
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: askAt(sAll, margin, sRelated, sJudged)})
 
-		pRanked, pJudged := rankAndJudge(ctx, t, pro, q.Text, hits, []float64{margin})
-		proRows = append(proRows, routingRow{q: q, want: want, got: askAt(pRanked, margin, pJudged)})
+		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin})
+		proRows = append(proRows, routingRow{q: q, want: want, got: askAt(pAll, margin, pRelated, pJudged)})
 	}
 
 	t.Logf("")
@@ -248,9 +259,9 @@ func TestEvalMeasureRouting(t *testing.T) {
 // deployment BACKEND_ROUTE_MARGIN actually gates in production. The chosen
 // constant comes out of this table; the table does not assume it.
 //
-// Rank and (at most) one Judge call run ONCE per question and are reused
-// across every margin via askAt — the sweep does not re-pay for the judge six
-// times over.
+// Rank, Related and Judge each run AT MOST ONCE per question and are reused
+// across every margin via askAt — the sweep does not re-pay for the
+// dependency query or the judge call six times over.
 func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	requireEval(t)
 	dim := embedDim(t)
@@ -269,25 +280,27 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	questions := loadQuestions(t)
 	mo := moduleOpts(t)
 
-	// The margin passed to NewRouter here is never read: this arm calls Rank
-	// and Judge directly, bypassing Route()'s own margin check so every
-	// margin in the sweep can be tried against the SAME ranking and the SAME
-	// judgement. 0 makes that plain rather than implying a margin matters.
+	// The margin passed to NewRouter here is never read: this arm calls Rank,
+	// Related and Judge directly, bypassing Route()'s own margin check so
+	// every margin in the sweep can be tried against the SAME ranking and the
+	// SAME judgement. 0 makes that plain rather than implying a margin
+	// matters.
 	router := ask.NewRouter(client, db, 0, mo)
 
 	t.Logf("questions=%d margins=%v", len(questions), routeMargins)
 
 	type perQuestion struct {
-		ranked ask.Ranked
-		judged bool
-		want   bool
-		q      Question
+		all     []ask.Candidate
+		related bool
+		judged  bool
+		want    bool
+		q       Question
 	}
 	rows := make([]perQuestion, 0, len(questions))
 	for _, q := range questions {
 		hits := hitsFor(t, ctx, r, expansions, q)
-		ranked, judged := rankAndJudge(ctx, t, router, q.Text, hits, routeMargins)
-		rows = append(rows, perQuestion{ranked: ranked, judged: judged, want: resolutionExpectsAsk(q.Resolution), q: q})
+		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins)
+		rows = append(rows, perQuestion{all: all, related: related, judged: judged, want: resolutionExpectsAsk(q.Resolution), q: q})
 	}
 
 	t.Logf("")
@@ -295,7 +308,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	for _, margin := range routeMargins {
 		correct := 0
 		for _, row := range rows {
-			if askAt(row.ranked, margin, row.judged) == row.want {
+			if askAt(row.all, margin, row.related, row.judged) == row.want {
 				correct++
 			}
 		}
@@ -310,6 +323,12 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 // recall on the same cohort, without a routing step in front of it) — a drop
 // means routing narrowed what the answer is built from, which the design
 // forbids.
+//
+// The 0.955 comparison and this arm's aggregate over all 44 are NOT the same
+// question if the router ever asks about a unique question: an asked turn
+// never gathers, which counts as ungrounded here and is a routing failure,
+// not a gathering one. Both numbers are reported so a drop can be attributed
+// to the right step instead of being read off one aggregate that mixes them.
 func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	requireEval(t)
 	dim := embedDim(t)
@@ -344,7 +363,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 		found bool
 	}
 	var rows []groundingRow
-	var grounded int
+	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
 		hits := hitsFor(t, ctx, r, expansions, q)
 		d, err := router.Route(ctx, q.Text, hits)
@@ -355,8 +374,9 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 		// decides whether to ask, not what to read. A "unique" question is
 		// never expected to make the router ask, but if it does, that turn
 		// never reaches gathering in production — sources is empty here in
-		// the same way, so the question counts as ungrounded rather than
-		// hiding behind a gather call the real pipeline would never run.
+		// the same way, so the question counts as ungrounded in the all-up
+		// number rather than hiding behind a gather call the real pipeline
+		// would never run.
 		var sources []ask.Source
 		if !d.Ask {
 			sources, err = gatherer.Gather(ctx, hits)
@@ -371,11 +391,24 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 		if found {
 			grounded++
 		}
+		if !d.Ask {
+			notAsked++
+			if found {
+				groundedOfNotAsked++
+			}
+		}
 		rows = append(rows, groundingRow{q: q, asked: d.Ask, found: found})
 	}
 
 	t.Logf("")
-	t.Logf("grounded = %.3f (%d/%d) — published anchor to beat: 0.955", float64(grounded)/float64(len(unique)), grounded, len(unique))
+	t.Logf("grounded, all %d unique questions       = %.3f (%d/%d) — includes any the router asked about", len(unique), float64(grounded)/float64(len(unique)), grounded, len(unique))
+	t.Logf("grounded, of the %d NOT asked about      = %.3f (%d/%d) — the number comparable to the published 0.955, which had no routing step in front of it",
+		notAsked, safeDiv(groundedOfNotAsked, notAsked), groundedOfNotAsked, notAsked)
+	if notAsked < len(unique) {
+		t.Logf("NOTE: the router asked about %d of %d unique questions — that is itself a routing miscall on a cohort defined to have exactly one answer",
+			len(unique)-notAsked, len(unique))
+	}
+
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].found != rows[j].found {
 			return !rows[i].found
@@ -386,6 +419,16 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	for _, row := range rows {
 		t.Logf("%-6v %-6v %s", row.asked, row.found, short(row.q.Text))
 	}
+}
+
+// safeDiv reports a/b as a float, or 0 when b is 0 — printing a rate over an
+// empty "not asked" cohort must not divide by zero if the router somehow asks
+// about every unique question.
+func safeDiv(a, b int) float64 {
+	if b == 0 {
+		return 0
+	}
+	return float64(a) / float64(b)
 }
 
 // TestResolutionExpectsAskMatchesTheSpec runs WITHOUT an endpoint: the
@@ -407,47 +450,49 @@ func TestResolutionExpectsAskMatchesTheSpec(t *testing.T) {
 	}
 }
 
-// TestAskAtAndNeedsJudge runs WITHOUT an endpoint: it is the guard that the
-// sweep's bookkeeping — deciding when the judge is needed and reproducing
-// Route()'s ladder from a cached Rank/Judge pair — matches Router.Dominates
-// and stays correct as margins or candidate scores change.
-func TestAskAtAndNeedsJudge(t *testing.T) {
-	dominant := ask.Ranked{All: []ask.Candidate{{Score: 0.60}, {Score: 0.20}}} // ratio 0.667, clears every margin in the sweep
-	tight := ask.Ranked{All: []ask.Candidate{{Score: 0.51}, {Score: 0.49}}}    // ratio 0.039
-	related := ask.Ranked{All: tight.All, Related: true}
+// TestAskAtAndAnyMarginNeedsLadder runs WITHOUT an endpoint: it is the guard
+// that the sweep's bookkeeping — deciding when Related/Judge are needed and
+// reproducing Route()'s ladder from a cached Rank/Related/Judge triple —
+// matches ask.Dominates and stays correct as margins or candidate scores
+// change.
+func TestAskAtAndAnyMarginNeedsLadder(t *testing.T) {
+	dominant := []ask.Candidate{{Score: 0.60}, {Score: 0.20}} // ratio 0.667, clears every margin in the sweep
+	tight := []ask.Candidate{{Score: 0.51}, {Score: 0.49}}    // ratio 0.039
 
-	// A margin looser than the ratio dominates: no judge needed, Ask=false.
-	if needsJudge(dominant, []float64{0.10, 0.40}) {
-		t.Error("a dominant pair never needs the judge at any margin in this sweep")
+	// A margin looser than the ratio dominates: the ladder never needs to go
+	// on, so Related/Judge are never asked for, and the decision is Ask=false
+	// regardless of what they would have said.
+	if anyMarginNeedsLadder(dominant, []float64{0.10, 0.40}) {
+		t.Error("a dominant pair never needs the ladder to go on at any margin in this sweep")
 	}
-	if askAt(dominant, 0.10, true /* must not be read */) {
-		t.Error("a dominant pair must answer without asking regardless of the judge")
-	}
-
-	// A margin tighter than the ratio does not dominate: the judge decides.
-	if !needsJudge(tight, []float64{0.10}) {
-		t.Error("a close pair below the margin needs the judge")
-	}
-	if got := askAt(tight, 0.10, true); !got {
-		t.Error("askAt must read the judge's answer once the margin does not dominate")
-	}
-	if got := askAt(tight, 0.10, false); got {
-		t.Error("askAt must read the judge's answer, not default to true")
+	if askAt(dominant, 0.10, true /* must not be read */, true /* must not be read */) {
+		t.Error("a dominant pair must answer without asking regardless of related/judged")
 	}
 
-	// A manifest dependency short-circuits the judge even when close.
-	if needsJudge(related, []float64{0.10}) {
-		t.Error("a manifest dependency answers composition without the judge")
+	// A margin tighter than the ratio does not dominate: the ladder goes on.
+	if !anyMarginNeedsLadder(tight, []float64{0.10}) {
+		t.Error("a close pair below the margin needs the ladder to go on")
 	}
-	if askAt(related, 0.10, true /* must not be read */) {
+
+	// Once past Dominates, a manifest dependency short-circuits the judge.
+	if got := askAt(tight, 0.10, true, true /* must not be read */); got {
 		t.Error("a manifest dependency must not ask even if the judge would have said ask")
 	}
 
-	// A sweep where ONE margin (not the first, not the last) needs the judge
-	// still reports needsJudge — the whole point of checking every margin
-	// rather than just the extremes.
-	mixed := ask.Ranked{All: []ask.Candidate{{Score: 0.55}, {Score: 0.50}}} // ratio 0.0909
-	if !needsJudge(mixed, []float64{0.05, 0.0909 + 0.001, 0.20}) {
-		t.Error("a margin strictly above the ratio still needs the judge for that margin")
+	// Once past Dominates and with no manifest dependency, the judge's answer
+	// is what decides — never defaulted.
+	if got := askAt(tight, 0.10, false, true); !got {
+		t.Error("askAt must read the judge's answer once the margin does not dominate and nothing is related")
+	}
+	if got := askAt(tight, 0.10, false, false); got {
+		t.Error("askAt must read the judge's answer, not default to true")
+	}
+
+	// A sweep where ONE margin (not the first, not the last) needs the ladder
+	// still reports anyMarginNeedsLadder — the whole point of checking every
+	// margin rather than just the extremes.
+	mixed := []ask.Candidate{{Score: 0.55}, {Score: 0.50}} // ratio 0.0909
+	if !anyMarginNeedsLadder(mixed, []float64{0.05, 0.0909 + 0.001, 0.20}) {
+		t.Error("a margin strictly above the ratio still needs the ladder to go on for that margin")
 	}
 }
