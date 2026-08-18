@@ -18,9 +18,13 @@ import (
 // gather_test.go does: the running pipeline searches 20 hits before routing.
 const routeSearchK = 20
 
-// routeMargins is the sweep the phase 4b spec asks for. BACKEND_ROUTE_MARGIN's
-// chosen value comes OUT of the accuracy table this produces; the constant is
-// not assumed by it.
+// routeMargins is the sweep the phase 4b spec asks for. The accuracy table
+// this produces does NOT choose BACKEND_ROUTE_MARGIN's value: the table
+// rewards asking less, on a catalogue that is 80% "do not ask", and its
+// best-scoring margin (0.10) would optimise the router towards switching
+// itself off. The default of 0.25 is kept despite this table, pending a fix
+// to the candidate layer — see docs/measurements/2026-08-18-routing.md,
+// "What this means for the margin".
 var routeMargins = []float64{0.10, 0.15, 0.20, 0.25, 0.30, 0.40}
 
 // resolutionExpectsAsk is the criterion fixed before any run: an ambiguous

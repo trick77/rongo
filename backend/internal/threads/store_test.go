@@ -318,11 +318,14 @@ func TestSourcesComeBackAndAVanishedChunkIsSimplyMissing(t *testing.T) {
 	deleteChunk(t, db, 2)
 
 	// When
-	got, err := s.Sources(ctx, testSubject, msg.ID)
+	got, total, err := s.Sources(ctx, testSubject, msg.ID)
 
 	// Then
 	if err != nil {
 		t.Fatalf("sources: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total = %d, want 2 — message_sources still holds both rows", total)
 	}
 	if len(got) != 1 || got[0].ChunkID != 1 {
 		t.Fatalf("got %v, want only the surviving chunk", got)
@@ -359,9 +362,12 @@ func TestAForeignSubjectGetsNothingFromClarificationCandidateHitsOrSources(t *te
 	if _, _, err := s.CandidateHits(ctx, other, id, 0); err == nil {
 		t.Error("CandidateHits gave a foreign subject another user's hits")
 	}
-	got, err := s.Sources(ctx, other, msg.ID)
+	got, total, err := s.Sources(ctx, other, msg.ID)
 	if err != nil {
 		t.Fatalf("Sources: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("total for a foreign subject = %d, want 0", total)
 	}
 	if len(got) != 0 {
 		t.Errorf("Sources gave a foreign subject %d sources, want none", len(got))
@@ -375,7 +381,7 @@ func TestAForeignSubjectGetsNothingFromClarificationCandidateHitsOrSources(t *te
 	if _, hits, err := s.CandidateHits(ctx, testSubject, id, 0); err != nil || len(hits) != 1 {
 		t.Errorf("CandidateHits for the owner: hits=%v, err=%v", hits, err)
 	}
-	if got, err := s.Sources(ctx, testSubject, msg.ID); err != nil || len(got) != 1 {
+	if got, total, err := s.Sources(ctx, testSubject, msg.ID); err != nil || len(got) != 1 || total != 1 {
 		t.Errorf("Sources for the owner: got=%v, err=%v", got, err)
 	}
 }

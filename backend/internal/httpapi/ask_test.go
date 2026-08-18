@@ -262,6 +262,63 @@ func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64
 	return msg.ID
 }
 
+// seedAnsweredMessageWithOneVanishedSource seeds a finished turn whose answer
+// was written from two chunks, then simulates a re-index removing one of
+// them — standing in for the common case: a re-index removes SOME of the
+// evidence, not all of it.
+func seedAnsweredMessageWithOneVanishedSource(t *testing.T, store *threads.Store, db *sql.DB) int64 {
+	t.Helper()
+	ctx := context.Background()
+	chunkA := seedChunk(t, db)
+	chunkB := seedChunkAt(t, db, "b.go")
+	th, err := store.Create(ctx, testSubject, "frage")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.SaveSources(ctx, msg.ID, []ask.Source{
+		{ChunkID: chunkA, Reason: "hit"},
+		{ChunkID: chunkB, Reason: "hit"},
+	}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM chunks WHERE id = ?`, chunkB); err != nil {
+		t.Fatalf("delete chunk: %v", err)
+	}
+	return msg.ID
+}
+
+// seedChunkAt is seedChunk for a second file in the same repo, so a message
+// can have two sources.
+func seedChunkAt(t *testing.T, db *sql.DB, path string) int64 {
+	t.Helper()
+	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', ?, 'def')`, path)
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	fileID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	res, err = db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
+		VALUES (?, 0, 1, 5, '', 'package b', 'package b', 'hash2')`, fileID)
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	chunkID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	return chunkID
+}
+
 func seedChunk(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url) VALUES ('peeq', 'https://example.invalid/peeq.git')`); err != nil {
@@ -525,6 +582,56 @@ func TestAskStreamsAClarificationAndEndsTheTurn(t *testing.T) {
 	}
 }
 
+// clarifyFailingThreads wraps a real store but makes Clarify fail, standing
+// in for a write that could not commit (disk full, a busy database). It
+// still needs every other method of the Threads interface, which the
+// embedded *threads.Store supplies.
+type clarifyFailingThreads struct {
+	*threads.Store
+}
+
+func (c *clarifyFailingThreads) Clarify(context.Context, int64, ask.Clarification) (int64, error) {
+	return 0, errors.New("disk full")
+}
+
+func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
+	// Given a pipeline that ends by asking, but a store that cannot write
+	// the clarification
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	st := threads.NewStore(db)
+	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &clarifyFailingThreads{Store: st}}
+	withAskerAsking()(deps.Ask.(*fakeAsker))
+
+	// When
+	rec := postAsk(t, deps, `{"question":"wie ist die Anmeldung geloest?"}`)
+
+	// Then no clarification event ships — a card whose candidates were never
+	// stored would offer choices resuming them cannot honour
+	body := rec.Body.String()
+	if strings.Contains(body, "event: clarification") {
+		t.Errorf("a clarification event shipped despite the failed write:\n%s", body)
+	}
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("no error event:\n%s", body)
+	}
+	// And the turn is recorded as failed, not left answerless and errorless
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: list=%+v err=%v", list, err)
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("Messages: msgs=%+v err=%v", msgs, err)
+	}
+	if msgs[0].Error == "" {
+		t.Errorf("message = %+v, want it recorded as failed", msgs[0])
+	}
+}
+
 func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 	// Given a stored clarification
 	srv, store := newTestServerWithStore(t, withAskerResuming())
@@ -625,7 +732,7 @@ func TestReexplainAddsANewTurnAndLeavesThePreviousAnswerUntouched(t *testing.T) 
 	if last.FromCandidateIdx != -1 {
 		t.Errorf("new turn FromCandidateIdx = %d, want -1 — it did not resume a clarification", last.FromCandidateIdx)
 	}
-	newSources, err := store.Sources(context.Background(), testSubject, last.ID)
+	newSources, _, err := store.Sources(context.Background(), testSubject, last.ID)
 	if err != nil {
 		t.Fatalf("Sources: %v", err)
 	}
@@ -641,5 +748,25 @@ func TestReexplainSaysSoWhenTheBasisIsGone(t *testing.T) {
 	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
 	if !strings.Contains(body, "event: error") {
 		t.Errorf("a vanished basis is an error, never the same question answered from other code:\n%s", body)
+	}
+}
+
+func TestReexplainSaysSoWhenOnlyPartOfTheBasisIsGone(t *testing.T) {
+	// A re-index usually removes SOME chunks, not all of them. Answering from
+	// the survivors would be the same question answered from different code
+	// than the reader was shown — a silent substitution, exactly what the
+	// invariants forbid.
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithOneVanishedSource(t, store, db)
+
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+	if !strings.Contains(body, "event: error") {
+		t.Errorf("a partially vanished basis is an error, never an answer from the surviving source:\n%s", body)
+	}
+	if !strings.Contains(body, basisGone) {
+		t.Errorf("want the basisGone message, not the generic turnFailed one:\n%s", body)
+	}
+	if strings.Contains(body, "event: token") {
+		t.Errorf("a partially vanished basis must not stream an answer:\n%s", body)
 	}
 }

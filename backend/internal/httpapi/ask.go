@@ -257,6 +257,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if clar != nil {
 		if _, cerr := s.deps.Threads.Clarify(record, msg.ID, *clar); cerr != nil {
 			slog.Error("record clarification failed", "err", cerr)
+			// Clarify writes the clarification and its candidates in one
+			// transaction precisely so that a card cannot go out with some
+			// candidates missing their stored hits. If the write failed, the
+			// card must not ship either: sending it anyway would offer
+			// choices resuming them cannot honour, and the clarification row
+			// is the only thing distinguishing "ended by asking" from "still
+			// in flight" — so the turn must be recorded as failed here.
+			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
+				slog.Error("record turn failure failed", "err", ferr)
+			}
+			send("error", map[string]any{"message": turnFailed})
+			return
 		}
 		send("clarification", map[string]any{"message_id": msg.ID, "candidates": wireCandidates(clar.Candidates)})
 		send("done", map[string]any{"message_id": msg.ID})
@@ -321,7 +333,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such message", http.StatusForbidden)
 		return
 	}
-	sources, err := s.deps.Threads.Sources(ctx, u.Subject, id)
+	sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, id)
 	if err != nil {
 		slog.Error("resolve sources failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -331,7 +343,16 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// The vanished-basis path writes nothing: it is decided before the new
 	// turn is created, so a re-index that removed the evidence never leaves
 	// a message with neither an answer nor an error.
-	if len(sources) == 0 {
+	//
+	// This fires whenever the resolved slice is shorter than what
+	// message_sources actually holds for this message (a re-index removed
+	// SOME chunks, not necessarily all) or when there is nothing to build
+	// from at all. Answering from surviving sources when some are missing
+	// would be a silent substitution: the same question, answered from
+	// different code than the one the reader was shown — exactly the
+	// failure mode the invariants forbid, so a partial basis is treated the
+	// same as a vanished one.
+	if len(sources) == 0 || len(sources) < total {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("X-Accel-Buffering", "no")

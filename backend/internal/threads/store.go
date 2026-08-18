@@ -489,10 +489,26 @@ func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.
 
 // Sources resolves an answer's chunk ids back to their text, ordered by hop
 // then chunk id. A chunk a re-index removed no longer joins and is silently
-// omitted — the caller decides what an incomplete set means. A message that
-// does not belong to a thread owned by subject yields an empty slice, the
-// same shape as "no sources yet", never another user's evidence.
-func (s *Store) Sources(ctx context.Context, subject string, messageID int64) ([]ask.Source, error) {
+// omitted from the returned slice. A message that does not belong to a
+// thread owned by subject yields an empty slice, the same shape as "no
+// sources yet", never another user's evidence.
+//
+// Sources also reports total: how many rows message_sources actually holds
+// for this message, scoped by the same ownership check. The caller decides
+// what an incomplete set means (Sources itself does not know), but it can
+// only decide correctly by comparing len(returned) against total — a
+// re-index that removed SOME of the evidence looks identical to one that
+// removed none of it if only the resolved slice is visible.
+func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error) {
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM message_sources ms
+		JOIN messages m ON m.id = ms.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE ms.message_id = ? AND t.user_subject = ?`, messageID, subject).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count sources: %w", err)
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT ms.chunk_id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, ms.reason, ms.hop
 		FROM message_sources ms
@@ -504,16 +520,19 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) ([
 		WHERE ms.message_id = ? AND t.user_subject = ?
 		ORDER BY ms.hop, ms.chunk_id`, messageID, subject)
 	if err != nil {
-		return nil, fmt.Errorf("read sources: %w", err)
+		return nil, 0, fmt.Errorf("read sources: %w", err)
 	}
 	defer rows.Close()
 	out := []ask.Source{}
 	for rows.Next() {
 		var src ask.Source
 		if err := rows.Scan(&src.ChunkID, &src.Repo, &src.Branch, &src.Path, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text, &src.Reason, &src.Hop); err != nil {
-			return nil, fmt.Errorf("scan source: %w", err)
+			return nil, 0, fmt.Errorf("scan source: %w", err)
 		}
 		out = append(out, src)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
 }

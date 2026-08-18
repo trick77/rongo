@@ -58,8 +58,14 @@ type Config struct {
 	ModuleMinChunks int
 	ModuleMaxChunks int
 	// RouteMargin is how far the leading candidate must be ahead before a
-	// turn answers without asking. The value comes out of the phase 4b
-	// routing measurement, not out of a guess.
+	// turn answers without asking. The phase 4b routing measurement
+	// (docs/measurements/2026-08-18-routing.md) swept this value and found
+	// that LOWER margins score better on its accuracy table — but only
+	// because asking less scores better on a catalogue that is 80% "do not
+	// ask", and the best-scoring value (0.10) would optimise the router
+	// towards switching itself off. The default stays at 0.25 despite the
+	// sweep, pending a fix to the candidate layer (phase 4c). The number to
+	// beat is 0.803: a router that never asks anything at all.
 	RouteMargin float64
 	// The MiMo endpoint. The two deployment NAMES are hardcoded in
 	// internal/llm and deliberately not settings: a deployment name in the
