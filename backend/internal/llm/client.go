@@ -81,13 +81,17 @@ type chatRequest struct {
 	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
 	Thinking            *thinkingOption `json:"thinking,omitempty"`
 	MaxCompletionTokens int             `json:"max_completion_tokens"`
+	// Temperature is omitted unless a call names one, so the endpoint's own
+	// default keeps applying to everything that does not care.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 // callOptions is what the Option funcs assemble.
 type callOptions struct {
-	model     string
-	thinking  *thinkingOption
-	maxTokens int
+	model       string
+	thinking    *thinkingOption
+	maxTokens   int
+	temperature *float64
 }
 
 // Option adjusts a single call.
@@ -114,6 +118,27 @@ func WithoutThinking() Option {
 // worse than a long one.
 func WithMaxTokens(n int) Option {
 	return func(o *callOptions) { o.maxTokens = n }
+}
+
+// WithTemperature pins the sampling temperature for this call. A call that
+// does not name one sends no temperature at all, and the endpoint's default
+// applies — which is what every call did before this existed.
+//
+// It is a THIRD switch, independent of the deployment and of thinking. Use it
+// where a re-roll is a defect rather than variety: the routing judge, the
+// understanding step, the naming call — anything whose whole output is an id,
+// a label or a one-word decision. Phase 4c measured what its absence costs.
+// Two runs of the same routing arm, over frozen expansions and an unchanged
+// corpus, decided three of sixty-one questions differently, which is larger
+// than the difference phase 4b published between the Pro and non-Pro
+// deployments. A reader sees the same thing from the other side: ask twice,
+// get a card once and an answer the other time.
+//
+// The answer call deliberately does not use it. That one is written for a
+// person to read, and pinning it to make a routing measurement reproducible
+// would change what everybody reads.
+func WithTemperature(v float64) Option {
+	return func(o *callOptions) { o.temperature = &v }
 }
 
 // Client calls the chat completions endpoint.
@@ -259,6 +284,7 @@ func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream
 		Stream:              stream,
 		Thinking:            o.thinking,
 		MaxCompletionTokens: o.maxTokens,
+		Temperature:         o.temperature,
 	}
 	if stream {
 		body.StreamOptions = &streamOptions{IncludeUsage: true}

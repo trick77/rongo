@@ -24,9 +24,17 @@ const expansionsFile = "expansions.json"
 type expansion struct {
 	Question string   `json:"question"`
 	Texts    []string `json:"texts"`
+	// Repos is the understanding's OTHER output: the repositories the question
+	// names, which pipeline.go hands to Search as a restriction. It is frozen
+	// separately from Texts and is optional, because the file predates it —
+	// every arm that reads Texts reads exactly the bytes it always did, which
+	// is what keeps the phase 2, 3 and 4a numbers comparable. See
+	// TestExpandQuestionRepos.
+	Repos []string `json:"repos,omitempty"`
 }
 
-func loadExpansions(t *testing.T) map[string][]string {
+// readExpansions parses the frozen file, or skips the arm if it is not there.
+func readExpansions(t *testing.T) []expansion {
 	t.Helper()
 	body, err := os.ReadFile(expansionsFile)
 	if err != nil {
@@ -36,9 +44,26 @@ func loadExpansions(t *testing.T) map[string][]string {
 	if err := json.Unmarshal(body, &list); err != nil {
 		t.Fatalf("parse %s: %v", expansionsFile, err)
 	}
+	return list
+}
+
+func loadExpansions(t *testing.T) map[string][]string {
+	t.Helper()
 	out := map[string][]string{}
-	for _, e := range list {
+	for _, e := range readExpansions(t) {
 		out[e.Question] = e.Texts
+	}
+	return out
+}
+
+// loadExpansionRepos returns the frozen repo restriction per question. A
+// question with none maps to nil, which is what Search treats as "the whole
+// corpus" — the same meaning an empty Understanding.Repos has in pipeline.go.
+func loadExpansionRepos(t *testing.T) map[string][]string {
+	t.Helper()
+	out := map[string][]string{}
+	for _, e := range readExpansions(t) {
+		out[e.Question] = e.Repos
 	}
 	return out
 }
@@ -70,14 +95,21 @@ func TestExpandQuestions(t *testing.T) {
 	// attempts fail — and every arm that reads this file fatals on a missing
 	// entry, so one bad reply would block every measurement until someone paid
 	// for a fresh sweep of all 61.
-	previous := map[string][]string{}
+	//
+	// The whole RECORD is carried forward, not just its texts. Repos is frozen
+	// by an arm of its own (TestExpandQuestionRepos) and rebuilding a record
+	// from texts alone would drop it — silently, because a missing restriction
+	// is indistinguishable from "this question names no repository". The
+	// routing arms would then go back to measuring the un-narrowed router, and
+	// nothing would fail.
+	previous := map[string]expansion{}
 	if body, err := os.ReadFile(expansionsFile); err == nil {
 		var list []expansion
 		if err := json.Unmarshal(body, &list); err != nil {
 			t.Fatalf("parse %s: %v", expansionsFile, err)
 		}
 		for _, e := range list {
-			previous[e.Question] = e.Texts
+			previous[e.Question] = e
 		}
 	}
 
@@ -99,10 +131,10 @@ func TestExpandQuestions(t *testing.T) {
 		}
 		if texts == nil {
 			if old, ok := previous[q.Text]; ok {
-				// The frozen expansion stays. It is still a measurement of a
-				// real expansion, just an older one — which is what freezing
-				// them is for.
-				out = append(out, expansion{Question: q.Text, Texts: old})
+				// The frozen expansion stays, whole. It is still a measurement
+				// of a real expansion, just an older one — which is what
+				// freezing them is for.
+				out = append(out, old)
 				kept = append(kept, q.Text)
 			} else {
 				failed = append(failed, q.Text)
@@ -111,7 +143,7 @@ func TestExpandQuestions(t *testing.T) {
 			continue
 		}
 		t.Logf("EXPANDED %-60s -> %v", short(q.Text), texts[1:])
-		out = append(out, expansion{Question: q.Text, Texts: texts})
+		out = append(out, refreshTexts(previous[q.Text], q.Text, texts))
 	}
 
 	body, err := json.MarshalIndent(out, "", "  ")
@@ -135,6 +167,167 @@ func TestExpandQuestions(t *testing.T) {
 // expandAttempts is how often one question's understanding step is retried
 // before it counts as missing.
 const expandAttempts = 3
+
+// refreshTexts writes a fresh expansion into an existing record, keeping every
+// other frozen field. Building a new record from the texts alone is the whole
+// point of this being a function: Repos is frozen by a separate arm and a
+// rebuild would drop it silently, because "no restriction recorded" and "this
+// question names no repository" look the same to every reader of the file.
+func refreshTexts(prev expansion, question string, texts []string) expansion {
+	prev.Question = question
+	prev.Texts = texts
+	return prev
+}
+
+// TestRefreshTextsKeepsTheFrozenRepoRestriction runs WITHOUT an endpoint. The
+// two freezing arms write the same file and must not undo each other: whoever
+// re-runs the expansion sweep would otherwise silently revert the routing arms
+// to searching the whole corpus, which is exactly the harness/product
+// divergence phase 4c set out to close.
+func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
+	prev := expansion{
+		Question: "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+		Texts:    []string{"alt"},
+		Repos:    []string{"peeq"},
+	}
+
+	got := refreshTexts(prev, prev.Question, []string{"neu", "auch neu"})
+
+	if len(got.Repos) != 1 || got.Repos[0] != "peeq" {
+		t.Errorf("Repos = %v, want the frozen restriction carried forward", got.Repos)
+	}
+	if len(got.Texts) != 2 || got.Texts[0] != "neu" {
+		t.Errorf("Texts = %v, want the fresh expansion", got.Texts)
+	}
+	if got.Question != prev.Question {
+		t.Errorf("Question = %q, want it unchanged", got.Question)
+	}
+
+	// A question that never had a restriction still has none — an empty Repos
+	// must not become a phantom entry.
+	fresh := refreshTexts(expansion{}, "neue Frage", []string{"x"})
+	if len(fresh.Repos) != 0 {
+		t.Errorf("Repos = %v, want none for a record that never had one", fresh.Repos)
+	}
+}
+
+// TestExpandQuestionRepos freezes the understanding step's OTHER output — the
+// repositories a question names — onto the existing records, and touches
+// nothing else in them.
+//
+// It exists because the routing arms were measuring a router the product does
+// not run. pipeline.go searches with Repos: u.Repos, so a question naming a
+// system never sees the other repositories at all; the frozen file recorded
+// only Texts, so every published routing row came from a candidate set
+// production would not have produced. 9 of the 44 unique and 1 of the 12
+// ambiguous questions name a repository outright.
+//
+// Texts are deliberately NOT regenerated here. They are the frozen input the
+// phase 3 expansion and phase 4a gathering documents were measured on, and
+// re-rolling them would break the comparison those documents rest on for a
+// field they do not use. Costs one short-gate call per question.
+func TestExpandQuestionRepos(t *testing.T) {
+	requireEval(t)
+	base := os.Getenv("BACKEND_LLM_BASE_URL")
+	if base == "" {
+		t.Skip("BACKEND_LLM_BASE_URL is unset")
+	}
+	// The records to attach to must already exist: this arm adds a field, it
+	// does not create the freeze.
+	existing := readExpansions(t)
+	byQuestion := map[string]expansion{}
+	for _, e := range existing {
+		byQuestion[e.Question] = e
+	}
+
+	c := llm.NewClient(llm.Config{
+		BaseURL: base,
+		APIKey:  os.Getenv("BACKEND_LLM_API_KEY"),
+		Timeout: 2 * time.Minute,
+	}, nil)
+	u := ask.NewUnderstander(c)
+
+	var out []expansion
+	var failed []string
+	named := 0
+	for _, q := range loadQuestions(t) {
+		rec, ok := byQuestion[q.Text]
+		if !ok {
+			t.Errorf("no frozen expansion for %q — run TestExpandQuestions first", q.Text)
+			continue
+		}
+		var repos []string
+		var last error
+		for attempt := 1; attempt <= expandAttempts; attempt++ {
+			got, err := u.Understand(context.Background(), q.Text)
+			if err == nil {
+				repos = got.Repos
+				last = nil
+				break
+			}
+			last = err
+			t.Logf("RETRY %d/%d %s: %v", attempt, expandAttempts, short(q.Text), err)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		if last != nil {
+			// The record survives with whatever it already carried. A missing
+			// restriction means "the whole corpus", which is the same thing
+			// the arms did before this field existed — a gap here degrades
+			// the measurement, it does not invalidate the file.
+			failed = append(failed, q.Text)
+			t.Errorf("understand %q: %v", q.Text, last)
+			out = append(out, rec)
+			continue
+		}
+		rec.Repos = repos
+		if len(repos) > 0 {
+			named++
+			t.Logf("REPOS %-60s -> %v", short(q.Text), repos)
+		}
+		out = append(out, rec)
+	}
+
+	body, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(expansionsFile, body, 0o644); err != nil {
+		t.Fatalf("write %s: %v", expansionsFile, err)
+	}
+	t.Logf("%d of %d questions carry a repo restriction", named, len(out))
+	if len(failed) > 0 {
+		t.Logf("%d question(s) kept no restriction because understanding failed: %v", len(failed), failed)
+	}
+
+	// A name the index does not know is not a narrowing, it is a wipe: Search
+	// puts it straight into `WHERE f.repo IN (…)`, so an invented repository
+	// returns zero hits and the turn reports "nothing found". Report it here
+	// rather than letting it show up later as an unexplained retrieval miss.
+	db := evalDB(t, embedDim(t))
+	known := map[string]bool{}
+	rows, err := db.Query(`SELECT name FROM repo_state`)
+	if err != nil {
+		t.Fatalf("read repo_state: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan repo_state: %v", err)
+		}
+		known[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read repo_state: %v", err)
+	}
+	for _, e := range out {
+		for _, name := range e.Repos {
+			if !known[name] {
+				t.Logf("UNKNOWN REPO %q named for %q — Search would return nothing for this question", name, short(e.Question))
+			}
+		}
+	}
+}
 
 // TestEvalMeasureExpansion compares searching the raw question against
 // searching the question plus its expansion, on the same index.

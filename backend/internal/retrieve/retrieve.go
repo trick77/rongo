@@ -72,7 +72,49 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // would be indistinguishable from a broken database, and the answer layer would
 // have to guess which one it was looking at.
 func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
-	return r.searchTexts(ctx, q.texts(), q.Repos, q.K)
+	repos, err := r.knownRepos(ctx, q.Repos)
+	if err != nil {
+		return nil, err
+	}
+	return r.searchTexts(ctx, q.texts(), repos, q.K)
+}
+
+// knownRepos drops names no repository in the index carries.
+//
+// The restriction is a guess: the understanding step reads it off the wording,
+// and measured over the real question catalogue three of nine guesses named
+// something that does not exist — "peeqs", the German genitive of peeq;
+// "Peek", a plain mishearing; and "asg017/sqlite-vec", a module nobody
+// indexed. A name like that is not a narrowing, it is a wipe. It goes into
+// `WHERE f.repo IN (…)`, nothing can match, and the turn reports "nothing
+// found" about code that is sitting in the index.
+//
+// So an unknown name is dropped, and a restriction left with nothing at all
+// becomes no restriction — the whole corpus, exactly as before this field
+// existed. A name the index DOES know still restricts, empty result and all:
+// "no hit means no hit" stays true for a repository that really is empty.
+func (r *Retriever) knownRepos(ctx context.Context, want []string) ([]string, error) {
+	if len(want) == 0 {
+		return nil, nil
+	}
+	rows, err := r.store.db.QueryContext(ctx,
+		`SELECT name FROM repo_state WHERE name IN (`+placeholders(len(want))+`)`, toAny(want)...)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repository restriction: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("resolve repository restriction: %w", err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("resolve repository restriction: %w", err)
+	}
+	return out, nil
 }
 
 // searchTexts is Search over SEVERAL phrasings of one question.

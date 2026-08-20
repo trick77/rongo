@@ -275,3 +275,51 @@ func TestSearch_repoFilterSurvivesTheWholePipeline(t *testing.T) {
 		}
 	}
 }
+
+// TestSearch_dropsARepositoryNameTheIndexDoesNotKnow is a defect found while
+// measuring phase 4c. The restriction comes from the understanding step, which
+// guesses it from the wording, and those guesses were measured on the real
+// question catalogue: of 9 restrictions, three named something that is not a
+// repository — "peeqs" (the German genitive of peeq), "Peek", and
+// "asg017/sqlite-vec" for a module that is not indexed.
+//
+// Such a name is not a narrowing, it is a wipe: it goes straight into
+// `WHERE f.repo IN (…)`, no row can match, and the turn reports "nothing
+// found" for a question whose answer is sitting in the index. Restricting to
+// nothing that exists therefore means no restriction — the behaviour from
+// before the field existed — while a name the index DOES know keeps
+// restricting, empty result and all.
+func TestSearch_dropsARepositoryNameTheIndexDoesNotKnow(t *testing.T) {
+	// Given
+	db := testDB(t)
+	addRepo(t, db, "peeq", "master")
+	addChunk(t, db, "peeq", "a.go", "A", "sender dispatch", nearVec)
+	r := New(db, fixedEmbedder{vec: queryVec})
+
+	// When the question is narrowed to a repository nobody indexed
+	hits, err := r.Search(context.Background(), Query{Text: "sender", Repos: []string{"peeqs"}, K: 5})
+
+	// Then
+	if err != nil {
+		t.Fatalf("Search() err = %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("an invented repository name wiped the search; it must fall back to the whole corpus")
+	}
+
+	// And a restriction that is PARTLY real still restricts to the real part.
+	addRepo(t, db, "loom", "main")
+	addChunk(t, db, "loom", "b.go", "B", "sender dispatch", nearVec)
+	hits, err = r.Search(context.Background(), Query{Text: "sender", Repos: []string{"loom", "Peek"}, K: 5})
+	if err != nil {
+		t.Fatalf("Search() err = %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("Search() found nothing in loom")
+	}
+	for _, h := range hits {
+		if h.Repo != "loom" {
+			t.Errorf("hit from %s leaked past the surviving half of the filter", h.Repo)
+		}
+	}
+}

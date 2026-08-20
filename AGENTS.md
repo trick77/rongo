@@ -20,9 +20,11 @@
 
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
-- **Pro** only where a human reads: the answer, Modulsteckbrief summaries.
-- **non-Pro + `ShortGate`** for the rest: understand, route, relevance while gathering, thread title, follow-up sufficiency check. Bar is "output is an id or a label", not "doesn't think".
-- Both deployments reason. Never justify the non-Pro lane as "the model that can't think". `WithoutThinking` and `ShortGate` are separate switches; don't couple them.
+- **Pro** where a human reads: the answer, Modulsteckbrief summaries.
+- **Pro also for the routing judge** — the one exception, measured: Pro 48/61+50/61 vs non-Pro 42/61+43/61, residual 1–2 (`docs/measurements/2026-08-19-candidates.md`). One word, but it decides answer-vs-question. Don't "restore" it to non-Pro.
+- **non-Pro + `ShortGate`** for the rest: understand, candidate naming, relevance while gathering, thread title, follow-up sufficiency check. Bar is "output is an id or a label", not "doesn't think".
+- Both deployments reason. Never justify the non-Pro lane as "the model that can't think". `WithoutThinking`, `ShortGate` and `WithTemperature` are separate switches; don't couple them.
+- **Pin `WithTemperature(gateTemperature)` on every call returning an id, label or decision.** Unpinned, the judge re-rolled 3 of 61 questions per run — wider than the deployment gap it was compared against. Answer call stays unpinned; a person reads it.
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
 - A BA answer is the core mechanism in three to five paragraphs — answer and stop. Edge cases go to a follow-up, cheap because the context is already gathered. DEV gets more room for inline code.
 - Embeddings are cached by chunk content hash; never re-embed unchanged content.

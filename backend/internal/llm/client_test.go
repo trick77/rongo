@@ -19,6 +19,7 @@ type captured struct {
 	Stream              bool            `json:"stream"`
 	MaxCompletionTokens int             `json:"max_completion_tokens"`
 	Thinking            *thinkingOption `json:"thinking"`
+	Temperature         *float64        `json:"temperature"`
 }
 
 // fakeUpstream answers one chat completion and records what it was asked.
@@ -113,6 +114,48 @@ func TestComplete_everyCallCarriesACompletionCap(t *testing.T) {
 	ask(t, c2, WithMaxTokens(64))
 	if got2.MaxCompletionTokens != 64 {
 		t.Errorf("max_completion_tokens = %d, want the explicit 64", got2.MaxCompletionTokens)
+	}
+}
+
+// TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault pins the third
+// switch, separate from the other two the way ShortGate and WithoutThinking
+// are separate from each other.
+//
+// It exists because of a measurement: the routing arm was run twice over
+// identical frozen inputs and the same corpus, and the judge decided three
+// questions differently — 41/61 against 44/61. Nothing had changed but the
+// sampling, because no request carried a temperature at all and the endpoint's
+// default applied. A gate whose whole output is one word out of two must not
+// re-roll it.
+func TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
+	// Given a call that names no temperature
+	c, got := fakeUpstream(t, "x")
+
+	ask(t, c)
+
+	// Then nothing is sent, and the endpoint keeps deciding — the answer call
+	// is written for a reader, and pinning it here would change what everyone
+	// reads to fix a routing measurement.
+	if got.Temperature != nil {
+		t.Errorf("temperature = %v, want it absent unless a call asks for one", *got.Temperature)
+	}
+
+	// When a call does name one
+	c2, got2 := fakeUpstream(t, "x")
+	ask(t, c2, WithTemperature(0))
+
+	if got2.Temperature == nil {
+		t.Fatal("temperature = absent, want the explicit 0 to reach the endpoint")
+	}
+	if *got2.Temperature != 0 {
+		t.Errorf("temperature = %v, want 0", *got2.Temperature)
+	}
+	// And it reroutes nothing and suppresses nothing.
+	if got2.Model != ProDeployment {
+		t.Errorf("model = %q, want the Pro deployment — WithTemperature must not reroute", got2.Model)
+	}
+	if got2.Thinking != nil {
+		t.Errorf("thinking = %+v, want it untouched", got2.Thinking)
 	}
 }
 

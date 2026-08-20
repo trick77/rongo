@@ -5,6 +5,9 @@
       "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
       "Speicherplatzprüfung vor Download Festsplattenkapazitätsprüfung Free disk space validation Storage availability check",
       "DiskSpace availableSpace freeSpace statfs NSFileManager NSURL fileSystemAttributes download"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
@@ -45,6 +48,9 @@
       "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
       "Scan-Intervall Auto-Abmeldung Threshold deaktivierter Kanal self-removal deleted channel",
       "scanCount channelDelete unsubscribe maxScans threshold cleanup staleChannel"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
@@ -61,6 +67,9 @@
       "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
       "availability mapping yt-dlp availability custom availability availability translation",
       "availability yt_dlp peeq Availability map_availability translate_availability availability_map yt_dlp_availability"
+    ],
+    "repos": [
+      "peeqs"
     ]
   },
   {
@@ -117,6 +126,9 @@
       "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
       "SQLite PRAGMAs Datenbankinitialisierung Datenbankkonfiguration beim Öffnen PRAGMA Einstellungen beim Start SQLite Setup beim Öffnen",
       "PRAGMA sqlite3_open sqlite3_exec openDatabase setupDatabase configureDatabase WAL journal_mode foreign_keys"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
@@ -125,6 +137,9 @@
       "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
       "Migrationsstatus erkennen angewendete Migration identifizieren Migrationshistorie prüfen Bereits ausgeführte Migrationen",
       "MigrationsManager applied_migrations migration_record check_applied schema_version has_applied migration_log applied_at"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
@@ -229,6 +244,9 @@
       "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
       "SponsorBlock Kategorien Video-Sponsoren-Typen Sponsoren-Unterbrechungen Werbung-Kategorien",
       "SponsorBlock SponsorCategory SponsorType sponsor_categories getSponsors requestSponsorBlock SponsorBlockAPI skipSegments"
+    ],
+    "repos": [
+      "Peek"
     ]
   },
   {
@@ -237,6 +255,9 @@
       "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
       "Audioklassifizierung Musik-Erkennung Spracherkennung Medieninhaltanalyse",
       "AudioClassifier MusicDetector SpeechDetector CMAudioAnalyser AVAudioEngine SoundAnalysis isMusic isSpeech"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
@@ -445,6 +466,9 @@
       "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
       "Vektor als Text kodieren sqlite-vec Eingabeformat textuelle Vektorrepräsentation String-Konvertierung für Vektordatenbank",
       "sqlite_vec vec_version vec_distance vec_length vec_from_json vec_to_json JSON TEXT"
+    ],
+    "repos": [
+      "asg017/sqlite-vec"
     ]
   },
   {
@@ -453,6 +477,9 @@
       "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
       "Datenbankzugriff gleichzeitige Schreibvorgaenge Konzurrenzsteuerung Parallelzugriff",
       "Database WriteOperation Concurrency Lock Transaction Thread DispatchQueue CoreData"
+    ],
+    "repos": [
+      "peeq"
     ]
   },
   {
