@@ -100,6 +100,159 @@ func has(sources []Source, path string) bool {
 	return false
 }
 
+// hasIn is has() for a corpus with more than one repository, where the path
+// alone no longer identifies a file — which is the whole subject of the
+// cross-repository tests below.
+func hasIn(sources []Source, repo, path string) bool {
+	for _, s := range sources {
+		if s.Repo == repo && s.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func repoPaths(sources []Source) []string {
+	out := make([]string, len(sources))
+	for i, s := range sources {
+		out[i] = s.Repo + "/" + s.Path
+	}
+	return out
+}
+
+// seedRepo adds a second repository to a gatherDB, so a test can put the same
+// symbol name in two products the way peeq and loom really do.
+func seedRepo(t *testing.T, db *sql.DB, repo string) {
+	t.Helper()
+	if _, err := db.Exec(
+		`INSERT INTO repo_state (name, clone_url, branch) VALUES (?, 'file:///x', 'master')`, repo); err != nil {
+		t.Fatalf("seed repo %s: %v", repo, err)
+	}
+}
+
+// seedChunkIn and seedSymbolIn are seedChunk/seedSymbol with the repository
+// spelled out. The originals stay as they are — every existing test is
+// single-repository and reads better without the extra argument.
+func seedChunkIn(t *testing.T, db *sql.DB, repo, path string, ordinal, start, end int, symbol, body string) int64 {
+	t.Helper()
+	var fileID int64
+	err := db.QueryRow(`SELECT id FROM files WHERE repo=? AND path=?`, repo, path).Scan(&fileID)
+	if err == sql.ErrNoRows {
+		res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES (?, ?, 'sha')`, repo, path)
+		if err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		fileID, _ = res.LastInsertId()
+	} else if err != nil {
+		t.Fatalf("look up file: %v", err)
+	}
+	res, err := db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		fileID, ordinal, start, end, symbol, "enriched "+body, body, repo+path+string(rune('a'+ordinal)))
+	if err != nil {
+		t.Fatalf("seed chunk: %v", err)
+	}
+	id, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, body); err != nil {
+		t.Fatalf("seed fts: %v", err)
+	}
+	return id
+}
+
+func seedSymbolIn(t *testing.T, db *sql.DB, repo, path, name string, line int) {
+	t.Helper()
+	var fileID int64
+	if err := db.QueryRow(`SELECT id FROM files WHERE repo=? AND path=?`, repo, path).Scan(&fileID); err != nil {
+		t.Fatalf("look up file for symbol: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO symbols (file_id, name, kind, line) VALUES (?, ?, 'func', ?)`, fileID, name, line); err != nil {
+		t.Fatalf("seed symbol: %v", err)
+	}
+}
+
+func hitInFor(t *testing.T, db *sql.DB, id int64) retrieve.Hit {
+	t.Helper()
+	var h retrieve.Hit
+	err := db.QueryRow(`
+		SELECT c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line
+		FROM chunks c JOIN files f ON f.id=c.file_id JOIN repo_state r ON r.name=f.repo
+		WHERE c.id = ?`, id).Scan(
+		&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol, &h.RawText, &h.StartLine, &h.EndLine)
+	if err != nil {
+		t.Fatalf("load hit: %v", err)
+	}
+	return h
+}
+
+// TestGather_resolvesASymbolInItsOwnRepositoryFirst is finding B from the
+// phase 4b hand-check, as a test. peeq and loom both define randomToken, byte
+// for byte — sibling products built from the same template do this constantly.
+// The walk started from peeq and cited loom's copy, because the query excluded
+// only the source file itself and then ordered by definer count and path, and
+// "loom/..." sorts before "peeq/...".
+//
+// Nothing about that is visible to a reader: the answer says peeq and the link
+// opens the other product. The name-based reference walk is what "the gathered
+// code really references the symbol" was implemented as, so the invariant was
+// formally met and materially broken.
+func TestGather_resolvesASymbolInItsOwnRepositoryFirst(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "loom")
+
+	hitID := seedChunkIn(t, db, "peeq", "backend/internal/auth/grant.go", 0, 1, 20, "issueGrant",
+		"func issueGrant() string { return randomToken(32) }")
+	seedChunkIn(t, db, "peeq", "backend/internal/auth/session.go", 0, 135, 141, "randomToken",
+		"func randomToken(n int) string { return \"\" }")
+	seedSymbolIn(t, db, "peeq", "backend/internal/auth/session.go", "randomToken", 135)
+	// loom's identical copy, and its path sorts first.
+	seedChunkIn(t, db, "loom", "backend/internal/auth/session.go", 0, 129, 141, "randomToken",
+		"func randomToken(n int) string { return \"\" }")
+	seedSymbolIn(t, db, "loom", "backend/internal/auth/session.go", "randomToken", 129)
+
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+
+	got, err := g.Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if !hasIn(got, "peeq", "backend/internal/auth/session.go") {
+		t.Errorf("sources = %v, want peeq's own definition", repoPaths(got))
+	}
+	if hasIn(got, "loom", "backend/internal/auth/session.go") {
+		t.Errorf("sources = %v, want no citation into loom — peeq defines randomToken itself", repoPaths(got))
+	}
+}
+
+// TestGather_stillCrossesToAnotherRepositoryForASymbolItDoesNotDefine keeps
+// the other half of the invariant alive. Composition over a real dependency —
+// peeq calling into go-sqlite3 — is the reason crossing a repository boundary
+// exists at all, and a same-repository-first rule that never crosses would
+// break every composed answer to fix a name collision.
+func TestGather_stillCrossesToAnotherRepositoryForASymbolItDoesNotDefine(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "go-sqlite3")
+
+	hitID := seedChunkIn(t, db, "peeq", "backend/internal/store/store.go", 0, 1, 20, "Open",
+		"func Open(p string) error { return ZeroBlob(p) }")
+	seedChunkIn(t, db, "go-sqlite3", "blob.go", 0, 40, 60, "ZeroBlob",
+		"func ZeroBlob(p string) error { return nil }")
+	seedSymbolIn(t, db, "go-sqlite3", "blob.go", "ZeroBlob", 40)
+
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+
+	got, err := g.Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if !hasIn(got, "go-sqlite3", "blob.go") {
+		t.Errorf("sources = %v, want the definition peeq does not have itself", repoPaths(got))
+	}
+}
+
 func TestGather_followsASymbolIntoAFileTheSearchNeverReturned(t *testing.T) {
 	// The point of gathering. A mechanism runs over a handler, a service and a
 	// template; plain top-k returns the handler and the answer needs the rest.

@@ -61,8 +61,13 @@ type Clarification struct {
 	// ThreadID is the thread the clarifying message belongs to. A resumed turn
 	// continues THIS thread rather than opening a new one — the reader is
 	// still in the same conversation, just answering a question rongo asked.
-	ThreadID      int64             `json:"thread_id"`
-	Understanding ask.Understanding `json:"understanding"`
+	ThreadID int64 `json:"thread_id"`
+	// Understanding is provenance: it is stored so a resumed turn can say what
+	// the first one searched for, and so a stored card can be read back years
+	// later. It is not sent to the browser — nothing there ever read it, and
+	// serialising the model's internal guesses into the page is output nobody
+	// asked for. The column stays.
+	Understanding ask.Understanding `json:"-"`
 	Candidates    []Candidate       `json:"candidates"`
 }
 

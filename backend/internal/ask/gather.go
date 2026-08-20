@@ -147,6 +147,17 @@ func (g *Gatherer) referenced(ctx context.Context, from Source) ([]Source, error
 	// alphabetically-first junk until the budget is gone, and the module the
 	// question is about never gets reached. A name that thirty files define
 	// says nothing about which one this code depends on.
+	// `home` is the second half of "cross a repository boundary only with two
+	// reasons". The name-based walk cannot tell peeq's randomToken from loom's
+	// — sibling products built from the same template define the same
+	// identifiers byte for byte — and the ordering below then handed the
+	// answer whichever path sorted first. A reader following that citation
+	// lands in the other product while the answer says this one.
+	//
+	// So a name that the source's OWN repository defines is resolved there and
+	// nowhere else. Crossing stays possible, and stays the point: a name this
+	// repository does not define at all is genuine composition — peeq calling
+	// into go-sqlite3 — and still travels.
 	q := `
 WITH selective AS (
     SELECT s.name
@@ -154,6 +165,13 @@ WITH selective AS (
     WHERE s.name IN (` + placeholders(len(names)) + `)
     GROUP BY s.name
     HAVING COUNT(DISTINCT s.file_id) <= ?
+),
+home AS (
+    SELECT DISTINCT s.name
+    FROM symbols s
+    JOIN selective sel ON sel.name = s.name
+    JOIN files f ON f.id = s.file_id
+    WHERE f.repo = ?
 )
 SELECT DISTINCT c.id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
        (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2 WHERE s2.name = s.name) AS definers
@@ -163,13 +181,14 @@ JOIN files f  ON f.id = s.file_id
 JOIN repo_state r ON r.name = f.repo
 JOIN chunks c ON c.file_id = f.id AND s.line BETWEEN c.start_line AND c.end_line
 WHERE NOT (f.repo = ? AND f.path = ?)
+  AND (f.repo = ? OR s.name NOT IN (SELECT name FROM home))
 ORDER BY definers ASC, f.path, c.ordinal`
 
-	args := make([]any, 0, len(names)+3)
+	args := make([]any, 0, len(names)+4)
 	for _, n := range names {
 		args = append(args, n)
 	}
-	args = append(args, maxDefiners, from.Repo, from.Path)
+	args = append(args, maxDefiners, from.Repo, from.Repo, from.Path, from.Repo)
 
 	rows, err := g.db.QueryContext(ctx, q, args...)
 	if err != nil {

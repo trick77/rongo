@@ -34,24 +34,13 @@ func resolutionExpectsAsk(res Resolution) bool {
 	return res == ResolutionAmbiguous
 }
 
-// askAt reproduces Router.Route's ask/answer decision for ONE margin, from
-// data computed once per question: the grouped candidates (Rank, no
-// database or model call), the manifest-dependency check (Related, run at
-// most once regardless of how many margins are swept), and — only if the
-// ladder needs it at all — the judge's single answer.
-//
-// This is what lets the margin sweep below avoid re-running Related and the
-// judge at every one of six margins: askAt is called six times, Related and
-// Judge at most once each.
-func askAt(all []ask.Candidate, margin float64, related, judged bool) bool {
-	if ask.Dominates(all, margin) {
-		return false
-	}
-	if related {
-		return false
-	}
-	return judged
-}
+// The ask/answer decision itself is ask.Decide — the same function Route
+// calls, never a copy of it here. This file only decides which rungs to PAY
+// for: the grouped candidates (Rank, no database or model call), the
+// manifest-dependency check (Related, run at most once regardless of how many
+// margins are swept), and — only if the ladder needs it at all — the judge's
+// single answer. Those three are then handed to ask.Decide once per margin,
+// so a six-margin sweep costs one Related and one Judge, not six.
 
 // anyMarginNeedsLadder reports whether at least one margin in margins fails
 // to dominate this ranking — i.e. whether the ladder needs to go on past
@@ -73,7 +62,7 @@ func anyMarginNeedsLadder(all []ask.Candidate, margins []float64) bool {
 // O(n^2) set of database queries — and Judge — a paid model call — run only
 // when at least one margin in margins would actually reach that rung, exactly
 // as Route()'s own short-circuit does. The three returned values are then fed
-// into askAt for as many margins as the caller wants, at no further database
+// into ask.Decide for as many margins as the caller wants, at no further database
 // or model cost.
 func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string, hits []retrieve.Hit, margins []float64) (all []ask.Candidate, related, judged bool) {
 	t.Helper()
@@ -130,17 +119,24 @@ func routeMargin(t *testing.T) float64 {
 	return f
 }
 
-// hitsFor runs the frozen expansion for q through Search. Reusing
-// expansions.json is the same reuse gather_test.go relies on: a routing
-// measurement should not also pay for a fresh understanding call per
+// hitsFor runs the frozen expansion for q through Search, exactly as
+// pipeline.go:93 does — BOTH of the understanding's outputs, the texts and
+// the repo restriction. Passing only the texts is what these arms did before
+// phase 4c, and it made them measure a router the product does not run: a
+// question that names a system never sees the other repositories in
+// production, so a candidate set drawn from all of them produced
+// clarifications nobody could ever have been asked.
+//
+// Reusing expansions.json is the same reuse gather_test.go relies on: a
+// routing measurement should not also pay for a fresh understanding call per
 // question, and freezing is what makes the measurement repeatable.
-func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, q Question) []retrieve.Hit {
+func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) []retrieve.Hit {
 	t.Helper()
 	texts, ok := expansions[q.Text]
 	if !ok {
 		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
 	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, K: routeSearchK})
+	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], K: routeSearchK})
 	if err != nil {
 		t.Fatalf("search %q: %v", q.Text, err)
 	}
@@ -231,25 +227,31 @@ func TestEvalMeasureRouting(t *testing.T) {
 	}, nil)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
+	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 	margin := routeMargin(t)
 	mo := moduleOpts(t)
 
-	shortGate := ask.NewRouter(client, db, margin, mo)
-	pro := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(nil)
+	// Pro is what NewRouter builds now — phase 4c moved the judge there, see
+	// the comment on Router.judgeDeployment. The cheap lane is the one that
+	// has to be asked for explicitly, and it is still measured every run: the
+	// spec's obligation is to keep comparing them, not to have compared them
+	// once.
+	pro := ask.NewRouter(client, db, margin, mo)
+	shortGate := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.ShortGate())
 
 	t.Logf("questions=%d margin=%.2f", len(questions), margin)
 
 	var shortRows, proRows []routingRow
 	for _, q := range questions {
-		hits := hitsFor(t, ctx, r, expansions, q)
+		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		want := resolutionExpectsAsk(q.Resolution)
 
 		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin})
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: askAt(sAll, margin, sRelated, sJudged)})
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged)})
 
 		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin})
-		proRows = append(proRows, routingRow{q: q, want: want, got: askAt(pAll, margin, pRelated, pJudged)})
+		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged)})
 	}
 
 	t.Logf("")
@@ -259,12 +261,13 @@ func TestEvalMeasureRouting(t *testing.T) {
 }
 
 // TestEvalMeasureRoutingMarginSweep reports routing accuracy at every margin
-// in routeMargins, over all 61 questions, on the ShortGate judge — the
-// deployment BACKEND_ROUTE_MARGIN actually gates in production. The chosen
-// constant comes out of this table; the table does not assume it.
+// in routeMargins, over all 61 questions, on the judge production actually
+// runs — Pro since phase 4c. The chosen constant comes out of this table; the
+// table does not assume it. Sweeping the other deployment would tune a
+// threshold against a router nobody serves.
 //
 // Rank, Related and Judge each run AT MOST ONCE per question and are reused
-// across every margin via askAt — the sweep does not re-pay for the
+// across every margin via ask.Decide — the sweep does not re-pay for the
 // dependency query or the judge call six times over.
 func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	requireEval(t)
@@ -281,6 +284,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	}, nil)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
+	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 	mo := moduleOpts(t)
 
@@ -302,7 +306,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	}
 	rows := make([]perQuestion, 0, len(questions))
 	for _, q := range questions {
-		hits := hitsFor(t, ctx, r, expansions, q)
+		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins)
 		rows = append(rows, perQuestion{all: all, related: related, judged: judged, want: resolutionExpectsAsk(q.Resolution), q: q})
 	}
@@ -312,7 +316,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	for _, margin := range routeMargins {
 		correct := 0
 		for _, row := range rows {
-			if askAt(row.all, margin, row.related, row.judged) == row.want {
+			if ask.Decide(row.all, margin, row.related, row.judged) == row.want {
 				correct++
 			}
 		}
@@ -348,6 +352,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	}, nil)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
+	expansionRepos := loadExpansionRepos(t)
 	mo := moduleOpts(t)
 	margin := routeMargin(t)
 	router := ask.NewRouter(client, db, margin, mo)
@@ -369,7 +374,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var rows []groundingRow
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
-		hits := hitsFor(t, ctx, r, expansions, q)
+		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		d, err := router.Route(ctx, q.Text, hits)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
@@ -454,12 +459,12 @@ func TestResolutionExpectsAskMatchesTheSpec(t *testing.T) {
 	}
 }
 
-// TestAskAtAndAnyMarginNeedsLadder runs WITHOUT an endpoint: it is the guard
-// that the sweep's bookkeeping — deciding when Related/Judge are needed and
-// reproducing Route()'s ladder from a cached Rank/Related/Judge triple —
-// matches ask.Dominates and stays correct as margins or candidate scores
-// change.
-func TestAskAtAndAnyMarginNeedsLadder(t *testing.T) {
+// TestSweepBookkeepingMatchesTheLadder runs WITHOUT an endpoint: it is the
+// guard that the sweep's bookkeeping — deciding when Related and Judge have
+// to be paid for, and re-deciding at each margin from the cached
+// Rank/Related/Judge triple — stays in step with ask.Dominates and
+// ask.Decide as margins or candidate scores change.
+func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	dominant := []ask.Candidate{{Score: 0.60}, {Score: 0.20}} // ratio 0.667, clears every margin in the sweep
 	tight := []ask.Candidate{{Score: 0.51}, {Score: 0.49}}    // ratio 0.039
 
@@ -469,7 +474,7 @@ func TestAskAtAndAnyMarginNeedsLadder(t *testing.T) {
 	if anyMarginNeedsLadder(dominant, []float64{0.10, 0.40}) {
 		t.Error("a dominant pair never needs the ladder to go on at any margin in this sweep")
 	}
-	if askAt(dominant, 0.10, true /* must not be read */, true /* must not be read */) {
+	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */) {
 		t.Error("a dominant pair must answer without asking regardless of related/judged")
 	}
 
@@ -479,17 +484,17 @@ func TestAskAtAndAnyMarginNeedsLadder(t *testing.T) {
 	}
 
 	// Once past Dominates, a manifest dependency short-circuits the judge.
-	if got := askAt(tight, 0.10, true, true /* must not be read */); got {
+	if got := ask.Decide(tight, 0.10, true, true /* must not be read */); got {
 		t.Error("a manifest dependency must not ask even if the judge would have said ask")
 	}
 
 	// Once past Dominates and with no manifest dependency, the judge's answer
 	// is what decides — never defaulted.
-	if got := askAt(tight, 0.10, false, true); !got {
-		t.Error("askAt must read the judge's answer once the margin does not dominate and nothing is related")
+	if got := ask.Decide(tight, 0.10, false, true); !got {
+		t.Error("ask.Decide must read the judge's answer once the margin does not dominate and nothing is related")
 	}
-	if got := askAt(tight, 0.10, false, false); got {
-		t.Error("askAt must read the judge's answer, not default to true")
+	if got := ask.Decide(tight, 0.10, false, false); got {
+		t.Error("ask.Decide must read the judge's answer, not default to true")
 	}
 
 	// A sweep where ONE margin (not the first, not the last) needs the ladder

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
@@ -90,6 +91,9 @@ const (
 // the two calls apart.
 const judgeMarker = "Alternativen oder Teile eines Ganzen"
 
+// judgeSystem is phase 4b's wording, kept after phase 4c measured a
+// replacement and could not show it earning its keep — see
+// docs/measurements/2026-08-19-candidates.md, "The change that did not land".
 const judgeSystem = `Du entscheidest, ob zwei oder mehr Fundstellen ` + judgeMarker + ` sind.
 
 Antworte AUSSCHLIESSLICH mit JSON: {"decision":"ask"} oder {"decision":"compose"}.
@@ -131,28 +135,41 @@ type Router struct {
 	// never sees a module nobody else in the product can see.
 	clusterOpts modules.Opts
 	// judgeDeployment selects which MiMo deployment decides ask-vs-compose.
-	// Production always runs on ShortGate — see the phase 4b spec's routing
-	// section, which asks for the queue-light deployment because the output
-	// is a one-word decision. WithJudgeDeployment overrides it so the eval
-	// harness can measure that choice against Pro before relying on it; no
-	// production caller uses the override.
+	//
+	// Production runs on Pro — the ONE exception to "Pro only where a human
+	// reads", and it is written down because it overturns a measurement
+	// rather than ignoring one. Phase 4b measured the two deployments a
+	// question apart and wrote non-Pro in on that basis. Phase 4c found the
+	// reason: no call carried a temperature, so both arms were re-rolling by
+	// about three questions per run and the difference was inside the noise.
+	// Pinned (see gateTemperature) and run twice, Pro routes 48/61 and 50/61
+	// against non-Pro's 42/61 and 43/61 — six to seven questions, against a
+	// residual spread of one to two.
+	//
+	// The bar for the cheap lane is "the output is an id or a label", and the
+	// judge's output is one word. That word is the difference between the
+	// reader getting an answer and getting a question back, which is why this
+	// one is bought on the expensive queue and understanding, naming and the
+	// thread title still are not. WithJudgeDeployment overrides it so the
+	// eval harness can keep measuring the choice.
 	judgeDeployment llm.Option
 }
 
-// NewRouter builds a Router. The judge runs on ShortGate, matching what is
+// NewRouter builds a Router. The judge runs on Pro, matching what is
 // deployed; see WithJudgeDeployment to change that for a measurement.
 func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Router {
-	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: llm.ShortGate()}
+	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: nil}
 }
 
 // WithJudgeDeployment returns a COPY of the Router with the ask-vs-compose
-// judge's deployment overridden — pass nil for the client's default (Pro).
-// It does not mutate the receiver: nothing in the product may point the
-// shared, production Router at Pro by accident, so selecting a different
-// judge deployment means deliberately building a second Router rather than
-// silently changing the one everything else uses. This exists for the phase
-// 4b eval harness, which the spec requires to measure the judge's decision
-// against Pro before non-Pro is written in — production never calls it.
+// judge's deployment overridden — pass llm.ShortGate() for the cheap lane,
+// nil for the client's default, which is Pro.
+// It does not mutate the receiver: nothing in the product may change the
+// shared, production Router's deployment by accident, so selecting a
+// different judge deployment means deliberately building a second Router
+// rather than silently changing the one everything else uses. This exists for
+// the eval harness, which the spec requires to keep measuring the judgement
+// against both deployments — production never calls it.
 func (r *Router) WithJudgeDeployment(opt llm.Option) *Router {
 	cp := *r
 	cp.judgeDeployment = opt
@@ -219,10 +236,30 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 	return r.judge(ctx, question, cs)
 }
 
+// Decide is the ladder's decision, given what each rung found: the margin
+// wins first, a manifest dependency next, and only then the judge's answer,
+// which is never defaulted.
+//
+// It is a pure function of the three rungs precisely so that it can be the
+// ONLY place this policy is written down. Route calls it, and so does the
+// eval harness's margin sweep, which needs to re-decide at six margins from
+// rungs it paid for once. Before this existed the harness carried its own
+// copy, which meant a change to the rung order here left the harness
+// compiling and silently measuring a policy the product no longer ran.
+func Decide(all []Candidate, margin float64, related, judged bool) bool {
+	if Dominates(all, margin) {
+		return false
+	}
+	if related {
+		return false
+	}
+	return judged
+}
+
 // Route runs the ladder: margin, then the manifest, then — only in the rest
-// case — the model. Built on Rank, Dominates, Related and Judge in the same
-// order it always ran them, so the common fast path — one candidate clearly
-// ahead — still does no database query and no model call.
+// case — the model. Which rungs are RUN is decided here, so the common fast
+// path — one candidate clearly ahead — still does no database query and no
+// model call; what the run rungs then MEAN is Decide's, and only Decide's.
 func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
@@ -237,17 +274,16 @@ func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit
 	if err != nil {
 		return Decision{}, err
 	}
-	if related {
-		// Composition, established from manifests. No model is asked, because
-		// there is nothing left to judge.
-		return Decision{Ask: false, Candidates: cs}, nil
+	judged := false
+	if !related {
+		// The judge is the last rung and the only paid one: a manifest
+		// dependency has already settled the question without it.
+		judged, err = r.Judge(ctx, question, cs)
+		if err != nil {
+			return Decision{}, err
+		}
 	}
-
-	ask, err := r.Judge(ctx, question, cs)
-	if err != nil {
-		return Decision{}, err
-	}
-	if !ask {
+	if !Decide(ranked.All, r.margin, related, judged) {
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
 	named, err := r.name(ctx, question, cs)
@@ -323,6 +359,14 @@ type judgeDecision struct {
 // mechanism. A reply that fails to decode means ask, never a crash: asking
 // costs the reader one click, silently composing unrelated mechanisms does
 // not recover.
+//
+// Phase 4c tried showing it more — the repository the question named, each
+// candidate's share of the hits, which expected identifiers landed where —
+// and measured it twice without being able to show a gain; the loose version
+// cost the ambiguous cohort 7/12 to 4/12, and the strict version reproduced
+// the baseline exactly. The evidence is a real lever on the unambiguous
+// cohort and the threshold is the unsolved part; that is written up rather
+// than left half-wired here.
 func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Frage: %s\n\nKandidaten:\n", question)
@@ -334,7 +378,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
-	opts := []llm.Option{llm.WithoutThinking(), llm.WithMaxTokens(routeMaxTokens)}
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(routeMaxTokens)}
 	if r.judgeDeployment != nil {
 		opts = append(opts, r.judgeDeployment)
 	}
@@ -387,7 +431,7 @@ func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]C
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
 				{Role: "system", Content: nameSystem},
 				{Role: "user", Content: b.String()},
-			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithMaxTokens(nameMaxTokens))
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens))
 			if err != nil {
 				return
 			}
@@ -415,11 +459,19 @@ func firstN(hits []retrieve.Hit, n int) []retrieve.Hit {
 
 // excerptOf trims raw chunk text to a short excerpt, so a judge or naming
 // prompt does not carry whole files.
+//
+// The bound is in bytes and the cut is on a rune boundary. Cutting at the
+// byte offset alone splits any multi-byte rune that straddles it — routine in
+// this corpus, whose comments are German — and JSON encoding then replaces
+// the half rune with U+FFFD on the way to the model.
 func excerptOf(s string, n int) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

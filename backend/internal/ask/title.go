@@ -32,7 +32,7 @@ func Title(ctx context.Context, c *llm.Client, question string) string {
 	out, _, err := c.Complete(ctx, []llm.Message{
 		{Role: "system", Content: titleSystem},
 		{Role: "user", Content: question},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithMaxTokens(titleMaxTokens))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(titleMaxTokens))
 	if err != nil {
 		return ""
 	}

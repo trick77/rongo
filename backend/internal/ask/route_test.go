@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
@@ -415,9 +416,12 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &models
 }
 
-func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
-	// Matches what is deployed: the judge is a one-word decision, not worth
-	// the Pro queue.
+func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
+	// Matches what is deployed. The judge is a one-word decision, which is the
+	// bar for the cheap lane — but phase 4c measured the two, pinned and twice,
+	// and Pro decides six to seven of the 61 catalogue questions better. That
+	// word is the difference between an answer and a question back, so it is
+	// bought on the expensive queue; see Router.judgeDeployment.
 	c, models := testLLMWithModel(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"compose"}`
@@ -433,22 +437,22 @@ func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
-		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ShortGateDeployment)
+	if len(*models) != 1 || (*models)[0] != llm.ProDeployment {
+		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ProDeployment)
 	}
 }
 
 func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
-	// The phase 4b eval harness needs the judge on Pro to measure it against
-	// ShortGate; WithJudgeDeployment(nil) is how it asks for that — nil means
-	// "no override", which resolves to the client's default, Pro.
+	// The eval harness needs the judge on the cheap lane to keep measuring it
+	// against the deployed one; WithJudgeDeployment(llm.ShortGate()) is how it
+	// asks for that. The override reaches the judge and nothing else.
 	c, models := testLLMWithModel(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"ask"}`
 		}
 		return `{"title":"T","summary":"S"}`
 	})
-	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(nil)
+	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(llm.ShortGate())
 
 	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
@@ -460,13 +464,13 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	if !got.Ask {
 		t.Fatal("the judge said ask")
 	}
-	if len(*models) == 0 || (*models)[0] != llm.ProDeployment {
-		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ProDeployment)
+	if len(*models) == 0 || (*models)[0] != llm.ShortGateDeployment {
+		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ShortGateDeployment)
 	}
 }
 
 // TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver guards against a
-// shared, production Router being silently pointed at Pro: WithJudgeDeployment
+// shared, production Router silently changing deployment: WithJudgeDeployment
 // must hand back a new Router and leave the one it was called on running the
 // deployment it already had.
 func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
@@ -477,7 +481,7 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 		return `{"title":"T","summary":"S"}`
 	})
 	base := newTestRouter(t, c, testDBWithDeps(t, nil))
-	_ = base.WithJudgeDeployment(nil) // a second Router, deliberately discarded here
+	_ = base.WithJudgeDeployment(llm.ShortGate()) // a second Router, deliberately discarded here
 
 	if _, err := base.Route(context.Background(), "frage", []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
@@ -486,9 +490,9 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
+	if len(*models) != 1 || (*models)[0] != llm.ProDeployment {
 		t.Errorf("the original Router ran the judge on %v, want it still on %q — WithJudgeDeployment must not mutate it",
-			*models, llm.ShortGateDeployment)
+			*models, llm.ProDeployment)
 	}
 }
 
@@ -545,5 +549,180 @@ func TestNameNormalisesSharpSInTitleAndSummary(t *testing.T) {
 	}
 	if !strings.Contains(got.Summary, "einschliesslich") {
 		t.Errorf("Summary = %q, want ß normalised to ss (einschliesslich)", got.Summary)
+	}
+}
+
+// TestDecideIsTheLadderRouteItselfRuns pins Decide as the ONE place the
+// ladder's decision lives. The eval harness used to carry its own copy of it
+// (askAt in the routing arms), which meant a change to Route's rung order
+// left the harness compiling while it silently measured a policy the product
+// no longer ran. Route calls Decide too, so there is nothing left to drift
+// apart — this test fixes what Decide must say at each rung.
+func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
+	dominant := []Candidate{{Score: 0.60}, {Score: 0.20}} // ratio 0.667
+	tight := []Candidate{{Score: 0.51}, {Score: 0.49}}    // ratio 0.039
+
+	// The margin dominates: no rung below it is consulted at all, so whatever
+	// related and judged would have said must not be read.
+	if Decide(dominant, 0.25, true, true) {
+		t.Error("a dominant pair answers without asking, whatever the later rungs would have said")
+	}
+	// A manifest dependency short-circuits the judge.
+	if Decide(tight, 0.25, true, true) {
+		t.Error("a manifest dependency is composition; the judge must not override it")
+	}
+	// Past both, the judge decides — and is never defaulted.
+	if !Decide(tight, 0.25, false, true) {
+		t.Error("the judge said ask")
+	}
+	if Decide(tight, 0.25, false, false) {
+		t.Error("the judge said compose")
+	}
+}
+
+// TestTheJudgeRunsOnProAndNamingDoesNot pins phase 4c's one exception to
+// "Pro only where a human reads". The judge's output is a single word, but it
+// decides whether the reader gets an answer or a question back, and pinned
+// measurements put Pro six to seven questions ahead of the cheap lane over
+// the 61-question catalogue against a residual spread of one to two. The
+// naming calls stay on ShortGate: a wrong title costs a worse card, not a
+// wrong turn.
+func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
+	var mu sync.Mutex
+	models := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(body, &req)
+		var prompt string
+		for _, m := range req.Messages {
+			prompt += m.Content + "\n"
+		}
+		reply := `{"title":"HTTP-Schicht von peeq","summary":"Nimmt Anfragen entgegen."}`
+		kind := "name"
+		if strings.Contains(prompt, judgeMarker) {
+			reply = `{"decision":"ask"}`
+			kind = "judge"
+		}
+		mu.Lock()
+		models[kind] = req.Model
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
+	if _, err := r.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
+		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
+	}); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	if models["judge"] != llm.ProDeployment {
+		t.Errorf("judge ran on %q, want the Pro deployment", models["judge"])
+	}
+	if models["name"] != llm.ShortGateDeployment {
+		t.Errorf("naming ran on %q, want the short-gate deployment — a title is not worth the expensive queue", models["name"])
+	}
+
+	// And the cheap lane is still reachable, because the harness has to keep
+	// measuring the comparison the spec asks for.
+	cheap := r.WithJudgeDeployment(llm.ShortGate())
+	if _, err := cheap.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
+		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
+	}); err != nil {
+		t.Fatalf("route on the cheap lane: %v", err)
+	}
+	if models["judge"] != llm.ShortGateDeployment {
+		t.Errorf("overridden judge ran on %q, want the short-gate deployment", models["judge"])
+	}
+}
+
+// TestEveryGateCallPinsItsTemperature guards the reproducibility of the two
+// paid calls routing makes. Both hand back a label — one word from a set of
+// two for the judge, a title and a sentence for the naming — and neither is
+// read as prose, so a re-roll is a defect. Phase 4c measured the cost of not
+// pinning them: two runs of the routing arm over frozen expansions and an
+// unchanged corpus decided three of sixty-one questions differently.
+func TestEveryGateCallPinsItsTemperature(t *testing.T) {
+	var mu sync.Mutex
+	var temps []*float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Temperature *float64 `json:"temperature"`
+			Messages    []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(body, &req)
+		var prompt string
+		for _, m := range req.Messages {
+			prompt += m.Content + "\n"
+		}
+		mu.Lock()
+		temps = append(temps, req.Temperature)
+		mu.Unlock()
+		reply := `{"title":"HTTP-Schicht von peeq","summary":"Nimmt Anfragen entgegen."}`
+		if strings.Contains(prompt, judgeMarker) {
+			reply = `{"decision":"ask"}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
+	if _, err := r.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
+		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
+	}); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+
+	if len(temps) != 3 {
+		t.Fatalf("made %d model calls, want 3 (1 judge + 2 names)", len(temps))
+	}
+	for i, temp := range temps {
+		if temp == nil {
+			t.Errorf("call %d sent no temperature; the endpoint's default would re-roll a one-word decision", i)
+			continue
+		}
+		if *temp != gateTemperature {
+			t.Errorf("call %d sent temperature %v, want %v", i, *temp, gateTemperature)
+		}
+	}
+}
+
+func TestExcerptOfCutsOnARuneBoundary(t *testing.T) {
+	// Given code whose n-th BYTE falls inside a multi-byte rune. German
+	// comments are the normal case in this corpus, so this is not exotic:
+	// cutting at the byte offset leaves half a rune, and JSON encoding
+	// replaces it with U+FFFD on the way to the model.
+	s := strings.Repeat("a", 9) + "ä" + strings.Repeat("b", 20)
+
+	got := excerptOf(s, 10)
+
+	if !utf8.ValidString(got) {
+		t.Errorf("excerpt is not valid UTF-8: %q", got)
+	}
+	if got != strings.Repeat("a", 9) {
+		t.Errorf("excerpt = %q, want the 9 whole runes that fit in 10 bytes", got)
+	}
+	// The bound is still a bound: nothing longer may come back.
+	if len(got) > 10 {
+		t.Errorf("excerpt is %d bytes, want at most 10", len(got))
 	}
 }

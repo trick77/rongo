@@ -989,6 +989,87 @@
   </p>
 </section>
 
+<section>
+  <h2>Nachtrag Phase 4c: der Richter wanderte auf Pro, die Kandidatenschicht blieb ungelöst</h2>
+  <p>
+    Der zweite Hebel oben ist gebaut und gemessen worden, zweimal, und hat sich nicht verdient. Was
+    diese Phase stattdessen einbrachte, kam aus der Messung selbst — Details in
+    <code>docs/measurements/2026-08-19-candidates.md</code>.
+  </p>
+
+  <h3>Die Messung mass ein anderes Produkt</h3>
+  <p>
+    <code>pipeline.go</code> sucht mit <code>Repos: u.Repos</code>, die eingefrorenen Expansionen
+    hielten nur die Suchtexte, und die Routing-Arme suchten ohne die Einengung. Jede veröffentlichte
+    Routing-Zeile stammte damit aus einer Kandidatenmenge, die das Produkt nie erzeugt hätte. Dazu
+    trat der zweite Fall derselben Familie: die Arme trugen eine eigene Kopie der Leiter. Es gibt
+    jetzt genau ein <code>ask.Decide</code>, das <code>Route</code> und die Messung gemeinsam rufen.
+  </p>
+
+  <h3>Ein erfundener Repository-Name löschte die Suche</h3>
+  <p>
+    Erst das Einfrieren der Einengung machte sie lesbar: von neun Einengungen nannten drei etwas, das
+    es nicht gibt — <code>peeqs</code> (der deutsche Genitiv), <code>Peek</code> und
+    <code>asg017/sqlite-vec</code>. Ein solcher Name ist keine Einengung, sondern eine Löschung: er
+    geht direkt in <code>WHERE f.repo IN (…)</code>, nichts kann treffen, und der Zug meldet «nichts
+    gefunden» über Code, der im Index liegt. <code>Search</code> verwirft jetzt unbekannte Namen; eine
+    Einengung, von der nichts übrig bleibt, ist keine Einengung mehr. Ein bekanntes, aber leeres
+    Repository engt weiterhin ein — «kein Treffer heisst kein Treffer» bleibt wahr.
+  </p>
+
+  <h3>Der Richter würfelte, und Phase 4bs Pflichtbefund war ein Artefakt</h3>
+  <p>
+    Kein Aufruf trug eine Temperatur, also würfelte jeder Gate-Aufruf mit dem Standard des Endpunkts.
+    Zwei Läufe desselben Arms über identische eingefrorene Eingaben entschieden drei von 61 Fragen
+    verschieden — mehr als der Unterschied, den Phase 4b zwischen den beiden Deployments gemessen und
+    zur Grundlage einer Festschreibung gemacht hatte. Der Leser trifft denselben Defekt von der
+    anderen Seite: zweimal dieselbe Frage, einmal eine Karte und einmal eine Antwort.
+  </p>
+  <p>
+    Mit <code>WithTemperature</code> festgenagelt und zweimal gelaufen: Pro 48/61 und 50/61, non-Pro
+    42/61 und 43/61, Reststreuung ein bis zwei Fragen. <b>Der Routing-Richter läuft ab jetzt auf
+    Pro</b> — die eine Ausnahme von «Pro nur, wo ein Mensch liest», und sie steht als solche in
+    <code>AGENTS.md</code>. Sein Ergebnis ist ein Wort, aber dieses Wort entscheidet, ob der Leser
+    eine Antwort oder eine Rückfrage bekommt. Verstehen, Benennen und der Thread-Titel bleiben auf
+    der günstigen Spur.
+  </p>
+
+  <h3>Die Kandidatenschicht: negativ, und wo der Hebel wirklich sitzt</h3>
+  <p>
+    Dem Richter wurde gezeigt, was die Kandidaten unterscheidet — das genannte Repository, der Anteil
+    an den Treffern samt Rang, und welche erwarteten Bezeichner wo gelandet sind. In der lockeren
+    Fassung halbierte das die falschen Rückfragen (8 auf 4) und hob das Grounding auf den besten je
+    gemessenen Wert, kostete aber die mehrdeutige Kohorte 7/12 auf 4/12 und landete genau auf 0.803:
+    Es erreichte den Router, der nichts fragt, indem es zu ihm wurde. Die strenge Fassung stellte 7/12
+    wieder her und reproduzierte exakt die Grundlinie. <b>Beides ist nicht ausgeliefert</b>; der
+    Richter-Prompt trägt wieder Phase 4bs Wortlaut.
+  </p>
+  <p>
+    Was bleibt, ist der Befund: der Hebel wirkt — 8 falsche Rückfragen auf 4 ist die grösste je
+    gemessene Bewegung auf dieser Kohorte —, ungelöst ist die Schwelle, nicht das Signal. Der
+    Trefferanteil gehört vermutlich nicht dazu: dass die Ränge dicht beieinander liegen, ist der
+    Grund, warum die Leiter den Richter überhaupt erreicht hat.
+  </p>
+
+  <h3>Befund B ist behoben</h3>
+  <p>
+    Der Referenzlauf in <code>gather.go</code> löst einen Namen jetzt zuerst im eigenen Repository auf
+    und überquert die Grenze nur für einen Namen, den dieses Repository überhaupt nicht definiert.
+    Echte Komposition über <code>repo_deps</code>-Kanten reist weiter. Am laufenden Programm geprüft,
+    auf demselben Weg, der den Fehler erzeugt hatte: Karte, peeq gewählt, jede Fundstelle in peeq, das
+    Wort <code>loom</code> kommt in der Antwort nicht vor.
+  </p>
+
+  <h3>Offen</h3>
+  <p>
+    Die Kandidaten-Körnung ist weiterhin unberührt. Auf der Rückfragekarte trugen zwei von drei
+    Kandidaten denselben Titel — der Benennungs-Prompt verlangt unterscheidbare Titel und lieferte
+    hier keine; die Karte bleibt beantwortbar, weil das Repository daneben steht, aber die Titel
+    tragen nichts. Und die <code>composition</code>-Kohorte bleibt aus dem in Phase 4b genannten
+    Grund unbeantwortbar: die Naht ist eine <em>Zeichenkette</em>, kein Symbol.
+  </p>
+</section>
+
 <footer>
   <span>rongo · Design &amp; Umsetzungsplan</span>
   <span>16. August 2026</span>
