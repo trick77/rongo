@@ -18,13 +18,18 @@ import (
 // gather_test.go does: the running pipeline searches 20 hits before routing.
 const routeSearchK = 20
 
-// routeMargins is the sweep the phase 4b spec asks for. The accuracy table
-// this produces does NOT choose BACKEND_ROUTE_MARGIN's value: the table
-// rewards asking less, on a catalogue that is 80% "do not ask", and its
-// best-scoring margin (0.10) would optimise the router towards switching
-// itself off. The default of 0.25 is kept despite this table, pending a fix
-// to the candidate layer — see docs/measurements/2026-08-18-routing.md,
-// "What this means for the margin".
+// routeMargins is the sweep the phase 4b spec asks for. The accuracy table it
+// produces does NOT choose BACKEND_ROUTE_MARGIN's value, and on the corpus of
+// 2026-08-20 it cannot: the table is flat. 0.667 at 0.10 and 0.633 to 0.650
+// everywhere from 0.15 to 0.40 — the whole useful range of the threshold is
+// worth at most two questions in sixty.
+//
+// That flatness is a finding rather than a disappointment. The threshold's job
+// is to arbitrate between two close candidates, and only 7 of the 16 ambiguous
+// questions retrieve both of their answers into the top 20 at all, so there is
+// usually no second candidate to arbitrate. The default stays at 0.25 because
+// nothing in this table argues for moving it. See
+// docs/measurements/2026-08-20-corpus-swap.md, "Why routing collapsed".
 var routeMargins = []float64{0.10, 0.15, 0.20, 0.25, 0.30, 0.40}
 
 // resolutionExpectsAsk is the criterion fixed before any run: an ambiguous

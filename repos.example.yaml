@@ -12,8 +12,18 @@ repositories:
     clone_url: /Users/jan/localgit/peeq
     # branch omitted on purpose: resolved from the remote
 
-  - name: loom
-    clone_url: /Users/jan/localgit/loom
+  # rongo indexes itself. It replaced loom on 2026-08-20: loom was peeq's
+  # wholesale twin, rongo overlaps peeq only where it has to — retrieval,
+  # storage, auth, scheduling — which is enough for a real ambiguous cohort
+  # and gives the corpus a repository whose questions can be verified against
+  # code that is right here.
+  # Deliberately the remote, not the local checkout. Cloning a local path takes
+  # that checkout's own branch ref, which lags whatever has been merged — the
+  # first attempt indexed rongo at 4 files because the local master was months
+  # behind origin/master. A local clone_url indexes the working copy's opinion,
+  # not the published code.
+  - name: rongo
+    clone_url: https://github.com/trick77/rongo.git
 
   # A dependency peeq genuinely declares in go.mod, so cross-repo composition is
   # exercised against real data rather than a fixture.

@@ -106,41 +106,65 @@
   {
     "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
     "kind": "why",
-    "resolution": "unique",
+    "resolution": "ambiguous",
     "candidates": [
       {
         "repo": "peeq",
         "paths": [
           "backend/internal/sched/sched.go"
         ]
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/sched/sched.go"
+        ],
+        "verified": "sched.go:13 Jittered, ±20% Streuung — gleicher Mechanismus wie in peeq"
       }
-    ]
+    ],
+    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
     "kind": "how",
-    "resolution": "unique",
+    "resolution": "ambiguous",
     "candidates": [
       {
         "repo": "peeq",
         "paths": [
           "backend/internal/rag/hybrid.go"
         ]
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/retrieve/hybrid.go"
+        ],
+        "verified": "hybrid.go FuseWeighted, gewichtete RRF-Fusion — gleicher Mechanismus wie peeqs rag/hybrid.go"
       }
-    ]
+    ],
+    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "FuseWeighted",
     "kind": "identifier",
-    "resolution": "unique",
+    "resolution": "ambiguous",
     "candidates": [
       {
         "repo": "peeq",
         "paths": [
           "backend/internal/rag/hybrid.go"
         ]
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/retrieve/hybrid.go"
+        ],
+        "verified": "hybrid.go:68 FuseWeighted — gleichnamige Funktion in beiden Repositories"
       }
-    ]
+    ],
+    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
@@ -155,9 +179,9 @@
         "verified": "chunk.go:38-51 estimateTokens, ~4 Zeichen pro Token, Kommentar nennt tiktoken"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/rag/chunk.go"
+          "backend/internal/indexer/chunk.go"
         ],
         "verified": "chunk.go:32-45 estimateTokens, zeichengleiche Implementierung samt Kommentar"
       }
@@ -167,15 +191,23 @@
   {
     "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
     "kind": "what",
-    "resolution": "unique",
+    "resolution": "ambiguous",
     "candidates": [
       {
         "repo": "peeq",
         "paths": [
           "backend/internal/rag/embed.go"
         ]
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/embed/client.go"
+        ],
+        "verified": "client.go stapelt die Texte und begrenzt den Stapel je Anfrage"
       }
-    ]
+    ],
+    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
@@ -220,7 +252,7 @@
   {
     "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
     "kind": "what",
-    "resolution": "unique",
+    "resolution": "ambiguous",
     "candidates": [
       {
         "repo": "peeq",
@@ -228,135 +260,16 @@
           "backend/internal/rag/stopwords.go",
           "backend/internal/rag/query.go"
         ]
-      }
-    ]
-  },
-  {
-    "question": "Wie meldet sich ein Benutzer per OIDC an?",
-    "kind": "how",
-    "resolution": "ambiguous",
-    "candidates": [
-      {
-        "repo": "peeq",
-        "paths": [
-          "backend/internal/auth/oidc.go"
-        ],
-        "verified": "oidc.go:15-17 peeq_oidc_state/nonce, OIDCBackend mit AuthCodeURL/Exchange/VerifyClaims"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/auth/oidc.go"
+          "backend/internal/retrieve/stopwords.go"
         ],
-        "verified": "oidc.go:15-17 loom_oidc_state/nonce, gleiche OIDCBackend-Schnittstelle"
+        "verified": "stopwords.go, eigene Stoppwortliste vor der Keyword-Suche"
       }
     ],
-    "note": "Zwei eigenstaendige Anmeldungen, bis auf die Cookie-Namen gleich gebaut. Die Frage nennt kein Produkt, also ist genau ein Steckbrief gemeint und rongo muss fragen welcher."
-  },
-  {
-    "question": "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
-    "kind": "how",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/title_normalizer.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
-    "kind": "where",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/upload_path.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/thumbnail.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/user_directives_store.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/share_store.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/message_search_store.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "ResolveOutputPath",
-    "kind": "identifier",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/path.go"
-        ]
-      }
-    ]
-  },
-  {
-    "question": "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
-    "kind": "how",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/path.go",
-          "backend/internal/artifact/upload_path.go"
-        ]
-      }
-    ]
+    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
   },
   {
     "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
@@ -497,90 +410,6 @@
     ]
   },
   {
-    "question": "Wie gross ist das laengste Seitenmass eines Artefakt-Vorschaubilds?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/thumbnail.go"
-        ],
-        "verified": "thumbnail.go:15 ThumbnailMaxDimension = 144, doppelt so gross wie die 36px-Kachel"
-      }
-    ]
-  },
-  {
-    "question": "Wo liegen die Vorschaubilder, damit sie nie eine echte Benutzerdatei ueberschreiben?",
-    "kind": "where",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/thumbnail.go"
-        ],
-        "verified": "thumbnail.go:17-24 thumbnailReservedDir = .loom/thumbnails, ein Praefix das keine Benutzereingabe erreichen kann"
-      }
-    ]
-  },
-  {
-    "question": "Warum bekommt ein SVG kein Vorschaubild?",
-    "kind": "why",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/artifact/thumbnail.go"
-        ],
-        "verified": "thumbnail.go:26-30 rasterImageMIMEs ohne image/svg+xml, Begruendung im Kommentar: Vektor, ohnehin winzig"
-      }
-    ]
-  },
-  {
-    "question": "Wie viel Text darf die automatisch erzeugte Benutzer-Erinnerung hoechstens umfassen?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/model.go"
-        ],
-        "verified": "model.go:81 MaxUserMemoryLength = 6000, in llm/project_memory.go:22 als userMemoryBudgetChars gespiegelt"
-      }
-    ]
-  },
-  {
-    "question": "Was unterscheidet eine abgeleitete Erinnerung von einer ausdruecklichen Anweisung des Benutzers?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/model.go"
-        ],
-        "verified": "model.go:62-95 UserMemory ist abgeleitet und nur lesbar, UserDirective wird diktiert und hart abgelehnt statt gekuerzt"
-      }
-    ]
-  },
-  {
-    "question": "Wie viele Threads liefert eine Seite der Threadliste hoechstens?",
-    "kind": "what",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "loom",
-        "paths": [
-          "backend/internal/chat/cursor.go"
-        ],
-        "verified": "cursor.go:22-26 maxThreadLimit = 1000"
-      }
-    ]
-  },
-  {
     "question": "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
     "kind": "how",
     "resolution": "unique",
@@ -649,9 +478,9 @@
         "verified": "chunk.go:33-35 DefaultChunkOptions 600/800/75 Tokens, Chunk schneidet auf Wortgrenzen"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/rag/chunk.go"
+          "backend/internal/indexer/chunk.go"
         ],
         "verified": "chunk.go:27-29 dieselben Werte, dieselbe Chunk-Funktion"
       }
@@ -671,7 +500,7 @@
         "verified": "store.go:21-25 DSN mit journal_mode(wal), busy_timeout(10000), foreign_keys(on)"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/store/store.go"
         ],
@@ -693,7 +522,7 @@
         "verified": "migrate.go:17-41 Tabelle schema_migrations, SELECT 1 ... WHERE version = ?"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/store/migrate.go"
         ],
@@ -715,9 +544,9 @@
         "verified": "sse.go:29-34 X-Accel-Buffering: no, samt Kommentar zu Traefik"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/sse/sse.go"
+          "backend/internal/httpapi/ask.go"
         ],
         "verified": "sse.go:27-34 identischer Block"
       }
@@ -737,7 +566,7 @@
         "verified": "session.go:143 hashToken, session.go:109-120 CookieFor mit HttpOnly und SameSite Lax"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/auth/session.go"
         ],
@@ -759,7 +588,7 @@
         "verified": "middleware.go:32-56 RequireAuth, dreimal writeJSONError mit 401 unauthorized"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/auth/middleware.go"
         ],
@@ -781,7 +610,7 @@
         "verified": "config.go:148 env(\"BACKEND_ADDR\", \":8080\")"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/config/config.go"
         ],
@@ -803,9 +632,9 @@
         "verified": "stream.go:40-43 maxStreamLine = 1 << 20, gesetzt in sc.Buffer"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/llm/stream.go"
+          "backend/internal/llm/client.go"
         ],
         "verified": "stream.go:300 scanner.Buffer(..., 1024*1024)"
       }
@@ -825,9 +654,9 @@
         "verified": "embed.go:21-24 maxEmbedErrorBody = 4 << 10"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/rag/embed.go"
+          "backend/internal/embed/client.go"
         ],
         "verified": "embed.go:18-21 maxEmbedErrorBody = 4 << 10"
       }
@@ -847,9 +676,9 @@
         "verified": "store.go:37-50 VecLiteral, JSON-Array aus float32"
       },
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
-          "backend/internal/rag/store.go"
+          "backend/internal/store/store.go"
         ],
         "verified": "store.go:44-52 vecLiteral, gleiche Kodierung, andere Paketebene"
       }
@@ -880,12 +709,12 @@
     "note": "peeq deklariert github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:8, und das Repository ist indexiert. Die Antwort braucht beide Haelften: peeq setzt den Wert, der Treiber setzt ihn um und laesst wegen _pragma seinen eigenen Standard weg."
   },
   {
-    "question": "Wer registriert den Treiber, den loom mit sql.Open(\"sqlite3\", ...) anspricht?",
+    "question": "Wer registriert den Treiber, den rongo mit sql.Open(\"sqlite3\", ...) anspricht?",
     "kind": "how",
     "resolution": "composition",
     "candidates": [
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/store/store.go"
         ],
@@ -924,12 +753,12 @@
     "note": "Eine Kette ueber die Repo-Grenze entlang derselben Abhaengigkeit aus peeqs go.mod."
   },
   {
-    "question": "Wie lange wartet loom, wenn die Datenbankdatei gerade gesperrt ist?",
+    "question": "Wie lange wartet rongo, wenn die Datenbankdatei gerade gesperrt ist?",
     "kind": "what",
     "resolution": "composition",
     "candidates": [
       {
-        "repo": "loom",
+        "repo": "rongo",
         "paths": [
           "backend/internal/store/store.go"
         ],
@@ -967,5 +796,201 @@
       }
     ],
     "note": "Ohne den Treiberteil bleibt offen, ob der Parameter ueberhaupt jemals ausgefuehrt wird."
+  },
+  {
+    "question": "Warum steht eine viel benutzte Hilfsfunktion nicht in jeder Antwort, obwohl der Code sie ueberall aufruft?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/gather.go"
+        ],
+        "verified": "gather.go:38 maxDefiners=4 — ein Name, den zu viele Dateien definieren, wird nicht verfolgt"
+      }
+    ]
+  },
+  {
+    "question": "Wie viele Moeglichkeiten darf eine Rueckfrage hoechstens zur Auswahl stellen?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/route.go"
+        ],
+        "verified": "route.go:80 maxCandidates=5"
+      }
+    ]
+  },
+  {
+    "question": "Wie oft wird nachgeschaut, ob sich an einem Repository etwas geaendert hat?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/indexer/poller.go"
+        ],
+        "verified": "poller.go:18 DefaultPollInterval=30min, bewusst kein Webhook"
+      }
+    ]
+  },
+  {
+    "question": "Woher weiss der Dienst, welcher Zweig gemeint ist, wenn keiner eingetragen wurde?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/gitrepo/gitrepo.go"
+        ],
+        "verified": "gitrepo.go:79 ls-remote --symref HEAD, nie ein vorgegebener Standard"
+      }
+    ]
+  },
+  {
+    "question": "Was passiert, wenn der eingetragene Zweig auf der Gegenseite geloescht wurde?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/gitrepo/gitrepo.go"
+        ],
+        "verified": "gitrepo.go:103 ErrBranchGone, lauter Fehler statt stillem Stillstand"
+      }
+    ]
+  },
+  {
+    "question": "Warum bricht der Start ab, wenn die falsche Variante eines Werkzeugs installiert ist?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/exttools/exttools.go"
+        ],
+        "verified": "exttools.go:37-39 universal-ctags wird beim Start geprueft"
+      }
+    ]
+  },
+  {
+    "question": "Wo stehen die Zugangsdaten fuer ein privates Repository, wenn nicht in der Konfigurationsdatei?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/repos/config.go"
+        ],
+        "verified": "config.go:25-27 TokenEnv nennt eine Umgebungsvariable je Forge-Host"
+      }
+    ]
+  },
+  {
+    "question": "Ab welcher Groesse gilt ein Verzeichnis nicht mehr als eigener Baustein?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/modules/cluster.go"
+        ],
+        "verified": "cluster.go Opts.MinChunks, Faltung bis zum Fixpunkt"
+      }
+    ]
+  },
+  {
+    "question": "Woran wird erkannt, dass ein Repository ein anderes benutzt?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/repodeps/repodeps.go"
+        ],
+        "verified": "repodeps.go liest die Manifeste und legt Kanten zwischen Repositories an"
+      }
+    ]
+  },
+  {
+    "question": "Welche Dateien landen gar nicht erst im Index?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/indexer/select.go"
+        ],
+        "verified": "select.go entscheidet, was ueberhaupt indexiert wird"
+      }
+    ]
+  },
+  {
+    "question": "Wie weit entfernt von einem Suchtreffer darf der Code noch liegen, der in eine Antwort kommt?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/gather.go"
+        ],
+        "verified": "gather.go GatherOptions.MaxHops begrenzt den Verweislauf"
+      }
+    ]
+  },
+  {
+    "question": "Was passiert mit dem gesammelten Material, wenn dessen Budget erreicht ist?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/gather.go"
+        ],
+        "verified": "gather.go: der Lauf haelt an, Suchtreffer werden nie verdraengt"
+      }
+    ]
+  },
+  {
+    "question": "Was passiert mit dem Index, wenn ein Repository aus der Konfiguration verschwindet?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/indexer/state.go"
+        ],
+        "verified": "state.go:49 deaktiviert statt geloescht; der Index ueberlebt bis zu einer ausdruecklichen Loeschung"
+      }
+    ]
+  },
+  {
+    "question": "Wie wird aus einer Frage in Fachsprache eine Suche, die den Code wirklich trifft?",
+    "kind": "how",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/understand.go"
+        ],
+        "verified": "understand.go code_terms — die geratene Bruecke von Fachwort zu Bezeichner"
+      }
+    ]
   }
 ]
