@@ -26,4 +26,10 @@ export BACKEND_REPOS_FILE=../../../../repos.yaml
 export BACKEND_REPO_ROOT=/tmp/rongo-eval-repos
 
 cd backend
-exec go test -v -timeout 90m -run "$1" ./internal/retrieve/eval/
+# -count=1 defeats the test cache, and it is not optional. These arms read
+# state Go does not track — the evaluation database, the clones under
+# BACKEND_REPO_ROOT, a real model endpoint — so an unchanged package can
+# produce a cache hit that replays the PREVIOUS run's numbers under a new
+# heading. That happened once: a re-index after a repos.yaml fix reported the
+# old corpus counts, down to the same duration to two decimals.
+exec go test -v -count=1 -timeout 90m -run "$1" ./internal/retrieve/eval/

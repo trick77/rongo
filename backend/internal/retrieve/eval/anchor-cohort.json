@@ -1,5 +1,5 @@
 {
-  "comment": "The 28 questions the phase-2, phase-3 and phase-4a measurements ran on, in the classification they had then. The anchor arm scores exactly these, against each question's FIRST candidate, and must reproduce recall@5 0.679 / recall@20 0.786 / MRR 0.476. Without it the enlarged catalogue starts a fresh, unanchored series.",
+  "comment": "The 19 of the original 28 anchor questions that survive the corpus change of 2026-08-20, when loom left and rongo entered. THE OLD ANCHOR VALUES DO NOT APPLY: recall@5 0.679 / recall@20 0.786 / MRR 0.476 were measured against a corpus containing loom, and these same questions now compete with different distractors. Phases 2, 3, 4a, 4b and 4c are the closed series those numbers belong to. The new series anchors HERE: recall@5 0.474 / recall@20 0.632 / MRR 0.145, measured on 2026-08-20 and recorded in docs/measurements/2026-08-20-corpus-swap.md. Every later phase must reproduce those three before any number it reports can be compared with anything.",
   "questions": [
     "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
     "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
@@ -18,15 +18,6 @@
     "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
     "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
     "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
-    "Wie meldet sich ein Benutzer per OIDC an?",
-    "Wie wird ein Thread-Titel bereinigt, wenn das Modell ihn in Anfuehrungszeichen liefert?",
-    "Wohin schreibt loom eine hochgeladene Datei im Benutzer-Volume?",
-    "Wie gross ist ein generiertes Artefakt-Thumbnail hoechstens?",
-    "Was passiert, wenn eine Benutzer-Direktive zu lang wird?",
-    "Kann ein Thread mehrere oeffentliche Share-Links gleichzeitig haben?",
-    "Wie viele Volltext-Treffer liefert die Nachrichtensuche standardmaessig zurueck?",
-    "ResolveOutputPath",
-    "Wie wird ein Dateiname bereinigt, bevor er auf die Platte geschrieben wird?",
     "Wie sichert man eine laufende SQLite-Datenbank online?",
     "ZeroBlob"
   ]
