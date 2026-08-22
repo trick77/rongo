@@ -1,6 +1,9 @@
 package retrieve
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // rrfK is the Reciprocal Rank Fusion damping constant. 60 is the widely used
 // default (Cormack et al.): large enough that top ranks do not dominate, small
@@ -66,6 +69,30 @@ type Lane struct {
 // confidence — the one value a caller would reach for to silence a lane must
 // not be the value that makes it shout loudest.
 func FuseWeighted(lanes []Lane, k int) []Hit {
+	return FuseWeightedDiverse(lanes, k, DefaultRepoDecay)
+}
+
+// FuseWeightedDiverse is FuseWeighted with a per-repository decay applied
+// before the list is cut to k: a repository's nth hit is ordered as if its
+// score were score*decay^n, while the score written onto the hit stays the
+// fusion score. Anything outside the open interval (0,1) is OFF and returns
+// exactly what FuseWeighted returns — zero included, so a Retriever built as a
+// struct literal rather than through New falls back to the shipped behaviour
+// instead of silently running the harshest setting there is.
+//
+// It exists because the binding constraint moved from routing to retrieval.
+// Measured on the mixed corpus, only 7 of 16 ambiguous questions retrieved
+// BOTH of their alternatives into the top 20 — one repository filled the list,
+// and the router was then asked to arbitrate between candidates that were
+// never in it. Demoting a repository's repeats is the cheapest way to leave
+// room for the second implementation; it cannot invent a candidate the lanes
+// did not return.
+//
+// The decay is deliberately gentle rather than a hard per-repository cap: a
+// question whose answer genuinely lives in twelve chunks of one repository
+// must not lose eight of them to make room for a repository that has nothing
+// to say.
+func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
 	type agg struct {
 		hit   Hit
 		score float64
@@ -104,7 +131,7 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 	if k <= 0 {
 		k = 10
 	}
-	out := make([]Hit, 0, min(k, len(order)))
+	ranked := make([]Hit, 0, len(order))
 	for _, id := range order {
 		a := byID[id]
 		// The score and the lane provenance are written back onto the hit: a
@@ -113,12 +140,64 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 		// literal match from a semantic guess.
 		a.hit.Score = a.score
 		a.hit.Lanes = a.lanes
-		out = append(out, a.hit)
-		if len(out) >= k {
-			break
+		ranked = append(ranked, a.hit)
+	}
+	// Diversify BEFORE the cut. Applied to an already-truncated list it could
+	// only shuffle what one repository had already filled, which is the
+	// failure it exists to fix.
+	ranked = diversifyByRepo(ranked, decay)
+	if len(ranked) > k {
+		ranked = ranked[:k]
+	}
+	return ranked
+}
+
+// DefaultRepoDecay is off. The value that ships is set by the measurement in
+// internal/retrieve/eval, not by argument here: the number it has to move is
+// how many of the sixteen ambiguous questions retrieve both of their answers,
+// and the thirty-four unique ones must not lose ground while it does.
+const DefaultRepoDecay = 1.0
+
+// diversifyByRepo reorders a ranked list so a repository's repeats step aside
+// for another repository's best hit. Nothing is dropped — reordering is not
+// filtering — and the input order breaks every tie, so the result is stable
+// for an unchanged corpus.
+//
+// Quadratic in the fused list, which is bounded by the candidate pool per lane
+// (forty by default). A cleverer structure would trade readability for a
+// saving nobody can measure.
+func diversifyByRepo(hits []Hit, decay float64) []Hit {
+	if decay <= 0 || decay >= 1 || len(hits) < 2 {
+		return hits
+	}
+	taken := make(map[string]int, 4)
+	remaining := make([]Hit, len(hits))
+	copy(remaining, hits)
+	out := make([]Hit, 0, len(hits))
+	for len(remaining) > 0 {
+		best, bestScore := 0, penalised(remaining[0], taken, decay)
+		for i := 1; i < len(remaining); i++ {
+			// Strictly greater, so a tie keeps the better fusion rank: the
+			// input is already sorted, and equal scores must not depend on map
+			// iteration or on which repository was seen first.
+			if sc := penalised(remaining[i], taken, decay); sc > bestScore {
+				best, bestScore = i, sc
+			}
 		}
+		h := remaining[best]
+		out = append(out, h)
+		taken[h.Repo]++
+		remaining = append(remaining[:best], remaining[best+1:]...)
 	}
 	return out
+}
+
+// penalised is the ordering key: the fusion score damped once per hit already
+// taken from the same repository. The hit's own Score is left untouched, because
+// a caller explaining a result reports what the fusion concluded, not what the
+// ordering did with it afterwards.
+func penalised(h Hit, taken map[string]int, decay float64) float64 {
+	return h.Score * math.Pow(decay, float64(taken[h.Repo]))
 }
 
 func contains(ss []string, s string) bool {
