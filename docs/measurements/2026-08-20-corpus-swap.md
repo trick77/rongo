@@ -120,6 +120,10 @@ number rather than a routing one: the new rongo questions are harder to gather f
 Three readings agree, so this is not a guess:
 
 - Of the 16 `ambiguous` questions, only **7 retrieve both alternatives into the top 20** —
+  *(Corrected 2026-08-22: 7/16 is the RAW question. With the query expansion the product
+  actually runs it is 12/16 on this same corpus — see
+  `2026-08-22-repo-diversity.md`. The reading below still holds, but the gap it describes
+  is smaller than 7/16 suggests.)*
   14 of 32 candidates. The router cannot ask about an ambiguity it never retrieved.
 - The judge is therefore rarely reached at all.
 - The margin sweep is flat, which is what one expects when the threshold's job — arbitrating

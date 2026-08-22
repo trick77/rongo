@@ -36,19 +36,27 @@ an ambiguous question because no clarification recovers it.
 | 0.50 | 0.750 (12/16) | 0.844 (27/32) | 0.667 (26/39) | 0.200 (1/5) |
 | 0.30 | 0.750 (12/16) | 0.844 (27/32) | 0.667 (26/39) | 0.200 (1/5) |
 
-## Finding 1: the baseline did not reproduce
+## Finding 1: the premise was the unexpanded number
 
-The premise was 7 of 16. Today, with the decay switched off, it is **12 of 16**,
-and 28 of 32 alternatives rather than 14 of 32 — the constraint the change was
-built to relieve is largely not there any more.
+The premise was 7 of 16. With the decay switched off it measures **12 of 16**,
+and 28 of 32 alternatives rather than 14 of 32 — so the constraint the change
+was built to relieve is much smaller than the corpus-swap document made it look.
 
-Nothing in the retrieval path explains it: this arm searches exactly as the
-routing arm does, same K, same candidate depth, same frozen expansions. What
-moved is the corpus. rongo indexes itself, and rongo on 22 August is not rongo
-on 20 August — the swap measurement ran while the repository had just been
-added. A corpus that indexes a repository under active development re-dates
-its own baseline, which is worth stating plainly: **every number in these
-documents is only comparable to a number measured on the same day's corpus.**
+The corpus is not the explanation. `unique` recall@20 comes out at 0.769 here,
+which is the corpus-swap document's own control value to three decimals, so
+both runs are looking at the same index.
+
+What differs is the query. `TestEvalMeasureGathered` on the same corpus reports
+the ambiguous cohort at **7/16 without query expansion** and **12/16 with it**,
+which is exactly the gap between the two documents. The published 7 of 16
+belongs to the *raw* question — the condition the anchor cohort is measured in,
+and the one the product does not run, because step 1 expands before the lanes
+ever see the question.
+
+That matters beyond this arm: **a retrieval number is only comparable to
+another number measured under the same query condition.** Two conditions live
+in the same harness, one of them is what ships, and the difference between them
+here is five of sixteen questions — larger than anything the decay does.
 
 ## Finding 2: the decay does not earn its keep
 
@@ -63,9 +71,18 @@ doing what it says — pushing a repository's repeats down — and on this
 catalogue the repeats being pushed down are frequently the answer.
 
 Composition sits at 1 of 5 in every arm, untouched by the decay. It is the
-worst number on the page and it is not this change's to fix: a composition
-question needs every part, and a fused list of twenty is evidently not where
-all the parts are. That belongs to gathering, not to ranking.
+worst number on the page, and gathering does not rescue it either:
+`TestEvalMeasureGathered` on this corpus lifts the parts from 2/10 to 6/10 with
+the symbol walk, and still finishes at 1 of 5 questions. Four of five
+composition questions never get all their parts — from search, from two hops,
+or from expansion. In all four the *same* candidate is the one missing, the
+first, while the second arrives via the walk.
+
+That is a defect against the design rather than a ranking problem: a
+composition question is the case where asking would be wrong and every part
+belongs in the answer. It wants its own diagnosis — is the missing candidate
+absent from the fused list, or is it cut by the hop budget or the token cap —
+and n = 5 makes it a lead, not a statistic.
 
 ## What ships
 
@@ -76,5 +93,6 @@ here is corpus-dependent, and a corpus with genuinely overlapping repositories
 — several products that really do implement the same mechanism — is the case
 where a repository crowding out the list is more than a possibility on paper.
 
-Before anyone re-runs it, re-measure the baseline in the same run. That is the
-only reason this measurement caught its own premise going stale.
+Before anyone re-runs it, re-measure the baseline in the same run, and record
+which query condition it was measured under. That is the only reason this
+measurement caught that its own premise was a number from the other one.
