@@ -274,3 +274,74 @@ func TestStream_requestsUsageInTheStream(t *testing.T) {
 		t.Error("stream = false on a streaming call")
 	}
 }
+
+// headerCapture answers one call — a JSON completion or an SSE stream — and
+// hands back the headers the upstream saw.
+func headerCapture(t *testing.T, stream bool) (*Client, *http.Header) {
+	t.Helper()
+	got := &http.Header{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*got = r.Header.Clone()
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": "ok"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(Config{BaseURL: srv.URL, APIKey: "k"}, srv.Client()), got
+}
+
+// TestChatUserAgentValue pins the exact client string. The header test below
+// compares against the constant and would pass on any value; the upstream cares
+// about this specific one, so assert the literal.
+func TestChatUserAgentValue(t *testing.T) {
+	const want = "opencode/1.18.11 ai-sdk/openai-compatible/3.0.20 ai-sdk/provider-utils/5.0.18 runtime/bun/1.3.14"
+	if chatUserAgent != want {
+		t.Fatalf("chatUserAgent = %q, want %q", chatUserAgent, want)
+	}
+}
+
+// TestChatRequestNeverSendsGoDefaultUserAgent guards the failure this change
+// exists to prevent: net/http reinstating "Go-http-client/1.1" if the header is
+// ever dropped from post. Both entry points are checked — post is shared today,
+// but a later split must not silently leave one of them unidentified.
+func TestChatRequestNeverSendsGoDefaultUserAgent(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "Complete"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			// Given
+			c, got := headerCapture(t, stream)
+
+			// When
+			var err error
+			if stream {
+				_, err = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+			} else {
+				_, _, err = c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
+			}
+			if err != nil {
+				t.Fatalf("call: %v", err)
+			}
+
+			// Then
+			ua := got.Get("User-Agent")
+			if ua == "" || strings.HasPrefix(ua, "Go-http-client") {
+				t.Fatalf("User-Agent = %q, want the configured client string", ua)
+			}
+			if ua != chatUserAgent {
+				t.Errorf("User-Agent = %q, want %q", ua, chatUserAgent)
+			}
+			if accept := got.Get("Accept"); accept != "*/*" {
+				t.Errorf("Accept = %q, want */*", accept)
+			}
+		})
+	}
+}

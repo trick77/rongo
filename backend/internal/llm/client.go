@@ -38,6 +38,12 @@ const (
 // where that shows up first.
 const defaultMaxTokens = 4096
 
+// chatUserAgent is the User-Agent sent to the MiMo endpoint. Go's default
+// "Go-http-client/1.1" identifies the caller as a bot; the upstream is happier
+// with the client string an ordinary OpenAI-compatible SDK sends. Same value as
+// loom, against the same endpoint.
+const chatUserAgent = "opencode/1.18.11 ai-sdk/openai-compatible/3.0.20 ai-sdk/provider-utils/5.0.18 runtime/bun/1.3.14"
+
 const maxErrorBodyBytes = 8 << 10
 
 // Config holds the endpoint settings. The deployment names are not here on
@@ -298,6 +304,11 @@ func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream
 		return nil, fmt.Errorf("create chat request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", chatUserAgent)
+	// Accept-Encoding is left unset on purpose so net/http keeps negotiating and
+	// decompressing gzip transparently; setting it by hand would hand us a
+	// compressed body to decode ourselves.
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
