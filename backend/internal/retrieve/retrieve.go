@@ -53,6 +53,10 @@ type Retriever struct {
 	MaxDistance float64
 	// Candidates is how many rows each lane fetches before fusion.
 	Candidates int
+	// RepoDecay demotes a repository's repeated hits so a second repository
+	// has room in the cut; see FuseWeightedDiverse. 1 is off, which is what
+	// ships until the evaluation names a value.
+	RepoDecay float64
 }
 
 // New builds a Retriever with the default bounds.
@@ -62,6 +66,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		embedder:    embedder,
 		MaxDistance: DefaultMaxDistance,
 		Candidates:  defaultCandidates,
+		RepoDecay:   DefaultRepoDecay,
 	}
 }
 
@@ -185,7 +190,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 		}
 	}
 
-	fused := FuseWeighted(lanes, k)
+	fused := FuseWeightedDiverse(lanes, k, r.RepoDecay)
 	if fused == nil {
 		// An empty slice, never nil: the caller distinguishes "nothing found"
 		// from an error, not from a nil check.
