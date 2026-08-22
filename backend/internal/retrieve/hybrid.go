@@ -88,6 +88,12 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 // room for the second implementation; it cannot invent a candidate the lanes
 // did not return.
 //
+// That 7 of 16 is the RAW question, which the product does not run: under the
+// shipped query expansion the same corpus measures 12 of 16, so the constraint
+// is much smaller than the premise made it look. See
+// docs/measurements/2026-08-22-repo-diversity.md — which is also why the decay
+// ships off.
+//
 // The decay is deliberately gentle rather than a hard per-repository cap: a
 // question whose answer genuinely lives in twelve chunks of one repository
 // must not lose eight of them to make room for a repository that has nothing
@@ -147,7 +153,10 @@ func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
 	// failure it exists to fix.
 	ranked = diversifyByRepo(ranked, decay)
 	if len(ranked) > k {
-		ranked = ranked[:k]
+		// Copied, not resliced: a Hit carries the chunk's raw text, and a
+		// caller holding the top twenty must not pin the whole candidate pool
+		// through the backing array.
+		ranked = append(make([]Hit, 0, k), ranked[:k]...)
 	}
 	return ranked
 }

@@ -21,7 +21,9 @@ var repoDecays = []float64{1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.3}
 // the corpus-swap measurement found the constraint: of sixteen ambiguous
 // questions only seven retrieved BOTH of their alternatives into the top 20,
 // so the router was asked to arbitrate between candidates that were not in
-// the list.
+// the list. That seven is the unexpanded question; with the shipped expansion
+// the same corpus measures twelve, which is why the 1.0 arm below is measured
+// rather than quoted.
 const diversityK = 20
 
 // TestEvalMeasureDiversitySweep reports, per decay, how many ambiguous

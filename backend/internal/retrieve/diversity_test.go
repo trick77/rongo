@@ -47,8 +47,10 @@ func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	// Given: one repository owns the whole top of the list and the second
 	// implementation sits just below the cut. This is the measured failure:
-	// only 7 of 16 ambiguous questions retrieved both of their answers, so the
-	// router was asked to arbitrate between candidates it could not see.
+	// on the raw question only 7 of 16 ambiguous questions retrieved both of
+	// their answers, so the router was asked to arbitrate between candidates
+	// it could not see. (With the shipped expansion it is 12 of 16 — the shape
+	// is the same, the size is smaller.)
 	lanes := []Lane{
 		{Name: "keyword:strict", Hits: append(repoHits("a", 1, 2, 3, 4), repoHits("b", 9)...), Weight: WeightKeywordStrict},
 	}
