@@ -20,7 +20,7 @@
 
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
-- **Pro** where a human reads: the answer, Modulsteckbrief summaries.
+- **Pro** where a human reads: the answer.
 - **Pro also for the routing judge** — the one exception, measured: Pro 48/61+50/61 vs non-Pro 42/61+43/61, residual 1–2 (`docs/measurements/2026-08-19-candidates.md`). One word, but it decides answer-vs-question. Don't "restore" it to non-Pro.
 - **non-Pro + `ShortGate`** for the rest: understand, candidate naming, relevance while gathering, thread title, follow-up sufficiency check. Bar is "output is an id or a label", not "doesn't think".
 - Both deployments reason. Never justify the non-Pro lane as "the model that can't think". `WithoutThinking`, `ShortGate` and `WithTemperature` are separate switches; don't couple them.
@@ -30,6 +30,7 @@
 - Embeddings are cached by chunk content hash; never re-embed unchanged content.
 
 ## Invariants (must hold in every feature)
+- **Never store or embed model-written text *about* code** — no module/file/symbol summary, eager or lazy: scales with corpus not usage, stale when written, and at useful resolution it is the code rewritten in prose. Name candidates per turn, only when a human sees them. Measured and lost: `docs/measurements/2026-08-17-module-ranking-and-comments.md`.
 - **Never invent.** Chain leads into non-indexed code → say so: call and configuration are visible, the internals are not.
 - **No hit means no hit.** "Nothing found" plus the terms tried, never an answer built from whatever is in context.
 - **Every claim is citable**: repo, branch, file, line — branch also in the forge URL, else the link may 404 off the default branch. Cited files are never evicted when capping context.
