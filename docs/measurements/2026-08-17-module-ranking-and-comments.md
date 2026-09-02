@@ -51,8 +51,8 @@ wholesale, and on the exact failure shape phase 2 recorded it helps:
 
 | Question | baseline | blend-0.15 |
 |---|---|---|
-| Wie werden Vektor-Treffer und Volltext-Treffer zusammengeführt? (`rag/hybrid.go`) | 7 | **2** |
-| Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift? | 5 | **3** |
+| How are vector hits and full-text hits merged? (`rag/hybrid.go`) | 7 | **2** |
+| How is a channel filter kept from taking effect only after the neighbour search? | 5 | **3** |
 
 But it costs more elsewhere than it gains: `sanitize filename` 4 → 9, `jittered
 loops` 4 → 7, and several rank-1 answers slip to 2. Two questions won, five lost.
@@ -75,7 +75,7 @@ the thing to check before calling anything a retrieval failure:
 | Platte fast voll | `peeq download/freebytes.go` | **not found** | — |
 | Extractor-Fehler | `peeq failmonitor/monitor.go` | 34 | `keyword:any` |
 | Apple TV | `peeq playbackgrant/store.go` | 52 | `keyword:any` |
-| Stopwörter | `peeq rag/stopwords.go` | 23 | `semantic` |
+| Stopwords | `peeq rag/stopwords.go` | 23 | `semantic` |
 | Upload-Pfad | `loom artifact/upload_path.go` | 25 | `semantic` |
 | Share-Links | `loom chat/share_store.go` | 23 | `semantic` |
 

@@ -7,51 +7,51 @@ import Trace from "./Trace";
 const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 
 describe("Trace", () => {
-  it("zeigt zusammengeklappt eine Zeile mit dem laufenden Schritt und einem Chevron", () => {
-    strict(<Trace steps={["Anfrage verstehen", "Code sammeln"]} state="running" />);
+  it("shows one collapsed line with the running step and a chevron", () => {
+    strict(<Trace steps={["Understand the question", "Gather code"]} state="running" />);
 
-    expect(screen.getByText(/Code sammeln/)).toBeTruthy();
-    expect(screen.queryByText("Anfrage verstehen")).toBeNull();
+    expect(screen.getByText(/Gather code/)).toBeTruthy();
+    expect(screen.queryByText("Understand the question")).toBeNull();
     expect(screen.getByRole("button").querySelector("svg")).toBeTruthy();
   });
 
-  it("zeigt aufgeklappt jeden Schritt als Knoten auf einer durchgehenden Linie", async () => {
+  it("shows every step as a node on one continuous line when expanded", async () => {
     const user = userEvent.setup();
-    strict(<Trace steps={["Anfrage verstehen", "Code sammeln"]} state="running" />);
+    strict(<Trace steps={["Understand the question", "Gather code"]} state="running" />);
 
     await user.click(screen.getByRole("button"));
 
-    expect(screen.getByText("Anfrage verstehen")).toBeTruthy();
-    expect(screen.getByText("Code sammeln")).toBeTruthy();
+    expect(screen.getByText("Understand the question")).toBeTruthy();
+    expect(screen.getByText("Gather code")).toBeTruthy();
   });
 
-  it("endet bei einem fertigen Zug mit dem Fertig-Knoten", async () => {
+  it("ends a finished turn on the done node", async () => {
     const user = userEvent.setup();
-    strict(<Trace steps={["Anfrage verstehen"]} state="done" />);
+    strict(<Trace steps={["Understand the question"]} state="done" />);
 
     await user.click(screen.getByRole("button"));
 
-    expect(screen.getByText("Fertig")).toBeTruthy();
+    expect(screen.getByText("Done")).toBeTruthy();
     expect(screen.queryByText("Wartet auf Auswahl")).toBeNull();
   });
 
-  it("endet bei einer Klaerfrage mit dem ockerfarbenen Warte-Knoten, nicht dem Haken", async () => {
+  it("ends a clarification on the ochre waiting node, not the check", async () => {
     // loom has no third state: complete = !active && !streaming would claim
     // "done" while a person is still being waited on.
     const user = userEvent.setup();
-    strict(<Trace steps={["Anfrage verstehen"]} state="waiting" />);
+    strict(<Trace steps={["Understand the question"]} state="waiting" />);
 
     await user.click(screen.getByRole("button"));
 
-    const waiting = screen.getByText("Wartet auf Auswahl");
+    const waiting = screen.getByText("Waiting for a choice");
     expect(waiting).toBeTruthy();
-    expect(screen.queryByText("Fertig")).toBeNull();
+    expect(screen.queryByText("Done")).toBeNull();
     const marker = waiting.closest("li")?.querySelector("span[aria-hidden]");
     expect(marker?.getAttribute("class")).toContain("ochre");
   });
 
-  it("wird als Panel hoeflich angesagt", () => {
-    strict(<Trace steps={["Anfrage verstehen"]} state="running" />);
+  it("is announced politely as a panel", () => {
+    strict(<Trace steps={["Understand the question"]} state="running" />);
 
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-live")).toBe("polite");

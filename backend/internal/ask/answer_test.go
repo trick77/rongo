@@ -61,11 +61,11 @@ func collect(tokens *[]string) func(string) {
 
 func TestAnswer_streamsAndResolvesTheMarkersItUsed(t *testing.T) {
 	// Given
-	c, _, _ := streamUpstream(t, "Der Grant ", "entsteht in ", "store.go [1].")
+	c, _, _ := streamUpstream(t, "The grant ", "is created in ", "store.go [1].")
 	var seen []string
 
 	// When
-	got, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, twoSources(), collect(&seen))
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, twoSources(), collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -90,9 +90,9 @@ func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	// A model that cites [7] with three sources in front of it has made the
 	// number up. Emitting a citation for it would put a fabricated reference
 	// under an answer — the failure this product can least afford.
-	c, _, _ := streamUpstream(t, "Das passiert in der Zustellung [7].")
+	c, _, _ := streamUpstream(t, "This happens in delivery [7].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, twoSources(), nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, twoSources(), nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -107,9 +107,9 @@ func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 	// index expression. Reading it as a marker would put a reference under the
 	// answer that the model never made — checkable-looking and false.
 	c, _, _ := streamUpstream(t,
-		"Der Aufruf steht in store.go [2]:\n\n```go\nname := args[1]\nvalue := parts[1]\n```\n")
+		"The call is in store.go [2]:\n\n```go\nname := args[1]\nvalue := parts[1]\n```\n")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceDev, twoSources(), nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, twoSources(), nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -119,35 +119,12 @@ func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 	}
 }
 
-func TestAnswer_swissOrthographyIsEnforcedOnTheStream(t *testing.T) {
-	// The fixture MUST contain ß, or this test passes without the rule. The
-	// model is instructed in German and still slips; normalising as the tokens
-	// pass is what keeps it out of the answer AND out of the stored record.
-	c, _, _ := streamUpstream(t, "Die Grösse ", "ist größer ", "als die Strasse.")
-	var seen []string
-
-	got, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, twoSources(), collect(&seen))
-	if err != nil {
-		t.Fatalf("Answer: %v", err)
-	}
-
-	if strings.Contains(got.Text, "ß") {
-		t.Errorf("stored answer still has ß: %q", got.Text)
-	}
-	if strings.Contains(strings.Join(seen, ""), "ß") {
-		t.Errorf("the stream carried ß to the reader: %q", seen)
-	}
-	if !strings.Contains(got.Text, "grösser") {
-		t.Errorf("text = %q, want ß replaced by ss", got.Text)
-	}
-}
-
 func TestAnswer_withoutSourcesItSaysSoAndNeverCallsTheModel(t *testing.T) {
 	// "No hit means no hit." Asking the model anyway would get a fluent answer
 	// built from nothing but the question and the system prompt.
-	c, _, calls := streamUpstream(t, "Ich vermute, dass ...")
+	c, _, calls := streamUpstream(t, "I suspect that ...")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "Wie laeuft der Versand?", AudienceBA, nil, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How does shipping work?", AudienceBA, nil, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -155,7 +132,7 @@ func TestAnswer_withoutSourcesItSaysSoAndNeverCallsTheModel(t *testing.T) {
 	if *calls != 0 {
 		t.Errorf("the model was called %d times with nothing gathered", *calls)
 	}
-	if !strings.Contains(strings.ToLower(got.Text), "nichts gefunden") {
+	if !strings.Contains(strings.ToLower(got.Text), "found nothing") {
 		t.Errorf("text = %q, want it to say nothing was found", got.Text)
 	}
 	if len(got.Citations) != 0 {
@@ -167,11 +144,11 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	// The role changes only this step: language level, depth, whether code is
 	// embedded. A prompt that ignored it would make the BA/DEV switch decorative.
 	cBA, promptBA, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cBA).Answer(context.Background(), "Wie?", AudienceBA, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, twoSources(), nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	cDev, promptDev, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cDev).Answer(context.Background(), "Wie?", AudienceDev, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, twoSources(), nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 

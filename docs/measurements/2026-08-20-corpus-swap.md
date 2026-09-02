@@ -66,8 +66,8 @@ from a mute one.
 
 rongo's domain vocabulary *is* its code vocabulary, so a question worded the way the code is
 worded would give the understanding step nothing to bridge and flatter every retrieval number.
-The new questions avoid that deliberately — „Warum steht eine viel benutzte Hilfsfunktion nicht
-in jeder Antwort?" rather than „Was macht `maxDefiners`?". The expansion arm shows what that
+The new questions avoid that deliberately — „Why is a heavily used helper not in every
+answer?" rather than „What does `maxDefiners` do?". The expansion arm shows what that
 buys:
 
 | cohort | raw question | expanded |

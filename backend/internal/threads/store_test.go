@@ -95,7 +95,7 @@ func threadDB(t *testing.T) *sql.DB {
 func TestCreate_titleStartsAsTheQuestionSoTheSidebarNeverWaits(t *testing.T) {
 	s := NewStore(threadDB(t))
 
-	got, err := s.Create(context.Background(), "anna", "Wie wird die Teaser-Mail verschickt?")
+	got, err := s.Create(context.Background(), "anna", "How is the teaser mail sent?")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestCreate_titleStartsAsTheQuestionSoTheSidebarNeverWaits(t *testing.T) {
 	if got.Title == "" {
 		t.Fatal("empty title; the sidebar entry must be there the moment the question is sent")
 	}
-	if !strings.HasPrefix(got.Title, "Wie wird die Teaser-Mail") {
+	if !strings.HasPrefix(got.Title, "How is the teaser mail") {
 		t.Errorf("title = %q, want the first words of the question", got.Title)
 	}
 }
@@ -112,7 +112,7 @@ func TestSetTitle_anEmptyModelTitleLeavesThePlaceholderStanding(t *testing.T) {
 	// A title call that returns nothing is not a failure anyone needs to see.
 	// Overwriting the placeholder with "" would blank the sidebar entry.
 	s := NewStore(threadDB(t))
-	th, _ := s.Create(context.Background(), "anna", "Wie laeuft der Versand?")
+	th, _ := s.Create(context.Background(), "anna", "How does shipping work?")
 
 	if err := s.SetTitle(context.Background(), th.ID, "   "); err != nil {
 		t.Fatalf("SetTitle: %v", err)
@@ -127,13 +127,13 @@ func TestSetTitle_anEmptyModelTitleLeavesThePlaceholderStanding(t *testing.T) {
 func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
-	th, _ := s.Create(ctx, "anna", "Wie?")
-	m, err := s.AddQuestion(ctx, th.ID, "ba", "Wie?")
+	th, _ := s.Create(ctx, "anna", "How?")
+	m, err := s.AddQuestion(ctx, th.ID, "ba", "How?")
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
 
-	err = s.Finish(ctx, m.ID, "So laeuft es [1].", []ask.Citation{
+	err = s.Finish(ctx, m.ID, "That is how it works [1].", []ask.Citation{
 		{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 9},
 	})
 	if err != nil {
@@ -144,7 +144,7 @@ func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
-	if len(msgs) != 1 || msgs[0].Answer != "So laeuft es [1]." {
+	if len(msgs) != 1 || msgs[0].Answer != "That is how it works [1]." {
 		t.Fatalf("messages = %+v", msgs)
 	}
 	if len(msgs[0].Citations) != 1 || msgs[0].Citations[0].Branch != "master" {
@@ -157,10 +157,10 @@ func TestFail_keepsTheQuestionInTheRecord(t *testing.T) {
 	// reader wondering what they asked.
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
-	th, _ := s.Create(ctx, "anna", "Wie?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "Wie?")
+	th, _ := s.Create(ctx, "anna", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "How?")
 
-	if err := s.Fail(ctx, m.ID, "das Modell antwortete nicht"); err != nil {
+	if err := s.Fail(ctx, m.ID, "the model did not answer"); err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
 
@@ -168,7 +168,7 @@ func TestFail_keepsTheQuestionInTheRecord(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("messages = %+v, want the failed turn kept", msgs)
 	}
-	if msgs[0].Question != "Wie?" || msgs[0].Error == "" {
+	if msgs[0].Question != "How?" || msgs[0].Error == "" {
 		t.Errorf("message = %+v, want the question plus the failure", msgs[0])
 	}
 }
@@ -178,8 +178,8 @@ func TestMessages_anotherUsersThreadIsNotReadable(t *testing.T) {
 	// hands over someone else's conversation.
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
-	th, _ := s.Create(ctx, "anna", "Wie?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "Wie?")
+	th, _ := s.Create(ctx, "anna", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "How?")
 	_ = s.Finish(ctx, m.ID, "geheim", nil)
 
 	got, err := s.Messages(ctx, "bruno", th.ID)
@@ -203,21 +203,21 @@ func TestAddQuestion_appendsRatherThanRewrites(t *testing.T) {
 	// The thread is a record. A follow-up adds a turn; nothing replaces one.
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
-	th, _ := s.Create(ctx, "anna", "Erste Frage?")
-	first, _ := s.AddQuestion(ctx, th.ID, "ba", "Erste Frage?")
-	_ = s.Finish(ctx, first.ID, "Erste Antwort.", nil)
+	th, _ := s.Create(ctx, "anna", "First question?")
+	first, _ := s.AddQuestion(ctx, th.ID, "ba", "First question?")
+	_ = s.Finish(ctx, first.ID, "First answer.", nil)
 	second, err := s.AddQuestion(ctx, th.ID, "dev", "Und als Dev?")
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
-	_ = s.Finish(ctx, second.ID, "Zweite Antwort.", nil)
+	_ = s.Finish(ctx, second.ID, "Second answer.", nil)
 
 	msgs, _ := s.Messages(ctx, "anna", th.ID)
 
 	if len(msgs) != 2 {
 		t.Fatalf("messages = %d, want both turns", len(msgs))
 	}
-	if msgs[0].Answer != "Erste Antwort." {
+	if msgs[0].Answer != "First answer." {
 		t.Errorf("the first answer changed: %q", msgs[0].Answer)
 	}
 	if msgs[0].Audience != "ba" || msgs[1].Audience != "dev" {
@@ -228,7 +228,7 @@ func TestAddQuestion_appendsRatherThanRewrites(t *testing.T) {
 func TestClarifyStoresTheCardAndServesItBackWithTheThread(t *testing.T) {
 	// Given a question that ended by asking
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "wie ist die Anmeldung geloest?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "how is sign-in done?")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestClarifyStoresTheCardAndServesItBackWithTheThread(t *testing.T) {
 	id, err := s.Clarify(ctx, msg.ID, ask.Clarification{
 		Understanding: ask.Understanding{CodeTerms: []string{"session", "oidc"}},
 		Candidates: []ask.Candidate{
-			{Repo: "peeq", Branch: "master", ModuleKey: "backend/internal/auth", Title: "Anmeldung in peeq", Summary: "Sitzungen ueber Cookies.", Hits: []retrieve.Hit{{ChunkID: 7}}},
+			{Repo: "peeq", Branch: "master", ModuleKey: "backend/internal/auth", Title: "Sign-in in peeq", Summary: "Sessions over cookies.", Hits: []retrieve.Hit{{ChunkID: 7}}},
 			{Repo: "loom", Branch: "master", ModuleKey: "backend/internal/auth", Title: "Anmeldung in loom", Summary: "Dasselbe, anderes Produkt.", Hits: []retrieve.Hit{{ChunkID: 9}}},
 		},
 	})

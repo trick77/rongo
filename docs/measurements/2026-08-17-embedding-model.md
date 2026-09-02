@@ -15,7 +15,7 @@ forced a genuine re-embedding rather than reuse of the first model's vectors.
 | Corpus | peeq (523 files / 5685 chunks), loom (530 / 3855), go-sqlite3 (292 / 2186) |
 | Total | 1345 files, 11 726 chunks |
 | Retrieval | hybrid: vec0 KNN + FTS5 ladder, weighted RRF (k=60), max distance 1.25 |
-| Questions | 19 German prose, 4 bare identifiers, 5 spanning two files; every expected path read and verified |
+| Questions | 19 in prose, 4 bare identifiers, 5 spanning two files; every expected path read and verified |
 | Harness | `BACKEND_EVAL=1 go test -run TestEval ./internal/retrieve/eval/` |
 
 ## Results
@@ -65,10 +65,10 @@ The model is not the binding constraint. **Four questions miss under both models
 
 | Question | Expected |
 |---|---|
-| Wie werden Vektor-Treffer und Volltext-Treffer zusammengeführt? | `peeq backend/internal/rag/hybrid.go` |
-| Welche Wörter werden aus einer Frage entfernt? | `peeq backend/internal/rag/stopwords.go` |
-| Wohin schreibt loom eine hochgeladene Datei? | `loom backend/internal/artifact/upload_path.go` |
-| Kann ein Thread mehrere Share-Links haben? | `loom backend/internal/chat/share_store.go` |
+| How are vector hits and full-text hits merged? | `peeq backend/internal/rag/hybrid.go` |
+| Which words are removed from a question? | `peeq backend/internal/rag/stopwords.go` |
+| Where does loom write an uploaded file? | `loom backend/internal/artifact/upload_path.go` |
+| Can a thread have several share links? | `loom backend/internal/chat/share_store.go` |
 
 Three of the four are the same shape: the answering file is one of several in a package that all
 talk about the same subject, and the *right* one loses to its neighbours. That is a chunking and

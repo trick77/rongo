@@ -41,7 +41,7 @@ func modelUpstream(t *testing.T, content string) (*llm.Client, *string, *string)
 
 const appleTVReply = `{
   "intent": "how",
-  "terms": ["Wiedergabe ohne Anmeldung", "Freigabe für externe Abspielgeräte"],
+  "terms": ["playback without sign-in", "access for external playback devices"],
   "code_terms": ["AirPlay", "playbackgrant", "token"],
   "repos": ["peeq"]
 }`
@@ -51,7 +51,7 @@ func TestUnderstand_returnsTermsAndGuessedCodeVocabulary(t *testing.T) {
 	// "AirPlay". A fake that echoed the question's own words back would measure
 	// an expansion that expands nothing.
 	c, _, _ := modelUpstream(t, appleTVReply)
-	q := "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?"
+	q := "How does an Apple TV get at the media file without signing in?"
 
 	got, err := NewUnderstander(c).Understand(context.Background(), q)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestUnderstand_searchTextsCarryBothLanguages(t *testing.T) {
 	// question would leave the guessed code vocabulary unused, which is exactly
 	// the gap the phase-3 measurement found.
 	c, _, _ := modelUpstream(t, appleTVReply)
-	q := "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?"
+	q := "How does an Apple TV get at the media file without signing in?"
 
 	got, err := NewUnderstander(c).Understand(context.Background(), q)
 	if err != nil {
@@ -108,14 +108,14 @@ func TestUnderstand_runsOnTheShortGateDeployment(t *testing.T) {
 	// would pay the expensive queue for a JSON blob.
 	c, model, prompt := modelUpstream(t, appleTVReply)
 
-	if _, err := NewUnderstander(c).Understand(context.Background(), "Wie laeuft der Versand?"); err != nil {
+	if _, err := NewUnderstander(c).Understand(context.Background(), "How does shipping work?"); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 
 	if *model != llm.ShortGateDeployment {
 		t.Errorf("model = %q, want the short-gate deployment", *model)
 	}
-	if !strings.Contains(*prompt, "Wie laeuft der Versand?") {
+	if !strings.Contains(*prompt, "How does shipping work?") {
 		t.Error("the question never reached the prompt")
 	}
 }

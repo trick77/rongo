@@ -85,23 +85,23 @@ func NewUnderstander(c *llm.Client) *Understander {
 	return &Understander{llm: c}
 }
 
-const understandSystem = `Du analysierst eine Frage zu einer Codebasis und antwortest AUSSCHLIESSLICH mit JSON.
+const understandSystem = `You analyse a question about a codebase and answer with JSON ONLY.
 
-Felder:
-  intent      "how", "why", "where" oder "conformance"
-  terms       2-4 Umformulierungen der Frage in Fachsprache, als ganze Wortgruppen
-  code_terms  3-8 Bezeichner, die im Quelltext wahrscheinlich vorkommen: Klassen-,
-              Methoden-, Paket- und Protokollnamen, englisch, so wie ein Entwickler
-              sie schreiben wuerde
-  repos       Namen der Repositories, falls die Frage eines nennt, sonst []
+Fields:
+  intent      "how", "why", "where" or "conformance"
+  terms       2-4 rewordings of the question in domain language, as whole phrases
+  code_terms  3-8 identifiers likely to occur in the source: class, method,
+              package and protocol names, written the way a developer would
+              write them
+  repos       names of the repositories, if the question names any, else []
 
-code_terms ist der wichtigste Teil. Die Frage ist in der Sprache des Fachbereichs
-gestellt, der Code ist es nicht: Wer nach einem "Apple TV" fragt, meint im Code
-"AirPlay"; wer nach "Platte fast voll" fragt, meint "statfs" oder "free bytes".
-Rate diese Bruecke, auch wenn du dir nicht sicher bist. Wiederhole nicht einfach
-die Woerter der Frage.
+code_terms is the most important part. The question is phrased in the language
+of the business domain, the code is not: someone asking about an "Apple TV"
+means "AirPlay" in the code; someone asking about "disk almost full" means
+"statfs" or "free bytes". Guess that bridge, even when you are not sure. Do not
+simply repeat the words of the question.
 
-Kein Fliesstext, keine Erklaerung, nur das JSON-Objekt.`
+No running text, no explanation, just the JSON object.`
 
 // Understand turns a question into search material.
 //

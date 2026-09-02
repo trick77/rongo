@@ -1,4 +1,4 @@
-# rongo Phase 1 — Grundgerüst Implementation Plan
+# rongo Phase 1 — Skeleton Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -18,7 +18,7 @@
 - stdlib `net/http` only. No web framework, no ORM, no router library.
 - All runtime config comes from `BACKEND_*` env vars. Secrets via env only, never committed.
 - Structured `slog` only. The error attribute key is **`err`**, never `error`. Log `r.URL.Path`, **never** a full URL, `RequestURI()` or a query string.
-- Docs, specs and code comments in **English**. UI copy and generated answers in **German, Swiss orthography** — never `ß`.
+- Docs, specs, code comments, UI copy and generated answers in **English**.
 - No test hits a real LLM, embeddings endpoint or git remote.
 - Feature branch `feat/phase-1-skeleton`. Never commit to `master`.
 - Commit as `trick77@users.noreply.github.com`.
@@ -1884,7 +1884,7 @@ export default function App() {
     <main className="mx-auto max-w-2xl p-8">
       <h1 className="text-2xl font-semibold tracking-tight">rongo</h1>
       <p className="mt-2 text-[var(--color-ink-soft)]">
-        Noch nichts indexiert. Die Oberfläche entsteht in einer späteren Phase.
+        Nothing indexed yet. The interface arrives in a later phase.
       </p>
     </main>
   );

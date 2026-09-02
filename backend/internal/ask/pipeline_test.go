@@ -68,7 +68,7 @@ func withRouterAsking(n int) pipelineOpt {
 		cs[i] = Candidate{
 			Repo:      repo,
 			ModuleKey: fmt.Sprintf("m%d", i),
-			Title:     fmt.Sprintf("Kandidat %d", i),
+			Title:     fmt.Sprintf("Candidate %d", i),
 			Summary:   "Testkandidat",
 			Hits:      []retrieve.Hit{{ChunkID: int64(i + 1), Repo: repo, Path: "a.go"}},
 		}
@@ -90,7 +90,7 @@ func newTestPipeline(t *testing.T, opts ...pipelineOpt) *Pipeline {
 		o(&f)
 	}
 	db := gatherDB(t)
-	c := twoStepUpstream(t, appleTVReply, "Antwort [1].")
+	c := twoStepUpstream(t, appleTVReply, "Answer [1].")
 	return NewPipeline(c, f.search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), f.router)
 }
 
@@ -133,9 +133,9 @@ func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "backend/internal/playbackgrant/store.go", 0, 1, 20, "NewGrant", "func NewGrant() {}")
 	search := &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}
-	c := twoStepUpstream(t, appleTVReply, "Der Zugriff laeuft ueber einen Grant [1].")
+	c := twoStepUpstream(t, appleTVReply, "Access runs through a grant [1].")
 	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
-	q := "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?"
+	q := "How does an Apple TV get at the media file without signing in?"
 
 	got, _, err := p.Run(context.Background(), q, AudienceBA, Events{})
 	if err != nil {
@@ -161,15 +161,15 @@ func TestPipeline_nothingFoundNamesTheTermsItTried(t *testing.T) {
 	// differently — instead of a shrug. And never an answer assembled from
 	// whatever happened to be in context.
 	db := gatherDB(t)
-	c := twoStepUpstream(t, appleTVReply, "Ich vermute ...")
+	c := twoStepUpstream(t, appleTVReply, "I suspect ...")
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "Wie laeuft der Versand?", AudienceBA, Events{})
+	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if !strings.Contains(got.Text, "nichts gefunden") {
+	if !strings.Contains(got.Text, "found nothing") {
 		t.Errorf("text = %q", got.Text)
 	}
 	if !strings.Contains(strings.ToLower(got.Text), "airplay") {
@@ -188,12 +188,12 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
 	var steps []string
 
-	if _, _, err := p.Run(context.Background(), "Wie?", AudienceBA,
+	if _, _, err := p.Run(context.Background(), "How?", AudienceBA,
 		Events{OnStatus: func(s string) { steps = append(steps, s) }}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	want := []string{"verstehen", "suchen", "routen", "sammeln", "antworten"}
+	want := []string{"understanding", "searching", "routing", "gathering", "answering"}
 	if len(steps) != len(want) {
 		t.Fatalf("steps = %v, want %v", steps, want)
 	}

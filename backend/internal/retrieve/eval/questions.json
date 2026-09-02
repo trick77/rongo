@@ -1,6 +1,6 @@
 [
   {
-    "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
+    "question": "How does peeq make sure a download does not start when the disk is almost full?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -13,7 +13,7 @@
     ]
   },
   {
-    "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
+    "question": "What happens when many videos fail with extractor errors one after another?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -26,7 +26,7 @@
     ]
   },
   {
-    "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
+    "question": "In which format does yt-dlp expect the cookie file?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -39,7 +39,7 @@
     ]
   },
   {
-    "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
+    "question": "Can an API token be shown again after it has been created once?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -52,7 +52,7 @@
     ]
   },
   {
-    "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
+    "question": "How does an Apple TV get at the media file without signing in?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -65,7 +65,7 @@
     ]
   },
   {
-    "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
+    "question": "After how many scans does peeq unsubscribe itself from a deleted channel?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -91,7 +91,7 @@
     ]
   },
   {
-    "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
+    "question": "How are yt-dlp's availability values translated into peeq's own values?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -104,7 +104,7 @@
     ]
   },
   {
-    "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
+    "question": "Why do the background loops have a random share in their interval?",
     "kind": "why",
     "resolution": "ambiguous",
     "candidates": [
@@ -119,13 +119,13 @@
         "paths": [
           "backend/internal/sched/sched.go"
         ],
-        "verified": "sched.go:13 Jittered, ±20% Streuung — gleicher Mechanismus wie in peeq"
+        "verified": "sched.go:13 Jittered, ±20% spread - the same mechanism as in peeq"
       }
     ],
-    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
+    "note": "rongo answers the same question independently. No dependency between the two, so alternatives, not composition."
   },
   {
-    "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
+    "question": "How are vector hits and full-text hits merged into one result list?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -140,10 +140,10 @@
         "paths": [
           "backend/internal/retrieve/hybrid.go"
         ],
-        "verified": "hybrid.go FuseWeighted, gewichtete RRF-Fusion — gleicher Mechanismus wie peeqs rag/hybrid.go"
+        "verified": "hybrid.go FuseWeighted, weighted RRF fusion - the same mechanism as peeq's rag/hybrid.go"
       }
     ],
-    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
+    "note": "rongo answers the same question independently. No dependency between the two, so alternatives, not composition."
   },
   {
     "question": "FuseWeighted",
@@ -161,13 +161,13 @@
         "paths": [
           "backend/internal/retrieve/hybrid.go"
         ],
-        "verified": "hybrid.go:68 FuseWeighted — gleichnamige Funktion in beiden Repositories"
+        "verified": "hybrid.go:68 FuseWeighted - a function of the same name in both repositories"
       }
     ],
-    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
+    "note": "rongo answers the same question independently. No dependency between the two, so alternatives, not composition."
   },
   {
-    "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
+    "question": "How is the token count of a chunk estimated without downloading a tokenizer?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -176,20 +176,20 @@
         "paths": [
           "backend/internal/rag/chunk.go"
         ],
-        "verified": "chunk.go:38-51 estimateTokens, ~4 Zeichen pro Token, Kommentar nennt tiktoken"
+        "verified": "chunk.go:38-51 estimateTokens, ~4 characters per token, the comment names tiktoken"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/indexer/chunk.go"
         ],
-        "verified": "chunk.go:32-45 estimateTokens, zeichengleiche Implementierung samt Kommentar"
+        "verified": "chunk.go:32-45 estimateTokens, a character-identical implementation including the comment"
       }
     ],
-    "note": "Beide Repositories tragen dieselbe Funktion samt identischem Kommentar. Keine Abhaengigkeit zwischen ihnen, also Alternativen, nicht Zusammensetzung."
+    "note": "Both repositories carry the same function including an identical comment. No dependency between them, so alternatives, not composition."
   },
   {
-    "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
+    "question": "How many texts go into a single embedding request at most?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -204,13 +204,13 @@
         "paths": [
           "backend/internal/embed/client.go"
         ],
-        "verified": "client.go stapelt die Texte und begrenzt den Stapel je Anfrage"
+        "verified": "client.go batches the texts and caps the batch per request"
       }
     ],
-    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
+    "note": "rongo answers the same question independently. No dependency between the two, so alternatives, not composition."
   },
   {
-    "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
+    "question": "How is a channel filter kept from taking effect only after the neighbour search?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -224,7 +224,7 @@
     ]
   },
   {
-    "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+    "question": "Which PRAGMAs does peeq set when opening the database?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -237,7 +237,7 @@
     ]
   },
   {
-    "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
+    "question": "How does peeq tell that a migration has already been applied?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -250,7 +250,7 @@
     ]
   },
   {
-    "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
+    "question": "Which words are removed from a question before the keyword search runs?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -266,13 +266,13 @@
         "paths": [
           "backend/internal/retrieve/stopwords.go"
         ],
-        "verified": "stopwords.go, eigene Stoppwortliste vor der Keyword-Suche"
+        "verified": "stopwords.go, its own stopword list ahead of the keyword search"
       }
     ],
-    "note": "rongo beantwortet dieselbe Frage unabhaengig. Keine Abhaengigkeit zwischen den beiden, also Alternativen, nicht Zusammensetzung."
+    "note": "rongo answers the same question independently. No dependency between the two, so alternatives, not composition."
   },
   {
-    "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
+    "question": "How do you back up a running SQLite database online?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -298,7 +298,7 @@
     ]
   },
   {
-    "question": "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
+    "question": "Which SponsorBlock categories does peeq store, and which explicitly not?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -307,12 +307,12 @@
         "paths": [
           "backend/internal/sponsorblock/sponsorblock.go"
         ],
-        "verified": "sponsorblock.go:29-48 Categories-Liste plus Wanted; poi_highlight und hook im Kommentar begruendet ausgeschlossen"
+        "verified": "sponsorblock.go:29-48 the Categories list plus Wanted; poi_highlight and hook excluded with a reason in the comment"
       }
     ]
   },
   {
-    "question": "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
+    "question": "How does peeq tell that an audio track holds music rather than speech?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -321,12 +321,12 @@
         "paths": [
           "backend/internal/subtitles/vtt.go"
         ],
-        "verified": "vtt.go:177-212 nonSpeechMaxWPM 25, nonSpeechMinMarkerRatio 0.25, IsNonSpeech verlangt beides"
+        "verified": "vtt.go:177-212 nonSpeechMaxWPM 25, nonSpeechMinMarkerRatio 0.25, IsNonSpeech requires both"
       }
     ]
   },
   {
-    "question": "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
+    "question": "How often may a video parked as unavailable be checked again?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -340,7 +340,7 @@
     ]
   },
   {
-    "question": "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
+    "question": "How many parked videos may a single scan run re-check?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -349,12 +349,12 @@
         "paths": [
           "backend/internal/scan/scheduler.go"
         ],
-        "verified": "scheduler.go:480 maxUnavailableProbes = 3, je Probe ein eigener yt-dlp-Aufruf"
+        "verified": "scheduler.go:480 maxUnavailableProbes = 3, one yt-dlp call per probe"
       }
     ]
   },
   {
-    "question": "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
+    "question": "From when on does a video count as old material rather than a new arrival?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -363,12 +363,12 @@
         "paths": [
           "backend/internal/scan/scheduler.go"
         ],
-        "verified": "scheduler.go:1148 backCatalogueGrace = 3 * 24h, isBackCatalogue vergleicht publishedAt gegen baselinedAt"
+        "verified": "scheduler.go:1148 backCatalogueGrace = 3 * 24h, isBackCatalogue compares publishedAt against baselinedAt"
       }
     ]
   },
   {
-    "question": "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
+    "question": "Why may the call for the key points spend more tokens than the one for the summary?",
     "kind": "why",
     "resolution": "unique",
     "candidates": [
@@ -377,12 +377,12 @@
         "paths": [
           "backend/internal/summarize/summarizer.go"
         ],
-        "verified": "summarizer.go:130-143 summaryMaxTokens 8000 mit Thinking an, keypointsMaxTokens 16000 mit Thinking aus"
+        "verified": "summarizer.go:130-143 summaryMaxTokens 8000 with thinking on, keypointsMaxTokens 16000 with thinking off"
       }
     ]
   },
   {
-    "question": "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
+    "question": "How does the download queue tell that nobody is waiting for a job?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -391,12 +391,12 @@
         "paths": [
           "backend/internal/download/worker.go"
         ],
-        "verified": "worker.go:38-46 autoDownloadPriority = 0, alles darueber kommt von einem Menschen und geht auf die interaktive Spur"
+        "verified": "worker.go:38-46 autoDownloadPriority = 0, anything above it comes from a human and goes on the interactive lane"
       }
     ]
   },
   {
-    "question": "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
+    "question": "How long may the metadata pre-check before a download take?",
     "kind": "what",
     "resolution": "unique",
     "candidates": [
@@ -410,7 +410,7 @@
     ]
   },
   {
-    "question": "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
+    "question": "How do you create a Bloom filter table in SQLite?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -424,7 +424,7 @@
     ]
   },
   {
-    "question": "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
+    "question": "How do you pass a Go slice to a SQL query as a table?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -433,12 +433,12 @@
         "paths": [
           "ext/array/array.go"
         ],
-        "verified": "array.go:14-22 Register bindet die Liste ueber BindPointer an die tabellenwertige Funktion array"
+        "verified": "array.go:14-22 Register binds the slice through BindPointer to the table-valued function array"
       }
     ]
   },
   {
-    "question": "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
+    "question": "How do you read a CSV file directly as a SQL table?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -447,12 +447,12 @@
         "paths": [
           "ext/csv/csv.go"
         ],
-        "verified": "csv.go:1-31 virtuelle CSV-Tabelle nach RFC 4180, Register und RegisterFS"
+        "verified": "csv.go:1-31 a virtual CSV table per RFC 4180, Register and RegisterFS"
       }
     ]
   },
   {
-    "question": "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
+    "question": "How do you write into a blob without loading all of it into memory?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -461,12 +461,12 @@
         "paths": [
           "ext/blobio/blob.go"
         ],
-        "verified": "blob.go:12-25 readblob/writeblob/openblob als SQL-Funktionen ueber inkrementelles Blob-I/O"
+        "verified": "blob.go:12-25 readblob/writeblob/openblob as SQL functions over incremental blob I/O"
       }
     ]
   },
   {
-    "question": "Wie werden Texte fuer die Suche in Chunks geschnitten?",
+    "question": "How are texts cut into chunks for the search?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -475,20 +475,20 @@
         "paths": [
           "backend/internal/rag/chunk.go"
         ],
-        "verified": "chunk.go:33-35 DefaultChunkOptions 600/800/75 Tokens, Chunk schneidet auf Wortgrenzen"
+        "verified": "chunk.go:33-35 DefaultChunkOptions 600/800/75 tokens, Chunk cuts on word boundaries"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/indexer/chunk.go"
         ],
-        "verified": "chunk.go:27-29 dieselben Werte, dieselbe Chunk-Funktion"
+        "verified": "chunk.go:27-29 the same values, the same Chunk function"
       }
     ],
-    "note": "Zwei getrennte Produkte mit derselben Chunk-Strategie. Keines haengt am anderen."
+    "note": "Two separate products with the same chunking strategy. Neither depends on the other."
   },
   {
-    "question": "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
+    "question": "Which PRAGMAs are set when the SQLite file is opened?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -497,20 +497,20 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:21-25 DSN mit journal_mode(wal), busy_timeout(10000), foreign_keys(on)"
+        "verified": "store.go:21-25 a DSN with journal_mode(wal), busy_timeout(10000), foreign_keys(on)"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:19-23 zeichengleicher DSN"
+        "verified": "store.go:19-23 a character-identical DSN"
       }
     ],
-    "note": "Die Frage nennt kein Produkt. Mit Produktnamen waere sie eindeutig — genau das macht sie zum Testfall fuer die Rueckfrage."
+    "note": "The question names no product. With a product name it would be unambiguous - which is exactly what makes it a test case for the follow-up question."
   },
   {
-    "question": "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
+    "question": "How is it recognised that a migration has already run?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -519,20 +519,20 @@
         "paths": [
           "backend/internal/store/migrate.go"
         ],
-        "verified": "migrate.go:17-41 Tabelle schema_migrations, SELECT 1 ... WHERE version = ?"
+        "verified": "migrate.go:17-41 the schema_migrations table, SELECT 1 ... WHERE version = ?"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/store/migrate.go"
         ],
-        "verified": "migrate.go:16-40 gleiche Tabelle, gleiche Abfrage"
+        "verified": "migrate.go:16-40 the same table, the same query"
       }
     ],
-    "note": "Dieselbe Frage steht bereits einmal mit Produktnamen im Satz und ist dort eindeutig."
+    "note": "The same question appears once already with the product name in the sentence, and is unambiguous there."
   },
   {
-    "question": "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
+    "question": "Which header keeps an upstream proxy from buffering the event stream?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -541,20 +541,20 @@
         "paths": [
           "backend/internal/sse/sse.go"
         ],
-        "verified": "sse.go:29-34 X-Accel-Buffering: no, samt Kommentar zu Traefik"
+        "verified": "sse.go:29-34 X-Accel-Buffering: no, including the comment about Traefik"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/httpapi/ask.go"
         ],
-        "verified": "sse.go:27-34 identischer Block"
+        "verified": "sse.go:27-34 an identical block"
       }
     ],
-    "note": "Zwei eigenstaendige SSE-Writer. Kein Manifest verbindet sie."
+    "note": "Two independent SSE writers. No manifest connects them."
   },
   {
-    "question": "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
+    "question": "How is a session token stored in the database?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -563,20 +563,20 @@
         "paths": [
           "backend/internal/auth/session.go"
         ],
-        "verified": "session.go:143 hashToken, session.go:109-120 CookieFor mit HttpOnly und SameSite Lax"
+        "verified": "session.go:143 hashToken, session.go:109-120 CookieFor with HttpOnly and SameSite Lax"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/auth/session.go"
         ],
-        "verified": "session.go:137 hashToken, session.go:103-114 gleiche Cookie-Flags"
+        "verified": "session.go:137 hashToken, session.go:103-114 the same cookie flags"
       }
     ],
-    "note": "Zwei getrennte Sitzungsverwaltungen, bis auf den Cookie-Namen gleich."
+    "note": "Two separate session implementations, identical apart from the cookie name."
   },
   {
-    "question": "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
+    "question": "What does the server answer to a request without a valid session?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -585,20 +585,20 @@
         "paths": [
           "backend/internal/auth/middleware.go"
         ],
-        "verified": "middleware.go:32-56 RequireAuth, dreimal writeJSONError mit 401 unauthorized"
+        "verified": "middleware.go:32-56 RequireAuth, writeJSONError three times with 401 unauthorized"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/auth/middleware.go"
         ],
-        "verified": "middleware.go:31-55 gleicher Aufbau, zusaetzlich RequireAdmin"
+        "verified": "middleware.go:31-55 the same structure, plus RequireAdmin"
       }
     ],
-    "note": "Gleiche Antwort, zwei unabhaengige Implementierungen."
+    "note": "The same answer, two independent implementations."
   },
   {
-    "question": "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
+    "question": "On which port does the service listen when nothing is configured?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -617,10 +617,10 @@
         "verified": "config.go:135 env(\"BACKEND_ADDR\", \":8080\")"
       }
     ],
-    "note": "Gleicher Standardwert in zwei Produkten, gelesen von je einer eigenen env-Funktion."
+    "note": "The same default value in two products, read by an env function of its own in each."
   },
   {
-    "question": "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
+    "question": "How long may a single line in the model's answer stream be at most?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -629,7 +629,7 @@
         "paths": [
           "backend/internal/llm/stream.go"
         ],
-        "verified": "stream.go:40-43 maxStreamLine = 1 << 20, gesetzt in sc.Buffer"
+        "verified": "stream.go:40-43 maxStreamLine = 1 << 20, set in sc.Buffer"
       },
       {
         "repo": "rongo",
@@ -639,10 +639,10 @@
         "verified": "stream.go:300 scanner.Buffer(..., 1024*1024)"
       }
     ],
-    "note": "Dieselbe Grenze, zweimal unabhaengig gezogen."
+    "note": "The same limit, drawn independently twice."
   },
   {
-    "question": "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
+    "question": "How much of the embedding service's error text is read at most?",
     "kind": "what",
     "resolution": "ambiguous",
     "candidates": [
@@ -661,10 +661,10 @@
         "verified": "embed.go:18-21 maxEmbedErrorBody = 4 << 10"
       }
     ],
-    "note": "Gleiche Konstante, gleicher Name, zwei Repositories."
+    "note": "The same constant, the same name, two repositories."
   },
   {
-    "question": "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
+    "question": "How is a vector encoded as text so that sqlite-vec accepts it?",
     "kind": "how",
     "resolution": "ambiguous",
     "candidates": [
@@ -673,20 +673,20 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:37-50 VecLiteral, JSON-Array aus float32"
+        "verified": "store.go:37-50 VecLiteral, a JSON array of float32"
       },
       {
         "repo": "rongo",
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:44-52 vecLiteral, gleiche Kodierung, andere Paketebene"
+        "verified": "store.go:44-52 vecLiteral, the same encoding at a different package level"
       }
     ],
-    "note": "Gleiche Aufgabe, in peeq im store-Paket und in loom im rag-Paket. Die Ablage unterscheidet sich, die Antwort ist trotzdem zweimal richtig."
+    "note": "The same job, in peeq in the store package and in loom in the rag package. The placement differs, the answer is still right twice over."
   },
   {
-    "question": "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
+    "question": "What happens when two writes in peeq hit the database at the same time?",
     "kind": "how",
     "resolution": "composition",
     "candidates": [
@@ -695,7 +695,7 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:21-25 busy_timeout(10000) im DSN"
+        "verified": "store.go:21-25 busy_timeout(10000) in the DSN"
       },
       {
         "repo": "go-sqlite3",
@@ -703,13 +703,13 @@
           "driver/driver.go",
           "conn.go"
         ],
-        "verified": "driver.go:187 c.pragmas = query.Has(\"_pragma\"), driver.go:249-253 der Standard von einer Minute entfaellt dadurch, conn.go:366 BusyTimeout und die Warteschleife darunter"
+        "verified": "driver.go:187 c.pragmas = query.Has(\"_pragma\"), driver.go:249-253 the one-minute default is dropped because of it, conn.go:366 BusyTimeout and the wait loop below it"
       }
     ],
-    "note": "peeq deklariert github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:8, und das Repository ist indexiert. Die Antwort braucht beide Haelften: peeq setzt den Wert, der Treiber setzt ihn um und laesst wegen _pragma seinen eigenen Standard weg."
+    "note": "peeq declares github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:8, and that repository is indexed. The answer needs both halves: peeq sets the value, the driver applies it and, because of _pragma, drops its own default."
   },
   {
-    "question": "Wer registriert den Treiber, den rongo mit sql.Open(\"sqlite3\", ...) anspricht?",
+    "question": "Who registers the driver rongo addresses with sql.Open(\"sqlite3\", ...)?",
     "kind": "how",
     "resolution": "composition",
     "candidates": [
@@ -718,20 +718,20 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:5-15 blanker Import von ncruces/go-sqlite3/driver, danach sql.Open(\"sqlite3\", dsn)"
+        "verified": "store.go:5-15 a blank import of ncruces/go-sqlite3/driver, then sql.Open(\"sqlite3\", dsn)"
       },
       {
         "repo": "go-sqlite3",
         "paths": [
           "driver/driver.go"
         ],
-        "verified": "driver.go:120-122 init ruft sql.Register(driverName, &SQLite{})"
+        "verified": "driver.go:120-122 init calls sql.Register(driverName, &SQLite{})"
       }
     ],
-    "note": "loom deklariert github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:9. Der blanke Import allein erklaert nichts; die init-Funktion im anderen Repository ist die zweite Haelfte."
+    "note": "loom declares github.com/ncruces/go-sqlite3 v0.23.3 in backend/go.mod:9. The blank import alone explains nothing; the init function in the other repository is the second half."
   },
   {
-    "question": "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
+    "question": "How does journal_mode=wal get from the connection URL into the database?",
     "kind": "how",
     "resolution": "composition",
     "candidates": [
@@ -740,20 +740,20 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:21-25 baut die URL mit _pragma=journal_mode(wal)"
+        "verified": "store.go:21-25 builds the URL with _pragma=journal_mode(wal)"
       },
       {
         "repo": "go-sqlite3",
         "paths": [
           "driver/driver.go"
         ],
-        "verified": "driver.go:180-188 zerlegt die Query, driver.go:261-263 fuehrt die PRAGMAs auf der Verbindung aus"
+        "verified": "driver.go:180-188 parses the query, driver.go:261-263 runs the PRAGMAs on the connection"
       }
     ],
-    "note": "Eine Kette ueber die Repo-Grenze entlang derselben Abhaengigkeit aus peeqs go.mod."
+    "note": "A chain across the repository boundary along the same dependency from peeq's go.mod."
   },
   {
-    "question": "Wie lange wartet rongo, wenn die Datenbankdatei gerade gesperrt ist?",
+    "question": "How long does rongo wait when the database file is currently locked?",
     "kind": "what",
     "resolution": "composition",
     "candidates": [
@@ -762,7 +762,7 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:19-23 busy_timeout(10000), also zehn Sekunden"
+        "verified": "store.go:19-23 busy_timeout(10000), that is ten seconds"
       },
       {
         "repo": "go-sqlite3",
@@ -770,13 +770,13 @@
           "conn.go",
           "driver/driver.go"
         ],
-        "verified": "conn.go:366-370 BusyTimeout rechnet in Millisekunden, Xgo_busy_timeout darunter schlaeft in Stufen bis die Frist erreicht ist"
+        "verified": "conn.go:366-370 BusyTimeout works in milliseconds, Xgo_busy_timeout below it sleeps in steps until the deadline is reached"
       }
     ],
-    "note": "Der Wert steht in loom, das Verhalten im Treiber. Nur eine der beiden Haelften zu nennen beantwortet die Frage nicht."
+    "note": "The value is in loom, the behaviour in the driver. Naming only one of the two halves does not answer the question."
   },
   {
-    "question": "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
+    "question": "Are foreign key constraints active, and who turns them on?",
     "kind": "what",
     "resolution": "composition",
     "candidates": [
@@ -785,20 +785,20 @@
         "paths": [
           "backend/internal/store/store.go"
         ],
-        "verified": "store.go:21-25 foreign_keys(on) als drittes _pragma"
+        "verified": "store.go:21-25 foreign_keys(on) as the third _pragma"
       },
       {
         "repo": "go-sqlite3",
         "paths": [
           "driver/driver.go"
         ],
-        "verified": "driver.go:187 erkennt _pragma, driver.go:261-263 setzt die PRAGMAs beim Verbindungsaufbau"
+        "verified": "driver.go:187 detects _pragma, driver.go:261-263 sets the PRAGMAs when the connection is opened"
       }
     ],
-    "note": "Ohne den Treiberteil bleibt offen, ob der Parameter ueberhaupt jemals ausgefuehrt wird."
+    "note": "Without the driver half it stays open whether the parameter is ever executed at all."
   },
   {
-    "question": "Warum steht eine viel benutzte Hilfsfunktion nicht in jeder Antwort, obwohl der Code sie ueberall aufruft?",
+    "question": "Why is a heavily used helper not in every answer, although the code calls it everywhere?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -807,12 +807,12 @@
         "paths": [
           "backend/internal/ask/gather.go"
         ],
-        "verified": "gather.go:38 maxDefiners=4 — ein Name, den zu viele Dateien definieren, wird nicht verfolgt"
+        "verified": "gather.go:38 maxDefiners=4 - a name defined by too many files is not followed"
       }
     ]
   },
   {
-    "question": "Wie viele Moeglichkeiten darf eine Rueckfrage hoechstens zur Auswahl stellen?",
+    "question": "How many options may a follow-up question offer at most?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -826,7 +826,7 @@
     ]
   },
   {
-    "question": "Wie oft wird nachgeschaut, ob sich an einem Repository etwas geaendert hat?",
+    "question": "How often is a repository checked for changes?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -835,12 +835,12 @@
         "paths": [
           "backend/internal/indexer/poller.go"
         ],
-        "verified": "poller.go:18 DefaultPollInterval=30min, bewusst kein Webhook"
+        "verified": "poller.go:18 DefaultPollInterval=30min, deliberately no webhook"
       }
     ]
   },
   {
-    "question": "Woher weiss der Dienst, welcher Zweig gemeint ist, wenn keiner eingetragen wurde?",
+    "question": "How does the service know which branch is meant when none was configured?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -849,12 +849,12 @@
         "paths": [
           "backend/internal/gitrepo/gitrepo.go"
         ],
-        "verified": "gitrepo.go:79 ls-remote --symref HEAD, nie ein vorgegebener Standard"
+        "verified": "gitrepo.go:79 ls-remote --symref HEAD, never a hardcoded default"
       }
     ]
   },
   {
-    "question": "Was passiert, wenn der eingetragene Zweig auf der Gegenseite geloescht wurde?",
+    "question": "What happens when the configured branch was deleted on the far side?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -863,12 +863,12 @@
         "paths": [
           "backend/internal/gitrepo/gitrepo.go"
         ],
-        "verified": "gitrepo.go:103 ErrBranchGone, lauter Fehler statt stillem Stillstand"
+        "verified": "gitrepo.go:103 ErrBranchGone, a loud error instead of a quiet stop"
       }
     ]
   },
   {
-    "question": "Warum bricht der Start ab, wenn die falsche Variante eines Werkzeugs installiert ist?",
+    "question": "Why does startup abort when the wrong variant of a tool is installed?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -877,12 +877,12 @@
         "paths": [
           "backend/internal/exttools/exttools.go"
         ],
-        "verified": "exttools.go:37-39 universal-ctags wird beim Start geprueft"
+        "verified": "exttools.go:37-39 universal-ctags is checked at startup"
       }
     ]
   },
   {
-    "question": "Wo stehen die Zugangsdaten fuer ein privates Repository, wenn nicht in der Konfigurationsdatei?",
+    "question": "Where do the credentials for a private repository live, if not in the configuration file?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -891,12 +891,12 @@
         "paths": [
           "backend/internal/repos/config.go"
         ],
-        "verified": "config.go:25-27 TokenEnv nennt eine Umgebungsvariable je Forge-Host"
+        "verified": "config.go:25-27 TokenEnv names one environment variable per forge host"
       }
     ]
   },
   {
-    "question": "Ab welcher Groesse gilt ein Verzeichnis nicht mehr als eigener Baustein?",
+    "question": "From which size on does a directory stop counting as a building block of its own?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -905,12 +905,12 @@
         "paths": [
           "backend/internal/modules/cluster.go"
         ],
-        "verified": "cluster.go Opts.MinChunks, Faltung bis zum Fixpunkt"
+        "verified": "cluster.go Opts.MinChunks, folding up to the fixed point"
       }
     ]
   },
   {
-    "question": "Woran wird erkannt, dass ein Repository ein anderes benutzt?",
+    "question": "How is it recognised that one repository uses another?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -919,12 +919,12 @@
         "paths": [
           "backend/internal/repodeps/repodeps.go"
         ],
-        "verified": "repodeps.go liest die Manifeste und legt Kanten zwischen Repositories an"
+        "verified": "repodeps.go reads the manifests and creates edges between repositories"
       }
     ]
   },
   {
-    "question": "Welche Dateien landen gar nicht erst im Index?",
+    "question": "Which files never make it into the index in the first place?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -933,12 +933,12 @@
         "paths": [
           "backend/internal/indexer/select.go"
         ],
-        "verified": "select.go entscheidet, was ueberhaupt indexiert wird"
+        "verified": "select.go decides what gets indexed in the first place"
       }
     ]
   },
   {
-    "question": "Wie weit entfernt von einem Suchtreffer darf der Code noch liegen, der in eine Antwort kommt?",
+    "question": "How far from a search hit may code sit and still make it into an answer?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -947,12 +947,12 @@
         "paths": [
           "backend/internal/ask/gather.go"
         ],
-        "verified": "gather.go GatherOptions.MaxHops begrenzt den Verweislauf"
+        "verified": "gather.go GatherOptions.MaxHops bounds the reference walk"
       }
     ]
   },
   {
-    "question": "Was passiert mit dem gesammelten Material, wenn dessen Budget erreicht ist?",
+    "question": "What happens to the gathered material once its budget is reached?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -961,12 +961,12 @@
         "paths": [
           "backend/internal/ask/gather.go"
         ],
-        "verified": "gather.go: der Lauf haelt an, Suchtreffer werden nie verdraengt"
+        "verified": "gather.go: the walk stops, search hits are never evicted"
       }
     ]
   },
   {
-    "question": "Was passiert mit dem Index, wenn ein Repository aus der Konfiguration verschwindet?",
+    "question": "What happens to the index when a repository disappears from the configuration?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -975,12 +975,12 @@
         "paths": [
           "backend/internal/indexer/state.go"
         ],
-        "verified": "state.go:49 deaktiviert statt geloescht; der Index ueberlebt bis zu einer ausdruecklichen Loeschung"
+        "verified": "state.go:49 deactivated rather than deleted; the index survives until an explicit purge"
       }
     ]
   },
   {
-    "question": "Wie wird aus einer Frage in Fachsprache eine Suche, die den Code wirklich trifft?",
+    "question": "How does a question in domain language become a search that actually hits the code?",
     "kind": "how",
     "resolution": "unique",
     "candidates": [
@@ -989,7 +989,7 @@
         "paths": [
           "backend/internal/ask/understand.go"
         ],
-        "verified": "understand.go code_terms — die geratene Bruecke von Fachwort zu Bezeichner"
+        "verified": "understand.go code_terms - the guessed bridge from domain word to identifier"
       }
     ]
   }

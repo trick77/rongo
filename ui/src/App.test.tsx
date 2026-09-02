@@ -43,9 +43,9 @@ describe("App", () => {
     expect(heading.textContent).toBe("rongo");
   });
 
-  it("schickt einen abgelaufenen Login zum Provider statt die App zu zeigen", async () => {
-    // Ohne diese Weiche scheitert stattdessen jede einzelne Kachel mit ihrem
-    // eigenen 401, und der Nutzer sieht eine kaputte App statt einer Anmeldung.
+  it("sends an expired login to the provider instead of showing the app", async () => {
+    // Without this gate every single panel fails with its own 401 instead,
+    // and the user sees a broken app rather than a sign-in.
     const href = vi.fn();
     stubLocation(href, "");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
@@ -56,9 +56,9 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
-  it("zeigt die App trotzdem, wenn /api/me am Netz scheitert", async () => {
-    // Ein Netzfehler ist keine abgelaufene Sitzung. Wer hier weiterleitet,
-    // wirft den Nutzer bei jedem Schluckauf des Backends zum Provider.
+  it("still shows the app when /api/me fails on the network", async () => {
+    // A network error is not an expired session. Redirecting here throws the
+    // user at the provider on every hiccup of the backend.
     const href = vi.fn();
     stubLocation(href, "");
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
@@ -69,11 +69,11 @@ describe("App", () => {
     expect(href).not.toHaveBeenCalled();
   });
 
-  it("bleibt nach einem gescheiterten Callback stehen statt in eine Schleife zu laufen", async () => {
-    // Ohne diese Weiche: /api/me sagt 401, das UI geht auf /api/auth/login, der
-    // Provider hat noch eine Sitzung und antwortet ohne Rueckfrage, der
-    // Callback scheitert wieder — eine enge Schleife ohne jede Meldung. Zwei
-    // gleichzeitig geoeffnete Tabs reichen aus, um sie auszuloesen.
+  it("halts after a failed callback instead of looping", async () => {
+    // Without this gate: /api/me says 401, the UI goes to /api/auth/login, the
+    // provider still has a session and answers without a prompt, the callback
+    // fails again — a tight loop with no message at all. Two tabs opened at the
+    // same time are enough to trigger it.
     const href = vi.fn();
     stubLocation(href, "?auth_error=oidc_callback_failed");
     const fetchMock = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
@@ -81,28 +81,28 @@ describe("App", () => {
 
     render(<App />);
 
-    await screen.findByRole("link", { name: "Anmelden" });
+    await screen.findByRole("link", { name: "Sign in" });
     expect(href).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("bleibt nach dem Abmelden stehen statt sich sofort neu anzumelden", async () => {
-    // rongo widerruft nur die eigene Sitzung; die des Providers bleibt. Wer
-    // hier weiterleitet, bekommt ohne Rueckfrage ein neues Token und ist wieder
-    // angemeldet — der Abmelden-Knopf taete sichtbar nichts.
+  it("halts after sign-out instead of signing in again right away", async () => {
+    // rongo only revokes its own session; the provider's stays. Redirecting
+    // here gets a fresh token without a prompt and signs the user back in — the
+    // sign-out button would visibly do nothing.
     const href = vi.fn();
     stubLocation(href, "?signed_out=1");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
 
     render(<App />);
 
-    await screen.findByRole("link", { name: "Anmelden" });
+    await screen.findByRole("link", { name: "Sign in" });
     expect(href).not.toHaveBeenCalled();
   });
 
-  it("zeigt bei 5xx auf /api/me nicht die angemeldete App", async () => {
-    // Eine durchgestylte App, deren saemtliche Kacheln danach einzeln
-    // scheitern, ist die schlechtere Auskunft als ein klarer Hinweis.
+  it("does not show the signed-in app on a 5xx from /api/me", async () => {
+    // A fully chromed app whose every panel then fails on its own tells the
+    // user less than one clear message does.
     const href = vi.fn();
     stubLocation(href, "");
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
@@ -113,7 +113,7 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 
-  it("meldet ab und folgt der redirect_url der Antwort", async () => {
+  it("signs out and follows the response's redirect_url", async () => {
     const href = vi.fn();
     stubLocation(href, "");
     const fetchMock = vi.fn(async (url: string) => ({
@@ -127,25 +127,25 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
 
-    await user.click(screen.getByRole("button", { name: "Abmelden" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(href).toHaveBeenCalledWith("/?signed_out=1"));
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
   });
 
-  it("behaelt den laufenden Thread beim Wechsel auf Repos", async () => {
+  it("keeps the running thread when switching to Repos", async () => {
     // Unmounting Ask would drop the answer on screen while the stream keeps
     // writing into a dead component. The stored record only catches up once the
     // turn is finished, so a stream interrupted this way is lost for good.
     await renderSignedIn();
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Frage"), "Eine Frage, die stehen bleiben muss");
+    await user.type(screen.getByLabelText("Question"), "A question that has to stay put");
 
     await user.click(screen.getByRole("button", { name: "Repos" }));
-    await user.click(screen.getByRole("button", { name: "Fragen" }));
+    await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    expect((screen.getByLabelText("Frage") as HTMLTextAreaElement).value).toBe(
-      "Eine Frage, die stehen bleiben muss",
+    expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe(
+      "A question that has to stay put",
     );
   });
 });
@@ -161,39 +161,39 @@ function apiFetch(threads: unknown, messages: unknown) {
   return mock;
 }
 
-const oneThread = [{ id: 7, title: "Wie laeuft der Versand?", created_at: "2026-08-17T10:00:00Z" }];
+const oneThread = [{ id: 7, title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" }];
 const oneTurn = [
   {
     id: 1,
     ordinal: 0,
     audience: "ba",
-    question: "Wie laeuft der Versand?",
-    answer: "Ueber einen Job [1].",
+    question: "How does shipping work?",
+    answer: "Through a job [1].",
     error: "",
     citations: [],
     created_at: "2026-08-17T10:00:00Z",
   },
 ];
 
-describe("App, der Thread ueber einen Neuladen hinweg", () => {
-  it("holt den zuletzt offenen Thread zurueck", async () => {
+describe("App, the thread across a reload", () => {
+  it("brings back the thread that was last open", async () => {
     localStorage.setItem("rongo.thread", "7");
     apiFetch(oneThread, oneTurn);
     render(<StrictMode><App /></StrictMode>);
-    expect(await screen.findByText(/Ueber einen Job/)).toBeTruthy();
+    expect(await screen.findByText(/Through a job/)).toBeTruthy();
   });
 
-  it("merkt sich den gewaehlten Thread", async () => {
+  it("remembers the chosen thread", async () => {
     apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
-    await user.click(await screen.findByRole("button", { name: "Wie laeuft der Versand?" }));
+    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
     await waitFor(() => expect(localStorage.getItem("rongo.thread")).toBe("7"));
   });
 
   // A thread that is not yours, or was purged, comes back as an empty list with
   // status 200. Keeping the id would make every later reload open nothing.
-  it("vergisst eine Thread-Nummer, die ins Leere fuehrt", async () => {
+  it("forgets a thread id that leads nowhere", async () => {
     localStorage.setItem("rongo.thread", "999");
     apiFetch([], []);
     render(<StrictMode><App /></StrictMode>);

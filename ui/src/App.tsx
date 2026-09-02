@@ -3,7 +3,7 @@ import Ask from "./Ask";
 import RepoList from "./RepoList";
 import Threads from "./Threads";
 
-type Page = "fragen" | "repos";
+type Page = "ask" | "repos";
 
 type Me = { subject: string; email: string; is_admin: boolean };
 
@@ -42,10 +42,10 @@ type Session =
 function haltReason(search: string): string | null {
   const params = new URLSearchParams(search);
   if (params.has("signed_out")) {
-    return "Abgemeldet. Die Anmeldung beim Provider besteht weiter — dort abmelden, um sie ebenfalls zu beenden.";
+    return "Signed out. The session at the provider is still live — sign out there as well to end it.";
   }
   if (params.has("auth_error")) {
-    return "Die Anmeldung konnte nicht abgeschlossen werden. Erneut versuchen; bleibt es dabei, steht der Grund im Server-Log.";
+    return "Sign-in could not be completed. Try again; if it keeps failing, the reason is in the server log.";
   }
   return null;
 }
@@ -86,7 +86,7 @@ function useSession(): Session {
         // signed-in UI whose every panel then fails on its own.
         setSession({
           state: "halted",
-          message: `Die Sitzung konnte nicht geprüft werden (HTTP ${res.status}).`,
+          message: `The session could not be checked (HTTP ${res.status}).`,
         });
         return;
       }
@@ -141,7 +141,7 @@ function rememberThread(id: number | null) {
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("fragen");
+  const [page, setPage] = useState<Page>("ask");
   const [threadId, setThreadId] = useState<number | null>(storedThread);
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
@@ -168,8 +168,8 @@ export default function App() {
           make the gate screen indistinguishable from the app.
         */}
         <p className="text-sm text-[var(--color-ink-soft)]">
-          {session.state === "checking" && "Anmeldung wird geprüft …"}
-          {session.state === "out" && "Weiterleitung zur Anmeldung …"}
+          {session.state === "checking" && "Checking the session …"}
+          {session.state === "out" && "Redirecting to sign-in …"}
           {session.state === "halted" && session.message}
         </p>
         {session.state === "halted" && (
@@ -177,7 +177,7 @@ export default function App() {
             href="/api/auth/login"
             className="mt-4 inline-block text-sm text-[var(--color-accent)]"
           >
-            Anmelden
+            Sign in
           </a>
         )}
       </main>
@@ -189,7 +189,7 @@ export default function App() {
       <header className="mb-8 flex items-baseline gap-6">
         <h1 className="text-2xl font-semibold tracking-tight">rongo</h1>
         <nav className="flex gap-4 text-sm">
-          {(["fragen", "repos"] as const).map((p) => (
+          {(["ask", "repos"] as const).map((p) => (
             <button
               key={p}
               type="button"
@@ -201,7 +201,7 @@ export default function App() {
                   : "text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
               }
             >
-              {p === "fragen" ? "Fragen" : "Repos"}
+              {p === "ask" ? "Ask" : "Repos"}
             </button>
           ))}
         </nav>
@@ -210,7 +210,7 @@ export default function App() {
           onClick={() => void logout()}
           className="ml-auto text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
         >
-          Abmelden
+          Sign out
         </button>
       </header>
 
@@ -220,7 +220,7 @@ export default function App() {
         keeps writing into a dead component — and the stored record only catches
         up once the turn is finished.
       */}
-      <div hidden={page !== "fragen"} className="flex gap-8">
+      <div hidden={page !== "ask"} className="flex gap-8">
         <aside className="w-56 shrink-0">
           <Threads
             activeId={threadId}
@@ -241,8 +241,8 @@ export default function App() {
       {page === "repos" && (
         <>
           <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
-            Reine Anzeige. Die Repository-Liste wird in <code>repos.yaml</code> gepflegt,
-            Zugangsdaten stehen nie darin.
+            Read-only. The repository list is maintained in <code>repos.yaml</code>,
+            and credentials never live in it.
           </p>
           <RepoList />
         </>

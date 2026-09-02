@@ -54,7 +54,7 @@ export default function Threads({
         disabled={busy}
         className="mb-3 w-full rounded border border-[var(--color-hairline)] px-3 py-1 text-left text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] disabled:opacity-50"
       >
-        Neue Frage
+        New question
       </button>
       <ul className="space-y-1">
         {threads.map((t) => (

@@ -52,13 +52,13 @@ func ask(t *testing.T, c *Client, opts ...Option) (string, Usage) {
 
 func TestComplete_usesProAndReturnsUsage(t *testing.T) {
 	// Given
-	c, got := fakeUpstream(t, "die Antwort")
+	c, got := fakeUpstream(t, "the answer")
 
 	// When
 	out, usage := ask(t, c)
 
 	// Then
-	if out != "die Antwort" {
+	if out != "the answer" {
 		t.Errorf("content = %q", out)
 	}
 	if got.Model != ProDeployment {
@@ -209,7 +209,7 @@ func streamingUpstream(t *testing.T, tokens []string) *Client {
 
 func TestStream_deliversTokensOneByOne(t *testing.T) {
 	// Given
-	c := streamingUpstream(t, []string{"Der ", "Versand ", "läuft"})
+	c := streamingUpstream(t, []string{"The ", "shipping ", "runs"})
 	var seen []string
 
 	// When
@@ -224,7 +224,7 @@ func TestStream_deliversTokensOneByOne(t *testing.T) {
 	if len(seen) != 3 {
 		t.Fatalf("callbacks = %d (%q), want one per token", len(seen), seen)
 	}
-	if strings.Join(seen, "") != "Der Versand läuft" {
+	if strings.Join(seen, "") != "The shipping runs" {
 		t.Errorf("assembled = %q", strings.Join(seen, ""))
 	}
 	if usage.Total != 7 {
@@ -242,7 +242,7 @@ func TestStream_anUpstreamThatStallsIsAbandoned(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		fl := http.NewResponseController(w)
 		frame, _ := json.Marshal(map[string]any{
-			"choices": []any{map[string]any{"delta": map[string]any{"content": "Der "}}},
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "The "}}},
 		})
 		fmt.Fprintf(w, "data: %s\n\n", frame)
 		_ = fl.Flush()
@@ -261,7 +261,7 @@ func TestStream_anUpstreamThatStallsIsAbandoned(t *testing.T) {
 	if elapsed > time.Second {
 		t.Errorf("Stream took %v, want it abandoned near the idle window", elapsed)
 	}
-	if len(seen) != 1 || seen[0] != "Der " {
+	if len(seen) != 1 || seen[0] != "The " {
 		t.Errorf("tokens = %q, want the one delta that did arrive", seen)
 	}
 }

@@ -210,9 +210,9 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 
 // TestEvalMeasureRouting measures the routing decision against Pro, over all
 // 61 questions, before non-Pro (ShortGate) is written into config.go
-// permanently — the phase 4b spec makes this comparison mandatory: "die
-// Trefferquote des Routens wird gegen Pro gemessen, bevor non-Pro dort
-// festgeschrieben wird. Behaupten reicht hier nicht."
+// permanently — the phase 4b spec makes this comparison mandatory: "the
+// hit rate of routing is measured against Pro before non-Pro is written in
+// there. Asserting it is not enough."
 //
 // Both arms share one Rank per question (no margin dependency, no database
 // or model call) and call Related/Judge only when the ladder would actually

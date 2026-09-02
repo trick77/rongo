@@ -112,11 +112,11 @@ func withAskerAsking() func(*fakeAsker) {
 }
 
 func withAskerResuming() func(*fakeAsker) {
-	return func(f *fakeAsker) { f.resumeTokens = []string{"Die ", "Antwort."} }
+	return func(f *fakeAsker) { f.resumeTokens = []string{"The ", "answer."} }
 }
 
 func withAskerReexplaining() func(*fakeAsker) {
-	return func(f *fakeAsker) { f.reexplainTokens = []string{"Die ", "Erklaerung."} }
+	return func(f *fakeAsker) { f.reexplainTokens = []string{"The ", "explanation."} }
 }
 
 // newTestServer builds a server over a fresh dev-auth store, wired to a
@@ -183,11 +183,11 @@ func seedClarification(t *testing.T, store *threads.Store) (msgID, clarID int64)
 func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string) (msgID, clarID int64) {
 	t.Helper()
 	ctx := context.Background()
-	th, err := store.Create(ctx, subject, "wie ist die Anmeldung geloest?")
+	th, err := store.Create(ctx, subject, "how is sign-in done?")
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "wie ist die Anmeldung geloest?")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "how is sign-in done?")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -405,12 +405,12 @@ func names(evs [][2]string) []string {
 func TestAsk_streamsThreadStatusTokensAndCitations(t *testing.T) {
 	// Given
 	deps, _ := askDeps(t, &fakeAsker{
-		tokens:    []string{"Der ", "Versand ", "laeuft [1]."},
+		tokens:    []string{"The ", "shipping ", "runs [1]."},
 		citations: []ask.Citation{{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go"}},
 	})
 
 	// When
-	rec := postAsk(t, deps, `{"question":"Wie laeuft der Versand?","audience":"ba"}`)
+	rec := postAsk(t, deps, `{"question":"How does shipping work?","audience":"ba"}`)
 
 	// Then
 	if rec.Code != http.StatusOK {
@@ -448,11 +448,11 @@ func TestAsk_streamsThreadStatusTokensAndCitations(t *testing.T) {
 
 func TestAsk_persistsTheAnswerAndItsCitations(t *testing.T) {
 	deps, st := askDeps(t, &fakeAsker{
-		tokens:    []string{"So laeuft es [1]."},
+		tokens:    []string{"That is how it works [1]."},
 		citations: []ask.Citation{{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go", StartLine: 2, EndLine: 9}},
 	})
 
-	postAsk(t, deps, `{"question":"Wie?","audience":"ba"}`)
+	postAsk(t, deps, `{"question":"How?","audience":"ba"}`)
 
 	list, err := st.List(context.Background(), "dev-user")
 	if err != nil {
@@ -465,7 +465,7 @@ func TestAsk_persistsTheAnswerAndItsCitations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
-	if len(msgs) != 1 || msgs[0].Answer != "So laeuft es [1]." {
+	if len(msgs) != 1 || msgs[0].Answer != "That is how it works [1]." {
 		t.Fatalf("messages = %+v", msgs)
 	}
 	if len(msgs[0].Citations) != 1 {
@@ -478,7 +478,7 @@ func TestAsk_aFailedTurnKeepsItsQuestionAndSaysNothingSecret(t *testing.T) {
 	// message; the record gets the question and the failure.
 	deps, st := askDeps(t, &fakeAsker{err: errors.New("upstream said: Bearer sk-secret")})
 
-	rec := postAsk(t, deps, `{"question":"Wie?","audience":"ba"}`)
+	rec := postAsk(t, deps, `{"question":"How?","audience":"ba"}`)
 
 	body := rec.Body.String()
 	if !strings.Contains(body, "event: error") {
@@ -489,7 +489,7 @@ func TestAsk_aFailedTurnKeepsItsQuestionAndSaysNothingSecret(t *testing.T) {
 	}
 	list, _ := st.List(context.Background(), "dev-user")
 	msgs, _ := st.Messages(context.Background(), "dev-user", list[0].ID)
-	if len(msgs) != 1 || msgs[0].Question != "Wie?" {
+	if len(msgs) != 1 || msgs[0].Question != "How?" {
 		t.Errorf("messages = %+v, want the failed turn kept with its question", msgs)
 	}
 }
@@ -498,7 +498,7 @@ func TestAsk_theAudienceReachesThePipeline(t *testing.T) {
 	a := &fakeAsker{tokens: []string{"x"}}
 	deps, _ := askDeps(t, a)
 
-	postAsk(t, deps, `{"question":"Wie?","audience":"dev"}`)
+	postAsk(t, deps, `{"question":"How?","audience":"dev"}`)
 
 	if a.gotAud != ask.AudienceDev {
 		t.Errorf("audience = %q, want dev", a.gotAud)
@@ -514,12 +514,12 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 	if _, err := deps.Auth.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}
-	other, err := st.Create(context.Background(), "someone-else", "Fremde Frage?")
+	other, err := st.Create(context.Background(), "someone-else", "Someone else's question?")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	rec := postAsk(t, deps, `{"question":"Wie?","audience":"ba","thread_id":`+itoa(other.ID)+`}`)
+	rec := postAsk(t, deps, `{"question":"How?","audience":"ba","thread_id":`+itoa(other.ID)+`}`)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -544,7 +544,7 @@ func TestAsk_withoutAPipelineAnswers503(t *testing.T) {
 	db := askDB(t)
 	deps := Deps{Auth: auth.NewService(db, "dev", ""), Threads: threads.NewStore(db)}
 
-	rec := postAsk(t, deps, `{"question":"Wie?"}`)
+	rec := postAsk(t, deps, `{"question":"How?"}`)
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
@@ -568,7 +568,7 @@ func TestAskStreamsAClarificationAndEndsTheTurn(t *testing.T) {
 	srv := newTestServer(t, withAskerAsking())
 
 	// When
-	body := doSSE(t, srv, "/api/ask", `{"question":"wie ist die Anmeldung geloest?"}`)
+	body := doSSE(t, srv, "/api/ask", `{"question":"how is sign-in done?"}`)
 
 	// Then
 	if !strings.Contains(body, "event: clarification") {
@@ -607,7 +607,7 @@ func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	withAskerAsking()(deps.Ask.(*fakeAsker))
 
 	// When
-	rec := postAsk(t, deps, `{"question":"wie ist die Anmeldung geloest?"}`)
+	rec := postAsk(t, deps, `{"question":"how is sign-in done?"}`)
 
 	// Then no clarification event ships — a card whose candidates were never
 	// stored would offer choices resuming them cannot honour
@@ -639,7 +639,7 @@ func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 
 	// When the reader picks the second candidate
 	body := doSSE(t, srv, "/api/ask",
-		fmt.Sprintf(`{"question":"wie ist die Anmeldung geloest?","clarification_message_id":%d,"choice":1}`, msgID))
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
 
 	// Then
 	if !strings.Contains(body, "event: token") {

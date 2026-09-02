@@ -82,20 +82,20 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 // the terms is the difference between a dead end someone can act on — the
 // vocabulary was wrong, ask differently — and a shrug.
 func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, ev Events) (Answer, *Clarification, error) {
-	ev.status("verstehen")
+	ev.status("understanding")
 	u, err := p.understander.Understand(ctx, question)
 	if err != nil {
 		return Answer{}, nil, err
 	}
 
 	texts := u.SearchTexts(question)
-	ev.status("suchen")
+	ev.status("searching")
 	hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: u.Repos, K: searchK})
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
 
-	ev.status("routen")
+	ev.status("routing")
 	d, err := p.router.Route(ctx, question, hits)
 	if err != nil {
 		return Answer{}, nil, err
@@ -111,16 +111,16 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// subset. The published 0.955 was measured that way; narrowing here would
 	// be an unmeasured regression. Routing decides whether to ask, not what
 	// to read.
-	ev.status("sammeln")
+	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
 		return Answer{}, nil, err
 	}
 	if len(sources) == 0 {
-		return Answer{Text: nothingFound + " Gesucht wurde nach: " + strings.Join(texts, " · ") + "."}, nil, nil
+		return Answer{Text: nothingFound + " Searched for: " + strings.Join(texts, " · ") + "."}, nil, nil
 	}
 
-	ev.status("antworten")
+	ev.status("answering")
 	answer, err := p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
 	return answer, nil, err
 }
@@ -131,13 +131,13 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, hits []retrieve.Hit, ev Events) (Answer, error) {
-	ev.status("sammeln")
+	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
 		return Answer{}, err
 	}
 
-	ev.status("antworten")
+	ev.status("answering")
 	return p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
 }
 
@@ -153,6 +153,6 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 		return Answer{}, fmt.Errorf("reexplain: no sources left to answer from")
 	}
 
-	ev.status("antworten")
+	ev.status("answering")
 	return p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
 }

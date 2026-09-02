@@ -88,7 +88,7 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 //
 // The restriction is a guess: the understanding step reads it off the wording,
 // and measured over the real question catalogue three of nine guesses named
-// something that does not exist — "peeqs", the German genitive of peeq;
+// something that does not exist — "peeqs", the possessive form of peeq;
 // "Peek", a plain mishearing; and "asg017/sqlite-vec", a module nobody
 // indexed. A name like that is not a narrowing, it is a wipe. It goes into
 // `WHERE f.repo IN (…)`, nothing can match, and the turn reports "nothing

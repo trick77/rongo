@@ -11,9 +11,9 @@ import (
 // given room will write a sentence.
 const titleMaxTokens = 48
 
-const titleSystem = `Fasse die Frage in drei bis sechs Woertern zusammen, als Titel fuer eine Seitenleiste.
-Deutsch, Schweizer Rechtschreibung, nie das Zeichen ß. Keine Anfuehrungszeichen,
-kein Punkt am Ende, keine Erklaerung — nur der Titel.`
+const titleSystem = `Sum the question up in three to six words, as a title for a sidebar.
+English. No quotation marks, no full stop at the end, no explanation - just the
+title.`
 
 // Title writes a short label for a thread.
 //
@@ -36,7 +36,7 @@ func Title(ctx context.Context, c *llm.Client, question string) string {
 	if err != nil {
 		return ""
 	}
-	title := swiss(strings.TrimSpace(out))
+	title := strings.TrimSpace(out)
 	title = strings.Trim(title, "\"'“”.")
 	// A model that answered with a paragraph did not write a title. Taking the
 	// first line of it would put half a sentence in the sidebar.

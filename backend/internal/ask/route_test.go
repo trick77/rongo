@@ -219,7 +219,7 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 		return ""
 	}), db)
 
-	got, err := r.Route(context.Background(), "wie oeffnet peeq die Datenbank?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "how does peeq open the database?", []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/store/store.go", Score: 0.50},
 		{Repo: "go-sqlite3", Path: "driver/driver.go", Score: 0.48},
 	})
@@ -244,11 +244,11 @@ func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"ask"}`
 		}
-		return `{"title":"HTTP-Schicht von peeq","summary":"Nimmt Anfragen entgegen und beantwortet sie."}`
+		return `{"title":"peeq HTTP layer","summary":"Takes requests and answers them."}`
 	})
 	r := newTestRouter(t, llmFake, testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	})
@@ -330,7 +330,7 @@ func TestRouteJudgeDecodeFailureMeansAskNotCrashNotCompose(t *testing.T) {
 	r := newTestRouter(t, testLLM(t, func(prompt string) string {
 		prompts = append(prompts, prompt)
 		if strings.Contains(prompt, judgeMarker) {
-			return "Ich denke, das gehoert zusammen."
+			return "I think these belong together."
 		}
 		return `{"title":"T","summary":"S"}`
 	}), testDBWithDeps(t, nil))
@@ -496,62 +496,6 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 	}
 }
 
-// TestNameSystemForbidsSharpS pins the Swiss-orthography rule on the naming
-// prompt: title and summary are both reader-visible, so nameSystem must
-// forbid ß exactly like answerCommon does for the answer text. No LLM call —
-// this only inspects the prompt string.
-func TestNameSystemForbidsSharpS(t *testing.T) {
-	if !strings.Contains(nameSystem, "ß") {
-		t.Fatalf("nameSystem must name the forbidden character ß, got:\n%s", nameSystem)
-	}
-	if !strings.Contains(nameSystem, "ss") {
-		t.Fatalf("nameSystem must tell the model to use ss instead, got:\n%s", nameSystem)
-	}
-	if strings.Count(nameSystem, "ß") != 1 {
-		t.Fatalf("nameSystem should mention ß only where it forbids it, not use it itself, got:\n%s", nameSystem)
-	}
-}
-
-// TestNameNormalisesSharpSInTitleAndSummary pins the guarantee, not just the
-// request: even when the model ignores nameSystem's instruction and replies
-// with ß anyway (as it did on the running card), the candidate that comes
-// back from name() must carry ss in both Title and Summary — the same
-// runtime normalisation answer.go applies to streamed answer tokens and
-// title.go applies to thread titles. No LLM call: the fake server returns a
-// canned reply containing ß.
-func TestNameNormalisesSharpSInTitleAndSummary(t *testing.T) {
-	r := newTestRouter(t, testLLM(t, func(prompt string) string {
-		return `{"title":"Ausschließlich SQL-Migration","summary":"Enthält Migrationsskripte einschließlich Indizes."}`
-	}), testDBWithDeps(t, nil))
-
-	cs := []Candidate{
-		{Repo: "peeq", ModuleKey: "backend/internal/store", Hits: []retrieve.Hit{
-			{Repo: "peeq", Path: "backend/internal/store/migrate.go", Score: 0.5},
-		}},
-	}
-
-	named, err := r.name(context.Background(), "wie migriert peeq das schema?", cs)
-	if err != nil {
-		t.Fatalf("name() err = %v", err)
-	}
-	if len(named) != 1 {
-		t.Fatalf("name() returned %d candidates, want 1", len(named))
-	}
-	got := named[0]
-	if strings.Contains(got.Title, "ß") {
-		t.Errorf("Title still contains ß: %q", got.Title)
-	}
-	if strings.Contains(got.Summary, "ß") {
-		t.Errorf("Summary still contains ß: %q", got.Summary)
-	}
-	if !strings.Contains(got.Title, "Ausschliesslich") {
-		t.Errorf("Title = %q, want ß normalised to ss (Ausschliesslich)", got.Title)
-	}
-	if !strings.Contains(got.Summary, "einschliesslich") {
-		t.Errorf("Summary = %q, want ß normalised to ss (einschliesslich)", got.Summary)
-	}
-}
-
 // TestDecideIsTheLadderRouteItselfRuns pins Decide as the ONE place the
 // ladder's decision lives. The eval harness used to carry its own copy of it
 // (askAt in the routing arms), which meant a change to Route's rung order
@@ -620,7 +564,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
-	if _, err := r.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {
@@ -637,7 +581,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	// And the cheap lane is still reachable, because the harness has to keep
 	// measuring the comparison the spec asks for.
 	cheap := r.WithJudgeDeployment(llm.ShortGate())
-	if _, err := cheap.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+	if _, err := cheap.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {
@@ -685,7 +629,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
-	if _, err := r.Route(context.Background(), "wie ist die Authentisierung geloest?", []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {
