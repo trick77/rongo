@@ -19,6 +19,13 @@ import (
 // measures the same expansion rather than a fresh one. The model is not
 // deterministic; freezing its output is what makes this a measurement of
 // retrieval instead of a measurement of the model's mood.
+//
+// The questions were translated from German to English after these texts
+// were frozen: the question and its domain-language rewording were
+// translated with them, the code terms are the ones the model guessed on
+// the German run. No entry therefore reproduces a real Understand() call
+// any more, and a fresh TestExpandQuestions sweep will differ for reasons
+// that have nothing to do with the model drifting.
 const expansionsFile = "expansions.json"
 
 type expansion struct {

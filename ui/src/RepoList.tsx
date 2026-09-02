@@ -91,7 +91,7 @@ export default function RepoList() {
         <tr className="border-b border-[var(--color-hairline)] text-left text-[var(--color-ink-faint)]">
           <th className="py-2 font-medium">Repository</th>
           <th className="py-2 font-medium">Branch</th>
-          <th className="py-2 font-medium">State</th>
+          <th className="py-2 font-medium">Last run</th>
           <th className="py-2 text-right font-medium">Files</th>
           <th className="py-2 text-right font-medium">Chunks</th>
           <th className="py-2 text-right font-medium">Modules</th>

@@ -20,11 +20,14 @@ var stopwords = map[string]struct{}{}
 func init() {
 	words := []string{
 		// --- articles, pronouns, particles ---
+		//
+		// Identifier-shaped words stay out on purpose: "all", "any", "some",
+		// "every" and "each" are real names in the corpus (Promise.all, a TS
+		// any, Array.some). Dropping them would strip a question down to
+		// nothing and answer "found nothing" about code that is indexed.
 		"a", "an", "the", "and", "or", "but", "nor", "so", "yet", "if",
 		"then", "than", "as", "that", "this", "these", "those", "there",
 		"here", "it", "its", "we", "you", "they", "them", "their",
-		"i", "he", "she", "his", "her", "our", "all", "any", "no", "not",
-		"also", "just", "only", "some", "such", "each", "every",
 		// --- question words and auxiliaries ---
 		"how", "what", "who", "where", "when", "why", "which",
 		"is", "are", "was", "were", "be", "been", "being", "do", "does",

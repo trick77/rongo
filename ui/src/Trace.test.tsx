@@ -32,7 +32,7 @@ describe("Trace", () => {
     await user.click(screen.getByRole("button"));
 
     expect(screen.getByText("Done")).toBeTruthy();
-    expect(screen.queryByText("Wartet auf Auswahl")).toBeNull();
+    expect(screen.queryByText("Waiting for a choice")).toBeNull();
   });
 
   it("ends a clarification on the ochre waiting node, not the check", async () => {
