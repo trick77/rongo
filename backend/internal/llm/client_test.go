@@ -297,10 +297,10 @@ func headerCapture(t *testing.T, stream bool) (*Client, *http.Header) {
 }
 
 // TestChatUserAgentValue pins the exact client string. The header test below
-// compares against the constant and would pass on any value; the upstream cares
-// about this specific one, so assert the literal.
+// compares against the constant and would pass on any value, so the literal is
+// asserted here — a typo in a version component is otherwise invisible.
 func TestChatUserAgentValue(t *testing.T) {
-	const want = "opencode/1.18.11 ai-sdk/openai-compatible/3.0.20 ai-sdk/provider-utils/5.0.18 runtime/bun/1.3.14"
+	const want = "opencode/1.18.26 ai-sdk/openai-compatible/3.0.43 ai-sdk/provider-utils/5.0.36 runtime/bun/1.4.0"
 	if chatUserAgent != want {
 		t.Fatalf("chatUserAgent = %q, want %q", chatUserAgent, want)
 	}

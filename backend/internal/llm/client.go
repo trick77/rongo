@@ -38,11 +38,12 @@ const (
 // where that shows up first.
 const defaultMaxTokens = 4096
 
-// chatUserAgent is the User-Agent sent to the MiMo endpoint. Go's default
-// "Go-http-client/1.1" identifies the caller as a bot; the upstream is happier
-// with the client string an ordinary OpenAI-compatible SDK sends. Same value as
-// loom, against the same endpoint.
-const chatUserAgent = "opencode/1.18.11 ai-sdk/openai-compatible/3.0.20 ai-sdk/provider-utils/5.0.18 runtime/bun/1.3.14"
+// chatUserAgent is the User-Agent sent to the MiMo endpoint: the client string
+// an OpenAI-compatible SDK sends, which is the shape that endpoint is built
+// around. Go's default "Go-http-client/1.1" names the HTTP library and says
+// nothing about the protocol being spoken. Same value as loom against the same
+// endpoint, so behaviour stays comparable between the two.
+const chatUserAgent = "opencode/1.18.26 ai-sdk/openai-compatible/3.0.43 ai-sdk/provider-utils/5.0.36 runtime/bun/1.4.0"
 
 const maxErrorBodyBytes = 8 << 10
 
