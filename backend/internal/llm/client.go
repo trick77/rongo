@@ -307,8 +307,10 @@ func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("User-Agent", chatUserAgent)
 	// Session headers pin a conversation to one upstream node. Both names carry
-	// the same value; the upstream sends the pair too. A turn that carries no
-	// thread — the gates, the title call — falls back to the per-process id.
+	// the same value; the upstream sends the pair too. Every call a turn makes —
+	// the gates, the answer, the title written alongside it — shares the id,
+	// because the thread is attached once to the request context. A call made
+	// outside a turn falls back to the per-process id.
 	sessionID := chatSessionID(threadIDFromContext(ctx))
 	req.Header.Set("X-Session-Id", sessionID)
 	req.Header.Set("X-Session-Affinity", sessionID)

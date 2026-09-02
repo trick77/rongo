@@ -410,8 +410,10 @@ func TestSessionHeaderIsStableWithinAThread(t *testing.T) {
 	}
 }
 
-// TestThreadlessCallUsesProcessSessionID pins the utility-call lane: the gates
-// and the title call carry no thread, and they still have to pin somewhere.
+// TestThreadlessCallUsesProcessSessionID pins the fallback lane. The HTTP
+// handlers attach the thread before any model call, so nothing in a served turn
+// reaches this path today; it exists so a caller outside a turn still pins
+// somewhere rather than sending an empty header.
 func TestThreadlessCallUsesProcessSessionID(t *testing.T) {
 	// Given
 	c, got := headerCapture(t, false)

@@ -35,9 +35,10 @@ const sessionCacheLimit = 4096
 
 var sessionCounter atomic.Uint64
 
-// processSessionID is the fallback affinity id for model calls that carry no
-// thread — utility calls such as titles and the gates. It is minted once per
-// backend process, so those calls still pin to a single upstream node for the
+// processSessionID is the fallback affinity id for model calls made outside a
+// turn — the HTTP handlers attach the thread before any model call, so the gates
+// and the title call are NOT in this lane. It is minted once per backend
+// process, so a threadless caller still pins to a single upstream node for the
 // process lifetime.
 var processSessionID = newSessionID()
 
@@ -69,8 +70,12 @@ func threadIDFromContext(ctx context.Context) string {
 
 // chatSessionID returns the session/affinity id to send for a turn. Every
 // request in one conversation reuses the same id — that is the point of the
-// affinity header — so ids are minted once per thread and cached for the
-// process lifetime. Turns without a thread id fall back to the per-process id.
+// affinity header — so ids are minted once per thread and cached until eviction.
+// Eviction is insertion-order FIFO, not LRU: a thread whose id was minted more
+// than sessionCacheLimit threads ago re-mints on its next turn and moves to
+// another node. Threads are cheap to re-pin and 4096 of them is a lot of
+// conversation, so the simpler bound wins over tracking recency. Turns without a
+// thread id fall back to the per-process id.
 func chatSessionID(threadID string) string {
 	if threadID == "" {
 		return processSessionID
