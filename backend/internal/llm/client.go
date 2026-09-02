@@ -306,6 +306,12 @@ func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("User-Agent", chatUserAgent)
+	// Session headers pin a conversation to one upstream node. Both names carry
+	// the same value; the upstream sends the pair too. A turn that carries no
+	// thread — the gates, the title call — falls back to the per-process id.
+	sessionID := chatSessionID(threadIDFromContext(ctx))
+	req.Header.Set("X-Session-Id", sessionID)
+	req.Header.Set("X-Session-Affinity", sessionID)
 	// Accept-Encoding is left unset on purpose so net/http keeps negotiating and
 	// decompressing gzip transparently; setting it by hand would hand us a
 	// compressed body to decode ourselves.

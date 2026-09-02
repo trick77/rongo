@@ -12,6 +12,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 )
@@ -166,6 +167,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		thread = t
 	}
+
+	// Every model call this turn makes carries the thread, so the whole
+	// conversation pins to one upstream node instead of scattering across the
+	// deployment. Attached once here: both the fresh and the resumed path land
+	// on the same thread value.
+	ctx = llm.WithThreadID(ctx, thread.ID)
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), req.Question)
 	if err != nil {
@@ -333,6 +340,10 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such message", http.StatusForbidden)
 		return
 	}
+	// A re-explain is another turn in the same conversation, so it pins to the
+	// same upstream node as the turn it re-answers.
+	ctx = llm.WithThreadID(ctx, msg.ThreadID)
+
 	sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, id)
 	if err != nil {
 		slog.Error("resolve sources failed", "err", err)
