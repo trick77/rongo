@@ -291,6 +291,7 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
 		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -337,6 +338,7 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
 		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -351,6 +353,28 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	}
 	if cfg.OIDCIssuer != "https://auth.example.com" {
 		t.Errorf("OIDCIssuer = %q, want it without the trailing slash", cfg.OIDCIssuer)
+	}
+}
+
+// Behind a TLS-terminating proxy the process only ever sees plain HTTP, so
+// nothing but this check can notice that the public URL says http:// — and the
+// session and nonce cookies would go out without Secure while the login works.
+func TestLoad_oidcModeRejectsAnHttpPublicURL(t *testing.T) {
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET":     validSecret,
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "http://rongo.example.com",
+		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal to run OIDC on a non-https public URL")
 	}
 }
 

@@ -34,13 +34,25 @@ jobs:
         name: Check whether the rongo package exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        #
+        # Only a 404 means "not published yet". Treating every non-2xx as that
+        # would turn a 403 on the packages endpoint into a workflow that skips
+        # the retention step, stays green every week, and lets GHCR grow
+        # unbounded with nobody looking — the worst shape a cleanup job can
+        # fail in. Anything else fails the run.
         run: |
-          if gh api "users/${{ github.repository_owner }}/packages/container/rongo" --silent 2>/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No rongo container package yet — nothing to clean." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          status=$(gh api "users/${{ github.repository_owner }}/packages/container/rongo" \
+            --silent -i 2>/dev/null | head -n1 | awk '{print $2}' || true)
+          case "$status" in
+            200)
+              echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "No rongo container package yet — nothing to clean." >> "$GITHUB_STEP_SUMMARY" ;;
+            *)
+              echo "::error::Unexpected HTTP status '${status:-none}' from the packages API; refusing to treat this as an empty package."
+              exit 1 ;;
+          esac
 
       - if: steps.package-check.outputs.exists == 'true'
         uses: snok/container-retention-policy@v3.1.0

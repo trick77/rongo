@@ -15,11 +15,40 @@ type Me = { subject: string; email: string; is_admin: boolean };
  * "checking" is a real state, not a detail: rendering the app first and
  * redirecting afterwards shows a flash of an empty, signed-out UI on every
  * reload.
+ *
+ * "halted" is what keeps the automatic redirect from becoming a loop. Both the
+ * failed callback and a completed sign-out land on a URL that says so, and the
+ * gate must offer a button there rather than send the browser back to a
+ * provider that will return to the same place.
  */
 type Session =
   | { state: "checking" }
   | { state: "in"; me: Me }
-  | { state: "out" };
+  | { state: "out" }
+  | { state: "halted"; message: string };
+
+/**
+ * A callback that failed and a sign-out that finished both look like "no
+ * session" to /api/me, and redirecting on either is a tight loop:
+ *
+ *   - failed callback: the provider still has a live session, so it answers the
+ *     next /api/auth/login without a prompt, and the callback fails the same
+ *     way. Two tabs opening the app at once are enough to trigger it — the
+ *     second StartLogin overwrites the first tab's state cookie.
+ *   - after sign-out: rongo revoked its own session, but the provider's is
+ *     untouched and, with consent pre-granted, hands out a fresh token without
+ *     the user seeing anything. The button would appear to do nothing.
+ */
+function haltReason(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (params.has("signed_out")) {
+    return "Abgemeldet. Die Anmeldung beim Provider besteht weiter — dort abmelden, um sie ebenfalls zu beenden.";
+  }
+  if (params.has("auth_error")) {
+    return "Die Anmeldung konnte nicht abgeschlossen werden. Erneut versuchen; bleibt es dabei, steht der Grund im Server-Log.";
+  }
+  return null;
+}
 
 function useSession(): Session {
   const [session, setSession] = useState<Session>({ state: "checking" });
@@ -27,25 +56,41 @@ function useSession(): Session {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      const halt = haltReason(window.location.search);
+      if (halt !== null) {
+        setSession({ state: "halted", message: halt });
+        return;
+      }
+      let res: Response;
       try {
-        const res = await fetch("/api/me");
-        if (cancelled) return;
-        if (res.status === 401) {
-          setSession({ state: "out" });
-          // A full navigation, not a fetch: the provider answers with a login
-          // page and a redirect chain, neither of which a fetch can follow
-          // into the address bar.
-          window.location.href = "/api/auth/login";
-          return;
-        }
-        if (!res.ok) throw new Error(String(res.status));
-        setSession({ state: "in", me: (await res.json()) as Me });
+        res = await fetch("/api/me");
       } catch {
         // A network error is not a signed-out session. Redirecting here would
-        // bounce the user to the provider every time the backend hiccups, so
+        // bounce the user to the provider every time the connection drops, so
         // the app renders and its panels report their own failures.
         if (!cancelled) setSession({ state: "in", me: { subject: "", email: "", is_admin: false } });
+        return;
       }
+      if (cancelled) return;
+      if (res.status === 401) {
+        setSession({ state: "out" });
+        // A full navigation, not a fetch: the provider answers with a login
+        // page and a redirect chain, neither of which a fetch can follow into
+        // the address bar.
+        window.location.href = "/api/auth/login";
+        return;
+      }
+      if (!res.ok) {
+        // A 500, or the 503 requireAuth answers when auth is unconfigured.
+        // Rendering the app here would show a fully chromed, apparently
+        // signed-in UI whose every panel then fails on its own.
+        setSession({
+          state: "halted",
+          message: `Die Sitzung konnte nicht geprüft werden (HTTP ${res.status}).`,
+        });
+        return;
+      }
+      setSession({ state: "in", me: (await res.json()) as Me });
     })();
     return () => {
       cancelled = true;
@@ -59,9 +104,9 @@ async function logout() {
   try {
     const res = await fetch("/api/auth/logout", { method: "POST" });
     const body = (await res.json()) as { redirect_url?: string };
-    window.location.href = body.redirect_url ?? "/";
+    window.location.href = body.redirect_url ?? "/?signed_out=1";
   } catch {
-    // The cookie may or may not be gone; reloading lets the session gate above
+    // The cookie may or may not be gone; reloading lets the session gate
     // decide, which is the only place that answer is authoritative.
     window.location.reload();
   }
@@ -117,9 +162,24 @@ export default function App() {
   if (session.state !== "in") {
     return (
       <main className="mx-auto max-w-6xl p-8">
+        {/*
+          Deliberately no <h1>: the app's own heading is how the tests and a
+          reader tell "signed in" from "not yet", and repeating it here would
+          make the gate screen indistinguishable from the app.
+        */}
         <p className="text-sm text-[var(--color-ink-soft)]">
-          {session.state === "checking" ? "Anmeldung wird geprüft …" : "Weiterleitung zur Anmeldung …"}
+          {session.state === "checking" && "Anmeldung wird geprüft …"}
+          {session.state === "out" && "Weiterleitung zur Anmeldung …"}
+          {session.state === "halted" && session.message}
         </p>
+        {session.state === "halted" && (
+          <a
+            href="/api/auth/login"
+            className="mt-4 inline-block text-sm text-[var(--color-accent)]"
+          >
+            Anmelden
+          </a>
+        )}
       </main>
     );
   }

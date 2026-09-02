@@ -131,8 +131,10 @@ func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["redirect_url"] != "/" {
-		t.Errorf("redirect_url = %q, want %q", body["redirect_url"], "/")
+	// Not "/": the provider's session survives this, so landing on the app root
+	// would redirect to the provider and sign the user straight back in.
+	if body["redirect_url"] != "/?signed_out=1" {
+		t.Errorf("redirect_url = %q, want %q", body["redirect_url"], "/?signed_out=1")
 	}
 	if c := cookie(t, rec, auth.SessionCookie); c.Value != "" || c.MaxAge >= 0 {
 		t.Errorf("session cookie = %+v, want it cleared", c)

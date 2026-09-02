@@ -65,5 +65,9 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.ClearSessionCookie(w, s.deps.PublicURL)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"redirect_url": "/"})
+	// Not "/": the provider's session is untouched by this, so landing on the
+	// app root would auto-redirect to the provider, get a token without a
+	// prompt, and sign the user straight back in — a logout button that visibly
+	// does nothing. The marker tells the SPA to stop and say what happened.
+	_ = json.NewEncoder(w).Encode(map[string]string{"redirect_url": "/?signed_out=1"})
 }

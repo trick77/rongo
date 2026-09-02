@@ -206,6 +206,14 @@ func Load() (Config, error) {
 				return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=oidc requires %s", m.name)
 			}
 		}
+		// The session and the OIDC nonce cookies get their Secure flag from
+		// this URL alone. Behind a TLS-terminating proxy the process only sees
+		// plain HTTP, so nothing else can notice that an operator wrote
+		// http://; the login works and the cookies go out readable.
+		if !strings.HasPrefix(cfg.PublicURL, "https://") {
+			return Config{}, fmt.Errorf(
+				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_PUBLIC_URL, got %q; the session cookie's Secure flag is derived from it", cfg.PublicURL)
+		}
 	default:
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
 	}
