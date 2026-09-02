@@ -117,3 +117,46 @@ func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
+
+// SessionTTL is how long a session stays valid after it is created. Authelia
+// runs its own, shorter inactivity window; this one only bounds how long
+// rongo's own cookie is worth anything if the provider is never consulted
+// again.
+const SessionTTL = 30 * 24 * time.Hour
+
+// CreateSessionFromClaims turns a verified OIDC identity into a local user and
+// a session, and reports when that session expires.
+//
+// adminGroup is the group whose members are admins. Empty means no group check
+// at all: every user the provider let through is an admin. That is peeq's
+// default and the honest one while the authorization decision still lives
+// entirely in Authelia's authorization_policy — a group name invented here
+// would look like a second gate without being one.
+func (s *Service) CreateSessionFromClaims(claims Claims, adminGroup string) (string, time.Time, User, error) {
+	if claims.Subject == "" {
+		return "", time.Time{}, User{}, errors.New("oidc claims carry no subject")
+	}
+	u, err := s.UpsertUser(claims.Subject, claims.Email, isAdmin(claims.Groups, adminGroup))
+	if err != nil {
+		return "", time.Time{}, User{}, err
+	}
+	token, err := s.CreateSession(u.ID, SessionTTL)
+	if err != nil {
+		return "", time.Time{}, User{}, err
+	}
+	return token, time.Now().Add(SessionTTL), u, nil
+}
+
+// isAdmin reports whether the claims carry the admin group. An empty group name
+// means the check is off; see CreateSessionFromClaims.
+func isAdmin(groups []string, adminGroup string) bool {
+	if adminGroup == "" {
+		return true
+	}
+	for _, g := range groups {
+		if g == adminGroup {
+			return true
+		}
+	}
+	return false
+}

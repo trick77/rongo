@@ -284,6 +284,100 @@ func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 	}
 }
 
+// A half-configured OIDC deployment would start, serve the SPA and then refuse
+// every login with a callback error, which reads as a provider outage rather
+// than a missing variable. Each of the four is fatal at boot instead.
+func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
+	full := map[string]string{
+		"BACKEND_SESSION_SECRET":     validSecret,
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
+		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
+	}
+	for _, missing := range []string{
+		"BACKEND_OIDC_ISSUER",
+		"BACKEND_OIDC_CLIENT_ID",
+		"BACKEND_OIDC_CLIENT_SECRET",
+		"BACKEND_OIDC_REDIRECT_URL",
+	} {
+		t.Run("without "+missing, func(t *testing.T) {
+			env := map[string]string{}
+			for k, v := range full {
+				env[k] = v
+			}
+			env[missing] = ""
+			setEnv(t, env)
+
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load() err = nil, want an error about %s", missing)
+			}
+		})
+	}
+
+	t.Run("with the whole block", func(t *testing.T) {
+		setEnv(t, full)
+
+		cfg, err := Load()
+
+		if err != nil {
+			t.Fatalf("Load() err = %v", err)
+		}
+		if cfg.OIDCClientID != "rongo" {
+			t.Errorf("OIDCClientID = %q, want %q", cfg.OIDCClientID, "rongo")
+		}
+	})
+}
+
+// Authelia's issuer is the bare origin. A trailing slash produces a double
+// slash in the discovery URL, and discovery 404s.
+func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET":     validSecret,
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
+		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
+	})
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.OIDCIssuer != "https://auth.example.com" {
+		t.Errorf("OIDCIssuer = %q, want it without the trailing slash", cfg.OIDCIssuer)
+	}
+}
+
+// Behind a TLS-terminating proxy the process only ever sees plain HTTP, so
+// nothing but this check can notice that the public URL says http:// — and the
+// session and nonce cookies would go out without Secure while the login works.
+func TestLoad_oidcModeRejectsAnHttpPublicURL(t *testing.T) {
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET":     validSecret,
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_PUBLIC_URL":         "http://rongo.example.com",
+		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal to run OIDC on a non-https public URL")
+	}
+}
+
 func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET": validSecret,

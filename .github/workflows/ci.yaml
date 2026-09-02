@@ -1,0 +1,62 @@
+name: CI
+
+# Tests run on pull requests (feature branches). Master does not run tests — it
+# builds and pushes the image (see release.yaml). No image build happens here.
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Read the version from go.mod rather than pinning it here, so the
+          # toolchain cannot drift from what the module actually declares.
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      # universal-ctags and ripgrep are not test fixtures: the indexer shells
+      # out to both, and rongo verifies at startup that ctags is the universal
+      # build rather than the BSD one. Without them the tests that walk a real
+      # fixture repository fail for the wrong reason.
+      - name: Install ripgrep and universal-ctags
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep universal-ctags
+      - run: cd backend && go build ./...
+      - run: cd backend && go vet ./...
+      # gofmt is not covered by `go vet`.
+      - name: gofmt
+        run: |
+          cd backend
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt'd. Run: gofmt -w ."
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: make test
+
+  ui:
+    name: UI (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: cd ui && npm ci
+      # `npm run build` is `tsc -b && vite build`, so this is the typecheck too.
+      - run: cd ui && npm run build
+      - run: cd ui && npm run test -- --run

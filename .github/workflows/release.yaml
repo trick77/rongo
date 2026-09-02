@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+    # Only cut a release when something that ships actually changed. The image is
+    # built from ui/ and backend/ (see backend/Containerfile), and nothing else in
+    # the tree reaches it.
+    #
+    # Without this, a .gitignore line or a comment fix each cut a full version,
+    # image build, GHCR push and git tag. Measured in the sibling peeq repo, which
+    # had the same unfiltered trigger: 38 pushes produced 38 releases, 16 of which
+    # changed nothing that ships.
+    #
+    # An ignore-list rather than an allow-list on purpose: a new top-level
+    # directory starts out releasing, which is the safe default. Forgetting to add
+    # a path here costs a redundant release; forgetting to remove one would
+    # silently skip a needed release.
+    #
+    # workflow_dispatch below is unfiltered, so a release can always be forced by
+    # hand — including after a change to this workflow, which .github/** ignores.
+    paths-ignore:
+      - "docs/**"
+      - "hack/**"
+      - ".github/**"
+      - "**/*.md"
+      - ".gitignore"
+      - ".env.example"
+      - "repos.example.yaml"
+      - "Makefile"
+      - "compose.yaml"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: ver
+        name: Compute next version
+        run: |
+          BUMP="${{ github.event.inputs.bump || 'patch' }}"
+          LATEST=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          LATEST="${LATEST:-0.0.0}"
+          IFS=. read -r MA MI PA <<< "$LATEST"
+          case "$BUMP" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          NEXT="$MA.$MI.$PA"
+          SHORT=$(git rev-parse --short HEAD)
+          echo "previous=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "major=$MA"     >> "$GITHUB_OUTPUT"
+          echo "minor=$MI"     >> "$GITHUB_OUTPUT"
+          echo "short=$SHORT"  >> "$GITHUB_OUTPUT"
+          echo "Bumping $LATEST -> $NEXT ($BUMP) at $SHORT" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./backend/Containerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
+            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.major }}.${{ steps.ver.outputs.minor }}
+            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.major }}
+            ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.short }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Tag only AFTER the image push succeeds, so a failed release never leaves
+      # an orphan git tag behind — the next version is derived from the newest
+      # tag, so an orphan would permanently burn that number.
+      #
+      # Create the tag via the REST API rather than `git push`: it needs no git
+      # credentials in the checkout and is a single atomic call that fails with a
+      # clear HTTP error. Every repo in this family does it this way so the
+      # release workflows stay comparable.
+      - name: Create tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/git/refs" \
+            -f ref="refs/tags/${{ steps.ver.outputs.version }}" \
+            -f sha="${{ github.sha }}"
+
+      # Runs after the tag exists, so the release attaches to it rather than
+      # creating a second pointer at the same commit.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --notes "Container image: \`ghcr.io/${{ github.repository }}:$VERSION\`"
