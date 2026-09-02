@@ -33,13 +33,13 @@ type Asker interface {
 // record. The underlying error may quote an upstream response body, and the
 // thread history is served back to the browser too — a generic message in one
 // place and the raw text in the other would leak it through the other door.
-const turnFailed = "Der Zug ist fehlgeschlagen."
+const turnFailed = "The turn failed."
 
 // basisGone is what a re-explain says when the code an answer was written
 // from is no longer indexed. Not turnFailed: the pipeline never ran, and
-// telling the reader "der Zug ist fehlgeschlagen" would claim a failure that
+// telling the reader "the turn failed" would claim a failure that
 // did not happen — the truth is the material itself is gone.
-const basisGone = "Die Grundlage dieser Antwort ist nicht mehr indexiert."
+const basisGone = "The basis of this answer is no longer indexed."
 
 // errNotYours separates "this thread is not yours" from "the query failed".
 // Collapsing them turns a locked database into a 403 and hands its text to the

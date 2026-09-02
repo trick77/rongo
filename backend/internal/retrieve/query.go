@@ -87,7 +87,7 @@ func BuildFTSQueries(q string) []FTSTier {
 	}
 
 	tiers := []FTSTier{{Match: strict, Weight: WeightKeywordStrict}}
-	// Every term was a function word ("wie funktioniert das"): there is no
+	// Every term was a function word ("how does this work"): there is no
 	// content query to fall back to, so the strict rung stands alone.
 	if len(content) == 0 {
 		return tiers

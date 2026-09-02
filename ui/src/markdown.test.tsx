@@ -3,76 +3,76 @@ import { render, screen } from "@testing-library/react";
 import Markdown from "./markdown";
 
 describe("Markdown", () => {
-  it("macht aus # eine Ueberschrift und nicht aus dem Zeichen selbst Text", () => {
-    const { container } = render(<Markdown text={"# Der Mechanismus\n\nEin Absatz."} />);
-    expect(container.querySelector("h2")?.textContent).toBe("Der Mechanismus");
+  it("turns # into a heading rather than rendering the character itself", () => {
+    const { container } = render(<Markdown text={"# The mechanism\n\nA paragraph."} />);
+    expect(container.querySelector("h2")?.textContent).toBe("The mechanism");
     expect(container.textContent).not.toContain("#");
   });
 
-  it("setzt **fett** und `Code` als Auszeichnung", () => {
-    const { container } = render(<Markdown text={"Der **Job** ruft `SendTeaser` auf."} />);
-    expect(container.querySelector("strong")?.textContent).toBe("Job");
+  it("renders **bold** and `code` as markup", () => {
+    const { container } = render(<Markdown text={"The **job** calls `SendTeaser`."} />);
+    expect(container.querySelector("strong")?.textContent).toBe("job");
     expect(container.querySelector("code")?.textContent).toBe("SendTeaser");
-    expect(container.textContent).toBe("Der Job ruft SendTeaser auf.");
+    expect(container.textContent).toBe("The job calls SendTeaser.");
   });
 
-  it("rendert einen Codeblock als Block, nicht als Absatz voller Backticks", () => {
+  it("renders a code block as a block, not a paragraph full of backticks", () => {
     const { container } = render(
-      <Markdown text={"Vorher.\n\n```go\nfunc main() {}\n```\n\nNachher."} />,
+      <Markdown text={"Before.\n\n```go\nfunc main() {}\n```\n\nAfter."} />,
     );
     expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
     expect(container.textContent).not.toContain("```");
   });
 
-  it("rendert Aufzaehlungen als Liste", () => {
-    const { container } = render(<Markdown text={"- eins\n- zwei\n"} />);
+  it("renders bullet points as a list", () => {
+    const { container } = render(<Markdown text={"- one\n- two\n"} />);
     expect(container.querySelectorAll("li").length).toBe(2);
-    expect(container.querySelectorAll("li")[1].textContent).toBe("zwei");
+    expect(container.querySelectorAll("li")[1].textContent).toBe("two");
   });
 
   // The named attack. Every claim in an answer carries a marker; a renderer
   // that treats brackets as syntax — link parsing, "tidy up stray brackets" —
   // deletes the evidence trail while looking like it worked.
-  describe("Belegmarken", () => {
-    it("bleiben im Fliesstext sichtbar", () => {
-      render(<Markdown text={"Der Versand laeuft ueber einen Job [1], gestartet vom Scheduler [12]."} />);
+  describe("citation markers", () => {
+    it("stay visible in running text", () => {
+      render(<Markdown text={"Shipping runs through a job [1], started by the scheduler [12]."} />);
       expect(screen.getByText(/\[1\]/)).toBeTruthy();
       expect(screen.getByText(/\[12\]/)).toBeTruthy();
     });
 
-    it("bleiben in fettem Text sichtbar", () => {
-      const { container } = render(<Markdown text={"**Nur der Job [3] schreibt.**"} />);
-      expect(container.querySelector("strong")?.textContent).toBe("Nur der Job [3] schreibt.");
+    it("stay visible in bold text", () => {
+      const { container } = render(<Markdown text={"**Only the job [3] writes.**"} />);
+      expect(container.querySelector("strong")?.textContent).toBe("Only the job [3] writes.");
     });
 
-    it("bleiben neben Inline-Code sichtbar", () => {
-      const { container } = render(<Markdown text={"`SendTeaser` [7] wird aufgerufen."} />);
-      expect(container.textContent).toBe("SendTeaser [7] wird aufgerufen.");
+    it("stay visible next to inline code", () => {
+      const { container } = render(<Markdown text={"`SendTeaser` [7] is called."} />);
+      expect(container.textContent).toBe("SendTeaser [7] is called.");
     });
 
-    it("bleiben in einer Ueberschrift sichtbar", () => {
-      const { container } = render(<Markdown text={"## Der Versand [2]"} />);
-      expect(container.querySelector("h3")?.textContent).toBe("Der Versand [2]");
+    it("stay visible in a heading", () => {
+      const { container } = render(<Markdown text={"## Shipping [2]"} />);
+      expect(container.querySelector("h3")?.textContent).toBe("Shipping [2]");
     });
   });
 
   // The answer is re-rendered on every streamed token, so half-written markup
   // is the normal case here, not an edge case.
-  describe("waehrend des Streamens", () => {
-    it("verschluckt einen noch offenen Codeblock nicht", () => {
+  describe("while streaming", () => {
+    it("does not swallow a code block that is still open", () => {
       const { container } = render(<Markdown text={"Text.\n\n```go\nfunc main() {"} />);
       expect(container.querySelector("pre code")?.textContent).toBe("func main() {");
       expect(container.textContent).toContain("Text.");
     });
 
-    it("zeigt ein angefangenes **fett als Text, statt den Rest zu schlucken", () => {
-      const { container } = render(<Markdown text={"Der **Job ruft"} />);
-      expect(container.textContent).toBe("Der **Job ruft");
+    it("shows a half-typed **bold as text instead of swallowing the rest", () => {
+      const { container } = render(<Markdown text={"The **job calls"} />);
+      expect(container.textContent).toBe("The **job calls");
     });
 
-    it("zeigt ein angefangenes `Code als Text", () => {
-      const { container } = render(<Markdown text={"Der `SendTeas"} />);
-      expect(container.textContent).toBe("Der `SendTeas");
+    it("shows a half-typed `code as text", () => {
+      const { container } = render(<Markdown text={"The `SendTeas"} />);
+      expect(container.textContent).toBe("The `SendTeas");
     });
   });
 });

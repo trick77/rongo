@@ -424,7 +424,7 @@ func TestChunkFile_docCommentEditChangesTheHash(t *testing.T) {
 	// vector would predate the comment it was supposed to include.
 	edited := strings.Replace(javaSource,
 		"/** Runs one pass over the abandoned carts. */",
-		"/** Sendet die Teaser-Mail fuer einen abgebrochenen Warenkorb. */", 1)
+		"/** Sends the teaser mail for an abandoned cart. */", 1)
 
 	// When
 	a := ChunkFile("r", "master", "A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())

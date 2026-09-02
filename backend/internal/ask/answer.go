@@ -59,33 +59,32 @@ func NewAnswerer(c *llm.Client) *Answerer {
 	return &Answerer{llm: c}
 }
 
-const answerCommon = `Du erklaerst Code auf Deutsch in Schweizer Rechtschreibung. Verwende nie das Zeichen ß, immer ss.
+const answerCommon = `You explain code in English.
 
-Du bekommst nummerierte Quellen. Regeln, ohne Ausnahme:
+You are given numbered sources. The rules, without exception:
 
-- Jede Aussage stuetzt sich auf eine Quelle und traegt deren Marke, etwa [1].
-- Erfinde nichts. Was in den Quellen nicht steht, existiert fuer dich nicht.
-- Fuehrt der Mechanismus in Code, der nicht vorliegt, sage das: Aufruf und
-  Konfiguration sind sichtbar, das Innere nicht.
-- Ein Kommentar ist eine Behauptung, kein Beweis. Was der Code nicht einloest,
-  gilt nicht — und wenn Kommentar und Code sich widersprechen, sage es.
-- Nur Marken benutzen, die es gibt. Eine erfundene Nummer ist schlimmer als
-  keine Marke.`
+- Every statement rests on a source and carries its marker, such as [1].
+- Invent nothing. What is not in the sources does not exist for you.
+- If the mechanism leads into code that is not present, say so: the call and
+  the configuration are visible, the inside is not.
+- A comment is a claim, not proof. What the code does not deliver does not
+  hold - and where comment and code contradict each other, say it.
+- Only use markers that exist. An invented number is worse than no marker.`
 
 const answerBA = `
-Zielgruppe: Business Analyst. Erklaere den Mechanismus in drei bis fuenf
-Absaetzen, in der Sprache des Fachbereichs. Kein Quelltext, keine Signaturen,
-keine Dateipfade im Fliesstext. Beantworte die Frage und hoere dann auf —
-Randfaelle gehoeren in eine Nachfrage.`
+Audience: business analyst. Explain the mechanism in three to five paragraphs,
+in the language of the business domain. No source code, no signatures, no file
+paths in running text. Answer the question and then stop - edge cases belong in
+a follow-up.`
 
 const answerDev = `
-Zielgruppe: Developer. Nenne Typen, Funktionen und Dateien beim Namen und
-zitiere kurze Ausschnitte, wo sie die Erklaerung tragen. Beschreibe den
-Kontrollfluss so, dass man ihm im Code folgen kann.`
+Audience: developer. Name types, functions and files, and quote short excerpts
+where they carry the explanation. Describe the control flow so that it can be
+followed in the code.`
 
 // nothingFound is the answer when nothing was gathered. It is not an apology
 // and not a guess: the caller adds the terms that were tried.
-const nothingFound = "Dazu habe ich im indexierten Code nichts gefunden."
+const nothingFound = "I found nothing about this in the indexed code."
 
 var markerRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 
@@ -112,10 +111,6 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		{Role: "system", Content: system},
 		{Role: "user", Content: renderSources(question, sources)},
 	}, func(tok string) {
-		// Normalised on the way through, so neither the reader nor the stored
-		// record ever sees a ß. Instructing the model is not enough: it is
-		// trained on German, not Swiss German, and it slips.
-		tok = swiss(tok)
 		text.WriteString(tok)
 		if onToken != nil {
 			onToken(tok)
@@ -136,16 +131,16 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 // marker, so the model never has to invent an identifier for a file.
 func renderSources(question string, sources []Source) string {
 	var b strings.Builder
-	b.WriteString("Frage: ")
+	b.WriteString("Question: ")
 	b.WriteString(question)
-	b.WriteString("\n\nQuellen:\n")
+	b.WriteString("\n\nSources:\n")
 	for i, s := range sources {
 		fmt.Fprintf(&b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
 		}
 		if s.Reason != "" && s.Reason != "hit" {
-			fmt.Fprintf(&b, " [hierher ueber %s]", strings.TrimPrefix(s.Reason, "reference:"))
+			fmt.Fprintf(&b, " [reached via %s]", strings.TrimPrefix(s.Reason, "reference:"))
 		}
 		b.WriteString("\n")
 		b.WriteString(s.Text)
@@ -211,7 +206,3 @@ func withoutCode(s string) string {
 }
 
 var inlineCodeRe = regexp.MustCompile("`[^`\n]*`")
-
-// swiss applies Swiss orthography. ß maps to ss in every position, which is the
-// whole of the rule.
-func swiss(s string) string { return strings.ReplaceAll(s, "ß", "ss") }

@@ -10,83 +10,83 @@ const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 const candidates = [
   {
     idx: 0,
-    title: "Ueber den Login-Service",
-    summary: "Die Anmeldung laeuft ueber den zentralen Login-Service.",
+    title: "Through the login service",
+    summary: "Sign-in runs through the central login service.",
     repo: "peeq",
     branch: "master",
   },
   {
     idx: 1,
-    title: "Ueber den Legacy-Adapter",
-    summary: "Der alte Adapter meldet Nutzer direkt gegen LDAP an.",
+    title: "Through the legacy adapter",
+    summary: "The old adapter signs users in straight against LDAP.",
     repo: "peeq-legacy",
     branch: "release-2024.3",
   },
 ];
 
 describe("Clarify", () => {
-  it("nennt jeden Kandidaten mit Repo und einer Zeile", () => {
+  it("names every candidate with its repo and one line", () => {
     strict(<Clarify candidates={candidates} onChoose={() => {}} />);
 
-    expect(screen.getByText("Ueber den Login-Service")).toBeTruthy();
+    expect(screen.getByText("Through the login service")).toBeTruthy();
     expect(screen.getByText("peeq · master")).toBeTruthy();
-    expect(screen.getByText(/zentralen Login-Service/)).toBeTruthy();
+    expect(screen.getByText(/central login service/)).toBeTruthy();
 
-    expect(screen.getByText("Ueber den Legacy-Adapter")).toBeTruthy();
+    expect(screen.getByText("Through the legacy adapter")).toBeTruthy();
     expect(screen.getByText("peeq-legacy · release-2024.3")).toBeTruthy();
-    expect(screen.getByText(/LDAP an/)).toBeTruthy();
+    expect(screen.getByText(/against LDAP/)).toBeTruthy();
   });
 
-  it("meldet beim Waehlen den Index des Kandidaten zurueck", async () => {
+  it("reports the candidate index back on a choice", async () => {
     const onChoose = vi.fn();
     const user = userEvent.setup();
     strict(<Clarify candidates={candidates} onChoose={onChoose} />);
 
-    await user.click(screen.getByText("Ueber den Legacy-Adapter"));
+    await user.click(screen.getByText("Through the legacy adapter"));
 
     expect(onChoose).toHaveBeenCalledWith(1);
   });
 
-  it("klappt die Karte nach der Wahl auf eine Zeile zusammen und bleibt im Thread", () => {
+  it("collapses the card to one line after the choice and stays in the thread", () => {
     // The decision belongs in the record: sometimes you only notice from the
     // answer that you picked the wrong mechanism, which is why the card
     // stays — just collapsed.
     strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
 
-    expect(screen.getByText(/Gewählt: Ueber den Login-Service/)).toBeTruthy();
-    expect(screen.queryByText(/zentralen Login-Service/)).toBeNull();
-    expect(screen.queryByText("Ueber den Legacy-Adapter")).toBeNull();
+    expect(screen.getByText(/Chosen: Through the login service/)).toBeTruthy();
+    expect(screen.queryByText(/central login service/)).toBeNull();
+    expect(screen.queryByText("Through the legacy adapter")).toBeNull();
   });
 
-  it("zeigt beim Aufklappen der zusammengeklappten Karte jeden Kandidaten, den gewaehlten markiert", async () => {
+  it("shows every candidate when the collapsed card is reopened, the chosen one marked", async () => {
     const user = userEvent.setup();
     strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
 
-    await user.click(screen.getByRole("button", { name: /Gewählt/ }));
+    await user.click(screen.getByRole("button", { name: /Chosen/ }));
 
-    expect(screen.getByText("Ueber den Login-Service")).toBeTruthy();
-    expect(screen.getByText("Ueber den Legacy-Adapter")).toBeTruthy();
-    const chosenButton = screen.getByText("Ueber den Login-Service").closest("button");
-    expect(chosenButton?.textContent).toContain("Gewählt");
+    expect(screen.getByText("Through the login service")).toBeTruthy();
+    expect(screen.getByText("Through the legacy adapter")).toBeTruthy();
+    const chosenButton = screen.getByText("Through the login service").closest("button");
+    expect(chosenButton?.textContent).toContain("Chosen");
   });
 
-  it("laesst einen anderen Kandidaten nach der Wahl anklickbar — er startet einen neuen Zug", async () => {
+  it("leaves another candidate clickable after the choice - it starts a new turn", async () => {
     const onChoose = vi.fn();
     const user = userEvent.setup();
     strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={onChoose} />);
 
-    await user.click(screen.getByRole("button", { name: /Gewählt/ }));
-    await user.click(screen.getByText("Ueber den Legacy-Adapter"));
+    await user.click(screen.getByRole("button", { name: /Chosen/ }));
+    await user.click(screen.getByText("Through the legacy adapter"));
 
     expect(onChoose).toHaveBeenCalledWith(1);
   });
 
-  it("dreht den Chevron beim Oeffnen um 90 Grad, ohne das Glyph zu tauschen", async () => {
+  it("rotates the chevron by 90 degrees on open, without swapping the glyph", async () => {
     // AGENTS.md: chevron only — no triangle, no plus/minus, no glyph swap.
     const user = userEvent.setup();
     strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
 
-    const button = screen.getByRole("button", { name: /Gewählt/ });
+    const button = screen.getByRole("button", { name: /Chosen/ });
     const pathBefore = button.querySelector("svg path")?.getAttribute("d");
     expect(button.querySelector("svg")?.getAttribute("class")).not.toContain("rotate-90");
 

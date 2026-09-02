@@ -28,13 +28,13 @@ func TestBuildFTSMatch_reEmitsRatherThanEscapes(t *testing.T) {
 	}
 }
 
-func TestBuildFTSQueries_aGermanQuestionStillGetsAContentRung(t *testing.T) {
-	// Given: rongo's users ask in German while the code is English. With an
-	// English-only stopword list the content rung would be identical to the
-	// strict rung, get dropped as redundant, and the ladder would collapse to
-	// its OR floor at weight 0.4 — BELOW the semantic lane. Nothing would look
-	// broken: results still come back, just semantic-dominated.
-	q := "Wie wird verhindert, dass zwei Migrationen gleichzeitig laufen?"
+func TestBuildFTSQueries_aNaturalQuestionStillGetsAContentRung(t *testing.T) {
+	// Given: a question phrased as a sentence. Without a stopword list the
+	// content rung would be identical to the strict rung, get dropped as
+	// redundant, and the ladder would collapse to its OR floor at weight 0.4 —
+	// BELOW the semantic lane. Nothing would look broken: results still come
+	// back, just semantic-dominated.
+	q := "How is it prevented that two migrations run at the same time?"
 
 	// When
 	tiers := BuildFTSQueries(q)
@@ -48,22 +48,22 @@ func TestBuildFTSQueries_aGermanQuestionStillGetsAContentRung(t *testing.T) {
 		t.Errorf("second rung weight = %v, want the content weight %v", content.Weight, WeightKeywordContent)
 	}
 	if len(strings.Fields(content.Match)) >= len(strings.Fields(strict.Match)) {
-		t.Errorf("content rung %q is not shorter than the strict rung %q; the German function words were not dropped",
+		t.Errorf("content rung %q is not shorter than the strict rung %q; the function words were not dropped",
 			content.Match, strict.Match)
 	}
-	for _, w := range []string{`"wie"`, `"wird"`, `"dass"`} {
+	for _, w := range []string{`"how"`, `"is"`, `"that"`} {
 		if strings.Contains(content.Match, w) {
 			t.Errorf("content rung still carries %s", w)
 		}
 	}
-	if !strings.Contains(content.Match, `"migrationen"`) {
+	if !strings.Contains(content.Match, `"migrations"`) {
 		t.Errorf("content rung %q dropped the topical word", content.Match)
 	}
 }
 
 func TestBuildFTSQueries_rungsDescendInWeight(t *testing.T) {
 	// Given / When
-	tiers := BuildFTSQueries("Wie wird die Teaser-Mail fuer abgebrochene Warenkoerbe verschickt?")
+	tiers := BuildFTSQueries("How is the teaser mail for abandoned carts sent?")
 
 	// Then: the ladder must never hand a looser rung more confidence than a
 	// stricter one, since each rung that answers becomes its own lane.
@@ -99,7 +99,7 @@ func TestBuildFTSQueries_dropsRedundantRungs(t *testing.T) {
 func TestBuildFTSQueries_allStopwordsLeavesTheStrictRungAlone(t *testing.T) {
 	// Given: a question with no topical word at all.
 	// When
-	tiers := BuildFTSQueries("wie ist das denn so")
+	tiers := BuildFTSQueries("how is it that they were")
 
 	// Then: there is no content query to fall back to, and inventing one from
 	// nothing would match the whole corpus.

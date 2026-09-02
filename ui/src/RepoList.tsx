@@ -28,10 +28,10 @@ function shortSha(sha: string): string {
 }
 
 function ago(iso: string | null): string {
-  if (!iso) return "nie";
+  if (!iso) return "never";
   const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return "unbekannt";
-  return then.toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" });
+  if (Number.isNaN(then.getTime())) return "unknown";
+  return then.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
 }
 
 function rowState(r: Repo): string {
@@ -57,7 +57,7 @@ export default function RepoList() {
         const repos = (await res.json()) as Repo[];
         if (!cancelled) setState({ kind: "loaded", repos });
       } catch {
-        if (!cancelled) setState({ kind: "failed", message: "Netzwerkfehler" });
+        if (!cancelled) setState({ kind: "failed", message: "network error" });
       }
     })();
     return () => {
@@ -66,13 +66,13 @@ export default function RepoList() {
   }, []);
 
   if (state.kind === "loading") {
-    return <p className="text-[var(--color-ink-soft)]">Wird geladen…</p>;
+    return <p className="text-[var(--color-ink-soft)]">Loading…</p>;
   }
 
   if (state.kind === "failed") {
     return (
       <p role="alert" className="text-[var(--color-ochre)]">
-        Der Repository-Status ist nicht abrufbar ({state.message}).
+        The repository status cannot be fetched ({state.message}).
       </p>
     );
   }
@@ -80,7 +80,7 @@ export default function RepoList() {
   if (state.repos.length === 0) {
     return (
       <p className="text-[var(--color-ink-soft)]">
-        Noch keine Repositories in <code>repos.yaml</code>.
+        No repositories in <code>repos.yaml</code> yet.
       </p>
     );
   }
@@ -91,10 +91,10 @@ export default function RepoList() {
         <tr className="border-b border-[var(--color-hairline)] text-left text-[var(--color-ink-faint)]">
           <th className="py-2 font-medium">Repository</th>
           <th className="py-2 font-medium">Branch</th>
-          <th className="py-2 font-medium">Stand</th>
-          <th className="py-2 text-right font-medium">Dateien</th>
+          <th className="py-2 font-medium">State</th>
+          <th className="py-2 text-right font-medium">Files</th>
           <th className="py-2 text-right font-medium">Chunks</th>
-          <th className="py-2 text-right font-medium">Module</th>
+          <th className="py-2 text-right font-medium">Modules</th>
         </tr>
       </thead>
       <tbody>
@@ -107,7 +107,7 @@ export default function RepoList() {
             <td className="py-2">
               <span className="font-medium">{r.name}</span>
               {!r.enabled && (
-                <span className="ml-2 text-xs text-[var(--color-ink-faint)]">Stillgelegt</span>
+                <span className="ml-2 text-xs text-[var(--color-ink-faint)]">Disabled</span>
               )}
               {r.last_error && (
                 <div className="mt-1 text-xs text-[var(--color-ochre)]">{r.last_error}</div>

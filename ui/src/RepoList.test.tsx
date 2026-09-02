@@ -32,7 +32,7 @@ afterEach(() => {
 });
 
 describe("RepoList", () => {
-  it("zeigt Zaehlungen und einen gekuerzten HEAD-SHA", async () => {
+  it("shows the counts and a shortened HEAD SHA", async () => {
     respondWith(200, [peeq]);
 
     render(<RepoList />);
@@ -46,7 +46,7 @@ describe("RepoList", () => {
     expect(screen.getByText("611255a")).toBeTruthy();
   });
 
-  it("zeigt einen verschwundenen Branch als lauten Fehler", async () => {
+  it("shows a vanished branch as a loud error", async () => {
     // A silent stop leaves the index frozen at months-old code while the page
     // looks healthy — the one failure this page exists to make visible.
     respondWith(200, [
@@ -60,25 +60,25 @@ describe("RepoList", () => {
     expect(row.getAttribute("data-state")).toBe("error");
   });
 
-  it("markiert ein stillgelegtes Repository, statt es zu verbergen", async () => {
+  it("marks a disabled repository instead of hiding it", async () => {
     respondWith(200, [peeq, { ...peeq, name: "legacy-crm", enabled: false }]);
 
     render(<RepoList />);
 
     const row = await screen.findByRole("row", { name: /legacy-crm/ });
     expect(row.getAttribute("data-state")).toBe("disabled");
-    expect(row.textContent).toContain("Stillgelegt");
+    expect(row.textContent).toContain("Disabled");
   });
 
-  it("unterscheidet 'noch nichts indexiert' von einem Fehler", async () => {
+  it("tells 'nothing indexed yet' apart from an error", async () => {
     respondWith(200, []);
 
     render(<RepoList />);
 
-    await screen.findByText(/Noch keine Repositories/);
+    await screen.findByText(/No repositories/);
   });
 
-  it("sagt es, wenn der Status nicht abrufbar ist", async () => {
+  it("says so when the status cannot be fetched", async () => {
     // Not an empty table: "nothing is configured" and "the server cannot tell
     // you" must never look the same.
     respondWith(503, "repository status unavailable");
@@ -86,8 +86,8 @@ describe("RepoList", () => {
     render(<RepoList />);
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toMatch(/nicht abrufbar/i);
+      expect(screen.getByRole("alert").textContent).toMatch(/cannot be fetched/i);
     });
-    expect(screen.queryByText(/Noch keine Repositories/)).toBeNull();
+    expect(screen.queryByText(/No repositories/)).toBeNull();
   });
 });

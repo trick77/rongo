@@ -58,12 +58,12 @@ func TestQueryTexts_expansionsAreSearchedAndTheQuestionStaysFirst(t *testing.T) 
 	// A Query carrying expansions must search all of them; one without must
 	// still search the raw question. Getting this wrong is silent — the search
 	// keeps returning results, only without the bridge.
-	q := Query{Text: "Wie kommt ein Apple TV an die Datei?"}
+	q := Query{Text: "How does an Apple TV get at the file?"}
 	if got := q.texts(); len(got) != 1 || got[0] != q.Text {
 		t.Fatalf("texts() = %v, want the raw question", got)
 	}
 
-	q.Texts = []string{q.Text, "Freigabe fuer externe Abspielgeraete", "AirPlay playbackgrant"}
+	q.Texts = []string{q.Text, "access for external playback devices", "AirPlay playbackgrant"}
 	got := q.texts()
 	if len(got) != 3 {
 		t.Fatalf("texts() = %v, want all three phrasings", got)

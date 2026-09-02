@@ -1,39 +1,38 @@
 ![rongo](rongo-wide.png)
 
-Codeverstehen ohne Umweg über eine Person. rongo indexiert die Repositories einer Organisation,
-klärt bei mehrdeutigen Fragen zurück, welcher Mechanismus gemeint ist, und erklärt ihn in der
-gewählten Rolle — **BA** fachlich, **DEV** technisch. Jede Aussage ist belegt.
+Understanding code without going through a person first. rongo indexes an organisation's
+repositories, asks back which mechanism is meant when a question is ambiguous, and explains it in
+the chosen role — **BA** in domain terms, **DEV** in technical ones. Every statement is sourced.
 
-Technische Entscheide: [`AGENTS.md`](AGENTS.md).
+Technical decisions: [`AGENTS.md`](AGENTS.md).
 
-## Stand
+## State
 
-Die Frage-Antwort-Strecke steht: Indexierung, Retrieval, Rückfrage bei
-mehrdeutigen Fragen und belegte Antworten, gemessen in
-[`docs/measurements/`](docs/measurements). Anmeldung läuft über OIDC
-(`BACKEND_AUTH_MODE=oidc`), betrieben wird der Stack mit `compose.yaml` hinter
-einem Reverse Proxy, der TLS terminiert.
+The question-answer path is in place: indexing, retrieval, the follow-up question on ambiguous
+questions and sourced answers, measured in [`docs/measurements/`](docs/measurements). Sign-in runs
+over OIDC (`BACKEND_AUTH_MODE=oidc`), and the stack is operated with `compose.yaml` behind a
+reverse proxy that terminates TLS.
 
-## Voraussetzungen
+## Requirements
 
 - Go, Node.js
 - `git`
 - `rg` (ripgrep)
-- `ctags` — **universal-ctags**, nicht die BSD-ctags, die macOS unter
-  `/usr/bin/ctags` mitliefert. Installation: `brew install universal-ctags`,
-  und sicherstellen, dass sie auf `PATH` vor `/usr/bin` steht.
+- `ctags` — **universal-ctags**, not the BSD ctags macOS ships at
+  `/usr/bin/ctags`. Install with `brew install universal-ctags`, and make sure
+  it comes before `/usr/bin` on `PATH`.
 
-## Entwicklung
+## Development
 
 ```
-cp .env.example .env   # BACKEND_SESSION_SECRET setzen, z. B. mit
+cp .env.example .env   # set BACKEND_SESSION_SECRET, e.g. with
                         # openssl rand -base64 32
-make dev                # Backend + Vite-Devserver mit Hot Reload
+make dev                # backend + Vite dev server with hot reload
 ```
 
-`make dev` startet das Backend auf `127.0.0.1:8080` und Vite auf
-`127.0.0.1:5173`; `/api/*` wird zum Backend durchgereicht.
+`make dev` starts the backend on `127.0.0.1:8080` and Vite on
+`127.0.0.1:5173`; `/api/*` is proxied through to the backend.
 
-Weitere Ziele: `make build` (Binary), `make test` (Go-Tests), `make fe-test`
-(Typecheck + Frontend-Tests). Details zu manuellen Prüfungen:
+Further targets: `make build` (binary), `make test` (Go tests), `make fe-test`
+(typecheck + frontend tests). Details on manual checks:
 [`docs/manual-verification.md`](docs/manual-verification.md).

@@ -294,177 +294,176 @@
 <div class="wrap">
 
 <header class="masthead">
-  <span class="eyebrow">Design &amp; Umsetzungsplan</span>
+  <span class="eyebrow">Design &amp; implementation plan</span>
   <h1>rongo</h1>
-  <p class="lede">Codeverstehen ohne Umweg über eine Person. Die Frage wird in der eigenen Sprache gestellt, die Antwort kommt in der gewählten Flughöhe — Business Analyst oder Developer — und jeder Satz ist belegt.</p>
+  <p class="lede">Understanding code without going through a person first. The question is asked in your own words, the answer comes at the altitude you picked — business analyst or developer — and every sentence is sourced.</p>
 </header>
 
 <section>
-  <h2>Warum</h2>
-  <p>Wer wissen will, wie der Teaser-Mail-Versand umgesetzt ist, muss heute einen Developer unterbrechen und bekommt eine Antwort auf der falschen Flughöhe. rongo nimmt diese Abhängigkeit weg: Es indexiert die Repositories, klärt zurück, welcher Mechanismus gemeint ist, und erklärt ihn in der Sprachebene, die man vorher gewählt hat — Business Analyst (BA) oder Developer (DEV). Jede Aussage bleibt über ein aufklappbares Belegfeld nachprüfbar.</p>
+  <h2>Why</h2>
+  <p>Anyone who wants to know how teaser mail sending is implemented has to interrupt a developer today, and gets an answer at the wrong altitude. rongo removes that dependency: it indexes the repositories, asks back which mechanism is meant, and explains it at the level chosen up front — business analyst (BA) or developer (DEV). Every statement stays checkable through an expandable source panel.</p>
   <div class="note">
     <span class="tag">Name</span>
-    <p>Das Produkt heisst <strong>rongo</strong> — in der Oberfläche, im Modulpfad, im Binary, im Container. Benannt <em>nach</em> Rongorongo, der nie entzifferten Rapa-Nui-Schrift im Boustrophedon (zeilenweise wechselnde Leserichtung, wie ein Mechanismus, der zwischen den Schichten hin und her springt). «Rongorongo» ist ausschliesslich Etymologie und darf nie als Produktname auftauchen. Das Boustrophedon bleibt Erzählung und wird <em>nicht</em> in die Oberfläche übersetzt — siehe den Entscheid unter «Oberfläche».</p>
+    <p>The product is called <strong>rongo</strong> — in the interface, in the module path, in the binary, in the container. Named <em>after</em> Rongorongo, the never-deciphered Rapa Nui script written in boustrophedon (the reading direction alternating line by line, like a mechanism that jumps back and forth between layers). «Rongorongo» is etymology only and must never appear as a product name. The boustrophedon stays a story and is <em>not</em> translated into the interface — see the decision under «Interface».</p>
   </div>
 </section>
 
 <section>
-  <h2>Rahmenbedingungen</h2>
+  <h2>Constraints</h2>
   <ul>
-    <li>Architektur von <code>../peeq</code>: ein statisches Go-Binary, eingebettete React-SPA, eine SQLite-Datei, ein Container.</li>
-    <li>Xiaomi MiMo Pro und non-Pro für die Generierung, OpenAI für Embeddings. Beides extern — Quellcode verlässt das Netz.</li>
-    <li>20–200 Repositories, ein interner Server, kleines Team. Admin-Token jetzt, OIDC später.</li>
-    <li>Antworten auf Deutsch in Schweizer Rechtschreibung (<code>ss</code>, nie <code>ß</code>).</li>
-    <li>Gestreamt wird nur die finale Antwort. Jeder interne Schritt ist ein gewöhnlicher Request.</li>
-    <li>Token- und Kostenerfassung, Preise aus dem litellm-Katalog. Ausgewiesen wird in <strong>USD</strong> — der Katalog führt USD, damit entfällt jede Umrechnung und jeder Kursstand.</li>
+    <li>Architecture from <code>../peeq</code>: one static Go binary, an embedded React SPA, one SQLite file, one container.</li>
+    <li>Xiaomi MiMo Pro and non-Pro for generation, OpenAI for embeddings. Both external — source code leaves the network.</li>
+    <li>20–200 repositories, one internal server, a small team. Admin token now, OIDC later.</li>
+    <li>Answers in English.</li>
+    <li>Only the final answer is streamed. Every internal step is an ordinary request.</li>
+    <li>Token and cost accounting, prices from the litellm catalogue. Reported in <strong>USD</strong> — the catalogue is in USD, which removes every conversion and every exchange rate.</li>
   </ul>
 </section>
-
+<section>
 <section>
   <h2>Stack</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Bereich</th><th>Entscheid</th><th>Vorlage in peeq</th></tr></thead>
+      <thead><tr><th>Area</th><th>Decision</th><th>Precedent in peeq</th></tr></thead>
       <tbody>
-        <tr><td>Backend</td><td>stdlib <code>net/http</code>, kein Framework. Build-Image <code>golang:1.26-alpine</code>, <code>go</code>-Direktive <code>1.25.0</code> wie in peeq und loom</td><td><code>internal/httpapi/server.go</code></td></tr>
-        <tr><td>Datenhaltung</td><td>eine SQLite-Datei, WAL, <code>ncruces/go-sqlite3</code> + sqlite-vec + FTS5, <code>CGO_ENABLED=0</code></td><td><code>internal/rag/store.go</code></td></tr>
-        <tr><td>Vektor-Binding</td><td><code>asg017/sqlite-vec-go-bindings/ncruces</code> — wasm-Variante, ohne cgo. Version <strong>an ncruces gekoppelt</strong>, siehe unten</td><td><code>internal/store/store.go:14</code></td></tr>
-        <tr><td>Migrationen</td><td>eigener Runner, <code>//go:embed migrations/*.sql</code>, Dateiname als Version</td><td><code>internal/store/migrate.go</code></td></tr>
-        <tr><td>Jobs</td><td>Warteschlangen als DB-Tabellen, gepollt von Goroutinen</td><td><code>internal/summaryjobs/</code>, <code>sched/</code></td></tr>
-        <tr><td>LLM</td><td>handgeschriebener OpenAI-kompatibler Client, Modelle hart verdrahtet</td><td><code>internal/llm/client.go</code></td></tr>
-        <tr><td>Streaming</td><td>SSE mit typisierten Events, <code>fetch</code> + ReadableStream im Client</td><td><code>internal/sse/</code>, <code>ui/src/api/stream.ts</code></td></tr>
-        <tr><td>Frontend</td><td>React 19, TS, Vite 8, Tailwind v4, <code>@theme</code>-Tokens, reine Hooks</td><td><code>ui/src/index.css</code></td></tr>
-        <tr><td>Auth</td><td>opake Session-Tokens in SQLite, Bearer-API-Token, OIDC-Modus</td><td><code>internal/auth/</code></td></tr>
-        <tr><td>Deployment</td><td>dreistufiges <code>Containerfile</code>, <code>compose.yaml</code> mit einem Service</td><td><code>backend/Containerfile</code></td></tr>
+        <tr><td>Backend</td><td>stdlib <code>net/http</code>, no framework. Build image <code>golang:1.26-alpine</code>, <code>go</code> directive <code>1.25.0</code> as in peeq and loom</td><td><code>internal/httpapi/server.go</code></td></tr>
+        <tr><td>Storage</td><td>one SQLite file, WAL, <code>ncruces/go-sqlite3</code> + sqlite-vec + FTS5, <code>CGO_ENABLED=0</code></td><td><code>internal/rag/store.go</code></td></tr>
+        <tr><td>Vector binding</td><td><code>asg017/sqlite-vec-go-bindings/ncruces</code> — the wasm variant, no cgo. Version <strong>coupled to ncruces</strong>, see below</td><td><code>internal/store/store.go:14</code></td></tr>
+        <tr><td>Migrations</td><td>own runner, <code>//go:embed migrations/*.sql</code>, file name as the version</td><td><code>internal/store/migrate.go</code></td></tr>
+        <tr><td>Jobs</td><td>queues as DB tables, polled by goroutines</td><td><code>internal/summaryjobs/</code>, <code>sched/</code></td></tr>
+        <tr><td>LLM</td><td>hand-written OpenAI-compatible client, models hardcoded</td><td><code>internal/llm/client.go</code></td></tr>
+        <tr><td>Streaming</td><td>SSE with typed events, <code>fetch</code> + ReadableStream in the client</td><td><code>internal/sse/</code>, <code>ui/src/api/stream.ts</code></td></tr>
+        <tr><td>Frontend</td><td>React 19, TS, Vite 8, Tailwind v4, <code>@theme</code> tokens, plain hooks</td><td><code>ui/src/index.css</code></td></tr>
+        <tr><td>Auth</td><td>opaque session tokens in SQLite, bearer API tokens, OIDC mode</td><td><code>internal/auth/</code></td></tr>
+        <tr><td>Deployment</td><td>three-stage <code>Containerfile</code>, <code>compose.yaml</code> with one service</td><td><code>backend/Containerfile</code></td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="note">
-    <span class="tag">Achtung beim Abschauen</span>
-    <p>Die Versionen stammen aus <code>peeq/backend/Containerfile</code> und <code>go.mod</code>, <strong>nicht</strong> aus <code>peeq/AGENTS.md</code> — das ist veraltet und nennt noch Go 1.25 und <code>debian:12-slim</code>. Diesen Plan nicht dagegen «korrigieren».</p>
+    <span class="tag">Careful when copying</span>
+    <p>The versions come from <code>peeq/backend/Containerfile</code> and <code>go.mod</code>, <strong>not</strong> from <code>peeq/AGENTS.md</code> — that one is stale and still names Go 1.25 and <code>debian:12-slim</code>. Do not «correct» this plan against it.</p>
   </div>
 
-  <p>Laufzeit-Image <code>debian:13-slim</code>, nicht distroless: rongo ruft <code>git</code>, <code>rg</code> und <code>ctags</code> als externe Programme auf. Alle drei kommen neu dazu. Genau das hält <code>CGO_ENABLED=0</code> am Leben — Go-Bindings für tree-sitter brauchen cgo, ein externer Symbol-Extraktor nicht.</p>
+  <p>Runtime image <code>debian:13-slim</code>, not distroless: rongo calls <code>git</code>, <code>rg</code> and <code>ctags</code> as external programs. All three are new here. That is exactly what keeps <code>CGO_ENABLED=0</code> alive — Go bindings for tree-sitter need cgo, an external symbol extractor does not.</p>
 
-  <h3>SQLite und sqlite-vec sind eine Einheit</h3>
-  <p>Die Vektor-Bindings sind kein unabhängiges Paket, sondern ein <strong>wasm-Build, der gegen ncruces' SQLite kompiliert wurde</strong>. Ein Versionsversatz bricht deshalb nicht die Kompilierung, sondern die Vektorsuche — im schlimmsten Fall als leere Trefferliste im Betrieb. peeq und loom laufen beide auf demselben Paar:</p>
+  <h3>SQLite and sqlite-vec are one unit</h3>
+  <p>The vector bindings are not an independent package but a <strong>wasm build compiled against ncruces' SQLite</strong>. Version skew therefore does not break compilation, it breaks vector search — in the worst case as an empty result list in production. peeq and loom both run on the same pair:</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Modul</th><th>Version</th><th>Warum genau diese</th></tr></thead>
+      <thead><tr><th>Module</th><th>Version</th><th>Why exactly this one</th></tr></thead>
       <tbody>
-        <tr><td><code>ncruces/go-sqlite3</code></td><td><code>v0.23.3</code></td><td>Trägt die wasm-Laufzeit, in die die Erweiterung geladen wird.</td></tr>
-        <tr><td><code>asg017/sqlite-vec-go-bindings</code></td><td><code>v0.1.7-alpha.2</code></td><td>Gegen genau diese Laufzeit gebaut. <strong>Alpha</strong> — vor jedem Bump das Änderungsprotokoll lesen.</td></tr>
+        <tr><td><code>ncruces/go-sqlite3</code></td><td><code>v0.23.3</code></td><td>Carries the wasm runtime the extension is loaded into.</td></tr>
+        <tr><td><code>asg017/sqlite-vec-go-bindings</code></td><td><code>v0.1.7-alpha.2</code></td><td>Built against exactly that runtime. <strong>Alpha</strong> — read the changelog before every bump.</td></tr>
       </tbody>
     </table>
   </div>
   <ul>
-    <li>Beide zusammen anheben oder keines. Eine einzelne Dependabot-Anhebung ist genau der Fall, der das kaputt macht — deshalb müssen die zwei später in <em>eine</em> gruppierte PR.</li>
-    <li>Auf demselben Paar bleiben wie peeq und loom. Abweichung heisst, dass eine dort gefundene Lösung hier nicht mehr trägt.</li>
+    <li>Bump both together or neither. A lone Dependabot bump is precisely the case that breaks this — which is why the two later have to go into <em>one</em> grouped PR.</li>
+    <li>Stay on the same pair as peeq and loom. Diverging means a fix found there no longer carries over here.</li>
   </ul>
 
   <div class="decision">
-    <span class="tag">Der Pin allein schützt nicht</span>
-    <p>Er verschiebt das Problem nur auf den Tag des Bumps. Was schützt, ist ein Test, der <code>vec0</code> tatsächlich durchspielt: Tabelle anlegen, Vektor einfügen, KNN-Abfrage, Nachbarn prüfen. Damit wird aus einem stillen Laufzeitbruch ein rotes CI. Dieser Test gehört in Phase 1, zusammen mit dem Migrationsrunner — nicht erst in Phase 2, wenn die Suche gebaut wird.</p>
+    <span class="tag">The pin alone does not protect anything</span>
+    <p>It only moves the problem to the day of the bump. What protects is a test that actually drives <code>vec0</code>: create the table, insert a vector, run a KNN query, check the neighbour. That turns a silent runtime break into a red CI. This test belongs in phase 1, together with the migration runner — not in phase 2 when search is built.</p>
   </div>
 
-  <h3>Modelle — wo Pro, wo non-Pro</h3>
-  <p>Massstab ist peeqs Regel: Was ein Mensch liest, läuft auf Pro. Was eine ID, ein Label oder ein Zwischenergebnis ist, läuft auf non-Pro mit <code>ShortGate</code> — die kleinere Warteschlange, nicht «das Modell ohne Denken». Beide sind Reasoning-Modelle; <code>WithoutThinking</code> und <code>ShortGate</code> bleiben getrennte Schalter.</p>
+  <h3>Models — where Pro, where non-Pro</h3>
+  <p>The yardstick is peeq's rule: what a human reads runs on Pro. What is an id, a label or an intermediate result runs on non-Pro with <code>ShortGate</code> — the smaller queue, not «the model without thinking». Both are reasoning models; <code>WithoutThinking</code> and <code>ShortGate</code> stay separate switches.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Aufrufstelle</th><th>Modell</th><th>Begründung</th></tr></thead>
+      <thead><tr><th>Call site</th><th>Model</th><th>Reason</th></tr></thead>
       <tbody>
-        <tr><td>Verstehen</td><td>non-Pro</td><td>Ergebnis ist JSON: Absicht, Suchbegriffe, Repo-Hinweise. Niemand liest es.</td></tr>
-        <tr><td><b>Routen</b></td><td><b>Pro</b></td><td>Ergebnis sind Modul-IDs und ein Schwellenwert-Entscheid — ein Wort, das aber über Antwort oder Rückfrage entscheidet. Die eine gemessene Ausnahme, siehe <code>docs/measurements/2026-08-19-candidates.md</code>.</td></tr>
-        <tr><td>Sammeln / Relevanz</td><td>non-Pro</td><td>Die volumenstärkste Stelle: pro Frage viele Iterationen, jede antwortet mit «verfolgen ja/nein». Hier liegt das Geld.</td></tr>
-        <tr><td>Thread-Titel</td><td>non-Pro</td><td>Steht zwar auf der Seite, ist aber ein Label aus wenigen Wörtern — daher non-Pro, bewusst und nicht aus Versehen. Läuft nebenläufig zur Antwort und darf sie nie aufhalten.</td></tr>
-        <tr><td><b>Antwort</b></td><td><b>Pro</b></td><td>Der einzige gestreamte Text. Auch «Als Dev neu erklären» ist Pro.</td></tr>
-        <tr><td>Kandidatentitel</td><td>non-Pro</td><td>Läuft nur, wenn die Rückfragekarte tatsächlich erscheint: je angezeigtem Kandidaten ein deutscher Titel und eine Zeile, geschrieben aus dessen eigenen Top-Chunks. Nichts davon wird gespeichert, also kann nichts veralten.</td></tr>
-        <tr><td>Aussagen zerlegen (Phase 8)</td><td>non-Pro</td><td>Zwischenschritt; das Urteil selbst wird wieder von Pro formuliert.</td></tr>
+        <tr><td>Understand</td><td>non-Pro</td><td>The result is JSON: intent, search terms, repo hints. Nobody reads it.</td></tr>
+        <tr><td><b>Route</b></td><td><b>Pro</b></td><td>The result is module ids and a threshold decision — one word, but it decides answer versus follow-up question. The one measured exception, see <code>docs/measurements/2026-08-19-candidates.md</code>.</td></tr>
+        <tr><td>Gather / relevance</td><td>non-Pro</td><td>The highest-volume place: many iterations per question, each answering «follow, yes or no». This is where the money is.</td></tr>
+        <tr><td>Thread title</td><td>non-Pro</td><td>It is on the page, but it is a label of a few words — hence non-Pro, deliberately and not by accident. Runs alongside the answer and must never hold it up.</td></tr>
+        <tr><td><b>Answer</b></td><td><b>Pro</b></td><td>The only streamed text. «Explain as Dev» is Pro as well.</td></tr>
+        <tr><td>Candidate titles</td><td>non-Pro</td><td>Runs only when the clarification card actually appears: one title and one line per displayed candidate, written from that candidate's own top chunks. None of it is stored, so nothing can go stale.</td></tr>
+        <tr><td>Decompose statements (phase 8)</td><td>non-Pro</td><td>An intermediate step; the verdict itself is written by Pro again.</td></tr>
       </tbody>
     </table>
   </div>
-  <p>Pro Frage läuft Pro damit genau <strong>einmal</strong>. Jeder Aufruf bekommt eine Obergrenze über <code>llm.WithMaxTokens</code>, ausser eine abgeschnittene Antwort wäre schlimmer als eine lange.</p>
+  <p>Pro therefore runs exactly <strong>once</strong> per question. Every call gets an upper bound through <code>llm.WithMaxTokens</code>, unless a truncated reply would be worse than a long one.</p>
 
   <div class="note">
-    <span class="tag">Die Stelle, an der Sparen Qualität kostet</span>
-    <p>Routen entscheidet, ob überhaupt der richtige Code gefunden wird. Routet non-Pro daneben, formuliert Pro anschliessend eine überzeugende falsche Antwort — der teuerste Fehlertyp, den dieses Produkt haben kann. Deshalb wird in Phase 4 die Trefferquote des Routens auf einem festen Fragenkatalog gegen Pro gemessen, bevor non-Pro dort festgeschrieben wird. Behaupten reicht hier nicht.</p>
+    <span class="tag">The place where saving costs quality</span>
+    <p>Routing decides whether the right code is found at all. If non-Pro routes wrongly, Pro then writes a convincing wrong answer — the most expensive kind of failure this product can have. That is why phase 4 measures the hit rate of routing against Pro over a fixed question catalogue before non-Pro is written in there. Asserting it is not enough.</p>
   </div>
 
   <h3>Embeddings</h3>
-  <p>OpenAI <code>text-embedding-3-small</code>, 1536 Dimensionen. <strong>Entschieden und gemessen</strong> am Ende von Phase 2: <code>docs/measurements/2026-08-17-embedding-model.md</code>. 28 Fragen gegen den Dev-Korpus, beide Modelle je einmal indexiert. <code>large</code> liegt auf allen drei Kennzahlen vorne (recall@5 0.714 vs 0.679, recall@20 0.857 vs 0.786, MRR 0.538 vs 0.476), der Unterschied ist bei 28 Fragen aber nicht von Rauschen zu unterscheiden (McNemar p ≈ 0.63 bzw. 1.0). Bei einem Gleichstand gewinnt die günstigere und schnellere Option: <code>small</code> kostet ein Sechstel, braucht die halbe Vektor-Ablage und indexiert den Korpus in 450 statt 675 Sekunden. Vier Fragen scheitern bei <em>beiden</em> Modellen — das ist ein Chunking- und Ranking-Problem, kein Embedding-Problem.</p>
+  <p>OpenAI <code>text-embedding-3-small</code>, 1536 dimensions. <strong>Decided and measured</strong> at the end of phase 2: <code>docs/measurements/2026-08-17-embedding-model.md</code>. 28 questions against the dev corpus, each model indexed once. <code>large</code> leads on all three figures (recall@5 0.714 vs 0.679, recall@20 0.857 vs 0.786, MRR 0.538 vs 0.476), but at 28 questions the difference is indistinguishable from noise (McNemar p ≈ 0.63 and 1.0 respectively). On a tie the cheaper and faster option wins: <code>small</code> costs a sixth, needs half the vector storage and indexes the corpus in 450 instead of 675 seconds. Four questions fail on <em>both</em> models — that is a chunking and ranking problem, not an embedding problem.</p>
 
 </section>
-
 <section>
-  <h2>Repositories — rongo klont selbst</h2>
+  <h2>Repositories — rongo clones them itself</h2>
   <div class="decision">
-    <span class="tag">Entscheid</span>
-    <p>Nicht die GitHub-Contents-API. Drei Gründe, jeder für sich disqualifizierend: sie kann nicht grep, einzelne Dateiabrufe laufen bei dieser Korpusgrösse ins Rate-Limit, und «warum ist das so» braucht lokales <code>git log</code>.</p>
+    <span class="tag">Decision</span>
+    <p>Not the GitHub contents API. Three reasons, each disqualifying on its own: it cannot grep, single file fetches hit the rate limit at this corpus size, and «why is it like this» needs a local <code>git log</code>.</p>
   </div>
-  <h3>Die Repository-Liste steht in einer Datei</h3>
-  <p>Kein Formular je Repository — bei 200 Stück wären das 200 Formulare, und ein neu dazugekommenes Repository vergisst man. Stattdessen <code>repos.yaml</code> neben der Konfiguration: Name, Clone-URL, Branch, aktiv ja/nein. Versionierbar, überprüfbar, in einem Diff lesbar.</p>
+  <h3>The repository list lives in a file</h3>
+  <p>No form per repository — at 200 of them that would be 200 forms, and a newly added repository gets forgotten. Instead <code>repos.yaml</code> next to the configuration: name, clone URL, branch, enabled yes/no. Versionable, reviewable, readable in a diff.</p>
 
-  <h3>Der Branch je Repository</h3>
-  <p><code>branch:</code> ist je Eintrag angebbar, aber <strong>optional — und die Voreinstellung ist niemals <code>master</code></strong>. Weggelassen heisst: den Standard-Branch der Gegenstelle auflösen (<code>git ls-remote --symref origin HEAD</code>). Das Dev-Korpus zeigt, warum:</p>
+  <h3>The branch per repository</h3>
+  <p><code>branch:</code> can be given per entry, but is <strong>optional — and the default is never <code>master</code></strong>. Omitted means: resolve the remote's default branch (<code>git ls-remote --symref origin HEAD</code>). The dev corpus shows why:</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Repository</th><th>Standard-Branch</th></tr></thead>
+      <thead><tr><th>Repository</th><th>Default branch</th></tr></thead>
       <tbody>
         <tr><td><code>peeq</code>, <code>loom</code>, <code>rongo</code></td><td><code>master</code></td></tr>
         <tr><td><code>ncruces/go-sqlite3</code>, <code>asg017/sqlite-vec</code></td><td><code>main</code></td></tr>
       </tbody>
     </table>
   </div>
-  <p>Ein fest verdrahtetes <code>master</code> bräche also ausgerechnet die beiden Fremdrepositories, an denen die Zusammensetzungs-Logik hängt. Angegeben wird der Branch nur, wenn es etwas anderes als der Standard sein soll — ein Release-Branch etwa.</p>
+  <p>A hardcoded <code>master</code> would therefore break exactly the two third-party repositories the composition logic depends on. The branch is only given when it should be something other than the default — a release branch, say.</p>
 
   <div class="decision">
-    <span class="tag">Ein Branch je Eintrag, nicht mehrere</span>
-    <p>Mehrere Branches desselben Repositories gleichzeitig zu indexieren wäre naheliegend, ist aber schädlich: es erzeugt Kandidaten, die sich <em>nur</em> im Branch unterscheiden, und damit dauernd Rückfragen ohne fachlichen Gehalt. Wer wirklich einen zweiten Branch braucht, legt einen zweiten Eintrag mit eigenem Namen an (<code>shop-backend@release-2024.3</code>). Dann ist der Branch Teil der Identität und taucht in Kandidaten, Belegen und Antwort sichtbar auf, statt als rätselhafter Doppelgänger.</p>
+    <span class="tag">One branch per entry, not several</span>
+    <p>Indexing several branches of the same repository at once would be the obvious thing to do, but it is harmful: it produces candidates that differ <em>only</em> in the branch, and with them a constant stream of follow-up questions with no substance. Anyone who really needs a second branch adds a second entry with its own name (<code>shop-backend@release-2024.3</code>). The branch is then part of the identity and shows up visibly in candidates, sources and answer, instead of as a puzzling doppelganger.</p>
   </div>
 
-  <p>Der Branch gehört damit in den <strong>Beleg</strong> (Repo, Branch, Datei, Zeile) und in die Forge-URL — sonst zeigt ein Link auf eine Zeile, die es auf dem Standard-Branch gar nicht gibt.</p>
+  <p>The branch therefore belongs in the <strong>source</strong> (repo, branch, file, line) and in the forge URL — otherwise a link points at a line that does not exist on the default branch at all.</p>
 
   <div class="note">
-    <span class="tag">Das gefährliche Versagen</span>
-    <p>Verschwindet der konfigurierte Branch bei der Gegenstelle — ein aufgeräumter Release-Branch —, darf der Poller <strong>nicht still stehenbleiben</strong>. Sonst friert der Index ein, während alles gesund aussieht, und rongo antwortet monatelang aus altem Code. Das muss ein lauter Fehler auf der Repos-Seite sein.</p>
+    <span class="tag">The dangerous failure</span>
+    <p>When the configured branch disappears on the remote — a tidied-up release branch — the poller must <strong>not stop quietly</strong>. Otherwise the index freezes while everything looks healthy, and rongo answers from months-old code. This has to be a loud error on the Repos page.</p>
   </div>
 
-  <p>Ein Branch-Wechsel in der YAML erzwingt übrigens <em>kein</em> vollständiges Neuindexieren: <code>git diff &lt;zuletzt indexierter SHA&gt;..&lt;neuer HEAD&gt;</code> ist auch über Branchgrenzen hinweg gültig, weil beide im selben Objektspeicher liegen.</p>
+  <p>Changing the branch in the YAML incidentally does <em>not</em> force a full reindex: <code>git diff &lt;last indexed SHA&gt;..&lt;new HEAD&gt;</code> is valid across branch boundaries too, because both live in the same object store.</p>
 
   <div class="note">
-    <span class="tag">Keine Zugangsdaten in der YAML</span>
-    <p>Die Datei landet über kurz oder lang in einem Repository oder in einem Ticket. Tokens stehen deshalb ausschliesslich in <code>BACKEND_*</code>-Umgebungsvariablen, je Forge-Host einer; die YAML verweist höchstens auf den Namen der Variable, nie auf ihren Wert. Ein PAT wird beim Abholen in die Remote-URL eingesetzt und nie geloggt.</p>
+    <span class="tag">No credentials in the YAML</span>
+    <p>The file ends up in a repository or a ticket sooner or later. Tokens therefore live exclusively in <code>BACKEND_*</code> environment variables, one per forge host; the YAML at most names the variable, never its value. A PAT is injected into the remote URL at fetch time and never logged.</p>
   </div>
 
   <ul>
-    <li>Gelesen wird beim Start, dazu ein Admin-Knopf «Liste neu einlesen» — der Kompromiss «Änderung braucht einen Deploy» kostet sonst unnötig einen Neustart.</li>
-    <li>Voller Clone nach <code>BACKEND_REPO_ROOT/&lt;name&gt;</code>. Die Historie braucht die «Warum»-Pipeline, und Quelltext ist billig auf der Platte.</li>
-    <li><strong>Aktualisierung:</strong> Ein Poller (Standard 30 Minuten, gejittert) macht <code>git fetch</code> und vergleicht den HEAD-SHA. Unverändert → fertig. Verändert → <code>git diff --name-only</code> und nur diese Pfade neu indexieren.</li>
-    <li><strong>Verschwindet ein Repository aus der Liste</strong>, wird es <em>stillgelegt</em>, nicht gelöscht: es fällt aus der Suche, sein Index bleibt liegen. Erst ein ausdrücklicher Admin-Befehl räumt ihn weg. Ein Tippfehler in der YAML darf keine Stunden Indexierung vernichten.</li>
-    <li>Die Seite <strong>Repos</strong> ist damit reine Anzeige statt Pflegemaske: letzter Abgleich, HEAD-SHA, Anzahl Chunks und Module, Fehler beim letzten Lauf.</li>
-    <li>Webhooks bleiben draussen — Polling braucht keinen Ingress und keine Zustellungs-Fehlerbehandlung.</li>
+    <li>Read at startup, plus an admin button «reload the list» — the compromise «a change needs a deploy» otherwise costs a restart for nothing.</li>
+    <li>Full clone into <code>BACKEND_REPO_ROOT/&lt;name&gt;</code>. The history is needed by the «why» pipeline, and source code is cheap on disk.</li>
+    <li><strong>Refresh:</strong> a poller (30 minutes by default, jittered) runs <code>git fetch</code> and compares the HEAD SHA. Unchanged → done. Changed → <code>git diff --name-only</code> and reindex only those paths.</li>
+    <li><strong>When a repository disappears from the list</strong> it is <em>deactivated</em>, not deleted: it drops out of search, its index stays. Only an explicit admin command clears it. A typo in the YAML must not destroy hours of indexing.</li>
+    <li>The <strong>Repos</strong> page is therefore read-only status rather than a maintenance form: last sync, HEAD SHA, number of chunks and modules, errors from the last run.</li>
+    <li>Webhooks stay out — polling needs no ingress and no delivery error handling.</li>
   </ul>
 
 </section>
 
 <section>
-  <h2>Index — drei Ebenen, eine Datei</h2>
-  <p>«Ich habe drei Teaser-Mail-Mechanismen gefunden» setzt <em>benannte Kandidaten</em> voraus — Vektoren auf Chunk-Ebene liefern zwanzig Schnipsel, nicht drei Features. Die Kandidaten sind aber keine Indexebene: Sie entstehen pro Frage aus der Trefferliste über deterministischen Modul-Clustern. Gespeichert wird nur, was sich belegen lässt.</p>
+  <h2>Index — three levels, one file</h2>
+  <p>«I found three teaser mail mechanisms» presupposes <em>named candidates</em> — vectors at chunk level return twenty snippets, not three features. The candidates are not an index level though: they are formed per question from the result list over deterministic module clusters. Only what can be cited is stored.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Ebene</th><th>Inhalt</th><th>Beantwortet</th></tr></thead>
+      <thead><tr><th>Level</th><th>Content</th><th>Answers</th></tr></thead>
       <tbody>
-        <tr><td><code>chunks</code> + <code>_vec</code> + <code>_fts</code></td><td>Code- und Doku-Chunks, eingebettet und volltextindexiert. Symbolgenau wo <code>ctags</code> etwas liefert, sonst Zeilenfenster mit Überlappung.</td><td>Die inhaltliche Antwort.</td></tr>
-        <tr><td><code>repo_deps</code></td><td>Aus den Abhängigkeitsmanifesten: welche Koordinate ein Repository veröffentlicht und welche es zieht. Nicht eingebettet.</td><td>Trennt Zusammensetzung von Mehrdeutigkeit und trägt das Sammeln über Repo-Grenzen.</td></tr>
-        <tr><td><code>history_docs</code></td><td>Commit-Nachrichten und PR-Texte als eigener Dokumenttyp, eingebettet.</td><td>«Warum ist das so» — mehr kostet dieser Anwendungsfall nicht.</td></tr>
+        <tr><td><code>chunks</code> + <code>_vec</code> + <code>_fts</code></td><td>Code and documentation chunks, embedded and full-text indexed. Symbol-exact where <code>ctags</code> yields something, otherwise line windows with overlap.</td><td>The substance of the answer.</td></tr>
+        <tr><td><code>repo_deps</code></td><td>From the dependency manifests: which coordinate a repository publishes and which ones it pulls. Not embedded.</td><td>Separates composition from ambiguity and carries gathering across repository boundaries.</td></tr>
+        <tr><td><code>history_docs</code></td><td>Commit messages and PR text as a document type of their own, embedded.</td><td>«Why is it like this» — that use case costs no more than this.</td></tr>
       </tbody>
     </table>
   </div>
 <figure class="fig"><div class="scroll">
 <svg viewBox="0 0 960 320" role="img" aria-labelledby="idx-title idx-desc" xmlns="http://www.w3.org/2000/svg">
-  <title id="idx-title">Indexierung</title>
-  <desc id="idx-desc">Der Poller holt geänderte Pfade aus dem Remote; daraus entstehen Code- und Doku-Chunks sowie Historien-Dokumente, die eingebettet und in je eine Indexebene geschrieben werden. Kein Schritt erzeugt Text über Code.</desc>
+  <title id="idx-title">Indexing</title>
+  <desc id="idx-desc">The poller fetches changed paths from the remote; from them come code and documentation chunks as well as history documents, which are embedded and written into one index level each. No step produces text about code.</desc>
   <defs>
       <marker id="i-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
         <polygon points="0 0, 8 3, 0 6" fill="var(--ink-faint)"/>
@@ -483,91 +482,91 @@
   <path d="M748,136 H772 Q780,136 780,128 V74 Q780,66 788,66 H804" fill="none" stroke="var(--ink-faint)" stroke-width="1" marker-end="url(#i-a)"/>
   <path d="M748,160 H772 Q780,160 780,168 V224 Q780,232 788,232 H804" fill="none" stroke="var(--ink-faint)" stroke-width="1" marker-end="url(#i-a)"/>
 
-  <rect x="134.0" y="128" width="60" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="164" y="137" text-anchor="middle">ALLE 30 MIN</text>
+  <rect x="134.0" y="128" width="60" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="164" y="137" text-anchor="middle">EVERY 30 MIN</text>
 
   <rect x="16" y="124" width="116" height="48" rx="6" fill="var(--ground)"/><rect x="16" y="124" width="116" height="48" rx="6" fill="var(--ground)" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="4,3"/><text class="nname" x="74.0" y="148.0" text-anchor="middle">Remote</text><text class="nsub" x="74.0" y="162.0" text-anchor="middle">git · PAT</text>
-  <rect x="196" y="124" width="152" height="48" rx="6" fill="var(--ground)"/><rect x="196" y="124" width="152" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="148.0" text-anchor="middle">Poller</text><text class="nsub" x="272.0" y="162.0" text-anchor="middle">fetch · nur Diff</text>
-  <rect x="412" y="40" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="40" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="64.0" text-anchor="middle">Code &amp; Doku</text><text class="nsub" x="484.0" y="78.0" text-anchor="middle">ctags · Chunks</text>
-  <rect x="412" y="208" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="208" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="232.0" text-anchor="middle">Historie</text><text class="nsub" x="484.0" y="246.0" text-anchor="middle">git log · PR-Text</text>
-  <rect x="620" y="124" width="128" height="48" rx="6" fill="var(--ground)"/><rect x="620" y="124" width="128" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="684.0" y="148.0" text-anchor="middle">Einbetten</text><text class="nsub" x="684.0" y="162.0" text-anchor="middle">OpenAI · 1536</text>
+  <rect x="196" y="124" width="152" height="48" rx="6" fill="var(--ground)"/><rect x="196" y="124" width="152" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="148.0" text-anchor="middle">Poller</text><text class="nsub" x="272.0" y="162.0" text-anchor="middle">fetch · diff only</text>
+  <rect x="412" y="40" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="40" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="64.0" text-anchor="middle">Code &amp; docs</text><text class="nsub" x="484.0" y="78.0" text-anchor="middle">ctags · Chunks</text>
+  <rect x="412" y="208" width="144" height="48" rx="6" fill="var(--ground)"/><rect x="412" y="208" width="144" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="232.0" text-anchor="middle">History</text><text class="nsub" x="484.0" y="246.0" text-anchor="middle">git log · PR text</text>
+  <rect x="620" y="124" width="128" height="48" rx="6" fill="var(--ground)"/><rect x="620" y="124" width="128" height="48" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="684.0" y="148.0" text-anchor="middle">Embed</text><text class="nsub" x="684.0" y="162.0" text-anchor="middle">OpenAI · 1536</text>
   <rect x="812" y="44" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="44" width="132" height="44" rx="6" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="878.0" y="66.0" text-anchor="middle">chunks</text><text class="nsub" x="878.0" y="80.0" text-anchor="middle">+ FTS5</text>
-  <rect x="812" y="210" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="210" width="132" height="44" rx="6" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="878.0" y="232.0" text-anchor="middle">history_docs</text><text class="nsub" x="878.0" y="246.0" text-anchor="middle">für «warum»</text>
+  <rect x="812" y="210" width="132" height="44" rx="6" fill="var(--ground)"/><rect x="812" y="210" width="132" height="44" rx="6" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="878.0" y="232.0" text-anchor="middle">history_docs</text><text class="nsub" x="878.0" y="246.0" text-anchor="middle">for «why»</text>
 
   <line x1="16" y1="278" x2="944" y2="278" stroke="var(--hairline)" stroke-width="0.8"/>
-  <text class="lgnd" x="16" y="296">LEGENDE</text>
+  <text class="lgnd" x="16" y="296">LEGEND</text>
   <rect x="96" y="288" width="18" height="9" rx="2" fill="var(--sunk)" stroke="var(--ink-faint)" stroke-width="1"/>
-  <text class="nsub" x="122" y="296">Tabelle in der SQLite-Datei</text>
+  <text class="nsub" x="122" y="296">Table in the SQLite file</text>
   <rect x="456" y="288" width="18" height="9" rx="2" fill="var(--ground)" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="4,3"/>
-  <text class="nsub" x="482" y="296">Ausserhalb von rongo</text>
+  <text class="nsub" x="482" y="296">Outside rongo</text>
 </svg>
-</div><figcaption>Die <code>symbols</code>-Tabelle fällt beim Zerlegen mit ab und wird nicht eingebettet — sie dient der exakten Namenssuche und dem Rückwärtslauf.</figcaption></figure>
+</div><figcaption>The <code>symbols</code> table falls out of chunking and is not embedded — it serves exact name search and the reverse walk.</figcaption></figure>
   <div class="decision">
-    <span class="tag">Entscheid: keine erzeugte Beschreibungsebene</span>
-    <p>rongo speichert und embeddet nie einen vom Modell geschriebenen Text <em>über</em> Code — weder je Modul, noch je Datei, noch je Symbol. Drei Gründe, jeder für sich ausreichend:</p>
+    <span class="tag">Decision: no generated description level</span>
+    <p>rongo never stores or embeds model-written text <em>about</em> code — not per module, not per file, not per symbol. Three reasons, each sufficient on its own:</p>
     <ul>
-      <li><b>Die Kosten skalieren mit dem Korpus statt mit der Nutzung.</b> 200 Repositories mit 50 bis 150 Modulen sind Zehntausende Pro-Aufrufe, bevor jemand eine Frage gestellt hat — und jedes Refactoring, das Modulgrenzen verschiebt, rechnet nach.</li>
-      <li><b>Eine erzeugte Beschreibung ist strukturell veraltet.</b> Sie behauptet etwas über Code, statt ihn zu zeigen. Die Behauptung wird still falsch, und die Antwort darauf ist überzeugend falsch — genau der Fehlertyp, den dieses Produkt am wenigsten verträgt.</li>
-      <li><b>Die Auflösung geht nicht auf.</b> Grob genug, um billig zu sein, heisst zu grob für konkrete Fragen. Fein genug für konkrete Fragen heisst: der Code ist in Prosa neu geschrieben — teurer und ungenauer als das Original.</li>
+      <li><b>The cost scales with the corpus instead of with usage.</b> 200 repositories with 50 to 150 modules are tens of thousands of Pro calls before anyone has asked a question — and every refactoring that moves module boundaries runs up the bill again.</li>
+      <li><b>A generated description is structurally stale.</b> It claims something about code instead of showing it. The claim goes quietly wrong, and the answer built on it is convincingly wrong — exactly the kind of failure this product tolerates least.</li>
+      <li><b>The resolution does not work out.</b> Coarse enough to be cheap means too coarse for concrete questions. Fine enough for concrete questions means the code has been rewritten in prose — more expensive and less precise than the original.</li>
     </ul>
-    <p>Die billigste Vorstufe dieser Ebene wurde ausserdem gemessen und hat verloren; die beiden Nachträge am Ende halten Zahlen und Gegentest fest. Was bleibt, ist deterministisches Clustering ohne Modellaufruf und Benennung erst dann, wenn ein Mensch die Kandidaten wirklich sieht.</p>
+    <p>The cheapest precursor of this level was measured as well, and lost; the two addenda at the end record the numbers and the counter-test. What remains is deterministic clustering without a model call, and naming only once a human really sees the candidates.</p>
   </div>
 
-  <h3>Worüber genau die Embeddings liegen</h3>
-  <p>Nicht über rohen Code. Eine Frage in Fachsprache und ein Methodenrumpf haben fast keine gemeinsamen Wörter — roh eingebettet findet der Vektorraum nichts. Eingebettet wird deshalb ein <strong>angereicherter Text</strong> je Einheit, während die Volltextspur (FTS5) parallel den <strong>rohen</strong> Code indexiert. Genau das ist der Sinn der Hybridsuche: <code>PromoMailJob</code> findet die Volltextspur wörtlich, «Teaser-Mail» findet die Vektorspur inhaltlich.</p>
+  <h3>What exactly the embeddings sit on</h3>
+  <p>Not on raw code. A question in domain language and a method body share almost no words — embedded raw, the vector space finds nothing. What is embedded is therefore an <strong>enriched text</strong> per unit, while the full-text lane (FTS5) indexes the <strong>raw</strong> code in parallel. That is precisely the point of hybrid search: <code>PromoMailJob</code> is found literally by the full-text lane, «teaser mail» is found by meaning in the vector lane.</p>
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Einheit</th><th>Was in den Vektor geht</th><th>Schnitt</th></tr></thead>
+      <thead><tr><th>Unit</th><th>What goes into the vector</th><th>Cut</th></tr></thead>
       <tbody>
         <tr>
-          <td>Code-Chunk</td>
-          <td>Repo- und Pfad-Brotkrume, die umschliessenden Symbolnamen (Klasse, Methode) aus <code>ctags</code>, der Doc-Kommentar falls vorhanden, dann der Rumpf.</td>
-          <td>Von einer Symbolzeile bis zur nächsten, gedeckelt; darüber hinaus Fenster mit Überlappung.</td>
+          <td>Code chunk</td>
+          <td>Repo and path breadcrumb, the enclosing symbol names (class, method) from <code>ctags</code>, the doc comment if present, then the body.</td>
+          <td>From one symbol line to the next, capped; beyond that, windows with overlap.</td>
         </tr>
         <tr>
-          <td>Doku-Chunk</td>
-          <td>Überschriftenpfad plus Abschnittstext. Ist bereits natürliche Sprache.</td>
-          <td>An Überschriften.</td>
+          <td>Documentation chunk</td>
+          <td>Heading path plus section text. Already natural language.</td>
+          <td>At headings.</td>
         </tr>
         <tr>
-          <td><b>Fachtext im Repo</b></td>
-          <td>Resource-Bundles und i18n-Dateien, Mail- und Seitentemplates, Testnamen — von Menschen geschriebene Fachsprache, roh übernommen mit Repo- und Pfad-Brotkrume.</td>
-          <td>Bundle-Eintrag, Template-Abschnitt, Testmethode.</td>
+          <td><b>Domain text in the repo</b></td>
+          <td>Resource bundles and i18n files, mail and page templates, test names — human-written domain language, taken over raw with the repo and path breadcrumb.</td>
+          <td>Bundle entry, template section, test method.</td>
         </tr>
         <tr>
-          <td>Historien-Dokument</td>
-          <td>Commit-Betreff, Rumpf und geänderte Pfade; die Commits eines PR zu einem Dokument zusammengezogen.</td>
-          <td>Ein PR, ein Dokument.</td>
+          <td>History document</td>
+          <td>Commit subject, body and changed paths; the commits of one PR pulled together into one document.</td>
+          <td>One PR, one document.</td>
         </tr>
         <tr>
-          <td>Anfrageseite</td>
-          <td>Nicht die rohe Frage, sondern die erweiterte aus Schritt 1 — einmal in Fachsprache, einmal mit geratenem Codevokabular; beide Trefferlisten werden zusammengeführt.</td>
+          <td>Query side</td>
+          <td>Not the raw question, but the expanded one from step 1 — once in domain language, once with guessed code vocabulary; both result lists are merged.</td>
           <td>—</td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <p>Die Brücke zwischen Fach- und Codevokabular wird damit <em>gefunden</em> statt erzeugt: «Teaser-Mail» steht wörtlich im Resource-Bundle, im Mailtemplate und im Testnamen, und diese Stellen sind zitierbar und veralten nur so, wie der Code veraltet. Die zweite Hälfte der Brücke liegt auf der Anfrageseite — Schritt 1 sucht zusätzlich mit geratenem Codevokabular.</p>
+  <p>The bridge between domain and code vocabulary is therefore <em>found</em> rather than generated: «teaser mail» appears literally in the resource bundle, in the mail template and in the test name, and those places are citable and go stale only as the code goes stale. The second half of the bridge sits on the query side — step 1 additionally searches with guessed code vocabulary.</p>
 
   <div class="decision">
-    <span class="tag">Kein tree-sitter, kein AST</span>
-    <p>Ein AST wäre der genauere Schnitt, kostet aber dreifach: cgo (und damit <code>CGO_ENABLED=0</code>), je Sprache eine Grammatik <em>und</em> die Kenntnis ihrer Knotennamen, um überhaupt eine Abfrage zu schreiben. Bei einem gemischten Korpus heisst das, für jede neue Sprache erst den Baum zu verstehen. <code>ctags</code> liefert für rund 150 Sprachen einen einheitlichen Datensatz — Name, Art, Zeile, Geltungsbereich — und mehr als Symbolgrenzen braucht das Schneiden nicht. Wo <code>ctags</code> nichts liefert, greift das Zeilenfenster; das ist kein Notfall, sondern der Normalfall.</p>
+    <span class="tag">No tree-sitter, no AST</span>
+    <p>An AST would be the more precise cut, but it costs three times over: cgo (and with it <code>CGO_ENABLED=0</code>), a grammar per language <em>and</em> knowledge of its node names to write a query at all. With a mixed corpus that means understanding the tree first for every new language. <code>ctags</code> yields a uniform record for around 150 languages — name, kind, line, scope — and chunking needs nothing beyond symbol boundaries. Where <code>ctags</code> yields nothing, the line window takes over; that is not an emergency, it is the normal path.</p>
   </div>
 
-  <p>Vor dem Einbetten wird aussortiert, was nur Kosten erzeugt: eingecheckte Abhängigkeiten, generierter Code, Sperrdateien, Binärdateien, Minimiertes, und Lizenzköpfe am Dateianfang. Ohne diesen Filter bezahlt man Megabytes Rauschen und verwässert die Trefferliste.</p>
+  <p>Before embedding, everything that only creates cost is filtered out: vendored dependencies, generated code, lock files, binaries, minified files, and licence headers at the top of a file. Without that filter you pay for megabytes of noise and dilute the result list.</p>
 
-  <p>Dazu eine schlichte <code>symbols</code>-Tabelle (Datei → Symbol → Zeile) aus <code>ctags</code>, für exakte Namenssuche und für den Rückwärtslauf der Auswirkungsanalyse.</p>
+  <p>Plus a plain <code>symbols</code> table (file → symbol → line) from <code>ctags</code>, for exact name search and for the reverse walk of impact analysis.</p>
 </section>
 
 <section>
-  <h2>Ablauf einer Frage</h2>
-  <p>Ein Zustandsautomat, kein linearer Strom. Schritte 1 bis 3 sind gewöhnliche interne Aufrufe, nur Schritt 4 streamt.</p>
+  <h2>The path of a question</h2>
+  <p>A state machine, not a linear stream. Steps 1 to 3 are ordinary internal calls, only step 4 streams.</p>
 
 <figure class="fig"><div class="scroll">
 <svg viewBox="0 0 960 320" role="img" aria-labelledby="flow-title flow-desc" xmlns="http://www.w3.org/2000/svg">
-  <title id="flow-title">Ablauf einer Frage in rongo</title>
-  <desc id="flow-desc">Eine Frage durchläuft Verstehen und Routen; ist die Zuordnung mehrdeutig, hält rongo mit einer Rückfrage an und setzt erst nach der Auswahl beim Sammeln fort, bevor die Antwort gestreamt wird.</desc>
+  <title id="flow-title">The path of a question in rongo</title>
+  <desc id="flow-desc">A question goes through understanding and routing; where the match is ambiguous, rongo stops with a follow-up question and only continues at gathering after the choice, before the answer is streamed.</desc>
   <defs>
       <marker id="f-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
         <polygon points="0 0, 8 3, 0 6" fill="var(--ink-faint)"/>
@@ -585,329 +584,325 @@
   <path d="M556,208 H676 Q684,208 684,200 V112" fill="none" stroke="var(--accent)" stroke-width="1" marker-end="url(#f-b)"/>
   <path d="M772,74 H828" fill="none" stroke="var(--accent)" stroke-width="1" marker-end="url(#f-b)"/>
 
-  <rect x="560.0" y="54" width="64" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="592" y="63" text-anchor="middle">EINDEUTIG</text>
+  <rect x="560.0" y="54" width="64" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="592" y="63" text-anchor="middle">UNAMBIGUOUS</text>
   <rect x="496" y="134" width="76" height="12" rx="2" fill="var(--ground)"/>
-  <text class="alab" x="500" y="143">MEHRDEUTIG</text>
-  <rect x="586.0" y="188" width="60" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="616" y="197" text-anchor="middle">AUSWAHL</text>
+  <text class="alab" x="500" y="143">AMBIGUOUS</text>
+  <rect x="586.0" y="188" width="60" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="616" y="197" text-anchor="middle">CHOICE</text>
   <rect x="786.0" y="54" width="36" height="12" rx="2" fill="var(--ground)"/><text class="alab" x="804" y="63" text-anchor="middle">SSE</text>
 
-  <rect x="16" y="48" width="116" height="52" rx="6" fill="var(--ground)"/><rect x="16" y="48" width="116" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="74.0" y="74.0" text-anchor="middle">Frage</text><text class="nsub" x="74.0" y="88.0" text-anchor="middle">Rolle: BA/DEV</text>
-  <rect x="196" y="48" width="152" height="52" rx="6" fill="var(--ground)"/><rect x="196" y="48" width="152" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="74.0" text-anchor="middle">Verstehen</text><text class="nsub" x="272.0" y="88.0" text-anchor="middle">non-Pro · JSON</text>
-  <rect x="412" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="412" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="74.0" text-anchor="middle">Routen</text><text class="nsub" x="484.0" y="88.0" text-anchor="middle">Suche · Module</text>
-  <rect x="628" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="628" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="700.0" y="74.0" text-anchor="middle">Sammeln</text><text class="nsub" x="700.0" y="88.0" text-anchor="middle">Chunks · Dateien</text>
-  <rect x="836" y="48" width="108" height="52" rx="6" fill="var(--ground)"/><rect x="836" y="48" width="108" height="52" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="890.0" y="74.0" text-anchor="middle">Antwort</text><text class="nsub" x="890.0" y="88.0" text-anchor="middle">Pro · Stream</text>
-  <rect x="412" y="180" width="144" height="56" rx="6" fill="var(--ground)"/><rect x="412" y="180" width="144" height="56" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="484.0" y="208.0" text-anchor="middle">Rückfrage</text><text class="nsub" x="484.0" y="222.0" text-anchor="middle">hält den Zug an</text>
+  <rect x="16" y="48" width="116" height="52" rx="6" fill="var(--ground)"/><rect x="16" y="48" width="116" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="74.0" y="74.0" text-anchor="middle">Question</text><text class="nsub" x="74.0" y="88.0" text-anchor="middle">Role: BA/DEV</text>
+  <rect x="196" y="48" width="152" height="52" rx="6" fill="var(--ground)"/><rect x="196" y="48" width="152" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="272.0" y="74.0" text-anchor="middle">Understand</text><text class="nsub" x="272.0" y="88.0" text-anchor="middle">non-Pro · JSON</text>
+  <rect x="412" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="412" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="484.0" y="74.0" text-anchor="middle">Route</text><text class="nsub" x="484.0" y="88.0" text-anchor="middle">Search · modules</text>
+  <rect x="628" y="48" width="144" height="52" rx="6" fill="var(--ground)"/><rect x="628" y="48" width="144" height="52" rx="6" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/><text class="nname" x="700.0" y="74.0" text-anchor="middle">Gather</text><text class="nsub" x="700.0" y="88.0" text-anchor="middle">Chunks · files</text>
+  <rect x="836" y="48" width="108" height="52" rx="6" fill="var(--ground)"/><rect x="836" y="48" width="108" height="52" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="890.0" y="74.0" text-anchor="middle">Answer</text><text class="nsub" x="890.0" y="88.0" text-anchor="middle">Pro · stream</text>
+  <rect x="412" y="180" width="144" height="56" rx="6" fill="var(--ground)"/><rect x="412" y="180" width="144" height="56" rx="6" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/><text class="nname" x="484.0" y="208.0" text-anchor="middle">Follow-up</text><text class="nsub" x="484.0" y="222.0" text-anchor="middle">stops the turn</text>
 
   <line x1="16" y1="268" x2="944" y2="268" stroke="var(--hairline)" stroke-width="0.8"/>
-  <text class="lgnd" x="16" y="286">LEGENDE</text>
+  <text class="lgnd" x="16" y="286">LEGEND</text>
   <rect x="96" y="278" width="18" height="9" rx="2" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1"/>
-  <text class="nsub" x="122" y="286">Was der Nutzer sieht</text>
+  <text class="nsub" x="122" y="286">What the user sees</text>
   <rect x="256" y="278" width="18" height="9" rx="2" fill="var(--surface)" stroke="var(--ink-faint)" stroke-width="1"/>
-  <text class="nsub" x="282" y="286">Interner Schritt, nicht gestreamt</text>
+  <text class="nsub" x="282" y="286">Internal step, not streamed</text>
 </svg>
-</div><figcaption>Nur der letzte Schritt streamt. Findet das Routen nichts, endet der Zug mit «nichts gefunden» statt mit einer Antwort.</figcaption></figure>
+</div><figcaption>Only the last step streams. If routing finds nothing, the turn ends with «nothing found» instead of with an answer.</figcaption></figure>
   <div class="steps">
     <div>
-      <div class="k">1 · Verstehen</div>
-      <div class="v"><b>non-Pro, JSON-Antwort</b><span>Absicht (<code>how</code>, <code>why</code>, <code>where</code>, <code>conformance</code>), erweiterte Suchbegriffe samt geratenem Codevokabular, Repo-Hinweise.</span></div>
+      <div class="k">1 · Understand</div>
+      <div class="v"><b>non-Pro, JSON reply</b><span>Intent (<code>how</code>, <code>why</code>, <code>where</code>, <code>conformance</code>), expanded search terms including guessed code vocabulary, repo hints.</span></div>
     </div>
     <div>
-      <div class="k">2 · Routen</div>
-      <div class="v"><b>Hybridsuche über Chunks, gruppiert nach Modul</b><span>Dominiert der beste Treffer den zweiten um mehr als <code>BACKEND_ROUTE_MARGIN</code>, läuft es still weiter. Sonst: <code>clarification</code>-Event mit zwei bis fünf benannten Kandidaten, und der Zug endet. Kein Treffer → «nichts gefunden» mit den versuchten Begriffen, nie eine erfundene Antwort.</span></div>
+      <div class="k">2 · Route</div>
+      <div class="v"><b>Hybrid search over chunks, grouped by module</b><span>If the best hit dominates the second by more than <code>BACKEND_ROUTE_MARGIN</code>, it continues quietly. Otherwise: a <code>clarification</code> event with two to five named candidates, and the turn ends. No hit → «nothing found» with the terms that were tried, never an invented answer.</span></div>
     </div>
     <div>
-      <div class="k">3 · Sammeln</div>
-      <div class="v"><b>Chunks, ganze Dateien, Aufrufketten</b><span>Treffer auf ganze Dateien ausweiten, dann Symbolreferenzen verfolgen — begrenzt auf zwei Sprünge und ein Token-Budget. Ein Mechanismus über Controller, Service und Template ist genau das, was reines Top-k verfehlt.</span></div>
+      <div class="k">3 · Gather</div>
+      <div class="v"><b>Chunks, whole files, call chains</b><span>Widen hits to whole files, then follow symbol references — bounded to two hops and a token budget. A mechanism spread over controller, service and template is exactly what plain top-k misses.</span></div>
     </div>
     <div>
-      <div class="k">4 · Antworten</div>
-      <div class="v"><b>Pro, gestreamt</b><span>Rollenabhängiger System-Prompt, Deutsch/Schweiz. Belegmarken im Text zeigen auf eine Belegliste, die als eigenes Event kommt.</span></div>
+      <div class="k">4 · Answer</div>
+      <div class="v"><b>Pro, streamed</b><span>A role-dependent system prompt, in English. Citation markers in the text point at a source list that arrives as an event of its own.</span></div>
     </div>
   </div>
 
-  <h3>SSE-Events</h3>
+  <h3>SSE events</h3>
   <div class="pillrow">
     <span class="pill">status</span><span class="pill">clarification</span><span class="pill">token</span>
     <span class="pill">citations</span><span class="pill">usage</span><span class="pill">done</span><span class="pill">error</span>
   </div>
-  <p>Die offene Rückfrage wird am Thread gespeichert — die Wahl des BA kommt als neuer Request herein und setzt bei Schritt 3 fort.</p>
+  <p>The open follow-up question is stored on the thread — the BA's choice arrives as a new request and continues at step 3.</p>
 
   <div class="decision">
-    <span class="tag">Rollenwahl</span>
-    <p><code>audience</code> ist <code>ba</code> oder <code>dev</code>; in der Oberfläche heisst der Schalter <strong>BA / DEV</strong>, pro Nachricht setzbar. Sie beeinflusst <strong>nur</strong> Schritt 4: Sprachebene, Tiefe, ob Code eingebettet wird, ob das Belegfeld offen startet. Angenehme Folge: «Als Dev neu erklären» führt nur Schritt 4 auf dem bereits gesammelten Kontext erneut aus — eine Generierung, keine neue Suche.</p>
+    <span class="tag">Role choice</span>
+    <p><code>audience</code> is <code>ba</code> or <code>dev</code>; in the interface the switch is called <strong>BA / DEV</strong> and can be set per message. It affects <strong>only</strong> step 4: level of language, depth, whether code is embedded, whether the source panel starts open. A pleasant consequence: «Explain as Dev» re-runs step 4 alone on the context already gathered — one generation, no new search.</p>
   </div>
 </section>
 
 <section>
-  <h2>Oberfläche</h2>
-  <p>Einspaltiger Thread. Seiten: <strong>Fragen</strong>, <strong>Repos</strong>, <strong>Kosten</strong>, <strong>Einstellungen</strong>.</p>
+  <h2>Interface</h2>
+  <p>A single-column thread. Pages: <strong>Ask</strong>, <strong>Repos</strong>, <strong>Cost</strong>, <strong>Settings</strong>.</p>
   <ul>
-    <li>Eingabe mit Rollenschalter direkt am Feld und optionalem Repo-Filter.</li>
-    <li><b>Aktivitätsspur</b> nach dem Muster von looms <code>ActivityTracePanel</code>: eingeklappt eine einzige Zeile mit einem <em>generierten</em> Titel dessen, was gerade läuft, dazu Chevron und Dauer. Ausgeklappt eine Timeline — je Schritt ein Uhr-Knoten auf einer durchgehenden Linie, abgeschlossen von einem Done-Knoten mit Haken. Es gibt <em>ein Panel je Zug</em>, nicht eines je Thread — eine Rückfrage beendet den Zug und damit die Spur. Das Panel trägt <code>role="status"</code> und <code>aria-live="polite"</code>, damit der Fortschritt vorgelesen wird.</li>
-    <li>Der Titel der Spur ist derselbe non-Pro-Aufruf wie der Thread-Titel — er beschreibt den laufenden Schritt, nicht die Frage.</li>
-    <li>Eine Spur, die in eine Rückfrage läuft, endet <em>nicht</em> mit dem Done-Haken, sondern mit einem Wartezustand-Knoten in Ochre («Rückfrage gestellt»). Nach der Auswahl beginnt eine zweite Spur mit «Auswahl übernommen». loom kennt diesen dritten Zustand nicht — dort ist <code>complete = !active &amp;&amp; !streaming</code>, was hier fälschlich «fertig» sagen würde, obwohl auf einen Menschen gewartet wird.</li>
-    <li>Rückfrage als eingebettete Karte, nicht als Dialogfenster. Jeder Kandidat mit deutschem Titel, Repo-Kennzeichen und einer Zeile Zusammenfassung. Offen ist sie in Ochre gerahmt — die Farbe heisst «du bist dran».</li>
-    <li><b>Nach der Auswahl klappt die Karte auf eine Zeile zusammen:</b> «Gewählt: …» plus Repo-Kennzeichen, Rahmen wird ruhig. Sie verschwindet nicht — der Entscheid gehört ins Protokoll, und man merkt manchmal erst an der Antwort, dass man den falschen Mechanismus erwischt hat. Wieder aufgeklappt stehen alle Kandidaten da, der gewählte markiert; ein anderer ist anklickbar und startet einen <em>neuen</em> Zug mit eigener Spur und eigener Antwort. Nichts wird überschrieben.</li>
-    <li>Rollenschalter <strong>BA / DEV</strong> direkt am Eingabefeld; jede Antwort lässt sich mit «Als Dev neu erklären» ohne neue Suche umschreiben.</li>
-    <li>Antwort gestreamt, Belegmarken hochgestellt, darunter ein zugeklapptes Feld <strong>«Woher weiss rongo das?»</strong> mit Repo, Datei, Zeile und Link.</li>
-    <li><b>Thread-Titel:</b> Sobald die Frage abgeschickt ist, steht der Eintrag in der Seitenleiste sofort da — mit den ersten Wörtern der Frage, gekürzt. Parallel schreibt non-Pro einen knappen Titel; kommt er an, ersetzt er den Platzhalter still. Der Titel wartet nie, und die Antwort wartet nie auf den Titel. Scheitert der Aufruf, bleibt der Platzhalter einfach stehen — das ist kein Fehlerfall, den jemand sehen muss.</li>
-    <li>Alles Aufklappbare trägt einen <strong>Chevron</strong>, der beim Öffnen um 90 Grad nach unten dreht — kein Dreieck, kein Plus/Minus, kein Wechsel des Symbols. Gilt für das Belegfeld und für jede spätere Aufklappstelle.</li>
+    <li>An input with the role switch right at the field and an optional repo filter.</li>
+    <li>An <b>activity trace</b> after the pattern of loom's <code>ActivityTracePanel</code>: collapsed, a single line with a <em>generated</em> title of what is running, plus chevron and duration. Expanded, a timeline — one clock node per step on a continuous line, closed by a done node with a check. There is <em>one panel per turn</em>, not one per thread — a follow-up question ends the turn and with it the trace. The panel carries <code>role="status"</code> and <code>aria-live="polite"</code> so progress is read out.</li>
+    <li>The trace title is the same non-Pro call as the thread title — it describes the running step, not the question.</li>
+    <li>A trace that runs into a follow-up question does <em>not</em> end on the done check, but on an ochre waiting node («follow-up question asked»). After the choice, a second trace starts with «choice taken». loom does not know this third state — there <code>complete = !active &amp;&amp; !streaming</code>, which here would wrongly say «done» while a person is being waited on.</li>
+    <li>The follow-up question as an embedded card, not a dialog window. Every candidate with a title, a repo marker and a one-line summary. While open it is framed in ochre — the colour means «your move».</li>
+    <li><b>After the choice the card collapses to one line:</b> «Chosen: …» plus the repo marker, and the border goes quiet. It does not disappear — the decision belongs in the record, and sometimes you only notice from the answer that you picked the wrong mechanism. Reopened, every candidate is there with the chosen one marked; another one is clickable and starts a <em>new</em> turn with its own trace and its own answer. Nothing is overwritten.</li>
+    <li>The <strong>BA / DEV</strong> role switch right at the input field; every answer can be rewritten with «Explain as Dev» without a new search.</li>
+    <li>The answer is streamed, citation markers are superscript, and below them sits a collapsed panel <strong>«How does rongo know this?»</strong> with repo, file, line and link.</li>
+    <li><b>Thread title:</b> as soon as the question is sent, the entry is in the sidebar immediately — with the first words of the question, truncated. In parallel non-Pro writes a short title; when it arrives, it quietly replaces the placeholder. The title never waits, and the answer never waits for the title. If the call fails, the placeholder simply stays — that is not a failure anyone needs to see.</li>
+    <li>Everything expandable carries a <strong>chevron</strong> that rotates 90 degrees downwards on open — no triangle, no plus/minus, no glyph swap. This holds for the source panel and for every later expandable spot.</li>
   </ul>
 </section>
 
   <div class="decision">
-    <span class="tag">Entscheid: kein Boustrophedon in der Oberfläche</span>
-    <p>Ursprünglich sollte die Statusspur zeilenweise die Richtung wechseln — das Motiv der Namensherkunft, wörtlich genommen. Mit der Timeline aus loom fällt das weg, und das ist richtig so: Der Wert der Timeline ist die <em>durchgehende Linie</em>, die die Knoten verbindet. Wechselnde Leserichtung zerschneidet genau diese Linie. Lesbarkeit schlägt Motiv.</p>
-    <p>Der Alternativvorschlag wäre, das Motiv anderswo auszugeben, wo es nichts kostet — etwa im Leerzustand oder als Randmarke. Meine Empfehlung ist, darauf zu verzichten: Der Name trägt die Geschichte bereits, und ein Motiv, das sich eine Stelle suchen muss, ist Dekoration.</p>
+    <span class="tag">Decision: no boustrophedon in the interface</span>
+    <p>Originally the status trace was meant to alternate direction line by line — the motif behind the name, taken literally. With loom's timeline that falls away, and rightly so: the value of the timeline is the <em>continuous line</em> connecting the nodes. Alternating reading direction cuts exactly that line. Readability beats motif.</p>
+    <p>The alternative would be to spend the motif somewhere it costs nothing — in the empty state, say, or as a margin mark. My recommendation is to drop it: the name already carries the story, and a motif that has to go looking for a place is decoration.</p>
   </div>
 
 <section>
-  <h2>Fragen über mehrere Repositories</h2>
-  <p>Mehrere gut punktende Module heissen zweierlei, und die beiden sehen für einen reinen Punktzahl-Vergleich gleich aus:</p>
+  <h2>Questions across several repositories</h2>
+  <p>Several well-scoring modules mean two different things, and to a plain score comparison the two look identical:</p>
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Lage</th><th>Beispiel</th><th>Richtige Reaktion</th></tr></thead>
+      <thead><tr><th>Situation</th><th>Example</th><th>Correct reaction</th></tr></thead>
       <tbody>
         <tr>
-          <td><b>Mehrdeutigkeit</b><br><span class="hint">Alternativen</span></td>
-          <td>Drei unabhängige Teaser-Mail-Mechanismen in drei Produkten.</td>
-          <td>Rückfragen. Genau ein Modul ist gemeint.</td>
+          <td><b>Ambiguity</b><br><span class="hint">alternatives</span></td>
+          <td>Three independent teaser mail mechanisms in three products.</td>
+          <td>Ask back. Exactly one module is meant.</td>
         </tr>
         <tr>
-          <td><b>Zusammensetzung</b><br><span class="hint">Teile eines Ganzen</span></td>
-          <td>Der orchestrierende Dienst in <code>shop-backend</code>, die geteilte Bibliothek in <code>commons-mail</code>, die fremde Komponente hinter <code>integration-x</code>.</td>
-          <td><strong>Nicht</strong> rückfragen. Alle drei gehören zur Antwort.</td>
+          <td><b>Composition</b><br><span class="hint">parts of one whole</span></td>
+          <td>The orchestrating service in <code>shop-backend</code>, the shared library in <code>commons-mail</code>, the third-party component behind <code>integration-x</code>.</td>
+          <td><strong>Do not</strong> ask back. All three belong in the answer.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <p>Eine Rückfrage in der zweiten Lage ist nicht bloss lästig, sie ist inhaltlich falsch: Sie zwingt zur Wahl eines Teils und erzeugt danach eine Antwort, die die halbe Wahrheit erzählt.</p>
+  <p>A follow-up question in the second situation is not merely annoying, it is substantively wrong: it forces a choice between parts and then produces an answer telling half the truth.</p>
 
-  <h3>Woran rongo die beiden unterscheidet</h3>
-  <p>Nicht am Modellurteil allein — dafür gibt es ein hartes Signal. Beim Indexieren werden die <strong>Abhängigkeitsmanifeste</strong> gelesen (<code>pom.xml</code>, <code>build.gradle</code>, <code>package.json</code>, <code>go.mod</code>, <code>requirements.txt</code>, <code>*.csproj</code>) und in eine Tabelle <code>repo_deps</code> geschrieben: Wer veröffentlicht welche Koordinate, und wer zieht sie. Daraus folgt unmittelbar:</p>
+  <h3>How rongo tells the two apart</h3>
+  <p>Not by the model's judgement alone — there is a hard signal for this. During indexing the <strong>dependency manifests</strong> are read (<code>pom.xml</code>, <code>build.gradle</code>, <code>package.json</code>, <code>go.mod</code>, <code>requirements.txt</code>, <code>*.csproj</code>) and written into a <code>repo_deps</code> table: who publishes which coordinate, and who pulls it. From that follows immediately:</p>
   <ul>
-    <li>Hängt Kandidat A laut Manifest an Kandidat B, sind es <strong>keine Alternativen</strong> — dann ist es Zusammensetzung, ohne dass ein Modell darüber urteilen muss.</li>
-    <li>Besteht keine Abhängigkeit und unterscheidet sich das fachliche Thema der Kandidaten, ist es Mehrdeutigkeit — es wird zurückgefragt.</li>
-    <li>Nur im Restfall entscheidet das Routen-Modell, und dann mit den Kandidaten <em>und</em> der Abhängigkeitslage im Prompt.</li>
+    <li>If candidate A depends on candidate B per the manifest, they are <strong>not alternatives</strong> — then it is composition, without a model having to judge it.</li>
+    <li>If there is no dependency and the candidates differ in their domain topic, it is ambiguity — rongo asks back.</li>
+    <li>Only in the remaining case does the routing model decide, and then with the candidates <em>and</em> the dependency situation in the prompt.</li>
   </ul>
 
-  <h3>Sammeln über Repo-Grenzen</h3>
-  <p>Das Sammeln darf die Grenze überschreiten, aber nicht blind: Ein Repository zieht schnell vierzig Abhängigkeiten, und deren Quelltext ist fast nie die Antwort. Die Schranke ist deshalb zweistufig — verfolgt wird ein Symbol nur, wenn <em>beides</em> gilt:</p>
+  <h3>Gathering across repository boundaries</h3>
+  <p>Gathering may cross the boundary, but not blindly: a repository quickly pulls forty dependencies, and their source is almost never the answer. The barrier is therefore two-stage — a symbol is only followed when <em>both</em> hold:</p>
   <ol>
-    <li>Der aufgesammelte Code referenziert das Symbol tatsächlich — das Manifest sagt nur, <em>zu welchem Repo</em> es gehört, die Referenz sagt, <em>ob es zählt</em>.</li>
-    <li>Das Zielrepository ist bei rongo indexiert.</li>
+    <li>The gathered code really references the symbol — the manifest only says <em>which repo</em> it belongs to, the reference says <em>whether it counts</em>.</li>
+    <li>The target repository is indexed in rongo.</li>
   </ol>
-  <p>Es gilt weiterhin dasselbe Sprungbudget wie innerhalb eines Repositories; Repo-Wechsel bekommen keinen Rabatt.</p>
+  <p>The same hop budget as within one repository still applies; crossing a repository gets no discount.</p>
 
   <div class="note">
-    <span class="tag">Die Grenze wird benannt, nicht überspielt</span>
-    <p>Führt die Kette in etwas, das rongo nicht indexiert hat — eine fremde Bibliothek, ein Hersteller-SDK, ein fremder Dienst — wird das in der Antwort <strong>ausdrücklich gesagt</strong>: «Der eigentliche Versand passiert in <code>vendor-mailer</code>, das nicht indexiert ist. rongo sieht, wie es aufgerufen und konfiguriert wird, nicht was es intern tut.» Das ist für den Nutzer wertvoller als eine glatte Antwort, denn es benennt genau die Stelle, an der doch noch jemand gefragt werden muss. Eine plausible Erfindung an dieser Stelle wäre der teuerste Fehler des Produkts.</p>
+    <span class="tag">The boundary is named, not papered over</span>
+    <p>If the chain leads into something rongo has not indexed — a third-party library, a vendor SDK, an external service — the answer <strong>says so explicitly</strong>: «The sending itself happens in <code>vendor-mailer</code>, which is not indexed. rongo sees how it is called and configured, not what it does internally.» That is more valuable to the user than a smooth answer, because it names exactly the place where someone still has to be asked. A plausible invention at that point would be the product's most expensive failure.</p>
   </div>
 
-  <h3>Was das für die Antwort heisst</h3>
+  <h3>What that means for the answer</h3>
   <ul>
-    <li>Die Antwort nennt zuerst die <strong>Orchestrierung</strong> — wer ruft wen, in welcher Reihenfolge — und erst dann die Innereien der einzelnen Teile.</li>
-    <li>Die Spur zeigt den Umfang («betrifft 3 Repositories»), damit sichtbar ist, dass mehr als ein Ort gelesen wurde.</li>
-    <li>Das Belegfeld gruppiert nach Repository, und der Zähler nennt beides: Belege und Repositories.</li>
+    <li>The answer names the <strong>orchestration</strong> first — who calls whom, in what order — and only then the internals of the individual parts.</li>
+    <li>The trace shows the scope («covers 3 repositories»), so it is visible that more than one place was read.</li>
+    <li>The source panel groups by repository, and the counter names both: sources and repositories.</li>
   </ul>
 </section>
 
 <section>
-  <h2>Nachfragen</h2>
-  <p>Eine Nachfrage erzeugt <strong>immer eine neue Antwort im Thread</strong>. Die vorherige wird nie überschrieben — sie kann längst weitergeleitet oder in ein Ticket kopiert worden sein. Der Thread ist ein Protokoll, kein Arbeitsdokument.</p>
-  <p>Ob dafür neu gesucht werden muss, entscheidet ein billiger Prüfschritt auf non-Pro: Er bekommt die Nachfrage und ein <em>Inventar</em> des bereits Gesammelten — Dateiliste, Symbole, gewähltes Modul — und antwortet mit «reicht» oder «hole zusätzlich». Daraus ergeben sich drei Fälle:</p>
+  <h2>Follow-up questions</h2>
+  <p>A follow-up question <strong>always produces a new answer in the thread</strong>. The previous one is never overwritten — it may long since have been forwarded or copied into a ticket. The thread is a record, not a working document.</p>
+  <p>Whether a new search is needed for it is decided by a cheap check on non-Pro: it gets the follow-up question and an <em>inventory</em> of what was already gathered — file list, symbols, chosen module — and answers with «enough» or «fetch more». That gives three cases:</p>
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Fall</th><th>Was läuft</th><th>Kosten</th></tr></thead>
+      <thead><tr><th>Case</th><th>What runs</th><th>Cost</th></tr></thead>
       <tbody>
         <tr>
-          <td><b>Nur die Rolle wechselt</b><br><span class="hint">«Als Dev neu erklären»</span></td>
-          <td>Ausschliesslich Schritt 4 auf demselben gesammelten Kontext. Keine Suche, keine Einbettung, dieselben Belege.</td>
-          <td>Ein Pro-Aufruf.</td>
+          <td><b>Only the role changes</b><br><span class="hint">«Explain as Dev»</span></td>
+          <td>Step 4 alone on the same gathered context. No search, no embedding, the same sources.</td>
+          <td>One Pro call.</td>
         </tr>
         <tr>
-          <td><b>Vertiefung im selben Mechanismus</b><br><span class="hint">«Was passiert bei mehreren offenen Warenkörben?»</span></td>
-          <td>Der Prüfschritt verlangt Nachschlag: gezieltes Nachsammeln <em>innerhalb</em> des gewählten Moduls, ohne neues Routen und ohne neue Rückfrage. Der Kontext wächst.</td>
-          <td>non-Pro-Prüfung, etwas Sammeln, ein Pro-Aufruf.</td>
+          <td><b>Going deeper into the same mechanism</b><br><span class="hint">«What happens with several open carts?»</span></td>
+          <td>The check asks for more: targeted gathering <em>within</em> the chosen module, with no new routing and no new follow-up question. The context grows.</td>
+          <td>A non-Pro check, some gathering, one Pro call.</td>
         </tr>
         <tr>
-          <td><b>Anderer Mechanismus</b><br><span class="hint">«Und wie ist das im Newsletter?»</span></td>
-          <td>Verlässt das gewählte Modul. Es wird neu geroutet — und darf dabei erneut eine Rückfrage auslösen, mit allem, was dazugehört.</td>
-          <td>Voller Durchlauf.</td>
+          <td><b>A different mechanism</b><br><span class="hint">«And how is it in the newsletter?»</span></td>
+          <td>Leaves the chosen module. It is routed again — and may trigger another follow-up question, with everything that entails.</td>
+          <td>A full run.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <div class="note">
-    <span class="tag">Warum der Prüfschritt nicht wegoptimiert wird</span>
-    <p>Ohne ihn beantwortet rongo jede Nachfrage aus dem, was zufällig schon im Kontext liegt — und formuliert überzeugend, obwohl die entscheidende Datei nie gelesen wurde. Ein Aufruf auf dem günstigen Modell ist der Preis dafür, dass «weiss ich nicht, hole ich nach» überhaupt vorkommen kann.</p>
+    <span class="tag">Why the check is not optimised away</span>
+    <p>Without it rongo answers every follow-up question from whatever happens to be in context — and phrases it convincingly, although the decisive file was never read. One call on the cheap model is the price of «I do not know, let me fetch it» being possible at all.</p>
   </div>
 
-  <p>Der gesammelte Kontext wächst über den Thread und wird gedeckelt. Verdrängt wird nach Alter, aber <strong>zitierte Dateien bleiben</strong>: Sie tragen das Belegfeld älterer Antworten, und ein Beleg, der ins Leere zeigt, ist schlimmer als eine längere Liste.</p>
+  <p>The gathered context grows across the thread and is capped. Eviction is by age, but <strong>cited files stay</strong>: they carry the source panel of older answers, and a source pointing nowhere is worse than a longer list.</p>
 </section>
-
 <section>
-  <h2>Antwortlänge und Weitergabe</h2>
-  <p>Eine BA-Antwort ist standardmässig <strong>kurz: der Kernmechanismus in drei bis fünf Absätzen</strong>. Sie beantwortet die Frage und hört auf. Randbedingungen und Sonderfälle kommen per Nachfrage — die ist billig, weil der Kontext bereits gesammelt ist, und sie kostet nur einen Pro-Aufruf. Der Token-Deckel über <code>WithMaxTokens</code> wird entsprechend gesetzt; das DEV-Register bekommt mehr Luft, weil dort Codeausschnitte im Fliesstext stehen.</p>
+  <h2>Answer length and passing it on</h2>
+  <p>A BA answer is <strong>short by default: the core mechanism in three to five paragraphs</strong>. It answers the question and stops. Edge conditions and special cases come through a follow-up question — which is cheap, because the context is already gathered, and costs only one Pro call. The token cap through <code>WithMaxTokens</code> is set accordingly; the DEV register gets more room, because code excerpts sit in the running text there.</p>
 
-  <h3>Export und Teilen-Link</h3>
+  <h3>Export and share link</h3>
   <ul>
-    <li><strong>Markdown-Export</strong> einer Antwort samt Belegen — rein lokal, keine neue Route.</li>
-    <li><strong>Teilen-Link</strong> nach peeqs Muster (<code>internal/sharelink</code>): opakes Token, nur dessen Hash gespeichert, eigene unauthentifizierte Route.</li>
+    <li><strong>Markdown export</strong> of an answer including its sources — purely local, no new route.</li>
+    <li><strong>Share link</strong> after peeq's pattern (<code>internal/sharelink</code>): an opaque token, only its hash stored, its own unauthenticated route.</li>
   </ul>
 
   <div class="note">
-    <span class="tag">Was ein Teilen-Link preisgibt</span>
-    <p>Er ist die einzige Stelle, an der rongo etwas ohne Anmeldung herausgibt — und das Herausgegebene ist eine Erklärung firmeneigenen Codes samt Datei- und Zeilenangaben. Drei Einschränkungen gehören deshalb dazu: geteilt wird <strong>eine Antwort, nie ein ganzer Thread</strong> (ein Thread enthält Fragen, die niemanden angehen); jeder Link ist einzeln widerrufbar; und alle bestehenden Links stehen in der Admin-Ansicht, sonst weiss nach einem halben Jahr niemand mehr, was draussen ist.</p>
+    <span class="tag">What a share link gives away</span>
+    <p>It is the only place where rongo hands something out without a sign-in — and what it hands out is an explanation of company code including file and line references. Three restrictions therefore belong with it: what is shared is <strong>one answer, never a whole thread</strong> (a thread contains questions that are nobody's business); every link is individually revocable; and every existing link is listed in the admin view, or after half a year nobody knows what is out there.</p>
   </div>
 </section>
 
 <section>
-  <h2>Kostenerfassung</h2>
-  <p>Ein einziger Zug verbraucht mehrere Modelle: non-Pro fürs Verstehen, non-Pro fürs Routen, ein Embedding für die Suchanfrage, Pro für die Antwort. Die Erfassung liegt deshalb <strong>pro Aufruf</strong>, nicht pro Nachricht.</p>
+  <h2>Cost accounting</h2>
+  <p>A single turn consumes several models: non-Pro for understanding, non-Pro for routing, an embedding for the search query, Pro for the answer. Accounting therefore sits <strong>per call</strong>, not per message.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Ebene</th><th>Was dort steht</th></tr></thead>
+      <thead><tr><th>Level</th><th>What is recorded there</th></tr></thead>
       <tbody>
-        <tr><td><code>llm_calls</code></td><td>eine Zeile je Aufruf: Nachricht, Schritt (<code>understand</code>, <code>route</code>, <code>embed</code>, <code>answer</code>, <code>name_candidates</code>), Modell bzw. Deployment, Prompt-, Completion- und Reasoning-Token, errechnete Kosten in USD, Dauer.</td></tr>
-        <tr><td>Nachricht</td><td>Summe ihrer Aufrufe — das ist der Wert am Antwortfuss, aufklappbar nach Modell.</td></tr>
-        <tr><td>Thread, Nutzer, Tag</td><td>Aggregate darüber, auf der Kosten-Seite.</td></tr>
-        <tr><td>Repository</td><td>Indexierungskosten — nur Embeddings, denn beim Indexieren läuft kein Generierungsaufruf. Dem Repo zugerechnet statt einer Nachricht.</td></tr>
+        <tr><td><code>llm_calls</code></td><td>one row per call: message, step (<code>understand</code>, <code>route</code>, <code>embed</code>, <code>answer</code>, <code>name_candidates</code>), model or deployment, prompt, completion and reasoning tokens, computed cost in USD, duration.</td></tr>
+        <tr><td>Message</td><td>the sum of its calls — that is the figure at the foot of the answer, expandable by model.</td></tr>
+        <tr><td>Thread, user, day</td><td>aggregates over that, on the Cost page.</td></tr>
+        <tr><td>Repository</td><td>indexing cost — embeddings only, because no generation call runs during indexing. Attributed to the repo instead of to a message.</td></tr>
       </tbody>
     </table>
   </div>
-  <p>Weil das Schema den Modellnamen je Zeile trägt, kostet ein zusätzliches oder ausgetauschtes Modell keine Migration — auch nicht ein späterer Wechsel des Embedding-Modells mitten im Betrieb.</p>
+  <p>Because the schema carries the model name per row, an additional or swapped model costs no migration — not even a later change of the embedding model in mid-operation.</p>
 
   <div class="note">
-    <span class="tag">Notwendig, nicht optional</span>
-    <p>Preise kommen aus litellms <code>model_prices_and_context_window.json</code>, <strong>mitgeliefert</strong> per <code>//go:embed</code> — ein interner Server soll für die Preisberechnung nicht ins Netz greifen — mit manueller Aktualisierung durch den Admin. Die MiMo-Deployments sind keine öffentlichen Modell-IDs und stehen in keinem Katalog: eine lokale <code>model_prices</code>-Übersteuerungstabelle nach Deployment-Namen ist Pflicht.</p>
+    <span class="tag">Necessary, not optional</span>
+    <p>Prices come from litellm's <code>model_prices_and_context_window.json</code>, <strong>shipped along</strong> via <code>//go:embed</code> — an internal server should not reach out to the network to compute prices — with manual updates by the admin. The MiMo deployments are not public model ids and appear in no catalogue: a local <code>model_prices</code> override table keyed by deployment name is mandatory.</p>
   </div>
 </section>
 
 <section>
-  <h2>Phasen</h2>
-  <p>Jede Phase ist ein eigener Feature-Branch ab <code>master</code> und endet lieferbar. TDD durchgehend.</p>
+  <h2>Phases</h2>
+  <p>Every phase is its own feature branch off <code>master</code> and ends shippable. TDD throughout.</p>
   <ol class="phases">
-    <li><b>Grundgerüst</b><span>Repo, Go-Modul <code>github.com/trick77/rongo</code>, Config, Migrationsrunner, Store, Auth (dev + Admin-Token, OIDC-Naht gelegt), eingebettete SPA-Hülle, Containerfile, compose.yaml, CI mit peeqs Coverage-Gates.</span></li>
-    <li><b>Indexierung</b><span>Repo-Registrierung, Clone/Fetch/Diff-Poller, <code>ctags</code>- und <code>rg</code>-Aufrufe, Chunking, Embedding-Client, Hybridsuche portiert aus <code>peeq/backend/internal/rag</code>. Endet mit der Messung small gegen large.</span></li>
-    <li><b>Modulebene</b><span>Deterministisches Clustering, Repos-Seite, Messung der Modulebene. <b>Eine erzeugte Beschreibungsebene entsteht bewusst nicht</b> — siehe den Nachtrag unten.</span></li>
-    <li><b>Frage-Pipeline «wie»</b><span>Verstehen → Routen → Sammeln → Streamen, SSE-Events, Thread-Persistenz, Rückfrage-Rundlauf, Rollenwahl, Belegfeld. Das erste wirklich benutzbare Release.</span></li>
-    <li><b>Kostenerfassung</b><span><code>llm_calls</code> pro Aufruf, mitgelieferter litellm-Katalog, Übersteuerungstabelle für die MiMo-Deployments, Kosten-Seite mit Aufschlüsselung nach Modell.</span></li>
-    <li><b>«Warum»</b><span>Historie indexiert und ins Sammeln gemischt. Klein, gleiche Pipeline.</span></li>
-    <li><b>«Wo müssten wir ändern»</b><span>Rückwärtslauf über <code>symbols</code>, gewichtete Liste der betroffenen Stellen.</span></li>
-    <li><b>Spec-Konformität</b><span>Anforderung einfügen, in prüfbare Aussagen zerlegen, je Aussage sammeln, Urteil <em>erfüllt / teilweise / nicht gefunden</em> mit Belegen.</span></li>
+    <li><b>Skeleton</b><span>Repo, Go module <code>github.com/trick77/rongo</code>, config, migration runner, store, auth (dev + admin token, the OIDC seam laid), embedded SPA shell, Containerfile, compose.yaml, CI with peeq's coverage gates.</span></li>
+    <li><b>Indexing</b><span>Repository registration, clone/fetch/diff poller, <code>ctags</code> and <code>rg</code> calls, chunking, embedding client, hybrid search ported from <code>peeq/backend/internal/rag</code>. Ends with the small versus large measurement.</span></li>
+    <li><b>Module level</b><span>Deterministic clustering, the Repos page, measurement of the module level. <b>A generated description level is deliberately not built</b> — see the addendum below.</span></li>
+    <li><b>The «how» pipeline</b><span>Understand → route → gather → stream, SSE events, thread persistence, the follow-up round trip, role choice, source panel. The first genuinely usable release.</span></li>
+    <li><b>Cost accounting</b><span><code>llm_calls</code> per call, the shipped litellm catalogue, an override table for the MiMo deployments, a Cost page broken down by model.</span></li>
+    <li><b>«Why»</b><span>History indexed and mixed into gathering. Small, the same pipeline.</span></li>
+    <li><b>«Where would we have to change it»</b><span>The reverse walk over <code>symbols</code>, a weighted list of the affected places.</span></li>
+    <li><b>Spec conformance</b><span>Paste in a requirement, decompose it into checkable statements, gather per statement, verdict <em>met / partly / not found</em> with sources.</span></li>
   </ol>
 
   <div class="note">
-    <span class="tag">Zum Umfang, aktenkundig</span>
-    <p>Empfohlen war v1 = «wie» plus «warum», mit «wo ändern» und Spec-Konformität als eigene Spezifikationen. Entschieden wurde: alle vier in einer Spezifikation — so steht es hier. Die praktische Folge bleibt: acht Phasen passen in keinen einzelnen Umsetzungsplan, also bekommt jede Phase beim Übergang ihr eigenes Plandokument. Die Spezifikation ist eine, die Pläne sind es nicht.</p>
+    <span class="tag">On scope, for the record</span>
+    <p>The recommendation was v1 = «how» plus «why», with «where to change» and spec conformance as specifications of their own. What was decided: all four in one specification — as written here. The practical consequence stands: eight phases fit into no single implementation plan, so every phase gets its own plan document at the handover. The specification is one; the plans are not.</p>
   </div>
 </section>
 
 <section>
-  <h2>Verifikation</h2>
+  <h2>Verification</h2>
   <ul>
-    <li><code>make test</code> (Go, <code>-race</code>) und <code>make fe-test</code> (Vitest), mit Coverage- und Diff-Cover-Gates aus peeqs <code>hack/</code>.</li>
-    <li>Kein Test ruft ein echtes LLM, einen echten Embedding-Endpunkt oder ein echtes Git-Remote: <code>httptest</code>-Attrappen und ein lokal erzeugtes Fixture-Repository.</li>
-    <li>Migration, die Daten anfasst → getestet auf einer DB, die auf dem Stand der Vorgängermigration hochgezogen wurde.</li>
-    <li>Ende zu Ende von Hand: privates Repo registrieren → indexieren lassen → mehrdeutig fragen → Rückfragekarte erscheint → Kandidat wählen → Antwort streamt → Belegfeld öffnen und eine zitierte Zeile tatsächlich nachschlagen → als Dev neu erklären lassen und prüfen, dass nicht neu gesucht wird → Kosten-Seite hat sich bewegt.</li>
-    <li>Sichtbare UI-Änderungen werden mit Playwright in der laufenden App bedient, bevor sie als fertig gemeldet werden.</li>
+    <li><code>make test</code> (Go, <code>-race</code>) and <code>make fe-test</code> (Vitest), with coverage and diff-cover gates from peeq's <code>hack/</code>.</li>
+    <li>No test calls a real LLM, a real embedding endpoint or a real git remote: <code>httptest</code> fakes and a locally built fixture repository.</li>
+    <li>A migration that touches data → tested on a database brought up to the state of the previous migration.</li>
+    <li>End to end by hand: register a private repo → let it index → ask an ambiguous question → the clarification card appears → pick a candidate → the answer streams → open the source panel and actually look up a cited line → have it explained as Dev again and check that nothing is searched anew → the Cost page has moved.</li>
+    <li>Visible UI changes are driven with Playwright in the running app before they are reported as done.</li>
   </ul>
 </section>
-
 <section>
-  <h2>Nachtrag Phase 3: die Routing-Ebene ist gemessen und vorerst nicht gebaut</h2>
+  <h2>Addendum phase 3: the routing level is measured and, for now, not built</h2>
   <p>
-    Phase 3 sollte <code>module_profiles</code> beim Indexieren erzeugen. Vorher wurde die These
-    geprüft, auf der alles darüber steht — <em>Bewertung auf Modulebene verbessert die Reihenfolge</em>
-    —, und zwar ohne einen einzigen Modellaufruf: Chunk-Treffer nach Modul gruppieren und danach neu
-    ordnen. Sechs Arme gegen dieselben 28 Fragen, Kriterium vorab festgelegt.
-    Ergebnis in <code>docs/measurements/2026-08-17-module-ranking-and-comments.md</code>:
-    <b>kein Arm schlägt die reine Chunk-Suche</b> (recall@5 0.679 gegen 0.607 im besten Modularm,
-    0.214 im schlechtesten).
+    Phase 3 was meant to produce <code>module_profiles</code> during indexing. Beforehand the thesis
+    everything above it rests on was tested — <em>scoring at module level improves the ordering</em>
+    — and without a single model call: group chunk hits by module and reorder by that. Six arms
+    against the same 28 questions, the criterion fixed in advance.
+    Result in <code>docs/measurements/2026-08-17-module-ranking-and-comments.md</code>:
+    <b>no arm beats plain chunk search</b> (recall@5 0.679 against 0.607 in the best module arm,
+    0.214 in the worst).
   </p>
   <p>
-    Zwei Ursachen, beide in den Daten sichtbar. Grosse Module gewinnen über ihre Grösse:
-    <code>peeq/backend/internal/httpapi</code> hat 1135 Chunks und begräbt einen einzelnen sehr guten
-    Treffer unter zwanzig mittelmässigen. Und die milde Variante — ein gedämpfter Bonus statt einer
-    Umgruppierung — hilft zwar genau der Fehlerform aus Phase 2 (<code>rag/hybrid.go</code>
-    Rang 7 → 2), beschädigt aber mehr Fragen, als sie repariert.
+    Two causes, both visible in the data. Large modules win through their size:
+    <code>peeq/backend/internal/httpapi</code> has 1135 chunks and buries a single very good hit
+    under twenty mediocre ones. And the mild variant — a damped bonus instead of a regrouping —
+    does help exactly the failure shape from phase 2 (<code>rag/hybrid.go</code>
+    rank 7 → 2), but damages more questions than it repairs.
   </p>
   <p>
-    Dazu eine Korrektur an der Begründung dieser Phase: Die Zahl recall@20 = 0.857, aus der
-    «die Antwort ist schon da, nur schlecht sortiert» abgeleitet wurde, gehört zu
-    <code>text-embedding-3-large</code>. Unter dem eingesetzten <code>-small</code> sind es 0.786,
-    sechs der 28 Fragen verfehlen also die Top 20. <b>Fünf davon werden sehr wohl gefunden</b> — auf
-    den fusionierten Rängen 23 bis 52, drei von ihnen über die semantische Spur. Nur
-    <code>freebytes.go</code> wird gar nicht gefunden. Es bleibt also ein Sortierproblem, und die
-    Modularme hatten die Gelegenheit, es zu lösen, und haben sie nicht genutzt.
+    Plus a correction to this phase's rationale: the figure recall@20 = 0.857, from which «the answer
+    is already there, just badly sorted» was derived, belongs to
+    <code>text-embedding-3-large</code>. Under the <code>-small</code> actually used it is 0.786,
+    so six of the 28 questions miss the top 20. <b>Five of them are very much found</b> — at fused
+    ranks 23 to 52, three of them through the semantic lane. Only
+    <code>freebytes.go</code> is not found at all. So it remains a sorting problem, and the module
+    arms had the chance to solve it and did not take it.
   </p>
   <p>
-    Wichtig für die Einordnung: Der Messharness sucht mit der <b>rohen Frage</b>. Das Design tut das
-    nicht — Schritt 1 «Verstehen» erzeugt erweiterte Suchbegriffe samt geratenem Codevokabular, und
-    laut Abschnitt «Anfrageseite» geht die Anfrage zweimal hinein, einmal in Fachsprache und einmal
-    in Codevokabular. Genau diese Brücke fehlt den sechs Fragen: <em>Apple TV → AirPlay</em>,
-    <em>Platte voll → statfs</em>. Sie ist entworfen, ungebaut und gehört zu Phase 4. Alle Zahlen
-    hier beschreiben deshalb eine Konfiguration, die das Design nie vorgeschlagen hat.
+    Important for context: the measurement harness searches with the <b>raw question</b>. The design
+    does not — step 1 «understand» produces expanded search terms including guessed code vocabulary,
+    and per the «query side» section the query goes in twice, once in domain language and once in
+    code vocabulary. That bridge is exactly what those six questions are missing:
+    <em>Apple TV → AirPlay</em>, <em>disk full → statfs</em>. It is designed, unbuilt, and belongs to
+    phase 4. Every number here therefore describes a configuration the design never proposed.
   </p>
   <p>
-    Deshalb entstand <code>module_profiles</code> zunächst nicht — und nach dem Entscheid weiter oben gar nicht mehr. Die Routing-Ebene existiert, um die
-    Antwortqualität zu heben; ihre billigste Vorstufe senkt sie messbar, und 700–7000 Pro-Aufrufe für
-    die volle Fassung sind damit nicht zu rechtfertigen. Was bleibt, ist das deterministische
-    Clustering: es kostet nichts, und die Repos-Seite zählt damit. Die Rückfrage aus Abschnitt
-    «Ablauf einer Frage» braucht in Phase 4 eine andere Quelle für ihre benannten Kandidaten als
-    vorberechnete Steckbriefe.
+    That is why <code>module_profiles</code> was not built at first — and after the decision further
+    up, not at all. The routing level exists to raise answer quality; its cheapest precursor lowers
+    it measurably, and 700–7000 Pro calls for the full version cannot be justified on that basis.
+    What remains is the deterministic clustering: it costs nothing, and the Repos page counts with
+    it. The follow-up question from the «path of a question» section needs a different source for its
+    named candidates in phase 4 than precomputed profiles.
   </p>
   <p>
-    Offen bleibt der Gegentest: Der Fragenkatalog hat 28 Einträge und <b>keinen einzigen echten
-    Mehrdeutigkeitsfall</b> — jede Frage hat genau ein richtiges Repo und genau eine richtige Datei.
-    Der Nutzen einer Routing-Ebene liegt aber gerade dort. Mit einem Korpus, in dem sich Repositories
-    fachlich überschneiden, ist die Frage neu zu stellen.
+    The counter-test stays open: the question catalogue has 28 entries and <b>not a single genuine
+    case of ambiguity</b> — every question has exactly one correct repo and exactly one correct file.
+    The value of a routing level lies precisely there. With a corpus where repositories overlap in
+    their domain, the question has to be asked again.
   </p>
 
-  <h2>Bewusst offen gelassen</h2>
+  <h2>Deliberately left open</h2>
   <ul>
     <li>
-      <s>Granularität des Modul-Clusterings</s> — <b>entschieden</b>: Verzeichnis, mit
-      Faltregel unter <code>BACKEND_MODULE_MIN_CHUNKS</code> und Splitregel über
-      <code>BACKEND_MODULE_MAX_CHUNKS</code>. Am echten Korpus 137 Module (peeq 52, loom 39,
-      go-sqlite3 46). Zwei bekannte Schwächen: ein flaches Verzeichnis lässt sich nicht splitten
-      (<code>httpapi</code>, 53 Dateien auf einer Ebene), und der Selector überspringt
-      Punkt-Verzeichnisse nicht, weshalb <code>.github/workflows</code> als Modul auftaucht.
+      <s>Granularity of the module clustering</s> — <b>decided</b>: the directory, with a
+      folding rule below <code>BACKEND_MODULE_MIN_CHUNKS</code> and a splitting rule above
+      <code>BACKEND_MODULE_MAX_CHUNKS</code>. On the real corpus 137 modules (peeq 52, loom 39,
+      go-sqlite3 46). Two known weaknesses: a flat directory cannot be split
+      (<code>httpapi</code>, 53 files on one level), and the selector does not skip
+      dot directories, which is why <code>.github/workflows</code> shows up as a module.
     </li>
-    <li>Gepflegtes oder gelerntes Glossar für die Vokabularbrücke — nur falls Phase 4 zeigt, dass der gefundene Fachtext plus erweiterte Suchbegriffe an echten Fragen scheitert.</li>
+    <li>A maintained or learned glossary for the vocabulary bridge — only if phase 4 shows that the found domain text plus expanded search terms fails on real questions.</li>
   </ul>
 </section>
-
 <section>
-  <h2>Nachtrag Phase 4b: geroutet wird, aber das Fragen verdient sich noch nichts</h2>
+  <h2>Addendum phase 4b: routing happens, but asking has not earned anything yet</h2>
   <p>
-    Phase 3s Nachtrag hatte offen gelassen, woher die Rückfrage in Phase 4 ihre benannten Kandidaten
-    nimmt, wenn nicht aus <code>module_profiles</code>. Antwort: aus per-Zug-Benennung über den
-    deterministischen Modul-Clustern. Kein Steckbrief wird beim Indexieren vorgeschrieben; wenn die
-    Rückfragekarte tatsächlich erscheint, bekommt jeder Kandidat aus seinen eigenen Top-Chunks einen
-    deutschen Titel und eine Zeile Zusammenfassung, geschrieben von einem non-Pro-Aufruf. Das ist die
-    andere Quelle, die dort gefordert war — und billiger als die verworfene volle Fassung, weil sie
-    nur dann läuft, wenn der Leser sie auch sieht.
+    Phase 3's addendum left open where the follow-up question in phase 4 takes its named candidates
+    from, if not from <code>module_profiles</code>. The answer: from per-turn naming over the
+    deterministic module clusters. No profile is written during indexing; when the clarification card
+    actually appears, every candidate gets a title and a one-line summary from its own top chunks,
+    written by a non-Pro call. That is the other source demanded there — and cheaper than the
+    discarded full version, because it only runs when the reader actually sees it.
   </p>
   <p>
-    <code>repo_deps</code> ist jetzt gefüllt, aus jedem <code>go.mod</code> im Baum eines
-    Repositories. Es ist die deterministische Stufe aus «Woran rongo die beiden unterscheidet», die
-    Zusammensetzung ohne Modellaufruf von Mehrdeutigkeit trennt.
+    <code>repo_deps</code> is now filled, from every <code>go.mod</code> in a repository's tree. It is
+    the deterministic stage from «how rongo tells the two apart», separating composition from
+    ambiguity without a model call.
   </p>
 
-  <h3>Die geforderte Messung: non-Pro gegen Pro</h3>
+  <h3>The required measurement: non-Pro against Pro</h3>
   <p>
-    Die Spec verlangte vor der Festschreibung genau diese Zahl. Gemessen in
-    <code>docs/measurements/2026-08-18-routing.md</code>, 61 Fragen:
+    The spec demanded exactly this number before writing anything in. Measured in
+    <code>docs/measurements/2026-08-18-routing.md</code>, 61 questions:
   </p>
   <table>
     <thead>
-      <tr><th>Richter-Deployment</th><th>gesamt</th><th><code>ambiguous</code> (soll fragen)</th><th><code>unique</code>+<code>composition</code> (soll nicht fragen)</th></tr>
+      <tr><th>Judge deployment</th><th>total</th><th><code>ambiguous</code> (should ask)</th><th><code>unique</code>+<code>composition</code> (should not ask)</th></tr>
     </thead>
     <tbody>
       <tr><td>non-Pro (<code>ShortGate</code>)</td><td>0.656 (40/61)</td><td>0.583 (7/12)</td><td>0.673 (33/49)</td></tr>
@@ -915,164 +910,156 @@
     </tbody>
   </table>
   <p>
-    Eine Frage Unterschied auf 61 — Pro findet einen echten Mehrdeutigkeitsfall mehr, ist sonst
-    identisch, inklusive derselben <code>composition</code>-Fehlerform. Das ist kein Grund, das
-    Routing-Urteil auf das teure Deployment zu heben, und die Bedingung der Spec für die
-    Festschreibung von non-Pro im Routen ist damit erfüllt.
+    One question of difference out of 61 — Pro finds one genuine ambiguity case more and is otherwise
+    identical, including the same <code>composition</code> failure shape. That is no reason to lift
+    the routing verdict onto the expensive deployment, and the spec's condition for writing non-Pro
+    into routing is thereby met.
   </p>
 
-  <h3>Das unbequeme Ergebnis</h3>
+  <h3>The uncomfortable result</h3>
   <p>
-    Ein Router, der nie fragt, erreicht auf diesem Katalog <b>0.803</b> — besser als jede hier
-    gemessene Konfiguration mit Margin, weil 49 der 61 Fragen keine Rückfrage wollen. Beim
-    Standardwert <code>BACKEND_ROUTE_MARGIN = 0.25</code> kauft die Kette <b>16 falsche Rückfragen für
-    7 richtige</b> und fragt bei 8 von 44 Fragen nach, die per Definition genau eine Antwort haben.
+    A router that never asks reaches <b>0.803</b> on this catalogue — better than any configuration
+    with a margin measured here, because 49 of the 61 questions do not want a follow-up question. At
+    the default <code>BACKEND_ROUTE_MARGIN = 0.25</code> the chain buys <b>16 wrong follow-up
+    questions for 7 right ones</b> and asks back on 8 of 44 questions that by definition have exactly
+    one answer.
   </p>
   <p>
-    Der Fehler liegt nicht im Urteil über die Kandidaten, sondern in dem, was die Kandidaten
-    <em>sind</em>. Zwei Repositories, die beide ein Paket <code>store</code> haben, erzeugen zwei
-    Kandidaten, die auf der Ebene, die die Karte zeigt, gleich aussehen.
+    The fault does not lie in the verdict about the candidates, but in what the candidates
+    <em>are</em>. Two repositories that both have a <code>store</code> package produce two candidates
+    that look identical at the level the card shows.
   </p>
   <div class="note">
-    <span class="tag">Die Margin bleibt bei 0.25</span>
+    <span class="tag">The margin stays at 0.25</span>
     <p>
-      Nicht, weil 0.25 in der Sweep-Tabelle gewinnt — sie tut es nicht, 0.10 scored am besten. Sondern
-      weil 0.10 nur gewinnt, indem es weniger fragt, und die Metrik auf einem zu 80 %
-      «nicht fragen»-Katalog Schweigen belohnt. Die Margin nach dieser Tabelle zu wählen würde den
-      Router darauf trimmen, sich selbst abzuschalten. Der Standard bleibt, bis die Kandidatenschicht
-      selbst behoben ist.
+      Not because 0.25 wins in the sweep table — it does not, 0.10 scores best. But because 0.10 only
+      wins by asking less, and on a catalogue that is 80 % «do not ask» the metric rewards silence.
+      Choosing the margin from that table would trim the router into switching itself off. The default
+      stays until the candidate layer itself is fixed.
     </p>
   </div>
 
-  <h3>Was Routing nicht beschädigt</h3>
+  <h3>What routing does not damage</h3>
   <p>
-    Auf dem nicht-fragenden Pfad wird die Antwort weiterhin aus der vollständigen Trefferliste
-    gebaut. Belegtreue über die Fragen, bei denen der Router nicht nachgefragt hat, liegt bei
-    <b>0.944</b> (34/36) gegen die publizierte 0.955 — eine Frage Unterschied. Über alle 44
-    <code>unique</code>-Fragen gerechnet sind es nur 0.773: ein Fünftel der eindeutigen Fragen
-    erreicht auf dem ersten Zug gar keine Antwort, weil stattdessen eine Rückfrage zurückkommt.
+    On the non-asking path the answer is still built from the complete result list. Citation fidelity
+    over the questions the router did not ask back on is <b>0.944</b> (34/36) against the published
+    0.955 — one question of difference. Computed over all 44 <code>unique</code> questions it is only
+    0.773: a fifth of the unambiguous questions reach no answer at all on the first turn, because a
+    follow-up question comes back instead.
   </p>
 
-  <h3><code>composition</code> unverändert bei 0/5</h3>
+  <h3><code>composition</code> unchanged at 0/5</h3>
   <p>
-    Wie im Phase-4b-Design vor dem Code vorhergesagt. <code>repo_deps</code> hält den Router davon
-    ab, danach zu fragen; es macht die Fragen dadurch nicht beantwortbar. Die Nahtstelle ist
-    <code>sql.Open("sqlite3", …)</code> plus ein Blank-Import — eine <em>Zeichenkette</em>, kein
-    Symbol.
+    As predicted in the phase 4b design before the code. <code>repo_deps</code> keeps the router from
+    asking about them; it does not thereby make the questions answerable. The seam is
+    <code>sql.Open("sqlite3", …)</code> plus a blank import — a <em>string</em>, not a symbol.
   </p>
 
-  <h3>Ein alter Fehler, jetzt sichtbar gemacht</h3>
+  <h3>An old fault, now made visible</h3>
   <p>
-    Der manuelle Testlauf zeigt eine Verwechslung, die Phase 4b nicht verursacht, aber sichtbar
-    macht. Auf der Rückfragekarte wählte der Leser den Kandidaten <b>peeq</b>; die Antwort zitierte
-    für eine Aussage über peeq <code>loom/backend/internal/auth/session.go:129-141</code> — obwohl
-    peeq sein eigenes, byteidentisches <code>randomToken</code> in
-    <code>session.go:135-141</code> besitzt. Der Referenz-Walk des Gatherers (Phase 4a) folgt
-    Symbolnamen über Repository-Grenzen hinweg; die Spec-Bedingung «der gesammelte Code referenziert
-    das Symbol tatsächlich» ist namensbasiert, nicht auflösungsbasiert.
+    The manual test run shows a mix-up that phase 4b does not cause but does make visible. On the
+    clarification card the reader picked the candidate <b>peeq</b>; for a statement about peeq the
+    answer cited <code>loom/backend/internal/auth/session.go:129-141</code> — although peeq has its
+    own, byte-identical <code>randomToken</code> in <code>session.go:135-141</code>. The gatherer's
+    reference walk (phase 4a) follows symbol names across repository boundaries; the spec's condition
+    «the gathered code really references the symbol» is name-based, not resolution-based.
   </p>
   <p>
-    Der Mechanismus ist vorbestehend. Die Rückfragekarte macht ihn erst zu einem greifbaren Problem,
-    weil sie verspricht, welcher Mechanismus gewählt wurde — und die Zitation dann auf Code aus dem
-    jeweils anderen zeigt. Das ist ein reproduzierbarer Verstoss gegen «jede Aussage ist zitierbar,
-    und eine Zitation zeigt auf den Code, um den es in der Aussage tatsächlich geht». Er gehört zur
-    Kandidatenschicht, die dieser Nachtrag bereits für eine spätere Phase offen lässt, nicht in
-    diesen Zug allein.
+    The mechanism pre-exists. The clarification card only turns it into a tangible problem, because it
+    promises which mechanism was chosen — and the citation then points at code from the other one.
+    That is a reproducible violation of «every statement is citable, and a citation points at the code
+    the statement is actually about». It belongs to the candidate layer this addendum already leaves
+    open for a later phase, not to this turn alone.
   </p>
 
-  <h3>Offen für eine spätere Phase</h3>
+  <h3>Open for a later phase</h3>
   <p>
-    Zwei Hebel, beide unbenutzt: die Kandidaten-Körnung — Modul-Identität ist möglicherweise so grob
-    wie die schon widerlegte Modul-<em>Bewertung</em> aus Phase 3 —, und der Richter, dem nie gezeigt
-    wird, was zwei Kandidaten tatsächlich unterscheiden würde: <code>Understanding.Repos</code> ist
-    berechnet und steht nicht im Prompt.
+    Two levers, both unused: candidate granularity — module identity may be as coarse as the already
+    refuted module <em>scoring</em> from phase 3 — and the judge, which is never shown what would
+    actually separate two candidates: <code>Understanding.Repos</code> is computed and does not appear
+    in the prompt.
   </p>
 </section>
-
-<section>
-  <h2>Nachtrag Phase 4c: der Richter wanderte auf Pro, die Kandidatenschicht blieb ungelöst</h2>
+  <h2>Addendum phase 4c: the judge moved to Pro, the candidate layer stayed unsolved</h2>
   <p>
-    Der zweite Hebel oben ist gebaut und gemessen worden, zweimal, und hat sich nicht verdient. Was
-    diese Phase stattdessen einbrachte, kam aus der Messung selbst — Details in
+    The second lever above was built and measured, twice, and did not earn its keep. What this phase
+    brought instead came out of the measurement itself — details in
     <code>docs/measurements/2026-08-19-candidates.md</code>.
   </p>
 
-  <h3>Die Messung mass ein anderes Produkt</h3>
+  <h3>The measurement measured a different product</h3>
   <p>
-    <code>pipeline.go</code> sucht mit <code>Repos: u.Repos</code>, die eingefrorenen Expansionen
-    hielten nur die Suchtexte, und die Routing-Arme suchten ohne die Einengung. Jede veröffentlichte
-    Routing-Zeile stammte damit aus einer Kandidatenmenge, die das Produkt nie erzeugt hätte. Dazu
-    trat der zweite Fall derselben Familie: die Arme trugen eine eigene Kopie der Leiter. Es gibt
-    jetzt genau ein <code>ask.Decide</code>, das <code>Route</code> und die Messung gemeinsam rufen.
+    <code>pipeline.go</code> searches with <code>Repos: u.Repos</code>, the frozen expansions held
+    only the search texts, and the routing arms searched without the restriction. Every published
+    routing figure therefore came from a candidate set the product would never have produced. On top
+    came the second case of the same family: the arms carried their own copy of the ladder. There is
+    now exactly one <code>ask.Decide</code>, called by <code>Route</code> and by the measurement alike.
   </p>
 
-  <h3>Ein erfundener Repository-Name löschte die Suche</h3>
+  <h3>An invented repository name wiped out the search</h3>
   <p>
-    Erst das Einfrieren der Einengung machte sie lesbar: von neun Einengungen nannten drei etwas, das
-    es nicht gibt — <code>peeqs</code> (der deutsche Genitiv), <code>Peek</code> und
-    <code>asg017/sqlite-vec</code>. Ein solcher Name ist keine Einengung, sondern eine Löschung: er
-    geht direkt in <code>WHERE f.repo IN (…)</code>, nichts kann treffen, und der Zug meldet «nichts
-    gefunden» über Code, der im Index liegt. <code>Search</code> verwirft jetzt unbekannte Namen; eine
-    Einengung, von der nichts übrig bleibt, ist keine Einengung mehr. Ein bekanntes, aber leeres
-    Repository engt weiterhin ein — «kein Treffer heisst kein Treffer» bleibt wahr.
+    Only freezing the restriction made it readable: of nine restrictions, three named something that
+    does not exist — <code>peeqs</code> (the possessive), <code>Peek</code> and
+    <code>asg017/sqlite-vec</code>. Such a name is not a restriction but a deletion: it goes straight
+    into <code>WHERE f.repo IN (…)</code>, nothing can match, and the turn reports «nothing found»
+    about code that is in the index. <code>Search</code> now discards unknown names; a restriction
+    with nothing left of it is no longer a restriction. A known but empty repository still restricts —
+    «no hit means no hit» stays true.
   </p>
 
-  <h3>Der Richter würfelte, und Phase 4bs Pflichtbefund war ein Artefakt</h3>
+  <h3>The judge was rolling dice, and phase 4b's mandatory finding was an artefact</h3>
   <p>
-    Kein Aufruf trug eine Temperatur, also würfelte jeder Gate-Aufruf mit dem Standard des Endpunkts.
-    Zwei Läufe desselben Arms über identische eingefrorene Eingaben entschieden drei von 61 Fragen
-    verschieden — mehr als der Unterschied, den Phase 4b zwischen den beiden Deployments gemessen und
-    zur Grundlage einer Festschreibung gemacht hatte. Der Leser trifft denselben Defekt von der
-    anderen Seite: zweimal dieselbe Frage, einmal eine Karte und einmal eine Antwort.
+    No call carried a temperature, so every gate call rolled with the endpoint's default. Two runs of
+    the same arm over identical frozen inputs decided three of 61 questions differently — more than
+    the difference phase 4b had measured between the two deployments and made the basis of a decision.
+    The reader meets the same defect from the other side: the same question twice, once a card and
+    once an answer.
   </p>
   <p>
-    Mit <code>WithTemperature</code> festgenagelt und zweimal gelaufen: Pro 48/61 und 50/61, non-Pro
-    42/61 und 43/61, Reststreuung ein bis zwei Fragen. <b>Der Routing-Richter läuft ab jetzt auf
-    Pro</b> — die eine Ausnahme von «Pro nur, wo ein Mensch liest», und sie steht als solche in
-    <code>AGENTS.md</code>. Sein Ergebnis ist ein Wort, aber dieses Wort entscheidet, ob der Leser
-    eine Antwort oder eine Rückfrage bekommt. Verstehen, Benennen und der Thread-Titel bleiben auf
-    der günstigen Spur.
-  </p>
-
-  <h3>Die Kandidatenschicht: negativ, und wo der Hebel wirklich sitzt</h3>
-  <p>
-    Dem Richter wurde gezeigt, was die Kandidaten unterscheidet — das genannte Repository, der Anteil
-    an den Treffern samt Rang, und welche erwarteten Bezeichner wo gelandet sind. In der lockeren
-    Fassung halbierte das die falschen Rückfragen (8 auf 4) und hob das Grounding auf den besten je
-    gemessenen Wert, kostete aber die mehrdeutige Kohorte 7/12 auf 4/12 und landete genau auf 0.803:
-    Es erreichte den Router, der nichts fragt, indem es zu ihm wurde. Die strenge Fassung stellte 7/12
-    wieder her und reproduzierte exakt die Grundlinie. <b>Beides ist nicht ausgeliefert</b>; der
-    Richter-Prompt trägt wieder Phase 4bs Wortlaut.
-  </p>
-  <p>
-    Was bleibt, ist der Befund: der Hebel wirkt — 8 falsche Rückfragen auf 4 ist die grösste je
-    gemessene Bewegung auf dieser Kohorte —, ungelöst ist die Schwelle, nicht das Signal. Der
-    Trefferanteil gehört vermutlich nicht dazu: dass die Ränge dicht beieinander liegen, ist der
-    Grund, warum die Leiter den Richter überhaupt erreicht hat.
+    Pinned with <code>WithTemperature</code> and run twice: Pro 48/61 and 50/61, non-Pro
+    42/61 and 43/61, residual spread one to two questions. <b>The routing judge runs on Pro from now
+    on</b> — the one exception to «Pro only where a human reads», and it is written down as such in
+    <code>AGENTS.md</code>. Its result is one word, but that word decides whether the reader gets an
+    answer or a follow-up question. Understanding, naming and the thread title stay on the cheap lane.
   </p>
 
-  <h3>Befund B ist behoben</h3>
+  <h3>The candidate layer: negative, and where the lever really sits</h3>
   <p>
-    Der Referenzlauf in <code>gather.go</code> löst einen Namen jetzt zuerst im eigenen Repository auf
-    und überquert die Grenze nur für einen Namen, den dieses Repository überhaupt nicht definiert.
-    Echte Komposition über <code>repo_deps</code>-Kanten reist weiter. Am laufenden Programm geprüft,
-    auf demselben Weg, der den Fehler erzeugt hatte: Karte, peeq gewählt, jede Fundstelle in peeq, das
-    Wort <code>loom</code> kommt in der Antwort nicht vor.
+    The judge was shown what separates the candidates — the repository named, the share of the hits
+    including rank, and which expected identifiers landed where. In the loose version that halved the
+    wrong follow-up questions (8 to 4) and lifted grounding to the best value ever measured, but cost
+    the ambiguous cohort 7/12 to 4/12 and landed exactly on 0.803: it reached the router that never
+    asks by becoming it. The strict version restored 7/12 and reproduced the baseline exactly.
+    <b>Neither is shipped</b>; the judge prompt carries phase 4b's wording again.
+  </p>
+  <p>
+    What remains is the finding: the lever works — 8 wrong follow-up questions down to 4 is the
+    largest movement ever measured on this cohort — and what is unsolved is the threshold, not the
+    signal. The hit share probably does not belong in it: that the ranks sit close together is the
+    reason the ladder reached the judge at all.
   </p>
 
-  <h3>Offen</h3>
+  <h3>Finding B is fixed</h3>
   <p>
-    Die Kandidaten-Körnung ist weiterhin unberührt. Auf der Rückfragekarte trugen zwei von drei
-    Kandidaten denselben Titel — der Benennungs-Prompt verlangt unterscheidbare Titel und lieferte
-    hier keine; die Karte bleibt beantwortbar, weil das Repository daneben steht, aber die Titel
-    tragen nichts. Und die <code>composition</code>-Kohorte bleibt aus dem in Phase 4b genannten
-    Grund unbeantwortbar: die Naht ist eine <em>Zeichenkette</em>, kein Symbol.
+    The reference walk in <code>gather.go</code> now resolves a name in its own repository first and
+    crosses the boundary only for a name that repository does not define at all. Genuine composition
+    over <code>repo_deps</code> edges still travels. Checked against the running program, on the same
+    path that produced the fault: card, peeq chosen, every hit in peeq, the word <code>loom</code>
+    does not appear in the answer.
+  </p>
+
+  <h3>Open</h3>
+  <p>
+    Candidate granularity is still untouched. On the clarification card two of three candidates
+    carried the same title — the naming prompt demands distinguishable titles and delivered none here;
+    the card stays answerable because the repository sits next to it, but the titles carry nothing.
+    And the <code>composition</code> cohort stays unanswerable for the reason named in phase 4b: the
+    seam is a <em>string</em>, not a symbol.
   </p>
 </section>
 
 <footer>
-  <span>rongo · Design &amp; Umsetzungsplan</span>
-  <span>16. August 2026</span>
+  <span>rongo · design &amp; implementation plan</span>
+  <span>16 August 2026</span>
 </footer>
-
 </div>

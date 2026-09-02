@@ -47,7 +47,7 @@
   a { color:var(--accent-ink); }
 </style>
 <div class="wrap">
-<h1>rongo Phase 1 — Grundgerüst Implementation Plan</h1>
+<h1>rongo Phase 1 — Skeleton Implementation Plan</h1>
 <blockquote>
 <p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
 </blockquote>
@@ -63,7 +63,7 @@
 <li>stdlib <code>net/http</code> only. No web framework, no ORM, no router library.</li>
 <li>All runtime config comes from <code>BACKEND_*</code> env vars. Secrets via env only, never committed.</li>
 <li>Structured <code>slog</code> only. The error attribute key is <strong><code>err</code></strong>, never <code>error</code>. Log <code>r.URL.Path</code>, <strong>never</strong> a full URL, <code>RequestURI()</code> or a query string.</li>
-<li>Docs, specs and code comments in <strong>English</strong>. UI copy and generated answers in <strong>German, Swiss orthography</strong> — never <code>ß</code>.</li>
+<li>Docs, specs, code comments, UI copy and generated answers in <strong>English</strong>.</li>
 <li>No test hits a real LLM, embeddings endpoint or git remote.</li>
 <li>Feature branch <code>feat/phase-1-skeleton</code>. Never commit to <code>master</code>.</li>
 <li>Commit as <code>trick77@users.noreply.github.com</code>.</li>
@@ -1859,7 +1859,7 @@ createRoot(document.getElementById(&quot;root&quot;)!).render(
     &lt;main className=&quot;mx-auto max-w-2xl p-8&quot;&gt;
       &lt;h1 className=&quot;text-2xl font-semibold tracking-tight&quot;&gt;rongo&lt;/h1&gt;
       &lt;p className=&quot;mt-2 text-[var(--color-ink-soft)]&quot;&gt;
-        Noch nichts indexiert. Die Oberfläche entsteht in einer späteren Phase.
+        Nothing indexed yet. The interface arrives in a later phase.
       &lt;/p&gt;
     &lt;/main&gt;
   );

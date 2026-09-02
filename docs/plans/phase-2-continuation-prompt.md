@@ -33,7 +33,7 @@ Tasks 1 to 4 are committed and green:
 - One SQLite file is the whole datastore. stdlib `net/http` only. No ORM, no framework.
 - **No tree-sitter.** `ctags` gives a uniform record across ~150 languages; where it yields nothing, the line window is the normal path, not a failure.
 - Structured `slog` only, error attribute key `err` (never `error`). Never log a token, a full URL, or a query string.
-- Docs and code comments in **English**. UI copy and generated answers in **German, Swiss orthography — never `ß`**.
+- Docs, code comments, UI copy and generated answers in **English**.
 - No test may hit a real LLM, embeddings endpoint, or git remote. Use `httptest` and a fixture repository built locally with `git init`.
 - TDD: failing test first, watch it fail, then implement.
 - Commit as `trick77 <trick77@users.noreply.github.com>`. Never `--author`, never a `Co-Authored-By` trailer, never a "Generated with" line. Never commit to `master`.

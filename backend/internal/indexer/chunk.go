@@ -14,7 +14,7 @@ import (
 // Text and RawText are deliberately different things, and that difference is
 // why hybrid search works here. Text is what gets EMBEDDED: it carries the
 // breadcrumb and the enclosing symbol chain, because a question asked in
-// business language ("wie wird die Teaser-Mail verschickt") shares almost no
+// business language ("how is the teaser mail sent") shares almost no
 // words with a method body. RawText is the source alone, which is what the
 // keyword lane indexes and what a citation quotes: that lane has to match the
 // literal identifier the user typed.

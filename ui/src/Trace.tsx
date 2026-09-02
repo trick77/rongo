@@ -9,8 +9,8 @@ import { Chevron } from "./Ask";
  */
 export type TraceState = "running" | "done" | "waiting";
 
-const doneLabel = "Fertig";
-const waitingLabel = "Wartet auf Auswahl";
+const doneLabel = "Done";
+const waitingLabel = "Waiting for a choice";
 
 /**
  * Collapsed, the trace is one line: the running step, or the closing word
@@ -34,7 +34,7 @@ export default function Trace({ steps, state }: { steps: string[]; state: TraceS
         className="flex items-center gap-2"
       >
         <Chevron open={open} />
-        <span>{open ? "Ablauf" : closingLabel}</span>
+        <span>{open ? "Steps" : closingLabel}</span>
       </button>
 
       {open && (

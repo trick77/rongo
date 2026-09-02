@@ -288,7 +288,7 @@ export default function Ask({
         body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
-        patchLast((t) => ({ ...t, error: `Der Server antwortete mit ${res.status}.`, done: true }));
+        patchLast((t) => ({ ...t, error: `The server answered with ${res.status}.`, done: true }));
         return;
       }
       const reader = res.body.getReader();
@@ -333,7 +333,7 @@ export default function Ask({
         });
       }
     } catch {
-      patchLast((t) => ({ ...t, error: "Die Verbindung ist abgebrochen.", done: true }));
+      patchLast((t) => ({ ...t, error: "The connection was lost.", done: true }));
     } finally {
       markBusy(false);
     }
@@ -433,9 +433,9 @@ export default function Ask({
           {turn.citations.length > 0 && (
             <details className="mt-4 text-sm">
               <summary className="cursor-pointer text-[var(--color-ink-soft)]">
-                <Chevron /> Woher weiss rongo das?{" "}
+                <Chevron /> How does rongo know this?{" "}
                 <span className="text-[var(--color-ink-faint)]">
-                  {turn.citations.length} Belege
+                  {turn.citations.length} sources
                 </span>
               </summary>
               <ul className="mt-2 space-y-1">
@@ -457,7 +457,7 @@ export default function Ask({
               onClick={() => reexplain(i)}
               className="mt-3 rounded border border-[var(--color-hairline)] px-3 py-1 text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] disabled:opacity-50"
             >
-              {turn.audience === "dev" ? "Als BA neu erklären" : "Als Dev neu erklären"}
+              {turn.audience === "dev" ? "Explain as BA" : "Explain as Dev"}
             </button>
           )}
         </article>
@@ -468,12 +468,12 @@ export default function Ask({
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           rows={3}
-          aria-label="Frage"
-          placeholder="Wie wird die Teaser-Mail verschickt?"
+          aria-label="Question"
+          placeholder="How is the teaser mail sent?"
           className="w-full rounded border border-[var(--color-hairline)] bg-[var(--color-surface)] p-3"
         />
         <div className="mt-2 flex items-center gap-3">
-          <fieldset className="flex gap-1" aria-label="Rolle">
+          <fieldset className="flex gap-1" aria-label="Role">
             {(["ba", "dev"] as const).map((role) => (
               <button
                 key={role}
@@ -496,7 +496,7 @@ export default function Ask({
             disabled={busy}
             className="rounded bg-[var(--color-accent)] px-4 py-1 text-sm text-white disabled:opacity-50"
           >
-            Fragen
+            Ask
           </button>
         </div>
       </form>

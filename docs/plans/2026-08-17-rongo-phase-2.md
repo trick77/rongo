@@ -19,7 +19,7 @@
 - All runtime config comes from `BACKEND_*` env vars. **Repository credentials come only from the environment, never from `repos.yaml`.**
 - **No tree-sitter.** `ctags` gives a uniform record across ~150 languages; where it yields nothing, the line window is the normal path, not a failure path.
 - Structured `slog` only; error attribute key **`err`**, never `error`. Never log a token, a full URL, or a query string.
-- Docs, specs and code comments in **English**. UI copy and generated answers in **German, Swiss orthography** — never `ß`.
+- Docs, specs, code comments, UI copy and generated answers in **English**.
 - No test hits a real LLM, embeddings endpoint or git remote — `httptest` fakes, and a fixture repository built locally with `git`.
 - Feature branch `feat/phase-2-indexing`. Never commit to `master`. Commit as `trick77@users.noreply.github.com`.
 
@@ -1505,7 +1505,7 @@ This task answers the question the spec deliberately deferred: `text-embedding-3
 
 ```json
 {
-  "question": "Wie wird verhindert, dass zwei Migrationen gleichzeitig laufen?",
+  "question": "How is it prevented that two migrations run at the same time?",
   "expect_repo": "peeq",
   "expect_paths": ["backend/internal/store/migrate.go"],
   "kind": "how"

@@ -42,11 +42,11 @@ in `go.mod`, and that repository is indexed.
 The re-check the phase-4a document asked for found two questions scored as
 having one right answer that do not have one:
 
-- **«Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer
-  herunterzuladen?»** — `estimateTokens` exists character-for-character in
+- **«How is the token count of a chunk estimated without downloading a
+  tokenizer?»** — `estimateTokens` exists character-for-character in
   `peeq/backend/internal/rag/chunk.go:38` and
   `loom/backend/internal/rag/chunk.go:32`, comment included.
-- **«Wie meldet sich ein Benutzer per OIDC an?»** — `auth/oidc.go` in both, the
+- **«How does a user sign in over OIDC?»** — `auth/oidc.go` in both, the
   same `OIDCBackend` interface, differing in the cookie name.
 
 Both are now `ambiguous`. The other 26 survive the check: either the question
@@ -99,8 +99,8 @@ the search misses it at K=20 in every arm, and the walk gathers it at hop 1.
 Two hops and a 24000-token budget could pull in enough of the corpus that
 everything looks found. It does not: the mean is 110 sources out of 11726
 chunks, roughly 1 %. And two unique questions are still missing after the walk —
-«Ab wann gilt ein Video als altes Material» (`scan/scheduler.go`) and «Warum
-bekommt ein SVG kein Vorschaubild?» (`artifact/thumbnail.go`). An arm that
+«From when on does a video count as old material» (`scan/scheduler.go`) and «Why
+does an SVG get no thumbnail?» (`artifact/thumbnail.go`). An arm that
 cannot fail would not have those.
 
 But the cost is real and belongs next to the number: the walk more than
@@ -133,7 +133,7 @@ build; the question set was too small to say so.
 
 The failure mode from the phase-4a document is unchanged and still visible in
 `expansions.json` — the model guesses the vocabulary of the technology it
-assumes. «Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?» produced
+assumes. «How does an Apple TV get at the media file without signing in?» produced
 `AVPlayerViewController`, `MPNowPlayingInfoCenter`, `NSFileCoordinator`; the
 question about parked videos produced `AVPlayerItem` and `isPlaybackLikelyToKeepUp`.
 peeq is a Go service. The business-language lane is what carries these, not the
@@ -153,14 +153,14 @@ So in ten of twelve cases phase 4b will have both alternatives in front of it
 and can ask which is meant. The other two fail in opposite ways, and only one of
 them is the failure this cohort exists to expose:
 
-- **«Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?»** gathers
+- **«On which port does the service listen when nothing is configured?»** gathers
   loom's `config.go` and not peeq's. This is the real case: rongo would answer
   confidently from one of two equally right places — and it would even give the
   *correct value*, because both default to `:8080`. A reader has no way to tell
   that the other half exists. That is the quiet version of the failure, not the
   loud one.
-- **«Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens
-  sein?»** gathers neither `llm/stream.go`. Nothing is found, so rongo says
+- **«How long may a single line in the model's answer stream be at
+  most?»** gathers neither `llm/stream.go`. Nothing is found, so rongo says
   nothing was found. That is the invariant working, not a wrong answer.
 
 **This is not a recall number and must not be read as one.** It says nothing

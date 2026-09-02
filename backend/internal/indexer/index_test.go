@@ -60,7 +60,7 @@ func fixtureCorpus(t *testing.T) string {
 	return fixtureCorpusFiles(t, map[string]string{
 		"src/shop/cart/AbandonedCartJob.java": cartJava,
 		"node_modules/left-pad/index.js":      "module.exports = function(){}\n",
-		"README.md":                           "# shop backend\n\nDer Warenkorb wird nach 24 Stunden aufgegeben.\n",
+		"README.md":                           "# shop backend\n\nThe cart is abandoned after 24 hours.\n",
 	})
 }
 
@@ -315,7 +315,7 @@ func TestIndexRepo_incrementalTouchesOnlyTheNamedPaths(t *testing.T) {
 		WHERE f.path = 'src/shop/cart/AbandonedCartJob.java'`)
 
 	// When: one file changes and another is deleted upstream.
-	write(t, h.src, "README.md", "# shop backend\n\nNeuer Text ueber den Warenkorb.\n")
+	write(t, h.src, "README.md", "# shop backend\n\nNew text about the cart.\n")
 	git(t, h.src, "rm", "-q", "node_modules/left-pad/index.js")
 	git(t, h.src, "add", "-A")
 	git(t, h.src, "commit", "-qm", "change and delete")

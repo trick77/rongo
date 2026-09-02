@@ -1,9 +1,9 @@
 [
   {
-    "question": "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
+    "question": "How does peeq make sure a download does not start when the disk is almost full?",
     "texts": [
-      "Wie stellt peeq sicher, dass ein Download nicht startet, wenn die Platte fast voll ist?",
-      "Speicherplatzprüfung Downloadverhinderung Festplattenkapazität Speicherplatzmanagement",
+      "How does peeq make sure a download does not start when the disk is almost full?",
+      "disk space check download prevention disk capacity storage space management",
       "diskSpace freeSpace availableSpace downloadManager storageCheck diskUsage canDownload insufficientSpace"
     ],
     "repos": [
@@ -11,18 +11,18 @@
     ]
   },
   {
-    "question": "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
+    "question": "What happens when many videos fail with extractor errors one after another?",
     "texts": [
-      "Was passiert, wenn hintereinander viele Videos mit Extractor-Fehlern fehlschlagen?",
-      "Video-Extraktion Fehlerbehandlung Aufeinanderfolgende Extraktorfehler Fehlerkaskade bei Videowiedergabe Extraktor-Ausnahmen Behandlung",
+      "What happens when many videos fail with extractor errors one after another?",
+      "video extraction error handling consecutive extractor failures failure cascade during playback extractor exception handling",
       "Extractor ExoPlayer MediaSource PlaybackException onPlayerError MediaCodecRenderer DefaultRenderersFactory ExtractorMediaSource"
     ]
   },
   {
-    "question": "In welchem Format erwartet yt-dlp die Cookie-Datei?",
+    "question": "In which format does yt-dlp expect the cookie file?",
     "texts": [
-      "In welchem Format erwartet yt-dlp die Cookie-Datei?",
-      "Cookie-Datei-Format Cookie-Format-Anforderung Cookie-Datei-Spezifikation",
+      "In which format does yt-dlp expect the cookie file?",
+      "cookie file format cookie format requirement cookie file specification",
       "cookies cookie_file load_cookies parse_cookies Netscape Mozilla cookie_jar http_cookie"
     ],
     "repos": [
@@ -30,26 +30,26 @@
     ]
   },
   {
-    "question": "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
+    "question": "Can an API token be shown again after it has been created once?",
     "texts": [
-      "Kann ein einmal erzeugter API-Token spaeter nochmal angezeigt werden?",
-      "API-Token Anzeige Token Sichtbarkeit Token Einmaligkeit Token Wiederanzeige",
+      "Can an API token be shown again after it has been created once?",
+      "API token display token visibility token shown once token redisplay",
       "api_token token secret credential access_token display_token show_token token_response"
     ]
   },
   {
-    "question": "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
+    "question": "How does an Apple TV get at the media file without signing in?",
     "texts": [
-      "Wie kommt ein Apple TV ohne Anmeldung an die Mediendatei?",
-      "AirPlay Medienzugriff ohne Authentifizierung Apple TV unauthentifizierter Dateizugriff Medienfreigabe ohne Apple-ID AirPlay Protokoll ohne Anmeldung",
+      "How does an Apple TV get at the media file without signing in?",
+      "unauthenticated media access streaming to a set-top box direct media file delivery playback without sign-in",
       "AirPlay AVPlayer MediaServer HTTPStreaming Bonjour NSNetService AVAssetResourceLoader handleAuthenticationChallenge"
     ]
   },
   {
-    "question": "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
+    "question": "After how many scans does peeq unsubscribe itself from a deleted channel?",
     "texts": [
-      "Nach wie vielen Scans meldet sich peeq von einem geloeschten Kanal selbst ab?",
-      "Automatische Abmeldung nach Kanal Löschung Scan-Zähler für inaktive Kanäle Peek Deaktivierung nach Scans Kanal-Timeout nach Löschen",
+      "After how many scans does peeq unsubscribe itself from a deleted channel?",
+      "automatic unsubscribe from a deleted channel scan threshold dead channel detection",
       "peeq channel scan delete unsubscribe timeout counter threshold"
     ]
   },
@@ -57,31 +57,31 @@
     "question": "DeadScanThreshold",
     "texts": [
       "DeadScanThreshold",
-      "DeadScanThreshold configuration dead scan threshold setting threshold for dead scans DeadScanThreshold parameter",
+      "dead scan threshold constant",
       "DeadScanThreshold deadScanThreshold DEAD_SCAN_THRESHOLD scanThreshold threshold deadScan scanConfig thresholdConfig"
     ]
   },
   {
-    "question": "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
+    "question": "How are yt-dlp's availability values translated into peeq's own values?",
     "texts": [
-      "Wie werden die availability-Werte von yt-dlp auf peeqs eigene Werte uebersetzt?",
-      "availability mapping yt-dlp availability translation peeqs availability values availability conversion logic",
+      "How are yt-dlp's availability values translated into peeq's own values?",
+      "availability value mapping upstream status translation availability state conversion",
       "availability yt_dlp peeqs Availability map_availability translate_availability availability_map convert_availability"
     ]
   },
   {
-    "question": "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
+    "question": "Why do the background loops have a random share in their interval?",
     "texts": [
-      "Warum haben die Hintergrund-Loops einen zufaelligen Anteil in ihrem Intervall?",
-      "Hintergrund-Loops zufälliges Intervall zufällige Verzögerung bei Hintergrundaufgaben variabler Zeitablauf für Background-Tasks",
+      "Why do the background loops have a random share in their interval?",
+      "jitter in background loop intervals randomised scheduling thundering herd avoidance",
       "backgroundLoop randomInterval jitter backoff timer dispatch sleep delay"
     ]
   },
   {
-    "question": "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
+    "question": "How are vector hits and full-text hits merged into one result list?",
     "texts": [
-      "Wie werden Vektor-Treffer und Volltext-Treffer zu einer Ergebnisliste zusammengefuehrt?",
-      "Ergebnisfusion Trefferkombination hybrid search ranking merge",
+      "How are vector hits and full-text hits merged into one result list?",
+      "hybrid search fusion combining vector and keyword results rank fusion into one result list",
       "mergeResults hybridSearch vectorScore fullTextScore rankFusion combineHits searchResults relevanceRanking"
     ]
   },
@@ -89,39 +89,39 @@
     "question": "FuseWeighted",
     "texts": [
       "FuseWeighted",
-      "FuseWeighted implementation weighted fuse operation weighted combination logic fuse weighted algorithm",
+      "weighted fusion of result lists",
       "FuseWeighted fuse weighted combine merge aggregate weight fuseWeighted"
     ]
   },
   {
-    "question": "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
+    "question": "How is the token count of a chunk estimated without downloading a tokenizer?",
     "texts": [
-      "Wie wird die Anzahl Tokens eines Chunks geschaetzt, ohne einen Tokenizer herunterzuladen?",
-      "Token-Anzahl Schätzung Chunk-Größe berechnen Tokenizer-freie Token-Zählung Approximative Token-Berechnung",
+      "How is the token count of a chunk estimated without downloading a tokenizer?",
+      "token count estimation without a tokenizer heuristic token counting chunk size estimate",
       "token_count estimate_tokens chunk_size tokenizer encode tokenize approximate count_tokens"
     ]
   },
   {
-    "question": "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
+    "question": "How many texts go into a single embedding request at most?",
     "texts": [
-      "Wie viele Texte gehen maximal in einen einzelnen Embedding-Request?",
-      "maximale Batch-Größe Anzahl der Texte pro Request Embedding-Limit pro Aufruf",
+      "How many texts go into a single embedding request at most?",
+      "embedding request batch size maximum texts per request batching limit",
       "max_batch_size embedding_request batch_size max_texts input_limit chunk_limit"
     ]
   },
   {
-    "question": "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
+    "question": "How is a channel filter kept from taking effect only after the neighbour search?",
     "texts": [
-      "Wie wird verhindert, dass ein Kanalfilter erst nach der Nachbarschaftssuche greift?",
-      "Kanalfilter Reihenfolge Nachbarschaftssuche Verzögerung Filter Priorität Channel Filter Timing",
+      "How is a channel filter kept from taking effect only after the neighbour search?",
+      "filter pushdown before nearest neighbour search pre-filtering of vector search channel restriction in the query",
       "ChannelFilter NeighborDiscovery filterPriority applyFilter channelFilter neighborSearch filterOrder preDiscoveryFilter"
     ]
   },
   {
-    "question": "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
+    "question": "Which PRAGMAs does peeq set when opening the database?",
     "texts": [
-      "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
-      "SQLite PRAGMA Einstellungen Datenbankinitialisierung PRAGMA Konfiguration beim Start",
+      "Which PRAGMAs does peeq set when opening the database?",
+      "SQLite PRAGMA settings on open database connection setup pragmas",
       "PRAGMA sqlite3_exec openDatabase configureDatabase setPragmas WAL journal_mode foreign_keys"
     ],
     "repos": [
@@ -129,10 +129,10 @@
     ]
   },
   {
-    "question": "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
+    "question": "How does peeq tell that a migration has already been applied?",
     "texts": [
-      "Woran erkennt peeq, dass eine Migration bereits angewendet wurde?",
-      "Migrationserkennung Migrationsstatus prüfen Migration bereits angewendet Migrationsverfolgung",
+      "How does peeq tell that a migration has already been applied?",
+      "migration bookkeeping applied migration detection schema version tracking",
       "Migration applied status check version schema database migrate"
     ],
     "repos": [
@@ -140,18 +140,18 @@
     ]
   },
   {
-    "question": "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
+    "question": "Which words are removed from a question before the keyword search runs?",
     "texts": [
-      "Welche Woerter werden aus einer Frage entfernt, bevor die Keyword-Suche laeuft?",
-      "Stopwörter entfernen Suchbegriffe filtern Keyword-Preprocessing Textnormalisierung",
+      "Which words are removed from a question before the keyword search runs?",
+      "stopword removal before keyword search function word filtering query cleanup",
       "stopwords filter keywords search query preprocess tokens remove"
     ]
   },
   {
-    "question": "Wie sichert man eine laufende SQLite-Datenbank online?",
+    "question": "How do you back up a running SQLite database online?",
     "texts": [
-      "Wie sichert man eine laufende SQLite-Datenbank online?",
-      "SQLite Backup API Online-Backup Datenbank sichern Live-Backup",
+      "How do you back up a running SQLite database online?",
+      "online backup of a live SQLite database hot backup while writes continue",
       "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_remaining sqlite3_backup_pagecount SQLITE_OPEN_READWRITE SQLITE_OPEN_READONLY sqlite3_backup"
     ]
   },
@@ -159,15 +159,15 @@
     "question": "ZeroBlob",
     "texts": [
       "ZeroBlob",
-      "ZeroBlob implementation zero-length blob handling empty blob representation blob zero value",
+      "zero-filled blob allocation",
       "ZeroBlob Blob zeroBlob emptyBlob blobSize isZeroBlob blobLength nullBlob"
     ]
   },
   {
-    "question": "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
+    "question": "Which SponsorBlock categories does peeq store, and which explicitly not?",
     "texts": [
-      "Welche SponsorBlock-Kategorien speichert peeq, und welche ausdruecklich nicht?",
-      "SponsorBlock Kategorien peeq SponsorBlock SponsorBlock Segmenttypen peeq SponsorBlock Unterstützung",
+      "Which SponsorBlock categories does peeq store, and which explicitly not?",
+      "SponsorBlock category selection stored segment categories excluded categories",
       "SponsorBlock Category SegmentType Peek PeekPlayer SponsorBlockManager SponsorBlockService SponsorBlockCategory"
     ],
     "repos": [
@@ -175,170 +175,170 @@
     ]
   },
   {
-    "question": "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
+    "question": "How does peeq tell that an audio track holds music rather than speech?",
     "texts": [
-      "Woran erkennt peeq, dass eine Tonspur Musik statt Sprache enthaelt?",
-      "Audioanalyse Musik-Erkennung Spracherkennung Audio-Klassifizierung",
+      "How does peeq tell that an audio track holds music rather than speech?",
+      "audio analysis music detection speech detection audio classification",
       "AudioAnalyzer MusicDetector SpeechDetector AudioClassifier analyzeAudio isMusic isSpeech AudioFeatureExtractor"
     ]
   },
   {
-    "question": "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
+    "question": "How often may a video parked as unavailable be checked again?",
     "texts": [
-      "Wie oft darf ein als nicht verfuegbar geparktes Video erneut geprueft werden?",
-      "Verfügbarkeitsprüfung Intervall Video-Parkstatus Aktualisierung Nicht-verfügbar-Video Retry-Limit Inhalt-Verfügbarkeit Prüffrequenz",
+      "How often may a video parked as unavailable be checked again?",
+      "retry limit for unavailable videos re-check attempts parked video recheck budget",
       "availabilityCheck retryCount maxRetries contentAvailability videoStatus parkedContent refreshInterval checkAvailability"
     ]
   },
   {
-    "question": "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
+    "question": "How many parked videos may a single scan run re-check?",
     "texts": [
-      "Wie viele geparkte Videos darf ein einzelner Scandurchlauf nachpruefen?",
-      "maximale Anzahl geparkter Videos Limit für geplante Scans Kapazität eines Scan-Durchlaufs",
+      "How many parked videos may a single scan run re-check?",
+      "per-scan recheck limit parked video batch size scan run budget",
       "maxVideos scanLimit parkedVideos scanBatchSize videoLimit scanQueue maxItems"
     ]
   },
   {
-    "question": "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
+    "question": "From when on does a video count as old material rather than a new arrival?",
     "texts": [
-      "Ab wann gilt ein Video als altes Material und nicht mehr als Neuzugang?",
-      "Video-Altersklassifizierung Neuzugangszeitraum Archivierungskriterien Medienbestandsalter",
+      "From when on does a video count as old material rather than a new arrival?",
+      "backlog cutoff age threshold for new arrivals old material classification",
       "Video Asset Age Threshold Archive New Date Created Published"
     ]
   },
   {
-    "question": "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
+    "question": "Why may the call for the key points spend more tokens than the one for the summary?",
     "texts": [
-      "Warum darf der Aufruf fuer die Kernpunkte mehr Tokens verbrauchen als der fuer die Zusammenfassung?",
-      "Token-Limit Kernpunkte Token-Budget Zusammenfassung maximale Token-Zahl",
+      "Why may the call for the key points spend more tokens than the one for the summary?",
+      "token budget per prompt key points versus summary max tokens choice",
       "maxTokens tokenLimit summaryTokens keyPointsTokens tokenBudget maxOutputTokens tokenCount"
     ]
   },
   {
-    "question": "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
+    "question": "How does the download queue tell that nobody is waiting for a job?",
     "texts": [
-      "Woran erkennt die Download-Warteschlange, dass niemand auf einen Auftrag wartet?",
-      "Download-Warteschlange Leerlauferkennung Auftrag ohne Wartende Idle-Erkennung Download-Queue",
+      "How does the download queue tell that nobody is waiting for a job?",
+      "abandoned job detection no waiting consumer download queue orphan job",
       "DownloadQueue isIdle hasWaitingClients pendingTasks activeDownloads queueStatus waitingCount isProcessing"
     ]
   },
   {
-    "question": "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
+    "question": "How long may the metadata pre-check before a download take?",
     "texts": [
-      "Wie lange darf die Metadaten-Vorpruefung vor einem Download dauern?",
-      "Metadaten-Vorprüfung Dauer Download-Vorab-Validierung Prüfzeitraum für Metadaten Zeitlimit für Vorab-Check",
+      "How long may the metadata pre-check before a download take?",
+      "metadata probe timeout pre-download check duration",
       "metadata precheck timeout duration limit validation download pre_download"
     ]
   },
   {
-    "question": "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
+    "question": "How do you create a Bloom filter table in SQLite?",
     "texts": [
-      "Wie legt man in SQLite eine Bloom-Filter-Tabelle an?",
-      "Bloom-Filter-Tabelle erstellen SQLite Bloom-Filter implementieren Bloom-Filter in SQLite anlegen",
+      "How do you create a Bloom filter table in SQLite?",
+      "Bloom filter table creation in SQLite probabilistic membership index",
       "CREATE TABLE bloom_filter sqlite3 CREATE VIRTUAL TABLE bloom sqlite3_bloom_filter"
     ]
   },
   {
-    "question": "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
+    "question": "How do you pass a Go slice to a SQL query as a table?",
     "texts": [
-      "Wie uebergibt man eine Go-Liste als Tabelle an eine SQL-Abfrage?",
-      "Go slice als SQL IN clause übergeben Slice in SQL Query einbetten Parameterisierte SQL Abfrage mit Go Array",
+      "How do you pass a Go slice to a SQL query as a table?",
+      "passing a Go slice as a table valued parameter array binding in SQL",
       "sql.In sqlx.In IN (?) []interface{} strings.Join Rebind NamedExec"
     ]
   },
   {
-    "question": "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
+    "question": "How do you read a CSV file directly as a SQL table?",
     "texts": [
-      "Wie liest man eine CSV-Datei direkt als SQL-Tabelle?",
-      "CSV als Tabelle importieren CSV-Datei in SQL laden CSV-Datenbanktabelle erstellen CSV-Datei als SQL-Tabelle verwenden",
+      "How do you read a CSV file directly as a SQL table?",
+      "reading a CSV file as a SQL table virtual table over CSV",
       "LOAD DATA INFILE COPY CREATE EXTERNAL TABLE CSV SQL IMPORT TABLE FILE"
     ]
   },
   {
-    "question": "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
+    "question": "How do you write into a blob without loading all of it into memory?",
     "texts": [
-      "Wie schreibt man in einen Blob, ohne ihn ganz in den Speicher zu laden?",
-      "streaming blob partial blob write blob upload without loading incremental blob write",
+      "How do you write into a blob without loading all of it into memory?",
+      "streaming blob write partial blob write incremental blob write without loading",
       "Blob BlobOutputStream write upload stream put createWriteStream BlobServiceClient"
     ]
   },
   {
-    "question": "Wie werden Texte fuer die Suche in Chunks geschnitten?",
+    "question": "How are texts cut into chunks for the search?",
     "texts": [
-      "Wie werden Texte fuer die Suche in Chunks geschnitten?",
-      "Textsegmentierung für Volltextsuche Chunking-Strategie für Suchindex Aufteilung von Dokumenten in Suchblöcke Tokenisierung und Segmentierung für Indexierung",
+      "How are texts cut into chunks for the search?",
+      "text segmentation for full-text search chunking strategy for the search index splitting documents into search blocks tokenisation and segmentation for indexing",
       "TextChunker DocumentSplitter IndexTokenizer ChunkingStrategy splitText createChunks TextSegment SearchIndex"
     ]
   },
   {
-    "question": "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
+    "question": "Which PRAGMAs are set when the SQLite file is opened?",
     "texts": [
-      "Welche PRAGMAs werden beim Oeffnen der SQLite-Datei gesetzt?",
-      "SQLite PRAGMA Einstellungen SQLite Datenbank Konfiguration SQLite Verbindungsoptionen SQLite Initialisierung",
+      "Which PRAGMAs are set when the SQLite file is opened?",
+      "PRAGMA settings on opening the SQLite file connection configuration",
       "PRAGMA sqlite3_open sqlite3_exec SQLITE_OPEN_READWRITE SQLITE_OPEN_CREATE sqlite3_db_config journal_mode foreign_keys"
     ]
   },
   {
-    "question": "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
+    "question": "How is it recognised that a migration has already run?",
     "texts": [
-      "Woran wird erkannt, dass eine Migration bereits gelaufen ist?",
-      "Migrationsstatus erkennen Migration bereits ausgeführt Migrationsverlauf prüfen doppelte Migration verhindern",
+      "How is it recognised that a migration has already run?",
+      "detecting an already applied migration migration state bookkeeping",
       "Migration hasRun isMigrated migrationVersion appliedMigrations migrationStatus checkMigration migrationHistory"
     ]
   },
   {
-    "question": "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
+    "question": "Which header keeps an upstream proxy from buffering the event stream?",
     "texts": [
-      "Welcher Header verhindert, dass ein vorgelagerter Proxy den Ereignisstrom puffert?",
-      "HTTP Header für Streaming Proxy-Pufferung verhindern Echtzeit-Event-Stream Server-Sent Events Header",
+      "Which header keeps an upstream proxy from buffering the event stream?",
+      "response header against proxy buffering server-sent events streaming header",
       "Cache-Control no-store no-cache X-Accel-Buffering Transfer-Encoding chunked text/event-stream Connection"
     ]
   },
   {
-    "question": "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
+    "question": "How is a session token stored in the database?",
     "texts": [
-      "Wie wird ein Sitzungstoken in der Datenbank abgelegt?",
-      "Sitzungstoken speichern Session Token persistieren Token in Datenbank ablegen Authentifizierungstoken speichern",
+      "How is a session token stored in the database?",
+      "session token storage session persistence hashed token record",
       "SessionToken TokenRepository saveToken session_tokens TokenStorage persistToken TokenService createSession"
     ]
   },
   {
-    "question": "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
+    "question": "What does the server answer to a request without a valid session?",
     "texts": [
-      "Was antwortet der Server auf eine Anfrage ohne gueltige Sitzung?",
-      "ungültige Sitzung Antwort Server Response Invalid Session Session Validation Error Authentication Failure Response",
+      "What does the server answer to a request without a valid session?",
+      "unauthenticated request response status code without a session",
       "Session validate authenticate HTTP 401 Unauthorized InvalidSessionException sessionToken checkSession"
     ]
   },
   {
-    "question": "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
+    "question": "On which port does the service listen when nothing is configured?",
     "texts": [
-      "Auf welchem Port hoert der Dienst, wenn nichts konfiguriert ist?",
-      "default port standard port listening port service port",
+      "On which port does the service listen when nothing is configured?",
+      "default listen port fallback address configuration default",
       "defaultPort port listen serverPort config DEFAULT_PORT portNumber bind"
     ]
   },
   {
-    "question": "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
+    "question": "How long may a single line in the model's answer stream be at most?",
     "texts": [
-      "Wie lang darf eine einzelne Zeile im Antwortstrom des Modells hoechstens sein?",
-      "maximale Zeilenlänge Stream-Limit Antwortzeichen pro Zeile",
+      "How long may a single line in the model's answer stream be at most?",
+      "maximum line length in the model stream scanner buffer limit",
       "max_line_length MAX_LINE_LENGTH line_limit stream_limit max_chars_per_line output_line_length"
     ]
   },
   {
-    "question": "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
+    "question": "How much of the embedding service's error text is read at most?",
     "texts": [
-      "Wie viel vom Fehlertext des Embedding-Dienstes wird hoechstens gelesen?",
-      "maximale Fehlermeldungslänge Embedding-Dienst Fehlertext Fehlerantwort Begrenzung",
+      "How much of the embedding service's error text is read at most?",
+      "bounded read of an upstream error body error message size limit",
       "embedding error message read max length response"
     ]
   },
   {
-    "question": "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
+    "question": "How is a vector encoded as text so that sqlite-vec accepts it?",
     "texts": [
-      "Wie wird ein Vektor als Text kodiert, damit sqlite-vec ihn annimmt?",
-      "Vektor Serialisierung Embedding Speicherung Binärdaten Kodierung SQLite Vektor Format",
+      "How is a vector encoded as text so that sqlite-vec accepts it?",
+      "vector serialisation for sqlite-vec embedding encoding as text",
       "sqlite3_bind_blob vec0 vec_distance vec_length vec_from_json vec_to_json BLOB REAL"
     ],
     "repos": [
@@ -346,10 +346,10 @@
     ]
   },
   {
-    "question": "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
+    "question": "What happens when two writes in peeq hit the database at the same time?",
     "texts": [
-      "Was passiert, wenn zwei Schreibvorgaenge in peeq gleichzeitig auf die Datenbank zugreifen?",
-      "concurrent database access simultaneous write operations database locking mechanism transaction isolation",
+      "What happens when two writes in peeq hit the database at the same time?",
+      "concurrent writes to SQLite write serialisation database locking",
       "Database write transaction lock concurrent queue synchronized peeq"
     ],
     "repos": [
@@ -357,146 +357,146 @@
     ]
   },
   {
-    "question": "Wer registriert den Treiber, den rongo mit sql.Open(\"sqlite3\", ...) anspricht?",
+    "question": "Who registers the driver rongo addresses with sql.Open(\"sqlite3\", ...)?",
     "texts": [
-      "Wer registriert den Treiber, den rongo mit sql.Open(\"sqlite3\", ...) anspricht?",
-      "Treiberregistrierung SQLite Treiber Anbindung sql.Open Treiberinitialisierung Datenbanktreiber Registrierung",
+      "Who registers the driver rongo addresses with sql.Open(\"sqlite3\", ...)?",
+      "SQL driver registration driver name binding database driver init",
       "sql.Open sqlite3 Register driver sql.DB database/sql init Driver"
     ]
   },
   {
-    "question": "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
+    "question": "How does journal_mode=wal get from the connection URL into the database?",
     "texts": [
-      "Wie kommt journal_mode=wal aus der Verbindungs-URL in der Datenbank an?",
-      "SQLite WAL mode connection URL parameter database journal mode URL query string parsing",
+      "How does journal_mode=wal get from the connection URL into the database?",
+      "connection URL pragma parameters WAL journal mode from the DSN",
       "journal_mode wal connection_string parse_url query_parameters sqlite3 PRAGMA setJournalMode"
     ]
   },
   {
-    "question": "Wie lange wartet rongo, wenn die Datenbankdatei gerade gesperrt ist?",
+    "question": "How long does rongo wait when the database file is currently locked?",
     "texts": [
-      "Wie lange wartet rongo, wenn die Datenbankdatei gerade gesperrt ist?",
-      "Lock-Wartezeit Datenbank Timeout bei Dateisperre Retry-Intervall bei gesperrter DB",
+      "How long does rongo wait when the database file is currently locked?",
+      "busy timeout on a locked database lock wait duration",
       "lock timeout retry busy database file wait interval"
     ]
   },
   {
-    "question": "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
+    "question": "Are foreign key constraints active, and who turns them on?",
     "texts": [
-      "Sind Fremdschluessel-Bedingungen aktiv, und wer schaltet sie ein?",
-      "foreign key constraints referential integrity FK constraints enabled constraint enforcement",
+      "Are foreign key constraints active, and who turns them on?",
+      "foreign key enforcement pragma foreign_keys who enables constraints",
       "ForeignKey referentialIntegrity enableConstraints PRAGMA foreign_keys setForeignKeyConstraintsEnabled isForeignKeyConstraintsEnabled DatabaseConfiguration"
     ]
   },
   {
-    "question": "Warum steht eine viel benutzte Hilfsfunktion nicht in jeder Antwort, obwohl der Code sie ueberall aufruft?",
+    "question": "Why is a heavily used helper not in every answer, although the code calls it everywhere?",
     "texts": [
-      "Warum steht eine viel benutzte Hilfsfunktion nicht in jeder Antwort, obwohl der Code sie ueberall aufruft?",
-      "Hilfsfunktion fehlt in Antwort Utility-Methode nicht in Response Helper-Funktion wird nicht zurückgegeben Fehlende Funktion in Ausgabe",
+      "Why is a heavily used helper not in every answer, although the code calls it everywhere?",
+      "down-ranking of ubiquitous helpers common utility penalty ranking of widely used code",
       "Helper Utility Response ResponseBuilder Serializer exclude transient internal"
     ]
   },
   {
-    "question": "Wie viele Moeglichkeiten darf eine Rueckfrage hoechstens zur Auswahl stellen?",
+    "question": "How many options may a follow-up question offer at most?",
     "texts": [
-      "Wie viele Moeglichkeiten darf eine Rueckfrage hoechstens zur Auswahl stellen?",
-      "maximale Anzahl Antwortoptionen Höchstzahl Auswahlmöglichkeiten Limit für Rückfragen",
+      "How many options may a follow-up question offer at most?",
+      "maximum number of candidates in a follow-up question choice limit",
       "maxOptions maxChoices MAX_OPTIONS MAX_CHOICES maxAnswers MAX_ANSWERS maxSuggestions MAX_SUGGESTIONS"
     ]
   },
   {
-    "question": "Wie oft wird nachgeschaut, ob sich an einem Repository etwas geaendert hat?",
+    "question": "How often is a repository checked for changes?",
     "texts": [
-      "Wie oft wird nachgeschaut, ob sich an einem Repository etwas geaendert hat?",
-      "Repository-Polling-Intervall Änderungserkennung Aktualisierungsprüfung Synchronisationshäufigkeit",
+      "How often is a repository checked for changes?",
+      "repository poll interval change detection frequency refresh schedule",
       "poll check update interval repository sync refresh fetch"
     ]
   },
   {
-    "question": "Woher weiss der Dienst, welcher Zweig gemeint ist, wenn keiner eingetragen wurde?",
+    "question": "How does the service know which branch is meant when none was configured?",
     "texts": [
-      "Woher weiss der Dienst, welcher Zweig gemeint ist, wenn keiner eingetragen wurde?",
-      "Standard-Branch-Erkennung Fallback-Branch-Logik Default-Branch-Auswahl Branch-Ermittlung ohne Angabe",
+      "How does the service know which branch is meant when none was configured?",
+      "default branch resolution branch fallback head detection",
       "defaultBranch branch getBranch resolveBranch fallback HEAD currentBranch branchName"
     ]
   },
   {
-    "question": "Was passiert, wenn der eingetragene Zweig auf der Gegenseite geloescht wurde?",
+    "question": "What happens when the configured branch was deleted on the far side?",
     "texts": [
-      "Was passiert, wenn der eingetragene Zweig auf der Gegenseite geloescht wurde?",
-      "Branch gelöscht Remote Branch Zweig entfernt Gegenseite gelöscht",
+      "What happens when the configured branch was deleted on the far side?",
+      "missing remote branch handling deleted upstream branch",
       "branch remote delete fetch prune tracking origin"
     ]
   },
   {
-    "question": "Warum bricht der Start ab, wenn die falsche Variante eines Werkzeugs installiert ist?",
+    "question": "Why does startup abort when the wrong variant of a tool is installed?",
     "texts": [
-      "Warum bricht der Start ab, wenn die falsche Variante eines Werkzeugs installiert ist?",
-      "Startup failure due to incorrect tool variant Abbruch bei falscher Werkzeugversion Installation inkompatibler Tool-Variante",
+      "Why does startup abort when the wrong variant of a tool is installed?",
+      "startup precondition check external tool variant validation fail fast on wrong binary",
       "ToolVariant ToolVersion Startup Installation Compatibility ToolManager ToolProvider VersionCheck"
     ]
   },
   {
-    "question": "Wo stehen die Zugangsdaten fuer ein privates Repository, wenn nicht in der Konfigurationsdatei?",
+    "question": "Where do the credentials for a private repository live, if not in the configuration file?",
     "texts": [
-      "Wo stehen die Zugangsdaten fuer ein privates Repository, wenn nicht in der Konfigurationsdatei?",
-      "private repository credentials authentication tokens access keys storage secure credential management",
+      "Where do the credentials for a private repository live, if not in the configuration file?",
+      "credentials for private repositories token from the environment secret handling outside config",
       "credentials token auth keychain env config secrets gitconfig"
     ]
   },
   {
-    "question": "Ab welcher Groesse gilt ein Verzeichnis nicht mehr als eigener Baustein?",
+    "question": "From which size on does a directory stop counting as a building block of its own?",
     "texts": [
-      "Ab welcher Groesse gilt ein Verzeichnis nicht mehr als eigener Baustein?",
-      "Verzeichnisgrenze Baustein-Schwellwert Modul-Größenbeschränkung Komponenten-Größenlimit",
+      "From which size on does a directory stop counting as a building block of its own?",
+      "module size threshold directory clustering cut minimum module size",
       "MAX_DIR_SIZE MODULE_THRESHOLD COMPONENT_SIZE_LIMIT DIR_SIZE_THRESHOLD isLargeDirectory shouldSplit MAX_MODULE_SIZE DIRECTORY_SIZE_LIMIT"
     ]
   },
   {
-    "question": "Woran wird erkannt, dass ein Repository ein anderes benutzt?",
+    "question": "How is it recognised that one repository uses another?",
     "texts": [
-      "Woran wird erkannt, dass ein Repository ein anderes benutzt?",
-      "Repository-Abhängigkeit erkennen Abhängigkeitsbeziehung zwischen Repositories Referenzierung eines externen Repositories Erkennung von Repository-Verknüpfungen",
+      "How is it recognised that one repository uses another?",
+      "cross repository dependency detection inter-repo usage links",
       "dependency import require submodule package.json requirements.txt Podfile build.gradle"
     ]
   },
   {
-    "question": "Welche Dateien landen gar nicht erst im Index?",
+    "question": "Which files never make it into the index in the first place?",
     "texts": [
-      "Welche Dateien landen gar nicht erst im Index?",
-      "Dateien vom Index ausgeschlossen Indexierungsfilter Dateien nicht indexiert Indexierungsregeln",
+      "Which files never make it into the index in the first place?",
+      "indexing exclusions skipped files ignore rules",
       "index exclude filter ignore skip file path pattern"
     ]
   },
   {
-    "question": "Wie weit entfernt von einem Suchtreffer darf der Code noch liegen, der in eine Antwort kommt?",
+    "question": "How far from a search hit may code sit and still make it into an answer?",
     "texts": [
-      "Wie weit entfernt von einem Suchtreffer darf der Code noch liegen, der in eine Antwort kommt?",
-      "Fuzzy Search Toleranz Suchtreffer Distanz Levenshtein Abstand Match Threshold",
+      "How far from a search hit may code sit and still make it into an answer?",
+      "neighbourhood around a hit context window for gathering distance from the match",
       "fuzzy threshold distance levenshtein similarity score match tolerance"
     ]
   },
   {
-    "question": "Was passiert mit dem gesammelten Material, wenn dessen Budget erreicht ist?",
+    "question": "What happens to the gathered material once its budget is reached?",
     "texts": [
-      "Was passiert mit dem gesammelten Material, wenn dessen Budget erreicht ist?",
-      "Budget-Limit erreicht Material-Sammlung stoppen Budget-Überschreitung verhindern Sammlung beenden bei Budget",
+      "What happens to the gathered material once its budget is reached?",
+      "gathering budget exhaustion truncation of collected sources context limit",
       "budget limit collection material stop exceed threshold quota"
     ]
   },
   {
-    "question": "Was passiert mit dem Index, wenn ein Repository aus der Konfiguration verschwindet?",
+    "question": "What happens to the index when a repository disappears from the configuration?",
     "texts": [
-      "Was passiert mit dem Index, wenn ein Repository aus der Konfiguration verschwindet?",
-      "Repository aus Konfiguration entfernt Index-Aktualisierung bei Konfigurationsänderung Verwaiste Indizes bei fehlendem Repository",
+      "What happens to the index when a repository disappears from the configuration?",
+      "index cleanup on removed repository purging stale rows",
       "Repository Index Configuration removeRepository updateIndex cleanup delete purge"
     ]
   },
   {
-    "question": "Wie wird aus einer Frage in Fachsprache eine Suche, die den Code wirklich trifft?",
+    "question": "How does a question in domain language become a search that actually hits the code?",
     "texts": [
-      "Wie wird aus einer Frage in Fachsprache eine Suche, die den Code wirklich trifft?",
-      "Fachbegriff in Code-Suche umwandeln Abfrage in Quelltextsuche überführen Terminologiebrücke zwischen Domäne und Implementierung",
+      "How does a question in domain language become a search that actually hits the code?",
+      "query expansion from domain language to identifiers understanding step bridging vocabulary",
       "search query terminology mapping domain implementation identifier"
     ]
   }

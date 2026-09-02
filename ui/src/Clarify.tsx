@@ -58,10 +58,10 @@ export default function Clarify({
       >
         <Chevron open={open} />
         {chosenIdx == null ? (
-          <span>Wie ist das gemeint?</span>
+          <span>Which one do you mean?</span>
         ) : (
           <>
-            <span>Gewählt: {chosen?.title}</span>
+            <span>Chosen: {chosen?.title}</span>
             <span className="text-xs text-[var(--color-ink-faint)]">{chosen?.repo}</span>
           </>
         )}
@@ -88,7 +88,7 @@ export default function Clarify({
                     {c.repo} · {c.branch}
                   </span>
                   {c.idx === chosenIdx && (
-                    <span className="text-xs text-[var(--color-accent)]">Gewählt</span>
+                    <span className="text-xs text-[var(--color-accent)]">Chosen</span>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{c.summary}</p>

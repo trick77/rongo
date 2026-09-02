@@ -186,17 +186,17 @@ func refreshTexts(prev expansion, question string, texts []string) expansion {
 // divergence phase 4c set out to close.
 func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 	prev := expansion{
-		Question: "Welche PRAGMAs setzt peeq beim Oeffnen der Datenbank?",
-		Texts:    []string{"alt"},
+		Question: "Which PRAGMAs does peeq set when opening the database?",
+		Texts:    []string{"old"},
 		Repos:    []string{"peeq"},
 	}
 
-	got := refreshTexts(prev, prev.Question, []string{"neu", "auch neu"})
+	got := refreshTexts(prev, prev.Question, []string{"new", "also new"})
 
 	if len(got.Repos) != 1 || got.Repos[0] != "peeq" {
 		t.Errorf("Repos = %v, want the frozen restriction carried forward", got.Repos)
 	}
-	if len(got.Texts) != 2 || got.Texts[0] != "neu" {
+	if len(got.Texts) != 2 || got.Texts[0] != "new" {
 		t.Errorf("Texts = %v, want the fresh expansion", got.Texts)
 	}
 	if got.Question != prev.Question {
@@ -205,7 +205,7 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 
 	// A question that never had a restriction still has none — an empty Repos
 	// must not become a phantom entry.
-	fresh := refreshTexts(expansion{}, "neue Frage", []string{"x"})
+	fresh := refreshTexts(expansion{}, "new question", []string{"x"})
 	if len(fresh.Repos) != 0 {
 		t.Errorf("Repos = %v, want none for a record that never had one", fresh.Repos)
 	}

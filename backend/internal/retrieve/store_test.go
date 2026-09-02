@@ -174,7 +174,7 @@ func TestSearch_literalIdentifierRanksAheadOfSemanticNoise(t *testing.T) {
 	db := testDB(t)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "Near1.java", "a", "irgendein anderer text", nearVec)
-	addChunk(t, db, "shop", "Near2.java", "b", "noch ein anderer text", nearVec)
+	addChunk(t, db, "shop", "Near2.java", "b", "yet another text", nearVec)
 	addChunk(t, db, "shop", "PromoMailJob.java", "send", "class PromoMailJob { void send() {} }", midVec)
 	r := New(db, fixedEmbedder{vec: queryVec})
 
@@ -280,7 +280,7 @@ func TestSearch_repoFilterSurvivesTheWholePipeline(t *testing.T) {
 // measuring phase 4c. The restriction comes from the understanding step, which
 // guesses it from the wording, and those guesses were measured on the real
 // question catalogue: of 9 restrictions, three named something that is not a
-// repository — "peeqs" (the German genitive of peeq), "Peek", and
+// repository — "peeqs" (the possessive form of peeq), "Peek", and
 // "asg017/sqlite-vec" for a module that is not indexed.
 //
 // Such a name is not a narrowing, it is a wipe: it goes straight into

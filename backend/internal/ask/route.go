@@ -89,34 +89,33 @@ const (
 
 // judgeMarker is a phrase unique to the judge's prompt. Tests use it to tell
 // the two calls apart.
-const judgeMarker = "Alternativen oder Teile eines Ganzen"
+const judgeMarker = "alternatives or parts of one whole"
 
 // judgeSystem is phase 4b's wording, kept after phase 4c measured a
 // replacement and could not show it earning its keep — see
 // docs/measurements/2026-08-19-candidates.md, "The change that did not land".
-const judgeSystem = `Du entscheidest, ob zwei oder mehr Fundstellen ` + judgeMarker + ` sind.
+const judgeSystem = `You decide whether two or more hits are ` + judgeMarker + `.
 
-Antworte AUSSCHLIESSLICH mit JSON: {"decision":"ask"} oder {"decision":"compose"}.
+Answer with JSON ONLY: {"decision":"ask"} or {"decision":"compose"}.
 
-  ask      Die Fundstellen sind unabhaengige Mechanismen, die dasselbe leisten.
-           Genau einer ist gemeint, und es waere falsch zu raten.
-  compose  Die Fundstellen sind Teile EINES Mechanismus: eine ruft die andere,
-           eine ist die gemeinsame Bibliothek, eine ist die Fassade.
+  ask      The hits are independent mechanisms that do the same thing.
+           Exactly one of them is meant, and guessing would be wrong.
+  compose  The hits are parts of ONE mechanism: one calls the other, one is
+           the shared library, one is the facade.
 
-Im Zweifel "ask": eine Rueckfrage kostet einen Klick, eine zusammengesetzte
-Antwort ueber unabhaengige Mechanismen ist schlicht falsch.`
+When in doubt "ask": a follow-up question costs one click, an answer composed
+across independent mechanisms is simply wrong.`
 
-const nameSystem = `Du benennst einen Kandidaten fuer eine Rueckfrage, auf Deutsch in
-Schweizer Rechtschreibung. Verwende nie das Zeichen ß, immer ss.
+const nameSystem = `You name a candidate for a follow-up question, in English.
 
-Antworte AUSSCHLIESSLICH mit JSON: {"title":"...","summary":"..."}
+Answer with JSON ONLY: {"title":"...","summary":"..."}
 
-  title    Hoechstens sechs Woerter, deutsch, fachlich. NICHT der Verzeichnisname.
-           Der Leser sieht das Repository schon daneben stehen.
-  summary  Ein Satz, was dieser Code tut.
+  title    At most six words, domain wording. NOT the directory name.
+           The reader already sees the repository next to it.
+  summary  One sentence on what this code does.
 
-Zwei Kandidaten muessen sich am Titel unterscheiden lassen, auch wenn beide im
-selben Paketnamen liegen.`
+Two candidates have to be tellable apart by their titles, even when both sit
+in the same package name.`
 
 // Decision is what routing produced: either an answer can be composed from
 // every candidate, or the reader has to be asked which one is meant.
@@ -369,9 +368,9 @@ type judgeDecision struct {
 // than left half-wired here.
 func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Frage: %s\n\nKandidaten:\n", question)
+	fmt.Fprintf(&b, "Question: %s\n\nCandidates:\n", question)
 	for i, c := range cs {
-		fmt.Fprintf(&b, "%d. Repository %s, Modul %s\n", i+1, c.Repo, c.ModuleKey)
+		fmt.Fprintf(&b, "%d. Repository %s, module %s\n", i+1, c.Repo, c.ModuleKey)
 		for _, h := range firstN(c.Hits, 2) {
 			excerpt := excerptOf(h.RawText, 200)
 			fmt.Fprintf(&b, "   - %s: %s\n", h.Path, excerpt)
@@ -422,7 +421,7 @@ func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]C
 			c.Summary = ""
 
 			var b strings.Builder
-			fmt.Fprintf(&b, "Frage: %s\n\nKandidat: Repository %s, Modul %s\n", question, c.Repo, c.ModuleKey)
+			fmt.Fprintf(&b, "Question: %s\n\nCandidate: repository %s, module %s\n", question, c.Repo, c.ModuleKey)
 			for _, h := range firstN(c.Hits, 3) {
 				excerpt := excerptOf(h.RawText, 200)
 				fmt.Fprintf(&b, "- %s: %s\n", h.Path, excerpt)
@@ -440,9 +439,9 @@ func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]C
 				return
 			}
 			if got.Title != "" {
-				c.Title = swiss(got.Title)
+				c.Title = got.Title
 			}
-			c.Summary = swiss(got.Summary)
+			c.Summary = got.Summary
 		}(i)
 	}
 	wg.Wait()

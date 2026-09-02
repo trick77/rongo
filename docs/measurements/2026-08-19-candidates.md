@@ -63,12 +63,12 @@ produce one:
 
 | question | the model named | the index has |
 |---|---|---|
-| „…auf **peeqs** eigene Werte übersetzt?" | `peeqs` | `peeq` — the German genitive read as a name |
-| „Welche SponsorBlock-Kategorien speichert **peeq**…" | `Peek` | `peeq` |
-| „…damit **sqlite-vec** ihn annimmt?" | `asg017/sqlite-vec` | not indexed at all |
+| „…translated into **peeqs** own values?" | `peeqs` | `peeq` — the possessive read as a name |
+| „Which SponsorBlock categories does **peeq** store…" | `Peek` | `peeq` |
+| „…so that **sqlite-vec** accepts it?" | `asg017/sqlite-vec` | not indexed at all |
 
 `retrieve` put these straight into `WHERE f.repo IN (…)`. A name nothing carries is not a
-narrowing, it is a wipe: no row can match, and `pipeline.go` then reports "nichts gefunden"
+narrowing, it is a wipe: no row can match, and `pipeline.go` then reports "nothing found"
 for a question whose answer is sitting in the index. **One third of all narrowings did
 this**, in production, silently.
 
@@ -145,21 +145,21 @@ The eight questions Pro asked about that it should have answered:
 
 | question | one answer, in |
 |---|---|
-| Ab wann gilt ein Video als altes Material…? | `peeq` `scan/scheduler.go` |
-| Warum darf der Aufruf für die Kernpunkte mehr Tokens…? | `peeq` `summarize/summarizer.go` |
-| Wie übergibt man eine Go-Liste als Tabelle…? | `go-sqlite3` `ext/array` |
-| Wie viele Texte gehen maximal in einen Embedding-Request? | `peeq` `rag/embed.go` |
-| Wie viele Volltext-Treffer liefert die Nachrichtensuche…? | `loom` `chat/message_search_store.go` |
-| Wie viele geparkte Videos darf ein Scandurchlauf…? | `peeq` `scan/scheduler.go` |
-| Wie wird ein Dateiname bereinigt…? | `loom` `artifact/path.go` |
-| *(composition)* Was passiert bei zwei gleichzeitigen Schreibvorgängen? | `peeq` `store` + `go-sqlite3` |
+| From when on does a video count as old material…? | `peeq` `scan/scheduler.go` |
+| Why may the call for the key points spend more tokens…? | `peeq` `summarize/summarizer.go` |
+| How do you pass a Go slice as a table…? | `go-sqlite3` `ext/array` |
+| How many texts go into an embedding request at most? | `peeq` `rag/embed.go` |
+| How many full-text hits does the message search return…? | `loom` `chat/message_search_store.go` |
+| How many parked videos may a scan run re-check…? | `peeq` `scan/scheduler.go` |
+| How is a file name sanitised…? | `loom` `artifact/path.go` |
+| *(composition)* What happens on two concurrent writes? | `peeq` `store` + `go-sqlite3` |
 
 Seven of eight are "how many / how much / from when": the answer is one constant in one file,
 the question carries almost no lexical hook, and every module has limits and defaults. The
 judge saw two excerpts that each contained a numeric constant and reasonably called them
 alternatives.
 
-One of them is worth singling out. `Wie übergibt man eine Go-Liste als Tabelle` puts
+One of them is worth singling out. `How do you pass a Go slice as a table` puts
 `ext/array` against `ext/csv` — two modules of the **same** repository, so no repository
 narrowing could ever have helped. What separates them is that the question's own expected
 identifiers land on one and not the other, and the judge was never shown that.
@@ -231,7 +231,7 @@ a name that repository does not define at all. Genuine composition over `repo_de
 still travels.
 
 Checked by hand against the running app, on the same round trip that produced it —
-„Wie wird ein Sitzungstoken in der Datenbank abgelegt?", card offered, peeq chosen:
+„How is a session token stored in the database?", card offered, peeq chosen:
 
     peeq backend/internal/auth/session.go:40-54
     peeq backend/internal/auth/session.go:55-85

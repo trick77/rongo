@@ -38,9 +38,9 @@ Three of the six failures are now found, two of them in the top 5:
 
 | Question | raw | expanded |
 |---|---|---|
-| Was passiert bei vielen Extractor-Fehlern? | not found | **6** |
-| Welche Wörter werden aus einer Frage entfernt? | not found | **2** |
-| Wohin schreibt loom eine hochgeladene Datei? | not found | **4** |
+| What happens on many extractor errors? | not found | **6** |
+| Which words are removed from a question? | not found | **2** |
+| Where does loom write an uploaded file? | not found | **4** |
 
 And the ranking improves broadly: `ResolveOutputPath` 3 → 1, `Dateiname
 bereinigt` 4 → 1, `Thread-Titel bereinigt` 14 → 6, `API-Token` 13 → 10. MRR
@@ -52,9 +52,9 @@ move at all:
 
 | Question | raw | expanded |
 |---|---|---|
-| Kanalfilter vor der Nachbarschaftssuche | 5 | 12 |
-| Wie viele Volltext-Treffer liefert die Nachrichtensuche? | 2 | 7 |
-| Was passiert, wenn eine Benutzer-Direktive zu lang wird? | 2 | 5 |
+| Channel filter before the neighbour search | 5 | 12 |
+| How many full-text hits does the message search return? | 2 | 7 |
+| What happens when a user directive gets too long? | 2 | 5 |
 
 So: **expansion finds more and ranks the whole field better, but it dilutes the
 top of the list.** Three lanes vote, and two of them are guesses; when the guess
@@ -66,8 +66,8 @@ Three of the six remain missing: `download/freebytes.go`,
 
 ## Where the guesses go wrong, in the model's own words
 
-The expansions are in `expansions.json` and worth reading. For "viele Videos mit
-Extractor-Fehlern" the model guessed `MediaExtractor`, `MediaCodec`, `ExoPlayer`
+The expansions are in `expansions.json` and worth reading. For "many videos with
+extractor errors" the model guessed `MediaExtractor`, `MediaCodec`, `ExoPlayer`
 — Android media vocabulary that appears nowhere in peeq, which is a Go service
 shelling out to yt-dlp. The question was still found, through the
 business-language lane rather than the code lane.
@@ -79,8 +79,8 @@ guess costs a lane.
 ## What this does not settle
 
 `playbackgrant/store.go` still misses at K=20 — and yet, driving the real
-pipeline through the UI, the answer to "Wie kommt ein Apple TV ohne Anmeldung an
-die Mediendatei?" cites exactly that file. The gathering step reaches it by
+pipeline through the UI, the answer to "How does an Apple TV get at the media
+file without signing in?" cites exactly that file. The gathering step reaches it by
 following symbol references out of the handler, which the search alone never
 returns.
 

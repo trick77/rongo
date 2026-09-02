@@ -1,7 +1,7 @@
 # rongo
 
 ## Conventions
-- Docs, specs, code comments: English. UI copy/answers: German, Swiss orthography — never `ß`.
+- Docs, specs, code comments, UI copy, prompts and generated answers: English throughout.
 - Feature branch per phase (`feat/phase-N-...`). Never commit to `master`.
 - TDD: failing test first, then the smallest implementation.
 - `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
