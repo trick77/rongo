@@ -14,8 +14,8 @@ if [ -f "$ROOT/.env" ]; then
   set +a
 fi
 
-DB_PATH=${BACKEND_DB_PATH:-/tmp/rongo-dev.db}
-REPO_ROOT=${BACKEND_REPO_ROOT:-/tmp/rongo-dev-repos}
+DB_PATH=${BACKEND_DB_PATH:-./data/rongo.db}
+REPO_ROOT=${BACKEND_REPO_ROOT:-./repos}
 
 # A relative path (e.g. from .env, copied from .env.example) is meant to
 # resolve against the repo root. The backend subshell below cd's into
