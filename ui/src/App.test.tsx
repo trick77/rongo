@@ -9,21 +9,74 @@ afterEach(() => {
   localStorage.clear();
 });
 
+/**
+ * Renders the app past its session gate. /api/me is the first request App
+ * makes, so every test that wants to see the UI has to get through it first.
+ */
+async function renderSignedIn() {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })));
+  render(<App />);
+  await screen.findByRole("heading", { level: 1 });
+}
+
 describe("App", () => {
-  it("renders the heading with text rongo", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })));
-    render(<App />);
+  it("renders the heading with text rongo", async () => {
+    await renderSignedIn();
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe("rongo");
+  });
+
+  it("schickt einen abgelaufenen Login zum Provider statt die App zu zeigen", async () => {
+    // Ohne diese Weiche scheitert stattdessen jede einzelne Kachel mit ihrem
+    // eigenen 401, und der Nutzer sieht eine kaputte App statt einer Anmeldung.
+    const href = vi.fn();
+    vi.stubGlobal("location", { get href() { return ""; }, set href(v: string) { href(v); }, reload: vi.fn() });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+
+    render(<App />);
+
+    await waitFor(() => expect(href).toHaveBeenCalledWith("/api/auth/login"));
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("zeigt die App trotzdem, wenn /api/me am Netz scheitert", async () => {
+    // Ein Netzfehler ist keine abgelaufene Sitzung. Wer hier weiterleitet,
+    // wirft den Nutzer bei jedem Schluckauf des Backends zum Provider.
+    const href = vi.fn();
+    vi.stubGlobal("location", { get href() { return ""; }, set href(v: string) { href(v); }, reload: vi.fn() });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+
+    render(<App />);
+
+    await screen.findByRole("heading", { level: 1 });
+    expect(href).not.toHaveBeenCalled();
+  });
+
+  it("meldet ab und folgt der redirect_url der Antwort", async () => {
+    const href = vi.fn();
+    vi.stubGlobal("location", { get href() { return ""; }, set href(v: string) { href(v); }, reload: vi.fn() });
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (String(url) === "/api/auth/logout" ? { redirect_url: "/" } : []),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Abmelden" }));
+
+    await waitFor(() => expect(href).toHaveBeenCalledWith("/"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
   });
 
   it("behaelt den laufenden Thread beim Wechsel auf Repos", async () => {
     // Unmounting Ask would drop the answer on screen while the stream keeps
     // writing into a dead component. The stored record only catches up once the
     // turn is finished, so a stream interrupted this way is lost for good.
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })));
+    await renderSignedIn();
     const user = userEvent.setup();
-    render(<App />);
     await user.type(screen.getByLabelText("Frage"), "Eine Frage, die stehen bleiben muss");
 
     await user.click(screen.getByRole("button", { name: "Repos" }));

@@ -1,9 +1,71 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Ask from "./Ask";
 import RepoList from "./RepoList";
 import Threads from "./Threads";
 
 type Page = "fragen" | "repos";
+
+type Me = { subject: string; email: string; is_admin: boolean };
+
+/**
+ * The session gate. /api/me is the one request the app makes before it renders
+ * anything, so an expired cookie sends the browser to the provider instead of
+ * letting every panel fail with its own 401.
+ *
+ * "checking" is a real state, not a detail: rendering the app first and
+ * redirecting afterwards shows a flash of an empty, signed-out UI on every
+ * reload.
+ */
+type Session =
+  | { state: "checking" }
+  | { state: "in"; me: Me }
+  | { state: "out" };
+
+function useSession(): Session {
+  const [session, setSession] = useState<Session>({ state: "checking" });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/me");
+        if (cancelled) return;
+        if (res.status === 401) {
+          setSession({ state: "out" });
+          // A full navigation, not a fetch: the provider answers with a login
+          // page and a redirect chain, neither of which a fetch can follow
+          // into the address bar.
+          window.location.href = "/api/auth/login";
+          return;
+        }
+        if (!res.ok) throw new Error(String(res.status));
+        setSession({ state: "in", me: (await res.json()) as Me });
+      } catch {
+        // A network error is not a signed-out session. Redirecting here would
+        // bounce the user to the provider every time the backend hiccups, so
+        // the app renders and its panels report their own failures.
+        if (!cancelled) setSession({ state: "in", me: { subject: "", email: "", is_admin: false } });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return session;
+}
+
+async function logout() {
+  try {
+    const res = await fetch("/api/auth/logout", { method: "POST" });
+    const body = (await res.json()) as { redirect_url?: string };
+    window.location.href = body.redirect_url ?? "/";
+  } catch {
+    // The cookie may or may not be gone; reloading lets the session gate above
+    // decide, which is the only place that answer is authoritative.
+    window.location.reload();
+  }
+}
 
 /**
  * threadKey is where the open thread survives a reload. The conversation is a
@@ -41,6 +103,7 @@ export default function App() {
   // background goroutine — and neither can push.
   const [threadsVersion, setThreadsVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  const session = useSession();
 
   const selectThread = useCallback((id: number | null) => {
     setThreadId(id);
@@ -48,6 +111,18 @@ export default function App() {
   }, []);
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
+
+  // Nothing is rendered until the session is known: the alternative is a flash
+  // of the signed-out app on every reload, and a redirect landing on top of it.
+  if (session.state !== "in") {
+    return (
+      <main className="mx-auto max-w-6xl p-8">
+        <p className="text-sm text-[var(--color-ink-soft)]">
+          {session.state === "checking" ? "Anmeldung wird geprüft …" : "Weiterleitung zur Anmeldung …"}
+        </p>
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto max-w-6xl p-8">
@@ -70,6 +145,13 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="ml-auto text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+        >
+          Abmelden
+        </button>
       </header>
 
       {/*

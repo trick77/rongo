@@ -165,9 +165,31 @@ func main() {
 		Dim:     cfg.EmbedDim,
 	}, nil)
 	deps := httpapi.Deps{
-		Auth:    authSvc,
-		Repos:   repostatus.New(db, moduleOpts(cfg)),
-		Threads: threads.NewStore(db),
+		Auth:           authSvc,
+		Repos:          repostatus.New(db, moduleOpts(cfg)),
+		Threads:        threads.NewStore(db),
+		OIDCAdminGroup: cfg.OIDCAdminGroup,
+		PublicURL:      cfg.PublicURL,
+	}
+	// Discovery talks to the provider, so a rongo that cannot reach Authelia
+	// fails here rather than coming up healthy and rejecting every login. The
+	// timeout is its own: the boot context has no deadline, and an unreachable
+	// provider would otherwise hang the process instead of reporting it.
+	if cfg.AuthMode == config.AuthModeOIDC {
+		discoverCtx, cancelDiscover := context.WithTimeout(ctx, 30*time.Second)
+		oidcSvc, err := auth.NewOIDCServiceFromDiscovery(discoverCtx, auth.OIDCServiceConfig{
+			Issuer:       cfg.OIDCIssuer,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL:  cfg.OIDCRedirectURL,
+			SecureCookie: strings.HasPrefix(cfg.PublicURL, "https://"),
+		})
+		cancelDiscover()
+		if err != nil {
+			slog.Error("oidc provider discovery failed", "issuer", cfg.OIDCIssuer, "err", err)
+			os.Exit(1)
+		}
+		deps.OIDC = oidcSvc
 	}
 	// Without a model endpoint rongo still serves the Repos page and the index;
 	// the question routes answer 503 rather than failing per request.

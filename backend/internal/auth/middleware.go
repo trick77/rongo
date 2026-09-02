@@ -91,6 +91,23 @@ func SetSessionCookie(w http.ResponseWriter, token, publicURL string, ttl time.D
 	})
 }
 
+// ClearSessionCookie expires the session cookie. Every attribute other than the
+// value matches what SetSessionCookie wrote: a browser keys a cookie by name,
+// domain and path, so a clear that differs in Path or Secure leaves the
+// original in place and the user stays signed in.
+func ClearSessionCookie(w http.ResponseWriter, publicURL string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   strings.HasPrefix(publicURL, "https://"),
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+	})
+}
+
 func bearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Get("Authorization")
 	const prefix = "Bearer "

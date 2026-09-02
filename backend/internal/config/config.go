@@ -87,6 +87,18 @@ type Config struct {
 	AdminToken    string // required when AuthMode is token
 	SessionSecret string // reserved: not read by anything yet — see the check below
 	LogLevel      string
+	// The OIDC block, all required when AuthMode is oidc. The issuer carries no
+	// path and no trailing slash for Authelia (https://auth.trick77.com);
+	// anything else fails discovery.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string
+	// OIDCAdminGroup is the group whose members are admins. Empty means no
+	// group check: everyone the provider let through is an admin, which is the
+	// truthful default while the only real gate is Authelia's
+	// authorization_policy.
+	OIDCAdminGroup string
 }
 
 // Load reads and validates the environment. It returns the first problem it
@@ -133,6 +145,14 @@ func Load() (Config, error) {
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
 		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
+		// The issuer is trimmed of its trailing slash for the same reason the
+		// endpoint URLs above are: a discovery URL built from
+		// "https://auth.example.com/" gets a double slash and 404s.
+		OIDCIssuer:       strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_OIDC_ISSUER")), "/"),
+		OIDCClientID:     strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_ID")),
+		OIDCClientSecret: strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_SECRET")),
+		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
+		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
 	}
 
 	// SessionSecret is currently unused — sessions are 256-bit random tokens
@@ -169,8 +189,23 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
 	case AuthModeOIDC:
-		// Wired in a later phase; the mode is accepted so deployments can be
-		// prepared, and the auth layer answers 401 until it exists.
+		// Every one of these is fatal rather than a warning. A half-configured
+		// OIDC deployment starts, serves the SPA, and then refuses every login
+		// with a callback error — which looks like a provider outage rather
+		// than a missing environment variable.
+		for _, m := range []struct {
+			name  string
+			value string
+		}{
+			{"BACKEND_OIDC_ISSUER", cfg.OIDCIssuer},
+			{"BACKEND_OIDC_CLIENT_ID", cfg.OIDCClientID},
+			{"BACKEND_OIDC_CLIENT_SECRET", cfg.OIDCClientSecret},
+			{"BACKEND_OIDC_REDIRECT_URL", cfg.OIDCRedirectURL},
+		} {
+			if m.value == "" {
+				return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=oidc requires %s", m.name)
+			}
+		}
 	default:
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
 	}

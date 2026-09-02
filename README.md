@@ -8,10 +8,11 @@ Technische Entscheide: [`AGENTS.md`](AGENTS.md).
 
 ## Stand
 
-Phase 1 liefert das Skelett: HTTP-Server (stdlib `net/http`), Konfiguration über
-`BACKEND_*`-Umgebungsvariablen, Auth-Seam (`dev`/`token`/`oidc`), SQLite-Datastore
-sowie das React/Vite-Frontend, eingebettet in das Go-Binary. Indexierung, Retrieval
-und Antwortgenerierung folgen in späteren Phasen.
+Die Frage-Antwort-Strecke steht: Indexierung, Retrieval, Rückfrage bei
+mehrdeutigen Fragen und belegte Antworten, gemessen in
+[`docs/measurements/`](docs/measurements). Anmeldung läuft über OIDC
+(`BACKEND_AUTH_MODE=oidc`), betrieben wird der Stack mit `compose.yaml` hinter
+einem Reverse Proxy, der TLS terminiert.
 
 ## Voraussetzungen
 
