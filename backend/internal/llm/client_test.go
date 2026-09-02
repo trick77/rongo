@@ -345,3 +345,97 @@ func TestChatRequestNeverSendsGoDefaultUserAgent(t *testing.T) {
 		})
 	}
 }
+
+// TestChatRequestSendsSessionHeaders covers the affinity pair on both entry
+// points: the pair is what keeps a multi-turn thread on one upstream node, and
+// a request that drops it silently loses the pinning with no visible failure.
+func TestChatRequestSendsSessionHeaders(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		name := "Complete"
+		if stream {
+			name = "Stream"
+		}
+		t.Run(name, func(t *testing.T) {
+			// Given
+			c, got := headerCapture(t, stream)
+			ctx := WithThreadID(context.Background(), 7)
+
+			// When
+			if err := callOnce(c, ctx, stream); err != nil {
+				t.Fatalf("call: %v", err)
+			}
+
+			// Then
+			id := got.Get("X-Session-Id")
+			if !sessionIDPattern.MatchString(id) {
+				t.Fatalf("X-Session-Id = %q, want ses_<12 hex><14 base62>", id)
+			}
+			if affinity := got.Get("X-Session-Affinity"); affinity != id {
+				t.Errorf("X-Session-Affinity = %q, want the same value as X-Session-Id %q", affinity, id)
+			}
+			if want := chatSessionID("7"); id != want {
+				t.Errorf("X-Session-Id = %q, want the id minted for the thread, %q", id, want)
+			}
+		})
+	}
+}
+
+// TestSessionHeaderIsStableWithinAThread is the property the header exists for:
+// two calls in one conversation must land on the same upstream node, and two
+// different conversations must not be pinned together.
+func TestSessionHeaderIsStableWithinAThread(t *testing.T) {
+	// Given
+	c, got := headerCapture(t, false)
+
+	// When
+	if err := callOnce(c, WithThreadID(context.Background(), 11), false); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	first := got.Get("X-Session-Id")
+	if err := callOnce(c, WithThreadID(context.Background(), 11), false); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	again := got.Get("X-Session-Id")
+	if err := callOnce(c, WithThreadID(context.Background(), 12), false); err != nil {
+		t.Fatalf("other-thread call: %v", err)
+	}
+	other := got.Get("X-Session-Id")
+
+	// Then
+	if again != first {
+		t.Errorf("session id changed within one thread: %q then %q", first, again)
+	}
+	if other == first {
+		t.Errorf("threads 11 and 12 share session id %q", other)
+	}
+}
+
+// TestThreadlessCallUsesProcessSessionID pins the fallback lane. The HTTP
+// handlers attach the thread before any model call, so nothing in a served turn
+// reaches this path today; it exists so a caller outside a turn still pins
+// somewhere rather than sending an empty header.
+func TestThreadlessCallUsesProcessSessionID(t *testing.T) {
+	// Given
+	c, got := headerCapture(t, false)
+
+	// When
+	if err := callOnce(c, context.Background(), false); err != nil {
+		t.Fatalf("call: %v", err)
+	}
+
+	// Then
+	if id := got.Get("X-Session-Id"); id != processSessionID {
+		t.Errorf("X-Session-Id = %q, want the per-process id %q", id, processSessionID)
+	}
+}
+
+// callOnce makes one trivial request over whichever entry point is under test.
+func callOnce(c *Client, ctx context.Context, stream bool) error {
+	msgs := []Message{{Role: "user", Content: "x"}}
+	if stream {
+		_, err := c.Stream(ctx, msgs, func(string) {})
+		return err
+	}
+	_, _, err := c.Complete(ctx, msgs)
+	return err
+}
