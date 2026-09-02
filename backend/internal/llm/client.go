@@ -43,7 +43,7 @@ const defaultMaxTokens = 4096
 // around. Go's default "Go-http-client/1.1" names the HTTP library and says
 // nothing about the protocol being spoken. Same value as loom against the same
 // endpoint, so behaviour stays comparable between the two.
-const chatUserAgent = "opencode/1.18.11 ai-sdk/openai-compatible/3.0.20 ai-sdk/provider-utils/5.0.18 runtime/bun/1.3.14"
+const chatUserAgent = "opencode/1.18.26 ai-sdk/openai-compatible/3.0.43 ai-sdk/provider-utils/5.0.36 runtime/bun/1.4.0"
 
 const maxErrorBodyBytes = 8 << 10
 
