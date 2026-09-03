@@ -177,6 +177,21 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf(
 			"BACKEND_EMBED_BASE_URL is required while indexing is enabled; set it, or set BACKEND_INDEX_ENABLED=false to run without indexing")
 	}
+	if cfg.IndexEnabled && cfg.EmbedAPIKey == "" {
+		return Config{}, fmt.Errorf(
+			"BACKEND_EMBED_API_KEY is required while indexing is enabled; the endpoint at BACKEND_EMBED_BASE_URL authenticates with it and answers 401 without")
+	}
+
+	// Answering questions is what rongo is for. Without a model endpoint it
+	// would start, index, and then answer every question with 503 — a
+	// deployment that looks healthy and is useless. Both values are fatal.
+	if cfg.LLMBaseURL == "" {
+		return Config{}, fmt.Errorf("BACKEND_LLM_BASE_URL is required; without it no question can be answered")
+	}
+	if cfg.LLMAPIKey == "" {
+		return Config{}, fmt.Errorf(
+			"BACKEND_LLM_API_KEY is required; the endpoint at BACKEND_LLM_BASE_URL authenticates with it and answers 401 without")
+	}
 
 	switch cfg.AuthMode {
 	case AuthModeDev:

@@ -23,9 +23,11 @@
 #                               mode auto-logs in an admin with no credentials.
 #      the BACKEND_OIDC_* block, whose client secret comes from
 #      ../authelia/gen-clients.sh
-#      BACKEND_LLM_*  and  BACKEND_EMBED_*  — without the first, questions
-#                               cannot be answered; without the second the
-#                               process refuses to start while indexing is on.
+#      BACKEND_LLM_*           endpoint and key that answer questions
+#      BACKEND_EMBED_*         endpoint and key that build the index
+#
+#    Every one of those is mandatory: `up` stops with the message next to the
+#    variable rather than starting a container that cannot answer anything.
 services:
   rongo:
     build:
@@ -73,12 +75,12 @@ services:
       # Empty means no group check — every user Authelia's authorization_policy
       # let through is an admin. Set it only once a second tier exists here.
       BACKEND_OIDC_ADMIN_GROUP: ${BACKEND_OIDC_ADMIN_GROUP:-}
-      # The MiMo endpoint. Without it rongo still serves the Repos page and
-      # keeps indexing; the question routes answer 503.
-      BACKEND_LLM_BASE_URL: ${BACKEND_LLM_BASE_URL:-}
-      BACKEND_LLM_API_KEY: ${BACKEND_LLM_API_KEY:-}
+      # The MiMo endpoint and its key. Mandatory: without them the process
+      # refuses to start rather than answering every question with 503.
+      BACKEND_LLM_BASE_URL: ${BACKEND_LLM_BASE_URL:?set it in .env, the OpenAI-compatible chat completions endpoint}
+      BACKEND_LLM_API_KEY: ${BACKEND_LLM_API_KEY:?set it in .env, the key for BACKEND_LLM_BASE_URL}
       BACKEND_EMBED_BASE_URL: ${BACKEND_EMBED_BASE_URL:?set it in .env, an OpenAI-compatible /embeddings endpoint}
-      BACKEND_EMBED_API_KEY: ${BACKEND_EMBED_API_KEY:-}
+      BACKEND_EMBED_API_KEY: ${BACKEND_EMBED_API_KEY:?set it in .env, the key for BACKEND_EMBED_BASE_URL}
       BACKEND_EMBED_MODEL: ${BACKEND_EMBED_MODEL:-text-embedding-3-small}
       # Baked into the vector table when the database is created. Changing it
       # means a NEW database file, not a restart.
