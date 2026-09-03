@@ -17,6 +17,16 @@ import (
 // are no webhooks.
 const DefaultPollInterval = 30 * time.Minute
 
+// FirstPollDelay is how long the poller waits before its FIRST cycle, as
+// opposed to the interval between later ones. It exists because a fresh
+// deployment is restarted several times while the operator fixes the
+// configuration, and each restart used to reset a full DefaultPollInterval:
+// half an hour of a healthy-looking process that clones nothing, with no way
+// to tell "not yet" from "broken". Short enough to see the first clone during
+// setup, still jittered so a fleet coming up together does not arrive at one
+// forge in the same second.
+const FirstPollDelay = 30 * time.Second
+
 // IndexFunc indexes one repository at one commit. paths is nil for a full index
 // and carries the changed paths for an incremental one.
 type IndexFunc func(ctx context.Context, st RepoState, sha string, paths []string) (Counts, error)
@@ -32,25 +42,32 @@ type PollerDeps struct {
 	Index    IndexFunc
 	Tokens   TokenFunc
 	Interval time.Duration
-	Logger   *slog.Logger
+	// FirstDelay overrides FirstPollDelay. A test that wants the first cycle
+	// immediately sets it; nothing in production does.
+	FirstDelay time.Duration
+	Logger     *slog.Logger
 }
 
 // Poller keeps every active repository current. It is deliberately sequential:
 // indexing is IO- and API-bound, and a stampede of parallel clones against one
 // forge is how a token gets rate-limited.
 type Poller struct {
-	state    *StateStore
-	git      *gitrepo.Client
-	index    IndexFunc
-	tokens   TokenFunc
-	interval time.Duration
-	log      *slog.Logger
+	state      *StateStore
+	git        *gitrepo.Client
+	index      IndexFunc
+	tokens     TokenFunc
+	interval   time.Duration
+	firstDelay time.Duration
+	log        *slog.Logger
 }
 
 // NewPoller builds a Poller, filling in the defaults.
 func NewPoller(d PollerDeps) *Poller {
 	if d.Interval <= 0 {
 		d.Interval = DefaultPollInterval
+	}
+	if d.FirstDelay <= 0 {
+		d.FirstDelay = FirstPollDelay
 	}
 	if d.Logger == nil {
 		d.Logger = slog.Default()
@@ -60,20 +77,28 @@ func NewPoller(d PollerDeps) *Poller {
 	}
 	return &Poller{
 		state: d.State, git: d.Git, index: d.Index,
-		tokens: d.Tokens, interval: d.Interval, log: d.Logger,
+		tokens: d.Tokens, interval: d.Interval, firstDelay: d.FirstDelay,
+		log: d.Logger,
 	}
 }
 
-// Run polls until the context ends. It sleeps first, so a restart does not
-// stampede every remote at once.
+// Run polls until the context ends. It sleeps before every cycle, the first
+// one included, so a restart does not stampede every remote at once — but that
+// first wait is FirstPollDelay, not the full interval.
 func (p *Poller) Run(ctx context.Context) {
+	// The first wait is short and announced. Without the log line "nothing is
+	// happening" is indistinguishable from a broken indexer, which is exactly
+	// how a fresh deployment reads while it waits.
+	delay := sched.Jittered(p.firstDelay)
+	p.log.Info("indexing scheduled", "first_poll_in", delay.Round(time.Second), "interval", p.interval)
 	for {
-		if !sched.Sleep(ctx, sched.Jittered(p.interval)) {
+		if !sched.Sleep(ctx, delay) {
 			return
 		}
 		if err := p.PollOnce(ctx); err != nil {
 			p.log.Error("poll cycle failed", "err", err)
 		}
+		delay = sched.Jittered(p.interval)
 	}
 }
 
