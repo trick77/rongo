@@ -67,6 +67,34 @@ describe("Markdown", () => {
       );
     });
 
+    it("draw one chip per number of a grouped marker", () => {
+      // A claim resting on several sources comes out as [1, 2]. One chip
+      // per number keeps every source reachable, and each chip is a whole
+      // marker on its own, so a copy reads "[1], [12]".
+      const { container } = render(<Markdown text={"Compared on poll [1, 12]."} />);
+      const sups = container.querySelectorAll("sup");
+      expect(sups.length).toBe(2);
+      expect(sups[0].textContent).toBe("[1]");
+      expect(sups[1].textContent).toBe("[12]");
+      expect(container.textContent).toBe("Compared on poll [1], [12].");
+    });
+
+    it("drop only the invented number of a grouped marker back to text", () => {
+      const { container } = render(
+        <Markdown text={"Compared on poll [1, 9]."} backed={new Set([1])} />,
+      );
+      const sups = container.querySelectorAll("sup");
+      expect(sups.length).toBe(1);
+      expect(sups[0].textContent).toBe("[1]");
+      expect(container.textContent).toBe("Compared on poll [1], [9].");
+    });
+
+    it("stay plain text while a grouped marker is still being written", () => {
+      const { container } = render(<Markdown text={"Compared on poll [1, "} />);
+      expect(container.querySelector("sup")).toBeNull();
+      expect(container.textContent).toBe("Compared on poll [1, ");
+    });
+
     it("stay plain text while the closing bracket has not arrived yet", () => {
       const { container } = render(<Markdown text={"A job [1"} />);
       expect(container.querySelector("sup")).toBeNull();

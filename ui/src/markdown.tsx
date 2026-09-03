@@ -31,37 +31,54 @@ import type { JSX, ReactNode } from "react";
  * normal case here, not an edge case.
  */
 
-const markerRe = /\[(\d{1,3})\]/g;
+/** One marker, or a grouped one: the prompt asks for [1][2], but a claim
+ * resting on several sources still comes out as [1, 2] often enough. Read as
+ * a single marker it matched nothing and stayed plain text next to chips. */
+const markerRe = /\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g;
 
 /** text renders one run of plain text, with complete citation markers as
- * superscripts. onMarker lets the view react to a marker being pointed at. */
+ * superscripts, one per number of a grouped marker. onMarker lets the view
+ * react to a marker being pointed at. */
 function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
+  const known = hooks.backed !== undefined;
   for (const m of src.matchAll(markerRe)) {
     const i = m.index ?? 0;
     if (i > last) out.push(src.slice(last, i));
-    const marker = Number(m[1]);
-    const known = hooks.backed !== undefined;
-    if (known && !hooks.backed!.has(marker)) {
-      // No source behind it: plain text, as it came.
-      out.push(m[0]);
-      last = i + m[0].length;
-      continue;
-    }
-    out.push(
-      <sup
-        key={`${key}-m${n++}`}
-        className="mx-px rounded bg-accent-dim px-1 font-mono text-[10px] font-semibold text-accent-strong"
-        onMouseEnter={() => known && hooks.onHover?.(marker)}
-        onMouseLeave={() => known && hooks.onHover?.(null)}
-      >
-        <span className="sr-only">[</span>
-        {m[1]}
-        <span className="sr-only">]</span>
-      </sup>,
-    );
+    // Every number becomes a complete marker of its own, brackets included,
+    // with the separators kept between them: a group [1, 2] reads "[1], [2]"
+    // to a screen reader, a copy, or a test - each piece checkable alone.
+    // On screen the chips sit side by side, as [1][2] would; a separator
+    // stays visible only where a chip would otherwise touch plain text.
+    const parts = m[1].split(/(\s*,\s*)/);
+    const plain = (part: string) => known && !hooks.backed!.has(Number(part));
+    parts.forEach((part, p) => {
+      if (p % 2 === 1) {
+        const visible = plain(parts[p - 1]) || plain(parts[p + 1]);
+        out.push(visible ? part : <span key={`${key}-s${i}-${p}`} className="sr-only">{part}</span>);
+        return;
+      }
+      const marker = Number(part);
+      if (plain(part)) {
+        // No source behind it: plain text.
+        out.push(`[${part}]`);
+        return;
+      }
+      out.push(
+        <sup
+          key={`${key}-m${n++}`}
+          className="mx-px rounded bg-accent-dim px-1 font-mono text-[10px] font-semibold text-accent-strong"
+          onMouseEnter={() => known && hooks.onHover?.(marker)}
+          onMouseLeave={() => known && hooks.onHover?.(null)}
+        >
+          <span className="sr-only">[</span>
+          {part}
+          <span className="sr-only">]</span>
+        </sup>,
+      );
+    });
     last = i + m[0].length;
   }
   if (last < src.length) out.push(src.slice(last));

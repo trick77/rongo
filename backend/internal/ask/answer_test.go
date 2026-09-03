@@ -115,6 +115,36 @@ func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	}
 }
 
+func TestAnswer_aGroupedMarkerCountsForEachNumberInIt(t *testing.T) {
+	// A claim resting on several sources comes out as [1, 2]. Read as one
+	// marker it matches nothing, and both sources vanish from the panel while
+	// the text still shows the brackets - the reader sees a citation that
+	// leads nowhere.
+	c, _, _ := streamUpstream(t, "Compared on poll [1, 2], and again [2,1].")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if len(got.Citations) != 2 || got.Citations[0].Marker != 1 || got.Citations[1].Marker != 2 {
+		t.Fatalf("citations = %+v, want markers 1 and 2 once each", got.Citations)
+	}
+}
+
+func TestAnswer_anInventedNumberInsideAGroupIsDroppedAlone(t *testing.T) {
+	c, _, _ := streamUpstream(t, "Compared on poll [1, 9].")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if len(got.Citations) != 1 || got.Citations[0].Marker != 1 {
+		t.Fatalf("citations = %+v, want only the real marker of the group", got.Citations)
+	}
+}
+
 func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 	// The DEV prompt asks for short snippets, and `args[1]` inside one is an
 	// index expression. Reading it as a marker would put a reference under the
