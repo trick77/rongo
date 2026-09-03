@@ -774,3 +774,27 @@ func TestReexplainSaysSoWhenOnlyPartOfTheBasisIsGone(t *testing.T) {
 		t.Errorf("a partially vanished basis must not stream an answer:\n%s", body)
 	}
 }
+
+func TestReexplainAFailedTurnIsRecordedAsFailedNotFinished(t *testing.T) {
+	// The production case: the model wrote no answer. The row must carry an
+	// error and the browser an error event, never a Done over nothing.
+	srv, store, db := newTestServerWithDB(t, func(f *fakeAsker) {
+		f.reexplainErr = errors.New("write the answer: the model returned no answer text")
+	})
+	msgID := seedAnsweredMessageWithSources(t, store, db)
+
+	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+
+	if !strings.Contains(body, "event: error") {
+		t.Fatalf("want an error event:\n%s", body)
+	}
+	orig, _, _ := store.Message(context.Background(), testSubject, msgID)
+	msgs, err := store.Messages(context.Background(), testSubject, orig.ThreadID)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	last := msgs[len(msgs)-1]
+	if last.ID == msgID || last.Error == "" || last.Answer != "" {
+		t.Errorf("new turn = %+v, want it recorded as failed with an empty answer", last)
+	}
+}

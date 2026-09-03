@@ -2,7 +2,9 @@ package ask
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strconv"
@@ -60,7 +62,14 @@ func languageName(lang Language) string {
 
 // answerMaxTokens is generous on purpose. This is the one call where a
 // truncated reply is worse than a long one: it is what a person reads.
-const answerMaxTokens = 4096
+//
+// The budget is shared with the model's reasoning: max_completion_tokens
+// counts the hidden thinking as well as the visible answer. At 4096 a DEV
+// re-explain over 261 sources spent the whole budget thinking and wrote
+// nothing (thread 2, message 5, 2026-09-03). The value here is a judgment,
+// not a measurement; a length failure now logs its completion count, which
+// is the number to calibrate against.
+const answerMaxTokens = 16384
 
 // Citation is one entry of the evidence panel. The branch travels with it
 // because a forge URL without one may 404 off the default branch.
@@ -200,8 +209,25 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 			onToken(tok)
 		}
 	}, llm.WithMaxTokens(answerMaxTokens))
+	var cut *llm.FinishError
+	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
+		// The upstream cut the answer short, but what arrived is what the
+		// reader watched being written. It is kept, as it was before the finish
+		// reason was read at all; failing the turn here would drop the text
+		// from the record while the browser still shows it. The cut is logged
+		// with the number that says whether the budget was the cause.
+		slog.Warn("answer cut short", "finish_reason", cut.Reason, "completion_tokens", cut.Completion)
+		err = nil
+	}
 	if err != nil {
 		return Answer{}, fmt.Errorf("write the answer: %w", err)
+	}
+	if strings.TrimSpace(text.String()) == "" {
+		// A clean stream with nothing in it is not an answer. Stored as one, it
+		// was a finished turn with an empty body and no log line: the reader
+		// saw a Done mark over nothing. The usage goes into the error because
+		// the completion count is what says whether the budget was the cause.
+		return Answer{}, fmt.Errorf("write the answer: the model returned no answer text (%d completion tokens)", usage.Completion)
 	}
 	return Answer{
 		Text:      text.String(),

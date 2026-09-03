@@ -237,9 +237,15 @@ func main() {
 	// config.Load rejects an empty BACKEND_LLM_BASE_URL, so the pipeline is
 	// always wired: a rongo that indexes but cannot answer is not a mode
 	// anyone wants to be in by accident.
+	// Timeout bounds one whole call, body included. The answer streams for as
+	// long as its 16384-token budget takes, hidden reasoning counted, and the
+	// default of five minutes would cut a slow one mid-answer: at 20 tokens a
+	// second the budget needs close to 14 minutes. The idle watchdog, not this
+	// one, is what catches a stalled upstream.
 	models := llm.NewClient(llm.Config{
 		BaseURL:     cfg.LLMBaseURL,
 		APIKey:      cfg.LLMAPIKey,
+		Timeout:     15 * time.Minute,
 		IdleTimeout: 90 * time.Second,
 	}, nil)
 	deps.Ask = ask.NewPipeline(
