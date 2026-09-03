@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
@@ -273,4 +274,74 @@ func TestPollOnce_doesNotAdvanceTheShaWhenIndexingFails(t *testing.T) {
 	if active[0].LastError == "" {
 		t.Error("LastError is empty, want the indexing failure surfaced")
 	}
+}
+
+// A fresh deployment is restarted several times while its configuration is
+// being fixed, and each restart used to re-arm a full DefaultPollInterval:
+// half an hour of a healthy-looking process that clones nothing.
+func TestNewPoller_firstDelayIsShorterThanTheInterval(t *testing.T) {
+	// Given a poller built the way main.go builds it
+	testee := newPoller(t, nil, nil)
+
+	// Then
+	if testee.firstDelay != FirstPollDelay {
+		t.Errorf("firstDelay = %v, want %v", testee.firstDelay, FirstPollDelay)
+	}
+	if testee.interval != DefaultPollInterval {
+		t.Errorf("interval = %v, want %v", testee.interval, DefaultPollInterval)
+	}
+	if testee.firstDelay >= testee.interval {
+		t.Errorf("firstDelay %v is not shorter than interval %v", testee.firstDelay, testee.interval)
+	}
+}
+
+// Run must reach its first cycle on FirstDelay rather than sitting out a whole
+// interval, which is what made "indexing is broken" indistinguishable from
+// "indexing has not started yet".
+func TestRun_pollsOnTheFirstDelayNotTheInterval(t *testing.T) {
+	// Given an immediate first delay and an interval far longer than this test
+	src := fixtureRemote(t)
+	s := NewStateStore(newDB(t))
+	if err := s.SyncSpecs(context.Background(), []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
+	}
+	indexed := make(chan struct{}, 1)
+	testee := NewPoller(PollerDeps{
+		State: s,
+		Git:   gitrepo.New(gitBin, t.TempDir()),
+		Index: func(context.Context, RepoState, string, []string) (Counts, error) {
+			select {
+			case indexed <- struct{}{}:
+			default:
+			}
+			return Counts{Files: 1, Chunks: 2}, nil
+		},
+		Tokens:     func(string) string { return "" },
+		Interval:   time.Hour,
+		FirstDelay: time.Millisecond,
+	})
+
+	// When
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		testee.Run(ctx)
+		close(done)
+	}()
+
+	// Then
+	select {
+	case <-indexed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not index within 30s; it waited for the interval instead of the first delay")
+	}
+	cancel()
+	<-done
 }
