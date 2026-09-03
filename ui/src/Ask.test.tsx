@@ -429,6 +429,120 @@ function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
   return mock;
 }
 
+describe("Ask, what a turn cost", () => {
+  const usage = {
+    calls: [
+      { step: "understand", model: "mimo-v2.5", prompt_tokens: 400, completion_tokens: 40 },
+      { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0 },
+      { step: "answer", model: "mimo-v2.5-pro", prompt_tokens: 2000, completion_tokens: 500 },
+    ],
+    prompt_tokens: 2412,
+    completion_tokens: 540,
+    total_tokens: 2952,
+  };
+
+  it("shows the turn's tokens and opens the per-call breakdown on the pill", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "The answer." }),
+      ev("citations", []),
+      ev("usage", usage),
+      ev("done", { message_id: 1 }),
+    ]);
+
+    const user = await ask("How?");
+
+    // Tokens only: no price is configured, so no money anywhere.
+    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    expect(pill.textContent).toContain("2,952 tok");
+    expect(pill.textContent).not.toContain("$");
+    expect(screen.queryByText("understand")).toBeNull();
+
+    await user.click(pill);
+
+    // Every call the turn made, the gates included, with its deployment.
+    expect(screen.getByText("understand")).toBeTruthy();
+    expect(screen.getByText("mimo-v2.5-pro")).toBeTruthy();
+    expect(screen.getByText("embed")).toBeTruthy();
+    expect(screen.getByText(/Set BACKEND_PRICE_/)).toBeTruthy();
+  });
+
+  it("shows money once the server prices the calls", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "The answer." }),
+      ev("usage", { ...usage, cost_usd: 0.0081 }),
+      ev("done", { message_id: 1 }),
+    ]);
+
+    await ask("How?");
+
+    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    expect(pill.textContent).toContain("$0.008");
+  });
+
+  it("keeps the pill on a turn that asked back or failed - the gates were paid for", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("usage", { ...usage, calls: usage.calls.slice(0, 2), total_tokens: 452 }),
+      ev("error", { message: "The turn failed." }),
+    ]);
+
+    await ask("How?");
+
+    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    expect(pill.textContent).toContain("452 tok");
+    // But no actions: there is no answer to re-explain or copy.
+    expect(screen.queryByRole("button", { name: /Explain as/ })).toBeNull();
+  });
+
+  it("reports the thread's running total upwards, every turn summed", async () => {
+    const onUsage = vi.fn();
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "The answer." }),
+      ev("usage", { ...usage, cost_usd: 0.01 }),
+      ev("done", { message_id: 1 }),
+    ]);
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask onUsage={onUsage} />
+      </StrictMode>,
+    );
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.01 }));
+
+    // A second turn adds to it.
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "More." }),
+      ev("usage", { ...usage, cost_usd: 0.02 }),
+      ev("done", { message_id: 2 }),
+    ]);
+    await user.type(screen.getByLabelText("Question"), "And then?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 5904, cost: 0.03 }));
+  });
+
+  it("restores a stored turn's usage from the record", async () => {
+    const onUsage = vi.fn();
+    routedFetch([{ ...storedTurn, usage: { ...usage, cost_usd: 0.005 } }]);
+    render(
+      <StrictMode>
+        <Ask threadId={7} onUsage={onUsage} />
+      </StrictMode>,
+    );
+
+    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    expect(pill.textContent).toContain("2,952 tok");
+    expect(pill.textContent).toContain("$0.005");
+    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.005 }));
+  });
+});
+
 describe("Ask, the clarification and re-explaining", () => {
   const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 

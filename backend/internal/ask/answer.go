@@ -208,7 +208,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		if onToken != nil {
 			onToken(tok)
 		}
-	}, llm.WithMaxTokens(answerMaxTokens))
+	}, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
 	var cut *llm.FinishError
 	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
 		// The upstream cut the answer short, but what arrived is what the

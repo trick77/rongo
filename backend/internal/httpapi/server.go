@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
 )
 
@@ -34,6 +35,8 @@ type Threads interface {
 	LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error
 	SaveSources(ctx context.Context, messageID int64, sources []ask.Source) error
 	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
+	// SaveUsage records the paid calls one turn made, however it ended.
+	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
@@ -65,6 +68,10 @@ type Deps struct {
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string, lang ask.Language) string
+	// Prices turns stored tokens into money, per model. Empty means the
+	// browser sees tokens only — the honest default when nobody has told
+	// rongo what the endpoint charges.
+	Prices usage.Prices
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.

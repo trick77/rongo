@@ -19,6 +19,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // The two deployments are hardcoded, never configurable. rongo targets MiMo
@@ -65,8 +67,9 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// Usage is what one call cost, as the upstream reported it. Returned rather
-// than stored: the llm_calls table is a later phase.
+// Usage is what one call cost, as the upstream reported it. Returned to the
+// caller, and also recorded into the usage.Meter on the context when there is
+// one — that is how a turn's total reaches message_usage.
 type Usage struct {
 	Prompt     int `json:"prompt_tokens"`
 	Completion int `json:"completion_tokens"`
@@ -115,6 +118,23 @@ type callOptions struct {
 	thinking    *thinkingOption
 	maxTokens   int
 	temperature *float64
+	step        string
+}
+
+// WithStep labels the call for the usage meter: the word a reader sees next
+// to its tokens in the breakdown. A call without one is recorded as "llm",
+// which is a bug to fix at the call site, not a mode.
+func WithStep(name string) Option {
+	return func(o *callOptions) { o.step = name }
+}
+
+// record writes one call into the context's meter, if a turn is metering.
+func record(ctx context.Context, o callOptions, u Usage) {
+	step := o.step
+	if step == "" {
+		step = "llm"
+	}
+	usage.Record(ctx, usage.Call{Step: step, Model: o.model, Prompt: u.Prompt, Completion: u.Completion})
 }
 
 // Option adjusts a single call.
@@ -209,7 +229,8 @@ func resolve(opts []Option) callOptions {
 
 // Complete runs one non-streaming call and returns the assistant's content.
 func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (string, Usage, error) {
-	resp, err := c.post(ctx, msgs, resolve(opts), false)
+	o := resolve(opts)
+	resp, err := c.post(ctx, msgs, o, false)
 	if err != nil {
 		return "", Usage{}, err
 	}
@@ -225,6 +246,9 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", Usage{}, fmt.Errorf("decode chat completion: %w", err)
 	}
+	// Recorded before the choices check: a reply without choices was still
+	// paid for.
+	record(ctx, o, out.Usage)
 	if len(out.Choices) == 0 {
 		return "", out.Usage, errors.New("chat completion carried no choices")
 	}
@@ -251,7 +275,8 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 		defer cancel()
 	}
 
-	resp, err := c.post(ctx, msgs, resolve(opts), true)
+	o := resolve(opts)
+	resp, err := c.post(ctx, msgs, o, true)
 	if err != nil {
 		return Usage{}, err
 	}
@@ -273,7 +298,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// answer as a finished turn. The reason is recorded and the stream read to
 	// the end, because the usage frame that follows it carries the completion
 	// count the error needs.
-	var usage Usage
+	var got Usage
 	var finishReason string
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
@@ -309,11 +334,11 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 			continue
 		}
 		if frame.Error != nil {
-			return usage, fmt.Errorf("chat completion failed mid-stream (%s): %s",
+			return got, fmt.Errorf("chat completion failed mid-stream (%s): %s",
 				frame.Error.Type, c.redactKey(frame.Error.Message))
 		}
 		if frame.Usage != nil && (frame.Usage.Total > 0 || frame.Usage.Completion > 0) {
-			usage = *frame.Usage
+			got = *frame.Usage
 		}
 		for _, ch := range frame.Choices {
 			if ch.Delta.Content != "" && onToken != nil {
@@ -324,13 +349,21 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 			}
 		}
 	}
+	// Recorded even when the read failed, as long as a usage frame arrived:
+	// what the upstream reported was paid for. A stream that broke before
+	// its usage frame (idle timeout, a dropped connection, an endpoint that
+	// ignores include_usage) records nothing rather than zeros — a zero row
+	// would read as "this call was free", and it was not; it is unknown.
+	if got.Total > 0 {
+		record(ctx, o, got)
+	}
 	if err := sc.Err(); err != nil {
-		return usage, fmt.Errorf("read stream: %w", redactURL(err))
+		return got, fmt.Errorf("read stream: %w", redactURL(err))
 	}
 	if finishReason != "" && finishReason != "stop" {
-		return usage, &FinishError{Reason: finishReason, Completion: usage.Completion}
+		return got, &FinishError{Reason: finishReason, Completion: got.Completion}
 	}
-	return usage, nil
+	return got, nil
 }
 
 func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream bool) (*http.Response, error) {

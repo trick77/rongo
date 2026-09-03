@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // testSubject is the identity dev auth mode signs in under. Every seed
@@ -30,6 +32,9 @@ type fakeAsker struct {
 	err       error
 	gotAud    ask.Audience
 	gotLang   ask.Language
+	// calls is what the fake "pays for" before it decides how the turn ends,
+	// recorded into the meter on the context the way the real clients do.
+	calls []usage.Call
 
 	// clarification, when set, makes Run end the turn by asking instead of
 	// answering.
@@ -42,9 +47,12 @@ type fakeAsker struct {
 	reexplainErr    error
 }
 
-func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
+func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
 	f.gotLang = lang
+	for _, c := range f.calls {
+		usage.Record(ctx, c)
+	}
 	if f.err != nil {
 		return ask.Answer{}, nil, f.err
 	}
@@ -66,9 +74,12 @@ func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, lang ask.
 
 // Resume answers from the candidate's own hits — it never searches, which is
 // the whole point of a resumed turn.
-func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
 	f.gotLang = lang
+	for _, c := range f.calls {
+		usage.Record(ctx, c)
+	}
 	if f.resumeErr != nil {
 		return ask.Answer{}, f.resumeErr
 	}
@@ -84,9 +95,12 @@ func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, lang a
 	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
-func (f *fakeAsker) Reexplain(_ context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
 	f.gotLang = lang
+	for _, c := range f.calls {
+		usage.Record(ctx, c)
+	}
 	if f.reexplainErr != nil {
 		return ask.Answer{}, f.reexplainErr
 	}
@@ -565,6 +579,181 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+// gateCalls is what a turn pays for before it decides how to end: the
+// understanding gate and the query embedding.
+var gateCalls = []usage.Call{
+	{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20},
+	{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
+}
+
+// usageEvent finds the usage event in an SSE body and decodes it.
+func usageEvent(t *testing.T, body string) usage.Report {
+	t.Helper()
+	for _, e := range events(body) {
+		if e[0] == "usage" {
+			var r usage.Report
+			if err := json.Unmarshal([]byte(e[1]), &r); err != nil {
+				t.Fatalf("usage event %q: %v", e[1], err)
+			}
+			return r
+		}
+	}
+	t.Fatalf("no usage event in:\n%s", body)
+	return usage.Report{}
+}
+
+func TestAsk_theUsageEventCarriesEveryCallOfTheTurnAndTheCallsAreStored(t *testing.T) {
+	// Given
+	srv, st := newTestServerWithStore(t, func(f *fakeAsker) {
+		f.tokens = []string{"The ", "answer."}
+		f.calls = gateCalls
+	})
+
+	// When
+	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+
+	// Then: the event sums the calls; total_tokens keeps its old name.
+	got := usageEvent(t, body)
+	if len(got.Calls) != 2 || got.Calls[0].Step != "understand" || got.Calls[1].Step != "embed" {
+		t.Errorf("calls = %+v, want the two gate calls in order", got.Calls)
+	}
+	if got.Prompt != 112 || got.Completion != 20 || got.Total != 132 {
+		t.Errorf("totals = %d/%d/%d, want 112/20/132", got.Prompt, got.Completion, got.Total)
+	}
+	if got.CostUSD != nil {
+		t.Errorf("cost = %v, want none: no prices are configured", *got.CostUSD)
+	}
+	// And the record holds them, so a reload and the thread total see them.
+	msgs, err := st.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(msgs) != 1 || len(msgs[0].Calls) != 2 {
+		t.Fatalf("stored calls = %+v, want 2", msgs)
+	}
+}
+
+func TestAsk_aTurnThatFailedOrAskedBackStillReportsAndStoresWhatItPaidFor(t *testing.T) {
+	cases := []struct {
+		name  string
+		shape func(*fakeAsker)
+		ends  string
+	}{
+		{"failed", func(f *fakeAsker) { f.err = errors.New("upstream down"); f.calls = gateCalls }, "error"},
+		{"asked back", func(f *fakeAsker) { withAskerAsking()(f); f.calls = gateCalls }, "clarification"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given
+			srv, st := newTestServerWithStore(t, tc.shape)
+
+			// When
+			body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+
+			// Then: usage arrives, and before the event that ends the turn,
+			// so the browser has it whichever way the turn closed.
+			got := usageEvent(t, body)
+			if got.Total != 132 {
+				t.Errorf("total = %d, want 132", got.Total)
+			}
+			var seenUsage bool
+			for _, e := range events(body) {
+				if e[0] == "usage" {
+					seenUsage = true
+				}
+				if e[0] == tc.ends && !seenUsage {
+					t.Errorf("%s event came before usage", tc.ends)
+				}
+			}
+			msgs, err := st.Messages(context.Background(), testSubject, threadIDOf(t, body))
+			if err != nil {
+				t.Fatalf("Messages: %v", err)
+			}
+			if len(msgs) != 1 || len(msgs[0].Calls) != 2 {
+				t.Fatalf("stored calls = %+v, want the gate calls", msgs)
+			}
+		})
+	}
+}
+
+func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
+	// Given a stored turn with usage, and a price for the gate deployment only
+	srv, _ := newTestServerWithStore(t, func(f *fakeAsker) {
+		f.tokens = []string{"The ", "answer."}
+		f.calls = gateCalls
+	})
+	srv.deps.Prices = usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}}
+	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+	id := threadIDOf(t, body)
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/threads/%d", id), nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	// Then: usage on the message, priced from the CURRENT table — the embed
+	// call has no price and carries none, the understanding call does.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	var msgs []threads.Message
+	if err := json.Unmarshal(rec.Body.Bytes(), &msgs); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Usage == nil {
+		t.Fatalf("messages = %s, want one with usage", rec.Body.String())
+	}
+	u := msgs[0].Usage
+	if u.Total != 132 || len(u.Calls) != 2 {
+		t.Errorf("usage = %+v", u)
+	}
+	// 100*1 + 20*2 = 140 per million
+	if u.CostUSD == nil || *u.CostUSD < 0.00014-1e-12 || *u.CostUSD > 0.00014+1e-12 {
+		t.Errorf("cost = %v, want 0.00014", u.CostUSD)
+	}
+	if u.Calls[1].CostUSD != nil {
+		t.Errorf("the unpriced embed call carries a cost: %v", *u.Calls[1].CostUSD)
+	}
+}
+
+func TestAsk_aTurnThatPaidForNothingSendsNoUsage(t *testing.T) {
+	// Given: the first call never reached the upstream, so nothing was
+	// metered.
+	srv := newTestServer(t, func(f *fakeAsker) { f.err = errors.New("endpoint down") })
+
+	// When
+	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+
+	// Then: no usage event. A "0 tok" pill would claim the turn was free,
+	// and the reload would show no pill at all for the same turn.
+	for _, e := range events(body) {
+		if e[0] == "usage" {
+			t.Fatalf("usage event %s sent for a turn with no calls", e[1])
+		}
+	}
+	if !strings.Contains(body, "event: error") {
+		t.Error("the turn must still end with an error event")
+	}
+}
+
+// threadIDOf reads the thread id off the first event of an SSE body.
+func threadIDOf(t *testing.T, body string) int64 {
+	t.Helper()
+	for _, e := range events(body) {
+		if e[0] == "thread" {
+			var p struct {
+				ThreadID int64 `json:"thread_id"`
+			}
+			if err := json.Unmarshal([]byte(e[1]), &p); err != nil {
+				t.Fatalf("thread event: %v", err)
+			}
+			return p.ThreadID
+		}
+	}
+	t.Fatalf("no thread event in:\n%s", body)
+	return 0
 }
 
 func TestAskStreamsAClarificationAndEndsTheTurn(t *testing.T) {

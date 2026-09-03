@@ -379,7 +379,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
-	opts := []llm.Option{llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(routeMaxTokens)}
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
 	if r.judgeDeployment != nil {
 		opts = append(opts, r.judgeDeployment)
 	}
@@ -433,7 +433,7 @@ func (r *Router) name(ctx context.Context, question string, lang Language, cs []
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: b.String()},
-			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens))
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
 			if err != nil {
 				return
 			}

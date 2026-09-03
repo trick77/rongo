@@ -257,6 +257,7 @@ func main() {
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}
+	deps.Prices = cfg.Prices
 	srv := httpapi.NewServer(deps)
 
 	httpServer := &http.Server{

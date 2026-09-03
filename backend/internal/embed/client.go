@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/trick77/rongo/internal/usage"
 )
 
 const (
@@ -156,6 +158,9 @@ func (c *Client) embedOne(ctx context.Context, inputs []string) ([][]float32, er
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("decode embed response: %w", err)
 	}
+	// A turn's query embedding is metered; indexing runs on a context without
+	// a meter and is not. Embedding has no completion side.
+	usage.Record(ctx, usage.Call{Step: "embed", Model: c.model, Prompt: int(parsed.Usage.PromptTokens)})
 	if len(parsed.Data) != len(inputs) {
 		return nil, fmt.Errorf("embedding count mismatch: got %d, want %d", len(parsed.Data), len(inputs))
 	}

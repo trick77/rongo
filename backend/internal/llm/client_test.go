@@ -11,7 +11,88 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/trick77/rongo/internal/usage"
 )
+
+func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
+	// Given
+	c, _ := fakeUpstream(t, "ok")
+	m := usage.New()
+	ctx := usage.WithMeter(context.Background(), m)
+
+	// When
+	if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, ShortGate(), WithStep("understand")); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Then: the deployment the call went to and the upstream's numbers.
+	calls := m.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	want := usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: 11, Completion: 7}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
+	// Given
+	c := streamingUpstream(t, []string{"a", "b"}, "", 4)
+	m := usage.New()
+	ctx := usage.WithMeter(context.Background(), m)
+
+	// When
+	if _, err := c.Stream(ctx, []Message{{Role: "user", Content: "x"}}, func(string) {}, WithStep("answer")); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Then
+	calls := m.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	want := usage.Call{Step: "answer", Model: ProDeployment, Prompt: 3, Completion: 4}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestStream_aStreamWithoutAUsageFrameRecordsNothingNotZeros(t *testing.T) {
+	// Given: an upstream that streams tokens and ends without ever reporting
+	// usage, the shape of a dropped connection or an endpoint that ignores
+	// include_usage.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		frame, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": "half"}}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(Config{BaseURL: srv.URL}, srv.Client())
+	m := usage.New()
+
+	// When
+	if _, err := c.Stream(usage.WithMeter(context.Background(), m), []Message{{Role: "user", Content: "x"}}, func(string) {}, WithStep("answer")); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Then: no row. A zero row would say the call was free.
+	if calls := m.Calls(); len(calls) != 0 {
+		t.Errorf("recorded %+v, want nothing for an unknown usage", calls)
+	}
+}
+
+func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
+	c, _ := fakeUpstream(t, "ok")
+	out, _ := ask(t, c, WithStep("route"))
+	if out != "ok" {
+		t.Errorf("out = %q", out)
+	}
+}
 
 // captured is one request body as the fake upstream saw it.
 type captured struct {

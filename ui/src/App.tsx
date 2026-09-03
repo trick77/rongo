@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import Ask from "./Ask";
+import Ask, { money } from "./Ask";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
 import { AskIcon, ReposIcon } from "./icons";
@@ -191,6 +191,9 @@ export default function App() {
   const [threadsVersion, setThreadsVersion] = useState(0);
   const [busy, setBusy] = useState(false);
   const [threads, setThreads] = useState<Thread[]>([]);
+  // The open thread's running total, as Ask reports it: every turn on
+  // screen summed. Shown in the header next to the title.
+  const [usageTotal, setUsageTotal] = useState<{ tokens: number; cost: number | null } | null>(null);
   const session = useSession();
   const index = useIndexStatus(session.state === "in", threadsVersion);
 
@@ -229,6 +232,7 @@ export default function App() {
   }
 
   const openTitle = threadId === null ? null : (threads.find((t) => t.id === threadId)?.title ?? null);
+  const total = threadId === null ? null : usageTotal;
 
   return (
     <div className="grid h-screen grid-rows-[56px_1fr]">
@@ -249,6 +253,21 @@ export default function App() {
               <span className="truncate font-serif text-[19px] font-medium text-ink">
                 {openTitle ?? "New question"}
               </span>
+              {total && (
+                <span
+                  aria-label="Thread usage"
+                  className="ml-2 shrink-0 whitespace-nowrap font-mono text-xs text-faint"
+                >
+                  thread{" "}
+                  <span className="text-muted">{total.tokens.toLocaleString("en-GB")} tok</span>
+                  {total.cost != null && (
+                    <>
+                      <span className="mx-1.5 opacity-50">·</span>
+                      <span className="text-muted">{money(total.cost)}</span>
+                    </>
+                  )}
+                </span>
+              )}
             </>
           ) : (
             <>
@@ -328,6 +347,14 @@ export default function App() {
               onThread={selectThread}
               onActivity={refreshThreads}
               onBusy={setBusy}
+              onUsage={(u) =>
+                // Compared by value: Ask reports on every change of its turn
+                // list, which is once per streamed token, and a fresh object
+                // each time would re-render the whole shell per token.
+                setUsageTotal((prev) =>
+                  prev && u && prev.tokens === u.tokens && prev.cost === u.cost ? prev : u,
+                )
+              }
             />
           </div>
           {page === "repos" && (
