@@ -76,6 +76,22 @@ type Usage struct {
 	Total      int `json:"total_tokens"`
 }
 
+// FinishError is how the upstream ended a completion when it was not a
+// normal stop: "length" when the completion budget ran out, "content_filter"
+// and the like. Both Complete and Stream return it, and Stream returns it only
+// after every content delta was delivered, so the caller decides what the text
+// it already has is worth. The completion count is what says whether the
+// budget was the cause.
+type FinishError struct {
+	Reason     string
+	Completion int
+}
+
+func (e *FinishError) Error() string {
+	return fmt.Sprintf("chat completion ended with finish_reason=%s after %d completion tokens",
+		e.Reason, e.Completion)
+}
+
 type thinkingOption struct {
 	Type string `json:"type"`
 }
@@ -222,7 +238,8 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 
 	var out struct {
 		Choices []struct {
-			Message Message `json:"message"`
+			Message      Message `json:"message"`
+			FinishReason string  `json:"finish_reason"`
 		} `json:"choices"`
 		Usage Usage `json:"usage"`
 	}
@@ -234,6 +251,12 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	record(ctx, o, out.Usage)
 	if len(out.Choices) == 0 {
 		return "", out.Usage, errors.New("chat completion carried no choices")
+	}
+	// The same rule as Stream: a reply cut at the cap is not a reply. Every
+	// caller here parses the content, and a truncated JSON body read as
+	// "unparseable" would hide that the budget was the cause.
+	if fr := out.Choices[0].FinishReason; fr != "" && fr != "stop" {
+		return out.Choices[0].Message.Content, out.Usage, &FinishError{Reason: fr, Completion: out.Usage.Completion}
 	}
 	return out.Choices[0].Message.Content, out.Usage, nil
 }
@@ -268,7 +291,15 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 		beat = func() { timer.Reset(c.idleTimeout) }
 	}
 
+	// finishReason is how the upstream said the stream ended. Anything but a
+	// normal stop is a failure the caller must hear about: a reasoning model
+	// that spends the whole completion budget thinking ends with "length" and
+	// not one content delta, and reading that as success once stored an empty
+	// answer as a finished turn. The reason is recorded and the stream read to
+	// the end, because the usage frame that follows it carries the completion
+	// count the error needs.
 	var got Usage
+	var finishReason string
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
@@ -286,20 +317,35 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 				Delta struct {
 					Content string `json:"content"`
 				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage *Usage `json:"usage"`
+			// Error is what an OpenAI-style upstream sends when it fails AFTER
+			// status 200: one frame with no choices. Dropping it read as a
+			// clean, empty stream.
+			Error *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
 			// A malformed frame is not worth killing a half-written answer for.
-			c.log.Warn("unparseable stream frame", "err", err)
+			c.log.Warn("unparseable stream frame", "err", err, "frame", c.redactKey(head(payload, 512)))
 			continue
 		}
-		if frame.Usage != nil && frame.Usage.Total > 0 {
+		if frame.Error != nil {
+			return got, fmt.Errorf("chat completion failed mid-stream (%s): %s",
+				frame.Error.Type, c.redactKey(frame.Error.Message))
+		}
+		if frame.Usage != nil && (frame.Usage.Total > 0 || frame.Usage.Completion > 0) {
 			got = *frame.Usage
 		}
 		for _, ch := range frame.Choices {
 			if ch.Delta.Content != "" && onToken != nil {
 				onToken(ch.Delta.Content)
+			}
+			if ch.FinishReason != "" {
+				finishReason = ch.FinishReason
 			}
 		}
 	}
@@ -313,6 +359,9 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	}
 	if err := sc.Err(); err != nil {
 		return got, fmt.Errorf("read stream: %w", redactURL(err))
+	}
+	if finishReason != "" && finishReason != "stop" {
+		return got, &FinishError{Reason: finishReason, Completion: got.Completion}
 	}
 	return got, nil
 }
@@ -378,6 +427,14 @@ func (c *Client) redactKey(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
+}
+
+// head keeps a log line from carrying a whole frame.
+func head(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // redactURL keeps a transport error from carrying the full request URL, which

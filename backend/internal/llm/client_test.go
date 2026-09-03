@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,7 +39,7 @@ func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
 
 func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
 	// Given
-	c := streamingUpstream(t, []string{"a", "b"})
+	c := streamingUpstream(t, []string{"a", "b"}, "", 4)
 	m := usage.New()
 	ctx := usage.WithMeter(context.Background(), m)
 
@@ -106,6 +107,12 @@ type captured struct {
 // fakeUpstream answers one chat completion and records what it was asked.
 func fakeUpstream(t *testing.T, reply string) (*Client, *captured) {
 	t.Helper()
+	return fakeUpstreamEnding(t, reply, "stop")
+}
+
+// fakeUpstreamEnding is fakeUpstream with the finish_reason the reply carries.
+func fakeUpstreamEnding(t *testing.T, reply string, finishReason string) (*Client, *captured) {
+	t.Helper()
 	got := &captured{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -114,7 +121,7 @@ func fakeUpstream(t *testing.T, reply string) (*Client, *captured) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
+			"choices": []any{map[string]any{"message": map[string]any{"content": reply}, "finish_reason": finishReason}},
 			"usage":   map[string]any{"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
 		})
 	}))
@@ -262,7 +269,11 @@ func TestComplete_theApiKeyNeverReachesAnError(t *testing.T) {
 // streamingUpstream sends the reply one token per SSE frame, flushing each, so a
 // client that only works when the whole body arrives at once fails here. A fake
 // that answers in a single chunk would let a buffering implementation pass.
-func streamingUpstream(t *testing.T, tokens []string) *Client {
+//
+// The stream then ends the way the upstream says it did: finishReason, when
+// set, goes out on an empty delta; then the usage frame with the given
+// completion count (prompt 3, total 3+completion); then [DONE].
+func streamingUpstream(t *testing.T, tokens []string, finishReason string, completion int) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -276,21 +287,40 @@ func streamingUpstream(t *testing.T, tokens []string) *Client {
 			_ = fl.Flush()
 			time.Sleep(2 * time.Millisecond)
 		}
+		if finishReason != "" {
+			end, _ := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+			})
+			fmt.Fprintf(w, "data: %s\n\n", end)
+		}
 		usage, _ := json.Marshal(map[string]any{
 			"choices": []any{},
-			"usage":   map[string]any{"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+			"usage":   map[string]any{"prompt_tokens": 3, "completion_tokens": completion, "total_tokens": 3 + completion},
 		})
 		fmt.Fprintf(w, "data: %s\n\n", usage)
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		_ = fl.Flush()
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "k"}, srv.Client())
+	return NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+}
+
+// rawStreamUpstream answers 200 with the one frame given and closes: the shape
+// of an OpenAI-style server that fails after it has already sent the status.
+func rawStreamUpstream(t *testing.T, frame string) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
 }
 
 func TestStream_deliversTokensOneByOne(t *testing.T) {
 	// Given
-	c := streamingUpstream(t, []string{"The ", "shipping ", "runs"})
+	c := streamingUpstream(t, []string{"The ", "shipping ", "runs"}, "", 4)
 	var seen []string
 
 	// When
@@ -519,4 +549,93 @@ func callOnce(c *Client, ctx context.Context, stream bool) error {
 	}
 	_, _, err := c.Complete(ctx, msgs)
 	return err
+}
+
+func TestStream_aStopFinishIsSuccess(t *testing.T) {
+	c := streamingUpstream(t, []string{"ok"}, "stop", 4096)
+
+	usage, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err != nil {
+		t.Fatalf("Stream: %v, want a normal stop to succeed", err)
+	}
+	if usage.Completion != 4096 {
+		t.Errorf("usage = %+v, want the trailing usage frame", usage)
+	}
+}
+
+func TestStream_aLengthFinishWithNoContentIsAnErrorNamingTheBudget(t *testing.T) {
+	// A reasoning model that spends the whole completion budget thinking ends
+	// the stream with finish_reason=length and not one content delta. Treating
+	// that as success stored an empty answer as a finished turn in production.
+	c := streamingUpstream(t, nil, "length", 4096)
+
+	usage, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err == nil {
+		t.Fatal("Stream: nil error on finish_reason=length with no content")
+	}
+	if !strings.Contains(err.Error(), "length") {
+		t.Errorf("err = %v, want the finish reason named", err)
+	}
+	if !strings.Contains(err.Error(), "4096") {
+		t.Errorf("err = %v, want the completion token count, so the cap can be calibrated", err)
+	}
+	if usage.Completion != 4096 {
+		t.Errorf("usage = %+v, want it read to the end even on failure", usage)
+	}
+}
+
+func TestStream_aLengthFinishAfterContentIsStillAnError(t *testing.T) {
+	// Truncated mid-answer is a failure too: the caller decides what to do with
+	// the partial text, but it must know.
+	c := streamingUpstream(t, []string{"The ", "shipping"}, "length", 4096)
+	var seen []string
+
+	_, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}},
+		func(tok string) { seen = append(seen, tok) })
+
+	if err == nil {
+		t.Fatal("Stream: nil error on a truncated answer")
+	}
+	var cut *FinishError
+	if !errors.As(err, &cut) || cut.Reason != "length" || cut.Completion != 4096 {
+		t.Errorf("err = %v, want a FinishError the caller can pick apart", err)
+	}
+	if len(seen) != 2 {
+		t.Errorf("tokens = %q, want every delta that arrived delivered before the error", seen)
+	}
+}
+
+func TestStream_anErrorFrameIsAnErrorAndNeverQuotesTheKey(t *testing.T) {
+	c := rawStreamUpstream(t, `{"error":{"message":"context length exceeded for Bearer sk-secret","type":"invalid_request_error"}}`)
+
+	_, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err == nil {
+		t.Fatal("Stream: nil error on an in-stream error frame")
+	}
+	if !strings.Contains(err.Error(), "context length exceeded") {
+		t.Errorf("err = %v, want the upstream message", err)
+	}
+	if strings.Contains(err.Error(), "sk-secret") {
+		t.Errorf("err = %v, the key must never be quoted", err)
+	}
+}
+
+func TestComplete_aLengthFinishIsAnErrorNamingTheBudget(t *testing.T) {
+	// The non-streaming twin of the rule above. Every Complete caller parses
+	// the reply, and a body cut at the cap would otherwise surface as
+	// "not JSON" or, for the judge, as a silent "ask".
+	c, _ := fakeUpstreamEnding(t, `{"decision": "comp`, "length")
+
+	out, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
+
+	var cut *FinishError
+	if !errors.As(err, &cut) || cut.Reason != "length" || cut.Completion != 7 {
+		t.Fatalf("err = %v, want a FinishError naming length and the completion count", err)
+	}
+	if out != `{"decision": "comp` {
+		t.Errorf("out = %q, want the truncated text handed over with the error", out)
+	}
 }

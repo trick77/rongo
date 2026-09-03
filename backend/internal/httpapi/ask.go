@@ -224,7 +224,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// holding the answer for.
 			titleMeter := usage.New()
 			bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
-			if title := s.deps.Titler(bg, question); title != "" {
+			if title := s.deps.Titler(bg, question, lang); title != "" {
 				if err := s.deps.Threads.SetTitle(bg, id, title); err != nil {
 					slog.Warn("set thread title failed", "err", err)
 				}

@@ -67,7 +67,7 @@ type Deps struct {
 	Threads Threads
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
-	Titler func(ctx context.Context, question string) string
+	Titler func(ctx context.Context, question string, lang ask.Language) string
 	// Prices turns stored tokens into money, per model. Empty means the
 	// browser sees tokens only — the honest default when nobody has told
 	// rongo what the endpoint charges.

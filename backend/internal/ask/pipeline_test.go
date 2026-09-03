@@ -41,7 +41,7 @@ type fakeRouter struct {
 	err error
 }
 
-func (f fakeRouter) Route(_ context.Context, _ string, _ []retrieve.Hit) (Decision, error) {
+func (f fakeRouter) Route(_ context.Context, _ string, _ Language, _ []retrieve.Hit) (Decision, error) {
 	return f.d, f.err
 }
 

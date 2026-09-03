@@ -2,7 +2,9 @@ package ask
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strconv"
@@ -22,11 +24,11 @@ const (
 	AudienceDev Audience = "dev"
 )
 
-// Language is the language the answer is written in. Like Audience it affects
-// the answer step only: the understanding, the search terms and the candidate
-// names stay in the language of the code. An unknown value is never an error
-// — ParseLanguage falls back to English, the same way an unknown audience
-// falls back to BA.
+// Language is the language everything a person reads is written in: the
+// answer, the clarification card's titles and summaries, the thread title and
+// the nothing-found text. Model-internal steps (understanding, search terms,
+// the judge) stay English. An unknown value is never an error — ParseLanguage
+// falls back to English, the same way an unknown audience falls back to BA.
 type Language string
 
 const (
@@ -52,9 +54,22 @@ func ParseLanguage(s string) Language {
 	return LanguageEN
 }
 
+// languageName is the word a prompt uses for lang, after the same fallback
+// ParseLanguage applies.
+func languageName(lang Language) string {
+	return languageNames[ParseLanguage(string(lang))]
+}
+
 // answerMaxTokens is generous on purpose. This is the one call where a
 // truncated reply is worse than a long one: it is what a person reads.
-const answerMaxTokens = 4096
+//
+// The budget is shared with the model's reasoning: max_completion_tokens
+// counts the hidden thinking as well as the visible answer. At 4096 a DEV
+// re-explain over 261 sources spent the whole budget thinking and wrote
+// nothing (thread 2, message 5, 2026-09-03). The value here is a judgment,
+// not a measurement; a length failure now logs its completion count, which
+// is the number to calibrate against.
+const answerMaxTokens = 16384
 
 // Citation is one entry of the evidence panel. The branch travels with it
 // because a forge URL without one may 404 off the default branch.
@@ -108,6 +123,15 @@ You are given numbered sources. The rules, without exception:
   with the code.
 - Only use markers that exist. An invented number is worse than no marker.`
 
+// answerLanguage closes the system prompt. Identifiers stay as they are: a
+// translated function name is a name that does not exist.
+const answerLanguage = `
+
+Language: every sentence of the answer, headings and list items included, is
+written in %s, regardless of the language of the sources or of these
+instructions. Identifiers, file names, quoted code and the markers stay
+exactly as they are.`
+
 const answerBA = `
 Audience: business analyst. Explain the mechanism in three to five paragraphs,
 in the language of the business domain. No source code, no signatures, no file
@@ -119,9 +143,34 @@ Audience: developer. Name types, functions and files, and quote short excerpts
 where they carry the explanation. Describe the control flow so that it can be
 followed in the code.`
 
-// nothingFound is the answer when nothing was gathered. It is not an apology
-// and not a guess: the caller adds the terms that were tried.
-const nothingFound = "I found nothing about this in the indexed code."
+// nothingFound is the answer when nothing was gathered, in the language the
+// reader asked for. It is not an apology and not a guess: the caller adds the
+// terms that were tried. Fixed text rather than a model call: an answer with
+// no sources must never come from a model.
+var nothingFound = map[Language]string{
+	LanguageEN: "I found nothing about this in the indexed code.",
+	LanguageDE: "Dazu habe ich im indexierten Code nichts gefunden.",
+	LanguageFR: "Je n'ai rien trouvé à ce sujet dans le code indexé.",
+	LanguageIT: "Non ho trovato nulla al riguardo nel codice indicizzato.",
+}
+
+// searchedFor introduces the terms that were tried, in the same language.
+var searchedFor = map[Language]string{
+	LanguageEN: "Searched for",
+	LanguageDE: "Gesucht nach",
+	LanguageFR: "Recherché ",
+	LanguageIT: "Cercato",
+}
+
+// NothingFound is the "nothing found" answer for lang, with the terms that
+// were tried appended when there are any.
+func NothingFound(lang Language, terms []string) string {
+	l := ParseLanguage(string(lang))
+	if len(terms) == 0 {
+		return nothingFound[l]
+	}
+	return nothingFound[l] + " " + searchedFor[l] + ": " + strings.Join(terms, " · ") + "."
+}
 
 var markerRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 
@@ -135,15 +184,20 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	sources []Source, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
-		return Answer{Text: nothingFound}, nil
+		return Answer{Text: NothingFound(lang, nil)}, nil
 	}
 
-	system := fmt.Sprintf(answerCommon, languageNames[ParseLanguage(string(lang))])
+	name := languageName(lang)
+	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
 		system += answerDev
 	} else {
 		system += answerBA
 	}
+	// Said twice, first and last: the sources in between are code and comments
+	// in whatever language the repository uses, and a model that has just read
+	// two thousand tokens of English tends to answer in it.
+	system += fmt.Sprintf(answerLanguage, name)
 
 	var text strings.Builder
 	usage, err := a.llm.Stream(ctx, []llm.Message{
@@ -155,8 +209,25 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 			onToken(tok)
 		}
 	}, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
+	var cut *llm.FinishError
+	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
+		// The upstream cut the answer short, but what arrived is what the
+		// reader watched being written. It is kept, as it was before the finish
+		// reason was read at all; failing the turn here would drop the text
+		// from the record while the browser still shows it. The cut is logged
+		// with the number that says whether the budget was the cause.
+		slog.Warn("answer cut short", "finish_reason", cut.Reason, "completion_tokens", cut.Completion)
+		err = nil
+	}
 	if err != nil {
 		return Answer{}, fmt.Errorf("write the answer: %w", err)
+	}
+	if strings.TrimSpace(text.String()) == "" {
+		// A clean stream with nothing in it is not an answer. Stored as one, it
+		// was a finished turn with an empty body and no log line: the reader
+		// saw a Done mark over nothing. The usage goes into the error because
+		// the completion count is what says whether the budget was the cause.
+		return Answer{}, fmt.Errorf("write the answer: the model returned no answer text (%d completion tokens)", usage.Completion)
 	}
 	return Answer{
 		Text:      text.String(),

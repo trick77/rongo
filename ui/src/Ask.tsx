@@ -553,7 +553,10 @@ export default function Ask({
   }, [sourceTurnIndex]);
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[1fr_320px]">
+    // The Sources pane takes a fixed column only when there is room for it;
+    // below that the thread has the width and the per-answer details block
+    // still lists the sources.
+    <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
         <div className="min-h-0 flex-1 overflow-auto">
@@ -753,10 +756,28 @@ export default function Ask({
 
         <form
           onSubmit={submit}
-          className="bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-10 pt-3 pb-4"
+          className="max-w-[900px] bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-10 pt-3 pb-4"
         >
-          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-ui-lg border border-border bg-panel py-2 pr-2 pl-3 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
-            <div className="flex items-center gap-2">
+          {/* The question gets the whole width; the controls sit under it in
+              their own row, so a long question and its settings never fight
+              for the same line. */}
+          <div className="rounded-ui-lg border border-border bg-panel px-3 pt-2 pb-2 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              ref={box}
+              rows={1}
+              aria-label="Question"
+              placeholder="Ask about the code…"
+              className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none"
+            />
+            <div className="mt-1.5 flex items-center gap-2">
               <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
                 {(["ba", "dev"] as const).map((role) => (
                   <button
@@ -791,37 +812,20 @@ export default function Ask({
                   <Chevron />
                 </span>
               </label>
+              <span className="ml-auto hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
+              <button
+                type="submit"
+                disabled={busy}
+                className="rounded-full bg-accent-fill px-4.5 py-1.5 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50"
+              >
+                Ask
+              </button>
             </div>
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              ref={box}
-              rows={1}
-              aria-label="Question"
-              placeholder="Ask about the code…"
-              className="w-full resize-none bg-transparent py-1.5 text-[15px] text-ink outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-full bg-accent-fill px-4.5 py-2 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50"
-            >
-              Ask
-            </button>
           </div>
-          <p className="mt-2 pl-1 text-xs text-faint">
-            Follow-ups stay in this thread. Role and language travel with each question. Shift+Enter for a new line.
-          </p>
         </form>
       </div>
 
-      <aside aria-label="Sources" className="flex min-h-0 flex-col border-l border-border bg-panel">
+      <aside aria-label="Sources" className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
         <header className="flex items-center border-b border-border px-4.5 py-3.5 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
           Sources
           {sourceTurn && (

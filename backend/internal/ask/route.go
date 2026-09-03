@@ -106,7 +106,9 @@ Answer with JSON ONLY: {"decision":"ask"} or {"decision":"compose"}.
 When in doubt "ask": a follow-up question costs one click, an answer composed
 across independent mechanisms is simply wrong.`
 
-const nameSystem = `You name a candidate for a follow-up question, in English.
+// nameSystem takes the language name as its one format argument: the card is
+// read by the person who asked, in the language they asked for.
+const nameSystem = `You name a candidate for a follow-up question, in %s.
 
 Answer with JSON ONLY: {"title":"...","summary":"..."}
 
@@ -259,7 +261,7 @@ func Decide(all []Candidate, margin float64, related, judged bool) bool {
 // case — the model. Which rungs are RUN is decided here, so the common fast
 // path — one candidate clearly ahead — still does no database query and no
 // model call; what the run rungs then MEAN is Decide's, and only Decide's.
-func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit) (Decision, error) {
+func (r *Router) Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		return Decision{}, err
@@ -285,7 +287,7 @@ func (r *Router) Route(ctx context.Context, question string, hits []retrieve.Hit
 	if !Decide(ranked.All, r.margin, related, judged) {
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
-	named, err := r.name(ctx, question, cs)
+	named, err := r.name(ctx, question, lang, cs)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -407,7 +409,8 @@ type nameResult struct {
 // name runs one Complete per candidate concurrently, each seeing that
 // candidate's top three hits. A candidate whose naming call fails keeps its
 // module key as the title and an empty summary rather than failing the turn.
-func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]Candidate, error) {
+func (r *Router) name(ctx context.Context, question string, lang Language, cs []Candidate) ([]Candidate, error) {
+	system := fmt.Sprintf(nameSystem, languageName(lang))
 	named := make([]Candidate, len(cs))
 	copy(named, cs)
 
@@ -428,7 +431,7 @@ func (r *Router) name(ctx context.Context, question string, cs []Candidate) ([]C
 			}
 
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
-				{Role: "system", Content: nameSystem},
+				{Role: "system", Content: system},
 				{Role: "user", Content: b.String()},
 			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
 			if err != nil {
