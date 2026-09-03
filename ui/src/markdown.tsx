@@ -14,6 +14,9 @@ import type { JSX, ReactNode } from "react";
  * consumed: the brackets stay in the text (visually hidden), so the rendered
  * text still reads "[1]" to a screen reader, a copy, or a test, and a
  * half-written "[1" mid-stream stays plain text until the bracket arrives.
+ * A grouped marker "[1, 2]" is split into one complete "[n]" per number with
+ * the separators kept between them, so it reads "[1], [2]"; a group with no
+ * backed number at all is left verbatim, as any other unbacked marker.
  *
  * Which markers are real is the backend's call (citationsFor drops the ones
  * no source backs — from the citation list, not from the text). Once the
@@ -54,6 +57,13 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
     // stays visible only where a chip would otherwise touch plain text.
     const parts = m[1].split(/(\s*,\s*)/);
     const plain = (part: string) => known && !hooks.backed!.has(Number(part));
+    if (parts.every((part, p) => p % 2 === 1 || plain(part))) {
+      // Nothing behind any of it: plain text, as it came. Answers stored
+      // before groups were read have no rows for their numbers.
+      out.push(m[0]);
+      last = i + m[0].length;
+      continue;
+    }
     parts.forEach((part, p) => {
       if (p % 2 === 1) {
         const visible = plain(parts[p - 1]) || plain(parts[p + 1]);

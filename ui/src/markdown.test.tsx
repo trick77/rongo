@@ -89,6 +89,16 @@ describe("Markdown", () => {
       expect(container.textContent).toBe("Compared on poll [1], [9].");
     });
 
+    it("leave a grouped marker verbatim when nothing backs any of it", () => {
+      // Answers stored before groups were read have no citation rows for
+      // their numbers; their text must not change shape on re-render.
+      const { container } = render(
+        <Markdown text={"Compared on poll [78, 139]."} backed={new Set([1])} />,
+      );
+      expect(container.querySelector("sup")).toBeNull();
+      expect(container.textContent).toBe("Compared on poll [78, 139].");
+    });
+
     it("stay plain text while a grouped marker is still being written", () => {
       const { container } = render(<Markdown text={"Compared on poll [1, "} />);
       expect(container.querySelector("sup")).toBeNull();
