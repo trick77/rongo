@@ -35,7 +35,7 @@
 - **Code is truth, docs are context.** README/docs stay indexed for intent; the code decides. Contradiction → answer names it, sides with the code. Plans and mock-ups → `BACKEND_INDEX_EXCLUDE`, never a broad doc exclusion.
 - **Never invent.** Chain leads into non-indexed code → say so: call and configuration are visible, the internals are not.
 - **No hit means no hit.** "Nothing found" plus the terms tried, never an answer built from whatever is in context.
-- **Every claim is citable**: repo, branch, file, line — branch also in the forge URL, else the link may 404 off the default branch. Cited files are never evicted when capping context.
+- **Every claim is citable**: repo, branch, file, line, and the commit the file was indexed at. A source opens in rongo's own viewer (`/api/source`, read from the checkout at that commit), never a forge link — the viewer serves only paths the index took, at the cited commit, so the marked lines stay the lines the answer was written from. Cited files are never evicted when capping context.
 - **The thread is a record.** A follow-up adds an answer, never rewrites one. A corrected clarification starts a new turn.
 - **Clarify only on real ambiguity.** Candidates depending on each other per `repo_deps` are composition, not alternatives — answer all of them.
 - **Cross a repo boundary only with two reasons**: the gathered code really references the symbol, and the target repo is indexed. Same hop budget.
