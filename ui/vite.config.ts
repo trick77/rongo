@@ -30,9 +30,11 @@ export default defineConfig({
       // inflates the reported percentage and lets the floor be met while whole
       // modules go untested.
       include: ["src/**/*.{ts,tsx}"],
-      // App bootstrap and test scaffolding: nothing here is behaviour a test
-      // could meaningfully assert.
-      exclude: ["src/main.tsx", "src/test-setup.ts", "src/vite-env.d.ts", "**/*.test.{ts,tsx}"],
+      // App bootstrap and type-only declarations: nothing here is behaviour a
+      // test could meaningfully assert. Test files and `setupFiles` are not
+      // listed because vitest appends both to coverage.exclude itself, and
+      // that cannot be overridden.
+      exclude: ["src/main.tsx", "src/**/*.d.ts"],
     },
   },
 });

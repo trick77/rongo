@@ -53,10 +53,9 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
-      # Runs the suite with -race and -coverpkg, converts the profile to
-      # Cobertura (Go exposes no line metric itself) and enforces the floor in
-      # hack/coverage-floors. The floor gate runs first: when a PR drops the
-      # project below it the absolute number is the more actionable failure.
+      # The floor gate (inside make backend-coverage) runs before the patch
+      # gate: when a PR drops the project below the floor the absolute number
+      # is the more actionable failure.
       - run: make backend-coverage
       - name: Backend patch coverage
         run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
