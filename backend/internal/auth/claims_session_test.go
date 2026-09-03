@@ -109,14 +109,14 @@ func TestCreateSessionFromClaims_rejectsClaimsWithoutSubject(t *testing.T) {
 // original cookie in the browser and the user signed in.
 func TestClearSessionCookie_matchesTheAttributesItClears(t *testing.T) {
 	// Given
-	const publicURL = "https://rongo.example.com"
+	const secure = true
 	set := httptest.NewRecorder()
-	SetSessionCookie(set, "token", publicURL, time.Hour)
+	SetSessionCookie(set, "token", secure, time.Hour)
 	want := set.Result().Cookies()[0]
 
 	// When
 	rec := httptest.NewRecorder()
-	ClearSessionCookie(rec, publicURL)
+	ClearSessionCookie(rec, secure)
 
 	// Then
 	got := rec.Result().Cookies()[0]

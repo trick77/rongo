@@ -169,7 +169,7 @@ func main() {
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
-		PublicURL:      cfg.PublicURL,
+		CookieSecure:   cfg.CookieSecure,
 	}
 	// Discovery talks to the provider, so a rongo that cannot reach Authelia
 	// fails here rather than coming up healthy and rejecting every login. The
@@ -182,7 +182,7 @@ func main() {
 			ClientID:     cfg.OIDCClientID,
 			ClientSecret: cfg.OIDCClientSecret,
 			RedirectURL:  cfg.OIDCRedirectURL,
-			SecureCookie: strings.HasPrefix(cfg.PublicURL, "https://"),
+			SecureCookie: cfg.CookieSecure,
 		})
 		cancelDiscover()
 		if err != nil {

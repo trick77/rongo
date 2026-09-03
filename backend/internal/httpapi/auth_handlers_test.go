@@ -49,7 +49,7 @@ func TestAuthCallback_setsSessionCookieAndRedirectsToTheApp(t *testing.T) {
 	srv := NewServer(Deps{
 		Auth:      devAuth(t),
 		OIDC:      &fakeOIDC{claims: auth.Claims{Subject: "sub-1", Email: "jan@example.com"}},
-		PublicURL: "https://rongo.example.com",
+		CookieSecure: true,
 	})
 
 	// When
@@ -116,7 +116,7 @@ func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSessionFromClaims() err = %v", err)
 	}
-	srv := NewServer(Deps{Auth: svc, PublicURL: "https://rongo.example.com"})
+	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
 

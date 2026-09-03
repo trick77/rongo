@@ -50,10 +50,10 @@ type Deps struct {
 	// OIDCAdminGroup is the group that grants admin. Empty means no check; see
 	// auth.Service.CreateSessionFromClaims.
 	OIDCAdminGroup string
-	// PublicURL is the externally reachable base URL. The session cookie's
-	// Secure flag is derived from it, so a deployment served over https that
-	// reports http here hands out a cookie any downgrade can read.
-	PublicURL string
+	// CookieSecure marks the session cookie Secure. It comes from the OIDC
+	// redirect URL, because behind a TLS-terminating proxy the process only
+	// ever sees plain HTTP and nothing about the request says otherwise.
+	CookieSecure bool
 	// Repos backs the Repos page. Nil means this deployment cannot report
 	// repository status, which its endpoint says with a 503 rather than an
 	// empty list.
