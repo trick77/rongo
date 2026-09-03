@@ -160,6 +160,16 @@ func (s *StateStore) MarkIndexed(ctx context.Context, name, sha string, c Counts
 	return err
 }
 
+// SetCounts refreshes the index totals alone. The startup sweep uses it after
+// removing excluded content: unlike MarkIndexed it moves neither last_sha nor
+// last_run_at and leaves a recorded error standing, because no poll ran.
+func (s *StateStore) SetCounts(ctx context.Context, name string, c Counts) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE repo_state SET file_count = ?, chunk_count = ? WHERE name = ?`,
+		c.Files, c.Chunks, name)
+	return err
+}
+
 // MarkChecked records a successful poll that found nothing new: it refreshes
 // last_run_at and clears last_error, leaving the index counts alone.
 //

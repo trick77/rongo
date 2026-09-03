@@ -201,6 +201,47 @@ func TestSyncSpecs_respectsAnExplicitlyDisabledEntry(t *testing.T) {
 	}
 }
 
+func TestSetCounts_touchesOnlyTheTotals(t *testing.T) {
+	// Given: an indexed repository that later recorded an error. The startup
+	// sweep refreshes the totals after removing excluded content, and it must
+	// not pose as a poll: the SHA and the error both stay.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if err := s.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true}}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 10, Chunks: 100}); err != nil {
+		t.Fatalf("MarkIndexed() err = %v", err)
+	}
+	if err := s.MarkError(ctx, "peeq", "fetch failed"); err != nil {
+		t.Fatalf("MarkError() err = %v", err)
+	}
+
+	// When
+	if err := s.SetCounts(ctx, "peeq", Counts{Files: 10, Chunks: 80}); err != nil {
+		t.Fatalf("SetCounts() err = %v", err)
+	}
+
+	// Then
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All() err = %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("All() = %+v, want one entry", all)
+	}
+	st := all[0]
+	if st.Files != 10 || st.Chunks != 80 {
+		t.Errorf("counts = %d/%d, want 10/80", st.Files, st.Chunks)
+	}
+	if st.LastSHA != "abc123" {
+		t.Errorf("LastSHA = %q, want abc123 untouched", st.LastSHA)
+	}
+	if st.LastError != "fetch failed" {
+		t.Errorf("LastError = %q, want the recorded error to stand", st.LastError)
+	}
+}
+
 func TestMarkError_isVisibleAndClearedByASuccess(t *testing.T) {
 	// Given
 	db := newDB(t)

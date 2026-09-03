@@ -276,6 +276,104 @@ func TestIndexRepo_fullIndexRecordsIndexedAndSkippedFilesAlike(t *testing.T) {
 	}
 }
 
+const stalePlan = "# Phase 2\n\nThe cart is abandoned after 48 hours, says this stale plan.\n"
+
+func TestIndexRepo_excludedPathIsRecordedNotEmbedded(t *testing.T) {
+	// Given: a repository carrying a design document under docs/plans.
+	h := newHarnessFiles(t, map[string]string{
+		"src/shop/cart/AbandonedCartJob.java": cartJava,
+		"docs/plans/phase-2.md":               stalePlan,
+	}, nil)
+	h.ix.selector = NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
+	st := h.stateOf(t)
+	sha := h.head(t)
+
+	// When
+	counts, err := h.ix.IndexRepo(context.Background(), st, sha, nil)
+
+	// Then
+	if err != nil {
+		t.Fatalf("IndexRepo() err = %v, want nil", err)
+	}
+	var reason string
+	if err := h.db.QueryRow(`SELECT skip_reason FROM files WHERE path = 'docs/plans/phase-2.md'`).Scan(&reason); err != nil {
+		t.Fatalf("the excluded file was not recorded: %v", err)
+	}
+	if reason != string(SkipExcluded) {
+		t.Errorf("skip_reason = %q, want %q", reason, SkipExcluded)
+	}
+	if n := countOf(t, h.db, `
+		SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id
+		WHERE f.path = 'docs/plans/phase-2.md'`); n != 0 {
+		t.Errorf("the excluded file produced %d chunks, want 0", n)
+	}
+	if counts.Files != 2 {
+		t.Errorf("Counts.Files = %d, want 2 — the excluded file is recorded, not omitted", counts.Files)
+	}
+}
+
+func TestSweepExcluded_removesWhatAnEarlierRunIndexed(t *testing.T) {
+	// Given: a repository indexed BEFORE the exclusion existed, so the plan is
+	// embedded and searchable. Incremental runs only visit changed paths and
+	// the poller does nothing while HEAD is unchanged, so without a sweep the
+	// plan would stay in the index for as long as nobody edits it.
+	h := newHarnessFiles(t, map[string]string{
+		"src/shop/cart/AbandonedCartJob.java": cartJava,
+		"docs/plans/phase-2.md":               stalePlan,
+	}, nil)
+	st := h.stateOf(t)
+	sha := h.head(t)
+	before, err := h.ix.IndexRepo(context.Background(), st, sha, nil)
+	if err != nil {
+		t.Fatalf("IndexRepo() err = %v", err)
+	}
+	planChunks := func() int {
+		return countOf(t, h.db, `
+			SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id
+			WHERE f.path = 'docs/plans/phase-2.md'`)
+	}
+	if planChunks() == 0 {
+		t.Fatal("the plan was not indexed by the first run; the sweep would have nothing to prove")
+	}
+	h.ix.selector = NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
+
+	// When
+	changed, counts, err := h.ix.SweepExcluded(context.Background(), "shop")
+
+	// Then
+	if err != nil {
+		t.Fatalf("SweepExcluded() err = %v, want nil", err)
+	}
+	if changed != 1 {
+		t.Errorf("changed = %d, want 1", changed)
+	}
+	if n := planChunks(); n != 0 {
+		t.Errorf("the plan still has %d chunks after the sweep, want 0", n)
+	}
+	var reason string
+	if err := h.db.QueryRow(`SELECT skip_reason FROM files WHERE path = 'docs/plans/phase-2.md'`).Scan(&reason); err != nil {
+		t.Fatalf("the swept file row is gone: %v", err)
+	}
+	if reason != string(SkipExcluded) {
+		t.Errorf("skip_reason = %q, want %q", reason, SkipExcluded)
+	}
+	// The mirrors go with the chunks: an orphaned vector keeps answering.
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks_vec`); n != counts.Chunks {
+		t.Errorf("chunks_vec holds %d rows, want %d", n, counts.Chunks)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks_fts`); n != counts.Chunks {
+		t.Errorf("chunks_fts holds %d rows, want %d", n, counts.Chunks)
+	}
+	if counts.Files != before.Files || counts.Chunks >= before.Chunks {
+		t.Errorf("Counts = %+v after %+v, want the same files and fewer chunks", counts, before)
+	}
+
+	// And a second sweep finds nothing left to do.
+	if changed, _, err := h.ix.SweepExcluded(context.Background(), "shop"); err != nil || changed != 0 {
+		t.Errorf("second sweep: changed = %d, err = %v, want 0 and nil", changed, err)
+	}
+}
+
 func TestIndexRepo_secondRunEmbedsNothing(t *testing.T) {
 	// Given: an indexed repository whose content has not changed. Re-embedding
 	// it would make every dev re-index cost minutes and money for nothing.

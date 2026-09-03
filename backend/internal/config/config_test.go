@@ -20,6 +20,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_INDEX_ENABLED",
 	"BACKEND_INDEX_MAX_FILE_BYTES",
 	"BACKEND_INDEX_COMMENTS",
+	"BACKEND_INDEX_EXCLUDE",
 	"BACKEND_REPOS_FILE",
 	"BACKEND_FORGE_TOKEN_GITHUB",
 	"BACKEND_EMBED_BASE_URL",
@@ -95,6 +96,41 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	}
 	if cfg.AuthMode != AuthModeDev {
 		t.Errorf("AuthMode = %q, want %q", cfg.AuthMode, AuthModeDev)
+	}
+}
+
+func TestLoad_indexExclude(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want []string
+	}{
+		{name: "unset means the design-document default", env: "", want: []string{"docs/plans/**"}},
+		{name: "a list is split and trimmed", env: " a/** , b/*.html ,", want: []string{"a/**", "b/*.html"}},
+		{name: "none switches exclusion off", env: "none", want: nil},
+		{name: "NONE is none too", env: " None ", want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given
+			setEnv(t, map[string]string{"BACKEND_INDEX_EXCLUDE": tc.env})
+
+			// When
+			cfg, err := Load()
+
+			// Then
+			if err != nil {
+				t.Fatalf("Load() err = %v, want nil", err)
+			}
+			if len(cfg.IndexExclude) != len(tc.want) {
+				t.Fatalf("IndexExclude = %q, want %q", cfg.IndexExclude, tc.want)
+			}
+			for i := range tc.want {
+				if cfg.IndexExclude[i] != tc.want[i] {
+					t.Errorf("IndexExclude[%d] = %q, want %q", i, cfg.IndexExclude[i], tc.want[i])
+				}
+			}
+		})
 	}
 }
 

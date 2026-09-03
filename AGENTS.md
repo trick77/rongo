@@ -31,6 +31,7 @@
 
 ## Invariants (must hold in every feature)
 - **Never store or embed model-written text *about* code** — no module/file/symbol summary, eager or lazy: scales with corpus not usage, stale when written, and at useful resolution it is the code rewritten in prose. Name candidates per turn, only when a human sees them. Measured and lost: `docs/measurements/2026-08-17-module-ranking-and-comments.md`.
+- **Code is truth, docs are context.** README/docs stay indexed for intent; the code decides. Contradiction → answer names it, sides with the code. Plans and mock-ups → `BACKEND_INDEX_EXCLUDE`, never a broad doc exclusion.
 - **Never invent.** Chain leads into non-indexed code → say so: call and configuration are visible, the internals are not.
 - **No hit means no hit.** "Nothing found" plus the terms tried, never an answer built from whatever is in context.
 - **Every claim is citable**: repo, branch, file, line — branch also in the forge URL, else the link may 404 off the default branch. Cited files are never evicted when capping context.

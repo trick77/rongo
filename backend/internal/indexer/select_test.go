@@ -117,6 +117,126 @@ func TestSelect_decisionTable(t *testing.T) {
 	}
 }
 
+func TestSelect_excludedPaths(t *testing.T) {
+	// The patterns are anchored at the repository root and matched segment by
+	// segment, so a directory name is never mistaken for a prefix of another
+	// and a nested copy is only excluded when the pattern says "**".
+	cases := []struct {
+		name    string
+		exclude []string
+		path    string
+		want    Decision
+	}{
+		{
+			name:    "the default keeps design documents out",
+			exclude: []string{"docs/plans/**"},
+			path:    "docs/plans/rongo-spec.html",
+			want:    SkipExcluded,
+		},
+		{
+			name:    "deeper files under the directory are excluded too",
+			exclude: []string{"docs/plans/**"},
+			path:    "docs/plans/2026/phase-3.md",
+			want:    SkipExcluded,
+		},
+		{
+			name:    "a sibling whose name merely starts the same is kept",
+			exclude: []string{"docs/plans/**"},
+			path:    "docs/plans-notes.md",
+			want:    Include,
+		},
+		{
+			name:    "the pattern is anchored at the root",
+			exclude: []string{"docs/plans/**"},
+			path:    "services/x/docs/plans/a.md",
+			want:    Include,
+		},
+		{
+			name:    "a leading ** matches at any depth",
+			exclude: []string{"**/docs/plans/**"},
+			path:    "services/x/docs/plans/a.md",
+			want:    SkipExcluded,
+		},
+		{
+			name:    "a leading ** also matches at the root",
+			exclude: []string{"**/docs/plans/**"},
+			path:    "docs/plans/a.md",
+			want:    SkipExcluded,
+		},
+		{
+			name:    "a file glob in the last segment",
+			exclude: []string{"docs/**/*.html"},
+			path:    "docs/plans/rongo-ui-mock.html",
+			want:    SkipExcluded,
+		},
+		{
+			name:    "the file glob does not catch other extensions",
+			exclude: []string{"docs/**/*.html"},
+			path:    "docs/plans/phase-2.md",
+			want:    Include,
+		},
+		{
+			name:    "a bare directory name without ** is the directory itself, not its files",
+			exclude: []string{"docs/plans"},
+			path:    "docs/plans/a.md",
+			want:    Include,
+		},
+		{
+			name:    "no patterns exclude nothing",
+			exclude: nil,
+			path:    "docs/plans/a.md",
+			want:    Include,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewSelector(SelectOptions{Exclude: tc.exclude})
+
+			got, reason := s.Select(tc.path, []byte("# heading\n\nbody\n"))
+
+			if got != tc.want {
+				t.Errorf("Select(%q) with %v = %v (%s), want %v", tc.path, tc.exclude, got, reason, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelect_secretDetectionBeatsExcluded(t *testing.T) {
+	// Given: an excluded document that also holds a credential. Exclusion is
+	// about relevance; the secret verdict is about a credential never leaving
+	// the network, and it also decides what gets reported.
+	s := NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
+
+	got, reason := s.Select("docs/plans/deploy-notes.md",
+		[]byte("export KEY=AKIAIOSFODNN7EXAMPLE\n"))
+
+	if got != SkipSecret {
+		t.Errorf("Select() = %v (%s), want SkipSecret — a credential outranks an exclusion", got, reason)
+	}
+}
+
+func TestValidateExclude(t *testing.T) {
+	// A malformed pattern must fail at startup: silently matching nothing
+	// would leave the excluded content in the index while the configuration
+	// looked right.
+	if err := ValidateExclude([]string{"docs/plans/**", "**/*.html"}); err != nil {
+		t.Errorf("ValidateExclude(valid) err = %v, want nil", err)
+	}
+	if err := ValidateExclude([]string{"docs/[plans/**"}); err == nil {
+		t.Error("ValidateExclude(unclosed bracket) err = nil, want an error")
+	}
+	if err := ValidateExclude([]string{""}); err == nil {
+		t.Error("ValidateExclude(empty pattern) err = nil, want an error")
+	}
+	// Paths are cleaned before matching, so these could never match anything
+	// and would fail silently instead of loudly.
+	for _, pat := range []string{"docs/plans/", "/docs/plans/**", "./docs/plans/**", "docs//plans/**", "../docs/**", "docs/**.html"} {
+		if err := ValidateExclude([]string{pat}); err == nil {
+			t.Errorf("ValidateExclude(%q) err = nil, want an error for a pattern that can never match", pat)
+		}
+	}
+}
+
 func TestSelect_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
 	// Given: a vendored file that also contains a credential. The vendored
 	// verdict alone would be harmless, but the ORDER matters for a different

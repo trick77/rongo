@@ -50,6 +50,15 @@ type Config struct {
 	// full re-embed of the corpus. That is intended: reusing vectors computed
 	// with comments under a setting that excludes them would be silently wrong.
 	IndexComments bool
+	// IndexExclude lists repo-relative path globs whose files are recorded as
+	// skipped ("excluded") instead of embedded: content written for reading,
+	// not for the corpus — design documents, plans, mock-ups — that is stale
+	// or wrong as an answer to how the code works. "**" spans directories;
+	// patterns are anchored at the repository root. BACKEND_INDEX_EXCLUDE,
+	// comma-separated; unset or empty is the default, "none" excludes nothing.
+	// Already-indexed matches are swept at the next start; removing a pattern
+	// takes effect for a file when it next changes.
+	IndexExclude []string
 	// ModuleMinChunks and ModuleMaxChunks are the module cut: below the first a
 	// directory is folded into its parent, above the second it is split again.
 	// Calibrated against the real corpus and recorded in the measurement
@@ -133,6 +142,7 @@ func Load() (Config, error) {
 		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
 		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
 		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
 		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
 		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
 		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
@@ -239,6 +249,26 @@ func Load() (Config, error) {
 	cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
 
 	return cfg, nil
+}
+
+// envListOr reads a comma-separated list. Unset or blank means the default,
+// like every other setting; the literal "none" is how an operator switches
+// the list off, since an empty value cannot say "nothing" here.
+func envListOr(key string, fallback []string) []string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	if strings.EqualFold(v, "none") {
+		return nil
+	}
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // envIntOr reads a positive integer setting. A malformed or non-positive value

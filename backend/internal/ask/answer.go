@@ -69,6 +69,10 @@ You are given numbered sources. The rules, without exception:
   the configuration are visible, the inside is not.
 - A comment is a claim, not proof. What the code does not deliver does not
   hold - and where comment and code contradict each other, say it.
+- The same for documentation files (README, docs, markdown): they supply
+  intent and context the code alone does not show, but the code decides what
+  actually happens. Where a document and the code disagree, say so and side
+  with the code.
 - Only use markers that exist. An invented number is worse than no marker.`
 
 const answerBA = `
