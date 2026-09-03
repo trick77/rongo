@@ -47,8 +47,8 @@ func TestAuthLogin_isReachableWithoutASession(t *testing.T) {
 func TestAuthCallback_setsSessionCookieAndRedirectsToTheApp(t *testing.T) {
 	// Given
 	srv := NewServer(Deps{
-		Auth:      devAuth(t),
-		OIDC:      &fakeOIDC{claims: auth.Claims{Subject: "sub-1", Email: "jan@example.com"}},
+		Auth:         devAuth(t),
+		OIDC:         &fakeOIDC{claims: auth.Claims{Subject: "sub-1", Email: "jan@example.com"}},
 		CookieSecure: true,
 	})
 
