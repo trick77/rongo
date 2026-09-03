@@ -1,4 +1,4 @@
-.PHONY: build test fe-build fe-test run dev tidy
+.PHONY: build test coverage backend-coverage fe-build fe-test fe-coverage run dev tidy
 
 tidy:
 	cd backend && go mod tidy
@@ -6,8 +6,27 @@ tidy:
 test:
 	cd backend && go test ./...
 
+# Line coverage with the same floor and scripts as ../peeq and ../loom
+# (hack/coverage-floors, hack/coverage-gate.sh). CI runs the patch gate on top
+# (hack/patch-coverage.sh); locally the floor is the thing to watch.
+coverage: backend-coverage fe-coverage
+
+# -coverpkg=./... attributes coverage across package boundaries: code exercised
+# only by another package's tests (httpapi drives threads and store) is
+# otherwise reported as uncovered. The race detector needs cgo; that is
+# independent of the app's CGO_ENABLED=0 build.
+backend-coverage:
+	mkdir -p coverage
+	cd backend && CGO_ENABLED=1 go test -race -covermode=atomic -coverpkg=./... -coverprofile=../coverage/backend.out ./...
+	cd backend && go run github.com/boumenot/gocover-cobertura@v1.5.0 < ../coverage/backend.out > ../coverage/backend.xml
+	./hack/coverage-gate.sh backend
+
 fe-test:
 	cd ui && npx tsc -b && npm run test -- --run
+
+fe-coverage:
+	cd ui && npm run test -- --run --coverage
+	./hack/coverage-gate.sh ui
 
 # vite.config.ts sets emptyOutDir:false so the tracked backend/web/dist/.gitkeep
 # survives a build (go:embed needs it); we clean the whole build output here
