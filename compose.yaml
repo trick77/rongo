@@ -11,9 +11,11 @@
 #
 #      mkdir -p data repos && chown 1000:1000 data repos
 #
-# 2. Copy repos.example.yaml to repos.yaml and list the repositories to index.
-#    It is mounted read-only; credentials never belong in it (see the file).
-#    Without it `up` stops at the mount instead of starting: see the volume.
+# 2. Copy repos.example.yaml to conf/repos.yaml and list the repositories to
+#    index. It is mounted read-only; credentials never belong in it (see the
+#    file). Without it rongo comes up and the Repos page says what is missing.
+#
+#      mkdir -p conf && cp repos.example.yaml conf/repos.yaml
 #
 # 3. Copy .env.example to .env and set at least:
 #      BACKEND_SESSION_SECRET  at least 16 characters, not "change-me"
@@ -89,21 +91,12 @@ services:
     volumes:
       - ./data:/data
       - ./repos:/repos
-      # The repository list carries no secrets, so read-only is enough and
-      # keeps rongo from ever rewriting what an operator maintains by hand.
-      #
-      # create_host_path: false is the point of the long syntax here. A bind
-      # mount of a file that does not exist on the host makes Docker create a
-      # DIRECTORY at that path, and rongo then reports
-      # "read /conf/repos.yaml: is a directory" on every start while the
-      # operator sees a repos.yaml sitting there. This turns that into a
-      # refusal to start, naming the missing file.
-      - type: bind
-        source: ./repos.yaml
-        target: /conf/repos.yaml
-        read_only: true
-        bind:
-          create_host_path: false
+      # The directory, not the file: a bind mount of a file that is missing on
+      # the host makes Docker create a DIRECTORY at that path, and rongo then
+      # reports "is a directory" forever. Mounting ./conf means a missing file
+      # is simply a missing file. Read-only keeps rongo from ever rewriting
+      # what an operator maintains by hand; the list carries no secrets.
+      - ./conf:/conf:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rongo", "-healthcheck"]
       interval: 30s
