@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"bytes"
+	"fmt"
 	"path"
 	"regexp"
 	"strings"
@@ -17,6 +18,11 @@ const (
 	SkipBinary    Decision = "binary"
 	SkipTooLarge  Decision = "too_large"
 	SkipSecret    Decision = "secret"
+	// SkipExcluded is a path the operator ruled out with BACKEND_INDEX_EXCLUDE:
+	// content written for reading, not for the corpus — design documents,
+	// plans, mock-ups — that is tracked in the repository but stale or wrong
+	// as an answer to how the code works.
+	SkipExcluded Decision = "excluded"
 	// SkipEmpty is not a selector verdict — the pipeline records it for a file
 	// that passed selection but produced no chunk, because it is blank. It
 	// shares this vocabulary so the answer layer renders one set of reasons.
@@ -29,11 +35,38 @@ type SelectOptions struct {
 	// truncated: half a file produces confidently wrong answers about the other
 	// half, which is worse than admitting the file was not indexed.
 	MaxBytes int
+	// Exclude lists path globs, relative to the repository root, whose files
+	// are skipped as SkipExcluded. Matched segment by segment: "*" and "?"
+	// apply within one segment, "**" spans zero or more segments. The
+	// patterns are anchored, so "docs/plans/**" excludes docs/plans/x.md but
+	// neither services/x/docs/plans/x.md (write "**/docs/plans/**") nor
+	// docs/plans-notes.md. Validate with ValidateExclude before use.
+	Exclude []string
 }
 
-// DefaultSelectOptions is 1 MB, overridable via BACKEND_INDEX_MAX_FILE_BYTES.
+// DefaultSelectOptions is 1 MB, overridable via BACKEND_INDEX_MAX_FILE_BYTES,
+// and no exclusions: the default exclusion list is the config package's, so
+// a caller that builds a Selector directly gets the plain rule set.
 func DefaultSelectOptions() SelectOptions {
 	return SelectOptions{MaxBytes: 1 << 20}
+}
+
+// ValidateExclude reports the first malformed exclusion pattern. It runs at
+// startup so a typo fails the boot rather than silently matching nothing —
+// the index would then keep the excluded content while the configuration
+// looked right.
+func ValidateExclude(patterns []string) error {
+	for _, pat := range patterns {
+		if pat == "" {
+			return fmt.Errorf("exclusion pattern is empty")
+		}
+		for _, seg := range strings.Split(pat, "/") {
+			if _, err := path.Match(seg, ""); err != nil {
+				return fmt.Errorf("exclusion pattern %q: %w", pat, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Selector decides which files are worth indexing.
@@ -43,15 +76,64 @@ func DefaultSelectOptions() SelectOptions {
 // list — a vendored dependency's source outranks the real answer for any query
 // about a common word.
 type Selector struct {
-	opts SelectOptions
+	opts    SelectOptions
+	exclude []excludePattern
 }
 
-// NewSelector builds a Selector.
+// excludePattern is one exclusion glob, split once so matching a path does
+// not re-split the pattern for every file.
+type excludePattern struct {
+	text string
+	segs []string
+}
+
+// NewSelector builds a Selector. Exclusion patterns are assumed valid; the
+// config package runs ValidateExclude at startup.
 func NewSelector(opts SelectOptions) *Selector {
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultSelectOptions().MaxBytes
 	}
-	return &Selector{opts: opts}
+	s := &Selector{opts: opts}
+	for _, pat := range opts.Exclude {
+		s.exclude = append(s.exclude, excludePattern{text: pat, segs: strings.Split(pat, "/")})
+	}
+	return s
+}
+
+// Excluded reports the exclusion pattern a path matches, if any.
+func (s *Selector) Excluded(p string) (string, bool) {
+	segs := strings.Split(path.Clean(p), "/")
+	for _, pat := range s.exclude {
+		if matchSegments(pat.segs, segs) {
+			return pat.text, true
+		}
+	}
+	return "", false
+}
+
+// matchSegments matches a pattern against a path, both already split on "/".
+// "**" consumes zero or more path segments; every other pattern segment must
+// match exactly one path segment via path.Match.
+func matchSegments(pat, segs []string) bool {
+	for len(pat) > 0 {
+		if pat[0] == "**" {
+			for i := 0; i <= len(segs); i++ {
+				if matchSegments(pat[1:], segs[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(segs) == 0 {
+			return false
+		}
+		// The pattern was validated at startup, so an error here cannot occur.
+		if ok, _ := path.Match(pat[0], segs[0]); !ok {
+			return false
+		}
+		pat, segs = pat[1:], segs[1:]
+	}
+	return len(segs) == 0
 }
 
 // vendoredDirs are directories whose contents belong to someone else. Matched
@@ -127,6 +209,12 @@ func (s *Selector) Select(p string, body []byte) (Decision, string) {
 	// embedding endpoint, so it wins regardless of where the file lives.
 	if pat := matchSecret(body); pat != "" {
 		return SkipSecret, "matches a credential pattern (" + pat + ")"
+	}
+	// The operator's list before the built-in ones: a document under an
+	// excluded directory is reported as excluded, whichever other rule would
+	// also have caught it.
+	if pat, ok := s.Excluded(p); ok {
+		return SkipExcluded, "matches exclusion pattern " + pat
 	}
 	if seg := vendoredSegment(p); seg != "" {
 		return SkipVendored, "lives under " + seg + "/"

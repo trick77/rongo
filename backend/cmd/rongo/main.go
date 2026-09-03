@@ -34,6 +34,30 @@ import (
 	"github.com/trick77/rongo/internal/threads"
 )
 
+// sweepExcluded applies BACKEND_INDEX_EXCLUDE to every repository's existing
+// index and refreshes the Repos page totals where it removed something.
+func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *indexer.Indexer) {
+	all, err := state.All(ctx)
+	if err != nil {
+		slog.Warn("exclusion sweep skipped; repository list unreadable", "err", err)
+		return
+	}
+	for _, st := range all {
+		changed, counts, err := pipeline.SweepExcluded(ctx, st.Name)
+		if err != nil {
+			slog.Warn("exclusion sweep failed", "repo", st.Name, "err", err)
+			continue
+		}
+		if changed == 0 {
+			continue
+		}
+		if err := state.SetCounts(ctx, st.Name, counts); err != nil {
+			slog.Warn("recording the swept totals failed", "repo", st.Name, "err", err)
+		}
+		slog.Info("excluded files removed from the index", "repo", st.Name, "files", changed)
+	}
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -126,10 +150,13 @@ func main() {
 			Model:   cfg.EmbedModel,
 			Dim:     cfg.EmbedDim,
 		}, nil),
-		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
-		Writer:   indexer.NewWriter(db),
-		Selector: indexer.NewSelector(indexer.SelectOptions{MaxBytes: cfg.IndexMaxFileBytes}),
-		Chunk:    chunkOptions(cfg),
+		Cache:  embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Writer: indexer.NewWriter(db),
+		Selector: indexer.NewSelector(indexer.SelectOptions{
+			MaxBytes: cfg.IndexMaxFileBytes,
+			Exclude:  cfg.IndexExclude,
+		}),
+		Chunk: chunkOptions(cfg),
 	})
 
 	poller := indexer.NewPoller(indexer.PollerDeps{
@@ -148,9 +175,17 @@ func main() {
 	defer stopPolling()
 	var workers sync.WaitGroup
 	if cfg.IndexEnabled {
+		// The exclusion list is read at start, and nothing else revisits files
+		// an earlier run already embedded: an incremental run touches only
+		// changed paths, and the poller idles while HEAD is unchanged. So the
+		// list is applied to the existing index here, once per start. A
+		// failure is logged, not fatal: the next poll still indexes correctly.
+		// It runs on the poller's goroutine so the HTTP side comes up without
+		// waiting for it, and so a shutdown cancels it like any other index work.
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			sweepExcluded(pollCtx, state, pipeline)
 			poller.Run(pollCtx)
 		}()
 	} else {

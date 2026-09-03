@@ -89,6 +89,8 @@ services:
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.
       BACKEND_FORGE_TOKEN_GITHUB: ${BACKEND_FORGE_TOKEN_GITHUB:-}
+      # Repo-relative globs kept out of the index; see .env.example.
+      BACKEND_INDEX_EXCLUDE: ${BACKEND_INDEX_EXCLUDE:-docs/plans/**}
       BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
     volumes:
       - ./data:/data
