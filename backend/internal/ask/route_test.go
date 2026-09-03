@@ -164,7 +164,7 @@ func TestRouteAnswersWithoutAskingWhenOneCandidateDominates(t *testing.T) {
 	}), testDBWithDeps(t, nil))
 
 	// When
-	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
 	})
@@ -195,7 +195,7 @@ func TestRouteFastPathMakesNoDependencyQuery(t *testing.T) {
 		return ""
 	}), db)
 
-	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
 	})
@@ -219,7 +219,7 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 		return ""
 	}), db)
 
-	got, err := r.Route(context.Background(), "how does peeq open the database?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "how does peeq open the database?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/store/store.go", Score: 0.50},
 		{Repo: "go-sqlite3", Path: "driver/driver.go", Score: 0.48},
 	})
@@ -248,7 +248,7 @@ func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
 	})
 	r := newTestRouter(t, llmFake, testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	})
@@ -279,7 +279,7 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 		return `{"decision":"compose"}`
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	})
@@ -313,7 +313,7 @@ func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", hits)
+	got, err := r.Route(context.Background(), "frage", LanguageEN, hits)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestRouteJudgeDecodeFailureMeansAskNotCrashNotCompose(t *testing.T) {
 		return `{"title":"T","summary":"S"}`
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	})
@@ -362,7 +362,7 @@ func TestRouteNamingFailureKeepsTheModuleKeyAsTitle(t *testing.T) {
 		return "not json"
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	})
@@ -430,7 +430,7 @@ func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
 	})
 	r := newTestRouter(t, c, testDBWithDeps(t, nil))
 
-	if _, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	}); err != nil {
@@ -454,7 +454,7 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	})
 	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(llm.ShortGate())
 
-	got, err := r.Route(context.Background(), "frage", []retrieve.Hit{
+	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	})
@@ -483,7 +483,7 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 	base := newTestRouter(t, c, testDBWithDeps(t, nil))
 	_ = base.WithJudgeDeployment(llm.ShortGate()) // a second Router, deliberately discarded here
 
-	if _, err := base.Route(context.Background(), "frage", []retrieve.Hit{
+	if _, err := base.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
 	}); err != nil {
@@ -564,7 +564,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
-	if _, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {
@@ -581,7 +581,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	// And the cheap lane is still reachable, because the harness has to keep
 	// measuring the comparison the spec asks for.
 	cheap := r.WithJudgeDeployment(llm.ShortGate())
-	if _, err := cheap.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
+	if _, err := cheap.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {
@@ -629,7 +629,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
-	if _, err := r.Route(context.Background(), "how is authentication done?", []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}); err != nil {

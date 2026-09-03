@@ -210,7 +210,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
 		go func(id int64, question string) {
 			bg := context.WithoutCancel(ctx)
-			if title := s.deps.Titler(bg, question); title != "" {
+			if title := s.deps.Titler(bg, question, lang); title != "" {
 				if err := s.deps.Threads.SetTitle(bg, id, title); err != nil {
 					slog.Warn("set thread title failed", "err", err)
 				}

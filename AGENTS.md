@@ -51,3 +51,4 @@
 - Ochre means "your move". Once decided, it loses the colour.
 - Look and tokens: Warm Editorial dark, the same `@theme` and fonts as ../loom and ../peeq (`ui/src/index.css`). Reference: `docs/plans/rongo-ui-mock.html`.
 - Roles read "Analyst" and "Developer" in the UI; the wire values stay `ba`/`dev`.
+- **Everything a person reads follows the answer language** (`ask.Language`): answer, clarification card titles and summaries, thread title, nothing-found text. Prompts name the language first AND last; identifiers, paths and code stay untranslated. Model-internal calls (understand, judge, relevance) stay English.
