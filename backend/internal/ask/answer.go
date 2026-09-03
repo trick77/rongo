@@ -125,7 +125,9 @@ You are given numbered sources. The rules, without exception:
   intent and context the code alone does not show, but the code decides what
   actually happens. Where a document and the code disagree, say so and side
   with the code.
-- Only use markers that exist. An invented number is worse than no marker.`
+- Only use markers that exist. An invented number is worse than no marker.
+- One marker per bracket: a claim resting on two sources reads [1][2], never
+  [1, 2].`
 
 // answerLanguage closes the system prompt. Identifiers stay as they are: a
 // translated function name is a name that does not exist.
@@ -176,7 +178,11 @@ func NothingFound(lang Language, terms []string) string {
 	return nothingFound[l] + " " + searchedFor[l] + ": " + strings.Join(terms, " · ") + "."
 }
 
-var markerRe = regexp.MustCompile(`\[(\d{1,3})\]`)
+// markerRe matches one marker or a grouped one. The prompt asks for [1][2],
+// but a claim resting on several sources still comes out as [1, 2] often
+// enough: read as a single marker that matched nothing, and both sources
+// vanished from the panel while the text kept showing the brackets.
+var markerRe = regexp.MustCompile(`\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
 
 // Answer writes the answer for one turn, streaming it token by token.
 //
@@ -277,11 +283,13 @@ func citationsFor(text string, sources []Source) []Citation {
 	// that the model never made, which is the same fabrication this function
 	// exists to prevent.
 	for _, m := range markerRe.FindAllStringSubmatch(withoutCode(text), -1) {
-		n, err := strconv.Atoi(m[1])
-		if err != nil || n < 1 || n > len(sources) {
-			continue
+		for _, num := range strings.Split(m[1], ",") {
+			n, err := strconv.Atoi(strings.TrimSpace(num))
+			if err != nil || n < 1 || n > len(sources) {
+				continue // an invented number drops alone, not the whole group
+			}
+			used[n] = true
 		}
-		used[n] = true
 	}
 	out := make([]Citation, 0, len(used))
 	for n := range used {
