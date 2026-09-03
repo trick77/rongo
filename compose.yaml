@@ -13,6 +13,7 @@
 #
 # 2. Copy repos.example.yaml to repos.yaml and list the repositories to index.
 #    It is mounted read-only; credentials never belong in it (see the file).
+#    Without it `up` stops at the mount instead of starting: see the volume.
 #
 # 3. Copy .env.example to .env and set at least:
 #      BACKEND_SESSION_SECRET  at least 16 characters, not "change-me"
@@ -90,7 +91,19 @@ services:
       - ./repos:/repos
       # The repository list carries no secrets, so read-only is enough and
       # keeps rongo from ever rewriting what an operator maintains by hand.
-      - ./repos.yaml:/conf/repos.yaml:ro
+      #
+      # create_host_path: false is the point of the long syntax here. A bind
+      # mount of a file that does not exist on the host makes Docker create a
+      # DIRECTORY at that path, and rongo then reports
+      # "read /conf/repos.yaml: is a directory" on every start while the
+      # operator sees a repos.yaml sitting there. This turns that into a
+      # refusal to start, naming the missing file.
+      - type: bind
+        source: ./repos.yaml
+        target: /conf/repos.yaml
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "/usr/local/bin/rongo", "-healthcheck"]
       interval: 30s
