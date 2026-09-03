@@ -15,7 +15,10 @@ import (
 )
 
 // gitRun runs git with a fixed identity, so a developer's own config cannot
-// change what the fixture looks like.
+// change what the fixture looks like. Automatic maintenance is off: a commit
+// may otherwise detach a background gc that is still writing under .git
+// while t.TempDir removes it, which failed once on CI as "directory not
+// empty".
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -23,6 +26,9 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
+		"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
