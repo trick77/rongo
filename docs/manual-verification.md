@@ -47,8 +47,8 @@ Checks:
 4. Reload the page. The thread reloads with the same clarification card
    already collapsed on "Chosen: {title}" — no re-asking, no flash of the
    open card.
-5. On that answered turn, click "Explain as Dev" (visible only once
+5. On that answered turn, click "Explain as Developer" (visible only once
    the turn is done, unclarified, and error-free). Watch the network tab or
    backend log: no retrieval/search call fires, only the re-explain request
-   on the stored sources. A new turn appears below with the DEV answer; the
-   original BA answer stays untouched above it.
+   on the stored sources. A new turn appears below with the Developer answer; the
+   original Analyst answer stays untouched above it.
