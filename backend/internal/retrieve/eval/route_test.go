@@ -380,7 +380,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
 		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
-		d, err := router.Route(ctx, q.Text, hits)
+		d, err := router.Route(ctx, q.Text, ask.LanguageEN, hits)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
 		}

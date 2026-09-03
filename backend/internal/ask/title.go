@@ -2,6 +2,7 @@ package ask
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -11,8 +12,9 @@ import (
 // given room will write a sentence.
 const titleMaxTokens = 48
 
-const titleSystem = `Sum the question up in three to six words, as a title for a sidebar.
-English. No quotation marks, no full stop at the end, no explanation - just the
+// titleSystem takes the language name as its one format argument.
+const titleSystem = `Sum the question up in three to six words, as a title for a sidebar,
+in %s. No quotation marks, no full stop at the end, no explanation - just the
 title.`
 
 // Title writes a short label for a thread.
@@ -25,12 +27,12 @@ title.`
 // The caller must never let this block the answer. An empty string is the
 // normal failure: the placeholder made from the question's first words stays,
 // and nobody needs to be told.
-func Title(ctx context.Context, c *llm.Client, question string) string {
+func Title(ctx context.Context, c *llm.Client, question string, lang Language) string {
 	if c == nil {
 		return ""
 	}
 	out, _, err := c.Complete(ctx, []llm.Message{
-		{Role: "system", Content: titleSystem},
+		{Role: "system", Content: fmt.Sprintf(titleSystem, languageNames[ParseLanguage(string(lang))])},
 		{Role: "user", Content: question},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(titleMaxTokens))
 	if err != nil {

@@ -108,6 +108,15 @@ You are given numbered sources. The rules, without exception:
   with the code.
 - Only use markers that exist. An invented number is worse than no marker.`
 
+// answerLanguage closes the system prompt. Identifiers stay as they are: a
+// translated function name is a name that does not exist.
+const answerLanguage = `
+
+Language: every sentence of the answer, headings and list items included, is
+written in %s - never in the language of the sources or of these
+instructions. Identifiers, file names, quoted code and the markers stay
+exactly as they are.`
+
 const answerBA = `
 Audience: business analyst. Explain the mechanism in three to five paragraphs,
 in the language of the business domain. No source code, no signatures, no file
@@ -119,9 +128,34 @@ Audience: developer. Name types, functions and files, and quote short excerpts
 where they carry the explanation. Describe the control flow so that it can be
 followed in the code.`
 
-// nothingFound is the answer when nothing was gathered. It is not an apology
-// and not a guess: the caller adds the terms that were tried.
-const nothingFound = "I found nothing about this in the indexed code."
+// nothingFound is the answer when nothing was gathered, in the language the
+// reader asked for. It is not an apology and not a guess: the caller adds the
+// terms that were tried. Fixed text rather than a model call: an answer with
+// no sources must never come from a model.
+var nothingFound = map[Language]string{
+	LanguageEN: "I found nothing about this in the indexed code.",
+	LanguageDE: "Dazu habe ich im indexierten Code nichts gefunden.",
+	LanguageFR: "Je n'ai rien trouvé à ce sujet dans le code indexé.",
+	LanguageIT: "Non ho trovato nulla al riguardo nel codice indicizzato.",
+}
+
+// searchedFor introduces the terms that were tried, in the same language.
+var searchedFor = map[Language]string{
+	LanguageEN: "Searched for",
+	LanguageDE: "Gesucht nach",
+	LanguageFR: "Recherché",
+	LanguageIT: "Cercato",
+}
+
+// NothingFound is the "nothing found" answer for lang, with the terms that
+// were tried appended when there are any.
+func NothingFound(lang Language, terms []string) string {
+	l := ParseLanguage(string(lang))
+	if len(terms) == 0 {
+		return nothingFound[l]
+	}
+	return nothingFound[l] + " " + searchedFor[l] + ": " + strings.Join(terms, " · ") + "."
+}
 
 var markerRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 
@@ -135,15 +169,20 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	sources []Source, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
-		return Answer{Text: nothingFound}, nil
+		return Answer{Text: NothingFound(lang, nil)}, nil
 	}
 
-	system := fmt.Sprintf(answerCommon, languageNames[ParseLanguage(string(lang))])
+	name := languageNames[ParseLanguage(string(lang))]
+	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
 		system += answerDev
 	} else {
 		system += answerBA
 	}
+	// Said twice, first and last: the sources in between are code and comments
+	// in whatever language the repository uses, and a model that has just read
+	// two thousand tokens of English tends to answer in it.
+	system += fmt.Sprintf(answerLanguage, name)
 
 	var text strings.Builder
 	usage, err := a.llm.Stream(ctx, []llm.Message{

@@ -248,8 +248,8 @@ func main() {
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
 	)
-	deps.Titler = func(ctx context.Context, question string) string {
-		return ask.Title(ctx, models, question)
+	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
+		return ask.Title(ctx, models, question, lang)
 	}
 	srv := httpapi.NewServer(deps)
 
