@@ -175,7 +175,11 @@ func Load() (Config, error) {
 		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
 		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
 	}
-	cfg.Prices = loadPrices(cfg.EmbedModel)
+	prices, err := loadPrices(cfg.EmbedModel)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Prices = prices
 
 	// SessionSecret is currently unused — sessions are 256-bit random tokens
 	// stored as unsalted SHA-256, no signing involved yet. It is still
@@ -296,30 +300,41 @@ func envIntOr(key string, fallback int) int {
 	return n
 }
 
-// envFloatOr reads a positive float setting. A malformed or non-positive
-// value falls back to the default rather than failing the boot, for the same
-// reason envIntOr does.
 // loadPrices reads the optional BACKEND_PRICE_* variables, USD per million
 // tokens, into a table keyed by the model each pair belongs to. A model with
 // neither side set is absent from the table, not priced at zero: absent means
-// "unknown", and the UI shows tokens only for it. The deployment names come
-// from internal/llm because that is where they are fixed.
-func loadPrices(embedModel string) usage.Prices {
+// "unknown", and the UI shows tokens only for it. Half a pair is an error,
+// not a price: pricing the missing side at zero would show a definite
+// figure that undercounts, and a mistyped value ("0,4") reads as unset. The
+// deployment names come from internal/llm because that is where they are
+// fixed.
+func loadPrices(embedModel string) (usage.Prices, error) {
 	p := usage.Prices{}
-	add := func(model, inKey, outKey string) {
+	add := func(model, inKey, outKey string) error {
 		in, out := envFloatOr(inKey, 0), envFloatOr(outKey, 0)
-		if in > 0 || out > 0 {
+		switch {
+		case in > 0 && out > 0:
 			p[model] = usage.Price{In: in, Out: out}
+		case in > 0 || out > 0:
+			return fmt.Errorf("%s and %s must both be set as positive numbers, or neither; half a price would show a cost that undercounts", inKey, outKey)
 		}
+		return nil
 	}
-	add(llm.ProDeployment, "BACKEND_PRICE_PRO_IN", "BACKEND_PRICE_PRO_OUT")
-	add(llm.ShortGateDeployment, "BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT")
+	if err := add(llm.ProDeployment, "BACKEND_PRICE_PRO_IN", "BACKEND_PRICE_PRO_OUT"); err != nil {
+		return nil, err
+	}
+	if err := add(llm.ShortGateDeployment, "BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT"); err != nil {
+		return nil, err
+	}
 	if v := envFloatOr("BACKEND_PRICE_EMBED", 0); v > 0 {
 		p[embedModel] = usage.Price{In: v}
 	}
-	return p
+	return p, nil
 }
 
+// envFloatOr reads a positive float setting. A malformed or non-positive
+// value falls back to the default rather than failing the boot, for the same
+// reason envIntOr does.
 func envFloatOr(key string, fallback float64) float64 {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

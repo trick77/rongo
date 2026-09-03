@@ -347,7 +347,14 @@ export default function App() {
               onThread={selectThread}
               onActivity={refreshThreads}
               onBusy={setBusy}
-              onUsage={setUsageTotal}
+              onUsage={(u) =>
+                // Compared by value: Ask reports on every change of its turn
+                // list, which is once per streamed token, and a fresh object
+                // each time would re-render the whole shell per token.
+                setUsageTotal((prev) =>
+                  prev && u && prev.tokens === u.tokens && prev.cost === u.cost ? prev : u,
+                )
+              }
             />
           </div>
           {page === "repos" && (

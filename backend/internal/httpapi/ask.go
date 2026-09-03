@@ -249,9 +249,14 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// closeUsage stores what the turn paid for and tells the browser, on
 	// EVERY exit: answered, asked back, found nothing, failed. The gates ran
 	// either way. Sent before the event that ends the turn, so the browser
-	// has the number whichever way the turn closed.
+	// has the number whichever way the turn closed. A turn that paid for
+	// nothing (the first call never reached the upstream) sends nothing,
+	// the same as the stored record shows for it after a reload.
 	closeUsage := func() {
 		calls := meter.Calls()
+		if len(calls) == 0 {
+			return
+		}
 		if err := s.deps.Threads.SaveUsage(record, msg.ID, calls); err != nil {
 			slog.Error("record usage failed", "err", err)
 		}
@@ -461,6 +466,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// reported however it ended.
 	closeUsage := func() {
 		calls := meter.Calls()
+		if len(calls) == 0 {
+			return
+		}
 		if err := s.deps.Threads.SaveUsage(record, newMsg.ID, calls); err != nil {
 			slog.Error("record usage failed", "err", err)
 		}

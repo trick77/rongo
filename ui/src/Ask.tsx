@@ -329,6 +329,11 @@ export default function Ask({
     const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
+    // A breakdown is a turn index into the thread that is being left; the
+    // same index in the next thread is a different turn. And the total in
+    // the header belongs to the old thread until the new one has loaded.
+    setOpenUsage(null);
+    onUsage(null);
     if (openThread === null) {
       setTurns([]);
       return;

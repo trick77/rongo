@@ -303,10 +303,14 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 			}
 		}
 	}
-	// Recorded even when the read failed: whatever the upstream reported
-	// before the break was paid for. A stream that broke before its usage
-	// frame records zeros, which is the honest number for "unknown".
-	record(ctx, o, got)
+	// Recorded even when the read failed, as long as a usage frame arrived:
+	// what the upstream reported was paid for. A stream that broke before
+	// its usage frame (idle timeout, a dropped connection, an endpoint that
+	// ignores include_usage) records nothing rather than zeros — a zero row
+	// would read as "this call was free", and it was not; it is unknown.
+	if got.Total > 0 {
+		record(ctx, o, got)
+	}
 	if err := sc.Err(); err != nil {
 		return got, fmt.Errorf("read stream: %w", redactURL(err))
 	}

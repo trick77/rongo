@@ -680,7 +680,7 @@ func TestAsk_aTurnThatFailedOrAskedBackStillReportsAndStoresWhatItPaidFor(t *tes
 
 func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 	// Given a stored turn with usage, and a price for the gate deployment only
-	srv, st := newTestServerWithStore(t, func(f *fakeAsker) {
+	srv, _ := newTestServerWithStore(t, func(f *fakeAsker) {
 		f.tokens = []string{"The ", "answer."}
 		f.calls = gateCalls
 	})
@@ -716,7 +716,26 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 	if u.Calls[1].CostUSD != nil {
 		t.Errorf("the unpriced embed call carries a cost: %v", *u.Calls[1].CostUSD)
 	}
-	_ = st
+}
+
+func TestAsk_aTurnThatPaidForNothingSendsNoUsage(t *testing.T) {
+	// Given: the first call never reached the upstream, so nothing was
+	// metered.
+	srv := newTestServer(t, func(f *fakeAsker) { f.err = errors.New("endpoint down") })
+
+	// When
+	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+
+	// Then: no usage event. A "0 tok" pill would claim the turn was free,
+	// and the reload would show no pill at all for the same turn.
+	for _, e := range events(body) {
+		if e[0] == "usage" {
+			t.Fatalf("usage event %s sent for a turn with no calls", e[1])
+		}
+	}
+	if !strings.Contains(body, "event: error") {
+		t.Error("the turn must still end with an error event")
+	}
 }
 
 // threadIDOf reads the thread id off the first event of an SSE body.

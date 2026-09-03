@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -175,6 +176,28 @@ func TestLoad_pricesAreOptionalAndKeyedByModel(t *testing.T) {
 	}
 	if _, ok := cfg.Prices[llm.ShortGateDeployment]; ok {
 		t.Errorf("the gate deployment is priced although nothing was set: %v", cfg.Prices)
+	}
+}
+
+func TestLoad_halfAPriceIsAnErrorNotAZero(t *testing.T) {
+	// Given: the output side mistyped, which envFloatOr reads as unset
+	setEnv(t, map[string]string{
+		"BACKEND_PRICE_GATE_IN":  "0.1",
+		"BACKEND_PRICE_GATE_OUT": "0,4",
+	})
+
+	// When
+	_, err := Load()
+
+	// Then: refused, naming both variables — pricing the missing side at
+	// zero would show a cost that undercounts.
+	if err == nil {
+		t.Fatal("Load() accepted half a price pair")
+	}
+	for _, want := range []string{"BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to name %s", err, want)
+		}
 	}
 }
 
