@@ -41,9 +41,16 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
     return () => before?.focus?.();
   }, []);
 
+  // Escape closes. Tab stays inside: the dialog is modal, and the close button
+  // is its only control, so a Tab that left it would land in the dimmed page
+  // behind the overlay.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
+      if (e.key === "Tab") {
+        e.preventDefault();
+        closeButton.current?.focus();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -61,7 +68,7 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
           // The server's message is written for the reader (not in the
           // checkout, binary, too large); a bare status is not.
           const message = (await res.text()).trim() || `The server answered with ${res.status}.`;
-          setLoaded({ state: "error", message });
+          if (!cancelled) setLoaded({ state: "error", message });
           return;
         }
         const file = await res.json();
@@ -93,6 +100,11 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
   const anchorLine = Math.max(source.start_line - contextAbove, 1);
   const shortSha = (loaded.state === "ready" ? loaded.sha : source.sha ?? "").slice(0, 7);
   const branch = loaded.state === "ready" ? loaded.branch : source.branch;
+  // A citation without its own commit is read at the commit the file was
+  // last indexed at, which can be newer than the answer. If the file has
+  // shrunk past the cited range since, nothing would be marked and the
+  // reader would take the answer for unbacked. Say what happened instead.
+  const moved = loaded.state === "ready" && source.start_line > loaded.lines.length;
 
   return (
     <div
@@ -136,6 +148,12 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
           {loaded.state === "error" && (
             <p role="alert" className="px-5 py-3 text-muted">
               {loaded.message}
+            </p>
+          )}
+          {moved && (
+            <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
+              The file has changed since the answer was written: it has {loaded.lines.length} lines at this
+              commit, and the cited range starts at line {source.start_line}.
             </p>
           )}
           {loaded.state === "ready" &&

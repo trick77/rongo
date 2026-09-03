@@ -44,9 +44,16 @@ func commit(t *testing.T, dir, name string, body []byte, msg string) string {
 	return gitRun(t, dir, "rev-parse", "HEAD")
 }
 
-// fixture builds a checkout under root/<repo> with two commits of the same
-// file, and a database that knows the repository. Nothing touches a network.
-func fixture(t *testing.T) (svc *Service, db *sql.DB, first, second string) {
+// fixture is a checkout under root/<repo> and a database that knows it. The
+// paths the index "took" have a files row; a secret has one with a
+// skip_reason; a path the index never saw has none. Nothing touches a network.
+type fixture struct {
+	svc           *Service
+	db            *sql.DB
+	first, second string
+}
+
+func newFixture(t *testing.T, maxBytes int) fixture {
 	t.Helper()
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
@@ -58,13 +65,13 @@ func fixture(t *testing.T) (svc *Service, db *sql.DB, first, second string) {
 		t.Fatal(err)
 	}
 	gitRun(t, dir, "init", "-q", "-b", "main")
-	first = commit(t, dir, "internal/a.go", []byte("package a\n\nfunc One() {}\n"), "one")
-	second = commit(t, dir, "internal/a.go", []byte("package a\n\n// moved\nfunc One() {}\n"), "two")
-	// The repository's last indexed commit is the newest one; the a.go files
-	// row stays on the second, as a file untouched by the latest run would.
-	third := commit(t, dir, "img.png", []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe}, "binary")
+	first := commit(t, dir, "internal/a.go", []byte("package a\n\nfunc One() {}\n"), "one")
+	second := commit(t, dir, "internal/a.go", []byte("package a\n\n// moved\nfunc One() {}\n"), "two")
+	commit(t, dir, "img.png", []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe}, "binary")
+	commit(t, dir, "notes.txt", []byte("caf\xe9 latin-1\n"), "latin1")
+	head := commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
 
-	db, err = store.Open(filepath.Join(t.TempDir(), "t.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,71 +79,124 @@ func fixture(t *testing.T) (svc *Service, db *sql.DB, first, second string) {
 	if err := store.Migrate(db, 4); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch, enabled, last_sha) VALUES ('peeq', 'x', 'main', 1, ?)`, third); err != nil {
+	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch, enabled, last_sha) VALUES ('peeq', 'x', 'main', 1, ?)`, head); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', 'internal/a.go', ?)`, second); err != nil {
-		t.Fatal(err)
+	for _, row := range []struct{ path, sha, skip string }{
+		{"internal/a.go", second, ""},
+		{"img.png", head, ""},
+		{"notes.txt", head, ""},
+		{"config/prod.env", head, "secret"},
+	} {
+		if _, err := db.Exec(`INSERT INTO files (repo, path, sha, skip_reason) VALUES ('peeq', ?, ?, ?)`, row.path, row.sha, row.skip); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return New(db, gitrepo.New(gitBin, root)), db, first, second
+	return fixture{svc: New(db, gitrepo.New(gitBin, root), maxBytes), db: db, first: first, second: second}
 }
 
 func TestRead_showsTheFileAtTheCitedCommitNotTheBranchHead(t *testing.T) {
 	// Given
-	svc, _, first, _ := fixture(t)
+	f := newFixture(t, 1<<20)
 
 	// When
-	f, err := svc.Read(context.Background(), "peeq", "internal/a.go", first)
+	got, err := f.svc.Read(context.Background(), "peeq", "internal/a.go", f.first)
 
 	// Then
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if strings.Contains(f.Content, "moved") {
-		t.Fatalf("got the branch head, want the cited commit: %q", f.Content)
+	if strings.Contains(got.Content, "moved") {
+		t.Fatalf("got the branch head, want the cited commit: %q", got.Content)
 	}
-	if f.Branch != "main" || f.SHA != first || f.Path != "internal/a.go" {
-		t.Fatalf("file = %+v", f)
+	if got.Branch != "main" || got.SHA != f.first || got.Path != "internal/a.go" {
+		t.Fatalf("file = %+v", got)
 	}
 }
 
 func TestRead_anEmptyCommitFallsBackToTheIndexedOne(t *testing.T) {
 	// Given: a citation recorded before the commit travelled with it.
-	svc, _, _, second := fixture(t)
+	f := newFixture(t, 1<<20)
 
 	// When
-	f, err := svc.Read(context.Background(), "peeq", "internal/a.go", "")
+	got, err := f.svc.Read(context.Background(), "peeq", "internal/a.go", "")
 
 	// Then
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if f.SHA != second || !strings.Contains(f.Content, "moved") {
-		t.Fatalf("file = %+v, want the indexed commit %s", f, second)
+	if got.SHA != f.second || !strings.Contains(got.Content, "moved") {
+		t.Fatalf("file = %+v, want the indexed commit %s", got, f.second)
+	}
+}
+
+func TestRead_textIsWhatTheIndexerCallsText(t *testing.T) {
+	// Given: a Latin-1 file. Not valid UTF-8, but no NUL byte, so the
+	// indexer took it and an answer can cite it.
+	f := newFixture(t, 1<<20)
+
+	// When
+	got, err := f.svc.Read(context.Background(), "peeq", "notes.txt", "")
+
+	// Then
+	if err != nil {
+		t.Fatalf("Read: %v, want the file the index serves", err)
+	}
+	if !strings.Contains(got.Content, "latin-1") {
+		t.Fatalf("content = %q", got.Content)
 	}
 }
 
 func TestRead_refusesWhatItCannotShow(t *testing.T) {
-	svc, _, first, _ := fixture(t)
+	f := newFixture(t, 1<<20)
 	ctx := context.Background()
 
 	for name, tc := range map[string]struct {
 		repo, path, sha string
 		want            error
 	}{
-		"unknown repository": {"loom", "internal/a.go", first, ErrNotFound},
-		"path not at commit": {"peeq", "internal/b.go", first, ErrNotFound},
-		"binary file":        {"peeq", "img.png", "", ErrBinary},
-		"empty path":         {"peeq", "", first, ErrInvalid},
-		"climbing path":      {"peeq", "../etc/passwd", first, ErrInvalid},
-		"option as commit":   {"peeq", "internal/a.go", "--output=/tmp/x", ErrInvalid},
-		"dash path":          {"peeq", "-internal/a.go", first, ErrInvalid},
+		"unknown repository": {"loom", "internal/a.go", f.first, ErrNotFound},
+		"path never indexed": {"peeq", "internal/b.go", f.first, ErrNotFound},
+		// The named door this must not be: a secret the selector refused has
+		// a files row, so the answer layer can say "exists, not indexed" —
+		// and that row is not permission to serve it.
+		"skipped as secret": {"peeq", "config/prod.env", "", ErrNotFound},
+		"a directory":       {"peeq", "internal", f.first, ErrNotFound},
+		"binary file":       {"peeq", "img.png", "", ErrBinary},
+		"empty path":        {"peeq", "", f.first, ErrInvalid},
+		"climbing path":     {"peeq", "../etc/passwd", f.first, ErrInvalid},
+		"option as commit":  {"peeq", "internal/a.go", "--output=/tmp/x", ErrInvalid},
+		"dash path":         {"peeq", "-internal/a.go", f.first, ErrInvalid},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := svc.Read(ctx, tc.repo, tc.path, tc.sha)
+			_, err := f.svc.Read(ctx, tc.repo, tc.path, tc.sha)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestRead_aDirectoryIsNotServedAsAFile(t *testing.T) {
+	// git show sha:dir prints a listing and exits 0, which would otherwise
+	// come back as "content".
+	f := newFixture(t, 1<<20)
+	_, err := f.svc.Read(context.Background(), "peeq", "internal", f.first)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want %v", err, ErrNotFound)
+	}
+}
+
+func TestRead_refusesALargeFileBeforeReadingIt(t *testing.T) {
+	// Given: a cap below the file. The refusal comes from the object's size,
+	// so nothing is buffered first.
+	f := newFixture(t, 8)
+
+	// When
+	_, err := f.svc.Read(context.Background(), "peeq", "internal/a.go", "")
+
+	// Then
+	if !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("err = %v, want %v", err, ErrTooLarge)
 	}
 }

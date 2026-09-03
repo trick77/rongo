@@ -64,6 +64,30 @@ describe("SourceView", () => {
     });
   });
 
+  it("says so when the file has shrunk past the cited range", async () => {
+    serve(200, { content: "one\ntwo\n", sha: "9999999", branch: "master" });
+
+    render(<SourceView source={{ ...source, start_line: 40, end_line: 42, sha: "" }} onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toContain("changed since the answer was written");
+    });
+    expect(document.querySelectorAll("[data-hit]").length).toBe(0);
+  });
+
+  it("keeps Tab inside the dialog", async () => {
+    serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
+    const user = userEvent.setup();
+
+    render(<SourceView source={source} onClose={() => {}} />);
+    await screen.findByText("x");
+
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+  });
+
   it("closes on Escape and on the close button", async () => {
     serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
     const user = userEvent.setup();

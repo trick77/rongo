@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/trick77/rongo/internal/repos"
@@ -201,6 +202,32 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 			redact(stderr.String()))
 	}
 	return stdout.Bytes(), nil
+}
+
+// Object reports what "sha:path" names — "blob", "tree", "commit" — and its
+// size in bytes, without reading it. A caller that would refuse a large or
+// non-file object asks here first, so the refusal costs nothing: ReadFile
+// buffers the whole object before returning it.
+func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) (kind string, size int64, err error) {
+	cmd := exec.CommandContext(ctx, c.git, "cat-file", "--batch-check")
+	cmd.Dir = c.Dir(spec)
+	cmd.Stdin = strings.NewReader(sha + ":" + path + "\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", 0, fmt.Errorf("stat %s at %s: %w: %s", path, shortSHA(sha), err, redact(stderr.String()))
+	}
+	// "<oid> <type> <size>" for an object, "<name> missing" otherwise.
+	fields := strings.Fields(stdout.String())
+	if len(fields) != 3 {
+		return "", 0, fmt.Errorf("stat %s at %s: %s", path, shortSHA(sha), strings.TrimSpace(stdout.String()))
+	}
+	n, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return "", 0, fmt.Errorf("stat %s at %s: size %q: %w", path, shortSHA(sha), fields[2], err)
+	}
+	return fields[1], n, nil
 }
 
 func (c *Client) run(ctx context.Context, dir string, args ...string) (string, error) {

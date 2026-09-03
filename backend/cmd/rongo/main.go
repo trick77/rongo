@@ -212,7 +212,7 @@ func main() {
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
-		Source:         sourceview.New(db, gitClient),
+		Source:         sourceview.New(db, gitClient, cfg.IndexMaxFileBytes),
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
 		CookieSecure:   cfg.CookieSecure,
 	}
