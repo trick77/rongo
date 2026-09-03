@@ -37,16 +37,28 @@ func activeEnvExampleVars(t *testing.T) []string {
 // active next to real mandatory ones, and the section header was the only
 // thing saying which was which. Load is the arbiter, not the header.
 func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
-	// Given a copy of .env.example with the two mandatory values filled in
+	// Given a copy of .env.example with every mandatory value filled in
 	active := activeEnvExampleVars(t)
-	filled := map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-	}
+	filled := mandatoryEnv
 	for _, name := range active {
 		if _, ok := filled[name]; !ok {
 			t.Fatalf("%s is active in .env.example but this test has no value for it; "+
 				"either it belongs behind a #, or add it here on purpose", name)
+		}
+	}
+
+	// and nothing mandatory hiding behind a "#"
+	for name := range filled {
+		found := false
+		for _, a := range active {
+			if a == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s is mandatory but commented out in .env.example; "+
+				"whoever copies the file would not know to set it", name)
 		}
 	}
 
@@ -59,14 +71,9 @@ func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
 	}
 	for _, name := range active {
 		t.Run(name, func(t *testing.T) {
-			// Given the same environment minus this one variable
-			without := map[string]string{}
-			for k, v := range filled {
-				if k != name {
-					without[k] = v
-				}
-			}
-			setEnv(t, without)
+			// Given the same environment minus this one variable. setEnv seeds
+			// the mandatory set, so dropping one means overriding it to "".
+			setEnv(t, map[string]string{name: ""})
 
 			// When / Then
 			if _, err := Load(); err == nil {

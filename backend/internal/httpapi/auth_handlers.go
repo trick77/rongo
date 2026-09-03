@@ -47,7 +47,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?auth_error=session_failed", http.StatusFound)
 		return
 	}
-	auth.SetSessionCookie(w, token, s.deps.PublicURL, time.Until(expiresAt))
+	auth.SetSessionCookie(w, token, s.deps.CookieSecure, time.Until(expiresAt))
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -63,7 +63,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 			slog.Error("session revoke failed", "err", err)
 		}
 	}
-	auth.ClearSessionCookie(w, s.deps.PublicURL)
+	auth.ClearSessionCookie(w, s.deps.CookieSecure)
 	w.Header().Set("Content-Type", "application/json")
 	// Not "/": the provider's session is untouched by this, so landing on the
 	// app root would auto-redirect to the provider, get a token without a

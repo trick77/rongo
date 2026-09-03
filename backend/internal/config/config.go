@@ -25,10 +25,9 @@ const (
 
 // Config holds all runtime settings.
 type Config struct {
-	Addr      string // HTTP listen address
-	PublicURL string // externally reachable base URL
-	DBPath    string // path to the single SQLite file
-	RepoRoot  string // where rongo clones the repositories it indexes
+	Addr     string // HTTP listen address
+	DBPath   string // path to the single SQLite file
+	RepoRoot string // where rongo clones the repositories it indexes
 	// ReposFile is the path to the repository list. Its entries carry no
 	// secrets: tokens are named by token_env and read from the environment,
 	// because that file ends up in a repository or a ticket eventually.
@@ -99,6 +98,11 @@ type Config struct {
 	// truthful default while the only real gate is Authelia's
 	// authorization_policy.
 	OIDCAdminGroup string
+	// CookieSecure marks the session and nonce cookies Secure. Derived from
+	// OIDCRedirectURL: behind a TLS-terminating proxy the process only ever
+	// sees plain HTTP, and the redirect URL is the one setting that has to
+	// name the external origin anyway.
+	CookieSecure bool
 }
 
 // Load reads and validates the environment. It returns the first problem it
@@ -121,7 +125,6 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
-		PublicURL: envOr("BACKEND_PUBLIC_URL", "http://127.0.0.1:8080"),
 		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
 		RepoRoot:  envOr("BACKEND_REPO_ROOT", "./repos"),
 		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
@@ -177,6 +180,21 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf(
 			"BACKEND_EMBED_BASE_URL is required while indexing is enabled; set it, or set BACKEND_INDEX_ENABLED=false to run without indexing")
 	}
+	if cfg.IndexEnabled && cfg.EmbedAPIKey == "" {
+		return Config{}, fmt.Errorf(
+			"BACKEND_EMBED_API_KEY is required while indexing is enabled; the endpoint at BACKEND_EMBED_BASE_URL authenticates with it and answers 401 without")
+	}
+
+	// Answering questions is what rongo is for. Without a model endpoint it
+	// would start, index, and then answer every question with 503 — a
+	// deployment that looks healthy and is useless. Both values are fatal.
+	if cfg.LLMBaseURL == "" {
+		return Config{}, fmt.Errorf("BACKEND_LLM_BASE_URL is required; without it no question can be answered")
+	}
+	if cfg.LLMAPIKey == "" {
+		return Config{}, fmt.Errorf(
+			"BACKEND_LLM_API_KEY is required; the endpoint at BACKEND_LLM_BASE_URL authenticates with it and answers 401 without")
+	}
 
 	switch cfg.AuthMode {
 	case AuthModeDev:
@@ -207,16 +225,18 @@ func Load() (Config, error) {
 			}
 		}
 		// The session and the OIDC nonce cookies get their Secure flag from
-		// this URL alone. Behind a TLS-terminating proxy the process only sees
-		// plain HTTP, so nothing else can notice that an operator wrote
-		// http://; the login works and the cookies go out readable.
-		if !strings.HasPrefix(cfg.PublicURL, "https://") {
+		// the redirect URL alone. Behind a TLS-terminating proxy the process
+		// only sees plain HTTP, so nothing else can notice that an operator
+		// wrote http://; the login works and the cookies go out readable.
+		if !strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://") {
 			return Config{}, fmt.Errorf(
-				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_PUBLIC_URL, got %q; the session cookie's Secure flag is derived from it", cfg.PublicURL)
+				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_OIDC_REDIRECT_URL, got %q; the session cookie's Secure flag is derived from it", cfg.OIDCRedirectURL)
 		}
 	default:
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
 	}
+
+	cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
 
 	return cfg, nil
 }

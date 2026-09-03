@@ -19,7 +19,6 @@ export BACKEND_REPO_ROOT=/tmp/rongo-eval-repos
 export BACKEND_INDEX_ENABLED=false
 export BACKEND_AUTH_MODE=dev
 export BACKEND_ADDR=127.0.0.1:8080
-export BACKEND_PUBLIC_URL=http://127.0.0.1:8080
 export BACKEND_SESSION_SECRET="${BACKEND_SESSION_SECRET:-dev-secret-not-for-prod}"
 
 cd backend

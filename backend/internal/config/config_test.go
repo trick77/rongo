@@ -11,7 +11,6 @@ const validSecret = "s3cret-long-enough"
 // exported in their shell doesn't fail an unrelated test.
 var allBackendEnvVars = []string{
 	"BACKEND_ADDR",
-	"BACKEND_PUBLIC_URL",
 	"BACKEND_DB_PATH",
 	"BACKEND_REPO_ROOT",
 	"BACKEND_AUTH_MODE",
@@ -20,18 +19,45 @@ var allBackendEnvVars = []string{
 	"BACKEND_LOG_LEVEL",
 	"BACKEND_INDEX_ENABLED",
 	"BACKEND_INDEX_MAX_FILE_BYTES",
+	"BACKEND_INDEX_COMMENTS",
 	"BACKEND_REPOS_FILE",
+	"BACKEND_FORGE_TOKEN_GITHUB",
 	"BACKEND_EMBED_BASE_URL",
 	"BACKEND_EMBED_API_KEY",
 	"BACKEND_EMBED_MODEL",
 	"BACKEND_EMBED_DIM",
+	"BACKEND_LLM_BASE_URL",
+	"BACKEND_LLM_API_KEY",
+	"BACKEND_MODULE_MIN_CHUNKS",
+	"BACKEND_MODULE_MAX_CHUNKS",
 	"BACKEND_ROUTE_MARGIN",
+	"BACKEND_GATHER_MAX_HOPS",
+	"BACKEND_GATHER_TOKEN_BUDGET",
+	"BACKEND_OIDC_ISSUER",
+	"BACKEND_OIDC_CLIENT_ID",
+	"BACKEND_OIDC_CLIENT_SECRET",
+	"BACKEND_OIDC_REDIRECT_URL",
+	"BACKEND_OIDC_ADMIN_GROUP",
+}
+
+// mandatoryEnv is what .env.example leaves uncommented: the values Load has no
+// default for. setEnv seeds them so a test about something else doesn't have to
+// repeat them; a test about one of them overrides it with "".
+var mandatoryEnv = map[string]string{
+	"BACKEND_SESSION_SECRET": validSecret,
+	"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+	"BACKEND_EMBED_API_KEY":  "embed-key",
+	"BACKEND_LLM_BASE_URL":   "http://models.invalid/v1",
+	"BACKEND_LLM_API_KEY":    "llm-key",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for _, k := range allBackendEnvVars {
 		t.Setenv(k, "")
+	}
+	for k, v := range mandatoryEnv {
+		t.Setenv(k, v)
 	}
 	for k, v := range kv {
 		t.Setenv(k, v)
@@ -109,7 +135,7 @@ func TestLoad_requiresAnEmbeddingEndpointWhileIndexing(t *testing.T) {
 	// Given: indexing on, no endpoint. An indexer that cannot embed leaves a
 	// repository list that looks configured and an index that stays empty.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_EMBED_BASE_URL": "",
 	})
 
 	// When
@@ -124,8 +150,9 @@ func TestLoad_requiresAnEmbeddingEndpointWhileIndexing(t *testing.T) {
 func TestLoad_allowsNoEmbeddingEndpointWhenIndexingIsOff(t *testing.T) {
 	// Given: the escape hatch for a deployment that only serves the UI.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
 		"BACKEND_INDEX_ENABLED":  "false",
+		"BACKEND_EMBED_BASE_URL": "",
+		"BACKEND_EMBED_API_KEY":  "",
 	})
 
 	// When
@@ -137,6 +164,54 @@ func TestLoad_allowsNoEmbeddingEndpointWhenIndexingIsOff(t *testing.T) {
 	}
 	if cfg.IndexEnabled {
 		t.Error("IndexEnabled = true, want it off")
+	}
+}
+
+func TestLoad_requiresAnEmbeddingKeyWhileIndexing(t *testing.T) {
+	// Given: an endpoint that authenticates and no key for it. The 401 would
+	// otherwise surface as an indexer that silently embeds nothing.
+	setEnv(t, map[string]string{
+		"BACKEND_EMBED_API_KEY": "",
+	})
+
+	// When
+	_, err := Load()
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a demand for BACKEND_EMBED_API_KEY")
+	}
+}
+
+func TestLoad_requiresAModelEndpoint(t *testing.T) {
+	// Given: no model endpoint. Answering questions is what rongo is for; a
+	// deployment that indexes and then 503s every question looks healthy and
+	// is useless, so this is fatal rather than a warning at startup.
+	setEnv(t, map[string]string{
+		"BACKEND_LLM_BASE_URL": "",
+	})
+
+	// When
+	_, err := Load()
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a demand for BACKEND_LLM_BASE_URL")
+	}
+}
+
+func TestLoad_requiresAModelKey(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_LLM_API_KEY": "",
+	})
+
+	// When
+	_, err := Load()
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a demand for BACKEND_LLM_API_KEY")
 	}
 }
 
@@ -291,7 +366,6 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
 		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -338,7 +412,6 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"BACKEND_PUBLIC_URL":         "https://rongo.example.com",
 		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -357,24 +430,62 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 }
 
 // Behind a TLS-terminating proxy the process only ever sees plain HTTP, so
-// nothing but this check can notice that the public URL says http:// — and the
-// session and nonce cookies would go out without Secure while the login works.
-func TestLoad_oidcModeRejectsAnHttpPublicURL(t *testing.T) {
+// nothing but this check can notice that the redirect URL says http:// — and
+// the session and nonce cookies would go out without Secure while the login
+// works.
+func TestLoad_oidcModeRejectsAnHttpRedirectURL(t *testing.T) {
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"BACKEND_PUBLIC_URL":         "http://rongo.example.com",
-		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"BACKEND_ADDR":               "0.0.0.0:8080",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "http://rongo.example.com/api/auth/callback",
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal to run OIDC on a non-https redirect URL")
+	}
+}
+
+// CookieSecure is what the whole https check exists for.
+func TestLoad_derivesCookieSecureFromTheRedirectURL(t *testing.T) {
+	// Given a complete oidc setup
+	setEnv(t, map[string]string{
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_ADDR":               "0.0.0.0:8080",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
 		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
 	})
 
-	_, err := Load()
+	// When
+	cfg, err := Load()
 
-	if err == nil {
-		t.Fatal("Load() err = nil, want a refusal to run OIDC on a non-https public URL")
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if !cfg.CookieSecure {
+		t.Error("CookieSecure = false, want true for an https redirect URL")
+	}
+}
+
+// In dev mode there is no redirect URL and the browser talks plain HTTP to
+// loopback; a Secure cookie would simply never come back.
+func TestLoad_devModeLeavesCookieSecureOff(t *testing.T) {
+	setEnv(t, map[string]string{})
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.CookieSecure {
+		t.Error("CookieSecure = true, want false without an https redirect URL")
 	}
 }
 

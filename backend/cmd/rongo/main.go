@@ -169,7 +169,7 @@ func main() {
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
-		PublicURL:      cfg.PublicURL,
+		CookieSecure:   cfg.CookieSecure,
 	}
 	// Discovery talks to the provider, so a rongo that cannot reach Authelia
 	// fails here rather than coming up healthy and rejecting every login. The
@@ -182,7 +182,7 @@ func main() {
 			ClientID:     cfg.OIDCClientID,
 			ClientSecret: cfg.OIDCClientSecret,
 			RedirectURL:  cfg.OIDCRedirectURL,
-			SecureCookie: strings.HasPrefix(cfg.PublicURL, "https://"),
+			SecureCookie: cfg.CookieSecure,
 		})
 		cancelDiscover()
 		if err != nil {
@@ -191,25 +191,22 @@ func main() {
 		}
 		deps.OIDC = oidcSvc
 	}
-	// Without a model endpoint rongo still serves the Repos page and the index;
-	// the question routes answer 503 rather than failing per request.
-	if cfg.LLMBaseURL != "" {
-		models := llm.NewClient(llm.Config{
-			BaseURL:     cfg.LLMBaseURL,
-			APIKey:      cfg.LLMAPIKey,
-			IdleTimeout: 90 * time.Second,
-		}, nil)
-		deps.Ask = ask.NewPipeline(
-			models,
-			retrieve.New(db, embedder),
-			ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
-			ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
-		)
-		deps.Titler = func(ctx context.Context, question string) string {
-			return ask.Title(ctx, models, question)
-		}
-	} else {
-		slog.Warn("BACKEND_LLM_BASE_URL is unset; questions cannot be answered")
+	// config.Load rejects an empty BACKEND_LLM_BASE_URL, so the pipeline is
+	// always wired: a rongo that indexes but cannot answer is not a mode
+	// anyone wants to be in by accident.
+	models := llm.NewClient(llm.Config{
+		BaseURL:     cfg.LLMBaseURL,
+		APIKey:      cfg.LLMAPIKey,
+		IdleTimeout: 90 * time.Second,
+	}, nil)
+	deps.Ask = ask.NewPipeline(
+		models,
+		retrieve.New(db, embedder),
+		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
+		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
+	)
+	deps.Titler = func(ctx context.Context, question string) string {
+		return ask.Title(ctx, models, question)
 	}
 	srv := httpapi.NewServer(deps)
 

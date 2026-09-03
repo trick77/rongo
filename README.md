@@ -25,10 +25,14 @@ reverse proxy that terminates TLS.
 ## Development
 
 ```
-cp .env.example .env   # set BACKEND_SESSION_SECRET, e.g. with
-                        # openssl rand -base64 32
+cp .env.example .env   # fill in the five active lines: the model and
+                        # embedding endpoints with their keys, and
+                        # BACKEND_SESSION_SECRET (openssl rand -base64 32)
 make dev                # backend + Vite dev server with hot reload
 ```
+
+Everything else in `.env.example` is commented out and shows its default. The
+five active ones have none, and the process refuses to start without them.
 
 `make dev` starts the backend on `127.0.0.1:8080` and Vite on
 `127.0.0.1:5173`; `/api/*` is proxied through to the backend.

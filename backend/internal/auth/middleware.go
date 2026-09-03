@@ -77,16 +77,17 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// SetSessionCookie writes the session cookie. Secure is set whenever the
-// public URL is https.
-func SetSessionCookie(w http.ResponseWriter, token, publicURL string, ttl time.Duration) {
+// SetSessionCookie writes the session cookie. secure comes from the OIDC
+// redirect URL: behind a TLS-terminating proxy the process only ever sees
+// plain HTTP, so nothing it can observe about the request says otherwise.
+func SetSessionCookie(w http.ResponseWriter, token string, secure bool, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   strings.HasPrefix(publicURL, "https://"),
+		Secure:   secure,
 		Expires:  time.Now().Add(ttl),
 	})
 }
@@ -95,14 +96,14 @@ func SetSessionCookie(w http.ResponseWriter, token, publicURL string, ttl time.D
 // value matches what SetSessionCookie wrote: a browser keys a cookie by name,
 // domain and path, so a clear that differs in Path or Secure leaves the
 // original in place and the user stays signed in.
-func ClearSessionCookie(w http.ResponseWriter, publicURL string) {
+func ClearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   strings.HasPrefix(publicURL, "https://"),
+		Secure:   secure,
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
