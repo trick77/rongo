@@ -1,4 +1,7 @@
-# The repositories rongo indexes. Copy to repos.yaml.
+# The repositories rongo indexes. Copy to conf/repos.yaml.
+#
+# As shipped this file works unchanged: rongo is public, so the one active
+# entry needs no token and indexes on the first start. Add your own below.
 #
 # Credentials NEVER belong in this file — it ends up in a repository or a ticket
 # sooner or later. Name the environment variable with token_env instead, and put
@@ -8,34 +11,37 @@
 # with `git ls-remote --symref origin HEAD`. That is not necessarily master:
 # this corpus mixes master and main.
 repositories:
-  - name: peeq
-    clone_url: /Users/jan/localgit/peeq
-    # branch omitted on purpose: resolved from the remote
-
   # rongo indexes itself. It replaced loom on 2026-08-20: loom was peeq's
   # wholesale twin, rongo overlaps peeq only where it has to — retrieval,
   # storage, auth, scheduling — which is enough for a real ambiguous cohort
   # and gives the corpus a repository whose questions can be verified against
   # code that is right here.
-  # Deliberately the remote, not the local checkout. Cloning a local path takes
+  # Deliberately the remote, not a local checkout. Cloning a local path takes
   # that checkout's own branch ref, which lags whatever has been merged — the
   # first attempt indexed rongo at 4 files because the local master was months
   # behind origin/master. A local clone_url indexes the working copy's opinion,
-  # not the published code.
+  # not the published code. It also does not exist inside the container.
   - name: rongo
     clone_url: https://github.com/trick77/rongo.git
+    # branch omitted on purpose: resolved from the remote
 
   # A dependency peeq genuinely declares in go.mod, so cross-repo composition is
   # exercised against real data rather than a fixture.
-  - name: go-sqlite3
-    clone_url: https://github.com/ncruces/go-sqlite3.git
+  #- name: go-sqlite3
+  #  clone_url: https://github.com/ncruces/go-sqlite3.git
+
+  # A private repository: the token lives in the environment under the name
+  # given here, never in this file.
+  #- name: peeq
+  #  clone_url: https://github.com/trick77/peeq.git
+  #  token_env: BACKEND_FORGE_TOKEN_GITHUB
 
   # Deliberately NOT listed, so the "the boundary is named" invariant is
   # exercised in daily use and not only in tests:
   #   asg017/sqlite-vec
 
   # An entry kept for the record but not indexed:
-  # - name: legacy-crm
-  #   clone_url: https://forge.example.invalid/acme/legacy-crm.git
-  #   token_env: BACKEND_FORGE_TOKEN
-  #   enabled: false
+  #- name: legacy-crm
+  #  clone_url: https://forge.example.invalid/acme/legacy-crm.git
+  #  token_env: BACKEND_FORGE_TOKEN
+  #  enabled: false

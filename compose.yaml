@@ -11,9 +11,11 @@
 #
 #      mkdir -p data repos && chown 1000:1000 data repos
 #
-# 2. Copy repos.example.yaml to conf/repos.yaml and list the repositories to
-#    index. It is mounted read-only; credentials never belong in it (see the
-#    file). Without it rongo comes up and the Repos page says what is missing.
+# 2. Copy repos.example.yaml to conf/repos.yaml. It works unchanged — the one
+#    active entry is rongo's own public remote — so add your repositories when
+#    you have seen the first index run. It is mounted read-only; credentials
+#    never belong in it (see the file). Without it rongo comes up and the
+#    Repos page says what is missing.
 #
 #      mkdir -p conf && cp repos.example.yaml conf/repos.yaml
 #
