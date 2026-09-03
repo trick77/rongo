@@ -65,6 +65,10 @@ type Deps struct {
 	// this deployment cannot answer questions, which its routes say with a 503.
 	Ask     Asker
 	Threads Threads
+	// Source serves a cited file out of the checkout, so a source in the
+	// evidence panel can be opened. Nil means this deployment has no checkout
+	// to read from, which the endpoint says with a 503.
+	Source SourceReader
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string, lang ask.Language) string
@@ -117,6 +121,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
+	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
 

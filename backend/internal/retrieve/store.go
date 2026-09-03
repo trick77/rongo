@@ -27,6 +27,10 @@ type Hit struct {
 	RawText   string
 	StartLine int
 	EndLine   int
+	// SHA is the commit the file was indexed at. A citation carries it so the
+	// cited lines can be shown as they were when the answer was written, not
+	// as the branch has moved on since.
+	SHA string
 	// Distance is the L2 distance from the query vector, set by the semantic
 	// lane only. The keyword lane leaves it 0: FTS rank is positional and the
 	// fusion works on rank, not on score.
@@ -43,7 +47,7 @@ const vecKMax = 4096
 
 // hitColumns is the projection both lanes share, so a hit means the same thing
 // whichever lane produced it.
-const hitColumns = `c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line`
+const hitColumns = `c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line, f.sha`
 
 const hitJoins = `
 	JOIN chunks c ON c.id = %s.rowid
@@ -105,7 +109,7 @@ func (s *Store) SearchVector(ctx context.Context, vec []float32, k int, maxDista
 	for rows.Next() {
 		var h Hit
 		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Distance); err != nil {
+			&h.RawText, &h.StartLine, &h.EndLine, &h.SHA, &h.Distance); err != nil {
 			return nil, fmt.Errorf("vector search: %w", err)
 		}
 		out = append(out, h)
@@ -151,7 +155,7 @@ func (s *Store) SearchKeyword(ctx context.Context, match string, n int, repos []
 	for rows.Next() {
 		var h Hit
 		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine); err != nil {
+			&h.RawText, &h.StartLine, &h.EndLine, &h.SHA); err != nil {
 			return nil, fmt.Errorf("keyword search: %w", err)
 		}
 		out = append(out, h)

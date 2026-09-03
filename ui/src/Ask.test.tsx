@@ -106,6 +106,42 @@ describe("Ask", () => {
     expect(screen.getByRole("complementary", { name: "Sources" }).textContent).toContain("store.go");
   });
 
+  it("opens the cited file, at the cited commit, when a source is clicked", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "So [1]." }),
+      ev("citations", [
+        { marker: 1, repo: "peeq", branch: "master", path: "internal/a.go", start_line: 2, end_line: 3, sha: "0123abcdef" },
+      ]),
+      ev("done", {}),
+    ]);
+    const user = await ask("How?");
+    await screen.findByText(/How does rongo know this/);
+
+    // From here on fetch serves the file, not the stream.
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ repo: "peeq", branch: "master", path: "internal/a.go", sha: "0123abcdef", content: "a\nb\nc\n" }),
+      text: async () => "",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pane = screen.getByRole("complementary", { name: "Sources" });
+    await user.click(pane.querySelector("button")!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("a.go");
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe(
+      "/api/source?repo=peeq&path=internal%2Fa.go&sha=0123abcdef",
+    );
+    await screen.findByText("b");
+    expect(Array.from(dialog.querySelectorAll("[data-hit]")).map((h) => h.getAttribute("data-line"))).toEqual(["2", "3"]);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("shows an error as an error, not as an empty answer", async () => {
     streamFrames([ev("thread", { thread_id: 1 }), ev("error", { message: "The turn failed." })]);
 

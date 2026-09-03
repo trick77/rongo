@@ -57,6 +57,16 @@ describe("Markdown", () => {
       expect(container.textContent).toBe("Real [1], invented [7].");
     });
 
+    it("look the same while streaming as once the citations have arrived", () => {
+      // The citations event is the last thing before done. Markers that
+      // changed colour all at once at that moment read as a glitch.
+      const streaming = render(<Markdown text={"A job [1] runs."} />);
+      const done = render(<Markdown text={"A job [1] runs."} backed={new Set([1])} />);
+      expect(streaming.container.querySelector("sup")?.className).toBe(
+        done.container.querySelector("sup")?.className,
+      );
+    });
+
     it("stay plain text while the closing bracket has not arrived yet", () => {
       const { container } = render(<Markdown text={"A job [1"} />);
       expect(container.querySelector("sup")).toBeNull();

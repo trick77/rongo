@@ -3,15 +3,9 @@ import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
 import Trace, { type Step, type TraceState } from "./Trace";
 import { Chevron } from "./icons";
+import SourceView, { type SourceRef } from "./SourceView";
 
-type Citation = {
-  marker: number;
-  repo: string;
-  branch: string;
-  path: string;
-  start_line: number;
-  end_line: number;
-};
+type Citation = SourceRef;
 
 type Audience = "ba" | "dev";
 
@@ -287,6 +281,8 @@ export default function Ask({
   const [busy, setBusy] = useState(false);
   // The marker under the pointer, so the Sources pane can point back.
   const [hot, setHot] = useState<number | null>(null);
+  // The source open in the viewer, or null while it is closed.
+  const [viewing, setViewing] = useState<Citation | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
   // The turn whose usage breakdown is open, if any. One at a time: it is a
   // glance at what a turn cost, not a report to keep open.
@@ -640,7 +636,13 @@ export default function Ask({
                       {turn.citations.map((c) => (
                         <li key={c.marker}>
                           <sup className="font-mono text-accent-strong">{c.marker}</sup>{" "}
-                          <code className="font-mono text-[13px] text-muted">{forgeLine(c)}</code>
+                          <button
+                            type="button"
+                            onClick={() => setViewing(c)}
+                            className="border-b border-transparent font-mono text-[13px] text-muted hover:border-accent hover:text-ink"
+                          >
+                            {forgeLine(c)}
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -841,10 +843,14 @@ export default function Ask({
             </p>
           )}
           {sourceTurn?.citations.map((c) => (
-            <div
+            // The whole row opens the file; the file name underlines on
+            // hover so the row reads as something to open, without a glyph.
+            <button
               key={c.marker}
+              type="button"
+              onClick={() => setViewing(c)}
               className={
-                "grid grid-cols-[26px_1fr] gap-x-2 gap-y-0.5 border-b border-border-soft px-4.5 py-3.5 text-[13px] " +
+                "group grid w-full grid-cols-[26px_1fr] gap-x-2 gap-y-0.5 border-b border-border-soft px-4.5 py-3.5 text-left text-[13px] " +
                 (hot === c.marker ? "bg-active" : "hover:bg-active")
               }
             >
@@ -855,13 +861,17 @@ export default function Ask({
               </span>
               <span className="font-mono text-xs break-all text-muted">
                 {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
-                <b className="font-medium text-ink-dim">{c.path.slice(c.path.lastIndexOf("/") + 1)}</b>
+                <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
+                  {c.path.slice(c.path.lastIndexOf("/") + 1)}
+                </b>
                 :{c.start_line}-{c.end_line}
               </span>
-            </div>
+            </button>
           ))}
         </div>
       </aside>
+
+      {viewing && <SourceView source={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }
