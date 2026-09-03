@@ -22,11 +22,11 @@ const (
 	AudienceDev Audience = "dev"
 )
 
-// Language is the language the answer is written in. Like Audience it affects
-// the answer step only: the understanding, the search terms and the candidate
-// names stay in the language of the code. An unknown value is never an error
-// — ParseLanguage falls back to English, the same way an unknown audience
-// falls back to BA.
+// Language is the language everything a person reads is written in: the
+// answer, the clarification card's titles and summaries, the thread title and
+// the nothing-found text. Model-internal steps (understanding, search terms,
+// the judge) stay English. An unknown value is never an error — ParseLanguage
+// falls back to English, the same way an unknown audience falls back to BA.
 type Language string
 
 const (
@@ -50,6 +50,12 @@ func ParseLanguage(s string) Language {
 		return Language(s)
 	}
 	return LanguageEN
+}
+
+// languageName is the word a prompt uses for lang, after the same fallback
+// ParseLanguage applies.
+func languageName(lang Language) string {
+	return languageNames[ParseLanguage(string(lang))]
 }
 
 // answerMaxTokens is generous on purpose. This is the one call where a
@@ -113,7 +119,7 @@ You are given numbered sources. The rules, without exception:
 const answerLanguage = `
 
 Language: every sentence of the answer, headings and list items included, is
-written in %s - never in the language of the sources or of these
+written in %s, regardless of the language of the sources or of these
 instructions. Identifiers, file names, quoted code and the markers stay
 exactly as they are.`
 
@@ -143,7 +149,7 @@ var nothingFound = map[Language]string{
 var searchedFor = map[Language]string{
 	LanguageEN: "Searched for",
 	LanguageDE: "Gesucht nach",
-	LanguageFR: "Recherché",
+	LanguageFR: "Recherché ",
 	LanguageIT: "Cercato",
 }
 
@@ -172,7 +178,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		return Answer{Text: NothingFound(lang, nil)}, nil
 	}
 
-	name := languageNames[ParseLanguage(string(lang))]
+	name := languageName(lang)
 	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
 		system += answerDev
