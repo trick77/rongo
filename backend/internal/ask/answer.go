@@ -2,7 +2,9 @@ package ask
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strconv"
@@ -207,6 +209,16 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 			onToken(tok)
 		}
 	}, llm.WithMaxTokens(answerMaxTokens))
+	var cut *llm.FinishError
+	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
+		// The upstream cut the answer short, but what arrived is what the
+		// reader watched being written. It is kept, as it was before the finish
+		// reason was read at all; failing the turn here would drop the text
+		// from the record while the browser still shows it. The cut is logged
+		// with the number that says whether the budget was the cause.
+		slog.Warn("answer cut short", "finish_reason", cut.Reason, "completion_tokens", cut.Completion)
+		err = nil
+	}
 	if err != nil {
 		return Answer{}, fmt.Errorf("write the answer: %w", err)
 	}

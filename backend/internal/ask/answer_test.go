@@ -16,6 +16,13 @@ import (
 // streamUpstream streams the given tokens and records the prompt it was sent.
 func streamUpstream(t *testing.T, tokens ...string) (*llm.Client, *string, *int) {
 	t.Helper()
+	return streamUpstreamEnding(t, "", tokens)
+}
+
+// streamUpstreamEnding is streamUpstream with the finish_reason the stream
+// ends on; "" sends none.
+func streamUpstreamEnding(t *testing.T, finishReason string, tokens []string) (*llm.Client, *string, *int) {
+	t.Helper()
 	var prompt string
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +45,12 @@ func streamUpstream(t *testing.T, tokens ...string) (*llm.Client, *string, *int)
 			})
 			fmt.Fprintf(w, "data: %s\n\n", frame)
 			_ = fl.Flush()
+		}
+		if finishReason != "" {
+			end, _ := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+			})
+			fmt.Fprintf(w, "data: %s\n\n", end)
 		}
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		_ = fl.Flush()
@@ -174,5 +187,32 @@ func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no answer text") {
 		t.Errorf("err = %v, want it to say the model wrote nothing", err)
+	}
+}
+
+func TestAnswer_aCutAnswerKeepsWhatTheReaderAlreadySaw(t *testing.T) {
+	// finish_reason=length after content: the text streamed to the browser
+	// must not vanish from the record. Empty is a failure; truncated is an
+	// answer with a log line.
+	c, _, _ := streamUpstreamEnding(t, "length", []string{"The grant ", "is created in store.go [1]."})
+	a := NewAnswerer(c)
+
+	got, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil)
+
+	if err != nil {
+		t.Fatalf("Answer: %v, want the partial text kept", err)
+	}
+	if !strings.Contains(got.Text, "store.go [1]") || len(got.Citations) != 1 {
+		t.Errorf("answer = %+v, want the text that arrived, with its citation", got)
+	}
+}
+
+func TestAnswer_aCutAnswerWithNoTextIsStillAnError(t *testing.T) {
+	c, _, _ := streamUpstreamEnding(t, "length", nil)
+
+	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil)
+
+	if err == nil || !strings.Contains(err.Error(), "length") {
+		t.Fatalf("err = %v, want the length failure surfaced", err)
 	}
 }

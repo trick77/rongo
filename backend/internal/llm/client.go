@@ -73,6 +73,22 @@ type Usage struct {
 	Total      int `json:"total_tokens"`
 }
 
+// FinishError is how the upstream ended a completion when it was not a
+// normal stop: "length" when the completion budget ran out, "content_filter"
+// and the like. Both Complete and Stream return it, and Stream returns it only
+// after every content delta was delivered, so the caller decides what the text
+// it already has is worth. The completion count is what says whether the
+// budget was the cause.
+type FinishError struct {
+	Reason     string
+	Completion int
+}
+
+func (e *FinishError) Error() string {
+	return fmt.Sprintf("chat completion ended with finish_reason=%s after %d completion tokens",
+		e.Reason, e.Completion)
+}
+
 type thinkingOption struct {
 	Type string `json:"type"`
 }
@@ -201,7 +217,8 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 
 	var out struct {
 		Choices []struct {
-			Message Message `json:"message"`
+			Message      Message `json:"message"`
+			FinishReason string  `json:"finish_reason"`
 		} `json:"choices"`
 		Usage Usage `json:"usage"`
 	}
@@ -210,6 +227,12 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	}
 	if len(out.Choices) == 0 {
 		return "", out.Usage, errors.New("chat completion carried no choices")
+	}
+	// The same rule as Stream: a reply cut at the cap is not a reply. Every
+	// caller here parses the content, and a truncated JSON body read as
+	// "unparseable" would hide that the budget was the cause.
+	if fr := out.Choices[0].FinishReason; fr != "" && fr != "stop" {
+		return out.Choices[0].Message.Content, out.Usage, &FinishError{Reason: fr, Completion: out.Usage.Completion}
 	}
 	return out.Choices[0].Message.Content, out.Usage, nil
 }
@@ -282,14 +305,14 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 		}
 		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
 			// A malformed frame is not worth killing a half-written answer for.
-			c.log.Warn("unparseable stream frame", "err", err)
+			c.log.Warn("unparseable stream frame", "err", err, "frame", c.redactKey(head(payload, 512)))
 			continue
 		}
 		if frame.Error != nil {
 			return usage, fmt.Errorf("chat completion failed mid-stream (%s): %s",
 				frame.Error.Type, c.redactKey(frame.Error.Message))
 		}
-		if frame.Usage != nil && frame.Usage.Total > 0 {
+		if frame.Usage != nil && (frame.Usage.Total > 0 || frame.Usage.Completion > 0) {
 			usage = *frame.Usage
 		}
 		for _, ch := range frame.Choices {
@@ -305,8 +328,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 		return usage, fmt.Errorf("read stream: %w", redactURL(err))
 	}
 	if finishReason != "" && finishReason != "stop" {
-		return usage, fmt.Errorf("chat completion ended with finish_reason=%s after %d completion tokens",
-			finishReason, usage.Completion)
+		return usage, &FinishError{Reason: finishReason, Completion: usage.Completion}
 	}
 	return usage, nil
 }
@@ -372,6 +394,14 @@ func (c *Client) redactKey(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
+}
+
+// head keeps a log line from carrying a whole frame.
+func head(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // redactURL keeps a transport error from carrying the full request URL, which
