@@ -1,66 +1,111 @@
-import { useState } from "react";
-import { Chevron } from "./Ask";
+import { useEffect, useState } from "react";
 
 /**
- * The activity trace has THREE states, not two: a turn that ended by asking
+ * The activity trace has more than two states: a turn that ended by asking
  * a clarification closes on an ochre "waiting" node, never the check — a
- * person is still being waited on, and `!active && !streaming` would call
- * that "done".
+ * person is still being waited on. Once that person has chosen, the node
+ * loses its colour ("decided"): ochre means "your move", and the move has
+ * been made. A turn that broke closes on the failure node.
  */
-export type TraceState = "running" | "done" | "waiting";
+export type TraceState = "running" | "done" | "waiting" | "decided" | "failed";
+
+/** One status event, with the moment it arrived. */
+export type Step = { step: string; at: number };
 
 const doneLabel = "Done";
 const waitingLabel = "Waiting for a choice";
+const decidedLabel = "Asked back, choice made";
+const failedLabel = "The turn failed";
 
 /**
- * Collapsed, the trace is one line: the running step, or the closing word
- * once the turn has ended. Expanded, every step becomes a node on one
- * continuous line, ending with the state the turn actually closed in.
+ * The backend reports a step as one word. The label is what a person reads,
+ * and an unknown word is shown as it came rather than hidden.
+ */
+const stepLabels: Record<string, string> = {
+  understanding: "Understanding the question",
+  searching: "Searching the index",
+  routing: "Deciding whether to ask back",
+  gathering: "Reading the code",
+  answering: "Writing the answer",
+};
+
+export function stepLabel(step: string): string {
+  return stepLabels[step] ?? step;
+}
+
+function seconds(ms: number): string {
+  return (Math.max(ms, 0) / 1000).toFixed(1) + "s";
+}
+
+/**
+ * The timeline is always expanded and grows as the steps arrive: progress is
+ * something the reader watches, not something they open. Every step is a node
+ * on one continuous line with the time it took, the running one carries the
+ * spinner, and the last row is the state the turn closed in.
  *
  * `role="status"` and `aria-live="polite"` so progress is read out as it
- * happens, not only once the panel is opened.
+ * happens.
  */
-export default function Trace({ steps, state }: { steps: string[]; state: TraceState }) {
-  const [open, setOpen] = useState(false);
-  const current = steps[steps.length - 1] ?? "";
-  const closingLabel = state === "waiting" ? waitingLabel : state === "done" ? doneLabel : `${current}…`;
+export default function Trace({
+  steps,
+  state,
+  startedAt,
+  endedAt = null,
+}: {
+  steps: Step[];
+  state: TraceState;
+  /** When the turn was sent; the total on the closing row counts from here. */
+  startedAt: number;
+  /** When the turn closed, or null while it runs. */
+  endedAt?: number | null;
+}) {
+  // A running step's duration ticks; once the turn has closed nothing moves.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (state !== "running") return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [state]);
+
+  const closedAt = endedAt ?? now;
+  const closing =
+    state === "done"
+      ? { label: doneLabel, node: "node-done", text: "text-ink" }
+      : state === "waiting"
+        ? { label: waitingLabel, node: "node-ochre", text: "text-ochre" }
+        : state === "decided"
+          ? { label: decidedLabel, node: "node-decided", text: "text-muted" }
+          : state === "failed"
+            ? { label: failedLabel, node: "node-fail", text: "text-accent-strong" }
+            : null;
 
   return (
-    <div role="status" aria-live="polite" className="mt-3 text-sm text-[var(--color-ink-soft)]">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2"
-      >
-        <Chevron open={open} />
-        <span>{open ? "Steps" : closingLabel}</span>
-      </button>
-
-      {open && (
-        <ol className="mt-2 flex flex-wrap items-center gap-3">
-          {steps.map((s, i) => (
-            <li key={i} className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />
-              {s}
+    <div role="status" aria-live="polite" className="mt-4">
+      <ol className="steps text-sm text-muted">
+        {steps.map((s, i) => {
+          const last = i === steps.length - 1;
+          const running = last && state === "running";
+          const until = last ? closedAt : steps[i + 1].at;
+          return (
+            <li key={i}>
+              <span className={"node " + (running ? "node-now" : "")} aria-hidden="true" />
+              <span className={"leading-7 " + (running ? "font-medium text-ink" : "")}>{stepLabel(s.step)}</span>
+              <time className="font-mono text-[11.5px] leading-7 tabular-nums text-faint">
+                {seconds(until - s.at)}
+              </time>
             </li>
-          ))}
-          <li className="flex items-center gap-2">
-            <span
-              className={
-                "h-2 w-2 rounded-full " +
-                (state === "waiting"
-                  ? "bg-[var(--color-ochre)]"
-                  : state === "done"
-                    ? "bg-[var(--color-accent)]"
-                    : "border border-[var(--color-hairline)]")
-              }
-              aria-hidden="true"
-            />
-            {state === "waiting" ? waitingLabel : state === "done" ? doneLabel : "…"}
+          );
+        })}
+        {closing && (
+          <li>
+            <span className={"node node-end " + closing.node} aria-hidden="true" />
+            <span className={"leading-7 font-medium " + closing.text}>{closing.label}</span>
+            <time className="font-mono text-[11.5px] leading-7 tabular-nums text-faint">
+              {seconds(closedAt - startedAt)}
+            </time>
           </li>
-        </ol>
-      )}
+        )}
+      </ol>
     </div>
   );
 }

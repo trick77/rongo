@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Chevron } from "./Ask";
+import { Chevron } from "./icons";
 
 /** One entry on the clarification card, as the SSE event and the stored
  * thread both send it (a stored candidate may also carry module_key, which
@@ -46,29 +46,31 @@ export default function Clarify({
   return (
     <div
       className={
-        "mt-3 rounded border p-3 " +
-        (chosenIdx == null ? "border-[var(--color-ochre)]" : "border-[var(--color-hairline)]")
+        "mt-4 rounded-ui border bg-panel " +
+        (chosenIdx == null ? "border-ochre" : "border-border")
       }
     >
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left text-[14.5px]"
       >
         <Chevron open={open} />
         {chosenIdx == null ? (
-          <span>Which one do you mean?</span>
+          <span className="font-medium text-ochre">Which one do you mean?</span>
         ) : (
           <>
             <span>Chosen: {chosen?.title}</span>
-            <span className="text-xs text-[var(--color-ink-faint)]">{chosen?.repo}</span>
+            <span className="ml-auto font-mono text-[11.5px] text-faint">
+              {chosen?.repo} · {chosen?.branch}
+            </span>
           </>
         )}
       </button>
 
       {open && (
-        <ul className="mt-3 space-y-2">
+        <ul className="grid gap-2 px-4 pb-4">
           {candidates.map((c) => (
             <li key={c.idx}>
               <button
@@ -76,22 +78,20 @@ export default function Clarify({
                 onClick={() => onChoose(c.idx)}
                 aria-pressed={c.idx === chosenIdx}
                 className={
-                  "w-full rounded border p-2 text-left " +
-                  (c.idx === chosenIdx
-                    ? "border-[var(--color-accent)]"
-                    : "border-[var(--color-hairline)] hover:border-[var(--color-accent)]")
+                  "w-full rounded-ui-sm border bg-bg px-3.5 py-3 text-left hover:border-accent " +
+                  (c.idx === chosenIdx ? "border-accent ring-1 ring-accent" : "border-border")
                 }
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">{c.title}</span>
-                  <span className="text-xs text-[var(--color-ink-faint)]">
+                  <span className="font-medium text-ink">{c.title}</span>
+                  <span className="font-mono text-[11.5px] text-faint">
                     {c.repo} · {c.branch}
                   </span>
                   {c.idx === chosenIdx && (
-                    <span className="text-xs text-[var(--color-accent)]">Chosen</span>
+                    <span className="ml-auto text-xs font-medium text-accent-strong">Chosen</span>
                   )}
                 </div>
-                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{c.summary}</p>
+                <p className="mt-1 text-sm text-muted">{c.summary}</p>
               </button>
             </li>
           ))}

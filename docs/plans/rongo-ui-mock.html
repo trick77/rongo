@@ -1,843 +1,364 @@
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rongo Interface Mock</title>
 <style>
+  @font-face { font-family: "Anthropic Sans"; src: url("../../ui/src/fonts/SansWebVariable-TextRegular.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  @font-face { font-family: "Anthropic Serif"; src: url("../../ui/src/fonts/SerifWebVariable-TextRegular.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  @font-face { font-family: "Anthropic Serif"; src: url("../../ui/src/fonts/SerifWebVariable-TextRegularItalic.woff2") format("woff2"); font-weight: 300 800; font-style: italic; font-display: swap; }
+  @font-face { font-family: "Anthropic Mono"; src: url("../../ui/src/fonts/MonoVariableVariable-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+
   :root {
-    --ground:   #F1F2EF;
-    --surface:  #FFFFFF;
-    --sunk:     #E8EAE6;
-    --ink:      #161B1C;
-    --ink-soft: #5C6668;
-    --ink-faint:#8B9496;
-    --hairline: #DBDED8;
-    --accent:   #106257;
-    --accent-ink:#0C4F46;
-    --accent-wash:#DCEAE6;
-    --ochre:    #8A6412;
-    --ochre-wash:#F2E9D2;
-
-    --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-
-    --t-xs: 0.6875rem;
-    --t-sm: 0.8125rem;
-    --t-md: 0.9375rem;
-    --t-lg: 1.0625rem;
-    --t-xl: 1.375rem;
-
-    --r: 3px;
-    --rail-w: 248px;
+    /* peeq / loom tokens, verbatim */
+    --bg: #1f1f1e; --panel: #1b1b1a; --active: #2c2c2a; --border: #323230; --border-soft: #2a2a28;
+    --ink: #faf9f5; --ink-dim: #e4e1d8; --muted: #9c9a92; --faint: #6f6d66;
+    --accent: #c6613f; --accent-strong: #d97757; --accent-fill: #c25f34; --accent-dim: #5a3527;
+    --online: #5aa06a; --danger: #c14638; --kept: #d6a15a;
+    --elevated: #363632; --elevated-border: #454540;
+    --glow-accent: rgba(217,119,87,.5); --shadow-panel: 0 24px 60px -18px rgba(0,0,0,.6);
+    --sans: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Anthropic Serif", Georgia, "Times New Roman", serif;
+    --mono: "Anthropic Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --r: 10px; --r-sm: 8px; --r-lg: 12px;
+    --rail: 248px; --evw: 320px;
+    /* rongo semantics on top: "your move" is the kept/gold token */
+    --wait: var(--kept); --wait-wash: rgba(214,161,90,.14);
   }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --ground:   #101415;
-      --surface:  #181D1E;
-      --sunk:     #1F2526;
-      --ink:      #E6E5DE;
-      --ink-soft: #99A2A3;
-      --ink-faint:#6D7677;
-      --hairline: #29302F;
-      --accent:   #63BBAB;
-      --accent-ink:#8ED3C5;
-      --accent-wash:#17302C;
-      --ochre:    #D3A752;
-      --ochre-wash:#2E2718;
-    }
-  }
-
-  :root[data-theme="dark"] {
-    --ground:   #101415;
-    --surface:  #181D1E;
-    --sunk:     #1F2526;
-    --ink:      #E6E5DE;
-    --ink-soft: #99A2A3;
-    --ink-faint:#6D7677;
-    --hairline: #29302F;
-    --accent:   #63BBAB;
-    --accent-ink:#8ED3C5;
-    --accent-wash:#17302C;
-    --ochre:    #D3A752;
-    --ochre-wash:#2E2718;
-  }
-
   * { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    background: var(--ground);
-    color: var(--ink);
-    font-family: var(--font-body);
-    font-size: var(--t-md);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  .app {
-    display: grid;
-    grid-template-columns: var(--rail-w) 1fr;
-    min-height: 100vh;
-  }
-
-  /* ---------- rail ---------- */
-
-  .rail {
-    background: var(--surface);
-    border-right: 1px solid var(--hairline);
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-    padding: 22px 0;
-  }
-
-  .brand {
-    display: flex;
-    align-items: baseline;
-    gap: 9px;
-    padding: 0 20px;
-  }
-
-  .brand b {
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  .brand span {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-    letter-spacing: 0.06em;
-  }
-
-  .nav { display: flex; flex-direction: column; }
-
-  .nav a {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 7px 20px;
-    color: var(--ink-soft);
-    text-decoration: none;
-    font-size: var(--t-md);
-    border-left: 2px solid transparent;
-  }
-
-  .nav a:hover { color: var(--ink); background: var(--sunk); }
-
-  .nav a[aria-current="page"] {
-    color: var(--ink);
-    border-left-color: var(--accent);
-    font-weight: 500;
-  }
-
-  .nav a em {
-    font-style: normal;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-  }
-
-  .rail-label {
-    padding: 0 20px;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    margin-bottom: 8px;
-  }
-
-  .threads { display: flex; flex-direction: column; }
-
-  .threads button {
-    text-align: left;
-    background: none;
-    border: 0;
-    border-left: 2px solid transparent;
-    padding: 8px 20px;
-    color: var(--ink-soft);
-    font: inherit;
-    font-size: var(--t-sm);
-    line-height: 1.4;
-    cursor: pointer;
-  }
-
-  .threads button:hover { background: var(--sunk); color: var(--ink); }
-
-  .threads button[aria-current="true"] {
-    border-left-color: var(--accent);
-    color: var(--ink);
-    background: var(--sunk);
-  }
-
-  .threads time {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-    margin-top: 2px;
-  }
-
-  .rail-foot {
-    margin-top: auto;
-    padding: 0 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  /* ---------- main ---------- */
-
-  .main { display: flex; flex-direction: column; min-width: 0; }
-
-  .topbar {
-    border-bottom: 1px solid var(--hairline);
-    padding: 12px 32px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    background: var(--surface);
-  }
-
-  .topbar h1 {
-    margin: 0;
-    font-size: var(--t-lg);
-    font-weight: 550;
-    letter-spacing: -0.01em;
-  }
-
-  .chip {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    letter-spacing: 0.02em;
-    padding: 3px 8px;
-    border-radius: var(--r);
-    background: var(--sunk);
-    color: var(--ink-soft);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .chip.accent { background: var(--accent-wash); color: var(--accent-ink); }
-
-  .thread {
-    flex: 1;
-    overflow: auto;
-    padding: 34px 32px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 30px;
-    max-width: 860px;
-    width: 100%;
-  }
-
-  /* ---------- question ---------- */
-
-  .ask {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    padding-left: 15px;
-    border-left: 2px solid var(--accent);
-  }
-
-  .ask p {
-    margin: 0;
-    font-size: var(--t-xl);
-    line-height: 1.35;
-    letter-spacing: -0.015em;
-    text-wrap: balance;
-  }
-
-  .meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-  }
-
-  /* ---------- activity trace (timeline, wie in loom) ---------- */
-
-  details.trace {
-    border: 1px solid var(--hairline);
-    border-radius: var(--r);
-    background: var(--surface);
-  }
-
-  details.trace > summary {
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 9px 14px;
-    font-size: var(--t-sm);
-    color: var(--ink-soft);
-  }
-
-  details.trace > summary::-webkit-details-marker { display: none; }
-  details.trace > summary:hover { color: var(--ink); }
-  details.trace[open] > summary { border-bottom: 1px solid var(--hairline); }
-  details.trace > summary .grow { flex: 1; }
-
-  .trace-body {
-    position: relative;
-    padding: 10px 14px 12px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* the line that makes it a timeline rather than a list */
-  .trace-body::before {
-    content: "";
-    position: absolute;
-    left: 25px;
-    top: 22px;
-    bottom: 22px;
-    width: 1px;
-    background: var(--hairline);
-  }
-
-  .trace-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 11px;
-    padding: 5px 0;
-  }
-
-  .trace-node {
-    position: relative;
-    z-index: 1;
-    flex: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--surface);
-    border: 1px solid var(--hairline);
-    color: var(--ink-faint);
-    display: grid;
-    place-items: center;
-  }
-
-  .trace-node svg { width: 11px; height: 11px; }
-
-  .trace-row.done .trace-node { border-color: var(--accent); color: var(--accent); }
-  .trace-row.waiting .trace-node { border-color: var(--ochre); color: var(--ochre); }
-
-  .trace-main { flex: 1; min-width: 0; padding-top: 2px; }
-
-  .trace-title { font-size: var(--t-sm); color: var(--ink); }
-
-  .trace-detail {
-    font-size: var(--t-sm);
-    color: var(--ink-soft);
-    margin-top: 1px;
-    line-height: 1.45;
-  }
-
-  .trace-dur {
-    flex: none;
-    padding-top: 4px;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* ---------- clarification ---------- */
-
-  /* pending: ochre, because it needs the reader. resolved: quiet hairline. */
-  details.clarify > summary {
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 10px 16px;
-    font-size: var(--t-sm);
-    color: var(--ink-soft);
-  }
-
-  details.clarify > summary::-webkit-details-marker { display: none; }
-  details.clarify > summary:hover { color: var(--ink); }
-  details.clarify > summary .grow { flex: 1; color: var(--ink); }
-  details.clarify[open] > summary { border-bottom: 1px solid var(--hairline); }
-
-  .clarify.resolved { border-color: var(--hairline); }
-
-  .clarify {
-    border: 1px solid var(--ochre);
-    border-radius: var(--r);
-    background: var(--surface);
-    overflow: hidden;
-  }
-
-  .clarify-head {
-    background: var(--ochre-wash);
-    padding: 11px 16px;
-    display: flex;
-    gap: 10px;
-    align-items: baseline;
-    border-bottom: 1px solid var(--hairline);
-  }
-
-  .clarify-head strong { font-weight: 550; font-size: var(--t-md); }
-
-  .clarify-head span {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--ochre);
-  }
-
-  .candidates { display: flex; flex-direction: column; }
-
-  .cand {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 14px;
-    align-items: start;
-    text-align: left;
-    background: none;
-    border: 0;
-    border-top: 1px solid var(--hairline);
-    padding: 12px 16px;
-    font: inherit;
-    color: var(--ink);
-    cursor: pointer;
-  }
-
-  .cand:first-child { border-top: 0; }
-  .cand:hover { background: var(--sunk); }
-
-  .cand[aria-pressed="true"] {
-    background: var(--accent-wash);
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-
-  .cand b { font-weight: 550; }
-
-  .cand small {
-    grid-column: 1 / -1;
-    color: var(--ink-soft);
-    font-size: var(--t-sm);
-    line-height: 1.5;
-  }
-
-  .repo {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-    white-space: nowrap;
-  }
-
-  /* ---------- answer ---------- */
-
-  .answer { display: flex; flex-direction: column; gap: 14px; }
-
-  .answer h3 {
-    margin: 6px 0 0;
-    font-size: var(--t-md);
-    font-weight: 600;
-    letter-spacing: -0.005em;
-  }
-
-  .answer p { margin: 0; max-width: 66ch; }
-
-  .answer ol { margin: 0; padding-left: 1.25em; max-width: 66ch; }
-  .answer li { margin-bottom: 6px; }
-
-  sup a {
-    font-family: var(--font-mono);
-    font-size: 0.66em;
-    color: var(--accent-ink);
-    text-decoration: none;
-    background: var(--accent-wash);
-    padding: 1px 3px;
-    border-radius: 2px;
-    vertical-align: super;
-  }
-
-  .caret {
-    display: inline-block;
-    width: 7px;
-    height: 1.05em;
-    background: var(--accent);
-    vertical-align: text-bottom;
-    animation: blink 1.1s steps(1) infinite;
-  }
-
+  html { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  [hidden] { display: none !important; }
+
+  .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+
+  /* ---------- top bar ---------- */
+  .bar { display: grid; grid-template-columns: var(--rail) 1fr auto; align-items: center; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 20px; font-family: var(--serif); font-weight: 600; font-size: 21px; letter-spacing: -.01em; height: 100%; }
+  .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--accent-fill) url("../../rongo-wide.png") no-repeat 3px center / auto 24px; filter: none; }
+  .mark { background-blend-mode: luminosity; }
+  .brand small { font-family: var(--mono); color: var(--faint); font-weight: 400; font-size: 11px; margin-left: auto; }
+  .crumb { display: flex; align-items: center; gap: 10px; padding: 0 24px; font-size: 15px; color: var(--muted); }
+  .crumb b { color: var(--ink); font-weight: 500; font-family: var(--serif); font-size: 19px; }
+  .crumb .sep { color: var(--faint); }
+  .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; background: var(--panel); }
+  .pill.accent { border-color: var(--accent-dim); background: var(--accent-dim); color: var(--accent-strong); font-weight: 500; }
+  .pill.ochre { border-color: transparent; background: var(--wait-wash); color: var(--wait); font-weight: 500; }
+  .pill.dim { border-color: transparent; background: var(--active); color: var(--muted); }
+  .user { display: flex; align-items: center; gap: 14px; padding: 0 20px; font-size: 13px; color: var(--muted); }
+  .user button:hover { color: var(--ink); }
+
+  /* ---------- body ---------- */
+  .body { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 0; }
+  .rail { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .nav { padding: 12px 12px 4px; display: grid; gap: 2px; }
+  .nav button { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: var(--r-sm); color: var(--muted); font-size: 15px; text-align: left; position: relative; }
+  .nav button:hover { color: var(--ink); background: var(--active); }
+  .nav button[aria-current="page"] { color: var(--ink); background: var(--active); }
+  .nav button[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .nav button .k { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .nav svg { width: 16px; height: 16px; color: var(--muted); }
+  .lbl { padding: 14px 24px 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); display: flex; font-weight: 500; }
+  .lbl .cnt { margin-left: auto; letter-spacing: 0; font-family: var(--mono); }
+  .threads { flex: 1; overflow: auto; padding: 0 12px 12px; }
+  .threads button { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 7px 12px; border-radius: var(--r-sm); color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; }
+  .threads button > .t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .threads button > time { margin-left: auto; flex: none; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .threads button:hover { color: var(--ink); background: var(--active); }
+  .threads button[aria-current="true"] { color: var(--ink); background: var(--active); }
+  .threads .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-strong); animation: pulse 1.2s ease-in-out infinite; flex: none; align-self: center; }
+  .railfoot { margin: 0 12px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg); font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .railfoot i { width: 7px; height: 7px; border-radius: 50%; background: var(--online); }
+
+  /* ---------- ask ---------- */
+  .ask { display: grid; grid-template-columns: 1fr var(--evw); min-height: 0; }
+  .col { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+  .scroll { flex: 1; overflow: auto; min-height: 0; }
+  .thread { padding: 32px 40px 40px; max-width: 900px; }
+
+  .turn { padding: 0 0 32px; margin-bottom: 32px; border-bottom: 1px solid var(--border-soft); }
+  .turn:last-of-type { border-bottom: 0; }
+  .q { margin: 0; font-family: var(--serif); font-size: 26px; font-weight: 500; letter-spacing: -.01em; line-height: 1.3; color: var(--ink); max-width: 30ch; text-wrap: balance; }
+  .eyebrow { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-strong); font-weight: 500; margin-bottom: 6px; }
+  .meta { display: flex; gap: 6px; align-items: center; margin: 10px 0 0 0; }
+  .meta time { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
+  .chev { width: 11px; height: 11px; transition: transform .15s; flex: none; }
+  [aria-expanded="true"] > .chev { transform: rotate(90deg); }
+
+  /* progress timeline: always visible, grows live, one per turn */
+  .prog { margin: 16px 0 0 0; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 22px 1fr auto; column-gap: 12px; row-gap: 0; font-size: 14px; color: var(--muted); position: relative; }
+  .steps::before { content: ""; position: absolute; left: 10px; top: 14px; bottom: 14px; width: 1px; background: var(--border); }
+  .steps li { display: contents; }
+  .steps li > i { position: relative; width: 22px; height: 28px; display: flex; align-items: center; justify-content: center; }
+  .steps li > i::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); position: relative; z-index: 1; box-shadow: 0 0 0 3px var(--bg); }
+  .steps li > span { line-height: 28px; }
+  .steps li > time { line-height: 28px; font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; text-align: right; }
+  .steps li.now > span { color: var(--ink); font-weight: 500; }
+  .steps li.now > i::before { width: 13px; height: 13px; background: transparent; border: 2px solid var(--accent-dim); border-top-color: var(--accent-strong); animation: spin .9s linear infinite; box-shadow: 0 0 0 3px var(--bg); }
+  .steps li.end > span { color: var(--ink); font-weight: 500; }
+  .steps li.end > i::before { width: 12px; height: 12px; }
+  .steps li.done > i::before { background: var(--online); }
+  .steps li.wait > i::before { background: var(--wait); box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--wait-wash); }
+  .steps li.wait > span { color: var(--wait); }
+  .steps li.fail > i::before { background: var(--danger); }
+  .steps li.fail > span { color: var(--accent-strong); }
+  .steps li.decided > i::before { background: var(--muted); }
+  .steps li.decided > span { color: var(--muted); font-weight: 400; }
+  .steps li.typing > span::after { content: ""; display: inline-block; width: 2px; height: .9em; background: var(--accent-strong); vertical-align: -1px; margin-left: 6px; animation: blink 1s steps(2) infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px var(--accent-dim); } }
+  @media (prefers-reduced-motion: reduce) { .steps li.now > i::before, .busybar, .threads .pulse, .caret, .steps li.typing > span::after { animation: none; } }
+  .busybar { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent-strong) 50%, transparent); background-size: 35% 100%; background-repeat: no-repeat; animation: slide 1.3s ease-in-out infinite; z-index: 1; }
+  @keyframes slide { from { background-position: -35% 0; } to { background-position: 135% 0; } }
+
+  .clar { margin: 12px 0 0 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); }
+  .clar.open { border-color: var(--wait); }
+  .clar > button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; text-align: left; font-size: 14.5px; }
+  .clar .lab { font-size: 11px; color: var(--faint); letter-spacing: .1em; text-transform: uppercase; font-weight: 500; }
+  .clar .sub { margin-left: auto; font-size: 12.5px; color: var(--faint); }
+  .clar .cnt { color: var(--faint); }
+
+  .ans { margin: 20px 0 0 0; max-width: 68ch; font-size: 16px; line-height: 1.65; color: var(--ink-dim); }
+  .ans p { margin: 0 0 14px; }
+  .ans code { background: var(--active); border: 1px solid var(--border); padding: 0 5px; border-radius: 5px; font-size: .88em; }
+  .ans sup { font-family: var(--mono); font-size: 10px; font-weight: 600; margin: 0 1px; }
+  .ans sup a { color: var(--accent-strong); text-decoration: none; padding: 1px 4px; border-radius: 4px; background: var(--accent-dim); }
+  .ans sup a:hover { color: var(--ink); }
+  .caret { display: inline-block; width: 2px; height: 1em; background: var(--accent-strong); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
 
-  @media (prefers-reduced-motion: reduce) {
-    .caret { animation: none; }
-  }
+  .acts { display: flex; gap: 8px; margin: 18px 0 0 0; align-items: center; }
+  .btn { font-size: 13.5px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; color: var(--ink-dim); background: var(--panel); }
+  .btn:hover { background: var(--active); border-color: var(--elevated-border); }
+  .btn kbd { font-family: var(--mono); color: var(--faint); margin-left: 6px; font-size: 11px; }
+  .acts .pill { margin-left: auto; }
 
-  /* ---------- evidence ---------- */
+  /* sources pane */
+  .ev { border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .ev header { padding: 14px 18px; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; font-weight: 500; }
+  .ev header .cnt { margin-left: auto; letter-spacing: 0; font-family: var(--mono); }
+  .ev .list { overflow: auto; flex: 1; }
+  .src { display: grid; grid-template-columns: 26px 1fr; gap: 2px 8px; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .src:hover, .src.hot { background: var(--active); }
+  .src .m { color: var(--accent-strong); font-weight: 600; font-family: var(--mono); grid-row: span 3; }
+  .src .repo { color: var(--ink); font-weight: 500; }
+  .src .repo span { color: var(--faint); font-weight: 400; margin-left: 6px; font-family: var(--mono); font-size: 11.5px; }
+  .src .path { color: var(--muted); word-break: break-all; font-family: var(--mono); font-size: 12px; }
+  .src .path b { color: var(--ink-dim); font-weight: 500; }
+  .src .turnref { color: var(--faint); font-size: 12px; }
+  .ev .note { padding: 14px 18px; font-size: 12.5px; color: var(--faint); border-top: 1px solid var(--border); line-height: 1.45; }
+  .ev .note b { color: var(--muted); font-weight: 500; }
 
-  details.evidence {
-    border: 1px solid var(--hairline);
-    border-radius: var(--r);
-    background: var(--surface);
-  }
+  /* composer */
+  .dock { padding: 12px 40px 18px; background: linear-gradient(to bottom, transparent, var(--bg) 30%); }
+  .prompt { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--panel); padding: 8px 8px 8px 12px; box-shadow: var(--shadow-panel); }
+  .prompt:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim), var(--shadow-panel); }
+  .ctl { display: flex; align-items: center; gap: 8px; }
+  .lang { position: relative; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); padding: 0 10px 0 12px; height: 32px; color: var(--muted); font-size: 12.5px; }
+  .lang:hover { color: var(--ink); border-color: var(--elevated-border); }
+  .lang select { appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: inherit; font: inherit; padding-right: 18px; outline: none; cursor: pointer; }
+  .lang .chev { position: absolute; right: 9px; transform: rotate(90deg); width: 10px; height: 10px; pointer-events: none; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .role { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; background: var(--bg); padding: 2px; gap: 2px; }
+  .role button { font-size: 12.5px; font-weight: 500; padding: 4px 12px; color: var(--muted); border-radius: 999px; }
+  .role button[aria-pressed="true"] { background: var(--accent-fill); color: var(--ink); }
+  .prompt textarea { border: 0; background: transparent; resize: none; font: inherit; font-size: 15px; color: var(--ink); outline: none; padding: 6px 0; width: 100%; }
+  .prompt textarea::placeholder { color: var(--faint); opacity: 1; }
+  .go { font-size: 14px; font-weight: 500; padding: 9px 18px; background: var(--accent-fill); color: var(--ink); border-radius: 999px; }
+  .go:hover { background: var(--accent-strong); }
+  .dockhint { margin-top: 8px; font-size: 12px; color: var(--faint); padding-left: 4px; }
 
-  details.evidence > summary {
-    cursor: pointer;
-    padding: 10px 14px;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-size: var(--t-sm);
-    color: var(--ink-soft);
-    list-style: none;
-  }
+  /* ---------- repos ---------- */
+  .page { padding: 32px 40px; max-width: 1100px; }
+  .page h2 { margin: 0 0 6px; font-family: var(--serif); font-size: 28px; font-weight: 500; letter-spacing: -.01em; }
+  .page .lede { color: var(--muted); margin: 0 0 24px; font-size: 14.5px; }
+  .strip { display: flex; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); margin-bottom: 20px; overflow: hidden; }
+  .strip div { padding: 14px 20px; border-right: 1px solid var(--border); flex: 1; }
+  .strip div:last-child { border-right: 0; }
+  .strip .k { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .strip .v { font-family: var(--serif); font-size: 26px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .strip .v small { font-family: var(--sans); font-size: 12.5px; color: var(--muted); margin-left: 6px; }
+  table.repos { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--panel); overflow: hidden; }
+  table.repos th { text-align: left; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
+  table.repos td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  table.repos tr:last-child td { border-bottom: 0; }
+  table.repos .num, table.repos th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .name { font-weight: 500; }
+  .errline { margin-top: 4px; color: var(--accent-strong); font-size: 13px; }
+  tr[data-state="disabled"] td { color: var(--faint); }
+  tr[data-state="error"] td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+  .sha { font-family: var(--mono); font-size: 12px; }
+  .when { color: var(--faint); font-size: 12.5px; margin-left: 6px; }
 
-  details.evidence > summary::-webkit-details-marker { display: none; }
-  details.evidence > summary:hover { color: var(--ink); }
-  details.evidence[open] > summary { border-bottom: 1px solid var(--hairline); }
-
-  /* disclosure marker: chevron, rotates to point down when open */
-  .chev {
-    flex: none;
-    width: 12px;
-    height: 12px;
-    color: var(--accent);
-    transition: transform 140ms ease;
-  }
-
-  details[open] > summary .chev { transform: rotate(90deg); }
-
-  @media (prefers-reduced-motion: reduce) {
-    .chev { transition: none; }
-  }
-
-  .ev-table-wrap { overflow-x: auto; }
-
-  table.ev {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--t-sm);
-  }
-
-  table.ev th {
-    text-align: left;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    font-weight: 400;
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--hairline);
-  }
-
-  table.ev td {
-    padding: 7px 14px;
-    border-bottom: 1px solid var(--hairline);
-    vertical-align: top;
-  }
-
-  table.ev tr:last-child td { border-bottom: 0; }
-
-  table.ev td.path {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    white-space: nowrap;
-  }
-
-  table.ev td.path a { color: var(--accent-ink); text-decoration: none; }
-  table.ev td.path a:hover { text-decoration: underline; }
-
-  table.ev td.n {
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--accent-ink);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* ---------- answer actions ---------- */
-
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-
-  .btn {
-    font: inherit;
-    font-size: var(--t-sm);
-    padding: 5px 11px;
-    border-radius: var(--r);
-    border: 1px solid var(--hairline);
-    background: var(--surface);
-    color: var(--ink-soft);
-    cursor: pointer;
-  }
-
-  .btn:hover { color: var(--ink); border-color: var(--ink-faint); }
-
-  /* ---------- composer ---------- */
-
-  .composer {
-    border-top: 1px solid var(--hairline);
-    background: var(--surface);
-    padding: 14px 32px 18px;
-  }
-
-  .composer-inner { max-width: 860px; }
-
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    border: 1px solid var(--hairline);
-    border-radius: var(--r);
-    padding: 9px 12px;
-    background: var(--ground);
-  }
-
-  .field:focus-within { border-color: var(--accent); }
-
-  .field input {
-    flex: 1;
-    border: 0;
-    background: none;
-    font: inherit;
-    color: var(--ink);
-    outline: none;
-    min-width: 0;
-  }
-
-  .field input::placeholder { color: var(--ink-faint); }
-
-  .roles { display: flex; border: 1px solid var(--hairline); border-radius: var(--r); overflow: hidden; }
-
-  .roles button {
-    font: inherit;
-    font-size: var(--t-xs);
-    font-family: var(--font-mono);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    padding: 4px 9px;
-    border: 0;
-    background: var(--surface);
-    color: var(--ink-faint);
-    cursor: pointer;
-  }
-
-  .roles button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
-
-  .send {
-    border: 0;
-    background: var(--accent);
-    color: var(--surface);
-    border-radius: var(--r);
-    padding: 6px 13px;
-    font: inherit;
-    font-size: var(--t-sm);
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .composer-foot {
-    display: flex;
-    gap: 14px;
-    align-items: center;
-    margin-top: 8px;
-    font-family: var(--font-mono);
-    font-size: var(--t-xs);
-    color: var(--ink-faint);
-    flex-wrap: wrap;
-  }
-
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  @media (max-width: 820px) {
-    .app { grid-template-columns: 1fr; }
-    .rail { display: none; }
-    .thread, .composer { padding-left: 18px; padding-right: 18px; }
-  }
+  .gallery { margin-top: 40px; padding-top: 20px; border-top: 1px dashed var(--border); }
+  .gallery h4 { margin: 0; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); font-weight: 500; }
+  .gallery .live { margin-top: 10px; }
+  .mockbar { display: none; }
 </style>
 
 <div class="app">
+  <header class="bar">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>rongo<small>v0.4</small></div>
+    <div class="crumb" data-crumb="ask"><span>Threads</span><span class="sep">/</span><b>Teaser mail sending</b><span class="pill accent">Analyst</span><span class="pill dim">2 turns</span><span class="pill dim">3 repos</span></div>
+    <div class="user">j.meier@firma.ch<button>Sign out</button></div>
+  </header>
 
-  <aside class="rail">
-    <div class="brand"><b>rongo</b><span>v0.4</span></div>
+  <div class="body">
+    <aside class="rail">
+      <div class="lbl" style="padding-top:16px">Explore</div>
+      <nav class="nav" aria-label="Pages">
+        <button aria-current="page" data-page="ask"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg>Ask</button>
+        <button data-page="repos" data-section="index"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="11" cy="6" r="1.5"/><path d="M5 5.5v5M11 7.5c0 2-6 1-6 3"/></svg>Repos</button>
+        <button><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>New question</button>
+      </nav>
+      <div class="lbl">History<span class="cnt">7</span></div>
+      <nav class="threads" aria-label="Threads">
+        <button aria-current="true"><span class="t">Teaser mail sending</span><span class="pulse" aria-hidden="true"></span><time>09:14</time></button>
+        <button><span class="t">Voucher expiry on refunds</span><time>08:02</time></button>
+        <button><span class="t">VAT calculation Germany</span><time>yest.</time></button>
+        <button><span class="t">Where does the order number come from?</span><time>yest.</time></button>
+        <button><span class="t">Writes to the customer master data</span><time>28 Aug</time></button>
+        <button><span class="t">Retry policy of the payment webhook</span><time>21 Aug</time></button>
+        <button><span class="t">How are duplicates merged?</span><time>12 Aug</time></button>
+      </nav>
+      <div class="railfoot"><i aria-hidden="true"></i>Index current · 6 min ago</div>
+    </aside>
 
-    <nav class="nav">
-      <a href="#" aria-current="page">Ask</a>
-      <a href="#">Repos <em>37</em></a>
-      <a href="#">Cost <em>$12.40</em></a>
-      <a href="#">Settings</a>
-    </nav>
+    <!-- ================= ASK ================= -->
+    <section class="ask" data-view="ask">
+      <div class="col">
+        <div class="busybar" aria-hidden="true"></div>
+        <div class="scroll">
+        <div class="thread">
 
-    <div>
-      <div class="rail-label">History</div>
-      <div class="threads">
-        <button aria-current="true">Teaser mail sending<time>2 minutes ago</time></button>
-        <button>Voucher expiry<time>Yesterday</time></button>
-        <button>VAT calculation Germany<time>12 August</time></button>
-        <button>Writes to the customer master data<time>8 August</time></button>
+          <article class="turn">
+            <div class="eyebrow">Analyst</div>
+            <p class="q">How is the teaser mail sent?</p>
+            <div class="meta"><time>09:14:07</time><span class="pill dim">turn 1</span></div>
+            <div class="prog" role="status">
+              <ol class="steps">
+                <li class="done"><i aria-hidden="true"></i><span>Understanding the question</span><time>0.8s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Searching 3 repositories</span><time>1.4s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Two mechanisms match</span><time>2.1s</time></li>
+                <li class="end decided"><i aria-hidden="true"></i><span>Asked back, choice made</span><time>4.3s</time></li>
+              </ol>
+            </div>
+            <div class="clar">
+              <button aria-expanded="false"><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lab">Chosen</span>Campaign teaser via the mailer queue<span class="sub">peeq · master · <span class="cnt">2 candidates</span></span></button>
+            </div>
+          </article>
+
+          <article class="turn">
+            <div class="eyebrow">Analyst</div>
+            <p class="q">How is the teaser mail sent?</p>
+            <div class="meta"><time>09:15:02</time><span class="pill dim">turn 2</span><span class="pill dim">from choice 1</span></div>
+            <div class="prog" role="status">
+              <ol class="steps">
+                <li class="done"><i aria-hidden="true"></i><span>Reading peeq/internal/mail</span><time>1.1s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Following campaign → mailer</span><time>1.9s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Checking relevance</span><time>0.7s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Writing the answer</span><time>6.2s</time></li>
+                <li class="end done"><i aria-hidden="true"></i><span>Done</span><time>9.9s</time></li>
+              </ol>
+            </div>
+            <div class="ans">
+              <p>A teaser mail is not sent by the campaign itself. When a campaign is scheduled, it only writes one job per recipient into the mailer queue, with the campaign id and the recipient's locale attached<sup><a href="#b1">1</a></sup>. Nothing leaves the system at that point.</p>
+              <p>A separate worker drains that queue every thirty seconds. For each job it renders the teaser template in the recipient's language, checks that the recipient has not unsubscribed in the meantime, and hands the finished message to the transport<sup><a href="#b2">2</a></sup>. A recipient who unsubscribed between scheduling and sending is skipped, and the job is marked as such rather than deleted.</p>
+              <p>The transport is the only place that talks to the outside world. It sends through the configured SMTP relay and records the provider's message id on the job, which is what the delivery report later matches against<sup><a href="#b3">3</a></sup>. The relay's credentials come from the environment, not from the campaign.<span class="caret" aria-hidden="true"></span></p>
+            </div>
+            <div class="acts">
+              <button class="btn">Explain as Developer<kbd>d</kbd></button>
+              <button class="btn">Copy as Markdown<kbd>c</kbd></button>
+              <span class="pill dim">4 812 tokens</span>
+            </div>
+          </article>
+
+          <article class="turn">
+            <div class="eyebrow">Analyst</div>
+            <p class="q">What happens when the relay is down?</p>
+            <div class="meta"><time>09:21:40</time><span class="pill dim">turn 3</span></div>
+            <div class="prog" role="status" aria-live="polite">
+              <ol class="steps">
+                <li class="done"><i aria-hidden="true"></i><span>Understanding the question</span><time>0.7s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Searching 3 repositories</span><time>1.2s</time></li>
+                <li class="done"><i aria-hidden="true"></i><span>Reading peeq/internal/mail/transport</span><time>1.9s</time></li>
+                <li class="now"><i aria-hidden="true"></i><span>Checking relevance</span><time>0.4s</time></li>
+              </ol>
+            </div>
+          </article>
+
+          <div class="gallery">
+            <h4>Timeline states (reference)</h4>
+            <div class="prog"><ol class="steps"><li class="done"><i aria-hidden="true"></i><span>Searching 3 repositories</span><time>1.4s</time></li><li class="now typing"><i aria-hidden="true"></i><span>Writing the answer</span><time>3.1s</time></li></ol></div>
+            <div class="prog"><ol class="steps"><li class="done"><i aria-hidden="true"></i><span>Two mechanisms match</span><time>2.1s</time></li><li class="end wait"><i aria-hidden="true"></i><span>Waiting for a choice</span><time>4.3s</time></li></ol></div>
+            <div class="prog"><ol class="steps"><li class="done"><i aria-hidden="true"></i><span>Writing the answer</span><time>6.2s</time></li><li class="end done"><i aria-hidden="true"></i><span>Done</span><time>9.9s</time></li></ol></div>
+            <div class="prog"><ol class="steps"><li class="done"><i aria-hidden="true"></i><span>Searching 3 repositories</span><time>1.4s</time></li><li class="end fail"><i aria-hidden="true"></i><span>The turn failed</span><time>2.0s</time></li></ol></div>
+          </div>
+
+        </div>
+        </div>
+        <form class="dock" onsubmit="return false">
+          <div class="prompt">
+            <div class="ctl"><div class="role" role="group" aria-label="Role"><button aria-pressed="true">Analyst</button><button aria-pressed="false">Developer</button></div><label class="lang"><span class="sr">Answer language</span><select aria-label="Answer language"><option>English</option><option>Deutsch</option><option>Français</option><option>Italiano</option></select><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></label></div>
+            <textarea rows="1" aria-label="Question" placeholder="Ask about the code…"></textarea>
+            <button class="go" type="submit">Ask</button>
+          </div>
+          <div class="dockhint">Follow-ups stay in this thread. Role and language travel with each question. <b style="color:var(--muted);font-weight:500">Language is a new field on the ask request, stored per message and passed to the answer prompt.</div>
+        </form>
       </div>
-    </div>
 
-    <div class="rail-foot">
-      <span class="chip">Index current · 6 min ago</span>
-      <span class="chip">j.meier@firma.ch</span>
-    </div>
-  </aside>
-
-  <div class="main">
-
-    <header class="topbar">
-      <h1>Teaser mail sending</h1>
-      <span class="chip accent">Role: business analyst</span>
-      <span class="chip">3 Repositories</span>
-      <span class="chip">4 calls · 4'812 tokens · $0.06</span>
-    </header>
-
-    <div class="thread">
-
-      <section class="ask">
-        <p>How did we implement teaser mail sending?</p>
-        <div class="meta"><span>Today, 09:14</span></div>
-      </section>
-
-      <details class="trace" open role="status" aria-live="polite">
-        <summary><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="grow">3 candidates found — a follow-up question is needed</span><span class="chip">1.3 s · 2 calls</span></summary>
-        <div class="trace-body">
-          <div class="trace-row">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.1"/></svg></span>
-            <div class="trace-main"><div class="trace-title">Question understood</div><div class="trace-detail">Intent: how it works · 6 search terms expanded</div></div>
-            <span class="trace-dur">0.4 s</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.1"/></svg></span>
-            <div class="trace-main"><div class="trace-title">37 repositories searched</div><div class="trace-detail">3 modules scoring too close together</div></div>
-            <span class="trace-dur">0.9 s</span>
-          </div>
-          <div class="trace-row waiting">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4.3 4.2a1.75 1.75 0 1 1 2.4 1.65c-.55.3-.75.75-.75 1.25v.25"/><circle cx="6" cy="9.4" r="0.6" fill="currentColor" stroke="none"/></svg></span>
-            <div class="trace-main"><div class="trace-title">Follow-up question asked</div><div class="trace-detail">3 candidates offered</div></div>
-            <span class="trace-dur">—</span>
-          </div>
+      <aside class="ev" aria-label="Sources">
+        <header>Sources<span class="cnt">Turn 2 · 3</span></header>
+        <div class="list">
+          <div class="src" id="b1"><span class="m">1</span><span class="repo">peeq<span>master</span></span><span class="path">internal/campaign/<b>schedule.go</b>:41-88</span><span class="turnref">enqueue per recipient</span></div>
+          <div class="src hot" id="b2"><span class="m">2</span><span class="repo">peeq<span>master</span></span><span class="path">internal/mail/<b>worker.go</b>:19-72</span><span class="turnref">drain loop, unsubscribe check</span></div>
+          <div class="src" id="b3"><span class="m">3</span><span class="repo">peeq<span>master</span></span><span class="path">internal/mail/transport/<b>smtp.go</b>:33-61</span><span class="turnref">relay send, message id</span></div>
         </div>
-      </details>
+        <div class="note"><b>Decisions:</b> Warm Editorial dark, one theme, same tokens and fonts as loom/peeq. The Sources pane replaces the spec's single-column thread. The grey lines under each path are illustrative only; the API sends no per-source text and the invariants forbid generating any.</div>
+      </aside>
+    </section>
 
-      <details class="clarify resolved">
-        <summary><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="grow">Chosen: <b>Teaser mails for abandoned carts</b></span><span class="repo">shop-backend</span></summary>
-        <div class="candidates">
-          <button class="cand" aria-pressed="true">
-            <b>Teaser mails for abandoned carts</b>
-            <span class="repo">shop-backend</span>
-            <small>Reminds customers who left their cart without ordering. Runs hourly, at most two mails per cart.</small>
-          </button>
-          <button class="cand">
-            <b>Teaser in the newsletter header</b>
-            <span class="repo">crm-campaigns</span>
-            <small>An editorially maintained teaser block, rendered above the newsletter and personalised per segment.</small>
-          </button>
-          <button class="cand">
-            <b>Product teaser in transactional mails</b>
-            <span class="repo">mail-templates</span>
-            <small>A recommendation block at the foot of order and shipping confirmations, filled from the recommendation service.</small>
-          </button>
+    <!-- ================= REPOS ================= -->
+    <section data-view="repos" hidden>
+      <div class="scroll">
+      <div class="page">
+        <h2>Repositories</h2>
+        <p class="lede">Read-only. Maintained in <code>repos.yaml</code>; credentials never live there. A repo that drops out of the file is deactivated, never deleted.</p>
+        <div class="strip">
+          <div><div class="k">repos</div><div class="v">4<small>3 active</small></div></div>
+          <div><div class="k">files</div><div class="v">1 906</div></div>
+          <div><div class="k">chunks</div><div class="v">14 311</div></div>
+          <div><div class="k">modules</div><div class="v">123</div></div>
+          <div><div class="k">last run</div><div class="v">6m<small>ago</small></div></div>
         </div>
-      </details>
-
-      <details class="trace" open role="status" aria-live="polite">
-        <summary><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="grow">14 files read across 2 repositories</span><span class="chip">3.3 s · 2 calls</span></summary>
-        <div class="trace-body">
-          <div class="trace-row">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.1"/></svg></span>
-            <div class="trace-main"><div class="trace-title">Choice taken</div><div class="trace-detail">Teaser mails for abandoned carts · shop-backend</div></div>
-            <span class="trace-dur">—</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.1"/></svg></span>
-            <div class="trace-main"><div class="trace-title">14 files read</div><div class="trace-detail">2 call chains followed: AbandonedCartJob → TeaserSender</div></div>
-            <span class="trace-dur">2.5 s</span>
-          </div>
-          <div class="trace-row">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="6" cy="6" r="4.6"/><path d="M6 3.4V6l1.8 1.1"/></svg></span>
-            <div class="trace-main"><div class="trace-title">Repository boundary crossed</div><div class="trace-detail">shop-backend pulls in <code>mail-templates:2.4</code> per its manifest — the symbol really is referenced, so it was followed. <code>vendor-mailer</code> is not indexed and was not entered.</div></div>
-            <span class="trace-dur">0.8 s</span>
-          </div>
-          <div class="trace-row done">
-            <span class="trace-node"><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6.3 5 8.7l4.4-5"/></svg></span>
-            <div class="trace-main"><div class="trace-title">Answer written</div></div>
-            <span class="trace-dur"></span>
-          </div>
-        </div>
-      </details>
-
-      <section class="answer">
-        <p>Teaser mail sending for abandoned carts runs fully automatically in <b>shop-backend</b> and consists of three parts: detecting the abandonment, a waiting period, and the sending itself.<sup><a href="#ev">1</a></sup></p>
-
-        <h3>When a cart counts as abandoned</h3>
-        <p>As soon as a cart has gone 30 minutes without a change and no order has been placed, it is marked as abandoned. Guest orders without a stored e-mail address are skipped.<sup><a href="#ev">2</a></sup></p>
-
-        <h3>The waiting period</h3>
-        <p>Four hours then pass before the first mail goes out. The delay is deliberate, so that customers who order shortly afterwards anyway do not get a pointless reminder.<sup><a href="#ev">3</a></sup></p>
-
-        <h3>Sending and stop conditions</h3>
-        <ol>
-          <li>An hourly job collects every cart that is due.</li>
-          <li>At most two mails are sent per cart — the second after 48 hours.<sup><a href="#ev">4</a></sup></li>
-          <li>If someone orders in the meantime, or opts out of marketing, sending stops immediately.<sup><a href="#ev">5</a></sup></li>
-        </ol>
-        <h3>Which part sits where</h3>
-        <p>The mechanism is spread over three places. <b>shop-backend</b> orchestrates: it detects the abandonment, keeps the deadlines and decides whether anything is sent at all. The template and its text blocks live in <b>mail-templates</b>, which is pulled in as a library.<sup><a href="#ev">6</a></sup> The sending itself goes to <b>vendor-mailer</b>, a bought-in component.</p>
-        <p><b>One limitation applies to vendor-mailer:</b> that component is not indexed in rongo. What is visible is how it is called and configured — what it does with the mail internally, such as delivery attempts or bounce handling, is not in the code readable here. That one question still has to be answered by someone on the team.<span class="caret" aria-hidden="true"></span></p>
-
-        <details class="evidence" id="ev">
-          <summary><svg class="chev" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 L8 6 L4.5 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg> How does rongo know this? <span class="chip">6 sources from 2 repositories · 1 boundary</span></summary>
-          <div class="ev-table-wrap">
-            <table class="ev">
-              <thead>
-                <tr><th>No.</th><th>Repository</th><th>File</th><th>Shows</th></tr>
-              </thead>
-              <tbody>
-                <tr><td class="n">1</td><td>shop-backend</td><td class="path"><a href="#">src/cart/AbandonedCartJob.java:41</a></td><td>The hourly job that kicks off the whole sequence</td></tr>
-                <tr><td class="n">2</td><td>shop-backend</td><td class="path"><a href="#">src/cart/CartTimeoutPolicy.java:18</a></td><td><code>IDLE_MINUTES = 30</code>, a guest order without a mail address is skipped</td></tr>
-                <tr><td class="n">3</td><td>shop-backend</td><td class="path"><a href="#">config/teaser.yaml:7</a></td><td><code>firstDelay: PT4H</code></td></tr>
-                <tr><td class="n">4</td><td>shop-backend</td><td class="path"><a href="#">config/teaser.yaml:9</a></td><td><code>maxSends: 2</code>, <code>secondDelay: PT48H</code></td></tr>
-                <tr><td class="n">5</td><td>shop-backend</td><td class="path"><a href="#">src/cart/TeaserSuppression.java:26</a></td><td>Stops on an order or a marketing opt-out</td></tr>
-                <tr><td class="n">6</td><td>mail-templates</td><td class="path"><a href="#">templates/cart/teaser_v2.mjml:1</a></td><td>The teaser mail's template and text blocks</td></tr>
-                <tr><td class="n">—</td><td>vendor-mailer</td><td class="path" style="color:var(--ink-faint)">not indexed</td><td>Only the call and the configuration are visible, not the inside</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-
-        <div class="actions">
-          <button class="btn">Explain as Dev</button>
-          <button class="btn">Export as Markdown</button>
-          <button class="btn">Share a link</button>
-          <span class="chip" title="Understand, route, embed, answer">MiMo Pro 3'904 · non-Pro 811 · Embed 97 · $0.06</span>
-        </div>
-      </section>
-
-    </div>
-
-    <div class="composer">
-      <div class="composer-inner">
-        <div class="field">
-          <input type="text" placeholder="Ask a follow-up — for example: what happens with several open carts?" aria-label="Follow-up question">
-          <div class="roles" role="group" aria-label="Role">
-            <button aria-pressed="true">BA</button>
-            <button aria-pressed="false">DEV</button>
-          </div>
-          <button class="send">Ask</button>
-        </div>
-        <div class="composer-foot">
-          <span>All 37 repositories</span>
-          <span>·</span>
-          <span>Index current up to 16 Aug, 09:08</span>
-        </div>
+        <table class="repos">
+          <thead><tr><th>Repository</th><th>Branch</th><th>State</th><th>Last run</th><th class="num">Files</th><th class="num">Chunks</th><th class="num">Modules</th></tr></thead>
+          <tbody>
+            <tr data-state="ok"><td class="name">peeq</td><td class="mono">master</td><td><span class="pill accent">Indexed</span></td><td><span class="sha">611255a</span><span class="when">today 09:08</span></td><td class="num">412</td><td class="num">3 120</td><td class="num">34</td></tr>
+            <tr data-state="ok"><td class="name">loom</td><td class="mono">master</td><td><span class="pill accent">Indexed</span></td><td><span class="sha">a9c0f12</span><span class="when">today 09:08</span></td><td class="num">1 083</td><td class="num">8 904</td><td class="num">71</td></tr>
+            <tr data-state="error"><td class="name">shop-backend@release-2024.3<div class="errline">Branch release-2024.3 no longer exists on origin. The index is frozen at the last run.</div></td><td class="mono">release-2024.3</td><td><span class="pill ochre">Error</span></td><td><span class="sha">0f3e77b</span><span class="when">28 Aug 14:02</span></td><td class="num">411</td><td class="num">2 287</td><td class="num">18</td></tr>
+            <tr data-state="disabled"><td class="name">legacy-crm</td><td class="mono">main</td><td><span class="pill dim">Disabled</span></td><td><span class="sha">c41d9e0</span><span class="when">3 Aug 22:10</span></td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+          </tbody>
+        </table>
       </div>
-    </div>
-
+      </div>
+    </section>
   </div>
 </div>
+
+<div class="mockbar"><button onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">Dark / light</button></div>
+<script>
+  document.querySelectorAll('.nav button[data-page]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.nav button').forEach(x => x.removeAttribute('aria-current'));
+    b.setAttribute('aria-current', 'page');
+    document.querySelectorAll('[data-view]').forEach(v => v.hidden = v.dataset.view !== b.dataset.page);
+  }));
+  document.querySelectorAll('.trace > button, .clar > button').forEach(b => b.addEventListener('click', () => {
+    const open = b.getAttribute('aria-expanded') === 'true';
+    b.setAttribute('aria-expanded', String(!open));
+    const list = b.parentElement.classList.contains('live') ? b.parentElement.nextElementSibling : b.nextElementSibling; if (list) list.hidden = open;
+  }));
+</script>

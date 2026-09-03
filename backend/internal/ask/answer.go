@@ -22,6 +22,36 @@ const (
 	AudienceDev Audience = "dev"
 )
 
+// Language is the language the answer is written in. Like Audience it affects
+// the answer step only: the understanding, the search terms and the candidate
+// names stay in the language of the code. An unknown value is never an error
+// — ParseLanguage falls back to English, the same way an unknown audience
+// falls back to BA.
+type Language string
+
+const (
+	LanguageEN Language = "en"
+	LanguageDE Language = "de"
+	LanguageFR Language = "fr"
+	LanguageIT Language = "it"
+)
+
+// languageNames is the allowlist, and the word the prompt uses for each entry.
+var languageNames = map[Language]string{
+	LanguageEN: "English",
+	LanguageDE: "German",
+	LanguageFR: "French",
+	LanguageIT: "Italian",
+}
+
+// ParseLanguage maps a wire value onto the allowlist, defaulting to English.
+func ParseLanguage(s string) Language {
+	if _, ok := languageNames[Language(s)]; ok {
+		return Language(s)
+	}
+	return LanguageEN
+}
+
 // answerMaxTokens is generous on purpose. This is the one call where a
 // truncated reply is worse than a long one: it is what a person reads.
 const answerMaxTokens = 4096
@@ -59,7 +89,10 @@ func NewAnswerer(c *llm.Client) *Answerer {
 	return &Answerer{llm: c}
 }
 
-const answerCommon = `You explain code in English.
+// answerCommon takes the language name as its one format argument. Only the
+// answer is written in that language: source paths, symbols and the markers
+// are quoted as they are.
+const answerCommon = `You explain code. Write the answer in %s.
 
 You are given numbered sources. The rules, without exception:
 
@@ -98,16 +131,18 @@ var markerRe = regexp.MustCompile(`\[(\d{1,3})\]`)
 // the model. A model handed only a question and a system prompt answers it
 // fluently from its own training, and that answer would be about some other
 // codebase — the single most expensive failure this product can produce.
-func (a *Answerer) Answer(ctx context.Context, question string, audience Audience,
+func (a *Answerer) Answer(ctx context.Context, question string, audience Audience, lang Language,
 	sources []Source, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
 		return Answer{Text: nothingFound}, nil
 	}
 
-	system := answerCommon + answerBA
+	system := fmt.Sprintf(answerCommon, languageNames[ParseLanguage(string(lang))])
 	if audience == AudienceDev {
-		system = answerCommon + answerDev
+		system += answerDev
+	} else {
+		system += answerBA
 	}
 
 	var text strings.Builder

@@ -20,13 +20,13 @@ import (
 // Asker runs one question end to end. An interface so the HTTP layer can be
 // tested without a model endpoint.
 type Asker interface {
-	Run(ctx context.Context, question string, audience ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error)
+	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 	// Resume continues a turn from the hits one clarification candidate was
 	// built from — no search, no routing.
-	Resume(ctx context.Context, question string, audience ask.Audience, hits []retrieve.Hit, ev ask.Events) (ask.Answer, error)
+	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
-	Reexplain(ctx context.Context, question string, audience ask.Audience, sources []ask.Source, ev ask.Events) (ask.Answer, error)
+	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, ev ask.Events) (ask.Answer, error)
 }
 
 // turnFailed is what a failed turn says, in the stream AND in the stored
@@ -50,6 +50,9 @@ type askRequest struct {
 	ThreadID int64  `json:"thread_id"`
 	Question string `json:"question"`
 	Audience string `json:"audience"`
+	// Language is the language the answer is written in; see ask.ParseLanguage
+	// for the allowlist. Absent or unknown means English.
+	Language string `json:"language"`
 	// ClarificationMessageID and Choice resume a turn that previously ended
 	// by asking: the id of the message that carried the clarification card,
 	// and the index of the candidate the reader picked.
@@ -107,6 +110,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if req.Audience == string(ask.AudienceDev) {
 		audience = ask.AudienceDev
 	}
+	lang := ask.ParseLanguage(req.Language)
 
 	ctx := r.Context()
 
@@ -174,7 +178,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// on the same thread value.
 	ctx = llm.WithThreadID(ctx, thread.ID)
 
-	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), req.Question)
+	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question)
 	if err != nil {
 		slog.Error("record question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -226,7 +230,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resume != nil {
-		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, resumeHits, events)
+		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, events)
 		if err != nil {
 			slog.Error("resumed turn failed", "err", err)
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
@@ -250,7 +254,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, events)
+	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, events)
 	if err != nil {
 		slog.Error("turn failed", "err", err)
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
@@ -317,6 +321,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Audience string `json:"audience"`
+		// Language is optional: a re-explain inherits the language of the
+		// turn it re-answers unless the request says otherwise.
+		Language string `json:"language"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "malformed request", http.StatusBadRequest)
@@ -343,6 +350,10 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// A re-explain is another turn in the same conversation, so it pins to the
 	// same upstream node as the turn it re-answers.
 	ctx = llm.WithThreadID(ctx, msg.ThreadID)
+	lang := ask.ParseLanguage(msg.Language)
+	if req.Language != "" {
+		lang = ask.ParseLanguage(req.Language)
+	}
 
 	sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, id)
 	if err != nil {
@@ -382,7 +393,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// thread is a record, and an earlier answer may already have been
 	// forwarded or pasted into a ticket. from_candidate_idx stays at its
 	// default -1 — this turn did not resume a clarification.
-	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), msg.Question)
+	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question)
 	if err != nil {
 		slog.Error("record re-explain question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -407,7 +418,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// as every other write in this package.
 	record := context.WithoutCancel(ctx)
 
-	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, sources, ask.Events{
+	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})

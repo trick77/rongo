@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import RepoList from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
@@ -38,12 +38,14 @@ describe("RepoList", () => {
     render(<RepoList />);
 
     await screen.findByText("peeq");
-    expect(screen.getByText("412")).toBeTruthy();
-    expect(screen.getByText("3120")).toBeTruthy();
-    expect(screen.getByText("34")).toBeTruthy();
+    // Scoped to the table: the strip above it sums the same numbers.
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("412")).toBeTruthy();
+    expect(table.getByText("3120")).toBeTruthy();
+    expect(table.getByText("34")).toBeTruthy();
     // The full SHA is unreadable in a table and the short form is what a
     // person compares against the forge.
-    expect(screen.getByText("611255a")).toBeTruthy();
+    expect(table.getByText("611255a")).toBeTruthy();
   });
 
   it("shows a vanished branch as a loud error", async () => {

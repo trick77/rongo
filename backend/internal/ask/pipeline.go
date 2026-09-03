@@ -81,7 +81,7 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 // tried, never with an answer assembled from whatever was in context. Naming
 // the terms is the difference between a dead end someone can act on — the
 // vocabulary was wrong, ask differently — and a shrug.
-func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, ev Events) (Answer, *Clarification, error) {
+func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, lang Language, ev Events) (Answer, *Clarification, error) {
 	ev.status("understanding")
 	u, err := p.understander.Understand(ctx, question)
 	if err != nil {
@@ -121,7 +121,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	}
 
 	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
 	return answer, nil, err
 }
 
@@ -130,7 +130,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 // candidate's own hits ARE the search result now — and gathers only from
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
-func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, hits []retrieve.Hit, ev Events) (Answer, error) {
+func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, ev Events) (Answer, error) {
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
@@ -138,7 +138,7 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
+	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -148,11 +148,11 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // first turn and the re-explain request, and answering the same question from
 // different code than the reader already saw would be a silent substitution —
 // exactly what "never invent" forbids.
-func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audience, sources []Source, ev Events) (Answer, error) {
+func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audience, lang Language, sources []Source, ev Events) (Answer, error) {
 	if len(sources) == 0 {
 		return Answer{}, fmt.Errorf("reexplain: no sources left to answer from")
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, sources, ev.OnToken)
+	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
 }

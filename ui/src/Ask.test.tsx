@@ -74,7 +74,7 @@ describe("Ask", () => {
     await ask("How?");
 
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("gathering");
+      expect(screen.getByRole("status").textContent).toContain("Reading the code");
     });
   });
 
@@ -99,8 +99,11 @@ describe("Ask", () => {
 
     const evidence = await screen.findByText(/How does rongo know this/);
     expect(evidence).toBeTruthy();
-    expect(screen.getByText(/release-2024\.3/)).toBeTruthy();
-    expect(screen.getByText(/store\.go:3-40/)).toBeTruthy();
+    const turn = evidence.closest("article")!;
+    expect(turn.textContent).toContain("release-2024.3");
+    expect(turn.textContent).toContain("store.go:3-40");
+    // The Sources pane lists the same file, so a reader keeps it in view.
+    expect(screen.getByRole("complementary", { name: "Sources" }).textContent).toContain("store.go");
   });
 
   it("shows an error as an error, not as an empty answer", async () => {
@@ -117,7 +120,7 @@ describe("Ask", () => {
     streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
-    await user.click(screen.getByRole("button", { name: "DEV" }));
+    await user.click(screen.getByRole("button", { name: "Developer" }));
     await user.type(screen.getByLabelText("Question"), "How?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
@@ -125,6 +128,32 @@ describe("Ask", () => {
       const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
       expect(body.audience).toBe("dev");
     });
+  });
+
+  it("sends the chosen answer language along", async () => {
+    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await user.type(screen.getByLabelText("Question"), "Wie?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => {
+      const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      expect(body.language).toBe("de");
+    });
+  });
+
+  it("asks on Enter and keeps Shift+Enter for a new line", async () => {
+    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.type(screen.getByLabelText("Question"), "First line{Shift>}{Enter}{/Shift}second");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("Question"), "{Enter}");
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    expect(body.question).toBe("First line\nsecond");
   });
 
   it("appends the second question to the same thread", async () => {
@@ -209,7 +238,7 @@ describe("Ask, a stored thread", () => {
 
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
     expect(screen.getByText(/How does an Apple TV get at the file/)).toBeTruthy();
-    expect(screen.getByText(/store\.go:3-40/)).toBeTruthy();
+    expect(screen.getByText(/store\.go:3-40/).closest("article")).toBeTruthy();
     // A restored turn is finished. A status line would claim something is
     // still running.
     expect(screen.queryByRole("status")).toBeNull();
@@ -218,7 +247,9 @@ describe("Ask, a stored thread", () => {
   it("restores the role the question was answered in", async () => {
     routedFetch([storedTurn]);
     strict(<Ask threadId={7} />);
-    expect(await screen.findByText("Developer")).toBeTruthy();
+    // The eyebrow over the question, not the composer's toggle button.
+    await screen.findByText(/Through a grant/);
+    expect(screen.getAllByText("Developer").some((el) => el.tagName !== "BUTTON")).toBe(true);
   });
 
   // Messages() puts the subject inside the WHERE clause and returns an empty
@@ -579,8 +610,8 @@ describe("Ask, the clarification and re-explaining", () => {
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
-    // storedTurn is audience "dev", so the button offers the BA re-explain.
-    await user.click(screen.getByRole("button", { name: "Explain as BA" }));
+    // storedTurn is audience "dev", so the button offers the Analyst re-explain.
+    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
 
     await screen.findByText(/An answer for the BA/);
 

@@ -65,7 +65,7 @@ func TestAnswer_streamsAndResolvesTheMarkersItUsed(t *testing.T) {
 	var seen []string
 
 	// When
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, twoSources(), collect(&seen))
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	// under an answer — the failure this product can least afford.
 	c, _, _ := streamUpstream(t, "This happens in delivery [7].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, twoSources(), nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 	c, _, _ := streamUpstream(t,
 		"The call is in store.go [2]:\n\n```go\nname := args[1]\nvalue := parts[1]\n```\n")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, twoSources(), nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestAnswer_withoutSourcesItSaysSoAndNeverCallsTheModel(t *testing.T) {
 	// built from nothing but the question and the system prompt.
 	c, _, calls := streamUpstream(t, "I suspect that ...")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How does shipping work?", AudienceBA, nil, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, nil, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -144,11 +144,11 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	// The role changes only this step: language level, depth, whether code is
 	// embedded. A prompt that ignored it would make the BA/DEV switch decorative.
 	cBA, promptBA, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	cDev, promptDev, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 
