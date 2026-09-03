@@ -6,7 +6,7 @@
 - TDD: failing test first, then the smallest implementation.
 - `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
 - No test hits a real LLM, embeddings endpoint or git remote — `httptest` fakes, fixture repo built locally with `git`.
-- Line coverage floor 75% on both sides (`hack/coverage-floors`), plus 75% on the lines a PR changes. `make coverage` locally; CI gates on both. Scripts are byte-identical with ../peeq and ../loom — fix them there too, never fork.
+- Line coverage floor 75% on both sides (`hack/coverage-floors`), plus 75% on the lines a PR changes. `make coverage` locally; CI gates on both. `hack/coverage-gate.sh`, `hack/patch-coverage.sh`, `hack/strip-comment-lines.go` are byte-identical with ../peeq (loom lags peeq by one generalisation) — fix them in the family, never fork. Tests run with `-race`, which needs cgo; the binary stays `CGO_ENABLED=0`.
 
 ## Locked choices (do not change without agreement)
 - Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5. `CGO_ENABLED=0` everywhere.
