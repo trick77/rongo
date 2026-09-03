@@ -15,6 +15,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // Asker runs one question end to end. An interface so the HTTP layer can be
@@ -177,6 +178,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// deployment. Attached once here: both the fresh and the resumed path land
 	// on the same thread value.
 	ctx = llm.WithThreadID(ctx, thread.ID)
+	// Every paid call this turn makes lands in one meter, the gates included.
+	// Attached after the thread id and before the title goroutine forks off:
+	// the title gets a meter of its own below.
+	meter := usage.New()
+	ctx = usage.WithMeter(ctx, meter)
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question)
 	if err != nil {
@@ -208,14 +214,25 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// a label; the answer must not wait for it, and a title that never arrives
 	// is not a failure anyone needs to see.
 	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
-		go func(id int64, question string) {
-			bg := context.WithoutCancel(ctx)
+		go func(id, messageID int64, question string) {
+			// WithoutCancel keeps the context's values, the turn's meter
+			// among them. The title gets its own so it cannot write into a
+			// meter that has already been read and stored; its call is
+			// recorded against this message when it finishes — after the
+			// turn's usage event, so the live pill misses it and the reload
+			// shows it. A label written in the background is not worth
+			// holding the answer for.
+			titleMeter := usage.New()
+			bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
 			if title := s.deps.Titler(bg, question); title != "" {
 				if err := s.deps.Threads.SetTitle(bg, id, title); err != nil {
 					slog.Warn("set thread title failed", "err", err)
 				}
 			}
-		}(thread.ID, req.Question)
+			if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
+				slog.Error("record title usage failed", "err", err)
+			}
+		}(thread.ID, msg.ID, req.Question)
 	}
 
 	// The record is written on a context that outlives the request. A reader
@@ -229,6 +246,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	}
 
+	// closeUsage stores what the turn paid for and tells the browser, on
+	// EVERY exit: answered, asked back, found nothing, failed. The gates ran
+	// either way. Sent before the event that ends the turn, so the browser
+	// has the number whichever way the turn closed.
+	closeUsage := func() {
+		calls := meter.Calls()
+		if err := s.deps.Threads.SaveUsage(record, msg.ID, calls); err != nil {
+			slog.Error("record usage failed", "err", err)
+		}
+		send("usage", s.deps.Prices.Report(calls))
+	}
+
 	if resume != nil {
 		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, events)
 		if err != nil {
@@ -236,6 +265,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 				slog.Error("record turn failure failed", "err", ferr)
 			}
+			closeUsage()
 			send("error", map[string]any{"message": turnFailed})
 			return
 		}
@@ -249,7 +279,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			slog.Error("link choice failed", "err", err)
 		}
 		send("citations", answer.Citations)
-		send("usage", answer.Usage)
+		closeUsage()
 		send("done", map[string]any{"message_id": msg.ID})
 		return
 	}
@@ -260,6 +290,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 			slog.Error("record turn failure failed", "err", ferr)
 		}
+		closeUsage()
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
 		send("error", map[string]any{"message": turnFailed})
@@ -278,9 +309,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 				slog.Error("record turn failure failed", "err", ferr)
 			}
+			closeUsage()
 			send("error", map[string]any{"message": turnFailed})
 			return
 		}
+		closeUsage()
 		send("clarification", map[string]any{"message_id": msg.ID, "candidates": wireCandidates(clar.Candidates)})
 		send("done", map[string]any{"message_id": msg.ID})
 		return
@@ -293,7 +326,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		slog.Error("record sources failed", "err", err)
 	}
 	send("citations", answer.Citations)
-	send("usage", answer.Usage)
+	closeUsage()
 	send("done", map[string]any{"message_id": msg.ID})
 }
 
@@ -350,6 +383,8 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// A re-explain is another turn in the same conversation, so it pins to the
 	// same upstream node as the turn it re-answers.
 	ctx = llm.WithThreadID(ctx, msg.ThreadID)
+	meter := usage.New()
+	ctx = usage.WithMeter(ctx, meter)
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)
@@ -422,11 +457,21 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
+	// The same rule as handleAsk: what the turn paid for is stored and
+	// reported however it ended.
+	closeUsage := func() {
+		calls := meter.Calls()
+		if err := s.deps.Threads.SaveUsage(record, newMsg.ID, calls); err != nil {
+			slog.Error("record usage failed", "err", err)
+		}
+		send("usage", s.deps.Prices.Report(calls))
+	}
 	if err != nil {
 		slog.Error("reexplain failed", "err", err)
 		if ferr := s.deps.Threads.Fail(record, newMsg.ID, turnFailed); ferr != nil {
 			slog.Error("record turn failure failed", "err", ferr)
 		}
+		closeUsage()
 		send("error", map[string]any{"message": turnFailed})
 		return
 	}
@@ -440,7 +485,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		slog.Error("record sources failed", "err", err)
 	}
 	send("citations", answer.Citations)
-	send("usage", answer.Usage)
+	closeUsage()
 	send("done", map[string]any{"message_id": newMsg.ID})
 }
 
@@ -501,6 +546,17 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		slog.Error("read thread failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	// Priced here, from the current table, never from a stored figure: the
+	// record holds tokens, and the price is configuration that can change.
+	// A turn with no calls on record (older than the table, or nothing paid)
+	// carries no usage rather than an empty one, so the browser shows nothing
+	// instead of a zero.
+	for i := range msgs {
+		if len(msgs[i].Calls) > 0 {
+			report := s.deps.Prices.Report(msgs[i].Calls)
+			msgs[i].Usage = &report
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(msgs)

@@ -154,7 +154,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		if onToken != nil {
 			onToken(tok)
 		}
-	}, llm.WithMaxTokens(answerMaxTokens))
+	}, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
 	if err != nil {
 		return Answer{}, fmt.Errorf("write the answer: %w", err)
 	}

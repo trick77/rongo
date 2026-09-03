@@ -54,11 +54,61 @@ type Turn = {
   // When the turn was sent and when it closed, for the timeline's totals.
   startedAt: number;
   endedAt: number | null;
-  // Tokens the model spent on this turn, from the usage event; 0 if unknown.
-  tokens: number;
+  // What the turn paid for — every call it made, summed, and priced when
+  // the server has prices. Null until the usage event arrives, and for a
+  // stored turn older than the record of it.
+  usage: Usage | null;
   // The moment the question was asked, as the record has it, or now.
   askedAt: string;
 };
+
+/** One paid call of a turn, as the usage event and the record carry it. */
+export type UsageCall = {
+  step: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_usd?: number;
+};
+
+/** Usage is the usage event's payload and a stored message's `usage`. */
+export type Usage = {
+  calls: UsageCall[];
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  // Present as soon as the server has any price configured, absent when it
+  // has none. Absent and zero are different things: zero is "priced, and it
+  // cost nothing", absent is "not priced here".
+  cost_usd?: number;
+};
+
+/** tokens formats a count the way the pill shows it. */
+function tokens(n: number): string {
+  return n.toLocaleString("en-GB") + " tok";
+}
+
+/** money formats a USD figure at the resolution a turn costs: a turn is
+ * fractions of a cent, a thread whole cents, so three decimals until a
+ * dollar and two beyond. */
+export function money(usd: number): string {
+  return "$" + (usd >= 1 ? usd.toFixed(2) : usd.toFixed(3));
+}
+
+/** threadUsage sums every turn that has usage. Cost is a number only when
+ * some turn carried one, so a thread on an unpriced server shows no money. */
+export function threadUsage(turns: Turn[]): { tokens: number; cost: number | null } | null {
+  let total = 0;
+  let cost: number | null = null;
+  let any = false;
+  for (const t of turns) {
+    if (!t.usage) continue;
+    any = true;
+    total += t.usage.total_tokens;
+    if (t.usage.cost_usd != null) cost = (cost ?? 0) + t.usage.cost_usd;
+  }
+  return any ? { tokens: total, cost } : null;
+}
 
 /** Message is one stored turn, as GET /api/threads/{id} serves it. */
 type Message = {
@@ -78,6 +128,9 @@ type Message = {
   // apart.
   from_clarification_id: number;
   created_at?: string;
+  // Absent for a turn with nothing on record: older than the usage table,
+  // or one that paid for nothing.
+  usage?: Usage | null;
 };
 
 /**
@@ -101,7 +154,7 @@ function storedTurn(m: Message): Turn {
     live: false,
     startedAt: 0,
     endedAt: 0,
-    tokens: 0,
+    usage: m.usage ?? null,
     askedAt: m.created_at ?? "",
   };
 }
@@ -127,7 +180,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     live: true,
     startedAt: now,
     endedAt: null,
-    tokens: 0,
+    usage: null,
     askedAt: new Date(now).toISOString(),
   };
 }
@@ -212,6 +265,7 @@ export default function Ask({
   onThread = () => {},
   onActivity = () => {},
   onBusy = () => {},
+  onUsage = () => {},
 }: {
   /** The thread to show, or null for a fresh one. */
   threadId?: number | null;
@@ -221,6 +275,10 @@ export default function Ask({
   onActivity?: () => void;
   /** Reports whether a turn is in flight, so the thread list can lock. */
   onBusy?: (busy: boolean) => void;
+  /** Reports the thread's running total — every turn on screen summed, the
+   * ones that asked back or failed included — or null when nothing is
+   * known yet. The header shows it next to the title. */
+  onUsage?: (total: { tokens: number; cost: number | null } | null) => void;
 }) {
   const [question, setQuestion] = useState("");
   const [audience, setAudience] = useState<Audience>("ba");
@@ -230,6 +288,9 @@ export default function Ask({
   // The marker under the pointer, so the Sources pane can point back.
   const [hot, setHot] = useState<number | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+  // The turn whose usage breakdown is open, if any. One at a time: it is a
+  // glance at what a turn cost, not a report to keep open.
+  const [openUsage, setOpenUsage] = useState<number | null>(null);
   const threadId = useRef<number | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -313,6 +374,13 @@ export default function Ask({
     bottom.current?.scrollIntoView?.({ block: "end" });
   }, [turns.length, openThread]);
 
+  // The running total follows the turns: it grows when a usage event lands
+  // and resets when another thread is opened.
+  useEffect(() => {
+    onUsage(threadUsage(turns));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns]);
+
   // The composer grows with the question up to a few lines, so a multi-line
   // question can be read back before it is sent.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -361,7 +429,7 @@ export default function Ask({
             patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
           } else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
-          else if (name === "usage") patchLast((t) => ({ ...t, tokens: Number(payload.total_tokens ?? 0) }));
+          else if (name === "usage") patchLast((t) => ({ ...t, usage: payload as Usage }));
           else if (name === "clarification") {
             patchLast((t) => ({
               ...t,
@@ -571,29 +639,104 @@ export default function Ask({
                   </details>
                 )}
 
-                {/* Re-explaining needs a stored answer to build from — never on a
-                    turn that failed or ended by asking. */}
-                {turn.done && turn.messageId && !turn.error && !turn.clarification && (
-                  <div className="mt-4 flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => reexplain(i)}
-                      className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
-                    >
-                      {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => copy(i)}
-                      className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
-                    >
-                      {copied === i ? "Copied" : "Copy as Markdown"}
-                    </button>
-                    {turn.tokens > 0 && (
-                      <span className={pill + " ml-auto bg-active font-mono text-faint"}>
-                        {turn.tokens.toLocaleString("en-GB")} tokens
-                      </span>
+                {/* The footer: the two actions need a stored answer to build
+                    from — never on a turn that failed or ended by asking. The
+                    usage pill does not: a turn that asked back or failed still
+                    paid for its gates, and the thread total counts them. */}
+                {turn.done && (turn.usage || (turn.messageId && !turn.error && !turn.clarification)) && (
+                  <div className="mt-4">
+                    <div className="flex items-center gap-2">
+                      {turn.messageId && !turn.error && !turn.clarification && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reexplain(i)}
+                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                          >
+                            {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => copy(i)}
+                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
+                          >
+                            {copied === i ? "Copied" : "Copy as Markdown"}
+                          </button>
+                        </>
+                      )}
+                      {turn.usage && (
+                        <button
+                          type="button"
+                          aria-expanded={openUsage === i}
+                          aria-label={`Usage of turn ${i + 1}`}
+                          onClick={() => setOpenUsage(openUsage === i ? null : i)}
+                          className={
+                            pill +
+                            " ml-auto inline-flex items-center gap-1.5 font-mono " +
+                            (openUsage === i ? "bg-elevated text-muted" : "bg-active text-faint hover:text-muted")
+                          }
+                        >
+                          {tokens(turn.usage.total_tokens)}
+                          {turn.usage.cost_usd != null && (
+                            <>
+                              <span className="opacity-50">·</span>
+                              {money(turn.usage.cost_usd)}
+                            </>
+                          )}
+                          <Chevron open={openUsage === i} />
+                        </button>
+                      )}
+                    </div>
+                    {turn.usage && openUsage === i && (
+                      <div className="mt-2.5 ml-auto w-full max-w-[470px] rounded-ui border border-border bg-panel px-3.5 py-2.5 font-mono text-xs">
+                        <table className="w-full border-collapse">
+                          <thead>
+                            <tr className="text-faint">
+                              <th className="border-b border-border-soft pb-1.5 text-left font-normal">call</th>
+                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">in</th>
+                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">out</th>
+                              {turn.usage.cost_usd != null && (
+                                <th className="border-b border-border-soft pb-1.5 text-right font-normal">cost</th>
+                              )}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {turn.usage.calls.map((c, k) => (
+                              <tr key={k} className="text-muted">
+                                <td className="py-1 text-ink-dim">
+                                  {c.step}
+                                  <span className="ml-2 text-faint">{c.model}</span>
+                                </td>
+                                <td className="py-1 text-right">{c.prompt_tokens.toLocaleString("en-GB")}</td>
+                                <td className="py-1 text-right">
+                                  {c.completion_tokens > 0 ? c.completion_tokens.toLocaleString("en-GB") : "–"}
+                                </td>
+                                {turn.usage!.cost_usd != null && (
+                                  <td className="py-1 text-right">{c.cost_usd != null ? money(c.cost_usd) : "–"}</td>
+                                )}
+                              </tr>
+                            ))}
+                            <tr className="text-ink-dim">
+                              <td className="border-t border-border-soft pt-1.5">total</td>
+                              <td className="border-t border-border-soft pt-1.5 text-right">
+                                {turn.usage.prompt_tokens.toLocaleString("en-GB")}
+                              </td>
+                              <td className="border-t border-border-soft pt-1.5 text-right">
+                                {turn.usage.completion_tokens.toLocaleString("en-GB")}
+                              </td>
+                              {turn.usage.cost_usd != null && (
+                                <td className="border-t border-border-soft pt-1.5 text-right">{money(turn.usage.cost_usd)}</td>
+                              )}
+                            </tr>
+                          </tbody>
+                        </table>
+                        <p className="mt-2 font-sans text-xs text-faint">
+                          {turn.usage.cost_usd != null
+                            ? "Computed from the configured prices, USD per million tokens. Not a bill: the provider's invoice is."
+                            : "Tokens only. Set BACKEND_PRICE_* to see cost."}
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}

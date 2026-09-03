@@ -10,7 +10,61 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/trick77/rongo/internal/usage"
 )
+
+func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
+	// Given
+	c, _ := fakeUpstream(t, "ok")
+	m := usage.New()
+	ctx := usage.WithMeter(context.Background(), m)
+
+	// When
+	if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, ShortGate(), WithStep("understand")); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Then: the deployment the call went to and the upstream's numbers.
+	calls := m.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	want := usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: 11, Completion: 7}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
+	// Given
+	c := streamingUpstream(t, []string{"a", "b"})
+	m := usage.New()
+	ctx := usage.WithMeter(context.Background(), m)
+
+	// When
+	if _, err := c.Stream(ctx, []Message{{Role: "user", Content: "x"}}, func(string) {}, WithStep("answer")); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Then
+	calls := m.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	want := usage.Call{Step: "answer", Model: ProDeployment, Prompt: 3, Completion: 4}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
+	c, _ := fakeUpstream(t, "ok")
+	out, _ := ask(t, c, WithStep("route"))
+	if out != "ok" {
+		t.Errorf("out = %q", out)
+	}
+}
 
 // captured is one request body as the fake upstream saw it.
 type captured struct {

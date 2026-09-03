@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // testSubject is the user threads are created for in every test that does
@@ -149,6 +150,55 @@ func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	}
 	if len(msgs[0].Citations) != 1 || msgs[0].Citations[0].Branch != "master" {
 		t.Errorf("citations = %+v, want the branch kept — a forge URL without it may 404", msgs[0].Citations)
+	}
+}
+
+func TestSaveUsage_everyCallOfATurnComesBackWithTheThreadEvenWhenItAskedOrFailed(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How?")
+	failed, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	answered, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How exactly?")
+
+	// A turn that failed after its gates ran still paid for the gates.
+	if err := s.Fail(ctx, failed.ID, "The turn failed."); err != nil {
+		t.Fatalf("Fail: %v", err)
+	}
+	if err := s.SaveUsage(ctx, failed.ID, []usage.Call{
+		{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20},
+		{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
+	}); err != nil {
+		t.Fatalf("SaveUsage: %v", err)
+	}
+	if err := s.SaveUsage(ctx, answered.ID, []usage.Call{
+		{Step: "understand", Model: "mimo-v2.5", Prompt: 110, Completion: 22},
+		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 2000, Completion: 400},
+	}); err != nil {
+		t.Fatalf("SaveUsage: %v", err)
+	}
+	// Saving nothing is not an error and writes nothing.
+	if err := s.SaveUsage(ctx, answered.ID, nil); err != nil {
+		t.Fatalf("SaveUsage(nil): %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, "anna", th.ID)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if got := msgs[0].Calls; len(got) != 2 || got[0].Step != "understand" || got[1].Model != "text-embedding-3-small" || got[1].Prompt != 12 {
+		t.Errorf("failed turn's calls = %+v, want its two gate calls in order", got)
+	}
+	if got := msgs[1].Calls; len(got) != 2 || got[1].Step != "answer" || got[1].Completion != 400 {
+		t.Errorf("answered turn's calls = %+v", got)
+	}
+
+	// Another user's thread stays unreadable, usage included.
+	other, _ := s.Messages(ctx, "bruno", th.ID)
+	if len(other) != 0 {
+		t.Errorf("bruno can read anna's usage: %+v", other)
 	}
 }
 

@@ -113,7 +113,7 @@ func (u *Understander) Understand(ctx context.Context, question string) (Underst
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: understandSystem},
 		{Role: "user", Content: question},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
 		return Understanding{}, fmt.Errorf("understand the question: %w", err)
 	}

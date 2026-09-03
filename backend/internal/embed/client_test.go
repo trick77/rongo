@@ -11,7 +11,36 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/trick77/rongo/internal/usage"
 )
+
+func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
+	// Given: the endpoint reports usage, as OpenAI-compatible ones do.
+	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
+		return 200, map[string]any{
+			"data":  []respData{{Index: 0, Embedding: vecOf(1, 4)}},
+			"usage": map[string]any{"prompt_tokens": 9, "total_tokens": 9},
+		}
+	})
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	m := usage.New()
+
+	// When
+	if _, err := testee.Embed(usage.WithMeter(context.Background(), m), []string{"one"}); err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+
+	// Then: one call, labelled embed, prompt side only.
+	calls := m.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(calls))
+	}
+	want := usage.Call{Step: "embed", Model: "text-embedding-3-small", Prompt: 9}
+	if calls[0] != want {
+		t.Errorf("call = %+v, want %+v", calls[0], want)
+	}
+}
 
 // vecOf builds a distinguishable vector: every component carries the marker, so
 // a mispaired result is visible rather than plausible.

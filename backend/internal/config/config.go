@@ -8,6 +8,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -80,6 +83,11 @@ type Config struct {
 	// environment lets a misconfigured host answer with a model nobody chose.
 	LLMBaseURL string
 	LLMAPIKey  string
+	// Prices is what the endpoints charge, keyed by model name, in USD per
+	// million tokens. All optional: unset means the UI shows tokens only.
+	// Nobody guesses a price — a made-up figure next to a real token count
+	// would read as a bill.
+	Prices usage.Prices
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -167,6 +175,7 @@ func Load() (Config, error) {
 		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
 		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
 	}
+	cfg.Prices = loadPrices(cfg.EmbedModel)
 
 	// SessionSecret is currently unused — sessions are 256-bit random tokens
 	// stored as unsalted SHA-256, no signing involved yet. It is still
@@ -290,6 +299,27 @@ func envIntOr(key string, fallback int) int {
 // envFloatOr reads a positive float setting. A malformed or non-positive
 // value falls back to the default rather than failing the boot, for the same
 // reason envIntOr does.
+// loadPrices reads the optional BACKEND_PRICE_* variables, USD per million
+// tokens, into a table keyed by the model each pair belongs to. A model with
+// neither side set is absent from the table, not priced at zero: absent means
+// "unknown", and the UI shows tokens only for it. The deployment names come
+// from internal/llm because that is where they are fixed.
+func loadPrices(embedModel string) usage.Prices {
+	p := usage.Prices{}
+	add := func(model, inKey, outKey string) {
+		in, out := envFloatOr(inKey, 0), envFloatOr(outKey, 0)
+		if in > 0 || out > 0 {
+			p[model] = usage.Price{In: in, Out: out}
+		}
+	}
+	add(llm.ProDeployment, "BACKEND_PRICE_PRO_IN", "BACKEND_PRICE_PRO_OUT")
+	add(llm.ShortGateDeployment, "BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT")
+	if v := envFloatOr("BACKEND_PRICE_EMBED", 0); v > 0 {
+		p[embedModel] = usage.Price{In: v}
+	}
+	return p
+}
+
 func envFloatOr(key string, fallback float64) float64 {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

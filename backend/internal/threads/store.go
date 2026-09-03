@@ -16,6 +16,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // Thread is one conversation.
@@ -53,6 +54,13 @@ type Message struct {
 	// thread at once, and position alone cannot tell them apart.
 	FromClarificationID int64     `json:"from_clarification_id"`
 	CreatedAt           time.Time `json:"created_at"`
+	// Calls is every paid call this turn made, as stored. Tokens only: the
+	// HTTP layer prices them into Usage, because the price table is
+	// configuration the store does not know.
+	Calls []usage.Call `json:"-"`
+	// Usage is what the browser sees: the calls, their sum, and the cost
+	// when prices are configured. Filled by the HTTP layer, never here.
+	Usage *usage.Report `json:"usage,omitempty"`
 }
 
 // Clarification is the card a turn ended with: what rongo understood, and
@@ -182,6 +190,48 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 	return tx.Commit()
 }
 
+// SaveUsage records the paid calls one turn made. Called on EVERY way a turn
+// ends — answered, asked back, found nothing, failed — because the gates ran
+// either way and a thread total that skipped them would be a lie. Nothing to
+// save writes nothing.
+func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, c := range calls {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO message_usage (message_id, step, model, prompt_tokens, completion_tokens)
+			VALUES (?,?,?,?,?)`, messageID, c.Step, c.Model, c.Prompt, c.Completion); err != nil {
+			return fmt.Errorf("store usage of %s: %w", c.Step, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) calls(ctx context.Context, messageID int64) ([]usage.Call, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT step, model, prompt_tokens, completion_tokens FROM message_usage
+		 WHERE message_id = ? ORDER BY id`, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("read usage: %w", err)
+	}
+	defer rows.Close()
+	out := []usage.Call{}
+	for rows.Next() {
+		var c usage.Call
+		if err := rows.Scan(&c.Step, &c.Model, &c.Prompt, &c.Completion); err != nil {
+			return nil, fmt.Errorf("scan usage: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // Fail records that a turn did not produce an answer. The question stays: a
 // disappearing question leaves the reader wondering what they asked.
 func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
@@ -284,6 +334,11 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 			return nil, err
 		}
 		out[i].Clarification = clar
+		calls, err := s.calls(ctx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i].Calls = calls
 	}
 	return out, nil
 }
