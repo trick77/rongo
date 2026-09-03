@@ -16,13 +16,15 @@ import type { JSX, ReactNode } from "react";
  * half-written "[1" mid-stream stays plain text until the bracket arrives.
  *
  * Which markers are real is the backend's call (citationsFor drops the ones
- * no source backs — from the citation list, not from the text). So a marker
- * is only drawn as a citation once the citations are known and it is among
- * them; an invented [7] stays plain text, exactly as it did before, because a
- * chip that looks checkable but leads nowhere is the failure this renderer
- * exists to prevent. While the answer still streams and the list has not
- * arrived, every marker is a quiet superscript, neither vouched for nor
- * denied.
+ * no source backs — from the citation list, not from the text). Once the
+ * citations are known, a marker among them is a citation and an invented [7]
+ * drops back to plain text, because a chip that looks checkable but leads
+ * nowhere is the failure this renderer exists to prevent. While the answer
+ * still streams and the list has not arrived, every marker already wears the
+ * citation look: the list arrives last, and markers that change colour all at
+ * once when the answer finishes read as a glitch, not as a verdict. Only the
+ * hover hand-off to the Sources pane waits for the list, because until then
+ * there is no row to point at.
  *
  * Unterminated markup renders as text rather than swallowing the rest. The
  * answer is re-rendered on every streamed token, so half-written markup is the
@@ -51,10 +53,7 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
     out.push(
       <sup
         key={`${key}-m${n++}`}
-        className={
-          "mx-px font-mono text-[10px] font-semibold " +
-          (known ? "rounded bg-accent-dim px-1 text-accent-strong" : "text-muted")
-        }
+        className="mx-px rounded bg-accent-dim px-1 font-mono text-[10px] font-semibold text-accent-strong"
         onMouseEnter={() => known && hooks.onHover?.(marker)}
         onMouseLeave={() => known && hooks.onHover?.(null)}
       >

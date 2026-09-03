@@ -63,7 +63,10 @@ func languageName(lang Language) string {
 const answerMaxTokens = 4096
 
 // Citation is one entry of the evidence panel. The branch travels with it
-// because a forge URL without one may 404 off the default branch.
+// because a forge URL without one may 404 off the default branch. The SHA is
+// the commit the cited file was indexed at: the source viewer reads the file
+// at that commit, so the cited lines are the lines the answer was written
+// from even after the branch has moved on.
 type Citation struct {
 	Marker    int    `json:"marker"`
 	Repo      string `json:"repo"`
@@ -71,6 +74,7 @@ type Citation struct {
 	Path      string `json:"path"`
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
+	SHA       string `json:"sha"`
 }
 
 // Answer is one finished turn.
@@ -258,7 +262,7 @@ func citationsFor(text string, sources []Source) []Citation {
 		s := sources[n-1]
 		out = append(out, Citation{
 			Marker: n, Repo: s.Repo, Branch: s.Branch, Path: s.Path,
-			StartLine: s.StartLine, EndLine: s.EndLine,
+			StartLine: s.StartLine, EndLine: s.EndLine, SHA: s.SHA,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Marker < out[j].Marker })

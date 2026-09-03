@@ -42,8 +42,10 @@ Checks:
    streams below it.
 3. Open the "How does rongo know this?" details block once the answer is done.
    It lists an "N sources" count and one `repo · path:start-end (branch)` line
-   per source — plain text, not a link. Pick one line and confirm the file
-   and line range against the repo on disk (or the forge) by hand.
+   per source. Click one (or its row in the Sources pane): an overlay opens
+   the file out of rongo's own checkout, at the commit the answer was written
+   from, with the cited lines marked and scrolled into view. Confirm the
+   marked lines say what the answer claims; Escape closes it.
 4. Reload the page. The thread reloads with the same clarification card
    already collapsed on "Chosen: {title}" — no re-asking, no flash of the
    open card.

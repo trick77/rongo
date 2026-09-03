@@ -23,7 +23,9 @@ type Source struct {
 	Symbol    string
 	StartLine int
 	EndLine   int
-	Text      string
+	// SHA is the commit the file was indexed at; see retrieve.Hit.SHA.
+	SHA  string
+	Text string
 	// Reason is "hit" for something the search returned, or
 	// "reference:<symbol>" for something a hop reached.
 	Reason string
@@ -88,7 +90,7 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 		out = append(out, Source{
 			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
 			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
-			Text: h.RawText, Reason: "hit", Hop: 0,
+			SHA: h.SHA, Text: h.RawText, Reason: "hit", Hop: 0,
 		})
 		spent += estimateTokens(h.RawText)
 	}
@@ -173,7 +175,7 @@ home AS (
     JOIN files f ON f.id = s.file_id
     WHERE f.repo = ?
 )
-SELECT DISTINCT c.id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
+SELECT DISTINCT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
        (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2 WHERE s2.name = s.name) AS definers
 FROM symbols s
 JOIN selective sel ON sel.name = s.name
@@ -201,7 +203,7 @@ ORDER BY definers ASC, f.path, c.ordinal`
 		var s Source
 		var sym string
 		var definers int
-		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.Symbol,
+		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol,
 			&s.StartLine, &s.EndLine, &s.Text, &sym, &definers); err != nil {
 			return nil, fmt.Errorf("scan reference: %w", err)
 		}

@@ -29,6 +29,7 @@ import (
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 	"github.com/trick77/rongo/internal/threads"
@@ -211,6 +212,7 @@ func main() {
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
+		Source:         sourceview.New(db, gitClient),
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
 		CookieSecure:   cfg.CookieSecure,
 	}

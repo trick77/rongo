@@ -173,9 +173,9 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 	}
 	for _, c := range citations {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO citations (message_id, marker, repo, branch, path, start_line, end_line)
-			VALUES (?,?,?,?,?,?,?)`,
-			messageID, c.Marker, c.Repo, c.Branch, c.Path, c.StartLine, c.EndLine); err != nil {
+			INSERT INTO citations (message_id, marker, repo, branch, path, start_line, end_line, sha)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			messageID, c.Marker, c.Repo, c.Branch, c.Path, c.StartLine, c.EndLine, c.SHA); err != nil {
 			return fmt.Errorf("store citation %d: %w", c.Marker, err)
 		}
 	}
@@ -290,7 +290,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 
 func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT marker, repo, branch, path, start_line, end_line FROM citations
+		`SELECT marker, repo, branch, path, start_line, end_line, sha FROM citations
 		 WHERE message_id = ? ORDER BY marker`, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("read citations: %w", err)
@@ -299,7 +299,7 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 	out := []ask.Citation{}
 	for rows.Next() {
 		var c ask.Citation
-		if err := rows.Scan(&c.Marker, &c.Repo, &c.Branch, &c.Path, &c.StartLine, &c.EndLine); err != nil {
+		if err := rows.Scan(&c.Marker, &c.Repo, &c.Branch, &c.Path, &c.StartLine, &c.EndLine, &c.SHA); err != nil {
 			return nil, fmt.Errorf("scan citation: %w", err)
 		}
 		out = append(out, c)
@@ -518,7 +518,7 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (s
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT ms.chunk_id, f.repo, r.branch, f.path, c.symbol, c.start_line, c.end_line, c.raw_text, ms.reason, ms.hop
+		SELECT ms.chunk_id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text, ms.reason, ms.hop
 		FROM message_sources ms
 		JOIN chunks c ON c.id = ms.chunk_id
 		JOIN files f ON f.id = c.file_id
@@ -534,7 +534,7 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (s
 	out := []ask.Source{}
 	for rows.Next() {
 		var src ask.Source
-		if err := rows.Scan(&src.ChunkID, &src.Repo, &src.Branch, &src.Path, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text, &src.Reason, &src.Hop); err != nil {
+		if err := rows.Scan(&src.ChunkID, &src.Repo, &src.Branch, &src.Path, &src.SHA, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text, &src.Reason, &src.Hop); err != nil {
 			return nil, 0, fmt.Errorf("scan source: %w", err)
 		}
 		out = append(out, src)

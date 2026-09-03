@@ -134,7 +134,7 @@ func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	}
 
 	err = s.Finish(ctx, m.ID, "That is how it works [1].", []ask.Citation{
-		{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 9},
+		{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 9, SHA: "0123abc"},
 	})
 	if err != nil {
 		t.Fatalf("Finish: %v", err)
@@ -149,6 +149,11 @@ func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	}
 	if len(msgs[0].Citations) != 1 || msgs[0].Citations[0].Branch != "master" {
 		t.Errorf("citations = %+v, want the branch kept — a forge URL without it may 404", msgs[0].Citations)
+	}
+	// The commit travels too: the source viewer reads the file at it, so the
+	// cited lines stay the cited lines after the branch has moved on.
+	if msgs[0].Citations[0].SHA != "0123abc" {
+		t.Errorf("citations = %+v, want the commit kept", msgs[0].Citations)
 	}
 }
 
