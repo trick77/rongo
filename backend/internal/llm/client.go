@@ -243,7 +243,15 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 		beat = func() { timer.Reset(c.idleTimeout) }
 	}
 
+	// finishReason is how the upstream said the stream ended. Anything but a
+	// normal stop is a failure the caller must hear about: a reasoning model
+	// that spends the whole completion budget thinking ends with "length" and
+	// not one content delta, and reading that as success once stored an empty
+	// answer as a finished turn. The reason is recorded and the stream read to
+	// the end, because the usage frame that follows it carries the completion
+	// count the error needs.
 	var usage Usage
+	var finishReason string
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
 	for sc.Scan() {
@@ -261,13 +269,25 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 				Delta struct {
 					Content string `json:"content"`
 				} `json:"delta"`
+				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage *Usage `json:"usage"`
+			// Error is what an OpenAI-style upstream sends when it fails AFTER
+			// status 200: one frame with no choices. Dropping it read as a
+			// clean, empty stream.
+			Error *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
 			// A malformed frame is not worth killing a half-written answer for.
 			c.log.Warn("unparseable stream frame", "err", err)
 			continue
+		}
+		if frame.Error != nil {
+			return usage, fmt.Errorf("chat completion failed mid-stream (%s): %s",
+				frame.Error.Type, c.redactKey(frame.Error.Message))
 		}
 		if frame.Usage != nil && frame.Usage.Total > 0 {
 			usage = *frame.Usage
@@ -276,10 +296,17 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 			if ch.Delta.Content != "" && onToken != nil {
 				onToken(ch.Delta.Content)
 			}
+			if ch.FinishReason != "" {
+				finishReason = ch.FinishReason
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return usage, fmt.Errorf("read stream: %w", redactURL(err))
+	}
+	if finishReason != "" && finishReason != "stop" {
+		return usage, fmt.Errorf("chat completion ended with finish_reason=%s after %d completion tokens",
+			finishReason, usage.Completion)
 	}
 	return usage, nil
 }

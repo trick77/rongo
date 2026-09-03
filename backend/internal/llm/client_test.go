@@ -439,3 +439,108 @@ func callOnce(c *Client, ctx context.Context, stream bool) error {
 	_, _, err := c.Complete(ctx, msgs)
 	return err
 }
+
+// endingUpstream streams the given tokens and then closes the stream the way
+// the upstream says it ended: a finish_reason on an empty delta, then the
+// usage frame, then [DONE]. errFrame, when set, is sent instead of all that,
+// as the in-stream error an OpenAI-style server emits after status 200.
+func endingUpstream(t *testing.T, tokens []string, finishReason string, errFrame string) *Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl := http.NewResponseController(w)
+		if errFrame != "" {
+			fmt.Fprintf(w, "data: %s\n\n", errFrame)
+			_ = fl.Flush()
+			return
+		}
+		for _, tok := range tokens {
+			frame, _ := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
+			})
+			fmt.Fprintf(w, "data: %s\n\n", frame)
+		}
+		end, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", end)
+		usage, _ := json.Marshal(map[string]any{
+			"choices": []any{},
+			"usage":   map[string]any{"prompt_tokens": 3, "completion_tokens": 4096, "total_tokens": 4099},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", usage)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		_ = fl.Flush()
+	}))
+	t.Cleanup(srv.Close)
+	return NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+}
+
+func TestStream_aStopFinishIsSuccess(t *testing.T) {
+	c := endingUpstream(t, []string{"ok"}, "stop", "")
+
+	usage, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err != nil {
+		t.Fatalf("Stream: %v, want a normal stop to succeed", err)
+	}
+	if usage.Completion != 4096 {
+		t.Errorf("usage = %+v, want the trailing usage frame", usage)
+	}
+}
+
+func TestStream_aLengthFinishWithNoContentIsAnErrorNamingTheBudget(t *testing.T) {
+	// A reasoning model that spends the whole completion budget thinking ends
+	// the stream with finish_reason=length and not one content delta. Treating
+	// that as success stored an empty answer as a finished turn in production.
+	c := endingUpstream(t, nil, "length", "")
+
+	usage, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err == nil {
+		t.Fatal("Stream: nil error on finish_reason=length with no content")
+	}
+	if !strings.Contains(err.Error(), "length") {
+		t.Errorf("err = %v, want the finish reason named", err)
+	}
+	if !strings.Contains(err.Error(), "4096") {
+		t.Errorf("err = %v, want the completion token count, so the cap can be calibrated", err)
+	}
+	if usage.Completion != 4096 {
+		t.Errorf("usage = %+v, want it read to the end even on failure", usage)
+	}
+}
+
+func TestStream_aLengthFinishAfterContentIsStillAnError(t *testing.T) {
+	// Truncated mid-answer is a failure too: the caller decides what to do with
+	// the partial text, but it must know.
+	c := endingUpstream(t, []string{"The ", "shipping"}, "length", "")
+	var seen []string
+
+	_, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}},
+		func(tok string) { seen = append(seen, tok) })
+
+	if err == nil {
+		t.Fatal("Stream: nil error on a truncated answer")
+	}
+	if len(seen) != 2 {
+		t.Errorf("tokens = %q, want every delta that arrived delivered before the error", seen)
+	}
+}
+
+func TestStream_anErrorFrameIsAnErrorAndNeverQuotesTheKey(t *testing.T) {
+	c := endingUpstream(t, nil, "", `{"error":{"message":"context length exceeded for Bearer sk-secret","type":"invalid_request_error"}}`)
+
+	_, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
+
+	if err == nil {
+		t.Fatal("Stream: nil error on an in-stream error frame")
+	}
+	if !strings.Contains(err.Error(), "context length exceeded") {
+		t.Errorf("err = %v, want the upstream message", err)
+	}
+	if strings.Contains(err.Error(), "sk-secret") {
+		t.Errorf("err = %v, the key must never be quoted", err)
+	}
+}

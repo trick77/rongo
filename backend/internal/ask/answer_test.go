@@ -159,3 +159,20 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		t.Error("the sources never reached the prompt with their markers")
 	}
 }
+
+func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {
+	// An upstream that ends cleanly without one content delta must not become
+	// a finished turn with nothing in it: the reader would see a Done mark over
+	// an empty answer and nothing would be logged.
+	c, _, _ := streamUpstream(t)
+	a := NewAnswerer(c)
+
+	_, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil)
+
+	if err == nil {
+		t.Fatal("Answer: nil error on an empty completion")
+	}
+	if !strings.Contains(err.Error(), "no answer text") {
+		t.Errorf("err = %v, want it to say the model wrote nothing", err)
+	}
+}
