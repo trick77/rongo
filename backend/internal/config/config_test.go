@@ -134,16 +134,6 @@ func TestLoad_indexExclude(t *testing.T) {
 	}
 }
 
-func TestLoad_rejectsAMalformedIndexExclude(t *testing.T) {
-	// A typo must stop the boot: a pattern that silently matches nothing
-	// leaves the excluded content in the index while the setting looks right.
-	setEnv(t, map[string]string{"BACKEND_INDEX_EXCLUDE": "docs/[plans/**"})
-
-	if _, err := Load(); err == nil {
-		t.Error("Load() err = nil, want an error for an unclosed bracket in BACKEND_INDEX_EXCLUDE")
-	}
-}
-
 func TestLoad_requiresSessionSecret(t *testing.T) {
 	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": ""})
 

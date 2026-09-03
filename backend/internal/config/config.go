@@ -8,8 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/trick77/rongo/internal/indexer"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -249,13 +247,6 @@ func Load() (Config, error) {
 	}
 
 	cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
-
-	// A malformed exclusion pattern fails the boot: silently matching nothing
-	// would keep the excluded content in the index while the setting looked
-	// right.
-	if err := indexer.ValidateExclude(cfg.IndexExclude); err != nil {
-		return Config{}, fmt.Errorf("BACKEND_INDEX_EXCLUDE: %w", err)
-	}
 
 	return cfg, nil
 }

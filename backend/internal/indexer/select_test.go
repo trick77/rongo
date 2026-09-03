@@ -228,6 +228,13 @@ func TestValidateExclude(t *testing.T) {
 	if err := ValidateExclude([]string{""}); err == nil {
 		t.Error("ValidateExclude(empty pattern) err = nil, want an error")
 	}
+	// Paths are cleaned before matching, so these could never match anything
+	// and would fail silently instead of loudly.
+	for _, pat := range []string{"docs/plans/", "/docs/plans/**", "./docs/plans/**", "docs//plans/**", "../docs/**", "docs/**.html"} {
+		if err := ValidateExclude([]string{pat}); err == nil {
+			t.Errorf("ValidateExclude(%q) err = nil, want an error for a pattern that can never match", pat)
+		}
+	}
 }
 
 func TestSelect_secretDetectionBeatsEveryOtherSkip(t *testing.T) {

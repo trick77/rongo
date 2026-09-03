@@ -312,6 +312,11 @@ func (ix *Indexer) vectors(ctx context.Context, chunks []Chunk) ([][]float32, er
 // happens to edit later, while the ones already embedded stayed searchable.
 // The list is read at start, so the sweep runs once per start.
 func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts, error) {
+	// Nothing to apply, nothing to scan: the caller only uses the totals when
+	// something changed.
+	if len(ix.selector.exclude) == 0 {
+		return 0, Counts{}, nil
+	}
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT path, sha, lang, size FROM files WHERE repo = ? AND skip_reason = ''`, repo)
 	if err != nil {
@@ -335,6 +340,9 @@ func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts,
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, Counts{}, err
+	}
+	if len(hits) == 0 {
+		return 0, Counts{}, nil
 	}
 	for _, f := range hits {
 		if err := ctx.Err(); err != nil {

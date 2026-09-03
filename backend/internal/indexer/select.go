@@ -61,6 +61,18 @@ func ValidateExclude(patterns []string) error {
 			return fmt.Errorf("exclusion pattern is empty")
 		}
 		for _, seg := range strings.Split(pat, "/") {
+			// Paths are cleaned before matching and never contain these, so a
+			// pattern carrying one (a gitignore-style trailing slash, a leading
+			// "/" or "./", a doubled slash) could never match anything.
+			switch seg {
+			case "", ".", "..":
+				return fmt.Errorf("exclusion pattern %q: segments are matched against a cleaned path, so a leading, trailing or doubled slash and \".\" or \"..\" never match", pat)
+			}
+			// "**" spans directories only as a whole segment; glued to other
+			// text path.Match would quietly read it as "*".
+			if strings.Contains(seg, "**") && seg != "**" {
+				return fmt.Errorf("exclusion pattern %q: \"**\" must be a whole segment, as in docs/**/*.html", pat)
+			}
 			if _, err := path.Match(seg, ""); err != nil {
 				return fmt.Errorf("exclusion pattern %q: %w", pat, err)
 			}
@@ -87,8 +99,8 @@ type excludePattern struct {
 	segs []string
 }
 
-// NewSelector builds a Selector. Exclusion patterns are assumed valid; the
-// config package runs ValidateExclude at startup.
+// NewSelector builds a Selector. Exclusion patterns are assumed valid; main
+// runs ValidateExclude at startup.
 func NewSelector(opts SelectOptions) *Selector {
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = DefaultSelectOptions().MaxBytes

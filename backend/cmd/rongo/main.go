@@ -65,6 +65,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
+	// The pattern syntax belongs to the indexer, so the check lives there and
+	// config stays a stdlib-only leaf. A malformed pattern fails the boot:
+	// silently matching nothing would keep the excluded content in the index
+	// while the setting looked right.
+	if err := indexer.ValidateExclude(cfg.IndexExclude); err != nil {
+		fmt.Fprintf(os.Stderr, "config: BACKEND_INDEX_EXCLUDE: %v\n", err)
+		os.Exit(1)
+	}
 
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit; used by the container healthcheck")
 	flag.Parse()
