@@ -137,7 +137,7 @@ func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
 	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, _, err := p.Run(context.Background(), q, AudienceBA, Events{})
+	got, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestPipeline_nothingFoundNamesTheTermsItTried(t *testing.T) {
 	c := twoStepUpstream(t, appleTVReply, "I suspect ...")
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, Events{})
+	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
 	var steps []string
 
-	if _, _, err := p.Run(context.Background(), "How?", AudienceBA,
+	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN,
 		Events{OnStatus: func(s string) { steps = append(steps, s) }}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestRunEndsTheTurnWithAClarification(t *testing.T) {
 	p := newTestPipeline(t, withRouterAsking(2))
 
 	// When
-	answer, clar, err := p.Run(context.Background(), "frage", AudienceBA, Events{})
+	answer, clar, err := p.Run(context.Background(), "frage", AudienceBA, LanguageEN, Events{})
 
 	// Then
 	if err != nil {
@@ -237,7 +237,7 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 	}))
 
 	// When
-	answer, err := p.Resume(context.Background(), "frage", AudienceBA,
+	answer, err := p.Resume(context.Background(), "frage", AudienceBA, LanguageEN,
 		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Events{})
 
 	// Then
@@ -258,7 +258,7 @@ func TestReexplainAnswersFromStoredSourcesWithoutSearchingOrGathering(t *testing
 		return nil, nil
 	}))
 
-	answer, err := p.Reexplain(context.Background(), "frage", AudienceDev,
+	answer, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
 		[]Source{{ChunkID: 1, Repo: "peeq", Path: "a.go", Text: "package a", StartLine: 1, EndLine: 1}}, Events{})
 	if err != nil {
 		t.Fatalf("reexplain: %v", err)
@@ -273,7 +273,7 @@ func TestReexplainRefusesWhenNothingIsLeftToAnswerFrom(t *testing.T) {
 	// different code would be a silent substitution — exactly what the
 	// invariants forbid.
 	p := newTestPipeline(t)
-	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, nil, Events{})
+	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN, nil, Events{})
 	if err == nil {
 		t.Fatal("want an error when the gathered basis is gone")
 	}

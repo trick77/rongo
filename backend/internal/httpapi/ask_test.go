@@ -29,6 +29,7 @@ type fakeAsker struct {
 	citations []ask.Citation
 	err       error
 	gotAud    ask.Audience
+	gotLang   ask.Language
 
 	// clarification, when set, makes Run end the turn by asking instead of
 	// answering.
@@ -41,8 +42,9 @@ type fakeAsker struct {
 	reexplainErr    error
 }
 
-func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
+func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
+	f.gotLang = lang
 	if f.err != nil {
 		return ask.Answer{}, nil, f.err
 	}
@@ -64,8 +66,9 @@ func (f *fakeAsker) Run(_ context.Context, _ string, aud ask.Audience, ev ask.Ev
 
 // Resume answers from the candidate's own hits — it never searches, which is
 // the whole point of a resumed turn.
-func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
+	f.gotLang = lang
 	if f.resumeErr != nil {
 		return ask.Answer{}, f.resumeErr
 	}
@@ -81,8 +84,9 @@ func (f *fakeAsker) Resume(_ context.Context, _ string, aud ask.Audience, _ []re
 	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
-func (f *fakeAsker) Reexplain(_ context.Context, _ string, aud ask.Audience, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Reexplain(_ context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
+	f.gotLang = lang
 	if f.reexplainErr != nil {
 		return ask.Answer{}, f.reexplainErr
 	}
@@ -187,7 +191,7 @@ func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "how is sign-in done?")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how is sign-in done?")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -230,7 +234,7 @@ func seedAnsweredMessageWithSources(t *testing.T, store *threads.Store, db *sql.
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -252,7 +256,7 @@ func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -275,7 +279,7 @@ func seedAnsweredMessageWithOneVanishedSource(t *testing.T, store *threads.Store
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}

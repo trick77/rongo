@@ -31,9 +31,12 @@ type Message struct {
 	// ThreadID is the thread this message belongs to. Re-explaining reads it
 	// off a bare message id to add the new turn to the same thread, the same
 	// way a resumed clarification does.
-	ThreadID  int64          `json:"thread_id"`
-	Ordinal   int            `json:"ordinal"`
-	Audience  string         `json:"audience"`
+	ThreadID int64  `json:"thread_id"`
+	Ordinal  int    `json:"ordinal"`
+	Audience string `json:"audience"`
+	// Language is the language the answer was written in, per message like
+	// Audience: the selector sits on the input field.
+	Language  string         `json:"language"`
 	Question  string         `json:"question"`
 	Answer    string         `json:"answer"`
 	Error     string         `json:"error"`
@@ -133,15 +136,15 @@ func (s *Store) SetTitle(ctx context.Context, id int64, title string) error {
 
 // AddQuestion appends a question and returns the message it created. The answer
 // arrives later, through Finish.
-func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, question string) (Message, error) {
+func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, language, question string) (Message, error) {
 	// The ordinal is computed inside the INSERT, not read and then written.
 	// Two tabs submitting on one thread would otherwise compute the same number
 	// and the second would hit UNIQUE (thread_id, ordinal) — a 500 for a thing
 	// people do routinely.
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO messages (thread_id, ordinal, audience, question)
-		VALUES (?, (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?), ?, ?)`,
-		threadID, threadID, audience, question)
+		INSERT INTO messages (thread_id, ordinal, audience, language, question)
+		VALUES (?, (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?), ?, ?, ?)`,
+		threadID, threadID, audience, language, question)
 	if err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
@@ -153,7 +156,7 @@ func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, quest
 	if err := s.db.QueryRowContext(ctx, `SELECT ordinal FROM messages WHERE id = ?`, id).Scan(&next); err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
-	return Message{ID: id, Ordinal: next, Audience: audience, Question: question}, nil
+	return Message{ID: id, Ordinal: next, Audience: audience, Language: language, Question: question}, nil
 }
 
 // Finish records the answer and its citations, in one transaction: an answer
@@ -219,10 +222,10 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var created string
 	var fromClar sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -245,7 +248,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ?
 		ORDER BY m.ordinal`, threadID, subject)
@@ -259,7 +262,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		var m Message
 		var created string
 		var fromClar sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64

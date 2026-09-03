@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"io/fs"
 	"path/filepath"
 	"testing"
 )
@@ -70,12 +71,19 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 
+	// Every embedded file is recorded, no more and no fewer: a migration the
+	// runner silently skipped would leave production one column short while
+	// every test database, built fresh, has it.
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
 	var files int
 	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&files); err != nil {
 		t.Fatalf("count migrations: %v", err)
 	}
-	if files != 1 {
-		t.Errorf("schema_migrations has %d rows, want 1 — the schema is one file now", files)
+	if files != len(entries) {
+		t.Errorf("schema_migrations has %d rows, want %d — one per embedded file", files, len(entries))
 	}
 
 	for _, table := range []string{
@@ -91,8 +99,9 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 		}
 	}
 
-	// The two columns that carry a resumed turn back to the card it came from.
-	for _, col := range []string{"from_clarification_id", "from_candidate_idx"} {
+	// The two columns that carry a resumed turn back to the card it came from,
+	// and the language column 0002 adds on top of the squashed init.
+	for _, col := range []string{"from_clarification_id", "from_candidate_idx", "language"} {
 		var n int
 		if err := db.QueryRow(
 			`SELECT count(*) FROM pragma_table_info('messages') WHERE name=?`, col).Scan(&n); err != nil {

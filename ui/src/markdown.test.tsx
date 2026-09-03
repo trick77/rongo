@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import Markdown from "./markdown";
 
 describe("Markdown", () => {
@@ -35,9 +35,32 @@ describe("Markdown", () => {
   // deletes the evidence trail while looking like it worked.
   describe("citation markers", () => {
     it("stay visible in running text", () => {
-      render(<Markdown text={"Shipping runs through a job [1], started by the scheduler [12]."} />);
-      expect(screen.getByText(/\[1\]/)).toBeTruthy();
-      expect(screen.getByText(/\[12\]/)).toBeTruthy();
+      const { container } = render(
+        <Markdown text={"Shipping runs through a job [1], started by the scheduler [12]."} />,
+      );
+      expect(container.textContent).toBe("Shipping runs through a job [1], started by the scheduler [12].");
+    });
+
+    it("are styled as superscripts, never consumed", () => {
+      const { container } = render(<Markdown text={"A job [1] runs."} />);
+      expect(container.querySelector("sup")?.textContent).toBe("[1]");
+      expect(container.textContent).toBe("A job [1] runs.");
+    });
+
+    it("are only drawn as citations once a source is known to back them", () => {
+      // The backend drops an invented marker from the citation list, never
+      // from the text. A chip for [7] with no row 7 would look checkable.
+      const { container } = render(<Markdown text={"Real [1], invented [7]."} backed={new Set([1])} />);
+      const sups = container.querySelectorAll("sup");
+      expect(sups.length).toBe(1);
+      expect(sups[0].textContent).toBe("[1]");
+      expect(container.textContent).toBe("Real [1], invented [7].");
+    });
+
+    it("stay plain text while the closing bracket has not arrived yet", () => {
+      const { container } = render(<Markdown text={"A job [1"} />);
+      expect(container.querySelector("sup")).toBeNull();
+      expect(container.textContent).toBe("A job [1");
     });
 
     it("stay visible in bold text", () => {

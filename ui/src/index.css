@@ -1,19 +1,241 @@
 @import "tailwindcss";
 
+/* Self-hosted variable fonts, the same files ../loom and ../peeq ship. */
+@font-face {
+  font-family: "Anthropic Sans";
+  src: url("./fonts/SansWebVariable-TextRegular.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url("./fonts/SerifWebVariable-TextRegular.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Serif";
+  src: url("./fonts/SerifWebVariable-TextRegularItalic.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anthropic Mono";
+  src: url("./fonts/MonoVariableVariable-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Warm Editorial, dark — the token set ../loom and ../peeq share, so the
+   three tools read as one family. These drive the Tailwind v4 theme and
+   generate the bg-*, text-*, border-*, font-* and rounded-ui utilities the
+   components use; nothing reaches for var(--color-…) directly.
+
+   rongo's own semantic on top: ochre means "your move". It is the sibling
+   repos' kept-gold value under rongo's name, so the AGENTS.md rule keeps its
+   word. */
 @theme {
-  --color-ground: #f1f2ef;
-  --color-surface: #ffffff;
-  --color-sunk: #e8eae6;
-  --color-ink: #161b1c;
-  --color-ink-soft: #5c6668;
-  --color-ink-faint: #8b9496;
-  --color-hairline: #dbded8;
-  --color-accent: #106257;
-  --color-ochre: #8a6412;
+  --color-bg: #1f1f1e;
+  --color-panel: #1b1b1a;
+  --color-active: #2c2c2a;
+  --color-border: #323230;
+  --color-border-soft: #2a2a28;
+  --color-ink: #faf9f5;
+  --color-ink-dim: #e4e1d8;
+  --color-muted: #9c9a92;
+  --color-faint: #6f6d66;
+  --color-accent: #c6613f;
+  --color-accent-strong: #d97757;
+  --color-accent-fill: #c25f34;
+  --color-accent-dim: #5a3527;
+  --color-online: #5aa06a;
+  --color-danger: #c14638;
+  --color-ochre: #d6a15a;
+  --color-ochre-wash: rgba(214, 161, 90, 0.14);
+  --color-elevated: #363632;
+  --color-elevated-border: #454540;
+  --font-sans: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: "Anthropic Serif", Georgia, "Times New Roman", Times, serif;
+  --font-mono: "Anthropic Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-ui: 10px;
+  --radius-ui-sm: 8px;
+  --radius-ui-lg: 12px;
+  --shadow-panel: 0 24px 60px -18px rgba(0, 0, 0, 0.6);
+}
+
+html {
+  color-scheme: dark;
+  scrollbar-gutter: stable;
+}
+
+/* Tailwind v4 dropped Preflight's pointer cursor on buttons. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 body {
-  background: var(--color-ground);
+  margin: 0;
+  background: var(--color-bg);
   color: var(--color-ink);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Placeholders are examples of what you could type, never content: pinned to
+   the faintest ink so they never read as a typed value. opacity:1 because
+   Firefox dims ::placeholder a second time on its own. */
+::placeholder {
+  color: var(--color-faint);
+  opacity: 1;
+}
+
+/* ---- the activity timeline (Trace.tsx) ----
+   One grid, so the node column, the label and the duration line up across
+   rows; the connecting line runs behind the nodes. Always expanded: it is how
+   progress is seen, and it grows as the steps arrive. */
+.steps {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  column-gap: 12px;
+  position: relative;
+}
+.steps::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--color-border);
+}
+.steps > li {
+  display: contents;
+}
+.node {
+  position: relative;
+  width: 22px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.node::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 0 0 3px var(--color-bg);
+}
+.node-now::before {
+  width: 13px;
+  height: 13px;
+  background: transparent;
+  border: 2px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent-strong);
+  animation: spin 0.9s linear infinite;
+}
+.node-end::before {
+  width: 12px;
+  height: 12px;
+}
+.node-done::before {
+  background: var(--color-online);
+}
+.node-ochre::before {
+  background: var(--color-ochre);
+  box-shadow:
+    0 0 0 3px var(--color-bg),
+    0 0 0 6px var(--color-ochre-wash);
+}
+.node-fail::before {
+  background: var(--color-danger);
+}
+.node-decided::before {
+  background: var(--color-muted);
+}
+
+/* The bar under the top edge of the thread column while a turn is in flight,
+   visible even when the running turn is scrolled out of view. */
+.busybar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-accent-strong) 50%, transparent);
+  background-size: 35% 100%;
+  background-repeat: no-repeat;
+  animation: slide 1.3s ease-in-out infinite;
+  z-index: 1;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--color-accent-strong);
+  vertical-align: -2px;
+  margin-left: 2px;
+  animation: blink 1s steps(2) infinite;
+}
+
+.pulse {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 4px var(--color-accent-dim);
+  }
+}
+@keyframes slide {
+  from {
+    background-position: -35% 0;
+  }
+  to {
+    background-position: 135% 0;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .node-now::before,
+  .busybar,
+  .caret,
+  .pulse {
+    animation: none;
+  }
+}
+
+/* A native <details> has no open state on its summary's children; the
+   chevron inside rotates off the element's own open attribute. */
+details[open] > summary .chev {
+  transform: rotate(90deg);
+}
+
+/* Native select, styled as a pill: the arrow is drawn by the component. */
+.lang-select {
+  appearance: none;
+  -webkit-appearance: none;
 }

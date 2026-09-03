@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
-import Trace, { type TraceState } from "./Trace";
+import Trace, { type Step, type TraceState } from "./Trace";
+import { Chevron } from "./icons";
 
 type Citation = {
   marker: number;
@@ -12,6 +13,16 @@ type Citation = {
   end_line: number;
 };
 
+type Audience = "ba" | "dev";
+
+/** The languages the answer can be written in; the backend's allowlist. */
+export const languages: { code: string; name: string }[] = [
+  { code: "en", name: "English" },
+  { code: "de", name: "Deutsch" },
+  { code: "fr", name: "Français" },
+  { code: "it", name: "Italiano" },
+];
+
 /** The clarification a turn ended with, as this view needs it: the id of the
  * message that carries the card (used to resume it) and its candidates. */
 type TurnClarification = {
@@ -21,13 +32,12 @@ type TurnClarification = {
 
 type Turn = {
   question: string;
-  audience: "ba" | "dev";
+  audience: Audience;
+  language: string;
   text: string;
   citations: Citation[];
-  status: string;
-  // Every "status" event in order, for the trace panel — not just the latest
-  // one, which is all the old single status line kept.
-  steps: string[];
+  // Every "status" event in order, with its arrival time, for the timeline.
+  steps: Step[];
   error: string;
   done: boolean;
   // The id of the message this turn was recorded as, once known. Reexplain
@@ -41,6 +51,13 @@ type Turn = {
   // True for a turn created in this session. A turn restored from the
   // record carries no live trace — it is finished by definition.
   live: boolean;
+  // When the turn was sent and when it closed, for the timeline's totals.
+  startedAt: number;
+  endedAt: number | null;
+  // Tokens the model spent on this turn, from the usage event; 0 if unknown.
+  tokens: number;
+  // The moment the question was asked, as the record has it, or now.
+  askedAt: string;
 };
 
 /** Message is one stored turn, as GET /api/threads/{id} serves it. */
@@ -48,6 +65,7 @@ type Message = {
   id: number;
   ordinal: number;
   audience: string;
+  language?: string;
   question: string;
   answer: string;
   error: string;
@@ -59,6 +77,7 @@ type Message = {
   // position, is what tells two clarifications open in the same thread
   // apart.
   from_clarification_id: number;
+  created_at?: string;
 };
 
 /**
@@ -70,9 +89,9 @@ function storedTurn(m: Message): Turn {
   return {
     question: m.question,
     audience: m.audience === "dev" ? "dev" : "ba",
+    language: m.language ?? "en",
     text: m.answer ?? "",
     citations: m.citations ?? [],
-    status: "",
     steps: [],
     error: m.error ?? "",
     done: true,
@@ -80,6 +99,10 @@ function storedTurn(m: Message): Turn {
     clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
     chosenIdx: null,
     live: false,
+    startedAt: 0,
+    endedAt: 0,
+    tokens: 0,
+    askedAt: m.created_at ?? "",
   };
 }
 
@@ -87,13 +110,14 @@ function storedTurn(m: Message): Turn {
  * A fresh, in-flight turn — asked, resumed from a candidate, or
  * re-explained. All three start the same way: no answer yet, no steps yet.
  */
-function freshTurn(question: string, audience: "ba" | "dev"): Turn {
+function freshTurn(question: string, audience: Audience, language: string): Turn {
+  const now = Date.now();
   return {
     question,
     audience,
+    language,
     text: "",
     citations: [],
-    status: "",
     steps: [],
     error: "",
     done: false,
@@ -101,6 +125,10 @@ function freshTurn(question: string, audience: "ba" | "dev"): Turn {
     clarification: null,
     chosenIdx: null,
     live: true,
+    startedAt: now,
+    endedAt: null,
+    tokens: 0,
+    askedAt: new Date(now).toISOString(),
   };
 }
 
@@ -124,10 +152,12 @@ function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
   });
 }
 
-/** The trace's three states — the turn does not merely finish or not, it can
- * also end by asking, and that closes on the waiting node, not the check. */
+/** The trace's states — the turn does not merely finish or not: it can end
+ * by asking (and that closes on the waiting node, not the check), lose the
+ * colour once the reader has chosen, or break. */
 function traceState(turn: Turn): TraceState {
-  if (turn.clarification) return "waiting";
+  if (turn.error) return "failed";
+  if (turn.clarification) return turn.chosenIdx == null ? "waiting" : "decided";
   return turn.done ? "done" : "running";
 }
 
@@ -155,28 +185,27 @@ function forgeLine(c: Citation): string {
   return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
 }
 
-/**
- * Chevron, rotating 90 degrees on open. No triangle, no plus/minus, and the
- * same glyph in both states — only the rotation changes.
- */
-export function Chevron({ open = false }: { open?: boolean }) {
-  return (
-    <svg
-      className={"chev inline-block h-3 w-3 transition-transform " + (open ? "rotate-90" : "")}
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-    >
-      <path
-        d="M4.5 2.5 L8 6 L4.5 9.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+function roleName(a: Audience): string {
+  return a === "dev" ? "Developer" : "Analyst";
 }
+
+function clock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** asMarkdown is what "Copy as Markdown" puts on the clipboard: the raw
+ * answer with its markers, and the sources they point at. */
+function asMarkdown(turn: Turn): string {
+  const lines = [`# ${turn.question}`, "", turn.text.trim()];
+  if (turn.citations.length > 0) {
+    lines.push("", "Sources:", ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`));
+  }
+  return lines.join("\n") + "\n";
+}
+
+const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";
 
 export default function Ask({
   threadId: openThread = null,
@@ -194,9 +223,13 @@ export default function Ask({
   onBusy?: (busy: boolean) => void;
 }) {
   const [question, setQuestion] = useState("");
-  const [audience, setAudience] = useState<"ba" | "dev">("ba");
+  const [audience, setAudience] = useState<Audience>("ba");
+  const [language, setLanguage] = useState("en");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
+  // The marker under the pointer, so the Sources pane can point back.
+  const [hot, setHot] = useState<number | null>(null);
+  const [copied, setCopied] = useState<number | null>(null);
   const threadId = useRef<number | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -212,6 +245,7 @@ export default function Ask({
   // by sequence instead of by cleanup also settles the real race: switching
   // threads while a slower load is in the air.
   const loadSeq = useRef(0);
+  const bottom = useRef<HTMLDivElement>(null);
 
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
@@ -273,6 +307,22 @@ export default function Ask({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openThread]);
 
+  // A new turn scrolls into view; tokens arriving into it do not fight the
+  // reader who scrolled up.
+  useEffect(() => {
+    bottom.current?.scrollIntoView?.({ block: "end" });
+  }, [turns.length, openThread]);
+
+  // The composer grows with the question up to a few lines, so a multi-line
+  // question can be read back before it is sent.
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [question]);
+
   /**
    * Streams one turn's SSE response into the LAST entry of `turns`. Shared by
    * asking, resuming a clarification and re-explaining — all three post,
@@ -288,7 +338,7 @@ export default function Ask({
         body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
-        patchLast((t) => ({ ...t, error: `The server answered with ${res.status}.`, done: true }));
+        patchLast((t) => ({ ...t, error: `The server answered with ${res.status}.`, done: true, endedAt: Date.now() }));
         return;
       }
       const reader = res.body.getReader();
@@ -308,21 +358,22 @@ export default function Ask({
             // appear in the list the moment the question is sent.
             onActivity();
           } else if (name === "status") {
-            patchLast((t) => ({ ...t, status: payload.step, steps: [...t.steps, payload.step] }));
+            patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
           } else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
+          else if (name === "usage") patchLast((t) => ({ ...t, tokens: Number(payload.total_tokens ?? 0) }));
           else if (name === "clarification") {
             patchLast((t) => ({
               ...t,
               messageId: payload.message_id,
               clarification: { messageId: payload.message_id, candidates: payload.candidates ?? [] },
             }));
-          } else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true }));
+          } else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true, endedAt: Date.now() }));
           else if (name === "done") {
             patchLast((t) => ({
               ...t,
               done: true,
-              status: "",
+              endedAt: t.endedAt ?? Date.now(),
               messageId: payload.message_id ?? t.messageId,
             }));
             // The model-written title replaces the placeholder in a background
@@ -333,14 +384,14 @@ export default function Ask({
         });
       }
     } catch {
-      patchLast((t) => ({ ...t, error: "The connection was lost.", done: true }));
+      patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
     } finally {
       markBusy(false);
     }
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submit(e?: React.FormEvent) {
+    e?.preventDefault();
     const q = question.trim();
     if (!q || busy) return;
 
@@ -351,10 +402,10 @@ export default function Ask({
     // load is what the reader expects anyway: they have moved on.
     loadSeq.current++;
 
-    setTurns((prev) => [...prev, freshTurn(q, audience)]);
+    setTurns((prev) => [...prev, freshTurn(q, audience, language)]);
     setQuestion("");
 
-    await stream("/api/ask", { question: q, audience, thread_id: threadId.current ?? 0 });
+    await stream("/api/ask", { question: q, audience, language, thread_id: threadId.current ?? 0 });
   }
 
   /**
@@ -371,13 +422,14 @@ export default function Ask({
     loadSeq.current++;
     setTurns((prev) => [
       ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
-      freshTurn(turn.question, turn.audience),
+      freshTurn(turn.question, turn.audience, turn.language),
     ]);
 
     await stream("/api/ask", {
       thread_id: threadId.current ?? 0,
       question: turn.question,
       audience: turn.audience,
+      language: turn.language,
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
     });
@@ -386,120 +438,278 @@ export default function Ask({
   /**
    * Re-explaining is a NEW turn for the other audience, from sources a prior
    * turn already gathered — never a rewrite, and never a fresh /api/ask
-   * question.
+   * question. The language is inherited on the server from the turn it
+   * re-answers.
    */
   async function reexplain(turnIndex: number) {
     if (busy) return;
     const turn = turns[turnIndex];
     if (!turn.messageId) return;
-    const nextAudience: "ba" | "dev" = turn.audience === "dev" ? "ba" : "dev";
+    const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
     loadSeq.current++;
-    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience)]);
+    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language)]);
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
   }
 
+  async function copy(turnIndex: number) {
+    try {
+      await navigator.clipboard.writeText(asMarkdown(turns[turnIndex]));
+      setCopied(turnIndex);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      // No clipboard (insecure context, permissions): the button simply does
+      // nothing visible; the answer is still on screen to select.
+    }
+  }
+
+  // The Sources pane shows the latest turn that has any: the one the reader
+  // is most likely looking at, and the only one whose markers can be pointed
+  // back to.
+  const sourceTurnIndex = (() => {
+    for (let i = turns.length - 1; i >= 0; i--) if (turns[i].citations.length > 0) return i;
+    return -1;
+  })();
+  const sourceTurn = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
+
+  // A highlight belongs to the turn the pane shows. When the pane moves to a
+  // newer turn, the old Markdown's mouseleave never fires for it.
+  useEffect(() => {
+    setHot(null);
+  }, [sourceTurnIndex]);
+
   return (
-    <div>
-      {turns.map((turn, i) => (
-        <article key={i} className="mb-8 border-b border-[var(--color-hairline)] pb-6">
-          <p className="font-medium">{turn.question}</p>
-          <p className="mt-1 text-xs text-[var(--color-ink-faint)]">
-            {turn.audience === "ba" ? "Business Analyst" : "Developer"}
-          </p>
+    <div className="grid h-full min-h-0 grid-cols-[1fr_320px]">
+      <div className="relative flex min-h-0 min-w-0 flex-col">
+        {busy && <div className="busybar" aria-hidden="true" />}
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="max-w-[900px] px-10 pt-8 pb-10">
+            {turns.length === 0 && (
+              <div className="mt-16 max-w-[52ch]">
+                <h2 className="font-serif text-[28px] font-medium leading-tight tracking-tight text-ink">
+                  Ask about the code.
+                </h2>
+                <p className="mt-3 text-muted">
+                  rongo searches the indexed repositories, asks back when a question fits more than one
+                  mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the
+                  mechanism in domain terms, a Developer gets types, functions and files.
+                </p>
+              </div>
+            )}
 
-          {/* A restored turn is finished by definition and carries no live
-              trace — only a turn asked, resumed or re-explained in THIS
-              session does. */}
-          {turn.live && <Trace steps={turn.steps} state={traceState(turn)} />}
+            {turns.map((turn, i) => (
+              <article
+                key={i}
+                className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0"
+              >
+                <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
+                  {roleName(turn.audience)}
+                </div>
+                <p className="mt-1.5 max-w-[30ch] font-serif text-[26px] font-medium leading-[1.3] tracking-tight text-ink text-balance">
+                  {turn.question}
+                </p>
+                <div className="mt-2.5 flex items-center gap-1.5">
+                  {turn.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(turn.askedAt)}</time>}
+                  <span className={pill + " bg-active text-muted"}>turn {i + 1}</span>
+                  {turn.language !== "en" && (
+                    <span className={pill + " bg-active text-muted"}>
+                      {languages.find((l) => l.code === turn.language)?.name ?? turn.language}
+                    </span>
+                  )}
+                </div>
 
-          {turn.clarification && (
-            <Clarify
-              candidates={turn.clarification.candidates}
-              chosenIdx={turn.chosenIdx}
-              onChoose={(idx) => chooseCandidate(i, idx)}
+                {/* A restored turn is finished by definition and carries no live
+                    trace — only a turn asked, resumed or re-explained in THIS
+                    session does. */}
+                {turn.live && (
+                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} />
+                )}
+
+                {turn.clarification && (
+                  <Clarify
+                    candidates={turn.clarification.candidates}
+                    chosenIdx={turn.chosenIdx}
+                    onChoose={(idx) => chooseCandidate(i, idx)}
+                  />
+                )}
+
+                {turn.text && (
+                  <div className="mt-4 max-w-[68ch] text-base leading-[1.65] text-ink-dim">
+                    <Markdown
+                      text={turn.text}
+                      onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
+                      // Known once the turn is done: the citations event is
+                      // the last thing before done, so a finished turn with
+                      // none has none.
+                      backed={turn.done ? new Set(turn.citations.map((c) => c.marker)) : undefined}
+                    />
+                    {!turn.done && <span className="caret" aria-hidden="true" />}
+                  </div>
+                )}
+
+                {turn.error && (
+                  <p role="alert" className="mt-3 text-accent-strong">
+                    {turn.error}
+                  </p>
+                )}
+
+                {turn.citations.length > 0 && (
+                  <details className="mt-4 text-sm">
+                    <summary className="flex cursor-pointer list-none items-center gap-2 text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+                      <Chevron /> How does rongo know this?{" "}
+                      <span className="text-faint">{turn.citations.length} sources</span>
+                    </summary>
+                    <ul className="mt-2 space-y-1">
+                      {turn.citations.map((c) => (
+                        <li key={c.marker}>
+                          <sup className="font-mono text-accent-strong">{c.marker}</sup>{" "}
+                          <code className="font-mono text-[13px] text-muted">{forgeLine(c)}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+
+                {/* Re-explaining needs a stored answer to build from — never on a
+                    turn that failed or ended by asking. */}
+                {turn.done && turn.messageId && !turn.error && !turn.clarification && (
+                  <div className="mt-4 flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => reexplain(i)}
+                      className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                    >
+                      {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copy(i)}
+                      className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
+                    >
+                      {copied === i ? "Copied" : "Copy as Markdown"}
+                    </button>
+                    {turn.tokens > 0 && (
+                      <span className={pill + " ml-auto bg-active font-mono text-faint"}>
+                        {turn.tokens.toLocaleString("en-GB")} tokens
+                      </span>
+                    )}
+                  </div>
+                )}
+              </article>
+            ))}
+            <div ref={bottom} />
+          </div>
+        </div>
+
+        <form
+          onSubmit={submit}
+          className="bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-10 pt-3 pb-4"
+        >
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-ui-lg border border-border bg-panel py-2 pr-2 pl-3 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
+            <div className="flex items-center gap-2">
+              <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
+                {(["ba", "dev"] as const).map((role) => (
+                  <button
+                    key={role}
+                    type="button"
+                    aria-pressed={audience === role}
+                    onClick={() => setAudience(role)}
+                    className={
+                      "rounded-full px-3 py-1 text-xs font-medium " +
+                      (audience === role ? "bg-accent-fill text-ink" : "text-muted hover:text-ink")
+                    }
+                  >
+                    {roleName(role)}
+                  </button>
+                ))}
+              </fieldset>
+              <label className="relative inline-flex h-8 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink">
+                <span className="sr-only">Answer language</span>
+                <select
+                  aria-label="Answer language"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none"
+                >
+                  {languages.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="pointer-events-none absolute right-2 rotate-90">
+                  <Chevron />
+                </span>
+              </label>
+            </div>
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              ref={box}
+              rows={1}
+              aria-label="Question"
+              placeholder="Ask about the code…"
+              className="w-full resize-none bg-transparent py-1.5 text-[15px] text-ink outline-none"
             />
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-full bg-accent-fill px-4.5 py-2 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50"
+            >
+              Ask
+            </button>
+          </div>
+          <p className="mt-2 pl-1 text-xs text-faint">
+            Follow-ups stay in this thread. Role and language travel with each question. Shift+Enter for a new line.
+          </p>
+        </form>
+      </div>
+
+      <aside aria-label="Sources" className="flex min-h-0 flex-col border-l border-border bg-panel">
+        <header className="flex items-center border-b border-border px-4.5 py-3.5 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
+          Sources
+          {sourceTurn && (
+            <span className="ml-auto font-mono tracking-normal">
+              turn {sourceTurnIndex + 1} · {sourceTurn.citations.length}
+            </span>
           )}
-
-          {turn.text && <Markdown text={turn.text} />}
-
-          {turn.error && (
-            <p role="alert" className="mt-3 text-[var(--color-ochre)]">
-              {turn.error}
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {!sourceTurn && (
+            <p className="px-4.5 py-4 text-[13px] text-faint">
+              The files an answer was written from appear here, numbered like the markers in the text.
             </p>
           )}
-
-          {turn.citations.length > 0 && (
-            <details className="mt-4 text-sm">
-              <summary className="cursor-pointer text-[var(--color-ink-soft)]">
-                <Chevron /> How does rongo know this?{" "}
-                <span className="text-[var(--color-ink-faint)]">
-                  {turn.citations.length} sources
-                </span>
-              </summary>
-              <ul className="mt-2 space-y-1">
-                {turn.citations.map((c) => (
-                  <li key={c.marker}>
-                    <sup>{c.marker}</sup> <code>{forgeLine(c)}</code>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-
-          {/* Re-explaining needs a stored answer to build from — never on a
-              turn that failed or ended by asking. */}
-          {turn.done && turn.messageId && !turn.error && !turn.clarification && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => reexplain(i)}
-              className="mt-3 rounded border border-[var(--color-hairline)] px-3 py-1 text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)] disabled:opacity-50"
+          {sourceTurn?.citations.map((c) => (
+            <div
+              key={c.marker}
+              className={
+                "grid grid-cols-[26px_1fr] gap-x-2 gap-y-0.5 border-b border-border-soft px-4.5 py-3.5 text-[13px] " +
+                (hot === c.marker ? "bg-active" : "hover:bg-active")
+              }
             >
-              {turn.audience === "dev" ? "Explain as BA" : "Explain as Dev"}
-            </button>
-          )}
-        </article>
-      ))}
-
-      <form onSubmit={submit} className="sticky bottom-0 bg-[var(--color-ground)] pt-2">
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          rows={3}
-          aria-label="Question"
-          placeholder="How is the teaser mail sent?"
-          className="w-full rounded border border-[var(--color-hairline)] bg-[var(--color-surface)] p-3"
-        />
-        <div className="mt-2 flex items-center gap-3">
-          <fieldset className="flex gap-1" aria-label="Role">
-            {(["ba", "dev"] as const).map((role) => (
-              <button
-                key={role}
-                type="button"
-                aria-pressed={audience === role}
-                onClick={() => setAudience(role)}
-                className={
-                  "rounded border px-3 py-1 text-sm " +
-                  (audience === role
-                    ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-                    : "border-[var(--color-hairline)] text-[var(--color-ink-soft)]")
-                }
-              >
-                {role.toUpperCase()}
-              </button>
-            ))}
-          </fieldset>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded bg-[var(--color-accent)] px-4 py-1 text-sm text-white disabled:opacity-50"
-          >
-            Ask
-          </button>
+              <span className="row-span-2 font-mono font-semibold text-accent-strong">{c.marker}</span>
+              <span className="font-medium text-ink">
+                {c.repo}
+                <span className="ml-1.5 font-mono text-[11.5px] font-normal text-faint">{c.branch}</span>
+              </span>
+              <span className="font-mono text-xs break-all text-muted">
+                {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
+                <b className="font-medium text-ink-dim">{c.path.slice(c.path.lastIndexOf("/") + 1)}</b>
+                :{c.start_line}-{c.end_line}
+              </span>
+            </div>
+          ))}
         </div>
-      </form>
+      </aside>
     </div>
   );
 }

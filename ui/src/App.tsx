@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Ask from "./Ask";
-import RepoList from "./RepoList";
-import Threads from "./Threads";
+import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
+import Threads, { type Thread } from "./Threads";
+import { AskIcon, ReposIcon } from "./icons";
+import logo from "./assets/rongo-wide.png";
 
 type Page = "ask" | "repos";
 
@@ -140,6 +142,46 @@ function rememberThread(id: number | null) {
   }
 }
 
+/**
+ * The index line at the foot of the rail: whether the index is current, and
+ * when it last ran. Read from /api/repos, the same status the Repos page
+ * shows in full; a list that cannot be loaded shows nothing rather than a
+ * warning nobody can act on from here.
+ */
+function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when: string } | null {
+  const [status, setStatus] = useState<{ ok: boolean; last: string | null } | null>(null);
+  useEffect(() => {
+    // Nothing is fetched before the session gate has let the app through:
+    // the gate is the one place that decides whether to talk to the server.
+    // Re-read whenever the thread list is (every turn), so the line does
+    // not freeze at what was true when the tab was opened.
+    if (!enabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/repos");
+        if (!res.ok) return;
+        const repos = (await res.json()) as Repo[];
+        if (cancelled || !Array.isArray(repos) || repos.length === 0) return;
+        // Only repos still being indexed count: a deactivated one keeps its
+        // last error in the record, but nobody is going to fix it here.
+        const live = repos.filter((r) => r.enabled);
+        setStatus({ ok: live.every((r) => !r.last_error), last: lastRunAt(live) });
+      } catch {
+        // See above.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, version]);
+  // "N min ago" is computed at render, not stored, so it ages with the page.
+  return status && { ok: status.ok, when: relative(status.last) };
+}
+
+const navItem =
+  "relative flex w-full items-center gap-3 rounded-ui-sm px-3 py-2 text-left text-[15px] hover:bg-active hover:text-ink";
+
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
   const [threadId, setThreadId] = useState<number | null>(storedThread);
@@ -148,7 +190,9 @@ export default function App() {
   // background goroutine — and neither can push.
   const [threadsVersion, setThreadsVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [threads, setThreads] = useState<Thread[]>([]);
   const session = useSession();
+  const index = useIndexStatus(session.state === "in", threadsVersion);
 
   const selectThread = useCallback((id: number | null) => {
     setThreadId(id);
@@ -167,7 +211,7 @@ export default function App() {
           reader tell "signed in" from "not yet", and repeating it here would
           make the gate screen indistinguishable from the app.
         */}
-        <p className="text-sm text-[var(--color-ink-soft)]">
+        <p className="text-sm text-muted">
           {session.state === "checking" && "Checking the session …"}
           {session.state === "out" && "Redirecting to sign-in …"}
           {session.state === "halted" && session.message}
@@ -175,7 +219,7 @@ export default function App() {
         {session.state === "halted" && (
           <a
             href="/api/auth/login"
-            className="mt-4 inline-block text-sm text-[var(--color-accent)]"
+            className="mt-4 inline-block rounded-full bg-accent-fill px-4 py-2 text-sm font-medium text-ink hover:bg-accent-strong"
           >
             Sign in
           </a>
@@ -184,69 +228,123 @@ export default function App() {
     );
   }
 
+  const openTitle = threadId === null ? null : (threads.find((t) => t.id === threadId)?.title ?? null);
+
   return (
-    <main className="mx-auto max-w-6xl p-8">
-      <header className="mb-8 flex items-baseline gap-6">
-        <h1 className="text-2xl font-semibold tracking-tight">rongo</h1>
-        <nav className="flex gap-4 text-sm">
-          {(["ask", "repos"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              aria-current={page === p ? "page" : undefined}
-              onClick={() => setPage(p)}
-              className={
-                page === p
-                  ? "text-[var(--color-accent)]"
-                  : "text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
-              }
-            >
-              {p === "ask" ? "Ask" : "Repos"}
-            </button>
-          ))}
-        </nav>
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="ml-auto text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
-        >
-          Sign out
-        </button>
+    <div className="grid h-screen grid-rows-[56px_1fr]">
+      <header className="grid grid-cols-[248px_1fr_auto] items-center border-b border-border bg-panel">
+        <div className="flex h-full items-center gap-2.5 px-5">
+          <span
+            aria-hidden="true"
+            className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity"
+            style={{ backgroundImage: `url(${logo})` }}
+          />
+          <h1 className="font-serif text-[21px] font-semibold tracking-tight">rongo</h1>
+        </div>
+        <div className="flex min-w-0 items-center gap-2.5 px-6 text-muted">
+          {page === "ask" ? (
+            <>
+              <span>Threads</span>
+              <span className="text-faint">/</span>
+              <span className="truncate font-serif text-[19px] font-medium text-ink">
+                {openTitle ?? "New question"}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-serif text-[19px] font-medium text-ink">Repos</span>
+              <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
+            </>
+          )}
+        </div>
+        <div className="flex items-center gap-3.5 px-5 text-[13px] text-muted">
+          {session.me.email && <span className="truncate">{session.me.email}</span>}
+          <button type="button" onClick={() => void logout()} className="hover:text-ink">
+            Sign out
+          </button>
+        </div>
       </header>
 
-      {/*
-        Ask stays mounted and is hidden, never unmounted. Switching to Repos
-        mid-answer would otherwise discard the thread on screen while the stream
-        keeps writing into a dead component — and the stored record only catches
-        up once the turn is finished.
-      */}
-      <div hidden={page !== "ask"} className="flex gap-8">
-        <aside className="w-56 shrink-0">
+      <div className="grid min-h-0 grid-cols-[248px_1fr]">
+        <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
+          <div className="px-6 pt-4 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">Explore</div>
+          <nav aria-label="Pages" className="grid gap-0.5 px-3 pb-1">
+            {(
+              [
+                ["ask", "Ask", <AskIcon key="a" />],
+                ["repos", "Repos", <ReposIcon key="r" />],
+              ] as const
+            ).map(([p, label, icon]) => (
+              <button
+                key={p}
+                type="button"
+                aria-current={page === p ? "page" : undefined}
+                onClick={() => setPage(p)}
+                className={navItem + " " + (page === p ? "bg-active text-ink" : "text-muted")}
+              >
+                {page === p && (
+                  <span aria-hidden="true" className="absolute top-2 bottom-2 -left-3 w-[3px] rounded-r bg-accent" />
+                )}
+                {icon}
+                {label}
+              </button>
+            ))}
+          </nav>
+          <div className="flex items-center px-6 pt-3 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
+            History
+            {threads.length > 0 && <span className="ml-auto font-mono tracking-normal">{threads.length}</span>}
+          </div>
           <Threads
             activeId={threadId}
-            onSelect={selectThread}
+            onSelect={(id) => {
+              setPage("ask");
+              selectThread(id);
+            }}
             version={threadsVersion}
             busy={busy}
+            onList={setThreads}
           />
+          {index && (
+            <div className="m-3 flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
+              <span
+                aria-hidden="true"
+                className={"h-[7px] w-[7px] rounded-full " + (index.ok ? "bg-online" : "bg-ochre")}
+              />
+              {index.ok ? "Index current" : "Index has errors"} · {index.when}
+            </div>
+          )}
         </aside>
-        <div className="min-w-0 flex-1">
-          <Ask
-            threadId={threadId}
-            onThread={selectThread}
-            onActivity={refreshThreads}
-            onBusy={setBusy}
-          />
-        </div>
+
+        <main className="min-h-0 min-w-0">
+          {/*
+            Ask stays mounted and is hidden, never unmounted. Switching to Repos
+            mid-answer would otherwise discard the thread on screen while the stream
+            keeps writing into a dead component — and the stored record only catches
+            up once the turn is finished.
+          */}
+          <div hidden={page !== "ask"} className="h-full">
+            <Ask
+              threadId={threadId}
+              onThread={selectThread}
+              onActivity={refreshThreads}
+              onBusy={setBusy}
+            />
+          </div>
+          {page === "repos" && (
+            <div className="h-full overflow-auto">
+              <div className="max-w-[1100px] px-10 py-8">
+                <h2 className="font-serif text-[28px] font-medium tracking-tight text-ink">Repositories</h2>
+                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+                  Read-only. The repository list is maintained in <code className="font-mono">repos.yaml</code>,
+                  and credentials never live in it. A repo that drops out of the file is deactivated, never
+                  deleted.
+                </p>
+                <RepoList />
+              </div>
+            </div>
+          )}
+        </main>
       </div>
-      {page === "repos" && (
-        <>
-          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
-            Read-only. The repository list is maintained in <code>repos.yaml</code>,
-            and credentials never live in it.
-          </p>
-          <RepoList />
-        </>
-      )}
-    </main>
+    </div>
   );
 }

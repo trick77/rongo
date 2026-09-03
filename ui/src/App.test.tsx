@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 
@@ -141,8 +141,9 @@ describe("App", () => {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Question"), "A question that has to stay put");
 
-    await user.click(screen.getByRole("button", { name: "Repos" }));
-    await user.click(screen.getByRole("button", { name: "Ask" }));
+    const pages = within(screen.getByRole("navigation", { name: "Pages" }));
+    await user.click(pages.getByRole("button", { name: "Repos" }));
+    await user.click(pages.getByRole("button", { name: "Ask" }));
 
     expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe(
       "A question that has to stay put",

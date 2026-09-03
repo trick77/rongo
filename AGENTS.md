@@ -46,5 +46,7 @@
 
 ## UI
 - Expandable → chevron, rotates 90° on open. No triangle, no plus/minus, no glyph swap.
-- Activity trace is a timeline, **one per turn**. A clarification ends the turn: ochre waiting node, not the Done check.
+- Activity trace is a timeline, **one per turn**, **never collapsible**: it grows live as steps arrive, with the time each took. Progress is watched, not opened. A clarification ends the turn: ochre waiting node, not the Done check.
 - Ochre means "your move". Once decided, it loses the colour.
+- Look and tokens: Warm Editorial dark, the same `@theme` and fonts as ../loom and ../peeq (`ui/src/index.css`). Reference: `docs/plans/rongo-ui-mock.html`.
+- Roles read "Analyst" and "Developer" in the UI; the wire values stay `ba`/`dev`.
