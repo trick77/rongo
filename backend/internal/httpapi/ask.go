@@ -287,6 +287,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resume != nil {
+		// The resumed turn is a turn of its own: it says what its scope was
+		// and records it, the same way handleReexplain does. Without this the
+		// notice stops at the card, and a re-explain of the resumed answer
+		// reads an empty scope and drops the rule that keeps the model from
+		// writing about a repository the index never had.
+		if notice := ask.ScopeNotice(lang, resumeScope.Known, resumeScope.Unknown); notice != "" {
+			send("notice", map[string]any{"text": notice})
+		}
+		if serr := s.deps.Threads.SetScope(record, msg.ID, resumeScope); serr != nil {
+			slog.Error("record scope failed", "err", serr)
+		}
 		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
 		if err != nil {
 			slog.Error("resumed turn failed", "err", err)

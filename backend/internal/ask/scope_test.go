@@ -16,6 +16,38 @@ const twoReposReply = `{"intent":"how","terms":["session handling"],"code_terms"
 // does — the loom case.
 const oneMissingReply = `{"intent":"how","terms":["session handling"],"code_terms":["Session"],"repos":["loom","rongo"]}`
 
+// threeReposReply names more repositories than the cap allows at full depth.
+const threeReposReply = `{"intent":"how","terms":["x"],"code_terms":["X"],"repos":["peeq","rongo","go-sqlite3"]}`
+
+// bothReposSources is one source from each of the two repositories a
+// comparison question names.
+func bothReposSources() []Source {
+	return []Source{
+		{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "backend/internal/sched/sched.go",
+			StartLine: 1, EndLine: 30, Text: "func Sleep() {}", Reason: "hit"},
+		{ChunkID: 2, Repo: "rongo", Branch: "master", Path: "backend/internal/sched/sched.go",
+			StartLine: 1, EndLine: 30, Text: "func Jittered() {}", Reason: "hit"},
+	}
+}
+
+func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
+	// A named repository can be indexed, be searched on its own and still
+	// return nothing for this question. "Cover every one of them" would then
+	// be an instruction to invent — the one thing the rest of the prompt is
+	// built to prevent.
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
+		twoSources(), Scope{Known: []string{"peeq", "rongo"}}, nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	// twoSources is peeq only: one covered repository is not a comparison.
+	if strings.Contains(*prompt, "The question names these repositories") {
+		t.Errorf("the comparison rule must rest on the sources, not on the names:\n%s", *prompt)
+	}
+}
+
 func TestDecideDoesNotAskWhenTheQuestionNamedBothRepositories(t *testing.T) {
 	// Given two candidates too close for the margin, which every later rung
 	// would turn into a card.
@@ -88,6 +120,37 @@ func TestPipelineSearchesEachNamedRepositoryOnItsOwn(t *testing.T) {
 			t.Errorf("search %d restricted to %v, want only %q", i, search.queries[i].Repos, want)
 		}
 	}
+}
+
+func TestPipelineCapsWhatAComparisonCarriesOutOfRetrieval(t *testing.T) {
+	// Gather never evicts a search hit, so every hit here becomes a source in
+	// the answer prompt. Four named repositories at full depth would inline
+	// eighty chunks of raw code with nothing to stop them.
+	db := gatherDB(t)
+	hits := make([]retrieve.Hit, searchK)
+	for i := range hits {
+		hits[i] = retrieve.Hit{ChunkID: int64(i + 1), Repo: "peeq", Path: "a.go", Score: float64(searchK - i)}
+	}
+	search := &fakeSearch{hits: hits, indexed: []string{"peeq", "rongo", "go-sqlite3"}}
+	c := twoStepUpstream(t, threeReposReply, "x")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	got, err := p.searchScoped(context.Background(), "q", []string{"q"}, []string{"peeq", "rongo", "go-sqlite3"})
+	if err != nil {
+		t.Fatalf("searchScoped: %v", err)
+	}
+
+	if len(got) != comparisonK {
+		t.Errorf("carried %d hits out of three repositories, want the cap of %d", len(got), comparisonK)
+	}
+	// Best first, so the cap keeps the strongest evidence rather than
+	// whichever repository happened to be searched first.
+	for i := 1; i < len(got); i++ {
+		if got[i-1].Score < got[i].Score {
+			t.Fatalf("hits are not ordered best first at %d", i)
+		}
+	}
+	_ = got
 }
 
 func TestPipelineTellsTheRouterWhichRepositoriesWereNamed(t *testing.T) {
@@ -192,7 +255,7 @@ func TestAnswerPromptCarriesTheComparisonAndTheMissingRepository(t *testing.T) {
 	// loom's side out of its training.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		twoSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

@@ -284,6 +284,25 @@ func ScopeNotice(lang Language, known, unknown []string) string {
 	return fmt.Sprintf(scopeNotice[l], missing, strings.Join(known, ", "))
 }
 
+// coveredRepos is the named repositories that actually have a source in front
+// of the model, in the order the question named them.
+func coveredRepos(known []string, sources []Source) []string {
+	if len(known) == 0 {
+		return nil
+	}
+	has := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		has[s.Repo] = true
+	}
+	var out []string
+	for _, n := range known {
+		if has[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // Answer writes the answer for one turn, streaming it token by token.
 //
 // With nothing gathered it returns the "nothing found" answer WITHOUT calling
@@ -306,8 +325,14 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}
 	// After the audience block, so "cover every one of them" is read against
 	// the shape the audience block just set rather than before it.
-	if len(scope.Known) >= 2 {
-		system += fmt.Sprintf(answerCompare, strings.Join(scope.Known, ", "))
+	//
+	// Against the repositories the SOURCES actually cover, never against the
+	// names alone: a named repository can be indexed, be searched on its own,
+	// and still return nothing for this question. Telling the model to cover
+	// it anyway is an instruction to invent, which is the one thing the rest
+	// of this prompt exists to prevent.
+	if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
 	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))

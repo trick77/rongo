@@ -14,6 +14,10 @@ import (
 // ranks twelfth is still the thread that leads to the service.
 const searchK = 20
 
+// comparisonK caps what a comparison turn carries out of retrieval, however
+// many repositories the question named: two sides at full depth, and no more.
+const comparisonK = 2 * searchK
+
 // Searcher is the retrieval half. An interface so the pipeline can be tested
 // without an embedding endpoint.
 type Searcher interface {
@@ -208,6 +212,15 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 	// router ranks candidates by their best hit and the gatherer walks in
 	// order, and neither should see the repositories' turn order instead.
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	// Bounded whatever the understanding guessed. Gather never evicts a search
+	// hit — an answer cites what it was built on — so every hit here becomes a
+	// source, and four named repositories would inline eighty chunks of raw
+	// code into the answer prompt with nothing to stop them. Two repositories'
+	// worth is the depth this was measured at; a third and fourth side compete
+	// for the same room rather than adding more.
+	if len(all) > comparisonK {
+		all = all[:comparisonK]
+	}
 	return all, nil
 }
 

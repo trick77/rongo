@@ -78,4 +78,27 @@ func TestResumingACardCarriesTheScopeItWasAskedUnder(t *testing.T) {
 	if len(got.Unknown) != 1 || got.Unknown[0] != "loom" {
 		t.Errorf("resumed turn was handed scope %+v, want the one the card was asked under", got)
 	}
+	// Said to the reader of the resumed turn, not only to the reader of the
+	// card: the resumed answer is a turn of its own.
+	if !strings.Contains(body, "event: notice") || !strings.Contains(body, "loom") {
+		t.Errorf("the resumed turn did not report its scope:\n%s", body)
+	}
+
+	// And recorded on the NEW message, or a later re-explain of it reads an
+	// empty scope and drops the rule that keeps the model off loom.
+	ths, err := st.List(context.Background(), testSubject)
+	if err != nil || len(ths) == 0 {
+		t.Fatalf("list threads: %v (%d)", err, len(ths))
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, ths[0].ID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	last := msgs[len(msgs)-1]
+	if last.ID == msgID {
+		t.Fatal("the resumed turn did not add a message")
+	}
+	if len(last.Scope.Unknown) != 1 || last.Scope.Unknown[0] != "loom" {
+		t.Errorf("resumed message stored scope %+v, want the card's", last.Scope)
+	}
 }
