@@ -107,7 +107,7 @@ func diverseHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expan
 	if !ok {
 		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
 	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], K: diversityK})
+	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], Question: q.Text, K: diversityK})
 	if err != nil {
 		t.Fatalf("search %q: %v", q.Text, err)
 	}

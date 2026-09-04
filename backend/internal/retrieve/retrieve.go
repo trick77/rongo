@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // defaultCandidates is how many rows each lane retrieves before fusion. Fusion
@@ -30,8 +33,17 @@ type Query struct {
 	// The raw question belongs in here too, first. A model's guess is a guess,
 	// and a wrong one must not be able to replace what was actually asked.
 	Texts []string
-	// Repos restricts the search. Empty means the whole corpus.
+	// Repos is the understanding step's GUESS at which repositories the
+	// question is about. It is not the restriction on its own: knownRepos
+	// unions it with the repositories Question names, so an empty Repos can
+	// still narrow the search and a filled one never bounds it alone. Both
+	// empty means the whole corpus.
 	Repos []string
+	// Question is the raw question, used to read repository names out of the
+	// reader's own words; see knownRepos. It duplicates Texts[0] on purpose:
+	// "the raw question" is a fact about the query, not a position in a slice,
+	// and a restriction must not depend on which lane happens to be first.
+	Question string
 	// K is how many hits to return. Zero means 10.
 	K int
 }
@@ -57,6 +69,10 @@ type Retriever struct {
 	// has room in the cut; see FuseWeightedDiverse. 1 is off, which is what
 	// ships until the evaluation names a value.
 	RepoDecay float64
+	// TestDecay cuts a test hit's fused score; see DefaultTestDecay. 1 — and
+	// the zero value, so a struct-literal Retriever keeps the behaviour that
+	// shipped before it existed — is off.
+	TestDecay float64
 }
 
 // New builds a Retriever with the default bounds.
@@ -67,6 +83,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		MaxDistance: DefaultMaxDistance,
 		Candidates:  defaultCandidates,
 		RepoDecay:   DefaultRepoDecay,
+		TestDecay:   DefaultTestDecay,
 	}
 }
 
@@ -77,7 +94,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // would be indistinguishable from a broken database, and the answer layer would
 // have to guess which one it was looking at.
 func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
-	repos, err := r.knownRepos(ctx, q.Repos)
+	repos, err := r.knownRepos(ctx, q.Repos, q.Question)
 	if err != nil {
 		return nil, err
 	}
@@ -98,28 +115,109 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 // becomes no restriction — the whole corpus, exactly as before this field
 // existed. A name the index DOES know still restricts, empty result and all:
 // "no hit means no hit" stays true for a repository that really is empty.
-func (r *Retriever) knownRepos(ctx context.Context, want []string) ([]string, error) {
-	if len(want) == 0 {
+//
+// The guess is not the only source. Every repository the QUESTION names as a
+// whole word joins the restriction, because the guess is allowed to miss: a
+// question reading "was schickt loom im header an das llm?" was answered from
+// the whole corpus, and the reader was then asked to choose between modules of
+// a repository they had not mentioned. The two are UNIONED — a guess that
+// misses what the reader typed must not be able to exclude it.
+func (r *Retriever) knownRepos(ctx context.Context, want []string, question string) ([]string, error) {
+	if len(want) == 0 && strings.TrimSpace(question) == "" {
 		return nil, nil
 	}
-	rows, err := r.store.db.QueryContext(ctx,
-		`SELECT name FROM repo_state WHERE name IN (`+placeholders(len(want))+`)`, toAny(want)...)
+	rows, err := r.store.db.QueryContext(ctx, `SELECT name FROM repo_state`)
 	if err != nil {
 		return nil, fmt.Errorf("resolve repository restriction: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	var known []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return nil, fmt.Errorf("resolve repository restriction: %w", err)
 		}
-		out = append(out, name)
+		known = append(known, name)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("resolve repository restriction: %w", err)
 	}
+
+	guessed := map[string]bool{}
+	for _, w := range want {
+		guessed[w] = true
+	}
+	var out []string
+	for _, name := range known {
+		if guessed[name] || mentions(question, name) {
+			out = append(out, name)
+		}
+	}
 	return out, nil
+}
+
+// minMentionLen is how short a repository name may be and still be read out of
+// a question. Two letters are a word in every language the corpus is commented
+// in, and a repository called "go" or "ui" would otherwise narrow every
+// question that happens to contain it.
+const minMentionLen = 3
+
+// commonWords are never read as a repository mention, however a repository is
+// named. A restriction is invisible from the outside — the turn reports
+// "nothing found" plus the terms it tried, which reads as a vocabulary miss
+// rather than as a corpus the reader never asked to narrow — so a repository
+// called "search" must not swallow every question containing the word.
+// The understanding step's guess still reaches such a repository; only the
+// reader's own wording is refused as evidence for it.
+var commonWords = map[string]bool{
+	"api": true, "app": true, "apps": true, "backend": true, "code": true,
+	"config": true, "core": true, "data": true, "docs": true, "frontend": true,
+	"index": true, "lib": true, "main": true, "search": true, "server": true,
+	"service": true, "shared": true, "test": true, "tests": true, "tools": true,
+	"web": true,
+}
+
+// mentions reports whether question names repo as a whole word,
+// case-insensitively. A substring is not a mention: "heirlooms" does not name
+// loom, and reading it as one silences the rest of the corpus.
+func mentions(question, repo string) bool {
+	if len(repo) < minMentionLen {
+		return false
+	}
+	q, name := strings.ToLower(question), strings.ToLower(repo)
+	if commonWords[name] {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.Index(q[i:], name)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(name)
+		if !wordBefore(q, start) && !wordAfter(q, end) {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+// wordBefore and wordAfter decide the boundaries, on RUNES rather than bytes.
+// The questions are German: "loomähnlich" must not name loom, and an ASCII
+// test would read the leading byte of "ä" as a boundary and narrow the whole
+// search to loom.
+func wordBefore(s string, i int) bool {
+	r, n := utf8.DecodeLastRuneInString(s[:i])
+	return n > 0 && wordRune(r)
+}
+
+func wordAfter(s string, i int) bool {
+	r, n := utf8.DecodeRuneInString(s[i:])
+	return n > 0 && wordRune(r)
+}
+
+func wordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // searchTexts is Search over SEVERAL phrasings of one question.
@@ -190,7 +288,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 		}
 	}
 
-	fused := FuseWeightedDiverse(lanes, k, r.RepoDecay)
+	fused := FuseWeightedDiverseTests(lanes, k, r.RepoDecay, r.TestDecay)
 	if fused == nil {
 		// An empty slice, never nil: the caller distinguishes "nothing found"
 		// from an error, not from a nil check.

@@ -133,13 +133,13 @@ func TestEvalMeasureGathered(t *testing.T) {
 		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget})
 		var out []gatherOutcome
 		for _, q := range questions {
-			query := retrieve.Query{Text: q.Text, K: gatherSearchK}
+			query := retrieve.Query{Text: q.Text, Question: q.Text, K: gatherSearchK}
 			if arm.expanded {
 				texts, ok := expansions[q.Text]
 				if !ok {
 					t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
 				}
-				query = retrieve.Query{Texts: texts, K: gatherSearchK}
+				query = retrieve.Query{Texts: texts, Question: q.Text, K: gatherSearchK}
 			}
 			hits, err := r.Search(ctx, query)
 			if err != nil {

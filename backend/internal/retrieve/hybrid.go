@@ -68,6 +68,10 @@ type Lane struct {
 // A lane whose weight is zero or negative is MUTED rather than promoted to full
 // confidence — the one value a caller would reach for to silence a lane must
 // not be the value that makes it shout loudest.
+//
+// The test demotion is included, at DefaultTestDecay: it ships on, so the
+// plainest-named fusion has to be the one the product runs. Pure weighted RRF
+// is FuseWeightedDiverseTests(lanes, k, DefaultRepoDecay, 1.0).
 func FuseWeighted(lanes []Lane, k int) []Hit {
 	return FuseWeightedDiverse(lanes, k, DefaultRepoDecay)
 }
@@ -75,10 +79,14 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 // FuseWeightedDiverse is FuseWeighted with a per-repository decay applied
 // before the list is cut to k: a repository's nth hit is ordered as if its
 // score were score*decay^n, while the score written onto the hit stays the
-// fusion score. Anything outside the open interval (0,1) is OFF and returns
-// exactly what FuseWeighted returns — zero included, so a Retriever built as a
-// struct literal rather than through New falls back to the shipped behaviour
-// instead of silently running the harshest setting there is.
+// fusion score. Anything outside the open interval (0,1) is OFF — zero
+// included, so a Retriever built as a struct literal rather than through New
+// falls back to no decay instead of silently running the harshest setting
+// there is. Retriever.TestDecay reads its zero the same way, which means a
+// struct-literal Retriever also runs with the test demotion OFF while
+// retrieve.New — the only constructor the product uses — runs it on. Both
+// knobs default to "do nothing" in the hand-built case; New is where the
+// shipped values live.
 //
 // It exists because the binding constraint moved from routing to retrieval.
 // Measured on the mixed corpus, only 7 of 16 ambiguous questions retrieved
@@ -99,6 +107,21 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 // must not lose eight of them to make room for a repository that has nothing
 // to say.
 func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
+	return FuseWeightedDiverseTests(lanes, k, decay, DefaultTestDecay)
+}
+
+// FuseWeightedDiverseTests is FuseWeightedDiverse with the test demotion made
+// explicit, so the evaluation harness can sweep it the way it sweeps the repo
+// decay. Anything outside the open interval (0,1) is OFF.
+//
+// Unlike the repo decay, this one is applied to the hit's OWN Score and not
+// only to the ordering key. The repo decay is a question of arrangement — the
+// hit is as good as fusion said, it just steps aside — while a test is
+// genuinely weaker evidence about how a mechanism works than the mechanism is.
+// The routing floor in internal/ask reads this score to decide what may reach
+// the clarification card, so a demotion the score hid would be a demotion that
+// never happened.
+func FuseWeightedDiverseTests(lanes []Lane, k int, decay, testDecay float64) []Hit {
 	type agg struct {
 		hit   Hit
 		score float64
@@ -124,6 +147,15 @@ func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
 			a.score += lane.Weight / float64(rrfK+rank)
 			if lane.Name != "" && !contains(a.lanes, lane.Name) {
 				a.lanes = append(a.lanes, lane.Name)
+			}
+		}
+	}
+	// Demote tests BEFORE the sort, so a demoted test loses its rank and its
+	// place in the cut rather than merely being labelled.
+	if testDecay > 0 && testDecay < 1 {
+		for _, a := range byID {
+			if IsTestPath(a.hit.Path) {
+				a.score *= testDecay
 			}
 		}
 	}
@@ -166,6 +198,18 @@ func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
 // how many of the sixteen ambiguous questions retrieve both of their answers,
 // and the thirty-four unique ones must not lose ground while it does.
 const DefaultRepoDecay = 1.0
+
+// DefaultTestDecay is how far a test hit's fused score is cut. Unlike the repo
+// decay this one ships ON: nothing else in the product knows what a test is,
+// and until this constant existed a header-capturing test fake competed with
+// the client it fakes for the answer and for a place on the clarification
+// card. Someone asking how a mechanism works is not asking about its harness.
+//
+// A demotion rather than a filter, because "how is this tested?" is a real
+// question: a test that is the only thing matching still wins, it just cannot
+// outrank the mechanism itself. The value is the evaluation harness's to set —
+// see internal/retrieve/eval — not an argument settled here.
+const DefaultTestDecay = 0.35
 
 // diversifyByRepo reorders a ranked list so a repository's repeats step aside
 // for another repository's best hit. Nothing is dropped — reordering is not
