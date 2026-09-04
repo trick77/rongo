@@ -37,6 +37,58 @@ import { highlightBlock, languageOf } from "./highlight";
  * normal case here, not an edge case.
  */
 
+/** How long a segment of the streaming fade runs before it is closed. Text
+ * arrives token by token, but fading per token would flicker, so segments end
+ * at a clause character or once they are long enough — the same coarse
+ * granularity ../loom uses (ui/src/chat/streamFade.ts). */
+const maxSegChars = 28;
+
+/** splitIntoSegments cuts one run of prose into the pieces that fade in
+ * separately. Whitespace stays attached to the word before it, so joining the
+ * segments returns the text unchanged. */
+export function splitIntoSegments(value: string): string[] {
+  const tokens = value.match(/\S+\s*|\s+/g);
+  if (!tokens) return [value];
+  const out: string[] = [];
+  let current = "";
+  for (const tok of tokens) {
+    current += tok;
+    if (/[.!?,;:—)\]]$/.test(tok.trimEnd()) || current.length >= maxSegChars) {
+      out.push(current);
+      current = "";
+    }
+  }
+  if (current !== "") out.push(current);
+  return out;
+}
+
+/** faded wraps one run of prose in the spans that carry the fade.
+ *
+ * Keyed by where the segment starts in the run its caller was given, never by
+ * its position among the segments. The answer re-renders on every token, and
+ * a span that remounted would restart its animation, so settled text would
+ * flicker for as long as the answer keeps growing. An offset survives the
+ * event that shifts the pieces around: the moment a marker's closing bracket
+ * arrives, the prose before it stops being the tail of the run and becomes a
+ * piece of its own, and only an offset keeps those segments the same
+ * elements. The caller's own key namespaces the runs against each other.
+ *
+ * Code and citation chips are deliberately NOT wrapped: a chip re-fading on
+ * every token flickers, and a span inside a highlighted block would fight
+ * the grammar's own colouring. */
+function faded(src: string, key: string, base: number): ReactNode[] {
+  let at = base;
+  return splitIntoSegments(src).map((seg) => {
+    const span = (
+      <span key={`${key}-w${at}`} className="stream-seg">
+        {seg}
+      </span>
+    );
+    at += seg.length;
+    return span;
+  });
+}
+
 /** One marker, or a grouped one: the prompt asks for [1][2], but a claim
  * resting on several sources still comes out as [1, 2] often enough. Read as
  * a single marker it matched nothing and stayed plain text next to chips. */
@@ -44,15 +96,26 @@ const markerRe = /\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g;
 
 /** text renders one run of plain text, with complete citation markers as
  * superscripts, one per number of a grouped marker. onMarker lets the view
- * react to a marker being pointed at. */
-function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
+ * react to a marker being pointed at.
+ *
+ * fade says whether the prose carries the streaming fade. Bold turns it off:
+ * until the closing ** arrives the words render as the literal text they came
+ * as, at full brightness, and the <strong> that replaces them is a new
+ * element whose children mount fresh whatever their keys. Segments inside it
+ * would start their fade at that moment, so a phrase the reader had already
+ * read would drop to a fifth of its brightness and climb back. */
+function text(src: string, key: string, hooks: MarkerHooks, fade = true): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
   const known = hooks.backed !== undefined;
   for (const m of src.matchAll(markerRe)) {
     const i = m.index ?? 0;
-    if (i > last) out.push(src.slice(last, i));
+    if (i > last) {
+      const run = src.slice(last, i);
+      if (fade) out.push(...faded(run, key, last));
+      else out.push(run);
+    }
     // Every number becomes a complete marker of its own, brackets included,
     // with the separators kept between them: a group [1, 2] reads "[1], [2]"
     // to a screen reader, a copy, or a test - each piece checkable alone.
@@ -112,7 +175,11 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
     });
     last = i + m[0].length;
   }
-  if (last < src.length) out.push(src.slice(last));
+  if (last < src.length) {
+    const run = src.slice(last);
+    if (fade) out.push(...faded(run, key, last));
+    else out.push(run);
+  }
   return out;
 }
 
@@ -153,7 +220,7 @@ function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
       }
       out.push(
         <strong key={`${key}-b${n++}`} className="font-semibold text-ink">
-          {text(rest.slice(first + 2, end), `${key}-bt${n}`, hooks)}
+          {text(rest.slice(first + 2, end), `${key}-bt${n}`, hooks, false)}
         </strong>,
       );
       rest = rest.slice(end + 2);

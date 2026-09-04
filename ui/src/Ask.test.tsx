@@ -680,7 +680,11 @@ describe("Ask, the clarification and re-explaining", () => {
 
     await user.click(screen.getByText("Through the login service"));
 
-    await screen.findByText(/Sign-in runs through the login service/);
+    // The answer's prose is cut into segments for the streaming fade, so the
+    // sentence spans several elements and only the paragraph holds it whole.
+    await screen.findByText(
+      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Sign-in runs through the login service"),
+    );
     // The card itself is marked, not overwritten — it still shows both
     // candidates when reopened, the chosen one included.
     expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();

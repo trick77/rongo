@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Markdown from "./markdown";
+import Markdown, { splitIntoSegments } from "./markdown";
 
 describe("Markdown", () => {
   it("turns # into a heading rather than rendering the character itself", () => {
@@ -190,6 +190,69 @@ describe("Markdown", () => {
     it("shows a half-typed `code as text", () => {
       const { container } = render(<Markdown text={"The `SendTeas"} />);
       expect(container.textContent).toBe("The `SendTeas");
+    });
+  });
+
+  // Newly arrived text appears once, dim to full, as ../loom's sidebar-less
+  // answer does. The split is the visible unit of that fade.
+  describe("the streaming fade", () => {
+    it("cuts prose into segments at a clause end or a length", () => {
+      expect(splitIntoSegments("Short one. Then a much longer run of words here.")).toEqual([
+        "Short one. ",
+        "Then a much longer run of words ",
+        "here.",
+      ]);
+    });
+
+    it("keeps every character of the text it splits", () => {
+      const src = "The  job\nruns, and then it stops.";
+      expect(splitIntoSegments(src).join("")).toBe(src);
+    });
+
+    it("wraps prose in segments without changing what the text reads", () => {
+      const { container } = render(<Markdown text={"The job runs, and then it stops."} />);
+      const segs = container.querySelectorAll(".stream-seg");
+      expect(segs.length).toBeGreaterThan(1);
+      expect(container.textContent).toBe("The job runs, and then it stops.");
+    });
+
+    it("leaves code and citation chips out of the fade", () => {
+      // A chip or a link that re-faded on every token would flicker, and a
+      // segment span inside a highlighted block would fight the grammar.
+      const { container } = render(
+        <Markdown text={"Calls `Send` [1] here.\n\n```go\nx := 1\n```"} backed={new Set([1])} />,
+      );
+      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(0);
+      expect(container.querySelector("code .stream-seg")).toBeNull();
+      expect(container.querySelector("pre .stream-seg")).toBeNull();
+      expect(container.querySelector("sup .stream-seg")).toBeNull();
+      expect(container.querySelector("sup")?.textContent).toBe("[1]");
+    });
+
+    it("does not fade bold, which the reader has already seen unbolded", () => {
+      // Until the closing ** arrives the words are on screen as the literal
+      // text they came as. The <strong> that replaces them is a new element,
+      // so segments inside it would mount and start their fade at that
+      // moment, dropping a phrase the reader has read back to a fifth of its
+      // brightness. Confirmed in the browser before this was written.
+      const { container, rerender } = render(<Markdown text={"The job **runs fast"} />);
+      expect(container.textContent).toBe("The job **runs fast");
+      rerender(<Markdown text={"The job **runs fast** now."} />);
+      expect(container.querySelector("strong")?.textContent).toBe("runs fast");
+      expect(container.querySelector("strong .stream-seg")).toBeNull();
+      expect(container.textContent).toBe("The job runs fast now.");
+    });
+
+    it("keeps the segments already on screen when more text arrives", () => {
+      // The whole answer re-renders on every token. If a settled segment
+      // remounted, its fade would restart and the finished text would
+      // flicker for the whole length of the answer.
+      const { container, rerender } = render(<Markdown text={"The job runs, and then"} />);
+      const first = container.querySelector(".stream-seg");
+      expect(first).not.toBeNull();
+      rerender(<Markdown text={"The job runs, and then it stops. A second sentence."} />);
+      expect(container.querySelector(".stream-seg")).toBe(first);
+      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(2);
     });
   });
 });
