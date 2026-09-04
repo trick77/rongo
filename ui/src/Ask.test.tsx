@@ -68,6 +68,18 @@ describe("Ask", () => {
     expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
   });
 
+  // The composer sits next to the language select and is the place the answer
+  // is asked for, so an English invitation under a German setting is the one
+  // piece of chrome that reads as a bug rather than as a convention.
+  it("invites the question in the answer language", async () => {
+    render(<Ask />);
+    const box = screen.getByLabelText("Question");
+    expect(box.getAttribute("placeholder")).toBe("Ask about the code…");
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    expect(box.getAttribute("placeholder")).toBe("Frag den Code …");
+  });
+
   it("shows the answer as it arrives, not only at the end", async () => {
     streamFrames([
       ev("thread", { thread_id: 1, title: "x" }),

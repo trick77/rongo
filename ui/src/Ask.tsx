@@ -17,16 +17,20 @@ export const languages: { code: string; name: string }[] = [
   { code: "it", name: "Italiano" },
 ];
 
-/** What the empty page says, in the language the select is set to: the one
- * piece of chrome a reader meets before any answer, so it follows the answer
- * language too. The rest of the chrome stays English.
+/** What the empty page and the composer say, in the language the select is
+ * set to: the two pieces of chrome a reader meets before any answer, so they
+ * follow the answer language too. The rest of the chrome stays English.
+ *
+ * The placeholder belongs here rather than beside the textarea because it is
+ * the same invitation as the title, in the place the answer is asked for.
  *
  * The role names are NOT translated: they are the labels on the controls
  * next to this text, and a body naming "un Analyste" beside a button
  * reading "Analyst" points at something that is not on the page. */
-const welcome: Record<string, { title: string; body: string }> = {
+const welcome: Record<string, { title: string; body: string; placeholder: string }> = {
   en: {
     title: "Ask about the code.",
+    placeholder: "Ask about the code…",
     body:
       "rongo searches the indexed repositories, asks back when a question fits more than one " +
       "mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the " +
@@ -34,6 +38,7 @@ const welcome: Record<string, { title: string; body: string }> = {
   },
   de: {
     title: "Frag den Code.",
+    placeholder: "Frag den Code …",
     body:
       "rongo durchsucht die indexierten Repositories, fragt nach, wenn eine Frage auf mehr als einen " +
       "Mechanismus passt, und antwortet mit Quellen für jede Aussage. Wähl eine Rolle: Ein Analyst " +
@@ -41,6 +46,7 @@ const welcome: Record<string, { title: string; body: string }> = {
   },
   fr: {
     title: "Interrogez le code.",
+    placeholder: "Interrogez le code …",
     body:
       "rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
       "plus d'un mécanisme, et répond avec des sources pour chaque affirmation. Choisissez un rôle : " +
@@ -49,6 +55,7 @@ const welcome: Record<string, { title: string; body: string }> = {
   },
   it: {
     title: "Chiedi al codice.",
+    placeholder: "Chiedi al codice …",
     body:
       "rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
       "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analyst " +
@@ -911,7 +918,7 @@ export default function Ask({
               ref={box}
               rows={1}
               aria-label="Question"
-              placeholder="Ask about the code…"
+              placeholder={(welcome[language] ?? welcome.en).placeholder}
               // 16px on a touch screen, and the same on the language select
               // below: iOS Safari zooms the page in when a focused field
               // renders under 16px and never zooms back out, leaving the app

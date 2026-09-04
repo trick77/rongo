@@ -1,4 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { Icon } from "./Icon";
+import ThreadMenu from "./ThreadMenu";
+import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
 
 /**
  * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
@@ -25,17 +29,6 @@ function group(iso: string, now = new Date()): string {
   return d.toLocaleString("en-GB", { month: "long", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
 
-/**
- * The short date shown next to a title, for older threads only. Today's rows
- * carry nothing: they sit at the top of the list under "History", and a clock
- * on every one of them is noise rather than an answer to "which thread".
- */
-function when(iso: string, now = new Date()): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  if (d.toDateString() === now.toDateString()) return "";
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
 
 /**
  * The thread list. Titles only — the conversation itself is a record, and this
@@ -52,6 +45,8 @@ export default function Threads({
   version,
   busy = false,
   onList = () => {},
+  onDeleted = () => {},
+  onRenamed = () => {},
 }: {
   activeId: number | null;
   /** Only ever a real thread: clearing to a new question is the rail's job. */
@@ -60,8 +55,39 @@ export default function Threads({
   busy?: boolean;
   /** Reports the loaded list, so the shell can name the open thread. */
   onList?: (list: Thread[]) => void;
+  /** A thread is gone. The shell closes it if it was the one on screen. */
+  onDeleted?: (id: number) => void;
+  /** A thread has a new title; the shell reloads the list. */
+  onRenamed?: () => void;
 }) {
   const [threads, setThreads] = useState<Thread[]>([]);
+  // Which row's menu is open, and which thread a dialog is asking about.
+  // Both are ids rather than objects: the list reloads underneath them.
+  const [openMenu, setOpenMenu] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState<Thread | null>(null);
+  const [deleting, setDeleting] = useState<Thread | null>(null);
+  const [pending, setPending] = useState(false);
+  const rail = useRef<HTMLElement | null>(null);
+
+  // The menu closes on a click anywhere outside the rail's list, and on
+  // Escape. Inside, the row's own handlers decide.
+  useEffect(() => {
+    if (openMenu === null) return;
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target;
+      if (target instanceof Node && rail.current?.contains(target)) return;
+      setOpenMenu(null);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpenMenu(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +119,46 @@ export default function Threads({
     else groups.push({ label, items: [t] });
   }
 
+  /**
+   * Both actions answer 204 and carry nothing back, so the row is dropped or
+   * the list reloaded from what was asked for rather than from a response
+   * body. A failure leaves the dialog up: the row is still there, and telling
+   * someone their thread is gone when it is not is worse than saying nothing.
+   */
+  async function rename(t: Thread, title: string) {
+    setPending(true);
+    try {
+      const res = await fetch(`/api/threads/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) return;
+      setThreads((prev) => prev.map((x) => (x.id === t.id ? { ...x, title } : x)));
+      setRenaming(null);
+      onRenamed();
+    } catch {
+      // Nothing to say: the title on screen is still the stored one.
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function remove(t: Thread) {
+    setPending(true);
+    try {
+      const res = await fetch(`/api/threads/${t.id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      setThreads((prev) => prev.filter((x) => x.id !== t.id));
+      setDeleting(null);
+      onDeleted(t.id);
+    } catch {
+      // Same: the row stays, and the dialog with it.
+    } finally {
+      setPending(false);
+    }
+  }
+
   const item =
     // ../loom's row: hover only moves the ground, never the text — the title
     // is already at its reading brightness. The hover ground itself lives on
@@ -104,7 +170,7 @@ export default function Threads({
     "flex h-7 pointer-coarse:h-11 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
 
   return (
-    <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
+    <nav ref={rail} aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
         {groups.map((g) => (
           // "Today" is not painted: it always heads the list, directly under
@@ -126,24 +192,29 @@ export default function Threads({
             <ul className="flex flex-col">
               {g.items.map((t) => {
                 const active = t.id === activeId;
+                const menuOpen = openMenu === t.id;
                 return (
-                  <li key={t.id} className="min-w-0">
-                    <button
-                      type="button"
-                      aria-current={active ? "true" : undefined}
-                      onClick={() => onSelect(t.id)}
-                      // Switching away from a running turn is what busy locks
-                      // out. The running thread's own row is not a switch: it
-                      // is the way back from the Repos page while the answer
-                      // is still being written, and with the page nav gone it
-                      // is the only one.
-                      disabled={busy && !active}
-                      className={item + " group " + (active ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+                  <li key={t.id} className="relative min-w-0">
+                    <div
+                      className={
+                        item + " group " + (active ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")
+                      }
                     >
-                      {/* The title runs out under a gradient to the row's own
-                          background rather than ending in an ellipsis, as
-                          ../loom's sidebar does. The text stays whole. */}
-                      <span className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                      <button
+                        type="button"
+                        aria-current={active ? "true" : undefined}
+                        onClick={() => onSelect(t.id)}
+                        // Switching away from a running turn is what busy
+                        // locks out. The running thread's own row is not a
+                        // switch: it is the way back from the Repos page
+                        // while the answer is still being written, and with
+                        // the page nav gone it is the only one.
+                        disabled={busy && !active}
+                        className="relative min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap disabled:opacity-50"
+                      >
+                        {/* The title runs out under a gradient to the row's
+                            own background rather than ending in an ellipsis,
+                            as ../loom's sidebar does. The text stays whole. */}
                         {t.title}
                         <span
                           aria-hidden="true"
@@ -152,20 +223,46 @@ export default function Threads({
                             (active ? "to-rail-sel" : "to-panel group-hover:to-rail-hover")
                           }
                         />
-                      </span>
+                      </button>
                       {active && busy && (
                         <span aria-hidden="true" className="pulse h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-strong" />
                       )}
-                      {/* Dropped entirely on today's rows rather than left
-                          empty: an empty element still spends the row's gap,
-                          and the title's fade would stop short of the edge on
-                          exactly the rows that have the most to say. */}
-                      {when(t.created_at) && (
-                        <time aria-hidden="true" className="shrink-0 font-mono text-[11px] text-faint">
-                          {when(t.created_at)}
-                        </time>
+                      {/* No actions at all while a turn is running: deleting
+                          the thread being written would pull the record out
+                          from under the answer still landing on it. */}
+                      {!busy && (
+                        <button
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={menuOpen}
+                          aria-label={"Actions for " + t.title}
+                          onClick={() => setOpenMenu(menuOpen ? null : t.id)}
+                          // Quiet on an idle row, but never unreachable: it
+                          // comes back for the keyboard and on touch, where
+                          // there is no hover to reveal it.
+                          className={
+                            "grid h-6 w-6 shrink-0 place-items-center rounded-md text-rail transition-colors hover:bg-active hover:text-ink " +
+                            (active || menuOpen
+                              ? ""
+                              : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
+                          }
+                        >
+                          <Icon name="moreVertical" size="17px" />
+                        </button>
                       )}
-                    </button>
+                    </div>
+                    {menuOpen && (
+                      <ThreadMenu
+                        onRename={() => {
+                          setOpenMenu(null);
+                          setRenaming(t);
+                        }}
+                        onDelete={() => {
+                          setOpenMenu(null);
+                          setDeleting(t);
+                        }}
+                      />
+                    )}
                   </li>
                 );
               })}
@@ -173,6 +270,22 @@ export default function Threads({
           </div>
         ))}
       </div>
+      {renaming && (
+        <RenameThreadModal
+          title={renaming.title}
+          busy={pending}
+          onCancel={() => setRenaming(null)}
+          onSubmit={(title) => void rename(renaming, title)}
+        />
+      )}
+      {deleting && (
+        <DeleteThreadModal
+          title={deleting.title}
+          busy={pending}
+          onCancel={() => setDeleting(null)}
+          onDelete={() => void remove(deleting)}
+        />
+      )}
     </nav>
   );
 }
