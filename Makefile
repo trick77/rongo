@@ -15,9 +15,16 @@ coverage: backend-coverage fe-coverage
 # only by another package's tests (httpapi drives threads and store) is
 # otherwise reported as uncovered. The race detector needs cgo; that is
 # independent of the app's CGO_ENABLED=0 build.
+#
+# -count=1 because a cached result carries the coverage counters of the file
+# set it was recorded against. Delete a Go file and the packages that did not
+# change still replay counters naming it, and the cobertura conversion dies on
+# a path that no longer exists ("unable to determine file path"). CI restores a
+# warm build cache, so without this any PR that removes a file fails there
+# while passing locally.
 backend-coverage:
 	mkdir -p coverage
-	cd backend && CGO_ENABLED=1 go test -race -covermode=atomic -coverpkg=./... -coverprofile=../coverage/backend.out ./...
+	cd backend && CGO_ENABLED=1 go test -count=1 -race -covermode=atomic -coverpkg=./... -coverprofile=../coverage/backend.out ./...
 	cd backend && go run github.com/boumenot/gocover-cobertura@v1.5.0 < ../coverage/backend.out > ../coverage/backend.xml
 	./hack/coverage-gate.sh backend
 
