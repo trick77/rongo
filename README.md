@@ -1,42 +1,45 @@
 ![rongo](rongo-wide.png)
 
-Understanding code without going through a person first. rongo indexes an organisation's
-repositories, asks back which mechanism is meant when a question is ambiguous, and explains it in
-the chosen role — **BA** in domain terms, **DEV** in technical ones. Every statement is sourced.
+Ask questions about your codebases and get answers with sources.
 
-Technical decisions: [`AGENTS.md`](AGENTS.md).
+rongo clones the repositories you list, indexes them, and answers in one of
+two voices: Analyst, which explains what the code does in the terms of the
+domain, or Developer, which explains how it does it and shows the code. When
+a question could mean several things it asks which one before answering.
+Every claim names repository, branch, file, lines and the commit it was read
+at, and the file opens in rongo's own viewer at that commit. The name comes
+from Rongorongo, the Easter Island script that nobody has deciphered.
 
-## State
+The index holds the code and docs as written, never summaries of them. The
+model reads the files that matched. If an answer would lead into code that
+isn't indexed, it says so instead of guessing.
 
-The question-answer path is in place: indexing, retrieval, the follow-up question on ambiguous
-questions and sourced answers, measured in [`docs/measurements/`](docs/measurements). Sign-in runs
-over OIDC (`BACKEND_AUTH_MODE=oidc`), and the stack is operated with `compose.yaml` behind a
-reverse proxy that terminates TLS.
+## How it works
 
-## Requirements
+One Go binary, one SQLite file (FTS5 for text, sqlite-vec for embeddings),
+React UI embedded in the binary. Symbols come from universal-ctags, search
+from ripgrep, checkouts from git. Chat goes to an OpenAI-compatible endpoint
+serving the MiMo deployments named in `backend/internal/llm/client.go`,
+embeddings to any OpenAI-compatible `/embeddings` endpoint.
 
-- Go, Node.js
-- `git`
-- `rg` (ripgrep)
-- `ctags` — **universal-ctags**, not the BSD ctags macOS ships at
-  `/usr/bin/ctags`. Install with `brew install universal-ctags`, and make sure
-  it comes before `/usr/bin` on `PATH`.
+## Running it
+
+`make dev` runs it locally with hot reload. Needs Go, Node.js, `git`, `rg`
+and universal-ctags (the BSD ctags macOS ships doesn't work and rongo says so
+at startup).
+
+`compose.yaml` runs it in production behind a TLS-terminating reverse proxy
+with OIDC login. The comment at the top of that file covers the first run.
 
 ## Development
 
 ```
-cp .env.example .env   # fill in the five active lines: the model and
-                        # embedding endpoints with their keys, and
-                        # BACKEND_SESSION_SECRET (openssl rand -base64 32)
-make dev                # backend + Vite dev server with hot reload
+make test        # Go tests
+make fe-test     # typecheck and frontend tests
+make coverage    # both, with the 75% floor CI enforces
+make build       # bin/rongo with the UI embedded
 ```
 
-Everything else in `.env.example` is commented out and shows its default. The
-five active ones have none, and the process refuses to start without them.
-
-`make dev` starts the backend on `127.0.0.1:8080` and Vite on
-`127.0.0.1:5173`; `/api/*` is proxied through to the backend.
-
-Further targets: `make build` (binary), `make test` (Go tests), `make fe-test`
-(typecheck + frontend tests). Details on manual checks:
-[`docs/manual-verification.md`](docs/manual-verification.md).
+Design decisions and invariants: [`AGENTS.md`](AGENTS.md). The measurements
+behind them: [`docs/measurements/`](docs/measurements). Checks that need a
+real browser: [`docs/manual-verification.md`](docs/manual-verification.md).
