@@ -189,11 +189,15 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
  * mono timestamp on a thread row.
  */
 const railRow =
-  "flex h-[26px] w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
+  "flex h-[26px] pointer-coarse:h-11 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
   "disabled:opacity-50";
 
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
+  // Below lg the rail is an off-canvas drawer: 300px of it beside a 390px
+  // phone left the thread 90px. There is no router, so this is the only place
+  // the drawer's state can live.
+  const [navOpen, setNavOpen] = useState(false);
   const [threadId, setThreadId] = useState<number | null>(storedThread);
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
@@ -214,11 +218,22 @@ export default function App() {
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
 
+  // Escape closes the drawer, the second way out beside the backdrop. Bound
+  // unconditionally rather than only while open: a listener added and removed
+  // on every toggle is more moving parts than one that reads the state.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Nothing is rendered until the session is known: the alternative is a flash
   // of the signed-out app on every reload, and a redirect landing on top of it.
   if (session.state !== "in") {
     return (
-      <main className="mx-auto max-w-6xl p-8">
+      <main className="mx-auto max-w-6xl p-5 sm:p-8">
         {/*
           Deliberately no <h1>: the app's own heading is how the tests and a
           reader tell "signed in" from "not yet", and repeating it here would
@@ -245,19 +260,45 @@ export default function App() {
   const total = threadId === null ? null : usageTotal;
 
   return (
-    <div className="grid h-screen grid-rows-[56px_1fr]">
-      <header className="grid grid-cols-[300px_1fr_auto] items-center border-b border-border bg-panel">
-        <div className="flex h-full items-center gap-2.5 px-5">
+    // h-dvh, not h-screen: iOS Safari counts the collapsed toolbar strip into
+    // 100vh, and the composer then sits under the toolbar with no way to reach
+    // it. The short-viewport row is the landscape phone, where 56px of header
+    // out of 390px is a tenth of the screen spent on chrome.
+    <div className="grid h-dvh grid-rows-[56px_1fr] [@media(max-height:500px)]:grid-rows-[44px_1fr]">
+      <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[300px_1fr_auto]">
+        <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
+          {/*
+            Deliberately not disabled={busy}: the rail's rows are, but the way
+            back TO the rail must not be. With the drawer shut and the toggle
+            dead there would be no navigation at all while an answer streams.
+          */}
+          <button
+            type="button"
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
+            aria-controls="nav-drawer"
+            onClick={() => setNavOpen(true)}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-ui-sm text-muted hover:bg-active hover:text-ink lg:hidden"
+          >
+            <Icon name="sidebar" size="21px" />
+          </button>
           <span
             aria-hidden="true"
-            className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity"
+            className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity [@media(max-height:500px)]:h-[24px] [@media(max-height:500px)]:w-[24px]"
             style={{ backgroundImage: `url(${logo})` }}
           />
-          <h1 className="font-serif text-[21px] font-semibold tracking-tight text-accent-strong">rongo</h1>
+          {/*
+            sr-only, never hidden: the wordmark is out of sight on a phone
+            because the thread title needs the width, but the h1 is how a
+            reader — and every test here — tells "signed in" from "not yet".
+          */}
+          <h1 className="sr-only font-serif text-[21px] font-semibold tracking-tight text-accent-strong sm:not-sr-only">
+            rongo
+          </h1>
         </div>
         {/* Baseline, not centre: the usage in small mono sits on the same
             line as the serif title, not floating beside its middle. */}
-        <div className="flex min-w-0 items-baseline gap-2.5 px-6 text-muted">
+        <div className="flex min-w-0 items-baseline gap-2.5 px-2 text-muted lg:px-6">
           {page === "ask" ? (
             <>
               {/* No breadcrumb root: there is one list, and "Threads /" led
@@ -269,7 +310,10 @@ export default function App() {
               {total && (
                 <span
                   aria-label="Thread usage"
-                  className="ml-2 shrink-0 whitespace-nowrap font-mono text-xs text-faint"
+                  // Out of sight below sm: the running total beside a serif
+                  // title does not fit 360px, and the same figure sits in
+                  // every turn's own usage block.
+                  className="ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block"
                 >
                   thread{" "}
                   <span className="text-muted">{total.tokens.toLocaleString("en-GB")} tok</span>
@@ -289,16 +333,36 @@ export default function App() {
             </>
           )}
         </div>
-        <div className="flex items-center gap-3.5 px-5 text-[13px] text-muted">
-          {session.me.email && <span className="truncate">{session.me.email}</span>}
+        <div className="flex items-center gap-2 px-2 text-[13px] text-muted lg:gap-3.5 lg:px-5">
+          {session.me.email && <span className="hidden truncate md:inline">{session.me.email}</span>}
           <button type="button" onClick={() => void logout()} className="hover:text-ink">
             Sign out
           </button>
         </div>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[300px_1fr]">
-        <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
+      <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[300px_1fr]">
+        {/*
+          The same rail at every width; below lg the box is off-canvas and
+          slides in, ../loom's drawer. Its contents are untouched — one action
+          on top, the history, Repos at the foot.
+
+          Closed, it is `invisible`, not merely translated away: a rail parked
+          off-screen still takes tab stops and still reads to a screen reader,
+          so tabbing past the toggle on a phone walked invisibly through every
+          thread row. `lg:visible` puts it back where the rail is the layout.
+          The visibility is transitioned discretely so it still slides out
+          rather than blinking away.
+        */}
+        <aside
+          id="nav-drawer"
+          className={
+            "fixed inset-y-0 left-0 z-50 flex min-h-0 w-[300px] max-w-[85vw] flex-col border-r border-border bg-panel " +
+            "transition-[transform,visibility] transition-discrete duration-200 ease-out " +
+            "lg:visible lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 " +
+            (navOpen ? "visible translate-x-0" : "invisible -translate-x-full")
+          }
+        >
           {/*
             The one action, at the top where it belongs, and the way to Repos
             under it. New question used to sit inside Threads and therefore
@@ -312,6 +376,7 @@ export default function App() {
               onClick={() => {
                 setPage("ask");
                 selectThread(null);
+                setNavOpen(false);
               }}
               disabled={busy}
               className={railRow + " text-rail hover:bg-rail-hover"}
@@ -327,7 +392,10 @@ export default function App() {
             <button
               type="button"
               aria-current={page === "repos" ? "page" : undefined}
-              onClick={() => setPage("repos")}
+              onClick={() => {
+                setPage("repos");
+                setNavOpen(false);
+              }}
               className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
             >
               <Icon name="code" size="21px" className="text-ink-dim" />
@@ -358,6 +426,7 @@ export default function App() {
             onSelect={(id) => {
               setPage("ask");
               selectThread(id);
+              setNavOpen(false);
             }}
             version={threadsVersion}
             busy={busy}
@@ -377,6 +446,17 @@ export default function App() {
             </div>
           )}
         </aside>
+        {/*
+          The way out, with no close button in the drawer: every row inside it
+          closes it, and on a 360px phone the backdrop is still 60px of tap.
+        */}
+        {navOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setNavOpen(false)}
+            aria-hidden="true"
+          />
+        )}
 
         <main className="min-h-0 min-w-0">
           {/*
@@ -403,8 +483,10 @@ export default function App() {
           </div>
           {page === "repos" && (
             <div className="h-full overflow-auto">
-              <div className="max-w-[1100px] px-10 py-8">
-                <h2 className="font-serif text-[28px] font-medium tracking-tight text-ink">Repositories</h2>
+              <div className="max-w-[1100px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+                <h2 className="font-serif text-[22px] font-medium tracking-tight text-ink sm:text-[28px]">
+                  Repositories
+                </h2>
                 <p className="mt-1 mb-6 text-[14.5px] text-muted">
                   Read-only. The repository list is maintained in <code className="font-mono">repos.yaml</code>,
                   and credentials never live in it. A repo that drops out of the file is deactivated, never

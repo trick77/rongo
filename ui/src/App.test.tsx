@@ -234,3 +234,111 @@ describe("App, the thread across a reload", () => {
     await waitFor(() => expect(localStorage.getItem("rongo.thread")).toBeNull());
   });
 });
+
+describe("App, the rail on a phone", () => {
+  // Below lg the 300px rail is an off-canvas drawer: at 390px it would
+  // otherwise leave the thread 90px, which is what made the app unusable on a
+  // phone. jsdom evaluates no media query, so every assertion here is on the
+  // state-driven class string or on behaviour, never on layout.
+  // By id, not by role: Ask's Sources pane is a landmark too, so
+  // getByRole("complementary") finds two.
+  const rail = () => document.getElementById("nav-drawer") as HTMLElement;
+
+  async function openDrawer() {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Open navigation" }));
+    return user;
+  }
+
+  it("keeps the rail off-canvas until it is asked for", async () => {
+    await renderSignedIn();
+    expect(rail().className).toContain("-translate-x-full");
+    expect(rail().className).toContain("lg:translate-x-0");
+    expect(screen.getByRole("button", { name: "Open navigation" }).className).toContain("lg:hidden");
+  });
+
+  it("slides the rail in and lays a backdrop over the thread", async () => {
+    await renderSignedIn();
+    await openDrawer();
+    expect(rail().className).toContain("translate-x-0");
+    expect(rail().className).not.toContain("-translate-x-full");
+    expect(document.querySelector(".bg-black\\/50")).toBeTruthy();
+  });
+
+  it("closes on the backdrop, which is the way out with no close button", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    await user.click(document.querySelector(".bg-black\\/50") as HTMLElement);
+    expect(rail().className).toContain("-translate-x-full");
+  });
+
+  it("closes on Escape", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    await user.keyboard("{Escape}");
+    expect(rail().className).toContain("-translate-x-full");
+  });
+
+  // A rail parked off-screen still takes tab stops and still reads to a
+  // screen reader: tabbing past the toggle on a phone walked invisibly
+  // through New question, every thread row and Repos. invisible takes it out
+  // of both, and lg:visible puts it back where the rail is the layout.
+  it("keeps the closed rail out of the tab order and the a11y tree", async () => {
+    await renderSignedIn();
+    expect(rail().className).toContain("invisible");
+    expect(rail().className).toContain("lg:visible");
+    const user = await openDrawer();
+    expect(rail().className).toContain("visible");
+    expect(rail().className).not.toContain("invisible");
+    await user.keyboard("{Escape}");
+    expect(rail().className).toContain("invisible");
+  });
+
+  it("closes when a thread is picked", async () => {
+    apiFetch(oneThread, oneTurn);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 });
+    const user = await openDrawer();
+    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
+    expect(rail().className).toContain("-translate-x-full");
+  });
+
+  it("closes on New question", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    await user.click(screen.getByRole("button", { name: "New question" }));
+    expect(rail().className).toContain("-translate-x-full");
+  });
+
+  it("closes on Repos", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    await user.click(screen.getByRole("button", { name: "Repos" }));
+    expect(rail().className).toContain("-translate-x-full");
+    await screen.findByRole("heading", { name: "Repositories" });
+  });
+
+  // The rail rows are disabled mid-turn; the way back to the rail must not be.
+  // With the drawer shut and the toggle dead there would be no navigation at
+  // all while an answer is being written.
+  it("leaves the toggle usable while a turn is running", async () => {
+    await renderSignedIn();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Question"), "A question");
+    expect(screen.getByRole("button", { name: "Open navigation" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  // The cramped phone header hides the wordmark visually, never from the
+  // accessibility tree: the h1 is how a reader and every test above tell
+  // "signed in" from "not yet". `hidden` would keep jsdom green and break it
+  // in a browser.
+  it("keeps the wordmark readable to a screen reader when it is out of sight", async () => {
+    await renderSignedIn();
+    const h1 = screen.getByRole("heading", { level: 1 });
+    expect(h1.textContent).toBe("rongo");
+    expect(h1.className).toContain("sr-only");
+    expect(h1.className).toContain("sm:not-sr-only");
+  });
+});

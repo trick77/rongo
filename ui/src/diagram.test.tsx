@@ -368,6 +368,47 @@ describe("Diagram", () => {
     });
   });
 
+  // A diagram is the one thing here too wide for a phone. It scrolls inside
+  // its own box; it must never be scaled to fit, because at the ratio a phone
+  // would need the labels and the chips stop being readable and tappable.
+  it("scrolls rather than scales, and gives the chips a finger's hit area", () => {
+    const { container } = render(
+      <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
+    );
+    const svg = container.querySelector("svg")!;
+    expect(svg.getAttribute("viewBox")).toBeNull();
+    expect(svg.parentElement!.className).toContain("overflow-x-auto");
+    expect(svg.parentElement!.className).toContain("max-w-full");
+
+    const chip = container.querySelector("rect.fill-accent-dim")!;
+    const hit = chip.parentElement!.querySelector("rect.fill-transparent")!;
+    expect(Number(hit.getAttribute("height"))).toBeGreaterThan(
+      Number(chip.getAttribute("height")),
+    );
+    expect(Number(hit.getAttribute("width"))).toBeGreaterThan(Number(chip.getAttribute("width")));
+  });
+
+  // The chips of one node sit 2px apart. A hit area wider than half that gap
+  // reaches over its neighbour, which is later in document order and wins the
+  // tap: the right edge of [1] would open source 2.
+  it("never lets a chip's hit area reach over the next chip", () => {
+    const { container } = render(
+      <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
+    );
+    const spans = [...container.querySelectorAll("rect.fill-transparent")].map((r) => ({
+      l: Number(r.getAttribute("x")),
+      r: Number(r.getAttribute("x")) + Number(r.getAttribute("width")),
+      y: Number(r.getAttribute("y")),
+    }));
+    expect(spans.length).toBeGreaterThan(1);
+    for (const a of spans) {
+      for (const b of spans) {
+        if (a === b || a.y !== b.y) continue;
+        expect(a.l >= b.r || a.r <= b.l).toBe(true);
+      }
+    }
+  });
+
   it("gives two diagrams on one page distinct arrowhead ids", () => {
     const { container } = render(
       <>

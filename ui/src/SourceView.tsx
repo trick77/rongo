@@ -116,7 +116,9 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
 
   return (
     <div
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-6 md:p-10"
+      // Edge to edge on a phone: 24px of scrim on each side buys nothing when
+      // the code inside is already scrolling sideways.
+      className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
       // The pointer, not the mouse: iOS Safari does not deliver mouse events
       // to a plain div, and an iPad has no Escape key to fall back on.
       onPointerDown={(e) => {
@@ -127,15 +129,18 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
         role="dialog"
         aria-modal="true"
         aria-label={`Source ${source.marker}: ${source.path}`}
-        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-ui-lg border border-elevated-border bg-panel shadow-panel"
+        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
       >
-        <header className="flex items-center gap-3.5 border-b border-border px-4.5 py-3">
+        <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3.5 sm:px-4.5 sm:py-3">
           <span className="font-mono font-semibold text-accent-strong">{source.marker}</span>
           <span className="min-w-0 truncate font-mono text-[13.5px] text-muted">
             {source.repo} · {dir}
             <b className="font-medium text-ink">{base}</b>
           </span>
-          <span className="ml-auto flex shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint">
+          {/* Out of sight on a phone, where the filename is what the reader
+              needs from a 360px header; the branch, the sha and the range are
+              all in the citation list under the answer as well. */}
+          <span className="ml-auto hidden shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint sm:flex">
             <span className="rounded-full border border-border px-2 py-px">{branch}</span>
             {shortSha && <span className="rounded-full border border-border px-2 py-px">{shortSha}</span>}
             <span>
@@ -147,7 +152,10 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="grid h-8 w-8 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink"
+            // ml-auto only where the pills beside it are not rendered — with
+            // both carrying it, flexbox splits the free space and the pills
+            // drift away from the button.
+            className="ml-auto grid h-11 w-11 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink sm:ml-0 sm:h-8 sm:w-8"
           >
             ×
           </button>
@@ -177,13 +185,15 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
                   data-line={n}
                   data-hit={hit || undefined}
                   className={
-                    "grid grid-cols-[56px_1fr] border-l-2 whitespace-pre " +
+                    // 40px still holds a four-digit line number and gives the
+                    // code back 16px of a 360px screen.
+                    "grid grid-cols-[40px_1fr] sm:grid-cols-[56px_1fr] border-l-2 whitespace-pre " +
                     (hit ? "border-accent bg-accent-dim/35" : "border-transparent")
                   }
                 >
                   <span
                     aria-hidden="true"
-                    className={"pr-4 text-right select-none " + (hit ? "text-accent-strong" : "text-faint")}
+                    className={"pr-2 text-right select-none sm:pr-4 " + (hit ? "text-accent-strong" : "text-faint")}
                   >
                     {n}
                   </span>

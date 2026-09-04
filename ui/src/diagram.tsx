@@ -453,6 +453,22 @@ function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top:
         }
         className={open ? "cursor-pointer" : undefined}
       >
+        {/* A 26x14 chip is a mouse's target, and an SVG group cannot take
+            padding, so the hit area has to be drawn. The height is where the
+            room is: 14 -> 32. Sideways it may grow by at most half the 2px
+            the chips are laid apart above — any more and this rect would
+            reach over the neighbouring chip, which comes later in document
+            order and would win the tap, so the right edge of [1] would open
+            source 2. */}
+        {open && (
+          <rect
+            x={cx - w / 2 - 1}
+            y={y - 9}
+            width={w + 2}
+            height={CHIP_H + 18}
+            className="fill-transparent"
+          />
+        )}
         <rect x={cx - w / 2} y={y} width={w} height={CHIP_H} rx={3} className="fill-accent-dim" />
         <text x={cx} y={y + 11} textAnchor="middle" className="fill-accent-strong font-mono text-[10px] font-semibold">
           [{m}]
@@ -577,10 +593,19 @@ export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: Mar
   const layout = spec.type === "flow" ? layoutFlow(spec) : layoutSequence(spec);
   const title = spec.type === "flow" ? "Flow diagram" : "Sequence diagram";
   return (
-    <div className="mt-3 overflow-x-auto rounded-ui-sm border border-border bg-panel p-3">
+    <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain rounded-ui-sm border border-border bg-panel p-3">
       {/* font-sans explicitly: the diagram sits inside the answer's .ui-markdown
           wrapper, which is serif prose. A node label is a name from the code,
-          not prose, and it reads as the rest of the chrome does. */}
+          not prose, and it reads as the rest of the chrome does.
+
+          Sized in px and deliberately given no viewBox, so on a phone it
+          scrolls inside the box above rather than scaling. A viewBox would fit
+          a 530px sequence into 310px at 0.55: the 10px chip text lands near
+          5.5px and the chip itself near 14x8, which is neither readable nor
+          tappable — and a diagram that cites like prose has to be both. With
+          the width attribute and no viewBox, any CSS that narrows the element
+          clips the drawing instead of scaling it, so it must keep its own
+          intrinsic width. */}
       <svg
         width={layout.width + 2 * PAD}
         height={layout.height + 2 * PAD}

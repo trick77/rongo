@@ -68,9 +68,15 @@ const th = "px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-[
 
 function Stat({ label, value, note }: { label: string; value: string | number; note?: string }) {
   return (
-    <div className="flex-1 border-r border-border px-5 py-3.5 last:border-r-0">
+    // The bottom border separates the two-up rows on a phone; from sm the
+    // block is one flex row again and only the vertical rules are left. The
+    // even: and last: rules keep a cell from drawing its own rule flush
+    // against the wrapper's border, which reads as a doubled line — and the
+    // odd fifth stat takes the whole last row rather than leaving half of it
+    // ruled and half of it blank.
+    <div className="flex-1 border-r border-b border-border px-4 py-3 even:border-r-0 last:col-span-2 last:border-r-0 last:border-b-0 sm:border-b-0 sm:px-5 sm:py-3.5 sm:even:border-r sm:last:border-r-0">
       <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">{label}</div>
-      <div className="mt-0.5 font-serif text-[26px] leading-tight tabular-nums text-ink">
+      <div className="mt-0.5 font-serif text-[21px] leading-tight tabular-nums text-ink sm:text-[26px]">
         {value}
         {note && <small className="ml-1.5 font-sans text-[12.5px] text-muted">{note}</small>}
       </div>
@@ -130,17 +136,27 @@ export default function RepoList() {
 
   return (
     <>
-      <div className="mb-5 flex overflow-hidden rounded-ui border border-border bg-panel">
+      {/* Five stats across a 360px phone is 70px each; two-up they still read
+          as numbers. From sm it is the original single row. */}
+      <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-ui border border-border bg-panel sm:flex">
         <Stat label="Repositories" value={repos.length} note={`${active} active`} />
         <Stat label="Files" value={sum((r) => r.files)} />
         <Stat label="Chunks" value={sum((r) => r.chunks)} />
         <Stat label="Modules" value={sum((r) => r.modules)} />
         <Stat label="Last run" value={relative(lastRun)} />
       </div>
-      <table className="w-full border-separate border-spacing-0 overflow-hidden rounded-ui border border-border bg-panel text-sm">
+      {/*
+        The frame moved out to a wrapper so seven columns scroll inside their
+        own box. Without it the table overflowed the page's own scroller and
+        dragged the whole Repos page sideways. The repository name stays put
+        while the rest scrolls, so a row is always identifiable — and the
+        error stripe and message, which live in that column, stay in sight.
+      */}
+      <div className="overflow-x-auto overscroll-x-contain rounded-ui border border-border">
+        <table className="w-full min-w-[720px] border-separate border-spacing-0 bg-panel text-sm">
         <thead>
           <tr className="bg-bg">
-            <th className={th + " border-b border-border"}>Repository</th>
+            <th className={th + " sticky left-0 z-10 border-b border-border bg-bg"}>Repository</th>
             <th className={th + " border-b border-border"}>Branch</th>
             <th className={th + " border-b border-border"}>State</th>
             <th className={th + " border-b border-border"}>Last run</th>
@@ -161,11 +177,18 @@ export default function RepoList() {
                   (r.enabled ? "" : "text-faint")
                 }
               >
-                <td className={"px-3.5 py-3 " + (r.last_error ? "shadow-[inset_3px_0_0_var(--color-danger)]" : "")}>
+                {/* The explicit background is what a sticky cell needs, or the
+                    scrolled columns show through it. */}
+                <td
+                  className={
+                    "sticky left-0 z-10 bg-panel px-3.5 py-3 " +
+                    (r.last_error ? "shadow-[inset_3px_0_0_var(--color-danger)]" : "")
+                  }
+                >
                   <span className="font-mono font-medium">{r.name}</span>
                   {r.last_error && <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>}
                 </td>
-                <td className="px-3.5 py-3 font-mono">{r.branch}</td>
+                <td className="whitespace-nowrap px-3.5 py-3 font-mono">{r.branch}</td>
                 <td className="px-3.5 py-3">
                   {/* Disabled and error are independent facts: a deactivated
                       repo keeps its last error, and both are said. */}
@@ -185,14 +208,15 @@ export default function RepoList() {
                   <code className="font-mono text-xs">{shortSha(r.last_sha)}</code>
                   <span className="ml-1.5 text-xs text-faint">{ago(r.last_run_at)}</span>
                 </td>
-                <td className="px-3.5 py-3 text-right font-mono tabular-nums">{r.files}</td>
-                <td className="px-3.5 py-3 text-right font-mono tabular-nums">{r.chunks}</td>
-                <td className="px-3.5 py-3 text-right font-mono tabular-nums">{r.modules}</td>
+                <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">{r.files}</td>
+                <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">{r.chunks}</td>
+                <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">{r.modules}</td>
               </tr>
             );
           })}
         </tbody>
-      </table>
+        </table>
+      </div>
     </>
   );
 }
