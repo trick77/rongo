@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -84,10 +85,15 @@ type Config struct {
 	LLMBaseURL string
 	LLMAPIKey  string
 	// Prices is what the endpoints charge, keyed by model name, in USD per
-	// million tokens. All optional: unset means the UI shows tokens only.
-	// Nobody guesses a price — a made-up figure next to a real token count
-	// would read as a bill.
+	// million tokens, as far as BACKEND_PRICE_* says so. It is the override
+	// on top of the registry, not the usual source: nobody types a price.
+	// Nobody guesses one either — a made-up figure next to a real token
+	// count would read as a bill.
 	Prices usage.Prices
+	// PricesURL is the registry the price table is resolved from, matched by
+	// the endpoints' hosts. Empty turns the lookup off: tokens only, unless
+	// BACKEND_PRICE_* says otherwise.
+	PricesURL string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -156,6 +162,7 @@ func Load() (Config, error) {
 		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
 		LLMAPIKey:         strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
+		PricesURL:         envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
@@ -360,6 +367,18 @@ func envBoolOr(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+// envOrUnset is envOr for a setting where "" is a value: a variable that is
+// present and empty turns the feature off, only an absent one gets the
+// default. envOr cannot say that, because compose passes every variable
+// through and an unset one arrives empty — so this default is what a
+// compose deployment gets only when the variable is left out of the file.
+func envOrUnset(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(v)
+	}
+	return fallback
 }
 
 func envOr(key, fallback string) string {

@@ -29,6 +29,7 @@
 - Cap every call with `WithMaxTokens` unless a truncated reply would be worse than a long one.
 - A BA answer is the core mechanism in three to five paragraphs — answer and stop. Edge cases go to a follow-up, cheap because the context is already gathered. DEV gets more room for inline code.
 - Embeddings are cached by chunk content hash; never re-embed unchanged content.
+- Prices: resolved from models.dev by the endpoints' HOST (`internal/pricing`), never typed; same model name costs 0 on a token plan and 5x at a reseller. Unknown host → tokens only + log warning, never a list-price fallback. `BACKEND_PRICE_*` = override only.
 
 ## Invariants (must hold in every feature)
 - **Never store or embed model-written text *about* code** — no module/file/symbol summary, eager or lazy: scales with corpus not usage, stale when written, and at useful resolution it is the code rewritten in prose. Name candidates per turn, only when a human sees them. Measured and lost: `docs/measurements/2026-08-17-module-ranking-and-comments.md`.

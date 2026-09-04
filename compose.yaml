@@ -91,8 +91,9 @@ services:
       BACKEND_FORGE_TOKEN_GITHUB: ${BACKEND_FORGE_TOKEN_GITHUB:-}
       # Repo-relative globs kept out of the index; see .env.example.
       BACKEND_INDEX_EXCLUDE: ${BACKEND_INDEX_EXCLUDE:-docs/plans/**}
-      # Prices, USD per million tokens; all optional, unset shows tokens
-      # only. See .env.example.
+      # Prices, USD per million tokens, resolved from the registry by the
+      # endpoints' hosts; the pairs below override. See .env.example.
+      BACKEND_PRICES_URL: ${BACKEND_PRICES_URL-https://models.dev/api.json}
       BACKEND_PRICE_PRO_IN: ${BACKEND_PRICE_PRO_IN:-}
       BACKEND_PRICE_PRO_OUT: ${BACKEND_PRICE_PRO_OUT:-}
       BACKEND_PRICE_GATE_IN: ${BACKEND_PRICE_GATE_IN:-}
