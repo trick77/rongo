@@ -7,6 +7,9 @@ describe("Icon", () => {
     // A wrong codepoint renders a different picture, not an error, so the
     // mapping is asserted rather than eyeballed.
     expect(ICONS.code).toBe("\ue048");
+    // Carried over from ../loom, never guessed: the font has no speaking
+    // names, so a wrong codepoint is a silently wrong picture.
+    expect(ICONS.sidebar).toBe("\ue0dd");
   });
 
   it("renders the glyph at the requested size", () => {

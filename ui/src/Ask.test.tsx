@@ -33,7 +33,11 @@ function streamFrames(frames: string[], status = 200) {
 
 const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  // The composer's language survives a reload now, so it survives a test too.
+  localStorage.clear();
+});
 
 // Mounted under StrictMode, like every test in this file and like main.tsx
 // mounts the real app: StrictMode runs each effect twice, and a component
@@ -1032,5 +1036,74 @@ describe("Ask, following the answer", () => {
     );
     await screen.findByText(/Through a grant/);
     expect(container.querySelector(".stream-seg")).toBeNull();
+  });
+});
+
+describe("Ask, the answer language across a reload", () => {
+  // The composer's default only: a turn keeps the language it was asked in.
+  it("opens on the language last picked", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<Ask />);
+    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    expect(localStorage.getItem("rongo.language")).toBe("de");
+
+    unmount();
+    render(<Ask />);
+    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("de");
+  });
+
+  // A code the backend's allowlist does not carry would be rejected on the
+  // next question, and the reader would never learn why.
+  it("falls back to English on a stored code that is not on the allowlist", () => {
+    localStorage.setItem("rongo.language", "kl");
+    render(<Ask />);
+    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("en");
+  });
+
+  // Safari's private mode throws on storage access. A forgotten preference is
+  // a small annoyance; a blank page instead of the composer is not.
+  it("still renders where storage throws", () => {
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    render(<Ask />);
+    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("en");
+    get.mockRestore();
+  });
+});
+
+describe("Ask, the composer on a phone", () => {
+  // A field rendering under 16px makes iOS Safari zoom the page in on focus
+  // and never zoom back out: the whole app is then permanently wider than the
+  // viewport. Both fields, not just the textarea — the language select is
+  // text-xs by inheritance and is one tap away.
+  it("gives both fields 16px on a touch screen", () => {
+    render(<Ask />);
+    const box = screen.getByLabelText("Question");
+    expect(box.className).toContain("pointer-coarse:text-base");
+    // An inline fontSize would out-specify the variant and put the zoom back.
+    // (The textarea does carry an inline height — that is the autosize.)
+    expect((box as HTMLTextAreaElement).style.fontSize).toBe("");
+    const lang = screen.getByLabelText("Answer language");
+    expect(lang.className).toContain("pointer-coarse:text-base");
+    expect((lang as HTMLSelectElement).style.fontSize).toBe("");
+  });
+
+  it("wraps the controls instead of crushing them", () => {
+    const { container } = render(<Ask />);
+    const row = container.querySelector("form .flex.flex-wrap");
+    expect(row).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Role" }).parentElement).toBe(row);
+  });
+
+  // ml-auto used to sit on the hint itself, which is hidden below sm — so on a
+  // phone the hint was display:none and the Ask button lost its push to the
+  // right edge and sat against the language pill.
+  it("keeps Ask on the right edge where the hint is not rendered", () => {
+    render(<Ask />);
+    const hint = screen.getByText("Shift+Enter for a new line");
+    expect(hint.className).not.toContain("ml-auto");
+    expect(hint.parentElement?.className).toContain("ml-auto");
+    expect(hint.parentElement?.contains(screen.getByRole("button", { name: "Ask" }))).toBe(true);
   });
 });

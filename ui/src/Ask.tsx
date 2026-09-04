@@ -293,6 +293,36 @@ function asMarkdown(turn: Turn): string {
 
 const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";
 
+/**
+ * The composer's answer language, remembered across reloads — someone who
+ * works in German re-picked it on every reload otherwise. Only the composer's
+ * default: a turn keeps the language it was asked in, and a follow-up still
+ * inherits from the turn it continues.
+ *
+ * Guarded like App's thread bookmark, because Safari's private mode throws on
+ * storage access, and a blank page is worse than a forgotten preference. A
+ * code outside the backend's allowlist falls back to English rather than
+ * sending the server something it will reject.
+ */
+const langKey = "rongo.language";
+
+function storedLanguage(): string {
+  try {
+    const raw = localStorage.getItem(langKey);
+    return raw && languages.some((l) => l.code === raw) ? raw : "en";
+  } catch {
+    return "en";
+  }
+}
+
+function rememberLanguage(code: string) {
+  try {
+    localStorage.setItem(langKey, code);
+  } catch {
+    // See storedLanguage.
+  }
+}
+
 export default function Ask({
   threadId: openThread = null,
   onThread = () => {},
@@ -315,7 +345,7 @@ export default function Ask({
 }) {
   const [question, setQuestion] = useState("");
   const [audience, setAudience] = useState<Audience>("ba");
-  const [language, setLanguage] = useState("en");
+  const [language, setLanguage] = useState(storedLanguage);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [busy, setBusy] = useState(false);
   // The marker under the pointer, so the Sources pane can point back.
@@ -641,10 +671,10 @@ export default function Ask({
           }}
           className="min-h-0 flex-1 overflow-auto"
         >
-          <div className="max-w-[900px] px-10 pt-8 pb-10">
+          <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {turns.length === 0 && (
-              <div className="mt-16 max-w-[52ch]">
-                <h2 className="font-serif text-[28px] font-medium leading-tight tracking-tight text-ink">
+              <div className="mt-8 max-w-[52ch] sm:mt-16">
+                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
                   {(welcome[language] ?? welcome.en).title}
                 </h2>
                 <p className="mt-3 text-muted">{(welcome[language] ?? welcome.en).body}</p>
@@ -654,12 +684,15 @@ export default function Ask({
             {turns.map((turn, i) => (
               <article
                 key={i}
-                className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0"
+                className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
               >
                 <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
                   {roleName(turn.audience)}
                 </div>
-                <p className="mt-1.5 max-w-[30ch] font-serif text-[26px] font-medium leading-[1.3] tracking-tight text-ink text-balance">
+                {/* The question wears the accent its own eyebrow does, and the
+                    header title above it: a turn's heading and the shell's
+                    speak in one voice. */}
+                <p className="mt-1.5 max-w-[30ch] font-serif text-[21px] font-medium leading-[1.3] tracking-tight text-accent-strong text-balance sm:text-[26px] [@media(max-height:500px)]:text-[19px]">
                   {turn.question}
                 </p>
                 <div className="mt-2.5 flex items-center gap-1.5">
@@ -801,7 +834,7 @@ export default function Ask({
                       )}
                     </div>
                     {turn.usage && openUsage === i && (
-                      <div className="mt-2.5 ml-auto w-full max-w-[470px] rounded-ui border border-border bg-panel px-3.5 py-2.5 font-mono text-xs">
+                      <div className="mt-2.5 ml-auto w-full max-w-[470px] overflow-x-auto rounded-ui border border-border bg-panel px-3.5 py-2.5 font-mono text-xs">
                         <table className="w-full border-collapse">
                           <thead>
                             <tr className="text-faint">
@@ -860,7 +893,7 @@ export default function Ask({
 
         <form
           onSubmit={submit}
-          className="max-w-[900px] bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-10 pt-3 pb-4"
+          className="max-w-[900px] bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
         >
           {/* The question gets the whole width; the controls sit under it in
               their own row, so a long question and its settings never fight
@@ -879,9 +912,14 @@ export default function Ask({
               rows={1}
               aria-label="Question"
               placeholder="Ask about the code…"
-              className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none"
+              // 16px on a touch screen, and the same on the language select
+              // below: iOS Safari zooms the page in when a focused field
+              // renders under 16px and never zooms back out, leaving the app
+              // permanently wider than the viewport. Never an inline
+              // fontSize — it would out-specify the variant.
+              className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none pointer-coarse:text-base"
             />
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
                 {(["ba", "dev"] as const).map((role) => (
                   <button
@@ -898,13 +936,16 @@ export default function Ask({
                   </button>
                 ))}
               </fieldset>
-              <label className="relative inline-flex h-8 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink">
+              <label className="relative inline-flex h-9 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink sm:h-8">
                 <span className="sr-only">Answer language</span>
                 <select
                   aria-label="Answer language"
                   value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none"
+                  onChange={(e) => {
+                    setLanguage(e.target.value);
+                    rememberLanguage(e.target.value);
+                  }}
+                  className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none pointer-coarse:text-base"
                 >
                   {languages.map((l) => (
                     <option key={l.code} value={l.code}>
@@ -916,14 +957,19 @@ export default function Ask({
                   <Chevron />
                 </span>
               </label>
-              <span className="ml-auto hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
-              <button
-                type="submit"
-                disabled={busy}
-                className="rounded-full bg-accent-fill px-4.5 py-1.5 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50"
-              >
-                Ask
-              </button>
+              {/* ml-auto belongs to the pair, not to the hint: the hint is not
+                  rendered below sm, and with the push on it the Ask button
+                  lost its right edge on exactly the width that needs it. */}
+              <div className="ml-auto flex items-center gap-2">
+                <span className="hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-full bg-accent-fill px-4.5 py-1.5 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50 pointer-coarse:py-2.5"
+                >
+                  Ask
+                </button>
+              </div>
             </div>
           </div>
         </form>

@@ -92,4 +92,33 @@ describe("RepoList", () => {
     });
     expect(screen.queryByText(/No repositories/)).toBeNull();
   });
+
+  // Seven columns do not fit a phone. Without its own scroller the table
+  // overflowed the page's, dragging the whole Repos page sideways.
+  it("scrolls the table inside its own box, name column pinned", async () => {
+    respondWith(200, [peeq]);
+
+    render(<RepoList />);
+    await screen.findByText("peeq");
+
+    const table = screen.getByRole("table");
+    expect(table.className).toContain("min-w-[720px]");
+    expect(table.parentElement!.className).toContain("overflow-x-auto");
+    // The pinned column carries the error stripe, so an error stays in sight
+    // however far the row is scrolled.
+    const name = screen.getByText("peeq").closest("td")!;
+    expect(name.className).toContain("sticky");
+    expect(name.className).toContain("left-0");
+    expect(name.className).toContain("bg-panel");
+  });
+
+  it("stacks the stats two-up on a phone", async () => {
+    respondWith(200, [peeq]);
+
+    render(<RepoList />);
+    // label div -> the Stat -> the block holding all five.
+    const stats = (await screen.findByText("Repositories")).parentElement!.parentElement!;
+    expect(stats.className).toContain("grid-cols-2");
+    expect(stats.className).toContain("sm:flex");
+  });
 });

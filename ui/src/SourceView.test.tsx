@@ -119,4 +119,19 @@ describe("SourceView", () => {
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+
+  // On a phone the viewer is the screen: a scrim around a panel that is itself
+  // scrolling code sideways only takes width away from the code.
+  it("goes edge to edge on a phone and keeps the frame from sm up", () => {
+    serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
+    render(<SourceView source={source} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+
+    expect(dialog.parentElement!.className).toContain("p-0");
+    expect(dialog.parentElement!.className).toContain("sm:p-6");
+    expect(dialog.className).toContain("rounded-none");
+    expect(dialog.className).toContain("sm:rounded-ui-lg");
+    // The first thing a thumb reaches for, and 32px is not a thumb.
+    expect(screen.getByRole("button", { name: "Close" }).className).toContain("h-11");
+  });
 });

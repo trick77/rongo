@@ -97,7 +97,11 @@ export default function Threads({
     // ../loom's row: hover only moves the ground, never the text — the title
     // is already at its reading brightness. The hover ground itself lives on
     // the idle branch below, so it cannot lift the selected row's darker one.
-    "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
+    //
+    // The 28px pitch is the desktop rhythm; a finger needs more. Keyed off the
+    // pointer, not the width, so an iPad gets the bigger row too — and an iPad
+    // on a trackpad reports a fine pointer and keeps the tight one.
+    "flex h-7 pointer-coarse:h-11 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">

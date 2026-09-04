@@ -101,6 +101,16 @@ describe("Threads", () => {
     expect(onSelect).toHaveBeenCalledWith(7);
   });
 
+  // 28px is a mouse's row, not a thumb's. jsdom matches no media query, so the
+  // class is what can be asserted here; the size itself is checked in a touch
+  // browser context.
+  it("gives the row a thumb's height on a touch screen", async () => {
+    threadList(two);
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const row = await screen.findByRole("button", { name: "How does shipping work?" });
+    expect(row.className).toContain("pointer-coarse:h-11");
+  });
+
   // Today's threads head the list under App's own "History" label, so both a
   // "Today" heading and a clock on every row name what the position already
   // says. Older rows keep their date: there the day is the useful part.
