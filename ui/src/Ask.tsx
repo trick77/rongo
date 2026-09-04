@@ -690,8 +690,10 @@ export default function Ask({
           className="min-h-0 flex-1 overflow-auto"
         >
           <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
+            {/* No top margin on the welcome: it starts where the Repositories
+                heading starts, both pages' first line on the same rule. */}
             {turns.length === 0 && (
-              <div className="mt-8 max-w-[52ch] sm:mt-16">
+              <div className="max-w-[52ch]">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
                   {(welcome[language] ?? welcome.en).title}
                 </h2>
