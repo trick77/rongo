@@ -1,6 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import Diagram, { parseDiagram, wrap, layoutFlow, layoutSequence, NODE_W, type FlowSpec, type SequenceSpec } from "./diagram";
+import Diagram, {
+  parseDiagram,
+  wrap,
+  truncate,
+  chipsWidth,
+  labelWidth,
+  layoutFlow,
+  layoutSequence,
+  NODE_W,
+  type FlowSpec,
+  type SequenceSpec,
+} from "./diagram";
 
 const flow: FlowSpec = {
   type: "flow",
@@ -96,7 +107,8 @@ describe("layoutFlow", () => {
     expect(l.nodes.map((n) => n.x)).toEqual([0, 0, 0]);
     expect(l.nodes[0].y).toBeLessThan(l.nodes[1].y);
     expect(l.nodes[1].y).toBeLessThan(l.nodes[2].y);
-    expect(l.width).toBe(NODE_W);
+    // One column, plus the overhang a chip would need.
+    expect(l.width).toBe(NODE_W + 6);
     expect(l.edges.every((e) => !e.back)).toBe(true);
   });
 
@@ -114,7 +126,7 @@ describe("layoutFlow", () => {
     expect(l.edges.find((e) => e.key.startsWith("b->c"))?.d).toBe(
       `M${b.x} ${b.y + b.h / 2} H${c.x + c.w / 2} V${c.y - 2}`,
     );
-    expect(l.width).toBe(2 * NODE_W + 32);
+    expect(l.width).toBe(2 * NODE_W + 32 + 6);
   });
 
   it("orders a rank by its parents so branches do not cross", () => {
@@ -189,6 +201,60 @@ describe("layoutFlow", () => {
   });
 });
 
+// The SVG has no viewBox, so anything past the computed width is clipped
+// away. A clipped chip takes a node's sources with it, which is the one
+// thing a diagram in an answer may never do.
+describe("nothing is drawn outside the width", () => {
+  it("keeps a long back-edge label right of the lane, inside the width", () => {
+    const l = layoutFlow({
+      type: "flow",
+      nodes: [
+        { id: "a", label: "a", kind: "step", src: [] },
+        { id: "b", label: "b", kind: "step", src: [] },
+      ],
+      edges: [
+        { from: "a", to: "b" },
+        { from: "b", to: "a", label: "retry the whole thing" },
+      ],
+    });
+    const e = l.edges.find((x) => x.back)!;
+    const half = (labelWidth(e.label) + 8) / 2;
+    expect(e.lx - half).toBeGreaterThan(NODE_W); // clear of the node column
+    expect(e.lx + half).toBeLessThanOrEqual(l.width);
+  });
+
+  it("makes room for a self call on the rightmost actor, label and chips", () => {
+    const l = layoutSequence({
+      type: "sequence",
+      actors: [
+        { id: "u", label: "UI" },
+        { id: "s", label: "Store" },
+      ],
+      steps: [{ from: "s", to: "s", label: "validateGrant", kind: "call", src: [1, 2] }],
+    });
+    const step = l.steps[0];
+    expect(step.right).toBeGreaterThan(250); // past the actor columns
+    expect(l.width).toBeGreaterThanOrEqual(step.right);
+    expect(step.chipsX + chipsWidth(step.src)).toBeLessThanOrEqual(l.width);
+  });
+
+  it("keeps a node's chips inside the width", () => {
+    const l = layoutFlow({
+      type: "flow",
+      nodes: [{ id: "a", label: "a", kind: "step", src: [11, 12] }],
+      edges: [],
+    });
+    expect(l.width).toBeGreaterThanOrEqual(NODE_W + 6);
+  });
+});
+
+describe("truncate", () => {
+  it("marks a shortened name so it cannot read as a real one", () => {
+    expect(truncate("Grant Store Service", 16)).toBe("Grant Store Ser…");
+    expect(truncate("httpapi", 16)).toBe("httpapi");
+  });
+});
+
 describe("layoutSequence", () => {
   it("spaces the lifelines by actor index and stacks the steps", () => {
     const l = layoutSequence(seq);
@@ -196,7 +262,9 @@ describe("layoutSequence", () => {
     expect(l.steps[0].y).toBeLessThan(l.steps[1].y);
     expect(l.steps[1].y).toBeLessThan(l.steps[2].y);
     expect(l.steps[2].self).toBe(true);
-    expect(l.width).toBe(250);
+    // The columns are 250 wide; the width stretches to the widest step.
+    expect(l.width).toBe(Math.max(250, ...l.steps.map((s) => s.right)));
+    expect(l.width).toBeGreaterThanOrEqual(250);
     // A return runs right to left; a self message loops out and back.
     expect(l.steps[1].x1).toBeGreaterThan(l.steps[1].x2);
     expect(l.steps[2].d).toMatch(/^M195 \d+ H225 V/);

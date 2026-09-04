@@ -143,6 +143,26 @@ export function wrap(label: string, cols = WRAP): string[] {
   return lines.map((l) => (l.length > cols ? l.slice(0, cols - 1) + "…" : l));
 }
 
+/** chipsWidth is what a node's markers occupy. The layout needs it before
+ * anything is drawn: the SVG has no viewBox, so whatever falls outside the
+ * computed width is clipped away, and clipped chips would take a node's
+ * sources with them. */
+export function chipsWidth(src: number[]): number {
+  if (src.length === 0) return 0;
+  return src.reduce((w, m) => w + 8 + `[${m}]`.length * 6, 0) + (src.length - 1) * 2;
+}
+
+/** labelWidth estimates a run of text, the one measurement this file makes. */
+export function labelWidth(label: string | undefined): number {
+  return label ? label.length * CHAR_W : 0;
+}
+
+/** truncate keeps one line, marking a cut so a shortened name cannot be read
+ * as a real one: an actor "Grant Store Service" is not "Grant Store". */
+export function truncate(label: string, cols: number): string {
+  return label.length > cols ? label.slice(0, cols - 1) + "…" : label;
+}
+
 export type Placed = {
   id: string;
   kind: FlowKind;
@@ -267,7 +287,9 @@ export function layoutFlow(spec: FlowSpec): FlowLayout {
       return;
     }
     // Skip and back edges: out of the right side, down (or up) the lane,
-    // into the target's right side.
+    // into the target's right side. A label sits to the RIGHT of its lane,
+    // never centred on it: centred, a long one reaches back over the node
+    // column, which the edges are painted under.
     const laneX = colW + 24 + lanes++ * 12;
     const uy = u.y + u.h / 2;
     const vy = v.y + v.h / 2;
@@ -276,11 +298,17 @@ export function layoutFlow(spec: FlowSpec): FlowLayout {
       d: `M${u.x + u.w} ${uy} H${laneX} V${vy} H${v.x + v.w + 2}`,
       back: back.has(ei),
       label: e.label,
-      lx: laneX,
+      lx: laneX + (e.label ? labelWidth(e.label) / 2 + 8 : 0),
       ly: (uy + vy) / 2,
     });
   });
-  const width = colW + (lanes ? 24 + lanes * 12 : 0);
+  // Whatever sits past this is clipped, so the width is the rightmost thing
+  // drawn: the columns, the lanes, an edge label, a node's chips.
+  const width = Math.max(
+    colW + (lanes ? 24 + lanes * 12 : 0),
+    ...edges.map((e) => (e.label ? e.lx + (labelWidth(e.label) + 8) / 2 : 0)),
+    ...placed.map((nd) => nd.x + nd.w + 6),
+  );
   return { width, height, nodes: placed, edges, ranks: ranks.map((r) => r.map((i) => spec.nodes[i].id)) };
 }
 
@@ -303,6 +331,9 @@ export type PlacedStep = {
   d: string;
   lx: number;
   ly: number;
+  /** Where this step's chips start, and where its drawing ends. */
+  chipsX: number;
+  right: number;
 };
 export type SeqLayout = { width: number; height: number; actors: (Actor & { x: number })[]; steps: PlacedStep[] };
 
@@ -320,6 +351,12 @@ export function layoutSequence(spec: SequenceSpec): SeqLayout {
     const d = self
       ? `M${x1} ${y} H${x1 + SELF_W} V${y + SELF_H} H${x1 + 2}`
       : `M${x1} ${y} H${x2 + (x2 > x1 ? -2 : 2)}`;
+    // A self message anchors its label at the loop; every other step centres
+    // it over the arrow. Either way the chips follow the label, and the two
+    // together decide how far right this step reaches.
+    const lx = self ? x1 + SELF_W + 6 : (x1 + x2) / 2;
+    const labelRight = lx + labelWidth(s.label) / (self ? 1 : 2);
+    const chipsX = labelRight + 4;
     steps.push({
       i,
       y,
@@ -330,12 +367,19 @@ export function layoutSequence(spec: SequenceSpec): SeqLayout {
       label: s.label,
       src: s.src,
       d,
-      lx: self ? x1 + SELF_W + 6 : (x1 + x2) / 2,
+      lx,
       ly: self ? y + SELF_H / 2 + 4 : y - 6,
+      chipsX,
+      right: chipsX + chipsWidth(s.src),
     });
     y += STEP_GAP + (self ? SELF_H : 0);
   });
-  const width = actors.length * ACTOR_W + (actors.length - 1) * ACTOR_GAP;
+  // A label or a chip past the last lifeline is still drawn, and the SVG has
+  // no viewBox: a self call on the rightmost actor would otherwise lose both.
+  const width = Math.max(
+    actors.length * ACTOR_W + (actors.length - 1) * ACTOR_GAP,
+    ...steps.map((s) => s.right),
+  );
   return { width, height: y - STEP_GAP + 20, actors, steps };
 }
 
@@ -345,12 +389,11 @@ export function layoutSequence(spec: SequenceSpec): SeqLayout {
  * overhanging `top`. Semantics as markdown.tsx `text`: while the citations
  * are unknown every number wears the chip look; once known, a number with no
  * source behind it is plain text and has no hover. */
-function Chips({ src, right, top, hooks, k }: { src: number[]; right: number; top: number; hooks: MarkerHooks; k: string }) {
+function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top: number; hooks: MarkerHooks; k: string }) {
   if (src.length === 0) return null;
   const known = hooks.backed !== undefined;
   const widths = src.map((m) => 8 + `[${m}]`.length * 6);
-  const total = widths.reduce((a, b) => a + b, 0) + (src.length - 1) * 2;
-  let x = right + 6 - total;
+  let x = left;
   const y = top - CHIP_H / 2;
   return src.map((m, i) => {
     const w = widths[i];
@@ -435,7 +478,13 @@ function Flow({ layout, hooks, head }: { layout: FlowLayout; hooks: MarkerHooks;
               />
             )}
             <Label lines={nd.lines} cx={cx} cy={cy} />
-            <Chips src={nd.src} right={nd.x + nd.w - (nd.kind === "decision" ? 20 : 0)} top={nd.y} hooks={hooks} k={nd.id} />
+            <Chips
+              src={nd.src}
+              left={nd.x + nd.w + 6 - (nd.kind === "decision" ? 20 : 0) - chipsWidth(nd.src)}
+              top={nd.y}
+              hooks={hooks}
+              k={nd.id}
+            />
           </g>
         );
       })}
@@ -451,7 +500,7 @@ function Sequence({ layout, hooks, head, open }: { layout: SeqLayout; hooks: Mar
         <g key={a.id}>
           <line x1={a.x} y1={ACTOR_H} x2={a.x} y2={bottom} className="stroke-border" strokeDasharray="4 4" />
           <rect x={a.x - ACTOR_W / 2} y={0} width={ACTOR_W} height={ACTOR_H} rx={8} className="fill-active stroke-border" />
-          <Label lines={wrap(a.label, 16).slice(0, 1)} cx={a.x} cy={ACTOR_H / 2} />
+          <Label lines={[truncate(a.label, 16)]} cx={a.x} cy={ACTOR_H / 2} />
         </g>
       ))}
       {layout.steps.map((s) => (
@@ -471,13 +520,7 @@ function Sequence({ layout, hooks, head, open }: { layout: SeqLayout; hooks: Mar
           >
             {s.label}
           </text>
-          <Chips
-            src={s.src}
-            right={s.lx + (s.self ? s.label.length * CHAR_W : (s.label.length * CHAR_W) / 2) + 4 + s.src.length * 26}
-            top={s.ly - 4}
-            hooks={hooks}
-            k={`s${s.i}`}
-          />
+          <Chips src={s.src} left={s.chipsX} top={s.ly - 4} hooks={hooks} k={`s${s.i}`} />
         </g>
       ))}
     </>
