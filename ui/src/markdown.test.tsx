@@ -255,4 +255,53 @@ describe("Markdown", () => {
       expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(2);
     });
   });
+
+  // The one fence that is not code. Its nodes carry markers, so it is drawn,
+  // not shown — but only when it is complete and says something drawable.
+  describe("diagram fence", () => {
+    const spec = JSON.stringify({
+      type: "flow",
+      nodes: [
+        { id: "a", label: "Answer()", kind: "start", src: [1] },
+        { id: "b", label: "stored", kind: "end", src: [2] },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    });
+
+    it("is drawn as SVG, not shown as text", () => {
+      const { container } = render(<Markdown text={"Before.\n\n```diagram\n" + spec + "\n```\n\nAfter."} />);
+      expect(container.querySelector("svg")).toBeTruthy();
+      expect(container.querySelector("pre")).toBeNull();
+      expect(container.textContent).not.toContain('"type"');
+      expect(container.textContent).toContain("Before.");
+      expect(container.textContent).toContain("After.");
+    });
+
+    it("carries the citation hooks into the picture", () => {
+      const { container } = render(<Markdown text={"```diagram\n" + spec + "\n```"} backed={new Set([1])} />);
+      expect(container.querySelectorAll("rect.fill-accent-dim").length).toBe(1);
+      expect(Array.from(container.querySelectorAll("text.fill-muted")).some((t) => t.textContent === "[2]")).toBe(true);
+    });
+
+    it("falls back to the code block when the JSON is not a spec it can draw", () => {
+      const { container } = render(<Markdown text={'```diagram\n{"type":"flow","nodes":[{"id"\n```'} />);
+      expect(container.querySelector("svg")).toBeNull();
+      expect(container.querySelector("pre code")?.textContent).toBe('{"type":"flow","nodes":[{"id"');
+    });
+
+    it("promises the picture while the fence is still open", () => {
+      const { container } = render(<Markdown text={"```diagram\n" + spec.slice(0, 40)} />);
+      expect(container.textContent).toContain("Drawing the diagram");
+      expect(container.querySelector("svg")).toBeNull();
+      expect(container.querySelector("pre")).toBeNull();
+    });
+
+    it("shows a fence left open by a finished turn as text, not a promise", () => {
+      // A cut stream keeps its partial text, and a stored answer re-renders
+      // it: a placeholder there would wait for a diagram that never comes.
+      const { container } = render(<Markdown text={"```diagram\n" + spec.slice(0, 40)} backed={new Set()} />);
+      expect(container.textContent).not.toContain("Drawing the diagram");
+      expect(container.querySelector("pre code")?.textContent).toBe(spec.slice(0, 40));
+    });
+  });
 });
