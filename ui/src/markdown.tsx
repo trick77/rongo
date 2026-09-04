@@ -100,13 +100,17 @@ const markerRe = /\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g;
  * superscripts, one per number of a grouped marker. onMarker lets the view
  * react to a marker being pointed at.
  *
- * fade says whether the prose carries the streaming fade. Bold turns it off:
+ * fade says whether the prose carries the streaming fade, and is off unless
+ * the caller asks for it: text that is not arriving right now — a thread
+ * being opened — must never fade, so the default is the safe one.
+ *
+ * Bold turns it off too:
  * until the closing ** arrives the words render as the literal text they came
  * as, at full brightness, and the <strong> that replaces them is a new
  * element whose children mount fresh whatever their keys. Segments inside it
  * would start their fade at that moment, so a phrase the reader had already
  * read would drop to a fifth of its brightness and climb back. */
-function text(src: string, key: string, hooks: MarkerHooks, fade = true): ReactNode[] {
+function text(src: string, key: string, hooks: MarkerHooks, fade = false): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
@@ -185,8 +189,9 @@ function text(src: string, key: string, hooks: MarkerHooks, fade = true): ReactN
   return out;
 }
 
-/** inline renders bold and inline code inside one block of text. */
-function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
+/** inline renders bold and inline code inside one block of text. `fade`
+ * rides along to the prose runs; see text(). */
+function inline(src: string, key: string, hooks: MarkerHooks, fade: boolean): ReactNode[] {
   const out: ReactNode[] = [];
   let rest = src;
   let n = 0;
@@ -194,11 +199,11 @@ function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
     const code = rest.indexOf("`");
     const bold = rest.indexOf("**");
     if (code < 0 && bold < 0) {
-      out.push(...text(rest, `${key}-t${n++}`, hooks));
+      out.push(...text(rest, `${key}-t${n++}`, hooks, fade));
       break;
     }
     const first = code < 0 ? bold : bold < 0 ? code : Math.min(code, bold);
-    if (first > 0) out.push(...text(rest.slice(0, first), `${key}-t${n++}`, hooks));
+    if (first > 0) out.push(...text(rest.slice(0, first), `${key}-t${n++}`, hooks, fade));
     if (first === code) {
       const end = rest.indexOf("`", first + 1);
       if (end < 0) {
@@ -259,7 +264,7 @@ export type MarkerHooks = {
 };
 
 /** renderMarkdown turns one answer into block-level nodes. */
-export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[] {
+export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = false): ReactNode[] {
   const lines = src.split("\n");
   const out: ReactNode[] = [];
   let i = 0;
@@ -325,7 +330,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       const Tag = `h${level}` as keyof JSX.IntrinsicElements;
       out.push(
         <Tag key={k++}>
-          {inline(h[2], `h${k}`, hooks)}
+          {inline(h[2], `h${k}`, hooks, fade)}
         </Tag>,
       );
       i++;
@@ -343,7 +348,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       while (i < lines.length) {
         const m = ordered ? orderedRe.exec(lines[i]) : bulletRe.exec(lines[i]);
         if (!m) break;
-        items.push(<li key={items.length}>{inline(m[1], `li${k}-${items.length}`, hooks)}</li>);
+        items.push(<li key={items.length}>{inline(m[1], `li${k}-${items.length}`, hooks, fade)}</li>);
         i++;
       }
       const List = ordered ? "ol" : "ul";
@@ -357,7 +362,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
     }
     out.push(
       <p key={k++} className="whitespace-pre-wrap">
-        {inline(para.join("\n"), `p${k}`, hooks)}
+        {inline(para.join("\n"), `p${k}`, hooks, fade)}
       </p>,
     );
   }
@@ -371,6 +376,7 @@ export default function Markdown({
   onMarkerHover,
   onMarkerOpen,
   backed,
+  fade = false,
 }: {
   text: string;
   onMarkerHover?: (marker: number | null) => void;
@@ -378,6 +384,12 @@ export default function Markdown({
   onMarkerOpen?: (marker: number) => void;
   /** Markers with a source behind them; leave undefined while unknown. */
   backed?: Set<number>;
+  /** Whether this answer's prose fades in segment by segment. The fade shows
+   * text ARRIVING, so it belongs to an answer streaming into this session and
+   * to nothing else: a thread being opened mounts its answers all at once,
+   * and fading them would wash a conversation the reader had already read
+   * back in as if it were being written now. Off unless asked for. */
+  fade?: boolean;
 }) {
-  return <>{renderMarkdown(src, { onHover: onMarkerHover, onOpen: onMarkerOpen, backed })}</>;
+  return <>{renderMarkdown(src, { onHover: onMarkerHover, onOpen: onMarkerOpen, backed }, fade)}</>;
 }
