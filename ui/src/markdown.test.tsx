@@ -229,6 +229,20 @@ describe("Markdown", () => {
       expect(container.querySelector("sup")?.textContent).toBe("[1]");
     });
 
+    it("does not fade bold, which the reader has already seen unbolded", () => {
+      // Until the closing ** arrives the words are on screen as the literal
+      // text they came as. The <strong> that replaces them is a new element,
+      // so segments inside it would mount and start their fade at that
+      // moment, dropping a phrase the reader has read back to a fifth of its
+      // brightness. Confirmed in the browser before this was written.
+      const { container, rerender } = render(<Markdown text={"The job **runs fast"} />);
+      expect(container.textContent).toBe("The job **runs fast");
+      rerender(<Markdown text={"The job **runs fast** now."} />);
+      expect(container.querySelector("strong")?.textContent).toBe("runs fast");
+      expect(container.querySelector("strong .stream-seg")).toBeNull();
+      expect(container.textContent).toBe("The job runs fast now.");
+    });
+
     it("keeps the segments already on screen when more text arrives", () => {
       // The whole answer re-renders on every token. If a settled segment
       // remounted, its fade would restart and the finished text would
