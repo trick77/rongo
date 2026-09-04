@@ -117,6 +117,21 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				// src arrays renumber; held back until the line is whole,
 				// because the tag decides how the whole block is read.
 				nl := strings.IndexByte(s[i:], '\n')
+				line := s[i:]
+				if nl >= 0 {
+					line = s[i : i+nl]
+				}
+				// A second "```" on the same line closes it: that is a span,
+				// not a block, and reading the rest of the line as an info
+				// string would leave the fence open over the whole answer -
+				// every marker after it silently uncited.
+				if strings.Contains(line[3:], "```") {
+					b.WriteString("```")
+					i += 3
+					r.inFence = true
+					r.inDiagram = false
+					continue
+				}
 				if nl < 0 && !atEnd {
 					return b.String(), s[i:]
 				}
@@ -124,7 +139,7 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				if nl >= 0 {
 					head = s[i : i+nl+1]
 				}
-				r.inDiagram = strings.TrimSpace(strings.Trim(head, "`\n")) == "diagram"
+				r.inDiagram = infoTag(head) == "diagram"
 				b.WriteString(head)
 				i += len(head)
 				r.inFence = true
@@ -169,6 +184,17 @@ var (
 	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
 	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
 )
+
+// infoTag reads the language of a fence header the way the browser does
+// (markdown.tsx fenceRe): the first token of the info string. The two ends
+// must agree on what a diagram fence is - one drawing a diagram the other
+// left at prompt numbering would put a wrong source under a chip.
+func infoTag(head string) string {
+	if f := strings.Fields(strings.Trim(head, "`\n")); len(f) > 0 {
+		return f[0]
+	}
+	return ""
+}
 
 // fenceBody hands a complete fence body to the renumberer for a diagram, and
 // passes anything else through untouched.

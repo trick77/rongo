@@ -125,6 +125,39 @@ func TestRenumber_aDiagramSplitAcrossTokensStillRenumbers(t *testing.T) {
 	}
 }
 
+func TestRenumber_aSameLineTripleBacktickSpanIsNotAFence(t *testing.T) {
+	// Reading the rest of the line as an info string would leave the fence
+	// open over the whole answer, and every marker after it would reach the
+	// reader as the prompt's number with no citation behind it.
+	out, rn := renumbered(t, 9, "see ```foo``` and [3]. More prose [5].\n")
+
+	if !strings.Contains(out, "and [1].") || !strings.Contains(out, "prose [2].") {
+		t.Errorf("out = %q, want the markers after the span renumbered", out)
+	}
+	if len(rn.order) != 2 {
+		t.Errorf("order = %v, want both markers cited", rn.order)
+	}
+}
+
+func TestRenumber_theInfoStringIsReadAsTheBrowserReadsIt(t *testing.T) {
+	// markdown.tsx takes the first token of the info string, so "```diagram
+	// flow" still draws a diagram. Were this end stricter, its src would keep
+	// the prompt's numbering while the chip claimed the reader's - a chip
+	// opening a source the node never cited.
+	text := "```diagram flow\n" +
+		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]}],"edges":[]}` +
+		"\n```"
+
+	out, rn := renumbered(t, 2, text)
+
+	if !strings.Contains(out, `"src":[1]`) {
+		t.Errorf("out = %q, want the src renumbered despite the trailing word", out)
+	}
+	if len(rn.order) != 1 {
+		t.Errorf("order = %v, want the node's source cited", rn.order)
+	}
+}
+
 func TestRenumber_anUnclosedDiagramFenceStillEndsWhole(t *testing.T) {
 	// A cut stream: the browser shows the block as text, so nothing may be
 	// held back for a close that never comes.

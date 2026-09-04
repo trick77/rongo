@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, createEvent } from "@testing-library/react";
 import Diagram, {
   parseDiagram,
   wrap,
@@ -238,6 +238,23 @@ describe("nothing is drawn outside the width", () => {
     expect(step.chipsX + chipsWidth(step.src)).toBeLessThanOrEqual(l.width);
   });
 
+  it("shifts right when an edge label reaches past the origin", () => {
+    // A label is centred on its edge, and an edge in the only column is
+    // centred on a 150px node: anything wider than 300px hangs off the left.
+    const l = layoutFlow({
+      type: "flow",
+      nodes: [
+        { id: "a", label: "a", kind: "step", src: [] },
+        { id: "b", label: "b", kind: "step", src: [] },
+      ],
+      edges: [{ from: "a", to: "b", label: "only when the grant is still valid" }],
+    });
+    const e = l.edges.find((x) => x.label)!;
+    expect(e.lx - (labelWidth(e.label) + 8) / 2).toBeLessThan(0); // would clip
+    expect(l.originX).toBeGreaterThan(0);
+    expect(l.originX + e.lx - (labelWidth(e.label) + 8) / 2).toBeGreaterThanOrEqual(0);
+  });
+
   it("keeps a node's chips inside the width", () => {
     const l = layoutFlow({
       type: "flow",
@@ -323,6 +340,11 @@ describe("Diagram", () => {
       expect(onOpen).toHaveBeenLastCalledWith(3);
       fireEvent.keyDown(chip, { key: "Enter" });
       expect(onOpen).toHaveBeenCalledTimes(2);
+      // Space opens the source without also scrolling the answer away.
+      const space = createEvent.keyDown(chip, { key: " " });
+      fireEvent(chip, space);
+      expect(onOpen).toHaveBeenCalledTimes(3);
+      expect(space.defaultPrevented).toBe(true);
     });
 
     it("are not buttons while the citations are unknown", () => {

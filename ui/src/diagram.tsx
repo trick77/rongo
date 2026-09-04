@@ -175,7 +175,17 @@ export type Placed = {
   rank: number;
 };
 export type EdgePath = { key: string; d: string; back: boolean; label?: string; lx: number; ly: number };
-export type FlowLayout = { width: number; height: number; nodes: Placed[]; edges: EdgePath[]; ranks: string[][] };
+export type FlowLayout = {
+  width: number;
+  height: number;
+  /** How far left of the origin anything reaches, as a positive shift the
+   * drawing applies: a decision in the leftmost column exits by its side, and
+   * its label is centred on that exit. */
+  originX: number;
+  nodes: Placed[];
+  edges: EdgePath[];
+  ranks: string[][];
+};
 
 /** layoutFlow places the nodes top-down: back edges found by DFS are set
  * aside, ranks are the longest path from a source, a rank orders its nodes by
@@ -309,7 +319,18 @@ export function layoutFlow(spec: FlowSpec): FlowLayout {
     ...edges.map((e) => (e.label ? e.lx + (labelWidth(e.label) + 8) / 2 : 0)),
     ...placed.map((nd) => nd.x + nd.w + 6),
   );
-  return { width, height, nodes: placed, edges, ranks: ranks.map((r) => r.map((i) => spec.nodes[i].id)) };
+  // And the leftmost: an edge label centred on a leftmost decision's side
+  // exit starts left of the origin, where there is only the padding to
+  // spare. The drawing shifts right by this, rather than losing the text.
+  const originX = Math.max(0, ...edges.map((e) => (e.label ? (labelWidth(e.label) + 8) / 2 - e.lx : 0)));
+  return {
+    width: width + originX,
+    height,
+    originX,
+    nodes: placed,
+    edges,
+    ranks: ranks.map((r) => r.map((i) => spec.nodes[i].id)),
+  };
 }
 
 const ACTOR_W = 110;
@@ -419,7 +440,17 @@ function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top:
         onClick={open ? () => hooks.onOpen?.(m) : undefined}
         role={open ? "button" : undefined}
         tabIndex={open ? 0 : undefined}
-        onKeyDown={open ? (e) => (e.key === "Enter" || e.key === " ") && hooks.onOpen?.(m) : undefined}
+        // Space scrolls the page unless it is taken here; a real <button>
+        // in the prose gets that for free, an SVG group does not.
+        onKeyDown={
+          open
+            ? (e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                hooks.onOpen?.(m);
+              }
+            : undefined
+        }
         className={open ? "cursor-pointer" : undefined}
       >
         <rect x={cx - w / 2} y={y} width={w} height={CHIP_H} rx={3} className="fill-accent-dim" />
@@ -557,7 +588,7 @@ export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: Mar
             <polyline points="0 0, 8 3, 0 6" className="fill-none stroke-muted" strokeWidth={1.2} />
           </marker>
         </defs>
-        <g transform={`translate(${PAD},${PAD})`}>
+        <g transform={`translate(${PAD + ("originX" in layout ? layout.originX : 0)},${PAD})`}>
           {spec.type === "flow" ? (
             <Flow layout={layout as FlowLayout} hooks={hooks} head={head} />
           ) : (
