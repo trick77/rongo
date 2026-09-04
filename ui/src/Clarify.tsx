@@ -18,9 +18,11 @@ export type ClarifyCandidate = {
  * good the moment a choice is made, even if the card is reopened later.
  *
  * The decision belongs to the thread's record, not to a dialog: after a
- * choice the card collapses to one line but never disappears, and every
- * candidate — including the one already picked — stays clickable. Picking a
- * different one starts a new turn; nothing here is overwritten.
+ * choice the card collapses to one line but never disappears, and reopening
+ * it still names every candidate with the chosen one marked. It is a record
+ * of what was decided, not a second chance to decide it — one card, one
+ * answer, so the candidates are inert from then on and a correction is a new
+ * question. The backend refuses a second resume with the same card too.
  */
 export default function Clarify({
   candidates,
@@ -32,12 +34,15 @@ export default function Clarify({
   onChoose: (idx: number) => void;
 }) {
   const [open, setOpen] = useState(chosenIdx == null);
-  // Collapses the instant a choice lands, without fighting a reader who
-  // later reopens it manually — the effect only fires on the null → number
-  // transition, never on a re-render that leaves chosenIdx unchanged.
+  // Collapses the instant a choice lands, and opens again if that choice is
+  // taken back because the turn it started failed — the card is "your move"
+  // once more. Neither fights a reader who toggles it by hand: the effect
+  // only fires on a transition, never on a re-render that leaves chosenIdx
+  // unchanged.
   const prevChosen = useRef(chosenIdx);
   useEffect(() => {
     if (prevChosen.current == null && chosenIdx != null) setOpen(false);
+    if (prevChosen.current != null && chosenIdx == null) setOpen(true);
     prevChosen.current = chosenIdx;
   }, [chosenIdx]);
 
@@ -76,9 +81,11 @@ export default function Clarify({
               <button
                 type="button"
                 onClick={() => onChoose(c.idx)}
+                disabled={chosenIdx != null}
                 aria-pressed={c.idx === chosenIdx}
                 className={
-                  "w-full rounded-ui-sm border bg-bg px-3.5 py-3 text-left hover:border-accent " +
+                  "w-full rounded-ui-sm border bg-bg px-3.5 py-3 text-left " +
+                  (chosenIdx == null ? "hover:border-accent " : "") +
                   (c.idx === chosenIdx ? "border-accent ring-1 ring-accent" : "border-border")
                 }
               >

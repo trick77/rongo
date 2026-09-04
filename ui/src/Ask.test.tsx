@@ -699,6 +699,97 @@ describe("Ask, the clarification and re-explaining", () => {
     });
   });
 
+  it("sends nothing when an answered card is clicked again", async () => {
+    // One card, one answer: a second choice would be a second answer to a
+    // question already decided, and the backend refuses it with 409 anyway.
+    const mock = queuedPostFetch([
+      [
+        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("done", { message_id: 5 }),
+      ],
+      [
+        ev("thread", { thread_id: 7, message_id: 6 }),
+        ev("token", { text: "Sign-in runs through the login service." }),
+        ev("done", { message_id: 6 }),
+      ],
+    ]);
+
+    const user = await ask("How is sign-in done?");
+    await screen.findByText("Through the login service");
+    await user.click(screen.getByText("Through the login service"));
+    await screen.findByText(/Chosen: Through the login service/);
+
+    // Reopened, the card is a record: neither candidate posts anything.
+    await user.click(screen.getByRole("button", { name: /Chosen/ }));
+    await user.click(screen.getByText("Through the legacy adapter"));
+    await user.click(screen.getByText("Through the login service"));
+
+    const posts = mock.mock.calls.filter((c) => c[1]?.method === "POST");
+    expect(posts.length).toBe(2);
+  });
+
+  it("unlocks the card again when the resumed turn fails", async () => {
+    // The choice is recorded by the answer, so a turn that never produced one
+    // leaves the card open on the server. A card locked in the browser would
+    // strand the reader with no way to retry.
+    queuedPostFetch([
+      [
+        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("done", { message_id: 5 }),
+      ],
+      [ev("thread", { thread_id: 7, message_id: 6 }), ev("error", { message: "The turn failed." })],
+    ]);
+
+    const user = await ask("How is sign-in done?");
+    await screen.findByText("Through the login service");
+    await user.click(screen.getByText("Through the login service"));
+
+    expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
+    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("unlocks the card again when the server refuses the choice", async () => {
+    // The card may have been answered in another tab. The refusal must put the
+    // card back the way it was, not leave it locked on a choice that never
+    // happened.
+    const encoder = new TextEncoder();
+    const frames = [
+      ev("thread", { thread_id: 7, message_id: 5 }),
+      ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+      ev("done", { message_id: 5 }),
+    ];
+    let posts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/threads/")) return { ok: true, status: 200, json: async () => [] };
+        if (posts++ > 0) return { ok: false, status: 409 };
+        let i = 0;
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            getReader: () => ({
+              async read() {
+                if (i >= frames.length) return { done: true, value: undefined };
+                return { done: false, value: encoder.encode(frames[i++]) };
+              },
+            }),
+          },
+        };
+      }),
+    );
+
+    const user = await ask("How is sign-in done?");
+    await screen.findByText("Through the login service");
+    await user.click(screen.getByText("Through the login service"));
+
+    expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
+    expect(screen.getByText("Through the login service").closest("button")?.hasAttribute("disabled")).toBe(false);
+  });
+
   const clarifyingMessage = {
     id: 5,
     ordinal: 0,

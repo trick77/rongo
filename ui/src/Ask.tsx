@@ -436,9 +436,15 @@ export default function Ask({
    * asking, resuming a clarification and re-explaining — all three post,
    * stream the same event vocabulary, and land in a turn appended just
    * before the call.
+   *
+   * Returns whether the turn produced an answer. A caller that changed
+   * something on an earlier turn before streaming — picking a candidate —
+   * needs that to undo it: a turn that failed left the server's record
+   * untouched.
    */
-  async function stream(url: string, body: object) {
+  async function stream(url: string, body: object): Promise<boolean> {
     markBusy(true);
+    let ok = true;
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -447,7 +453,8 @@ export default function Ask({
       });
       if (!res.ok || !res.body) {
         patchLast((t) => ({ ...t, error: `The server answered with ${res.status}.`, done: true, endedAt: Date.now() }));
-        return;
+        ok = false;
+        return false;
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -476,7 +483,10 @@ export default function Ask({
               messageId: payload.message_id,
               clarification: { messageId: payload.message_id, candidates: payload.candidates ?? [] },
             }));
-          } else if (name === "error") patchLast((t) => ({ ...t, error: payload.message, done: true, endedAt: Date.now() }));
+          } else if (name === "error") {
+            ok = false;
+            patchLast((t) => ({ ...t, error: payload.message, done: true, endedAt: Date.now() }));
+          }
           else if (name === "done") {
             patchLast((t) => ({
               ...t,
@@ -492,10 +502,12 @@ export default function Ask({
         });
       }
     } catch {
+      ok = false;
       patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
     } finally {
       markBusy(false);
     }
+    return ok;
   }
 
   async function submit(e?: React.FormEvent) {
@@ -518,14 +530,19 @@ export default function Ask({
 
   /**
    * A choice on a clarification card does two things: it marks the card that
-   * asked, and it starts a NEW turn for the answer. Nothing about the card
-   * is overwritten — picking a different candidate later repeats exactly
-   * this, appending yet another turn.
+   * asked, and it starts a NEW turn for the answer. Nothing about the card is
+   * overwritten, but it is answered once: a card that already carries a choice
+   * takes no further one, and the backend refuses a second resume with 409.
+   *
+   * The mark is put on before the answer arrives, so the ochre goes the moment
+   * the reader decides. A turn that fails takes it back off: the server records
+   * the choice only when the answer lands, so a card left locked here would
+   * strand the reader with no way to retry.
    */
   async function chooseCandidate(turnIndex: number, idx: number) {
     if (busy) return;
     const turn = turns[turnIndex];
-    if (!turn.clarification) return;
+    if (!turn.clarification || turn.chosenIdx != null) return;
 
     loadSeq.current++;
     setTurns((prev) => [
@@ -533,7 +550,7 @@ export default function Ask({
       freshTurn(turn.question, turn.audience, turn.language),
     ]);
 
-    await stream("/api/ask", {
+    const ok = await stream("/api/ask", {
       thread_id: threadId.current ?? 0,
       question: turn.question,
       audience: turn.audience,
@@ -541,6 +558,7 @@ export default function Ask({
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
     });
+    if (!ok) setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
   }
 
   /**

@@ -80,6 +80,12 @@ type Clarification struct {
 	// asked for. The column stays.
 	Understanding ask.Understanding `json:"-"`
 	Candidates    []Candidate       `json:"candidates"`
+	// Answered is true once a turn resumed from this card. A card is answered
+	// once: the handler refuses a second resume with it, before the choice
+	// costs a model call. Not sent to the browser — the page derives the same
+	// fact from the answer's from_clarification_id, which it needs anyway to
+	// tell two open cards in one thread apart.
+	Answered bool `json:"-"`
 }
 
 // Candidate is one entry on a clarification card, without its hits.
@@ -427,13 +433,17 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 func (s *Store) Clarification(ctx context.Context, subject string, messageID int64) (*Clarification, error) {
 	var c Clarification
 	var understanding string
+	// Whether the card was answered is asked of the messages, not of a flag on
+	// the card: a clarification is closed by the answer that came out of it,
+	// and that link already exists on the answering turn.
 	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, m.thread_id, c.understanding
+		SELECT c.id, m.thread_id, c.understanding,
+		       EXISTS (SELECT 1 FROM messages a WHERE a.from_clarification_id = c.id)
 		FROM clarifications c
 		JOIN messages m ON m.id = c.message_id
 		JOIN threads t ON t.id = m.thread_id
 		WHERE c.message_id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&c.ID, &c.ThreadID, &understanding)
+		Scan(&c.ID, &c.ThreadID, &understanding, &c.Answered)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -498,8 +508,9 @@ func (s *Store) CandidateHits(ctx context.Context, subject string, clarification
 }
 
 // LinkChoice records which candidate a new turn resumed from. It is stored on
-// the new message, never as a `chosen` flag on the clarification: picking a
-// second candidate later is a second turn, and the first is never overwritten.
+// the new message, never as a `chosen` flag on the clarification: the answer
+// is what closes the card, so a turn that never produced one leaves it open
+// for a retry, and nothing in the record is ever overwritten.
 //
 // The UPDATE only fires when messageID and clarificationID both resolve into
 // the SAME thread owned by subject. A handler is never trusted to have paired

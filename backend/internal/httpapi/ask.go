@@ -116,9 +116,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Resuming a clarification is validated in full BEFORE the thread is
-	// touched: an out-of-range choice or a foreign clarification must come
-	// back as 400/403, decided before the first byte of the SSE stream is
-	// written, because after that the status code is fixed.
+	// touched: an out-of-range choice, a foreign clarification or a card that
+	// was already answered must come back as 400/403/409, decided before the
+	// first byte of the SSE stream is written, because after that the status
+	// code is fixed.
 	var resume *threads.Clarification
 	var resumeHits []retrieve.Hit
 	if req.ClarificationMessageID != 0 {
@@ -138,6 +139,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// Answering from a candidate nobody offered is worse than
 			// refusing: it would look like an answer to the question asked.
 			http.Error(w, "choice out of range", http.StatusBadRequest)
+			return
+		}
+		if c.Answered {
+			// A card is answered once. The answer it produced is in the
+			// thread, and a second one would be a second answer to a question
+			// already decided — refused here, before it costs a model call.
+			http.Error(w, "this clarification was already answered", http.StatusConflict)
 			return
 		}
 		_, hits, err := s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)

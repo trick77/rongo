@@ -326,9 +326,10 @@ func TestClarifyStoresTheCardAndServesItBackWithTheThread(t *testing.T) {
 	}
 }
 
-func TestChoosingASecondCandidateLeavesTheFirstTurnUntouched(t *testing.T) {
-	// The thread is a record. Two choices are two turns, and neither
-	// overwrites the card or the other's answer.
+func TestAClarificationIsAnsweredOnceAndTheCardSaysSo(t *testing.T) {
+	// One card, one answer. The fact lives on the answer's
+	// from_clarification_id, and Clarification reports it so the handler can
+	// refuse a second resume before it costs a model call.
 	s, ctx, threadID, _ := newThreadStore(t)
 	first, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
 	id, err := s.Clarify(ctx, first.ID, twoCandidateClarification())
@@ -336,24 +337,41 @@ func TestChoosingASecondCandidateLeavesTheFirstTurnUntouched(t *testing.T) {
 		t.Fatalf("clarify: %v", err)
 	}
 
-	a, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
-	if err := s.LinkChoice(ctx, testSubject, a.ID, id, 0); err != nil {
-		t.Fatalf("link first choice: %v", err)
+	clar, err := s.Clarification(ctx, testSubject, first.ID)
+	if err != nil || clar == nil {
+		t.Fatalf("clarification: %v", err)
 	}
-	b, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
-	if err := s.LinkChoice(ctx, testSubject, b.ID, id, 1); err != nil {
-		t.Fatalf("link second choice: %v", err)
+	if clar.Answered {
+		t.Error("a card nobody has answered must not read as answered")
 	}
 
+	a, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
+	if err := s.LinkChoice(ctx, testSubject, a.ID, id, 0); err != nil {
+		t.Fatalf("link choice: %v", err)
+	}
+
+	clar, err = s.Clarification(ctx, testSubject, first.ID)
+	if err != nil || clar == nil {
+		t.Fatalf("clarification: %v", err)
+	}
+	if !clar.Answered {
+		t.Error("the answer that came out of the card closes it")
+	}
+
+	// Card and answer both stay in the record, and the choice is still
+	// readable on the turn that resumed.
 	msgs, err := s.Messages(ctx, testSubject, threadID)
 	if err != nil {
 		t.Fatalf("messages: %v", err)
 	}
-	if len(msgs) != 3 {
-		t.Fatalf("got %d messages, want 3 — the card and both answers", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want 2 — the card and its answer", len(msgs))
 	}
-	if msgs[1].FromCandidateIdx != 0 || msgs[2].FromCandidateIdx != 1 {
-		t.Errorf("choices recorded as %d and %d", msgs[1].FromCandidateIdx, msgs[2].FromCandidateIdx)
+	if msgs[0].Clarification == nil {
+		t.Error("the card stays on the turn that asked")
+	}
+	if msgs[1].FromCandidateIdx != 0 || msgs[1].FromClarificationID != id {
+		t.Errorf("choice recorded as %d on clarification %d", msgs[1].FromCandidateIdx, msgs[1].FromClarificationID)
 	}
 }
 
