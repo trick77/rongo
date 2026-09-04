@@ -180,7 +180,7 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
 }
 
 const navItem =
-  "relative flex w-full items-center gap-3 rounded-ui-sm px-3 py-2 text-left text-[15px] hover:bg-active hover:text-ink";
+  "flex w-full items-center gap-3 rounded-ui-sm px-3 py-1.5 text-left text-[15px] hover:bg-active hover:text-ink";
 
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
@@ -243,7 +243,7 @@ export default function App() {
             className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity"
             style={{ backgroundImage: `url(${logo})` }}
           />
-          <h1 className="font-serif text-[21px] font-semibold tracking-tight">rongo</h1>
+          <h1 className="font-serif text-[21px] font-semibold tracking-tight text-accent-strong">rongo</h1>
         </div>
         {/* Baseline, not centre: the usage in small mono sits on the same
             line as the serif title, not floating beside its middle. */}
@@ -252,7 +252,7 @@ export default function App() {
             <>
               <span>Threads</span>
               <span className="text-faint">/</span>
-              <span className="truncate font-serif text-[19px] font-medium text-ink">
+              <span className="truncate font-serif text-[19px] font-medium text-accent-strong">
                 {openTitle ?? "New question"}
               </span>
               {total && (
@@ -273,7 +273,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <span className="font-serif text-[19px] font-medium text-ink">Repos</span>
+              <span className="font-serif text-[19px] font-medium text-accent-strong">Repos</span>
               <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
             </>
           )}
@@ -289,7 +289,7 @@ export default function App() {
       <div className="grid min-h-0 grid-cols-[300px_1fr]">
         <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
           <div className="px-6 pt-4 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">Explore</div>
-          <nav aria-label="Pages" className="grid gap-0.5 px-3 pb-1">
+          <nav aria-label="Pages" className="grid gap-px px-3 pb-1">
             {(
               [
                 ["ask", "Ask", <AskIcon key="a" />],
@@ -303,9 +303,6 @@ export default function App() {
                 onClick={() => setPage(p)}
                 className={navItem + " " + (page === p ? "bg-active text-ink" : "text-muted")}
               >
-                {page === p && (
-                  <span aria-hidden="true" className="absolute top-2 bottom-2 -left-3 w-[3px] rounded-r bg-accent" />
-                )}
                 {icon}
                 {label}
               </button>
