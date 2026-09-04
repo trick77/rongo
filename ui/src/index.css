@@ -29,6 +29,16 @@
   font-style: normal;
   font-display: swap;
 }
+/* The glyph source, same file ../loom ships. font-display: block, not swap:
+   a fallback face has nothing at these codepoints, so swapping would flash
+   tofu where an icon belongs. */
+@font-face {
+  font-family: "Anthropic Icons";
+  src: url("./fonts/Icons-Variable.woff2") format("woff2-variations");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: block;
+}
 
 /* Warm Editorial, dark — the token set ../loom and ../peeq share, so the
    three tools read as one family. These drive the Tailwind v4 theme and
@@ -46,6 +56,9 @@
   --color-border-soft: #2a2a28;
   --color-ink: #faf9f5;
   --color-ink-dim: #e4e1d8;
+  /* Answer prose only. Brighter than ink-dim because the serif at weight 360
+     sets lighter than the sans does — loom's value, for the same reason. */
+  --color-ink-prose: #f3f0e8;
   --color-muted: #9c9a92;
   --color-faint: #6f6d66;
   --color-accent: #c6613f;
@@ -97,6 +110,100 @@ body {
 ::placeholder {
   color: var(--color-faint);
   opacity: 1;
+}
+
+/* ---- answer prose (markdown.tsx, one call site in Ask.tsx) ----
+   The same block ../loom carries as .ui-markdown, so an answer reads the same
+   in both tools: serif at 360, line-height 1.5, a real heading scale.
+
+   It lives in CSS rather than on the emitted nodes for two reasons. The scale
+   stays in one place instead of being spread over the renderer, and it stays
+   quarantined — the class sits on the answer wrapper alone, so the composer,
+   the clarification cards and the source viewer keep the sans chrome.
+
+   Typography is loom's; surfaces are rongo's own tokens. The code block and
+   inline code deliberately keep bg-panel/border-border from the component: the
+   syntax colouring was tuned against them, and the source viewer uses the same
+   pair. Copying loom's raw #111110 here would desync the two and bypass
+   @theme. */
+.ui-markdown {
+  font-family: var(--font-serif);
+  font-weight: 360;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--color-ink-prose);
+}
+
+.ui-markdown :where(p, ul, ol, pre) {
+  margin-block: 0.75rem;
+}
+
+/* The wrapper supplies the space above and below the answer; a first or last
+   block adding its own would double it. */
+.ui-markdown :where(p, ul, ol, pre, h1, h2, h3, h4):first-child {
+  margin-top: 0;
+}
+
+.ui-markdown :where(p, ul, ol, pre, h1, h2, h3, h4):last-child {
+  margin-bottom: 0;
+}
+
+.ui-markdown :where(h1, h2, h3, h4) {
+  margin: 1.1rem 0 0.45rem;
+  color: var(--color-ink);
+  font-weight: 530;
+  line-height: 1.3;
+}
+
+/* The page owns h1, so the renderer starts at h2 — h1 is styled anyway, for
+   the case where that ever changes. */
+.ui-markdown h1 {
+  font-size: 1.65rem;
+}
+
+.ui-markdown h2 {
+  font-size: 1.4rem;
+}
+
+.ui-markdown h3 {
+  font-size: 1.2rem;
+}
+
+.ui-markdown h4 {
+  font-size: 1.15rem;
+}
+
+.ui-markdown :where(ul, ol) {
+  padding-left: 1.35rem;
+}
+
+.ui-markdown ul {
+  list-style: disc;
+}
+
+.ui-markdown ol {
+  list-style: decimal;
+}
+
+.ui-markdown li + li {
+  margin-top: 0.25rem;
+}
+
+.ui-markdown strong {
+  color: var(--color-ink);
+  font-weight: 530;
+}
+
+/* No em rule: the renderer has no emphasis node, so there would be nothing to
+   style. Same for blockquote, hr, table and links — loom carries all of them,
+   rongo emits none of them. */
+
+/* Inline code only. The fenced block sets its own font on the <pre>, and this
+   selector must not shrink the <code> inside it a second time. */
+.ui-markdown :not(pre) > code {
+  padding: 0.1rem 0.28rem;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 
 /* ---- the activity timeline (Trace.tsx) ----

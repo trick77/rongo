@@ -208,7 +208,8 @@ function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
       out.push(
         <code
           key={`${key}-c${n++}`}
-          className="rounded-[5px] border border-border bg-active px-1.5 text-[0.88em]"
+          // Surface only: the mono family and the size come from .ui-markdown.
+          className="rounded-[5px] border border-border bg-active"
         >
           {rest.slice(first + 1, end)}
         </code>,
@@ -221,7 +222,7 @@ function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
         break;
       }
       out.push(
-        <strong key={`${key}-b${n++}`} className="font-semibold text-ink">
+        <strong key={`${key}-b${n++}`}>
           {text(rest.slice(first + 2, end), `${key}-bt${n}`, hooks, false)}
         </strong>,
       );
@@ -291,7 +292,10 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
         }
         if (!closed && hooks.backed === undefined) {
           out.push(
-            <div key={k++} className="mt-3 rounded-ui-sm border border-border bg-panel p-3 text-sm text-muted">
+            <div
+              key={k++}
+              className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted"
+            >
               Drawing the diagram…
             </div>,
           );
@@ -304,7 +308,9 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       out.push(
         <pre
           key={k++}
-          className="mt-3 overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
+          // Surface and layout only. The block keeps its own mono size —
+          // the syntax colouring and the source viewer are tuned to it.
+          className="overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
         >
           <code>{highlightBlock(body.join("\n"), languageOf(tag))}</code>
         </pre>,
@@ -318,7 +324,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       const level = Math.min(h[1].length + 1, 4);
       const Tag = `h${level}` as keyof JSX.IntrinsicElements;
       out.push(
-        <Tag key={k++} className="mt-5 font-serif text-xl font-medium text-ink">
+        <Tag key={k++}>
           {inline(h[2], `h${k}`, hooks)}
         </Tag>,
       );
@@ -337,19 +343,11 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       while (i < lines.length) {
         const m = ordered ? orderedRe.exec(lines[i]) : bulletRe.exec(lines[i]);
         if (!m) break;
-        items.push(
-          <li key={items.length} className="ml-5 list-outside">
-            {inline(m[1], `li${k}-${items.length}`, hooks)}
-          </li>,
-        );
+        items.push(<li key={items.length}>{inline(m[1], `li${k}-${items.length}`, hooks)}</li>);
         i++;
       }
       const List = ordered ? "ol" : "ul";
-      out.push(
-        <List key={k++} className={"mt-3 " + (ordered ? "list-decimal" : "list-disc")}>
-          {items}
-        </List>,
-      );
+      out.push(<List key={k++}>{items}</List>);
       continue;
     }
 
@@ -358,7 +356,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       para.push(lines[i++]);
     }
     out.push(
-      <p key={k++} className="mt-3 whitespace-pre-wrap">
+      <p key={k++} className="whitespace-pre-wrap">
         {inline(para.join("\n"), `p${k}`, hooks)}
       </p>,
     );

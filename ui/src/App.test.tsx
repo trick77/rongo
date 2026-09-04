@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 
@@ -141,13 +141,46 @@ describe("App", () => {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Question"), "A question that has to stay put");
 
-    const pages = within(screen.getByRole("navigation", { name: "Pages" }));
-    await user.click(pages.getByRole("button", { name: "Repos" }));
-    await user.click(pages.getByRole("button", { name: "Ask" }));
+    const repos = screen.getByRole("button", { name: "Repos" });
+    await user.click(repos);
+    expect(repos.getAttribute("aria-current")).toBe("page");
+    // With the page nav gone, the rail is the way back: New question here,
+    // because this draft belongs to no thread yet. With a thread open it is
+    // that thread's row, which stays clickable even mid-stream.
+    await user.click(screen.getByRole("button", { name: "New question" }));
+    expect(repos.getAttribute("aria-current")).toBe(null);
 
     expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe(
       "A question that has to stay put",
     );
+  });
+
+  // The action used to live inside the thread list, and therefore under the
+  // "History" heading, which read as if starting a question were history.
+  it("clears the open thread from the rail's New question", async () => {
+    localStorage.setItem("rongo.thread", "7");
+    apiFetch(oneThread, []);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 });
+    await screen.findByText("How does shipping work?");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "New question" }));
+
+    expect(localStorage.getItem("rongo.thread")).toBe(null);
+    // The header names the open thread; with none open it falls back.
+    expect(screen.getAllByText("New question").length).toBeGreaterThan(1);
+  });
+
+  // "Threads /" pointed at nothing you could click once the nav went.
+  it("heads the answer with the thread title alone", async () => {
+    localStorage.setItem("rongo.thread", "7");
+    apiFetch(oneThread, []);
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 });
+
+    await screen.findAllByText("How does shipping work?");
+    expect(screen.queryByText("Threads")).toBe(null);
   });
 });
 

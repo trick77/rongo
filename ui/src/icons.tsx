@@ -1,6 +1,7 @@
 /**
- * The handful of glyphs the shell needs, as inline SVG. Three icons are not
- * worth a dependency, and inline SVG inherits currentColor for free.
+ * The two glyphs the shell draws itself, as inline SVG. Everything else comes
+ * from the icon font (Icon.tsx); these two stay hand-drawn because the chevron
+ * has to rotate and the plus is the one ../loom also keeps as SVG.
  */
 
 /**
@@ -26,30 +27,17 @@ export function Chevron({ open = false }: { open?: boolean }) {
   );
 }
 
-const glyph = "h-4 w-4 shrink-0";
-
-export function AskIcon() {
-  return (
-    <svg className={glyph} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <path d="M2 3h12v8H6l-3 3v-3H2z" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-export function ReposIcon() {
-  return (
-    <svg className={glyph} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-      <circle cx="5" cy="4" r="1.5" />
-      <circle cx="5" cy="12" r="1.5" />
-      <circle cx="11" cy="6" r="1.5" />
-      <path d="M5 5.5v5M11 7.5c0 2-6 1-6 3" />
-    </svg>
-  );
-}
-
+/** The plus inside the new-question button's disc. 13px, as ../loom draws it. */
 export function PlusIcon() {
   return (
-    <svg className={glyph} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <svg
+      className="h-[13px] w-[13px] shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      aria-hidden="true"
+    >
       <path d="M8 3v10M3 8h10" strokeLinecap="round" />
     </svg>
   );

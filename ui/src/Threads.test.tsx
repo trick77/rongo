@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Threads from "./Threads";
 
@@ -55,15 +55,6 @@ describe("Threads", () => {
     expect(onSelect).toHaveBeenCalledWith(3);
   });
 
-  it("starts an empty thread from 'New question'", async () => {
-    threadList(two);
-    const onSelect = vi.fn();
-    render(<Threads activeId={7} onSelect={onSelect} version={0} />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "New question" }));
-    expect(onSelect).toHaveBeenCalledWith(null);
-  });
-
   // The model-written title replaces the placeholder in a background goroutine
   // with no way to push it. Without a reload the sidebar shows the truncated
   // question until someone reloads the page.
@@ -75,10 +66,14 @@ describe("Threads", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
-  it("stays usable when the server refuses the list", async () => {
+  // A list that cannot be loaded is not an error banner: the rail keeps its
+  // shape and asking a new question, which lives above this component, still
+  // works.
+  it("stays quiet when the server refuses the list", async () => {
     threadList(null, false);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-    expect(await screen.findByRole("button", { name: "New question" })).toBeTruthy();
+    const list = await screen.findByRole("navigation", { name: "Threads" });
+    expect(within(list).queryAllByRole("button")).toHaveLength(0);
   });
 
   it("locks switching while an answer is streaming", async () => {
@@ -90,5 +85,19 @@ describe("Threads", () => {
     const user = userEvent.setup();
     await user.click(other);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  // With the page nav gone, this row is the only way back to a streaming
+  // answer from the Repos page. Locking it would strand the reader there
+  // until the turn finished.
+  it("keeps the running thread's own row clickable while it streams", async () => {
+    threadList(two);
+    const onSelect = vi.fn();
+    render(<Threads activeId={7} onSelect={onSelect} version={0} busy />);
+    const own = await screen.findByRole("button", { name: "How does shipping work?" });
+    expect((own as HTMLButtonElement).disabled).toBe(false);
+    const user = userEvent.setup();
+    await user.click(own);
+    expect(onSelect).toHaveBeenCalledWith(7);
   });
 });
