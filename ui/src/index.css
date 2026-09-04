@@ -71,6 +71,14 @@
   --color-ochre-wash: rgba(214, 161, 90, 0.14);
   --color-elevated: #363632;
   --color-elevated-border: #454540;
+  /* The rail's own four, ../loom's sidebar values. They are separate tokens
+     rather than the shared muted/active/ink because the sidebar is the one
+     surface where loom inverts the selection: the chosen row is darker than
+     the panel, not lighter, and its idle text sits brighter than muted. */
+  --color-rail: #c7c5bd;
+  --color-rail-label: #97958c;
+  --color-rail-hover: #2a2a28;
+  --color-rail-sel: #10100f;
   --font-sans: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-serif: "Anthropic Serif", Georgia, "Times New Roman", Times, serif;
   --font-mono: "Anthropic Mono", ui-monospace, "SF Mono", Menlo, monospace;

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
  * tracked eyebrow. Exported because the "History" umbrella in App is the same
  * label as the day groups below it and must not drift from them.
  */
-export const railLabel = "pl-1.5 text-xs/4 text-muted";
+export const railLabel = "pl-1.5 text-xs/4 text-rail-label";
 
 export type Thread = {
   id: number;
@@ -25,14 +25,16 @@ function group(iso: string, now = new Date()): string {
   return d.toLocaleString("en-GB", { month: "long", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
 
-/** The short time shown next to a title: the clock today, the date otherwise. */
+/**
+ * The short date shown next to a title, for older threads only. Today's rows
+ * carry nothing: they sit at the top of the list under "History", and a clock
+ * on every one of them is noise rather than an answer to "which thread".
+ */
 function when(iso: string, now = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const sameDay = d.toDateString() === now.toDateString();
-  return sameDay
-    ? d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  if (d.toDateString() === now.toDateString()) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 /**
@@ -92,15 +94,20 @@ export default function Threads({
   }
 
   const item =
-    "flex h-7 w-full items-center gap-2 rounded-ui-sm pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50 " +
-    "hover:bg-active hover:text-ink";
+    // ../loom's row: hover only moves the ground, never the text — the title
+    // is already at its reading brightness. The hover ground itself lives on
+    // the idle branch below, so it cannot lift the selected row's darker one.
+    "flex h-7 w-full items-center gap-2 rounded-ui-sm pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         {groups.map((g) => (
-          <div key={g.label}>
-            <h3 className={"mt-3 mb-1 " + railLabel}>{g.label}</h3>
+          // "Today" is not painted: it always heads the list, directly under
+          // the "History" label, and would only name the same thing twice.
+          // The group still exists, so tomorrow's threads split off it.
+          <div key={g.label} className={g.label === "Today" ? "mt-1" : ""}>
+            {g.label !== "Today" && <h3 className={"mt-3 mb-1 " + railLabel}>{g.label}</h3>}
             {/* No gap: the 28px row pitch is the rhythm, as ../loom has it. */}
             <ul className="flex flex-col">
               {g.items.map((t) => {
@@ -117,7 +124,7 @@ export default function Threads({
                       // is still being written, and with the page nav gone it
                       // is the only one.
                       disabled={busy && !active}
-                      className={item + " group " + (active ? "bg-active text-ink" : "text-muted")}
+                      className={item + " group " + (active ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
                     >
                       {/* The title runs out under a gradient to the row's own
                           background rather than ending in an ellipsis, as
@@ -127,17 +134,23 @@ export default function Threads({
                         <span
                           aria-hidden="true"
                           className={
-                            "pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent group-hover:to-active " +
-                            (active ? "to-active" : "to-panel")
+                            "pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent " +
+                            (active ? "to-rail-sel" : "to-panel group-hover:to-rail-hover")
                           }
                         />
                       </span>
                       {active && busy && (
                         <span aria-hidden="true" className="pulse h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-strong" />
                       )}
-                      <time aria-hidden="true" className="shrink-0 font-mono text-[11px] text-faint">
-                        {when(t.created_at)}
-                      </time>
+                      {/* Dropped entirely on today's rows rather than left
+                          empty: an empty element still spends the row's gap,
+                          and the title's fade would stop short of the edge on
+                          exactly the rows that have the most to say. */}
+                      {when(t.created_at) && (
+                        <time aria-hidden="true" className="shrink-0 font-mono text-[11px] text-faint">
+                          {when(t.created_at)}
+                        </time>
+                      )}
                     </button>
                   </li>
                 );
