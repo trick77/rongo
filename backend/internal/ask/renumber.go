@@ -180,9 +180,24 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 // never on the bracket: a node label may be `parts[2]`, and renumbering that
 // would mint a citation out of an index expression - the fabrication the
 // whole citation path exists to prevent.
+//
+// The value is read as a CHAIN of bracket groups, because answerCommon tells
+// the model that two sources read [6][25], and it applies that inside the
+// fence often enough. Written into JSON the chain is not parseable, so the
+// browser shows the diagram as the code block it now is; worse, renumbering
+// only the first group leaves the second at prompt numbering, which puts a
+// wrong source under a chip. Both groups are read and the value is emitted
+// as the one array it was meant to be.
 var (
-	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
+	srcGroup    = `\[(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\]`
+	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*(` + srcGroup + `(?:\s*` + srcGroup + `)*)`)
 	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
+	// What may still grow into another group of the chain: nothing yet, or a
+	// bracket that has not closed. Held back until it is decided.
+	srcMoreRe = regexp.MustCompile(`^\s*(\[[\d\s,]*)?$`)
+	// The seam between two groups of a chain, which becomes the comma the
+	// array should have carried.
+	srcJoinRe = regexp.MustCompile(`\]\s*\[`)
 )
 
 // infoTag reads the language of a fence header the way the browser does
@@ -229,7 +244,12 @@ func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) 
 		b.WriteString(s[i : i+j])
 		i += j
 		if m := srcAtStart.FindStringSubmatch(s[i:]); m != nil {
-			b.WriteString(`"src":` + r.rewrite(m[1]))
+			// A group that ends where the text does may be the first of a
+			// chain: decided only once what follows it has arrived.
+			if !atEnd && srcMoreRe.MatchString(s[i+len(m[0]):]) {
+				return b.String(), s[i:]
+			}
+			b.WriteString(`"src":` + r.rewrite(srcGroups(m[1])))
 			i += len(m[0])
 			continue
 		}
@@ -240,6 +260,13 @@ func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) 
 		i += len(`"src"`)
 	}
 	return b.String(), ""
+}
+
+// srcGroups flattens a chain of bracket groups into the one group they meant,
+// so [6][25] renumbers and is written back as the array [6,25]. A single
+// group passes through with its own separators intact.
+func srcGroups(chain string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(srcJoinRe.ReplaceAllString(chain, ","), "["), "]")
 }
 
 // rewrite renumbers the numbers of one marker group, keeping its separators.

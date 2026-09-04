@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -155,6 +156,58 @@ func TestRenumber_theInfoStringIsReadAsTheBrowserReadsIt(t *testing.T) {
 	}
 	if len(rn.order) != 1 {
 		t.Errorf("order = %v, want the node's source cited", rn.order)
+	}
+}
+
+func TestRenumber_aChainedSrcBecomesTheArrayItMeant(t *testing.T) {
+	// answerCommon tells the model that two sources read [6][25], and it
+	// applies that inside the fence. Written into JSON the chain does not
+	// parse, so the browser shows the diagram as the code block it now is -
+	// and renumbering only the first group would leave the second at prompt
+	// numbering, putting a wrong source under a chip.
+	text := "```diagram\n" +
+		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2][1]}],"edges":[]}` +
+		"\n```"
+
+	out, rn := renumbered(t, 2, text)
+
+	if !strings.Contains(out, `"src":[1,2]`) {
+		t.Errorf("out = %q, want one array holding both, each renumbered", out)
+	}
+	if len(rn.order) != 2 {
+		t.Errorf("order = %v, want both sources cited, not one of them twice", rn.order)
+	}
+}
+
+func TestRenumber_aChainedSrcSplitAcrossTokensIsStillOneArray(t *testing.T) {
+	// The group is complete where the token ends, so it may not be emitted
+	// yet: the bracket that follows turns it into a chain.
+	rn := newRenumberer(2)
+	var got strings.Builder
+	for _, tok := range []string{"```diagram\n{\"nodes\":[{\"src\":[2]", "[1]}]}\n```"} {
+		got.WriteString(rn.feed(tok))
+	}
+	got.WriteString(rn.flush())
+
+	if out := got.String(); !strings.Contains(out, `"src":[1,2]`) {
+		t.Errorf("out = %q, want the chain joined across the token boundary", out)
+	}
+}
+
+func TestRenumber_aChainedSrcLeavesTheDiagramParseable(t *testing.T) {
+	// The whole answer as one payload: what the reader must get back is a
+	// spec the browser's parseDiagram accepts, not a code block.
+	text := "```diagram\n" +
+		`{"type":"sequence","actors":[{"id":"ui","label":"UI"},{"id":"be","label":"Backend"}],` +
+		`"steps":[{"from":"ui","to":"be","label":"Get current rates","kind":"call","src":[2][1]}]}` +
+		"\n```"
+
+	out, _ := renumbered(t, 2, text)
+
+	body, _, _ := strings.Cut(strings.TrimPrefix(out, "```diagram\n"), "\n```")
+	var spec any
+	if err := json.Unmarshal([]byte(body), &spec); err != nil {
+		t.Errorf("the fence body does not parse: %v\nbody = %s", err, body)
 	}
 }
 
