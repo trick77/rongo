@@ -378,6 +378,11 @@ export default function Ask({
   // follows again once they return to the bottom.
   const view = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  // Set when the turns on screen come from opening a thread rather than from
+  // asking. A record is read from its beginning: the question and the answer
+  // it was opened for are at the top, so the view lands there and stays until
+  // the reader moves it.
+  const opened = useRef(false);
 
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
@@ -432,6 +437,7 @@ export default function Ask({
           onThread(null);
           return;
         }
+        opened.current = true;
         setTurns(linkChosenCandidates(list, list.map(storedTurn)));
       } catch {
         // The turns are cleared rather than left standing: the ids have already
@@ -444,21 +450,31 @@ export default function Ask({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openThread]);
 
-  // A new turn, or another thread, puts the reader back at the foot of the
-  // thread — that is where the answer will appear.
+  // A new turn puts the reader at the foot of the thread — that is where the
+  // answer will appear. A thread that was just OPENED is exempt: its turns
+  // arrive in one go and belong to the top of the view, not the bottom.
   useEffect(() => {
+    if (opened.current) return;
     following.current = true;
     bottom.current?.scrollIntoView?.({ block: "end" });
-  }, [turns.length, openThread]);
+  }, [turns.length]);
 
   // The answer grows downwards while it streams, so the view follows it —
   // otherwise the reader watches an answer write itself off the bottom edge
   // and has to chase it. Every token patches the turn, so this runs on each
   // one; it does nothing while the reader is reading further up. A thread
-  // that has just loaded lands here too, at its last turn.
+  // that has just loaded lands here too, and goes to its first line instead:
+  // it is a record being read, not an answer being written.
   useEffect(() => {
     const el = view.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (opened.current) {
+      opened.current = false;
+      following.current = false;
+      el.scrollTop = 0;
+      return;
+    }
+    if (following.current) el.scrollTop = el.scrollHeight;
   }, [turns]);
 
   // The running total follows the turns: it grows when a usage event lands
@@ -664,7 +680,9 @@ export default function Ask({
           ref={view}
           // Wheel, trackpad, touch and the keyboard all arrive here, so one
           // handler covers every way of leaving the bottom. The scrolls this
-          // view makes itself land at the bottom and keep it following.
+          // view makes itself land at the bottom and keep it following — bar
+          // the jump to the top when a thread is opened, which is a reader
+          // sitting at the head of a record, not following anything.
           onScroll={() => {
             const el = view.current;
             if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;

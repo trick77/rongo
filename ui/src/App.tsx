@@ -398,7 +398,13 @@ export default function App() {
               }}
               className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
             >
-              <Icon name="code" size="21px" className="text-ink-dim" />
+              {/* The same 20px slot as the plus disc above. The Icon glyph is
+                  text, so its box is whatever advance width the font gives it
+                  — 21px here — and without the slot the two labels start a
+                  pixel apart. */}
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="code" size="21px" className="text-ink-dim" />
+              </span>
               Repos
             </button>
           </div>
