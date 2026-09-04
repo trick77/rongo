@@ -117,7 +117,9 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-6 md:p-10"
-      onMouseDown={(e) => {
+      // The pointer, not the mouse: iOS Safari does not deliver mouse events
+      // to a plain div, and an iPad has no Escape key to fall back on.
+      onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >

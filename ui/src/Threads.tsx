@@ -117,9 +117,21 @@ export default function Threads({
                       aria-current={active ? "true" : undefined}
                       onClick={() => onSelect(t.id)}
                       disabled={busy}
-                      className={item + " " + (active ? "bg-active text-ink" : "text-muted")}
+                      className={item + " group " + (active ? "bg-active text-ink" : "text-muted")}
                     >
-                      <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                      {/* The title runs out under a gradient to the row's own
+                          background rather than ending in an ellipsis, as
+                          ../loom's sidebar does. The text stays whole. */}
+                      <span className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+                        {t.title}
+                        <span
+                          aria-hidden="true"
+                          className={
+                            "pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent group-hover:to-active " +
+                            (active ? "to-active" : "to-panel")
+                          }
+                        />
+                      </span>
                       {active && busy && (
                         <span aria-hidden="true" className="pulse h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-strong" />
                       )}

@@ -28,8 +28,9 @@ import { highlightBlock, languageOf } from "./highlight";
  * still streams and the list has not arrived, every marker already wears the
  * citation look: the list arrives last, and markers that change colour all at
  * once when the answer finishes read as a glitch, not as a verdict. Only the
- * hover hand-off to the Sources pane waits for the list, because until then
- * there is no row to point at.
+ * hover hand-off to the Sources pane and the tap that opens the source wait
+ * for the list, because until then there is no row to point at and no file
+ * to open.
  *
  * Unterminated markup renders as text rather than swallowing the rest. The
  * answer is re-rendered on every streamed token, so half-written markup is the
@@ -78,6 +79,11 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
         out.push(`[${part}]`);
         return;
       }
+      // Once its source is known the chip is a button that opens it: on a
+      // tablet there is no hover and no pane, and a chip that cannot be
+      // tapped leaves the reader no way to a source but a collapsed list
+      // under the answer. The brackets stay in the text either way.
+      const open = known && hooks.onOpen;
       out.push(
         <sup
           key={`${key}-m${n++}`}
@@ -86,7 +92,20 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
           onMouseLeave={() => known && hooks.onHover?.(null)}
         >
           <span className="sr-only">[</span>
-          {part}
+          {open ? (
+            <button
+              type="button"
+              onClick={() => hooks.onOpen?.(marker)}
+              // sup resets line-height to 0, which would give the button no
+              // height at all; the padding widens the hit area for a finger
+              // without moving the text around it.
+              className="-mx-1 -my-2 cursor-pointer px-1 py-2 leading-none text-inherit hover:underline"
+            >
+              {part}
+            </button>
+          ) : (
+            part
+          )}
           <span className="sr-only">]</span>
         </sup>,
       );
@@ -161,6 +180,9 @@ function startsBlock(line: string): boolean {
 
 type MarkerHooks = {
   onHover?: (marker: number | null) => void;
+  /** Opens the source behind a marker; the chip is a button only once
+   * `backed` says there is one. */
+  onOpen?: (marker: number) => void;
   /** The markers a source backs, once the citations have arrived; undefined
    * while they are still unknown. */
   backed?: Set<number>;
@@ -256,12 +278,15 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
 export default function Markdown({
   text: src,
   onMarkerHover,
+  onMarkerOpen,
   backed,
 }: {
   text: string;
   onMarkerHover?: (marker: number | null) => void;
+  /** Called with the marker when a backed chip is clicked or tapped. */
+  onMarkerOpen?: (marker: number) => void;
   /** Markers with a source behind them; leave undefined while unknown. */
   backed?: Set<number>;
 }) {
-  return <>{renderMarkdown(src, { onHover: onMarkerHover, backed })}</>;
+  return <>{renderMarkdown(src, { onHover: onMarkerHover, onOpen: onMarkerOpen, backed })}</>;
 }

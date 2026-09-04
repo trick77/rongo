@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import Markdown from "./markdown";
 
 describe("Markdown", () => {
@@ -67,6 +68,28 @@ describe("Markdown", () => {
       const { container } = render(<Markdown text={"A job [1] runs."} />);
       expect(container.querySelector("sup")?.textContent).toBe("[1]");
       expect(container.textContent).toBe("A job [1] runs.");
+    });
+
+    it("open their source on click, once a source is known to back them", async () => {
+      // Hover only points at the pane, and a tablet has no hover and no
+      // pane; a chip that cannot be tapped leaves the reader no way to a
+      // source but a collapsed list under the answer.
+      const onOpen = vi.fn();
+      const { container } = render(
+        <Markdown text={"Real [12], invented [7]."} backed={new Set([12])} onMarkerOpen={onOpen} />,
+      );
+      const buttons = container.querySelectorAll("sup button");
+      expect(buttons.length).toBe(1);
+      await userEvent.click(buttons[0]);
+      expect(onOpen).toHaveBeenCalledWith(12);
+      expect(container.textContent).toBe("Real [12], invented [7].");
+    });
+
+    it("are not buttons while the citations are still unknown", () => {
+      // Nothing to open yet: the list arrives last.
+      const { container } = render(<Markdown text={"A job [1] runs."} onMarkerOpen={() => {}} />);
+      expect(container.querySelector("sup")).toBeTruthy();
+      expect(container.querySelector("sup button")).toBeNull();
     });
 
     it("are only drawn as citations once a source is known to back them", () => {

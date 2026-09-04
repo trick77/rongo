@@ -17,6 +17,41 @@ export const languages: { code: string; name: string }[] = [
   { code: "it", name: "Italiano" },
 ];
 
+/** What the empty page says, in the language the select is set to: the one
+ * piece of chrome a reader meets before any answer, so it follows the answer
+ * language too. The rest of the chrome stays English. */
+const welcome: Record<string, { title: string; body: string }> = {
+  en: {
+    title: "Ask about the code.",
+    body:
+      "rongo searches the indexed repositories, asks back when a question fits more than one " +
+      "mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the " +
+      "mechanism in domain terms, a Developer gets types, functions and files.",
+  },
+  de: {
+    title: "Frag den Code.",
+    body:
+      "rongo durchsucht die indexierten Repositories, fragt nach, wenn eine Frage auf mehr als einen " +
+      "Mechanismus passt, und antwortet mit Quellen für jede Aussage. Wähl eine Rolle: Ein Analyst " +
+      "bekommt den Mechanismus in Fachbegriffen, ein Developer Typen, Funktionen und Dateien.",
+  },
+  fr: {
+    title: "Interrogez le code.",
+    body:
+      "rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
+      "plus d'un mécanisme, et répond avec des sources pour chaque affirmation. Choisissez un rôle : " +
+      "un Analyste reçoit le mécanisme dans les termes du métier, un Développeur les types, les " +
+      "fonctions et les fichiers.",
+  },
+  it: {
+    title: "Chiedi al codice.",
+    body:
+      "rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
+      "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analista " +
+      "riceve il meccanismo nei termini del dominio, un Developer tipi, funzioni e file.",
+  },
+};
+
 /** The clarification a turn ended with, as this view needs it: the id of the
  * message that carries the card (used to resume it) and its candidates. */
 type TurnClarification = {
@@ -550,8 +585,9 @@ export default function Ask({
 
   return (
     // The Sources pane takes a fixed column only when there is room for it;
-    // below that the thread has the width and the per-answer details block
-    // still lists the sources.
+    // below that (every iPad in portrait, the 11" in landscape) the thread
+    // has the width, the chips in the text open the sources, and the
+    // per-answer details block still lists them.
     <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
@@ -560,13 +596,9 @@ export default function Ask({
             {turns.length === 0 && (
               <div className="mt-16 max-w-[52ch]">
                 <h2 className="font-serif text-[28px] font-medium leading-tight tracking-tight text-ink">
-                  Ask about the code.
+                  {(welcome[language] ?? welcome.en).title}
                 </h2>
-                <p className="mt-3 text-muted">
-                  rongo searches the indexed repositories, asks back when a question fits more than one
-                  mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the
-                  mechanism in domain terms, a Developer gets types, functions and files.
-                </p>
+                <p className="mt-3 text-muted">{(welcome[language] ?? welcome.en).body}</p>
               </div>
             )}
 
@@ -611,6 +643,12 @@ export default function Ask({
                     <Markdown
                       text={turn.text}
                       onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
+                      // Every turn, from its own list: the pane shows only
+                      // the newest, and a tablet has no pane at all.
+                      onMarkerOpen={(marker) => {
+                        const c = turn.citations.find((x) => x.marker === marker);
+                        if (c) setViewing(c);
+                      }}
                       // Known once the turn is done: the citations event is
                       // the last thing before done, so a finished turn with
                       // none has none.

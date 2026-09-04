@@ -236,7 +236,7 @@ export default function App() {
 
   return (
     <div className="grid h-screen grid-rows-[56px_1fr]">
-      <header className="grid grid-cols-[248px_1fr_auto] items-center border-b border-border bg-panel">
+      <header className="grid grid-cols-[300px_1fr_auto] items-center border-b border-border bg-panel">
         <div className="flex h-full items-center gap-2.5 px-5">
           <span
             aria-hidden="true"
@@ -245,7 +245,9 @@ export default function App() {
           />
           <h1 className="font-serif text-[21px] font-semibold tracking-tight">rongo</h1>
         </div>
-        <div className="flex min-w-0 items-center gap-2.5 px-6 text-muted">
+        {/* Baseline, not centre: the usage in small mono sits on the same
+            line as the serif title, not floating beside its middle. */}
+        <div className="flex min-w-0 items-baseline gap-2.5 px-6 text-muted">
           {page === "ask" ? (
             <>
               <span>Threads</span>
@@ -284,7 +286,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[248px_1fr]">
+      <div className="grid min-h-0 grid-cols-[300px_1fr]">
         <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
           <div className="px-6 pt-4 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">Explore</div>
           <nav aria-label="Pages" className="grid gap-0.5 px-3 pb-1">
