@@ -85,7 +85,7 @@ export default function Threads({
   }
 
   const item =
-    "flex w-full items-baseline gap-2 rounded-ui-sm px-3 py-1.5 text-left text-sm disabled:opacity-50 " +
+    "flex w-full items-baseline gap-2 rounded-ui-sm px-3 py-1 text-left text-sm disabled:opacity-50 " +
     "hover:bg-active hover:text-ink";
 
   return (
@@ -107,7 +107,7 @@ export default function Threads({
             <h3 className="mt-3 mb-1 px-3 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
               {g.label}
             </h3>
-            <ul className="flex flex-col gap-px">
+            <ul className="flex flex-col">
               {g.items.map((t) => {
                 const active = t.id === activeId;
                 return (
