@@ -141,7 +141,7 @@ func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansion
 	if !ok {
 		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
 	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], K: routeSearchK})
+	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], Question: q.Text, K: routeSearchK})
 	if err != nil {
 		t.Fatalf("search %q: %v", q.Text, err)
 	}

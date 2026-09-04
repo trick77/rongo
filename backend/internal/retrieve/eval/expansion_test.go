@@ -369,11 +369,11 @@ func TestEvalMeasureExpansion(t *testing.T) {
 		if !ok {
 			t.Fatalf("no expansion recorded for %q", q.Text)
 		}
-		raw, err := r.Search(ctx, retrieve.Query{Text: q.Text, K: 20})
+		raw, err := r.Search(ctx, retrieve.Query{Text: q.Text, Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("raw search: %v", err)
 		}
-		exp, err := r.Search(ctx, retrieve.Query{Texts: texts, K: 20})
+		exp, err := r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("expanded search: %v", err)
 		}

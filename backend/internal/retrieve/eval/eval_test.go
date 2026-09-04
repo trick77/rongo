@@ -307,7 +307,7 @@ func TestEvalMeasure(t *testing.T) {
 	questions := loadQuestions(t)
 	results := make([]result, 0, len(questions))
 	for _, q := range questions {
-		hits, err := r.Search(ctx, retrieve.Query{Text: q.Text, K: 20})
+		hits, err := r.Search(ctx, retrieve.Query{Text: q.Text, Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("search %q: %v", q.Text, err)
 		}

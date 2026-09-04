@@ -69,6 +69,69 @@ func dominates(cs []Candidate, margin float64) bool {
 	return (cs[0].Score-cs[1].Score)/cs[0].Score > margin
 }
 
+// candidateFloor is how far behind the leader a candidate may fall and still
+// be worth putting to the reader, as a share of the leader's score.
+//
+// Grouping had no absolute floor: the top five modules of the fused twenty
+// became the card, whatever they were, and the judge is only ever asked "ask
+// or compose" — "these are noise" is not an answer it may give, and its
+// instruction is to ask when in doubt. So a straggler that shared nothing with
+// the question but a language reached the card at full standing. The floor is
+// relative for the same reason the margin is: fused scores have no fixed
+// range, and a constant would mean something different for every question.
+const candidateFloor = 0.4
+
+// worthOffering drops what the reader should never be asked to choose between:
+// a candidate far behind the leader, and a module that is nothing but test
+// code. The leader itself is always kept — everything scoring badly is not the
+// same as nothing being the best, and a floor that can empty the list would
+// turn a weak answer into no answer at all.
+//
+// This decides what may be OFFERED, never what may be read: Gather still
+// starts from every hit (see Pipeline.Run), so a test that is genuinely the
+// answer is still quoted and cited.
+func worthOffering(cs []Candidate) []Candidate {
+	if len(cs) == 0 {
+		return cs
+	}
+	lead := cs[0].Score
+	var kept, keptWithTests []Candidate
+	for _, c := range cs {
+		if lead > 0 && c.Score < lead*candidateFloor {
+			continue
+		}
+		keptWithTests = append(keptWithTests, c)
+		if !onlyTests(c.Hits) {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		// Everything that cleared the floor was test material. That is still
+		// the best the corpus has, and someone who asked how a thing is TESTED
+		// is entitled to it — including the card, when two repositories test
+		// the same thing in two places. Returning the leader alone here would
+		// silently answer from one of them: dominates() cannot ask about a
+		// list of one.
+		return keptWithTests
+	}
+	return kept
+}
+
+// onlyTests reports whether every hit that put a candidate on the list is test
+// material. A module that mixes the two stays: dropping it would lose the
+// mechanism in order to keep out its harness.
+func onlyTests(hits []retrieve.Hit) bool {
+	if len(hits) == 0 {
+		return false
+	}
+	for _, h := range hits {
+		if !retrieve.IsTestPath(h.Path) {
+			return false
+		}
+	}
+	return true
+}
+
 // lastSlash finds the final path separator, so a directory can be taken as a
 // module key without pulling in path/filepath's OS-specific behaviour.
 func lastSlash(p string) int {
@@ -185,8 +248,11 @@ func (r *Router) WithJudgeDeployment(opt llm.Option) *Router {
 // question and reuse it at every margin: the grouping does not depend on
 // margin, only whether the ladder goes on past it does.
 type Ranked struct {
-	// All is every candidate, uncapped — what Dominates tests against, same as
-	// Route.
+	// All is every candidate worth offering, uncapped — what Dominates tests
+	// against, same as Route. Uncapped is not unfiltered: worthOffering has
+	// already dropped the stragglers and the test-only modules, and the
+	// harness must test the margin against exactly that list, because Route
+	// does.
 	All []Candidate
 	// Capped is All cut to maxCandidates: what the manifest check and the
 	// judge see, exactly as Route uses it.
@@ -202,7 +268,7 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 	if err != nil {
 		return Ranked{}, err
 	}
-	all := candidates(hits, moduleOf)
+	all := worthOffering(candidates(hits, moduleOf))
 	capped := all
 	if len(capped) > maxCandidates {
 		capped = capped[:maxCandidates]

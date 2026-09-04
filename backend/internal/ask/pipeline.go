@@ -89,7 +89,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
-	hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: u.Repos, K: searchK})
+	hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: u.Repos, Question: question, K: searchK})
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}

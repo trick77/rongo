@@ -185,7 +185,7 @@ func TestEvalMeasureModules(t *testing.T) {
 	for _, q := range questions {
 		// One search per question, reused by every arm: the arms must differ in
 		// how they rank, not in what they were given.
-		hits, err := r.Search(ctx, retrieve.Query{Text: q.Text, K: moduleCandidates})
+		hits, err := r.Search(ctx, retrieve.Query{Text: q.Text, Question: q.Text, K: moduleCandidates})
 		if err != nil {
 			t.Fatalf("search %q: %v", q.Text, err)
 		}
