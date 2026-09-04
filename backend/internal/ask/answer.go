@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -179,12 +176,6 @@ func NothingFound(lang Language, terms []string) string {
 	return nothingFound[l] + " " + searchedFor[l] + ": " + strings.Join(terms, " · ") + "."
 }
 
-// markerRe matches one marker or a grouped one. The prompt asks for [1][2],
-// but a claim resting on several sources still comes out as [1, 2] often
-// enough: read as a single marker that matched nothing, and both sources
-// vanished from the panel while the text kept showing the brackets.
-var markerRe = regexp.MustCompile(`\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
-
 // Answer writes the answer for one turn, streaming it token by token.
 //
 // With nothing gathered it returns the "nothing found" answer WITHOUT calling
@@ -210,16 +201,25 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// two thousand tokens of English tends to answer in it.
 	system += fmt.Sprintf(answerLanguage, name)
 
+	// Every token passes the renumberer before it reaches the reader or the
+	// record, so the two are the same text; what it holds back is flushed
+	// once the stream ends, cut short or not.
 	var text strings.Builder
+	rn := newRenumberer(len(sources))
+	emit := func(s string) {
+		if s == "" {
+			return
+		}
+		text.WriteString(s)
+		if onToken != nil {
+			onToken(s)
+		}
+	}
 	usage, err := a.llm.Stream(ctx, []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: renderSources(question, sources)},
-	}, func(tok string) {
-		text.WriteString(tok)
-		if onToken != nil {
-			onToken(tok)
-		}
-	}, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
+	}, func(tok string) { emit(rn.feed(tok)) }, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
+	emit(rn.flush())
 	var cut *llm.FinishError
 	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
 		// The upstream cut the answer short, but what arrived is what the
@@ -242,14 +242,15 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}
 	return Answer{
 		Text:      text.String(),
-		Citations: citationsFor(text.String(), sources),
+		Citations: rn.citations(sources),
 		Usage:     usage,
 		Sources:   sources,
 	}, nil
 }
 
 // renderSources numbers the gathered material. The number IS the citation
-// marker, so the model never has to invent an identifier for a file.
+// marker the model writes, so it never has to invent an identifier for a
+// file; the renumberer turns it into the reader's number on the way out.
 func renderSources(question string, sources []Source) string {
 	var b strings.Builder
 	b.WriteString("Question: ")
@@ -269,63 +270,3 @@ func renderSources(question string, sources []Source) string {
 	}
 	return b.String()
 }
-
-// citationsFor resolves the markers the answer actually used.
-//
-// A marker with no source behind it is DROPPED. A model that cites [7] with
-// three sources in front of it made the number up, and turning that into an
-// entry in the evidence panel would put a fabricated reference under an answer
-// — worse than no marker at all, because it looks checkable.
-func citationsFor(text string, sources []Source) []Citation {
-	used := map[int]bool{}
-	// Code blocks are excluded first. The DEV prompt asks for short snippets,
-	// and `args[1]` or `parts[2]` inside one is an index expression, not a
-	// citation — minting an entry for it would put a reference under the answer
-	// that the model never made, which is the same fabrication this function
-	// exists to prevent.
-	for _, m := range markerRe.FindAllStringSubmatch(withoutCode(text), -1) {
-		for _, num := range strings.Split(m[1], ",") {
-			n, err := strconv.Atoi(strings.TrimSpace(num))
-			if err != nil || n < 1 || n > len(sources) {
-				continue // an invented number drops alone, not the whole group
-			}
-			used[n] = true
-		}
-	}
-	out := make([]Citation, 0, len(used))
-	for n := range used {
-		s := sources[n-1]
-		out = append(out, Citation{
-			Marker: n, Repo: s.Repo, Branch: s.Branch, Path: s.Path,
-			StartLine: s.StartLine, EndLine: s.EndLine, SHA: s.SHA,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Marker < out[j].Marker })
-	return out
-}
-
-// withoutCode blanks fenced blocks and inline spans so a marker-shaped
-// expression inside code cannot be read as a citation. Blanked rather than
-// removed, because nothing else here depends on offsets and a blank keeps the
-// surrounding prose intact.
-func withoutCode(s string) string {
-	var b strings.Builder
-	rest := s
-	for {
-		open := strings.Index(rest, "```")
-		if open < 0 {
-			break
-		}
-		b.WriteString(rest[:open])
-		rest = rest[open+3:]
-		if end := strings.Index(rest, "```"); end >= 0 {
-			rest = rest[end+3:]
-		} else {
-			rest = "" // an unclosed fence swallows the remainder, as it should
-		}
-	}
-	b.WriteString(rest)
-	return inlineCodeRe.ReplaceAllString(b.String(), " ")
-}
-
-var inlineCodeRe = regexp.MustCompile("`[^`\n]*`")

@@ -157,8 +157,109 @@ func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 		t.Fatalf("Answer: %v", err)
 	}
 
-	if len(got.Citations) != 1 || got.Citations[0].Marker != 2 {
+	if !strings.Contains(got.Text, "store.go [1]:") || !strings.Contains(got.Text, "args[1]") {
+		t.Errorf("text = %q, want the prose marker renumbered and the code untouched", got.Text)
+	}
+	if len(got.Citations) != 1 || got.Citations[0].Marker != 1 || got.Citations[0].Path != "backend/internal/httpapi/grant.go" {
 		t.Fatalf("citations = %+v, want only the marker outside the code block", got.Citations)
+	}
+}
+
+func TestAnswer_markersAreRenumberedInOrderOfFirstAppearance(t *testing.T) {
+	// The prompt numbers a hundred sources and the model cites three of them,
+	// so the reader sees [107]. The answer reads 1, 2, 3 in the order the
+	// markers appear, and the stream carries the same text as the record:
+	// a marker split across tokens is held back until it is complete.
+	c, _, _ := streamUpstream(t, "Issued in grant.go [", "2", "], stored [1] and again [2].")
+	var seen []string
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), collect(&seen))
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if got.Text != "Issued in grant.go [1], stored [2] and again [1]." {
+		t.Errorf("text = %q", got.Text)
+	}
+	if strings.Join(seen, "") != got.Text {
+		t.Errorf("streamed %q, stored %q; the reader must see the record", strings.Join(seen, ""), got.Text)
+	}
+	if len(got.Citations) != 2 || got.Citations[0].Marker != 1 || got.Citations[1].Marker != 2 {
+		t.Fatalf("citations = %+v, want markers 1 and 2", got.Citations)
+	}
+	if got.Citations[0].Path != "backend/internal/httpapi/grant.go" || got.Citations[1].Path != "backend/internal/playbackgrant/store.go" {
+		t.Errorf("citations = %+v, want 1 to be the source the model called [2]", got.Citations)
+	}
+}
+
+func TestAnswer_aGroupedMarkerIsRenumberedPerNumber(t *testing.T) {
+	c, _, _ := streamUpstream(t, "Compared on poll [2, 1] and [9, 2].")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	// An invented number stays as it came, so the UI drops it to plain text.
+	if got.Text != "Compared on poll [1, 2] and [9, 1]." {
+		t.Errorf("text = %q", got.Text)
+	}
+	if len(got.Citations) != 2 {
+		t.Fatalf("citations = %+v", got.Citations)
+	}
+}
+
+func TestAnswer_aMarkerInsideInlineCodeIsNotRenumbered(t *testing.T) {
+	// The span is split across tokens: the line is held back until the
+	// closing backtick says it is code.
+	c, _, _ := streamUpstream(t, "Use `args[", "2]` as in grant.go [2].")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if got.Text != "Use `args[2]` as in grant.go [1]." {
+		t.Errorf("text = %q", got.Text)
+	}
+	if len(got.Citations) != 1 || got.Citations[0].Marker != 1 {
+		t.Fatalf("citations = %+v", got.Citations)
+	}
+}
+
+func TestAnswer_anUnclosedBacktickIsProseAtTheEnd(t *testing.T) {
+	// withoutCode reads an inline span only when it closes on the same line;
+	// a stray backtick with a marker after it is prose, and the marker counts.
+	c, _, _ := streamUpstream(t, "A stray ` and then [2]")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if got.Text != "A stray ` and then [1]" {
+		t.Errorf("text = %q", got.Text)
+	}
+	if len(got.Citations) != 1 {
+		t.Fatalf("citations = %+v", got.Citations)
+	}
+}
+
+func TestAnswer_aCutAnswerIsStillRenumberedAndFlushed(t *testing.T) {
+	c, _, _ := streamUpstreamEnding(t, "length", []string{"Stored [2] and then [", "1"})
+	var seen []string
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), collect(&seen))
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	// The half-written marker at the cut is text, and it reaches the reader.
+	if got.Text != "Stored [1] and then [1" || strings.Join(seen, "") != got.Text {
+		t.Errorf("text = %q, streamed %q", got.Text, strings.Join(seen, ""))
+	}
+	if len(got.Citations) != 1 || got.Citations[0].Path != "backend/internal/httpapi/grant.go" {
+		t.Fatalf("citations = %+v", got.Citations)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SourceView from "./SourceView";
 
@@ -90,6 +90,21 @@ describe("SourceView", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
     await user.tab({ shift: true });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+  });
+
+  it("closes on a tap beside the dialog, not on one inside it", async () => {
+    // An iPad has no Escape key, and iOS Safari does not deliver mouse
+    // events to a plain div: the backdrop listens for the pointer itself.
+    serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
+    const onClose = vi.fn();
+
+    render(<SourceView source={source} onClose={onClose} />);
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.pointerDown(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.pointerDown(dialog.parentElement!);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("closes on Escape and on the close button", async () => {

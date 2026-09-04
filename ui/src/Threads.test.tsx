@@ -24,6 +24,18 @@ describe("Threads", () => {
     expect(screen.getByText("Where does the token come from?")).toBeTruthy();
   });
 
+  it("fades a long title out instead of cutting it with an ellipsis", async () => {
+    // As ../loom does: the title runs under a gradient to the row's own
+    // background. The text stays whole for a reader and a test.
+    threadList(two);
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const title = await screen.findByText("How does shipping work?");
+    expect(title.className).not.toContain("truncate");
+    expect(title.className).toContain("whitespace-nowrap");
+    const fade = title.querySelector("[aria-hidden]");
+    expect(fade?.className).toContain("bg-gradient-to-r");
+  });
+
   it("marks the open thread", async () => {
     threadList(two);
     render(<Threads activeId={3} onSelect={() => {}} version={0} />);

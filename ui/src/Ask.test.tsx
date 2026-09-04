@@ -52,6 +52,18 @@ async function ask(text: string) {
 }
 
 describe("Ask", () => {
+  it("greets in the answer language", async () => {
+    // The select says Deutsch and the page still says "Ask about the code."
+    render(<Ask />);
+    expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    expect(screen.getByRole("heading", { name: "Frag den Code." })).toBeTruthy();
+    expect(screen.queryByText(/Ask about the code/)).toBeNull();
+    await user.selectOptions(screen.getByLabelText("Answer language"), "en");
+    expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
+  });
+
   it("shows the answer as it arrives, not only at the end", async () => {
     streamFrames([
       ev("thread", { thread_id: 1, title: "x" }),
@@ -278,6 +290,38 @@ describe("Ask, a stored thread", () => {
     // A restored turn is finished. A status line would claim something is
     // still running.
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("opens a source from a chip in an older turn, not only from the pane", async () => {
+    // On a tablet the pane is not there and hover does not exist. The chip
+    // is the way to the source, in every turn, from that turn's own list.
+    const newer = {
+      ...storedTurn,
+      id: 10,
+      ordinal: 1,
+      question: "And the token?",
+      answer: "From the header [1].",
+      citations: [{ ...storedTurn.citations[0], path: "backend/internal/httpapi/token.go" }],
+    };
+    routedFetch([storedTurn, newer]);
+    strict(<Ask threadId={7} />);
+    await screen.findByText(/From the header/);
+
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ repo: "peeq", branch: "master", path: "backend/internal/playbackgrant/store.go", sha: "", content: "a\n" }),
+      text: async () => "",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const older = screen.getByText(/Through a grant/).closest("article")!;
+    const user = userEvent.setup();
+    await user.click(older.querySelector("sup button")!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.getAttribute("aria-label")).toContain("playbackgrant/store.go");
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("playbackgrant%2Fstore.go");
   });
 
   it("restores the role the question was answered in", async () => {
