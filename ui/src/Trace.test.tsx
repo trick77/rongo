@@ -82,7 +82,8 @@ describe("Trace", () => {
   });
 
   it("shows a step the backend has no label for as it came", () => {
-    expect(stepLabel("answering")).toBe("Writing the answer");
+    expect(stepLabel("answering")).toBe("Thinking about the answer");
+    expect(stepLabel("writing")).toBe("Writing the answer");
     expect(stepLabel("verstehen")).toBe("verstehen");
   });
 });

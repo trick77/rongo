@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
  * tracked eyebrow. Exported because the "History" umbrella in App is the same
  * label as the day groups below it and must not drift from them.
  */
-export const railLabel = "pl-1.5 text-xs/4 text-rail-label";
+export const railLabel = "px-1.5 text-xs/4 text-rail-label";
 
 export type Thread = {
   id: number;
@@ -97,17 +97,27 @@ export default function Threads({
     // ../loom's row: hover only moves the ground, never the text — the title
     // is already at its reading brightness. The hover ground itself lives on
     // the idle branch below, so it cannot lift the selected row's darker one.
-    "flex h-7 w-full items-center gap-2 rounded-ui-sm pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
+    "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
         {groups.map((g) => (
           // "Today" is not painted: it always heads the list, directly under
           // the "History" label, and would only name the same thing twice.
           // The group still exists, so tomorrow's threads split off it.
-          <div key={g.label} className={g.label === "Today" ? "mt-1" : ""}>
-            {g.label !== "Today" && <h3 className={"mt-3 mb-1 " + railLabel}>{g.label}</h3>}
+          //
+          // Unpainted, it owes "History" the 8px a label owes its rows, so it
+          // carries mt-2 itself. A painted group owes the 20px a label gets
+          // instead, which its own h3 carries — that is what keeps a morning
+          // with nothing asked yet, where "Yesterday" is the first thing under
+          // "History", reading as two labels rather than a label and a gap.
+          <div key={g.label} className={g.label === "Today" ? "mt-2" : ""}>
+            {/* ../loom's SidebarSection metrics: 20px above a label, 8px
+                below. Its sections are Starred/Projects/Recents rather than
+                days, but the day groups are the same thing — a named run of
+                rows — and must read on the same rhythm. */}
+            {g.label !== "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>{g.label}</h3>}
             {/* No gap: the 28px row pitch is the rhythm, as ../loom has it. */}
             <ul className="flex flex-col">
               {g.items.map((t) => {

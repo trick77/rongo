@@ -50,6 +50,26 @@ func (e Events) status(step string) {
 	}
 }
 
+// tokens wraps OnToken so the first token that arrives reports "writing".
+//
+// "answering" is reported before the model is called, and on a reasoning model
+// the wait between the two is most of the turn — the reader was told the answer
+// was being written while nothing was being written yet. Splitting the step in
+// two makes the trace honest and puts a number on each half: how long it thought
+// and how long it wrote.
+func (e Events) tokens() func(string) {
+	first := true
+	return func(tok string) {
+		if first {
+			first = false
+			e.status("writing")
+		}
+		if e.OnToken != nil {
+			e.OnToken(tok)
+		}
+	}
+}
+
 // Pipeline runs a question end to end: understand, search, route, gather,
 // answer.
 type Pipeline struct {
@@ -120,7 +140,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	}
 
 	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
 	return answer, nil, err
 }
 
@@ -137,7 +157,7 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
+	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -153,5 +173,5 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.OnToken)
+	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
 }

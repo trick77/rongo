@@ -181,12 +181,15 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
 }
 
 /**
- * A rail button, ../loom's metrics: 26px tall, 14/20 text. The rail has two
- * type sizes in total — this one and railLabel — plus the mono timestamp on a
- * thread row.
+ * A rail button, ../loom's metrics: 26px tall, 14/20 text, 6px radius — its
+ * SidebarItems.tsx has `h-[26px] rounded-md px-1.5 gap-2.5`. rounded-md rather
+ * than the app's own rounded-ui-sm because the rail is loom's surface and 8px
+ * reads rounder than loom's rows do; rounded-ui-sm stays for everything else.
+ * The rail has two type sizes in total — this one and railLabel — plus the
+ * mono timestamp on a thread row.
  */
 const railRow =
-  "flex h-[26px] w-full items-center gap-2.5 rounded-ui-sm px-1.5 text-left text-sm/5 " +
+  "flex h-[26px] w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
   "disabled:opacity-50";
 
 export default function App() {
@@ -303,7 +306,7 @@ export default function App() {
             were a piece of history; Repos spent a release at the foot, where
             it read as part of the index status line rather than as a place.
           */}
-          <div className="p-2">
+          <div className="px-2 pt-2">
             <button
               type="button"
               onClick={() => {
@@ -331,7 +334,21 @@ export default function App() {
               Repos
             </button>
           </div>
-          {/* px-2 to sit in the same column as the day groups and the rows
+          {/* ../loom's label rhythm, taken from its SidebarSection: 20px above
+              a label, 8px below it. The action block above therefore carries
+              no bottom padding of its own — mt-5 alone is the whole gap, the
+              way it is between loom's last primary item and its first section
+              title.
+
+              The 8px BELOW this label is spent by the first group in Threads,
+              not here: on a morning with nothing asked yet the first thing
+              under "History" is another label, and two stacked labels want the
+              20px a label always gets, not 8. loom reaches the same 20 by
+              margin collapsing through its empty section; rongo's scroller is
+              a BFC, so the gap has to be owned on one side, and the group side
+              is the one that knows which case it is.
+
+              px-2 to sit in the same column as the day groups and the rows
               below, which are inside Threads' own px-2 scroller. */}
           <div className="mt-5 px-2">
             <div className={railLabel}>History</div>

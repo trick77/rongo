@@ -26,7 +26,12 @@ const stepLabels: Record<string, string> = {
   searching: "Searching the index",
   routing: "Deciding whether to ask back",
   gathering: "Reading the code",
-  answering: "Writing the answer",
+  // Two steps, not one: "answering" is reported before the model is called, so
+  // for as long as it reasons nothing is being written yet. Calling that stretch
+  // "writing" was a claim the empty answer pane contradicted. The backend emits
+  // "writing" on the first token.
+  answering: "Thinking about the answer",
+  writing: "Writing the answer",
 };
 
 export function stepLabel(step: string): string {
