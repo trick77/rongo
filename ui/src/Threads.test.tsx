@@ -100,4 +100,35 @@ describe("Threads", () => {
     await user.click(own);
     expect(onSelect).toHaveBeenCalledWith(7);
   });
+
+  // Today's threads head the list under App's own "History" label, so both a
+  // "Today" heading and a clock on every row name what the position already
+  // says. Older rows keep their date: there the day is the useful part.
+  describe("today", () => {
+    const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+    const mixed = [
+      { id: 9, title: "Asked this morning", created_at: days(0) },
+      { id: 4, title: "Asked earlier in the week", created_at: days(3) },
+    ];
+
+    it("carries no heading and no time", async () => {
+      threadList(mixed);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const row = await screen.findByRole("button", { name: "Asked this morning" });
+      expect(screen.queryByText("Today")).toBeNull();
+      expect(row.querySelector("time")).toBeNull();
+    });
+
+    it("leaves the older group its heading and its date", async () => {
+      threadList(mixed);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const row = await screen.findByRole("button", { name: "Asked earlier in the week" });
+      expect(screen.getByText("This week")).toBeTruthy();
+      const expected = new Date(mixed[1].created_at).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+      });
+      expect(row.querySelector("time")?.textContent).toBe(expected);
+    });
+  });
 });

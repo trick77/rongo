@@ -187,7 +187,7 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
  */
 const railRow =
   "flex h-[26px] w-full items-center gap-2.5 rounded-ui-sm px-1.5 text-left text-sm/5 " +
-  "hover:bg-active hover:text-ink disabled:opacity-50";
+  "disabled:opacity-50";
 
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
@@ -297,9 +297,11 @@ export default function App() {
       <div className="grid min-h-0 grid-cols-[300px_1fr]">
         <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
           {/*
-            The one action, at the top where it belongs. It used to sit inside
-            Threads and therefore under the "History" heading, which read as if
-            starting a question were a piece of history.
+            The one action, at the top where it belongs, and the way to Repos
+            under it. New question used to sit inside Threads and therefore
+            under the "History" heading, which read as if starting a question
+            were a piece of history; Repos spent a release at the foot, where
+            it read as part of the index status line rather than as a place.
           */}
           <div className="p-2">
             <button
@@ -309,7 +311,7 @@ export default function App() {
                 selectThread(null);
               }}
               disabled={busy}
-              className={railRow + " text-muted"}
+              className={railRow + " text-rail hover:bg-rail-hover"}
             >
               <span
                 aria-hidden="true"
@@ -319,15 +321,20 @@ export default function App() {
               </span>
               New question
             </button>
+            <button
+              type="button"
+              aria-current={page === "repos" ? "page" : undefined}
+              onClick={() => setPage("repos")}
+              className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+            >
+              <Icon name="code" size="21px" className="text-ink-dim" />
+              Repos
+            </button>
           </div>
           {/* px-2 to sit in the same column as the day groups and the rows
-              below, which are inside Threads' own px-2 scroller; pr-1 so the
-              count lines up with their timestamps. */}
+              below, which are inside Threads' own px-2 scroller. */}
           <div className="mt-5 px-2">
-            <div className={"flex items-center pr-1 " + railLabel}>
-              History
-              {threads.length > 0 && <span className="ml-auto font-mono">{threads.length}</span>}
-            </div>
+            <div className={railLabel}>History</div>
           </div>
           <Threads
             activeId={threadId}
@@ -339,31 +346,19 @@ export default function App() {
             busy={busy}
             onList={setThreads}
           />
-          {/*
-            The foot. The index line is conditional — it needs a repo list to
-            say anything — but the way to the Repos page is not, so the link
-            sits outside that guard.
-          */}
-          <div className="p-2">
-            {index && (
-              <div className="mb-1.5 flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
+          {/* The foot: the index line alone, and only when there is a repo
+              list for it to speak about. */}
+          {index && (
+            <div className="p-2">
+              <div className="flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
                 <span
                   aria-hidden="true"
                   className={"h-[7px] w-[7px] rounded-full " + (index.ok ? "bg-online" : "bg-ochre")}
                 />
                 {index.ok ? "Index current" : "Index has errors"} · {index.when}
               </div>
-            )}
-            <button
-              type="button"
-              aria-current={page === "repos" ? "page" : undefined}
-              onClick={() => setPage("repos")}
-              className={railRow + " " + (page === "repos" ? "bg-active text-ink" : "text-muted")}
-            >
-              <Icon name="code" size="21px" className="text-ink-dim" />
-              Repos
-            </button>
-          </div>
+            </div>
+          )}
         </aside>
 
         <main className="min-h-0 min-w-0">
