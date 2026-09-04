@@ -453,14 +453,18 @@ function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top:
         }
         className={open ? "cursor-pointer" : undefined}
       >
-        {/* A 26x14 chip is a mouse's target. The invisible rect behind it is
-            roughly 42x32 of finger; an SVG group cannot take padding, so the
-            hit area has to be drawn. Nothing about the layout moves. */}
+        {/* A 26x14 chip is a mouse's target, and an SVG group cannot take
+            padding, so the hit area has to be drawn. The height is where the
+            room is: 14 -> 32. Sideways it may grow by at most half the 2px
+            the chips are laid apart above — any more and this rect would
+            reach over the neighbouring chip, which comes later in document
+            order and would win the tap, so the right edge of [1] would open
+            source 2. */}
         {open && (
           <rect
-            x={cx - w / 2 - 8}
+            x={cx - w / 2 - 1}
             y={y - 9}
-            width={w + 16}
+            width={w + 2}
             height={CHIP_H + 18}
             className="fill-transparent"
           />

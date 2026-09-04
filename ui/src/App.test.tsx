@@ -272,6 +272,28 @@ describe("App, the rail on a phone", () => {
     expect(rail().className).toContain("-translate-x-full");
   });
 
+  it("closes on Escape", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    await user.keyboard("{Escape}");
+    expect(rail().className).toContain("-translate-x-full");
+  });
+
+  // A rail parked off-screen still takes tab stops and still reads to a
+  // screen reader: tabbing past the toggle on a phone walked invisibly
+  // through New question, every thread row and Repos. invisible takes it out
+  // of both, and lg:visible puts it back where the rail is the layout.
+  it("keeps the closed rail out of the tab order and the a11y tree", async () => {
+    await renderSignedIn();
+    expect(rail().className).toContain("invisible");
+    expect(rail().className).toContain("lg:visible");
+    const user = await openDrawer();
+    expect(rail().className).toContain("visible");
+    expect(rail().className).not.toContain("invisible");
+    await user.keyboard("{Escape}");
+    expect(rail().className).toContain("invisible");
+  });
+
   it("closes when a thread is picked", async () => {
     apiFetch(oneThread, oneTurn);
     render(<App />);

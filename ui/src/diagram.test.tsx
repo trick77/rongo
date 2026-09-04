@@ -388,6 +388,27 @@ describe("Diagram", () => {
     expect(Number(hit.getAttribute("width"))).toBeGreaterThan(Number(chip.getAttribute("width")));
   });
 
+  // The chips of one node sit 2px apart. A hit area wider than half that gap
+  // reaches over its neighbour, which is later in document order and wins the
+  // tap: the right edge of [1] would open source 2.
+  it("never lets a chip's hit area reach over the next chip", () => {
+    const { container } = render(
+      <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
+    );
+    const spans = [...container.querySelectorAll("rect.fill-transparent")].map((r) => ({
+      l: Number(r.getAttribute("x")),
+      r: Number(r.getAttribute("x")) + Number(r.getAttribute("width")),
+      y: Number(r.getAttribute("y")),
+    }));
+    expect(spans.length).toBeGreaterThan(1);
+    for (const a of spans) {
+      for (const b of spans) {
+        if (a === b || a.y !== b.y) continue;
+        expect(a.l >= b.r || a.r <= b.l).toBe(true);
+      }
+    }
+  });
+
   it("gives two diagrams on one page distinct arrowhead ids", () => {
     const { container } = render(
       <>

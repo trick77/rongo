@@ -68,9 +68,13 @@ const th = "px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-[
 
 function Stat({ label, value, note }: { label: string; value: string | number; note?: string }) {
   return (
-    // The bottom border is what separates the two-up rows on a phone; from sm
-    // the block is one flex row again and only the vertical rules are left.
-    <div className="flex-1 border-r border-b border-border px-4 py-3 last:border-r-0 sm:border-b-0 sm:px-5 sm:py-3.5">
+    // The bottom border separates the two-up rows on a phone; from sm the
+    // block is one flex row again and only the vertical rules are left. The
+    // even: and last: rules keep a cell from drawing its own rule flush
+    // against the wrapper's border, which reads as a doubled line — and the
+    // odd fifth stat takes the whole last row rather than leaving half of it
+    // ruled and half of it blank.
+    <div className="flex-1 border-r border-b border-border px-4 py-3 even:border-r-0 last:col-span-2 last:border-r-0 last:border-b-0 sm:border-b-0 sm:px-5 sm:py-3.5 sm:even:border-r sm:last:border-r-0">
       <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">{label}</div>
       <div className="mt-0.5 font-serif text-[21px] leading-tight tabular-nums text-ink sm:text-[26px]">
         {value}

@@ -218,6 +218,17 @@ export default function App() {
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
 
+  // Escape closes the drawer, the second way out beside the backdrop. Bound
+  // unconditionally rather than only while open: a listener added and removed
+  // on every toggle is more moving parts than one that reads the state.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNavOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Nothing is rendered until the session is known: the alternative is a flash
   // of the signed-out app on every reload, and a redirect landing on top of it.
   if (session.state !== "in") {
@@ -335,13 +346,21 @@ export default function App() {
           The same rail at every width; below lg the box is off-canvas and
           slides in, ../loom's drawer. Its contents are untouched — one action
           on top, the history, Repos at the foot.
+
+          Closed, it is `invisible`, not merely translated away: a rail parked
+          off-screen still takes tab stops and still reads to a screen reader,
+          so tabbing past the toggle on a phone walked invisibly through every
+          thread row. `lg:visible` puts it back where the rail is the layout.
+          The visibility is transitioned discretely so it still slides out
+          rather than blinking away.
         */}
         <aside
           id="nav-drawer"
           className={
             "fixed inset-y-0 left-0 z-50 flex min-h-0 w-[300px] max-w-[85vw] flex-col border-r border-border bg-panel " +
-            "transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 " +
-            (navOpen ? "translate-x-0" : "-translate-x-full")
+            "transition-[transform,visibility] transition-discrete duration-200 ease-out " +
+            "lg:visible lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 " +
+            (navOpen ? "visible translate-x-0" : "invisible -translate-x-full")
           }
         >
           {/*
