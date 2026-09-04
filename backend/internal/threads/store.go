@@ -146,18 +146,62 @@ func (s *Store) Create(ctx context.Context, subject, question string) (Thread, e
 	return Thread{ID: id, Title: title, CreatedAt: time.Now().UTC()}, nil
 }
 
-// SetTitle replaces the placeholder. A failure is swallowed by the caller on
-// purpose: a missing title is cosmetic, and it must never fail a turn.
-func (s *Store) SetTitle(ctx context.Context, id int64, title string) error {
-	title = strings.TrimSpace(title)
-	if title == "" {
+// SetTitle replaces the placeholder, but only while the placeholder is still
+// what the row holds. `from` is the title the caller saw; a thread the reader
+// has renamed in the meantime no longer matches and keeps its own name. The
+// title call runs in the background and lands seconds after the question, so
+// without the guard a rename in that window would be silently overwritten.
+//
+// A failure is swallowed by the caller on purpose: a missing title is
+// cosmetic, and it must never fail a turn.
+func (s *Store) SetTitle(ctx context.Context, id int64, from, to string) error {
+	to = strings.TrimSpace(to)
+	if to == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE threads SET title = ? WHERE id = ?`, title, id)
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE threads SET title = ? WHERE id = ? AND title = ?`, to, id, from)
 	if err != nil {
 		return fmt.Errorf("set thread title: %w", err)
 	}
 	return nil
+}
+
+// Rename gives a thread the title its owner typed. Reports whether a row
+// matched: a thread that is gone, or was never this reader's, is not an error
+// here, it is a 404 at the edge.
+func (s *Store) Rename(ctx context.Context, subject string, id int64, title string) (bool, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE threads SET title = ? WHERE id = ? AND user_subject = ?`, title, id, subject)
+	if err != nil {
+		return false, fmt.Errorf("rename thread: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rename thread: %w", err)
+	}
+	return n > 0, nil
+}
+
+// Delete removes a thread and, through the schema's cascades, every message,
+// citation, clarification, source and usage row hanging off it. The owner is
+// part of the predicate rather than a check in front of it, so a thread that
+// is not yours is indistinguishable from one that does not exist.
+func (s *Store) Delete(ctx context.Context, subject string, id int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM threads WHERE id = ? AND user_subject = ?`, id, subject)
+	if err != nil {
+		return false, fmt.Errorf("delete thread: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete thread: %w", err)
+	}
+	return n > 0, nil
 }
 
 // AddQuestion appends a question and returns the message it created. The answer

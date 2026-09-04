@@ -437,6 +437,14 @@ export default function App() {
             version={threadsVersion}
             busy={busy}
             onList={setThreads}
+            onDeleted={(id) => {
+              // The thread on screen has just been deleted: close it, so the
+              // view falls back to the empty ask page rather than holding a
+              // conversation whose record is gone.
+              if (id === threadId) selectThread(null);
+              refreshThreads();
+            }}
+            onRenamed={refreshThreads}
           />
           {/* The foot: the index line alone, and only when there is a repo
               list for it to speak about. */}

@@ -22,7 +22,12 @@ import (
 // structurally.
 type Threads interface {
 	Create(ctx context.Context, subject, question string) (threads.Thread, error)
-	SetTitle(ctx context.Context, id int64, title string) error
+	// SetTitle replaces `from` with `to`, and only while the row still holds
+	// `from`: the title is written in the background and must not overwrite a
+	// name its owner typed in the meantime.
+	SetTitle(ctx context.Context, id int64, from, to string) error
+	Rename(ctx context.Context, subject string, id int64, title string) (bool, error)
+	Delete(ctx context.Context, subject string, id int64) (bool, error)
 	AddQuestion(ctx context.Context, threadID int64, audience, language, question string) (threads.Message, error)
 	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
 	Fail(ctx context.Context, messageID int64, msg string) error
@@ -126,6 +131,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
+	s.mux.Handle("PATCH /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleRenameThread)))
+	s.mux.Handle("DELETE /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteThread)))
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))

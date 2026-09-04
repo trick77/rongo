@@ -115,13 +115,142 @@ func TestSetTitle_anEmptyModelTitleLeavesThePlaceholderStanding(t *testing.T) {
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(context.Background(), "anna", "How does shipping work?")
 
-	if err := s.SetTitle(context.Background(), th.ID, "   "); err != nil {
+	if err := s.SetTitle(context.Background(), th.ID, th.Title, "   "); err != nil {
 		t.Fatalf("SetTitle: %v", err)
 	}
 
 	list, _ := s.List(context.Background(), "anna")
 	if list[0].Title == "" {
 		t.Error("the placeholder was overwritten with an empty title")
+	}
+}
+
+func TestSetTitle_replacesThePlaceholderItWasHanded(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if err := s.SetTitle(ctx, th.ID, th.Title, "Shipping, end to end"); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if list[0].Title != "Shipping, end to end" {
+		t.Errorf("title = %q, want the model's", list[0].Title)
+	}
+}
+
+func TestSetTitle_leavesARenamedThreadAlone(t *testing.T) {
+	// The title call lands seconds after the question. A reader who renamed
+	// the thread in that window keeps their name: the row no longer holds the
+	// placeholder the background write was handed.
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if _, err := s.Rename(ctx, "anna", th.ID, "Mine"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if err := s.SetTitle(ctx, th.ID, th.Title, "The model's idea"); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if list[0].Title != "Mine" {
+		t.Errorf("title = %q, want the typed name to have survived", list[0].Title)
+	}
+}
+
+func TestRename_refusesAnEmptyTitleAndAnotherReadersThread(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	// Given an empty title
+	renamed, err := s.Rename(ctx, "anna", th.ID, "   ")
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if renamed {
+		t.Error("an empty title renamed the thread")
+	}
+
+	// Given someone else's thread
+	renamed, err = s.Rename(ctx, "bob", th.ID, "Bob's")
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if renamed {
+		t.Error("bob renamed anna's thread")
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if !strings.HasPrefix(list[0].Title, "How does shipping") {
+		t.Errorf("title = %q, want the placeholder untouched", list[0].Title)
+	}
+}
+
+func TestDelete_takesTheThreadAndEverythingUnderIt(t *testing.T) {
+	ctx := context.Background()
+	db := threadDB(t)
+	s := NewStore(db)
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+	m, err := s.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?")
+	if err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+	if err := s.Finish(ctx, m.ID, "It ships.", []ask.Citation{{Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2}}); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	// When
+	deleted, err := s.Delete(ctx, "anna", th.ID)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// Then
+	if !deleted {
+		t.Fatal("Delete reported no row")
+	}
+	list, _ := s.List(ctx, "anna")
+	if len(list) != 0 {
+		t.Errorf("threads = %d, want the list empty", len(list))
+	}
+	// The cascades are the schema's, but nothing else deletes a message, so
+	// a row left behind here would outlive every reader of it.
+	var messages int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&messages); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if messages != 0 {
+		t.Errorf("messages = %d, want the cascade to have taken them", messages)
+	}
+	var citations int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM citations`).Scan(&citations); err != nil {
+		t.Fatalf("count citations: %v", err)
+	}
+	if citations != 0 {
+		t.Errorf("citations = %d, want the cascade to have taken them", citations)
+	}
+}
+
+func TestDelete_leavesAnotherReadersThreadStanding(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	deleted, err := s.Delete(ctx, "bob", th.ID)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if deleted {
+		t.Error("bob deleted anna's thread")
+	}
+	list, _ := s.List(ctx, "anna")
+	if len(list) != 1 {
+		t.Errorf("threads = %d, want anna's thread untouched", len(list))
 	}
 }
 

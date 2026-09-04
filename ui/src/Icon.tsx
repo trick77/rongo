@@ -18,6 +18,9 @@ import type { CSSProperties } from "react";
 const CODEPOINTS = {
   code: 0xe048,
   sidebar: 0xe0dd,
+  edit: 0xe064,
+  moreVertical: 0xe062,
+  trash: 0xe101,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;

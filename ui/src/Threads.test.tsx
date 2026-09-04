@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Threads from "./Threads";
@@ -103,42 +103,173 @@ describe("Threads", () => {
 
   // 28px is a mouse's row, not a thumb's. jsdom matches no media query, so the
   // class is what can be asserted here; the size itself is checked in a touch
-  // browser context.
+  // browser context. The height sits on the row that holds the title and the
+  // actions button, not on the title alone.
   it("gives the row a thumb's height on a touch screen", async () => {
     threadList(two);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-    const row = await screen.findByRole("button", { name: "How does shipping work?" });
-    expect(row.className).toContain("pointer-coarse:h-11");
+    const title = await screen.findByRole("button", { name: "How does shipping work?" });
+    expect(title.parentElement?.className).toContain("pointer-coarse:h-11");
   });
 
-  // Today's threads head the list under App's own "History" label, so both a
-  // "Today" heading and a clock on every row name what the position already
-  // says. Older rows keep their date: there the day is the useful part.
-  describe("today", () => {
+  // Today's threads head the list under App's own "History" label, so a
+  // "Today" heading names what the position already says. The day groups
+  // below it stay: there the day is the useful part.
+  describe("day groups", () => {
     const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
     const mixed = [
       { id: 9, title: "Asked this morning", created_at: days(0) },
       { id: 4, title: "Asked earlier in the week", created_at: days(3) },
     ];
 
-    it("carries no heading and no time", async () => {
+    it("carries no heading for today", async () => {
       threadList(mixed);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-      const row = await screen.findByRole("button", { name: "Asked this morning" });
+      await screen.findByRole("button", { name: "Asked this morning" });
       expect(screen.queryByText("Today")).toBeNull();
-      expect(row.querySelector("time")).toBeNull();
     });
 
-    it("leaves the older group its heading and its date", async () => {
+    it("leaves the older group its heading", async () => {
       threadList(mixed);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-      const row = await screen.findByRole("button", { name: "Asked earlier in the week" });
+      await screen.findByRole("button", { name: "Asked earlier in the week" });
       expect(screen.getByText("This week")).toBeTruthy();
-      const expected = new Date(mixed[1].created_at).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
+    });
+
+    // The date used to sit at the end of every older row. The row menu took
+    // its place: which thread this is, is the title's job, and what can be
+    // done to it is the only other thing the row has to say.
+    it("shows no date on any row", async () => {
+      threadList(mixed);
+      const { container } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByRole("button", { name: "Asked this morning" });
+      expect(container.querySelectorAll("time").length).toBe(0);
+    });
+  });
+
+  describe("the row menu", () => {
+    /** Opens the menu on one row and hands back the user-event session. */
+    async function openMenu(title: string) {
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Actions for " + title }));
+      return user;
+    }
+
+    it("offers rename and delete, and closes on a click outside", async () => {
+      threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const user = await openMenu("How does shipping work?");
+
+      expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+
+      await user.click(document.body);
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // Switching thread from under an open menu would leave it hanging off the
+    // row that was just left, pointing at a thread nobody is looking at.
+    it("closes when another row is picked", async () => {
+      threadList(two);
+      const onSelect = vi.fn();
+      render(<Threads activeId={null} onSelect={onSelect} version={0} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("button", { name: "Where does the token come from?" }));
+
+      expect(onSelect).toHaveBeenCalledWith(3);
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // A menu already open when the question is sent has to go with the
+    // trigger: left standing, it still offers Delete on the thread the
+    // answer is landing on.
+    it("closes when a turn starts under it", async () => {
+      threadList(two);
+      const { rerender } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await openMenu("How does shipping work?");
+      expect(screen.getByRole("menu")).toBeTruthy();
+
+      rerender(<Threads activeId={7} onSelect={() => {}} version={0} busy />);
+
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // Deleting the thread being written would pull the record out from under
+    // the answer still landing on it.
+    it("is not offered at all while a turn runs", async () => {
+      threadList(two);
+      render(<Threads activeId={7} onSelect={() => {}} version={0} busy />);
+      await screen.findByRole("button", { name: "How does shipping work?" });
+      expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
+    });
+
+    it("deletes the thread once the dialog is confirmed, and not before", async () => {
+      threadList(two);
+      const onDeleted = vi.fn();
+      render(<Threads activeId={null} onSelect={() => {}} version={0} onDeleted={onDeleted} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(fetch).toHaveBeenCalledTimes(1); // the list load, and nothing more
+
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      expect(fetch).toHaveBeenCalledWith("/api/threads/7", { method: "DELETE" });
+      expect(onDeleted).toHaveBeenCalledWith(7);
+      expect(screen.queryByRole("button", { name: "How does shipping work?" })).toBeNull();
+    });
+
+    it("leaves the row alone when the delete is cancelled", async () => {
+      threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("button", { name: "How does shipping work?" })).toBeTruthy();
+    });
+
+    it("writes the typed title and shows it", async () => {
+      threadList(two);
+      const onRenamed = vi.fn();
+      render(<Threads activeId={null} onSelect={() => {}} version={0} onRenamed={onRenamed} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+      const box = screen.getByRole("textbox", { name: "Thread title" });
+      await user.clear(box);
+      await user.type(box, "Shipping, end to end");
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(fetch).toHaveBeenCalledWith("/api/threads/7", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Shipping, end to end" }),
       });
-      expect(row.querySelector("time")?.textContent).toBe(expected);
+      expect(onRenamed).toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Shipping, end to end" })).toBeTruthy();
+    });
+
+    // A row dropped from a delete the server refused would be a lie: the
+    // thread is still there on the next reload.
+    it("keeps the row and the dialog when the delete fails", async () => {
+      threadList(two);
+      const onDeleted = vi.fn();
+      render(<Threads activeId={null} onSelect={() => {}} version={0} onDeleted={onDeleted} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 500 });
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      expect(onDeleted).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "How does shipping work?" })).toBeTruthy();
     });
   });
 });

@@ -236,7 +236,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// a label; the answer must not wait for it, and a title that never arrives
 	// is not a failure anyone needs to see.
 	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
-		go func(id, messageID int64, question string) {
+		go func(id, messageID int64, question, placeholder string) {
 			// WithoutCancel keeps the context's values, the turn's meter
 			// among them. The title gets its own so it cannot write into a
 			// meter that has already been read and stored; its call is
@@ -247,14 +247,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			titleMeter := usage.New()
 			bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
 			if title := s.deps.Titler(bg, question, lang); title != "" {
-				if err := s.deps.Threads.SetTitle(bg, id, title); err != nil {
+				// `placeholder` is the title Create wrote and the rail is
+				// showing right now. Handing it over makes the write a
+				// no-op once the reader has renamed the thread themselves.
+				if err := s.deps.Threads.SetTitle(bg, id, placeholder, title); err != nil {
 					slog.Warn("set thread title failed", "err", err)
 				}
 			}
 			if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
 				slog.Error("record title usage failed", "err", err)
 			}
-		}(thread.ID, msg.ID, req.Question)
+		}(thread.ID, msg.ID, req.Question, thread.Title)
 	}
 
 	// The record is written on a context that outlives the request. A reader
@@ -624,4 +627,92 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(msgs)
+}
+
+// threadRequest is what the rail's own actions send: a rename carries the new
+// title, a delete carries nothing.
+type threadRequest struct {
+	Title string `json:"title"`
+}
+
+// maxTitleRunes is what a thread title may be, matching the length the store
+// cuts its placeholder to.
+const maxTitleRunes = 48
+
+func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return
+	}
+	var req threadRequest
+	// Capped like every other body this package reads: a title is a line of
+	// text, and one that is not would be buffered here and then shipped with
+	// the list on every load of the rail.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "malformed request", http.StatusBadRequest)
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+	// The same length the placeholder is cut to, so a typed title cannot
+	// outgrow the one the model writes. Refused rather than truncated: the
+	// rail would otherwise show something nobody asked for.
+	if len([]rune(title)) > maxTitleRunes {
+		http.Error(w, "title is too long", http.StatusBadRequest)
+		return
+	}
+	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
+	if err != nil {
+		slog.Error("rename thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !renamed {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return
+	}
+	deleted, err := s.deps.Threads.Delete(r.Context(), u.Subject, id)
+	if err != nil {
+		slog.Error("delete thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !deleted {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// threadTarget resolves the reader and the thread id both single-thread
+// actions need, answering the request itself when either is missing. A thread
+// that is not this reader's is never told apart from one that is gone: both
+// end as the 404 the handlers write once the store reports no row.
+func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User, int64, bool) {
+	if s.deps.Threads == nil {
+		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		return auth.User{}, 0, false
+	}
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return auth.User{}, 0, false
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "malformed thread id", http.StatusBadRequest)
+		return auth.User{}, 0, false
+	}
+	return u, id, true
 }
