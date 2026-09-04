@@ -342,6 +342,12 @@ export default function Ask({
   // threads while a slower load is in the air.
   const loadSeq = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
+  // The scrolling column, and whether the view is currently following what
+  // arrives into it. It follows while the reader sits at the foot of the
+  // thread, stops the moment they scroll up to read something back, and
+  // follows again once they return to the bottom.
+  const view = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
 
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
@@ -408,11 +414,22 @@ export default function Ask({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openThread]);
 
-  // A new turn scrolls into view; tokens arriving into it do not fight the
-  // reader who scrolled up.
+  // A new turn, or another thread, puts the reader back at the foot of the
+  // thread — that is where the answer will appear.
   useEffect(() => {
+    following.current = true;
     bottom.current?.scrollIntoView?.({ block: "end" });
   }, [turns.length, openThread]);
+
+  // The answer grows downwards while it streams, so the view follows it —
+  // otherwise the reader watches an answer write itself off the bottom edge
+  // and has to chase it. Every token patches the turn, so this runs on each
+  // one; it does nothing while the reader is reading further up. A thread
+  // that has just loaded lands here too, at its last turn.
+  useEffect(() => {
+    const el = view.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [turns]);
 
   // The running total follows the turns: it grows when a usage event lands
   // and resets when another thread is opened.
@@ -613,7 +630,17 @@ export default function Ask({
     <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          ref={view}
+          // Wheel, trackpad, touch and the keyboard all arrive here, so one
+          // handler covers every way of leaving the bottom. The scrolls this
+          // view makes itself land at the bottom and keep it following.
+          onScroll={() => {
+            const el = view.current;
+            if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+          }}
+          className="min-h-0 flex-1 overflow-auto"
+        >
           <div className="max-w-[900px] px-10 pt-8 pb-10">
             {turns.length === 0 && (
               <div className="mt-16 max-w-[52ch]">
@@ -678,6 +705,18 @@ export default function Ask({
                       // the last thing before done, so a finished turn with
                       // none has none.
                       backed={turn.done ? new Set(turn.citations.map((c) => c.marker)) : undefined}
+                      // Only a turn of THIS session fades its text in: it is
+                      // the one whose words are arriving. A stored thread is
+                      // mounted whole, and fading it would replay a
+                      // conversation that was written long ago.
+                      //
+                      // Kept on for the rest of the turn's life rather than
+                      // dropped at `done`: turning it off unwraps the
+                      // segments, and the last ones - younger than the fade
+                      // itself - would snap to full brightness at the moment
+                      // the answer ends. Nothing re-fades, because the
+                      // segments keep their keys and never remount.
+                      fade={turn.live}
                     />
                     {!turn.done && <span className="caret" aria-hidden="true" />}
                   </div>

@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
 
@@ -909,5 +909,128 @@ describe("Ask, the clarification and re-explaining", () => {
     expect(String(postCalls[0][0])).toBe("/api/messages/9/reexplain");
     expect(JSON.parse(String(postCalls[0][1]?.body))).toEqual({ audience: "ba" });
     expect(mock.mock.calls.some((c) => String(c[0]).startsWith("/api/ask"))).toBe(false);
+  });
+});
+
+/**
+ * A stream the test drives frame by frame: each read waits until the test
+ * pushes the next one. The reader who scrolls away mid-answer only exists in
+ * the gap between two frames, and a fake that hands over every frame at once
+ * has no such gap.
+ */
+function pushableStream() {
+  const encoder = new TextEncoder();
+  const queue: string[] = [];
+  let wake: (() => void) | null = null;
+  let ended = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          return {
+            async read() {
+              while (queue.length === 0 && !ended) await new Promise<void>((r) => (wake = r));
+              const frame = queue.shift();
+              if (frame === undefined) return { done: true, value: undefined };
+              return { done: false, value: encoder.encode(frame) };
+            },
+          };
+        },
+      },
+    })),
+  );
+  const bump = () => {
+    const w = wake;
+    wake = null;
+    w?.();
+  };
+  return {
+    async push(frame: string) {
+      queue.push(frame);
+      await act(async () => bump());
+    },
+    async end() {
+      ended = true;
+      await act(async () => bump());
+    },
+  };
+}
+
+/** The scrolling element, given the heights jsdom never lays out. */
+function scroller(container: HTMLElement, height = 2000) {
+  const el = container.querySelector(".overflow-auto") as HTMLElement;
+  Object.defineProperty(el, "scrollHeight", { configurable: true, value: height });
+  Object.defineProperty(el, "clientHeight", { configurable: true, value: 500 });
+  return el;
+}
+
+async function askInto(container: HTMLElement) {
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("Question"), "How?");
+  await user.click(screen.getByRole("button", { name: "Ask" }));
+  return container;
+}
+
+describe("Ask, following the answer", () => {
+  it("scrolls the arriving answer into view", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "Shipping runs through a job." }));
+    await screen.findByText(/Shipping runs/);
+
+    expect(view.scrollTop).toBe(2000);
+  });
+
+  it("leaves the reader alone once they scrolled up, and follows again at the bottom", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    // The reader scrolls back to read what has already arrived.
+    view.scrollTop = 0;
+    fireEvent.scroll(view);
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(0);
+
+    // Back at the bottom, the answer is followed again.
+    view.scrollTop = 1500;
+    fireEvent.scroll(view);
+    await stream.push(ev("token", { text: "Three." }));
+    await screen.findByText(/Three/);
+    expect(view.scrollTop).toBe(2000);
+  });
+
+  it("fades the text that streams in", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+
+    await stream.push(ev("token", { text: "Shipping runs through a job." }));
+    await screen.findByText(/Shipping runs/);
+    expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(0);
+    await stream.end();
+  });
+
+  it("does not fade a stored thread: its answers were read long ago", async () => {
+    // Opening a thread mounts every answer at once. A fade there would wash
+    // the whole conversation in, as if it were arriving now.
+    routedFetch([storedTurn]);
+    const { container } = render(
+      <StrictMode>
+        <Ask threadId={7} />
+      </StrictMode>,
+    );
+    await screen.findByText(/Through a grant/);
+    expect(container.querySelector(".stream-seg")).toBeNull();
   });
 });

@@ -210,7 +210,7 @@ describe("Markdown", () => {
     });
 
     it("wraps prose in segments without changing what the text reads", () => {
-      const { container } = render(<Markdown text={"The job runs, and then it stops."} />);
+      const { container } = render(<Markdown text={"The job runs, and then it stops."} fade />);
       const segs = container.querySelectorAll(".stream-seg");
       expect(segs.length).toBeGreaterThan(1);
       expect(container.textContent).toBe("The job runs, and then it stops.");
@@ -220,7 +220,7 @@ describe("Markdown", () => {
       // A chip or a link that re-faded on every token would flicker, and a
       // segment span inside a highlighted block would fight the grammar.
       const { container } = render(
-        <Markdown text={"Calls `Send` [1] here.\n\n```go\nx := 1\n```"} backed={new Set([1])} />,
+        <Markdown text={"Calls `Send` [1] here.\n\n```go\nx := 1\n```"} backed={new Set([1])} fade />,
       );
       expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(0);
       expect(container.querySelector("code .stream-seg")).toBeNull();
@@ -235,9 +235,9 @@ describe("Markdown", () => {
       // so segments inside it would mount and start their fade at that
       // moment, dropping a phrase the reader has read back to a fifth of its
       // brightness. Confirmed in the browser before this was written.
-      const { container, rerender } = render(<Markdown text={"The job **runs fast"} />);
+      const { container, rerender } = render(<Markdown text={"The job **runs fast"} fade />);
       expect(container.textContent).toBe("The job **runs fast");
-      rerender(<Markdown text={"The job **runs fast** now."} />);
+      rerender(<Markdown text={"The job **runs fast** now."} fade />);
       expect(container.querySelector("strong")?.textContent).toBe("runs fast");
       expect(container.querySelector("strong .stream-seg")).toBeNull();
       expect(container.textContent).toBe("The job runs fast now.");
@@ -247,12 +247,18 @@ describe("Markdown", () => {
       // The whole answer re-renders on every token. If a settled segment
       // remounted, its fade would restart and the finished text would
       // flicker for the whole length of the answer.
-      const { container, rerender } = render(<Markdown text={"The job runs, and then"} />);
+      const { container, rerender } = render(<Markdown text={"The job runs, and then"} fade />);
       const first = container.querySelector(".stream-seg");
       expect(first).not.toBeNull();
-      rerender(<Markdown text={"The job runs, and then it stops. A second sentence."} />);
+      rerender(<Markdown text={"The job runs, and then it stops. A second sentence."} fade />);
       expect(container.querySelector(".stream-seg")).toBe(first);
       expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(2);
+    });
+
+    it("stays off unless it is asked for: prose read from the record is not arriving", () => {
+      const { container } = render(<Markdown text={"The job runs, and then it stops."} />);
+      expect(container.querySelector(".stream-seg")).toBeNull();
+      expect(container.textContent).toBe("The job runs, and then it stops.");
     });
   });
 
