@@ -31,6 +31,33 @@ func TestRenumberer_aFenceSplitAcrossTokensStaysCode(t *testing.T) {
 	}
 }
 
+func TestRenumberer_anOpeningFenceSplitAcrossTokensStaysCode(t *testing.T) {
+	// The OPEN arrives as "``" then "`", the way the close does. Read as an
+	// empty inline span, the block's index expression became a citation the
+	// model never made and the stray third backtick opened a fence that
+	// swallowed the markers after it.
+	r := newRenumberer(3)
+	got := r.feed("See [3]:\n``") + r.feed("`go\nx := a[2]\n```\ndone [1]") + r.flush()
+
+	if got != "See [1]:\n```go\nx := a[2]\n```\ndone [2]" {
+		t.Errorf("got %q", got)
+	}
+	if len(r.order) != 2 || r.order[0] != 3 || r.order[1] != 1 {
+		t.Errorf("order = %v, want the two markers in prose only", r.order)
+	}
+}
+
+func TestRenumberer_aTokenEndingInAFenceDoesNotPanic(t *testing.T) {
+	// "x````" opens the fence at the fourth-last byte and leaves one backtick
+	// undecided: counting the trailing backticks over the whole buffer put
+	// the cut before the cursor and sliced out of range.
+	_, got := run(3, "x````", "go\ny\n```\n")
+
+	if got != "x````go\ny\n```\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestRenumberer_anUnclosedFenceSwallowsTheRest(t *testing.T) {
 	_, got := run(3, "Prose [3].\n```go\nname := args[2]\n", "more [1]")
 

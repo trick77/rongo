@@ -75,8 +75,10 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				b.WriteString(s[i:])
 				return b.String(), ""
 			}
-			// Trailing backticks may be the start of the close.
-			cut := len(s) - trailingBackticks(s, 2)
+			// Trailing backticks may be the start of the close. Counted over
+			// what is left to decide, never over the whole buffer: the fence
+			// that opened at i is made of backticks too.
+			cut := len(s) - trailingBackticks(s[i:], 2)
 			b.WriteString(s[i:cut])
 			return b.String(), s[cut:]
 		}
@@ -89,6 +91,14 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 		b.WriteString(s[i : i+j])
 		i += j
 		if s[i] == '`' {
+			// One or two backticks at the end of what has arrived may be the
+			// start of an opening fence: held back, as the closing one is.
+			// Read as an empty inline span they would leave the "```" broken,
+			// the block's index expressions read as markers, and the stray
+			// third backtick opening a fence that swallows the rest.
+			if !atEnd && len(s)-i < 3 && strings.TrimLeft(s[i:], "`") == "" {
+				return b.String(), s[i:]
+			}
 			if strings.HasPrefix(s[i:], "```") {
 				b.WriteString("```")
 				i += 3
