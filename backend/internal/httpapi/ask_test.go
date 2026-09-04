@@ -685,7 +685,7 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 		f.tokens = []string{"The ", "answer."}
 		f.calls = gateCalls
 	})
-	srv.deps.Prices = pricing.NewTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
+	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
 	id := threadIDOf(t, body)
 

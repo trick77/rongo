@@ -2,10 +2,7 @@ package config
 
 import (
 	"os"
-	"strings"
 	"testing"
-
-	"github.com/trick77/rongo/internal/llm"
 )
 
 // validSecret satisfies the length and placeholder checks so tests that don't
@@ -41,11 +38,6 @@ var allBackendEnvVars = []string{
 	"BACKEND_ROUTE_MARGIN",
 	"BACKEND_GATHER_MAX_HOPS",
 	"BACKEND_GATHER_TOKEN_BUDGET",
-	"BACKEND_PRICE_PRO_IN",
-	"BACKEND_PRICE_PRO_OUT",
-	"BACKEND_PRICE_GATE_IN",
-	"BACKEND_PRICE_GATE_OUT",
-	"BACKEND_PRICE_EMBED",
 	"BACKEND_OIDC_ISSUER",
 	"BACKEND_OIDC_CLIENT_ID",
 	"BACKEND_OIDC_CLIENT_SECRET",
@@ -143,63 +135,6 @@ func TestLoad_indexExclude(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestLoad_pricesAreOptionalAndKeyedByModel(t *testing.T) {
-	// Given: nothing priced
-	setEnv(t, nil)
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	// Then: an empty table, not zeros — the UI shows tokens only.
-	if len(cfg.Prices) != 0 {
-		t.Errorf("Prices = %v, want empty", cfg.Prices)
-	}
-
-	// Given: the Pro pair and the embedding price, the gate left unset
-	setEnv(t, map[string]string{
-		"BACKEND_PRICE_PRO_IN":  "0.4",
-		"BACKEND_PRICE_PRO_OUT": "1.6",
-		"BACKEND_PRICE_EMBED":   "0.02",
-		"BACKEND_EMBED_MODEL":   "text-embedding-3-large",
-	})
-	cfg, err = Load()
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	// Then: keyed by the deployment and embedding model names
-	if p := cfg.Prices[llm.ProDeployment]; p.In != 0.4 || p.Out != 1.6 {
-		t.Errorf("Pro price = %+v, want 0.4/1.6", p)
-	}
-	if p := cfg.Prices["text-embedding-3-large"]; p.In != 0.02 || p.Out != 0 {
-		t.Errorf("embed price = %+v, want 0.02 in, nothing out", p)
-	}
-	if _, ok := cfg.Prices[llm.ShortGateDeployment]; ok {
-		t.Errorf("the gate deployment is priced although nothing was set: %v", cfg.Prices)
-	}
-}
-
-func TestLoad_halfAPriceIsAnErrorNotAZero(t *testing.T) {
-	// Given: the output side left empty
-	setEnv(t, map[string]string{
-		"BACKEND_PRICE_GATE_IN":  "0.1",
-		"BACKEND_PRICE_GATE_OUT": "",
-	})
-
-	// When
-	_, err := Load()
-
-	// Then: refused, naming both variables — pricing the missing side at
-	// zero would show a cost that undercounts.
-	if err == nil {
-		t.Fatal("Load() accepted half a price pair")
-	}
-	for _, want := range []string{"BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err = %q, want it to name %s", err, want)
-		}
 	}
 }
 
@@ -628,38 +563,8 @@ func TestLoad_pricesRegistryDefaultsToModelsDevAndEmptyTurnsItOff(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Load() err = %v", err)
 	}
-	// Then: no URL, so main never fetches; tokens only unless a pair is set
+	// Then: no URL, so main never fetches; tokens only
 	if cfg.PricesURL != "" {
 		t.Errorf("PricesURL = %q, want empty", cfg.PricesURL)
-	}
-}
-
-func TestLoad_anExplicitZeroIsAPriceAndAMistypedOneIsAnError(t *testing.T) {
-	// Given: a flat-rate contract the registry gets wrong, overridden to 0
-	setEnv(t, map[string]string{
-		"BACKEND_PRICE_PRO_IN":  "0",
-		"BACKEND_PRICE_PRO_OUT": "0",
-		"BACKEND_PRICE_EMBED":   "0",
-	})
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	// Then: present in the table at zero, not absent
-	if p, ok := cfg.Prices[llm.ProDeployment]; !ok || p.In != 0 || p.Out != 0 {
-		t.Errorf("Pro price = %+v (present %v), want 0/0 present", p, ok)
-	}
-	if _, ok := cfg.Prices["text-embedding-3-small"]; !ok {
-		t.Errorf("embed price absent although set to 0: %v", cfg.Prices)
-	}
-
-	// Given: a decimal comma
-	setEnv(t, map[string]string{
-		"BACKEND_PRICE_PRO_IN":  "0,4",
-		"BACKEND_PRICE_PRO_OUT": "1.6",
-	})
-	// Then: refused, not silently handed back to the registry
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_PRICE_PRO_IN") {
-		t.Errorf("Load() err = %v, want the mistyped variable named", err)
 	}
 }

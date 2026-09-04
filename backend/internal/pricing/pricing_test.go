@@ -15,10 +15,12 @@ import (
 
 // fixture is the shape of models.dev's api.json, cut down to what the
 // resolver reads: a provider's api URL and each model's cost. Modelled on
-// the real file: "openai" has no api field; "reseller" prices the
-// deployments differently, which is why the endpoint decides; the vendor
-// and its coding plan share a host and differ by path; two aggregators
-// share one URL byte for byte; three local servers differ by port only.
+// the real file: "openai" has no api field; the token plan lists the
+// deployments at zero where "xiaomi" prices them; the vendor and its coding
+// plan share a host and differ by path; two aggregators share one URL byte
+// for byte; the local servers differ by port only. Everything but "xiaomi"
+// is matched by URL, which is the embedding endpoint's path through the
+// resolver, so those providers carry an embedding model too.
 const fixture = `{
   "xiaomi": {
     "id": "xiaomi", "name": "Xiaomi", "api": "https://api.xiaomimimo.com/v1",
@@ -44,43 +46,37 @@ const fixture = `{
   "vendor": {
     "id": "vendor", "api": "https://api.vendor.example/api/paas/v4",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.6, "output": 2.2}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.1, "output": 0.3}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02, "output": 0}}
     }
   },
   "vendor-coding-plan": {
     "id": "vendor-coding-plan", "api": "https://api.vendor.example/api/coding/paas/v4",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0, "output": 0}}
     }
   },
   "gateway": {
     "id": "gateway", "api": "https://api.gateway.example/v1",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.14, "output": 0.28}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02, "output": 0}}
     }
   },
   "gateway-providers": {
     "id": "gateway-providers", "api": "https://api.gateway.example/v1",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.5, "output": 1}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.05, "output": 0}}
     }
   },
   "local-a": {
     "id": "local-a", "api": "http://127.0.0.1:1337/v1",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0, "output": 0}}
     }
   },
   "local-b": {
     "id": "local-b", "api": "http://127.0.0.1:1234/v1",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
-      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0, "output": 0}}
     }
   },
   "openai": {
@@ -147,12 +143,12 @@ func TestFetch_reportsAFailedOrMalformedRegistry(t *testing.T) {
 	}
 }
 
-func TestResolve_pricesEveryModelFromTheProviderServingTheEndpoint(t *testing.T) {
-	// Given the pay-as-you-go endpoint and OpenAI embeddings
+func TestResolve_pricesTheDeploymentsFromMiMosAPIAndEmbedFromItsEndpoint(t *testing.T) {
+	// Given OpenAI embeddings
 	reg := fetchFixture(t)
 
 	// When
-	prices, warnings := Resolve(reg, xiaomiURL, openaiURL, embed)
+	prices, warnings := Resolve(reg, openaiURL, embed)
 
 	// Then every model rongo calls is priced, and nothing is warned about
 	if p := prices[llm.ProDeployment]; p.In != 0.435 || p.Out != 0.87 {
@@ -169,16 +165,20 @@ func TestResolve_pricesEveryModelFromTheProviderServingTheEndpoint(t *testing.T)
 	}
 }
 
-func TestResolve_aTokenPlanIsPricedAtZeroNotLeftOut(t *testing.T) {
+func TestResolve_theDeploymentsAreMiMosPriceNotTheTokenPlansZero(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// A token plan is flat rate: zero is a price, present in the table, so
-	// the browser shows a real $0 rather than nothing. The trailing slash
-	// is what a copied URL often carries.
-	prices, warnings := Resolve(reg, "https://token-plan-ams.xiaomimimo.com/v1/", "", "")
-	p, ok := prices[llm.ProDeployment]
-	if !ok || p.In != 0 || p.Out != 0 {
-		t.Errorf("token plan pro = %+v (present %v), want 0/0 present", p, ok)
+	// The fixture lists the token plan at 0/0, the way models.dev really
+	// does. Whichever endpoint the deployments are called at, they are worth
+	// what MiMo charges for them: a flat plan showed a thread as $0.000,
+	// which reads as broken rather than as free.
+	prices, warnings := Resolve(reg, "", "")
+
+	if p := prices[llm.ProDeployment]; p.In != 0.435 || p.Out != 0.87 {
+		t.Errorf("pro = %+v, want MiMo's 0.435/0.87", p)
+	}
+	if p := prices[llm.ShortGateDeployment]; p.In != 0.14 || p.Out != 0.28 {
+		t.Errorf("gate = %+v, want MiMo's 0.14/0.28", p)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -190,13 +190,13 @@ func TestResolve_thePathTellsACodingPlanFromPayAsYouGo(t *testing.T) {
 
 	// The vendor's two contracts share a host; the path is the difference,
 	// and the flat-rate one must not be billed at the metered price.
-	prices, warnings := Resolve(reg, "https://api.vendor.example/api/coding/paas/v4", "", "")
-	if p, ok := prices[llm.ProDeployment]; !ok || p.In != 0 {
-		t.Errorf("coding plan pro = %+v (present %v), want 0 present; warnings %v", p, ok, warnings)
+	prices, warnings := Resolve(reg, "https://api.vendor.example/api/coding/paas/v4", embed)
+	if p, ok := prices[embed]; !ok || p.In != 0 {
+		t.Errorf("coding plan embed = %+v (present %v), want 0 present; warnings %v", p, ok, warnings)
 	}
-	prices, _ = Resolve(reg, "https://api.vendor.example/api/paas/v4", "", "")
-	if p := prices[llm.ProDeployment]; p.In != 0.6 || p.Out != 2.2 {
-		t.Errorf("pay-as-you-go pro = %+v, want 0.6/2.2", p)
+	prices, _ = Resolve(reg, "https://api.vendor.example/api/paas/v4", embed)
+	if p := prices[embed]; p.In != 0.02 {
+		t.Errorf("pay-as-you-go embed = %+v, want 0.02", p)
 	}
 }
 
@@ -204,10 +204,10 @@ func TestResolve_thePortTellsLocalServersApart(t *testing.T) {
 	reg := fetchFixture(t)
 
 	// Two registry entries on 127.0.0.1; a third port is nobody's.
-	if prices, _ := Resolve(reg, "http://127.0.0.1:1234/v1", "", ""); len(prices) != 2 {
+	if prices, _ := Resolve(reg, "http://127.0.0.1:1234/v1", embed); len(prices) != 3 {
 		t.Errorf("the registry's own port must match, got %v", prices)
 	}
-	prices, warnings := Resolve(reg, "http://127.0.0.1:8000/v1", "", "")
+	prices, warnings := Resolve(reg, "http://127.0.0.1:8000/v1", embed)
 	if len(prices) != 0 {
 		t.Errorf("an unlisted port must not borrow a neighbour's price, got %v", prices)
 	}
@@ -219,13 +219,13 @@ func TestResolve_thePortTellsLocalServersApart(t *testing.T) {
 func TestResolve_providersSharingOneEndpointMustAgreeOrNothingIsPriced(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// Both gateway entries price Pro alike but the gate differently: the
+	// The two gateway entries price the embedding model differently: the
 	// endpoint alone does not say which contract applies.
-	prices, warnings := Resolve(reg, "https://api.gateway.example/v1", "", "")
+	prices, warnings := Resolve(reg, "https://api.gateway.example/v1", embed)
 	if len(prices) != 0 {
 		t.Errorf("a disagreement must price nothing, got %v", prices)
 	}
-	if len(warnings) < 1 || !strings.Contains(warnings[0], "differently") || !strings.Contains(warnings[0], llm.ShortGateDeployment) {
+	if len(warnings) < 1 || !strings.Contains(warnings[0], "differently") || !strings.Contains(warnings[0], embed) {
 		t.Errorf("warnings = %v, want the disagreement named", warnings)
 	}
 }
@@ -233,36 +233,36 @@ func TestResolve_providersSharingOneEndpointMustAgreeOrNothingIsPriced(t *testin
 func TestResolve_anUnknownEndpointIsTokensOnlyForTheWholeTable(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// The embedding side alone would resolve, and a total made of the
-	// embedding call only would read as the cost of the turn.
-	prices, warnings := Resolve(reg, "http://llm.internal.example/v1", openaiURL, embed)
+	// The deployments alone would resolve, and a total missing the embedding
+	// calls would read as the cost of the turn.
+	prices, warnings := Resolve(reg, "http://embed.internal.example/v1", embed)
 
 	if len(prices) != 0 {
-		t.Errorf("an unknown LLM endpoint must empty the whole table, got %v", prices)
+		t.Errorf("an unknown embed endpoint must empty the whole table, got %v", prices)
 	}
-	if len(warnings) != 2 || !strings.Contains(warnings[0], "llm.internal.example") || !strings.Contains(warnings[1], "tokens only") {
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "embed.internal.example") || !strings.Contains(warnings[1], "tokens only") {
 		t.Errorf("warnings = %v, want the endpoint named and the consequence stated", warnings)
 	}
 }
 
-func TestResolve_aMatchedProviderMissingOneModelEmptiesTheTable(t *testing.T) {
+func TestResolve_aMatchedProviderMissingTheModelEmptiesTheTable(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// The reseller lists only the Pro deployment: a total without the gate
-	// calls would undercount every turn.
-	prices, warnings := Resolve(reg, "https://llm.reseller.example/v1", openaiURL, "text-embedding-3-large")
+	// OpenAI lists the small embedding model, not the large one: a total
+	// without the embedding calls would undercount every turn.
+	prices, warnings := Resolve(reg, openaiURL, "text-embedding-3-large")
 
 	if len(prices) != 0 {
 		t.Errorf("one unpriced model must empty the table, got %v", prices)
 	}
-	if len(warnings) != 3 || !strings.Contains(warnings[0], llm.ShortGateDeployment) || !strings.Contains(warnings[1], "text-embedding-3-large") {
-		t.Errorf("warnings = %v, want one per gap and the consequence", warnings)
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "text-embedding-3-large") || !strings.Contains(warnings[1], "tokens only") {
+		t.Errorf("warnings = %v, want the gap and the consequence", warnings)
 	}
 }
 
 func TestResolve_anEmptyEmbedEndpointIsSkippedSilently(t *testing.T) {
 	reg := fetchFixture(t)
-	prices, warnings := Resolve(reg, xiaomiURL, "", embed)
+	prices, warnings := Resolve(reg, "", embed)
 	if _, ok := prices[embed]; ok {
 		t.Error("nothing embeds without an endpoint, so nothing is priced")
 	}
@@ -271,30 +271,38 @@ func TestResolve_anEmptyEmbedEndpointIsSkippedSilently(t *testing.T) {
 	}
 }
 
-func TestTable_startsFromTheOverrideAndKeepsItOverTheRegistry(t *testing.T) {
-	override := usage.Prices{llm.ProDeployment: usage.Price{In: 9, Out: 9}}
-	table := NewTable(override)
-	if p := table.Prices()[llm.ProDeployment]; p.In != 9 {
-		t.Fatalf("before any fetch the override must already apply, got %+v", p)
+func TestTable_isEmptyUntilTheRegistryAnswers(t *testing.T) {
+	table := NewTable()
+	if got := table.Prices(); len(got) != 0 {
+		t.Fatalf("before any fetch the table must be empty, got %v", got)
 	}
 
 	srv := serve(t, fixture, http.StatusOK)
 	err := table.Refresh(context.Background(), Source{
 		URL: srv.URL, Client: srv.Client(),
-		LLMBaseURL: xiaomiURL, EmbedBaseURL: openaiURL, EmbedModel: embed,
+		EmbedBaseURL: openaiURL, EmbedModel: embed,
 	})
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	got := table.Prices()
-	if p := got[llm.ProDeployment]; p.In != 9 || p.Out != 9 {
-		t.Errorf("a configured pair wins over the registry, got %+v", p)
+	if p := got[llm.ProDeployment]; p.In != 0.435 || p.Out != 0.87 {
+		t.Errorf("pro = %+v, want the registry's 0.435/0.87", p)
 	}
 	if p := got[llm.ShortGateDeployment]; p.In != 0.14 {
-		t.Errorf("the rest comes from the registry, got %+v", p)
+		t.Errorf("gate = %+v, want the registry's 0.14", p)
 	}
 	if p := got[embed]; p.In != 0.02 {
-		t.Errorf("embed from the registry, got %+v", p)
+		t.Errorf("embed = %+v, want the registry's 0.02", p)
+	}
+}
+
+func TestNewFixedTable_servesWhatItWasGivenAndCopiesIt(t *testing.T) {
+	given := usage.Prices{llm.ProDeployment: usage.Price{In: 1, Out: 2}}
+	table := NewFixedTable(given)
+	given[llm.ProDeployment] = usage.Price{In: 9, Out: 9}
+	if p := table.Prices()[llm.ProDeployment]; p.In != 1 || p.Out != 2 {
+		t.Errorf("pro = %+v, want the 1/2 it was built with", p)
 	}
 }
 
@@ -306,9 +314,9 @@ func TestTable_aNilTableIsAnEmptyOne(t *testing.T) {
 }
 
 func TestTable_aFailedRefreshLeavesTheTableUnchanged(t *testing.T) {
-	table := NewTable(nil)
+	table := NewTable()
 	good := serve(t, fixture, http.StatusOK)
-	src := Source{URL: good.URL, Client: good.Client(), LLMBaseURL: xiaomiURL}
+	src := Source{URL: good.URL, Client: good.Client()}
 	if err := table.Refresh(context.Background(), src); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -331,11 +339,11 @@ func TestTable_runFetchesOnceAndStopsWithTheContext(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	table := NewTable(nil)
+	table := NewTable()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		table.Run(ctx, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: xiaomiURL})
+		table.Run(ctx, Source{URL: srv.URL, Client: srv.Client()})
 		close(done)
 	}()
 	// Run applies the first table before it sleeps, so the goroutine can be
@@ -358,13 +366,12 @@ func TestTable_runFetchesOnceAndStopsWithTheContext(t *testing.T) {
 	}
 }
 
-func TestStart_anEmptyURLMeansNoWorkerAndOnlyTheOverride(t *testing.T) {
+func TestStart_anEmptyURLMeansNoWorkerAndAnEmptyTable(t *testing.T) {
 	var workers sync.WaitGroup
-	override := usage.Prices{llm.ProDeployment: usage.Price{In: 1, Out: 2}}
-	table := Start(context.Background(), &workers, override, Source{URL: ""})
+	table := Start(context.Background(), &workers, Source{URL: ""})
 	workers.Wait() // returns at once: nothing was started
-	if p := table.Prices()[llm.ProDeployment]; p.In != 1 || p.Out != 2 {
-		t.Errorf("override = %+v, want 1/2", p)
+	if got := table.Prices(); len(got) != 0 {
+		t.Errorf("prices = %v, want tokens only", got)
 	}
 }
 
@@ -372,7 +379,7 @@ func TestStart_withAURLRunsTheWorkerUntilTheContextEnds(t *testing.T) {
 	srv := serve(t, fixture, http.StatusOK)
 	var workers sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
-	table := Start(ctx, &workers, nil, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: xiaomiURL})
+	table := Start(ctx, &workers, Source{URL: srv.URL, Client: srv.Client()})
 	deadline := time.Now().Add(5 * time.Second)
 	for table.Prices()[llm.ProDeployment].In == 0 {
 		if time.Now().After(deadline) {
