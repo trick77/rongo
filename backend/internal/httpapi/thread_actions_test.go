@@ -129,6 +129,25 @@ func TestRenameThread_refusesAnEmptyTitle(t *testing.T) {
 	}
 }
 
+func TestRenameThread_refusesATitleLongerThanTheRailCanHold(t *testing.T) {
+	// A title is a line of text. One that is not would be stored, then shipped
+	// with the list on every load of the rail.
+	ctx := context.Background()
+	srv, st := threadActions(t)
+	th, _ := st.Create(ctx, testSubject, "How is sign-in done?")
+
+	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%d", th.ID),
+		`{"title":"`+strings.Repeat("a", 49)+`"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	list, _ := st.List(ctx, testSubject)
+	if !strings.HasPrefix(list[0].Title, "How is sign-in") {
+		t.Errorf("title = %q, want the placeholder untouched", list[0].Title)
+	}
+}
+
 func TestRenameThread_anotherReadersThreadIsNotFound(t *testing.T) {
 	ctx := context.Background()
 	srv, st := threadActions(t)

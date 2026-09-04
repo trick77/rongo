@@ -587,21 +587,36 @@ type threadRequest struct {
 	Title string `json:"title"`
 }
 
+// maxTitleRunes is what a thread title may be, matching the length the store
+// cuts its placeholder to.
+const maxTitleRunes = 48
+
 func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	u, id, ok := s.threadTarget(w, r)
 	if !ok {
 		return
 	}
 	var req threadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	// Capped like every other body this package reads: a title is a line of
+	// text, and one that is not would be buffered here and then shipped with
+	// the list on every load of the rail.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.Title) == "" {
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, req.Title)
+	// The same length the placeholder is cut to, so a typed title cannot
+	// outgrow the one the model writes. Refused rather than truncated: the
+	// rail would otherwise show something nobody asked for.
+	if len([]rune(title)) > maxTitleRunes {
+		http.Error(w, "title is too long", http.StatusBadRequest)
+		return
+	}
+	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
 	if err != nil {
 		slog.Error("rename thread failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

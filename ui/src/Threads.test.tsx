@@ -167,6 +167,34 @@ describe("Threads", () => {
       expect(screen.queryByRole("menu")).toBeNull();
     });
 
+    // Switching thread from under an open menu would leave it hanging off the
+    // row that was just left, pointing at a thread nobody is looking at.
+    it("closes when another row is picked", async () => {
+      threadList(two);
+      const onSelect = vi.fn();
+      render(<Threads activeId={null} onSelect={onSelect} version={0} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("button", { name: "Where does the token come from?" }));
+
+      expect(onSelect).toHaveBeenCalledWith(3);
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // A menu already open when the question is sent has to go with the
+    // trigger: left standing, it still offers Delete on the thread the
+    // answer is landing on.
+    it("closes when a turn starts under it", async () => {
+      threadList(two);
+      const { rerender } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await openMenu("How does shipping work?");
+      expect(screen.getByRole("menu")).toBeTruthy();
+
+      rerender(<Threads activeId={7} onSelect={() => {}} version={0} busy />);
+
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
     // Deleting the thread being written would pull the record out from under
     // the answer still landing on it.
     it("is not offered at all while a turn runs", async () => {

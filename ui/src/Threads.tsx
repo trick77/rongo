@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
@@ -67,15 +67,17 @@ export default function Threads({
   const [renaming, setRenaming] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState<Thread | null>(null);
   const [pending, setPending] = useState(false);
-  const rail = useRef<HTMLElement | null>(null);
 
-  // The menu closes on a click anywhere outside the rail's list, and on
-  // Escape. Inside, the row's own handlers decide.
+  // The menu closes on a pointer anywhere but the menu itself and the kebabs
+  // — another row's title included, which switches thread and would otherwise
+  // leave the menu hanging off the row that was left. The kebabs are spared
+  // because their own click toggles, and closing here first would make the
+  // toggle reopen the menu that was just dismissed.
   useEffect(() => {
     if (openMenu === null) return;
     function onPointerDown(e: PointerEvent) {
       const target = e.target;
-      if (target instanceof Node && rail.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[role="menu"], [aria-haspopup="menu"]')) return;
       setOpenMenu(null);
     }
     function onKeyDown(e: KeyboardEvent) {
@@ -167,10 +169,13 @@ export default function Threads({
     // The 28px pitch is the desktop rhythm; a finger needs more. Keyed off the
     // pointer, not the width, so an iPad gets the bigger row too — and an iPad
     // on a trackpad reports a fine pointer and keeps the tight one.
-    "flex h-7 pointer-coarse:h-11 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50";
+    //
+    // No disabled: dimming — this class dresses the row's <div>, which cannot
+    // be disabled. The title button inside it carries its own.
+    "flex h-7 pointer-coarse:h-11 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5";
 
   return (
-    <nav ref={rail} aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
+    <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
         {groups.map((g) => (
           // "Today" is not painted: it always heads the list, directly under
@@ -192,7 +197,10 @@ export default function Threads({
             <ul className="flex flex-col">
               {g.items.map((t) => {
                 const active = t.id === activeId;
-                const menuOpen = openMenu === t.id;
+                // Gated on busy as well as on the id: the trigger is dropped
+                // the moment a turn starts, and a menu left standing over it
+                // would still offer Delete on the thread being written.
+                const menuOpen = openMenu === t.id && !busy;
                 return (
                   <li key={t.id} className="relative min-w-0">
                     <div
