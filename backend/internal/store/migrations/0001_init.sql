@@ -183,9 +183,9 @@ CREATE TABLE messages (
     answer     TEXT NOT NULL DEFAULT '',
     error      TEXT NOT NULL DEFAULT '',
     -- Where this turn came from, when it resumed a clarification. Recorded on
-    -- the NEW message rather than as a `chosen` flag on the clarification:
-    -- picking a second candidate later is a second turn, and nothing in the
-    -- record is ever overwritten.
+    -- the NEW message rather than as a `chosen` flag on the clarification: the
+    -- answer is what closes the card, so a turn that never produced one leaves
+    -- it open for a retry, and nothing in the record is ever overwritten.
     from_clarification_id INTEGER REFERENCES clarifications(id) ON DELETE SET NULL,
     from_candidate_idx    INTEGER NOT NULL DEFAULT -1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

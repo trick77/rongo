@@ -70,15 +70,21 @@ describe("Clarify", () => {
     expect(chosenButton?.textContent).toContain("Chosen");
   });
 
-  it("leaves another candidate clickable after the choice - it starts a new turn", async () => {
+  it("locks every candidate once the card is answered", async () => {
+    // One card, one answer. The reopened card is a record of what was
+    // decided, not a second chance to decide it.
     const onChoose = vi.fn();
     const user = userEvent.setup();
     strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={onChoose} />);
 
     await user.click(screen.getByRole("button", { name: /Chosen/ }));
     await user.click(screen.getByText("Through the legacy adapter"));
+    await user.click(screen.getByText("Through the login service"));
 
-    expect(onChoose).toHaveBeenCalledWith(1);
+    expect(onChoose).not.toHaveBeenCalled();
+    for (const title of ["Through the login service", "Through the legacy adapter"]) {
+      expect(screen.getByText(title).closest("button")?.hasAttribute("disabled")).toBe(true);
+    }
   });
 
   it("rotates the chevron by 90 degrees on open, without swapping the glyph", async () => {

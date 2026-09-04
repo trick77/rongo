@@ -851,6 +851,68 @@ func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 	_ = clarID
 }
 
+func TestAClarificationIsAnsweredOnceAndASecondChoiceIsRefused(t *testing.T) {
+	// A card is closed by the answer that came out of it. A second choice
+	// would be a second answer to a question already decided, so it is
+	// refused before it costs a model call.
+	srv, store := newTestServerWithStore(t, withAskerResuming())
+	msgID, _ := seedClarification(t, store)
+	threadID := threadOf(t, store, msgID)
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("the first choice must answer:\n%s", body)
+	}
+	before, err := store.Messages(context.Background(), testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+
+	// When the same card is answered again, with the other candidate
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":0}`, msgID))
+
+	// Then
+	if code != http.StatusConflict {
+		t.Errorf("status %d, want 409 — the card was already answered", code)
+	}
+	after, err := store.Messages(context.Background(), testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("the refused choice wrote %d extra messages", len(after)-len(before))
+	}
+}
+
+func TestAResumeThatFailedLeavesTheCardOpenForARetry(t *testing.T) {
+	// The choice is recorded by the answer, so a turn that never produced one
+	// must not close the card — otherwise one upstream hiccup would strand the
+	// reader with a locked card and no answer.
+	srv, store := newTestServerWithStore(t, func(f *fakeAsker) {
+		withAskerResuming()(f)
+		f.resumeErr = errors.New("upstream down")
+	})
+	msgID, _ := seedClarification(t, store)
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":1}`, msgID))
+
+	clar, err := store.Clarification(context.Background(), testSubject, msgID)
+	if err != nil || clar == nil {
+		t.Fatalf("clarification: %v", err)
+	}
+	if clar.Answered {
+		t.Fatal("a failed resume must leave the card open")
+	}
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":1}`, msgID))
+	if code == http.StatusConflict {
+		t.Error("the retry after a failed resume was refused as already answered")
+	}
+}
+
 func TestChoiceOutOfRangeIsRefusedNotGuessed(t *testing.T) {
 	srv, store := newTestServerWithStore(t, withAskerResuming())
 	msgID, _ := seedClarification(t, store)
