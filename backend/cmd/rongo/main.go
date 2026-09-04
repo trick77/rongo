@@ -26,6 +26,7 @@ import (
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -259,7 +260,15 @@ func main() {
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}
-	deps.Prices = cfg.Prices
+	// Prices come from the registry, matched by the hosts rongo talks to;
+	// BACKEND_PRICE_* sits on top. The table is read per report, so a fetch
+	// that lands after boot prices the thread that is already open.
+	deps.Prices = pricing.Start(pollCtx, &workers, cfg.Prices, pricing.Source{
+		URL:          cfg.PricesURL,
+		LLMBaseURL:   cfg.LLMBaseURL,
+		EmbedBaseURL: cfg.EmbedBaseURL,
+		EmbedModel:   cfg.EmbedModel,
+	})
 	srv := httpapi.NewServer(deps)
 
 	httpServer := &http.Server{

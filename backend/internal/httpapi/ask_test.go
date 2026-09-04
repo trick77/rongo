@@ -14,6 +14,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/threads"
@@ -684,7 +685,7 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 		f.tokens = []string{"The ", "answer."}
 		f.calls = gateCalls
 	})
-	srv.deps.Prices = usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}}
+	srv.deps.Prices = pricing.NewTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
 	id := threadIDOf(t, body)
 

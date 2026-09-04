@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -84,10 +85,15 @@ type Config struct {
 	LLMBaseURL string
 	LLMAPIKey  string
 	// Prices is what the endpoints charge, keyed by model name, in USD per
-	// million tokens. All optional: unset means the UI shows tokens only.
-	// Nobody guesses a price — a made-up figure next to a real token count
-	// would read as a bill.
+	// million tokens, as far as BACKEND_PRICE_* says so. It is the override
+	// on top of the registry, not the usual source: nobody types a price.
+	// Nobody guesses one either — a made-up figure next to a real token
+	// count would read as a bill.
 	Prices usage.Prices
+	// PricesURL is the registry the price table is resolved from, matched by
+	// the endpoints' hosts. Empty turns the lookup off: tokens only, unless
+	// BACKEND_PRICE_* says otherwise.
+	PricesURL string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -156,6 +162,7 @@ func Load() (Config, error) {
 		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
 		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
 		LLMAPIKey:         strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
+		PricesURL:         envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
@@ -301,22 +308,32 @@ func envIntOr(key string, fallback int) int {
 }
 
 // loadPrices reads the optional BACKEND_PRICE_* variables, USD per million
-// tokens, into a table keyed by the model each pair belongs to. A model with
-// neither side set is absent from the table, not priced at zero: absent means
-// "unknown", and the UI shows tokens only for it. Half a pair is an error,
-// not a price: pricing the missing side at zero would show a definite
-// figure that undercounts, and a mistyped value ("0,4") reads as unset. The
-// deployment names come from internal/llm because that is where they are
-// fixed.
+// tokens, into a table keyed by the model each pair belongs to: the override
+// on top of the registry. A model with neither side set is absent from the
+// table, not priced at zero: absent means "the registry decides". An
+// explicit 0 is a price — the override exists for the contract the registry
+// gets wrong, and a flat-rate plan is the usual case. Half a pair is an
+// error, not a price: pricing the missing side at zero would show a
+// definite figure that undercounts. So is a value that does not parse
+// ("0,4"): read as unset, it would hand the model back to the registry
+// without a word. The deployment names come from internal/llm because that
+// is where they are fixed.
 func loadPrices(embedModel string) (usage.Prices, error) {
 	p := usage.Prices{}
 	add := func(model, inKey, outKey string) error {
-		in, out := envFloatOr(inKey, 0), envFloatOr(outKey, 0)
+		in, inSet, err := envPrice(inKey)
+		if err != nil {
+			return err
+		}
+		out, outSet, err := envPrice(outKey)
+		if err != nil {
+			return err
+		}
 		switch {
-		case in > 0 && out > 0:
+		case inSet && outSet:
 			p[model] = usage.Price{In: in, Out: out}
-		case in > 0 || out > 0:
-			return fmt.Errorf("%s and %s must both be set as positive numbers, or neither; half a price would show a cost that undercounts", inKey, outKey)
+		case inSet || outSet:
+			return fmt.Errorf("%s and %s must both be set, or neither; half a price would show a cost that undercounts", inKey, outKey)
 		}
 		return nil
 	}
@@ -326,10 +343,29 @@ func loadPrices(embedModel string) (usage.Prices, error) {
 	if err := add(llm.ShortGateDeployment, "BACKEND_PRICE_GATE_IN", "BACKEND_PRICE_GATE_OUT"); err != nil {
 		return nil, err
 	}
-	if v := envFloatOr("BACKEND_PRICE_EMBED", 0); v > 0 {
+	v, set, err := envPrice("BACKEND_PRICE_EMBED")
+	if err != nil {
+		return nil, err
+	}
+	if set {
 		p[embedModel] = usage.Price{In: v}
 	}
 	return p, nil
+}
+
+// envPrice reads one price variable: the value and whether it was set at
+// all. Empty is unset. Anything else must be a number that is not
+// negative.
+func envPrice(key string) (float64, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0, false, nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 {
+		return 0, false, fmt.Errorf("%s=%q is not a price: USD per million tokens, 0 or more", key, raw)
+	}
+	return v, true, nil
 }
 
 // envFloatOr reads a positive float setting. A malformed or non-positive
@@ -360,6 +396,18 @@ func envBoolOr(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+// envOrUnset is envOr for a setting where "" is a value: a variable that is
+// present and empty turns the feature off, only an absent one gets the
+// default. envOr cannot say that, because compose passes every variable
+// through and an unset one arrives empty — so this default is what a
+// compose deployment gets only when the variable is left out of the file.
+func envOrUnset(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(v)
+	}
+	return fallback
 }
 
 func envOr(key, fallback string) string {

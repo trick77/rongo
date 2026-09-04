@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
@@ -72,10 +73,11 @@ type Deps struct {
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string, lang ask.Language) string
-	// Prices turns stored tokens into money, per model. Empty means the
-	// browser sees tokens only — the honest default when nobody has told
-	// rongo what the endpoint charges.
-	Prices usage.Prices
+	// Prices turns stored tokens into money, per model, read at report time
+	// because the table is refreshed from a registry behind the process's
+	// back. Nil or empty means the browser sees tokens only — the honest
+	// default when nothing says what the endpoint charges.
+	Prices *pricing.Table
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.
