@@ -24,10 +24,10 @@ type Asker interface {
 	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 	// Resume continues a turn from the hits one clarification candidate was
 	// built from — no search, no routing.
-	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, ev ask.Events) (ask.Answer, error)
+	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, scope ask.Scope, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
-	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, ev ask.Events) (ask.Answer, error)
+	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, scope ask.Scope, ev ask.Events) (ask.Answer, error)
 }
 
 // turnFailed is what a failed turn says, in the stream AND in the stored
@@ -122,6 +122,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// code is fixed.
 	var resume *threads.Clarification
 	var resumeHits []retrieve.Hit
+	var resumeScope ask.Scope
 	if req.ClarificationMessageID != 0 {
 		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
@@ -153,6 +154,19 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			slog.Error("resolve candidate hits failed", "err", err)
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
+		}
+		// The scope the card was asked under carries over. Without it a resumed
+		// turn re-answers "how do loom and rongo differ" from rongo-only
+		// sources with no rule saying loom is not indexed, and the model
+		// writes loom's side out of its own training.
+		m, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.ClarificationMessageID)
+		if err != nil {
+			slog.Error("resolve clarification scope failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if ok {
+			resumeScope = m.Scope
 		}
 		resume = c
 		resumeHits = hits
@@ -252,6 +266,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	events := ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
+		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
 	}
 
 	// closeUsage stores what the turn paid for and tells the browser, on
@@ -272,7 +287,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resume != nil {
-		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, events)
+		// The resumed turn is a turn of its own: it says what its scope was
+		// and records it, the same way handleReexplain does. Without this the
+		// notice stops at the card, and a re-explain of the resumed answer
+		// reads an empty scope and drops the rule that keeps the model from
+		// writing about a repository the index never had.
+		if notice := ask.ScopeNotice(lang, resumeScope.Known, resumeScope.Unknown); notice != "" {
+			send("notice", map[string]any{"text": notice})
+		}
+		if serr := s.deps.Threads.SetScope(record, msg.ID, resumeScope); serr != nil {
+			slog.Error("record scope failed", "err", serr)
+		}
+		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
 		if err != nil {
 			slog.Error("resumed turn failed", "err", err)
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
@@ -309,6 +335,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		send("error", map[string]any{"message": turnFailed})
 		return
 	}
+	// Stored whichever way the turn ended, before the ending is sent: a card
+	// and an answer both belong to a question that named repositories, and a
+	// resumed turn reads the scope back off this row.
+	if clar != nil {
+		if serr := s.deps.Threads.SetScope(record, msg.ID, clar.Scope); serr != nil {
+			slog.Error("record scope failed", "err", serr)
+		}
+	} else if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
+		slog.Error("record scope failed", "err", serr)
+	}
+
 	if clar != nil {
 		if _, cerr := s.deps.Threads.Clarify(record, msg.ID, *clar); cerr != nil {
 			slog.Error("record clarification failed", "err", cerr)
@@ -466,7 +503,18 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// as every other write in this package.
 	record := context.WithoutCancel(ctx)
 
-	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, ask.Events{
+	// The scope of the turn being re-explained carries over with its sources:
+	// same question, same corpus, so the same rules about what was and was not
+	// in the index. Rendered for this turn's reader too — the new message is a
+	// turn of its own and has to stand on its own after a reload.
+	if notice := ask.ScopeNotice(lang, msg.Scope.Known, msg.Scope.Unknown); notice != "" {
+		send("notice", map[string]any{"text": notice})
+	}
+	if err := s.deps.Threads.SetScope(record, newMsg.ID, msg.Scope); err != nil {
+		slog.Error("record scope failed", "err", err)
+	}
+
+	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})

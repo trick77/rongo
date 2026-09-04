@@ -27,7 +27,7 @@ func TestRouteNamesTheCandidatesInTheReadersLanguage(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie wird angemeldet?", LanguageDE, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 	// that has just read two thousand tokens of English tends to answer in
 	// it. The closing line is what keeps a German answer German.
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Count(*prompt, "German") < 2 {

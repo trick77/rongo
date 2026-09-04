@@ -33,6 +33,10 @@ type fakeAsker struct {
 	err       error
 	gotAud    ask.Audience
 	gotLang   ask.Language
+	// gotScope is the scope a resumed or re-explained turn was handed, so a
+	// test can check the handler carried it over from the stored message
+	// rather than starting the turn with none.
+	gotScope ask.Scope
 	// calls is what the fake "pays for" before it decides how the turn ends,
 	// recorded into the meter on the context the way the real clients do.
 	calls []usage.Call
@@ -46,6 +50,11 @@ type fakeAsker struct {
 
 	reexplainTokens []string
 	reexplainErr    error
+
+	// notice, when set, is what Run reports about the turn's scope, and
+	// scope is what it hands back for the record.
+	notice string
+	scope  ask.Scope
 }
 
 func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
@@ -56,6 +65,9 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 	}
 	if f.err != nil {
 		return ask.Answer{}, nil, f.err
+	}
+	if f.notice != "" && ev.OnNotice != nil {
+		ev.OnNotice(f.notice)
 	}
 	if f.clarification != nil {
 		return ask.Answer{}, f.clarification, nil
@@ -70,13 +82,14 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text, Citations: f.citations}, nil, nil
+	return ask.Answer{Text: text, Citations: f.citations, Scope: f.scope}, nil, nil
 }
 
 // Resume answers from the candidate's own hits — it never searches, which is
 // the whole point of a resumed turn.
-func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
+	f.gotScope = gotScope
 	f.gotLang = lang
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
@@ -96,8 +109,9 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
-func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
 	f.gotAud = aud
+	f.gotScope = gotScope
 	f.gotLang = lang
 	for _, c := range f.calls {
 		usage.Record(ctx, c)

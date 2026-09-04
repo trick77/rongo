@@ -92,6 +92,11 @@ type Answer struct {
 	// and later re-explain the same turn for the other audience without
 	// searching or gathering again.
 	Sources []Source
+	// Scope is what the question said about repositories, as the index
+	// resolved it. Carried out of the turn so the caller can store it: the
+	// sentence a reader sees is rendered from it, and a later resume or
+	// re-explain rebuilds the same prompt rules from it.
+	Scope Scope
 }
 
 // Answerer writes the answer. This is the only step that runs on Pro, and the
@@ -140,6 +145,33 @@ Audience: business analyst. Explain the mechanism in three to five paragraphs,
 in the language of the business domain. No source code, no signatures, no file
 paths in running text. Answer the question and then stop - edge cases belong in
 a follow-up.`
+
+// answerCompare is added when the question named two or more repositories the
+// index carries. It has to be explicit about covering every one of them
+// because answerBA's "answer the question and then stop" reads, on its own,
+// as licence to explain the first mechanism and finish — which on a question
+// that named both sides is half an answer.
+//
+// It takes the named repositories as its one format argument, spelled the way
+// the index spells them.
+const answerCompare = `
+
+The question names these repositories: %s. Each has its own implementation and
+all of them are in the sources. Cover every one of them, say plainly where they
+differ and where they agree, and attribute every claim to the repository it
+came from. Do not answer for one and leave the others out; do not merge them
+into a single mechanism they do not share. Repository names stay as they are.`
+
+// answerMissingRepo is added when the question named a repository the index
+// does not carry. Without it the model is handed "how do loom and rongo
+// differ" plus rongo-only sources, and writes loom's side from its own
+// training — the invention the whole prompt is built to prevent.
+const answerMissingRepo = `
+
+The question names repositories that are NOT indexed: %s. There are no sources
+for them and you know nothing about them. Say in one sentence that they are not
+in the index, answer for the rest, and make no claim of any kind about their
+code - not a guess, not a comparison, not "presumably".`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
@@ -199,6 +231,78 @@ func NothingFound(lang Language, terms []string) string {
 	return nothingFound[l] + " " + searchedFor[l] + ": " + strings.Join(terms, " · ") + "."
 }
 
+// Scope is what the question said about repositories, after the index has
+// been asked which of those names it carries. It travels from the pipeline to
+// the answer prompt and, for Unknown, to the reader.
+type Scope struct {
+	// Known are the named repositories the index carries, in the order the
+	// question named them. Two or more means the turn is a comparison.
+	Known []string
+	// Unknown are the named repositories the index does not carry. The search
+	// silently ignores them — it has to, or a mishearing would wipe the whole
+	// result — so this is the only thing that keeps a turn from answering
+	// about code the reader never asked about.
+	Unknown []string
+}
+
+// scopeNotice is the "one of the repositories you named is not indexed"
+// sentence, in the language the reader asked for. Templated rather than
+// written by a model, exactly like nothingFound: a person reads it, so the
+// language invariant applies, and no model call is worth spending on a
+// sentence whose content is already known.
+//
+// Two format arguments: the missing names, then the ones actually searched.
+var scopeNotice = map[Language]string{
+	LanguageEN: "No repository called %s in the index. Answered for %s alone.",
+	LanguageDE: "Kein Repository namens %s im Index. Nur %s beantwortet.",
+	LanguageFR: "Aucun dépôt nommé %s dans l'index. Réponse portant sur %s uniquement.",
+	LanguageIT: "Nessun repository di nome %s nell'indice. Risposta solo su %s.",
+}
+
+// scopeNoticeWhole is the same sentence when the question named nothing the
+// index carries: there is no narrowed scope to name, so the turn searched
+// everything.
+var scopeNoticeWhole = map[Language]string{
+	LanguageEN: "No repository called %s in the index. Searched all indexed repositories.",
+	LanguageDE: "Kein Repository namens %s im Index. Alle indexierten Repositories durchsucht.",
+	LanguageFR: "Aucun dépôt nommé %s dans l'index. Recherche sur tous les dépôts indexés.",
+	LanguageIT: "Nessun repository di nome %s nell'indice. Cercato in tutti i repository indicizzati.",
+}
+
+// ScopeNotice is what the reader is told about a repository the index does not
+// carry, or "" when every named repository was found — which is the ordinary
+// case, and says nothing.
+func ScopeNotice(lang Language, known, unknown []string) string {
+	if len(unknown) == 0 {
+		return ""
+	}
+	l := ParseLanguage(string(lang))
+	missing := strings.Join(unknown, ", ")
+	if len(known) == 0 {
+		return fmt.Sprintf(scopeNoticeWhole[l], missing)
+	}
+	return fmt.Sprintf(scopeNotice[l], missing, strings.Join(known, ", "))
+}
+
+// coveredRepos is the named repositories that actually have a source in front
+// of the model, in the order the question named them.
+func coveredRepos(known []string, sources []Source) []string {
+	if len(known) == 0 {
+		return nil
+	}
+	has := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		has[s.Repo] = true
+	}
+	var out []string
+	for _, n := range known {
+		if has[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // Answer writes the answer for one turn, streaming it token by token.
 //
 // With nothing gathered it returns the "nothing found" answer WITHOUT calling
@@ -206,7 +310,7 @@ func NothingFound(lang Language, terms []string) string {
 // fluently from its own training, and that answer would be about some other
 // codebase — the single most expensive failure this product can produce.
 func (a *Answerer) Answer(ctx context.Context, question string, audience Audience, lang Language,
-	sources []Source, onToken func(string)) (Answer, error) {
+	sources []Source, scope Scope, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, nil)}, nil
@@ -218,6 +322,20 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		system += answerDev
 	} else {
 		system += answerBA
+	}
+	// After the audience block, so "cover every one of them" is read against
+	// the shape the audience block just set rather than before it.
+	//
+	// Against the repositories the SOURCES actually cover, never against the
+	// names alone: a named repository can be indexed, be searched on its own,
+	// and still return nothing for this question. Telling the model to cover
+	// it anyway is an instruction to invent, which is the one thing the rest
+	// of this prompt exists to prevent.
+	if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+	}
+	if len(scope.Unknown) > 0 {
+		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}
 	system += answerDiagram
 	// Said twice, first and last: the sources in between are code and comments

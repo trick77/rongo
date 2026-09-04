@@ -11,11 +11,11 @@ func TestAnswer_theLanguageReachesThePrompt(t *testing.T) {
 	// make the selector decorative. An unknown value falls back to English
 	// rather than failing the turn.
 	cDE, promptDE, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cDE).Answer(context.Background(), "How?", AudienceBA, LanguageDE, twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cDE).Answer(context.Background(), "How?", AudienceBA, LanguageDE, twoSources(), Scope{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	cXX, promptXX, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cXX).Answer(context.Background(), "How?", AudienceBA, Language("xx"), twoSources(), nil); err != nil {
+	if _, err := NewAnswerer(cXX).Answer(context.Background(), "How?", AudienceBA, Language("xx"), twoSources(), Scope{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 

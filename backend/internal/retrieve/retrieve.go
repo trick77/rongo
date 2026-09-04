@@ -101,6 +101,151 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 	return r.searchTexts(ctx, q.texts(), repos, q.K)
 }
 
+// ResolveRepos sorts what a question said about repositories into the names
+// the index carries and the names it does not.
+//
+// Search resolves the first half for itself and keeps the result — which is
+// enough to search with and not enough to answer with. Two decisions upstream
+// need the halves by name: a question naming two indexed repositories is
+// asking for both and must not be turned into a card, and a name the index
+// does not carry has to be said out loud rather than silently dropped, or the
+// turn answers about code the reader did not ask about.
+//
+// known is knownRepos' own answer — the guess unioned with what the question
+// names as a whole word — so the rung upstream fires on exactly the
+// restriction the search ran under, never on a second reading of the same
+// sentence.
+//
+// unknown is the narrow part, and keeping it narrow is what stops this
+// becoming a machine for making false statements. knownRepos records what the
+// guess measured like: of nine guesses, "peeqs" was the possessive of a real
+// repository and "Peek" a plain mishearing. Saying "no repository called Peek
+// is indexed", and then telling the answer model it knows nothing about Peek
+// with peeq's code in front of it, is worse than the silence this replaced.
+// So a guess that is only a misspelling of an indexed name is dropped exactly
+// as before: not known, so it narrows nothing, and not unknown, so nothing is
+// claimed about it. Only a name resembling nothing in the index is reported.
+func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question string) (known, unknown []string, err error) {
+	known, err = r.knownRepos(ctx, want, question)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(want) == 0 {
+		return known, nil, nil
+	}
+	indexed, err := r.allRepos(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resolved := map[string]bool{}
+	for _, n := range known {
+		resolved[foldRepo(n)] = true
+	}
+	// Walked over want, not over the index: the guess's order is the order the
+	// question used, and a repeated guess must not become two notices.
+	seen := map[string]bool{}
+	for _, n := range want {
+		folded := foldRepo(n)
+		if resolved[folded] || seen[folded] {
+			// Already searched under the name the index uses, whatever the
+			// question spelled it: case, a possessive, an owner prefix.
+			continue
+		}
+		seen[folded] = true
+		if nearAnyRepo(folded, indexed) {
+			// A mishearing. Dropped in silence, exactly as before.
+			continue
+		}
+		unknown = append(unknown, n)
+	}
+	return known, unknown, nil
+}
+
+// allRepos is every repository the index carries. The table has one row per
+// configured repository, so this is a handful of names.
+func (r *Retriever) allRepos(ctx context.Context) ([]string, error) {
+	rows, err := r.store.db.QueryContext(ctx, `SELECT name FROM repo_state`)
+	if err != nil {
+		return nil, fmt.Errorf("read the indexed repositories: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("read the indexed repositories: %w", err)
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the indexed repositories: %w", err)
+	}
+	return out, nil
+}
+
+// foldRepo normalises a name for comparison: lower case (the column is a TEXT
+// PRIMARY KEY, so SQL compares it byte for byte), the owner prefix of
+// "asg017/sqlite-vec" dropped, and a trailing possessive or plural removed.
+func foldRepo(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if i := strings.LastIndexByte(s, '/'); i >= 0 {
+		s = s[i+1:]
+	}
+	s = strings.TrimSuffix(s, "'s")
+	s = strings.TrimSuffix(s, "’s")
+	return strings.TrimSuffix(s, "s")
+}
+
+// nearAnyRepo reports whether a folded guess is within one edit of an indexed
+// name — near enough to be a mishearing of it rather than a repository the
+// index is missing.
+//
+// The floor of four characters keeps the rule from swallowing short names that
+// genuinely differ. It leans towards saying nothing: a near miss dropped in
+// silence behaves exactly as it did before the notice existed, while a false
+// "not indexed" is a claim the reader has no way to check.
+func nearAnyRepo(folded string, indexed []string) bool {
+	if len([]rune(folded)) < 4 {
+		return false
+	}
+	for _, n := range indexed {
+		if withinOneEdit(folded, foldRepo(n)) {
+			return true
+		}
+	}
+	return false
+}
+
+// withinOneEdit reports whether a and b differ by at most one insertion,
+// deletion or substitution.
+func withinOneEdit(a, b string) bool {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) < len(rb) {
+		ra, rb = rb, ra
+	}
+	if len(ra)-len(rb) > 1 {
+		return false
+	}
+	var i, j, edits int
+	for i < len(ra) && j < len(rb) {
+		if ra[i] == rb[j] {
+			i, j = i+1, j+1
+			continue
+		}
+		edits++
+		if edits > 1 {
+			return false
+		}
+		if len(ra) == len(rb) {
+			i, j = i+1, j+1
+			continue
+		}
+		i++
+	}
+	return edits+(len(ra)-i) <= 1
+}
+
 // knownRepos drops names no repository in the index carries.
 //
 // The restriction is a guess: the understanding step reads it off the wording,
