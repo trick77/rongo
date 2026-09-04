@@ -19,7 +19,11 @@ export const languages: { code: string; name: string }[] = [
 
 /** What the empty page says, in the language the select is set to: the one
  * piece of chrome a reader meets before any answer, so it follows the answer
- * language too. The rest of the chrome stays English. */
+ * language too. The rest of the chrome stays English.
+ *
+ * The role names are NOT translated: they are the labels on the controls
+ * next to this text, and a body naming "un Analyste" beside a button
+ * reading "Analyst" points at something that is not on the page. */
 const welcome: Record<string, { title: string; body: string }> = {
   en: {
     title: "Ask about the code.",
@@ -40,14 +44,14 @@ const welcome: Record<string, { title: string; body: string }> = {
     body:
       "rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
       "plus d'un mécanisme, et répond avec des sources pour chaque affirmation. Choisissez un rôle : " +
-      "un Analyste reçoit le mécanisme dans les termes du métier, un Développeur les types, les " +
+      "un Analyst reçoit le mécanisme dans les termes du métier, un Developer les types, les " +
       "fonctions et les fichiers.",
   },
   it: {
     title: "Chiedi al codice.",
     body:
       "rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
-      "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analista " +
+      "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analyst " +
       "riceve il meccanismo nei termini del dominio, un Developer tipi, funzioni e file.",
   },
 };
