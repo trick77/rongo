@@ -717,7 +717,7 @@ export default function Ask({
                 </p>
                 <div className="mt-2.5 flex items-center gap-1.5">
                   {turn.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(turn.askedAt)}</time>}
-                  <span className={pill + " bg-active text-muted"}>turn {i + 1}</span>
+                  <span className={pill + " bg-active text-muted"}>Turn {i + 1}</span>
                   {turn.language !== "en" && (
                     <span className={pill + " bg-active text-muted"}>
                       {languages.find((l) => l.code === turn.language)?.name ?? turn.language}
