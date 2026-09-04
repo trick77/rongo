@@ -37,6 +37,57 @@ import { highlightBlock, languageOf } from "./highlight";
  * normal case here, not an edge case.
  */
 
+/** How long a segment of the streaming fade runs before it is closed. Text
+ * arrives token by token, but fading per token would flicker, so segments end
+ * at a clause character or once they are long enough — the same coarse
+ * granularity ../loom uses (ui/src/chat/streamFade.ts). */
+const maxSegChars = 28;
+
+/** splitIntoSegments cuts one run of prose into the pieces that fade in
+ * separately. Whitespace stays attached to the word before it, so joining the
+ * segments returns the text unchanged. */
+export function splitIntoSegments(value: string): string[] {
+  const tokens = value.match(/\S+\s*|\s+/g);
+  if (!tokens) return [value];
+  const out: string[] = [];
+  let current = "";
+  for (const tok of tokens) {
+    current += tok;
+    if (/[.!?,;:—)\]]$/.test(tok.trimEnd()) || current.length >= maxSegChars) {
+      out.push(current);
+      current = "";
+    }
+  }
+  if (current !== "") out.push(current);
+  return out;
+}
+
+/** faded wraps one run of prose in the spans that carry the fade.
+ *
+ * Keyed by where the segment starts in the whole block, never by its position
+ * among the runs. The answer re-renders on every token, and a span that
+ * remounted would restart its animation, so settled text would flicker for as
+ * long as the answer keeps growing. An offset survives the event that shifts
+ * the runs around: the moment a marker's closing bracket arrives, the prose
+ * before it stops being the tail of the block and becomes a run of its own,
+ * and only an absolute offset keeps those segments the same elements.
+ *
+ * Code and citation chips are deliberately NOT wrapped: a chip re-fading on
+ * every token flickers, and a span inside a highlighted block would fight
+ * the grammar's own colouring. */
+function faded(src: string, key: string, base: number): ReactNode[] {
+  let at = base;
+  return splitIntoSegments(src).map((seg) => {
+    const span = (
+      <span key={`${key}-w${at}`} className="stream-seg">
+        {seg}
+      </span>
+    );
+    at += seg.length;
+    return span;
+  });
+}
+
 /** One marker, or a grouped one: the prompt asks for [1][2], but a claim
  * resting on several sources still comes out as [1, 2] often enough. Read as
  * a single marker it matched nothing and stayed plain text next to chips. */
@@ -52,7 +103,7 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
   const known = hooks.backed !== undefined;
   for (const m of src.matchAll(markerRe)) {
     const i = m.index ?? 0;
-    if (i > last) out.push(src.slice(last, i));
+    if (i > last) out.push(...faded(src.slice(last, i), key, last));
     // Every number becomes a complete marker of its own, brackets included,
     // with the separators kept between them: a group [1, 2] reads "[1], [2]"
     // to a screen reader, a copy, or a test - each piece checkable alone.
@@ -112,7 +163,7 @@ function text(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
     });
     last = i + m[0].length;
   }
-  if (last < src.length) out.push(src.slice(last));
+  if (last < src.length) out.push(...faded(src.slice(last), key, last));
   return out;
 }
 

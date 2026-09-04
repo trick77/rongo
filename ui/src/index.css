@@ -196,6 +196,25 @@ body {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
+/* Streaming fade: a segment of newly arrived answer text appears once, from
+   dim to full, the same effect as ../loom's .ui-stream-seg. Done on opacity
+   rather than on colour: loom's keyframe ends on an explicit colour, and here
+   the segments also sit inside bold, which is a brighter colour than the
+   answer body — with animation-fill-mode forwards that would strand every
+   bold word at the body colour once its fade finished. */
+@keyframes stream-fade {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.stream-seg {
+  animation: stream-fade 420ms ease-out forwards;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -223,7 +242,8 @@ body {
   .node-now::before,
   .busybar,
   .caret,
-  .pulse {
+  .pulse,
+  .stream-seg {
     animation: none;
   }
 }
