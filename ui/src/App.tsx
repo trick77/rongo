@@ -398,7 +398,13 @@ export default function App() {
               }}
               className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
             >
-              <Icon name="code" size="21px" className="text-ink-dim" />
+              {/* The same 20px slot as the plus disc above. The Icon glyph is
+                  text, so its box is whatever advance width the font gives it
+                  — 21px here — and without the slot the two labels start a
+                  pixel apart. */}
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="code" size="21px" className="text-ink-dim" />
+              </span>
               Repos
             </button>
           </div>
@@ -484,7 +490,9 @@ export default function App() {
           {page === "repos" && (
             <div className="h-full overflow-auto">
               <div className="max-w-[1100px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-                <h2 className="font-serif text-[22px] font-medium tracking-tight text-ink sm:text-[28px]">
+                {/* leading-tight like Ask's welcome heading: without it the
+                    taller line box puts this title 3px below the other page's. */}
+                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
                   Repositories
                 </h2>
                 <p className="mt-1 mb-6 text-[14.5px] text-muted">

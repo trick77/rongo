@@ -922,29 +922,36 @@ describe("Ask, the clarification and re-explaining", () => {
  * the gap between two frames, and a fake that hands over every frame at once
  * has no such gap.
  */
-function pushableStream() {
+function pushableStream(messages: unknown = null) {
   const encoder = new TextEncoder();
   const queue: string[] = [];
   let wake: (() => void) | null = null;
   let ended = false;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      body: {
-        getReader() {
-          return {
-            async read() {
-              while (queue.length === 0 && !ended) await new Promise<void>((r) => (wake = r));
-              const frame = queue.shift();
-              if (frame === undefined) return { done: true, value: undefined };
-              return { done: false, value: encoder.encode(frame) };
-            },
-          };
+    vi.fn(async (url: string) => {
+      // A stored thread, when the test opens one before asking. Routed like
+      // routedFetch: the two endpoints must not answer the same way.
+      if (messages !== null && String(url).startsWith("/api/threads/")) {
+        return { ok: true, status: 200, json: async () => messages };
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader() {
+            return {
+              async read() {
+                while (queue.length === 0 && !ended) await new Promise<void>((r) => (wake = r));
+                const frame = queue.shift();
+                if (frame === undefined) return { done: true, value: undefined };
+                return { done: false, value: encoder.encode(frame) };
+              },
+            };
+          },
         },
-      },
-    })),
+      };
+    }),
   );
   const bump = () => {
     const w = wake;
@@ -1011,6 +1018,33 @@ describe("Ask, following the answer", () => {
     fireEvent.scroll(view);
     await stream.push(ev("token", { text: "Three." }));
     await screen.findByText(/Three/);
+    expect(view.scrollTop).toBe(2000);
+  });
+
+  it("opens a stored thread at its top, never at the foot", async () => {
+    routedFetch([storedTurn]);
+    const { container, rerender } = render(<Ask threadId={null} onThread={() => {}} />);
+    const view = scroller(container);
+    view.scrollTop = 1500;
+
+    rerender(<Ask threadId={7} onThread={() => {}} />);
+    await screen.findByText(/Through a grant/);
+
+    expect(view.scrollTop).toBe(0);
+  });
+
+  it("follows the answer again once a question is asked in the opened thread", async () => {
+    const stream = pushableStream([storedTurn]);
+    const { container, rerender } = render(<Ask threadId={null} onThread={() => {}} />);
+    const view = scroller(container);
+    rerender(<Ask threadId={7} onThread={() => {}} />);
+    await screen.findByText(/Through a grant/);
+    expect(view.scrollTop).toBe(0);
+
+    await askInto(container);
+    await stream.push(ev("token", { text: "Shipping runs through a job." }));
+    await screen.findByText(/Shipping runs/);
+
     expect(view.scrollTop).toBe(2000);
   });
 
