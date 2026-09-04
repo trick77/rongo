@@ -6,11 +6,11 @@
 // pay-as-you-go endpoint and up to five times that at a reseller. The price
 // belongs to the endpoint. models.dev lists every provider with its API base
 // URL and each model's cost, in USD per million tokens, and rongo already
-// knows its base URLs, so the lookup needs no configuration: match the host,
-// take the provider's prices for the deployments rongo calls.
+// knows its base URLs, so the lookup needs no configuration: match the
+// endpoint, take the provider's prices for the deployments rongo calls.
 //
-// A host that is not in the registry is not guessed at. The table stays
-// empty for it, the UI shows tokens only, and the log says why.
+// An endpoint that is not in the registry is not guessed at. The table
+// stays empty, the UI shows tokens only, and the log says why.
 package pricing
 
 import (
@@ -94,29 +94,30 @@ func Fetch(ctx context.Context, rawURL string, client *http.Client) (Registry, e
 }
 
 // Resolve builds the price table for the endpoints rongo calls. The LLM
-// host prices both deployments, the embedding host prices the embedding
-// model; each side is matched on its own. An empty embedding endpoint is a
-// configured state (indexing off), skipped without a word. Every host or
-// model the registry does not know is one warning, and nothing is priced
-// in its place.
+// endpoint prices both deployments, the embedding endpoint prices the
+// embedding model. An empty embedding endpoint is a configured state
+// (indexing off), skipped without a word.
+//
+// All or nothing: a turn's total that silently leaves out the calls nobody
+// could price would read as the whole cost, so one model the registry
+// cannot price for its endpoint empties the table. Each gap is one warning.
 func Resolve(reg Registry, llmBaseURL, embedBaseURL, embedModel string) (usage.Prices, []string) {
 	prices := usage.Prices{}
 	var warnings []string
 
 	price := func(baseURL string, models ...string) {
-		host := hostOf(baseURL)
-		id, provider, ok := providerFor(reg, host)
-		if !ok {
-			warnings = append(warnings, fmt.Sprintf("host %s is not in the price registry; showing tokens only for it", host))
+		matches := providersFor(reg, baseURL)
+		if len(matches) == 0 {
+			warnings = append(warnings, fmt.Sprintf("endpoint %s is not in the price registry", endpointOf(baseURL)))
 			return
 		}
 		for _, model := range models {
-			m, listed := provider.Models[model]
-			if !listed || m.Cost == nil {
-				warnings = append(warnings, fmt.Sprintf("provider %s does not price %s; showing tokens only for it", id, model))
+			p, warning := agreedPrice(reg, matches, model)
+			if warning != "" {
+				warnings = append(warnings, warning)
 				continue
 			}
-			prices[model] = usage.Price{In: m.Cost.Input, Out: m.Cost.Output}
+			prices[model] = p
 		}
 	}
 
@@ -124,47 +125,94 @@ func Resolve(reg Registry, llmBaseURL, embedBaseURL, embedModel string) (usage.P
 	if embedBaseURL != "" {
 		price(embedBaseURL, embedModel)
 	}
-	return prices, warnings
+	if len(warnings) > 0 {
+		return usage.Prices{}, append(warnings, "showing tokens only: every model rongo calls must be priced for its endpoint, or none is")
+	}
+	return prices, nil
 }
 
-// hostOf is the bare host of a base URL, lowercased, without a port: the
-// registry writes hosts without one.
-func hostOf(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
-		return strings.ToLower(rawURL)
-	}
-	return strings.ToLower(u.Hostname())
-}
-
-// providerFor finds the provider serving host. Ids are visited in order so a
-// host listed twice resolves the same way every boot.
-func providerFor(reg Registry, host string) (string, Provider, bool) {
-	if id, ok := hostsWithoutAPI[host]; ok {
-		if p, listed := reg[id]; listed {
-			return id, p, true
-		}
-	}
-	ids := make([]string, 0, len(reg))
-	for id := range reg {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+// agreedPrice is the price the matched providers give model. Several
+// providers can share one base URL (a vendor and its coding plan, listed
+// twice); when they disagree, the endpoint alone does not say which
+// contract applies, and no figure is better than one of two.
+func agreedPrice(reg Registry, ids []string, model string) (usage.Price, string) {
+	var (
+		agreed usage.Price
+		found  bool
+	)
 	for _, id := range ids {
-		p := reg[id]
-		if p.API != "" && hostOf(p.API) == host {
-			return id, p, true
+		m, listed := reg[id].Models[model]
+		if !listed || m.Cost == nil {
+			return usage.Price{}, fmt.Sprintf("provider %s does not price %s", id, model)
+		}
+		p := usage.Price{In: m.Cost.Input, Out: m.Cost.Output}
+		if found && p != agreed {
+			return usage.Price{}, fmt.Sprintf("providers %s share the endpoint but price %s differently; the endpoint does not say which contract applies", strings.Join(ids, ", "), model)
+		}
+		agreed, found = p, true
+	}
+	return agreed, ""
+}
+
+// endpointOf is what a base URL is matched on: host, port and path,
+// lowercased, without scheme or trailing slash. The registry tells a
+// vendor's coding plan from its pay-as-you-go endpoint by the path alone,
+// and three local servers apart by the port alone, so neither can be
+// dropped. A value that does not parse as a URL is matched as written.
+func endpointOf(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return strings.ToLower(strings.TrimRight(rawURL, "/"))
+	}
+	return strings.ToLower(u.Host + strings.TrimRight(u.Path, "/"))
+}
+
+// providersFor finds the providers serving baseURL: the ones whose api is
+// the endpoint itself or a prefix of it, path segment by path segment, and
+// among those the longest. Ids come back sorted so a shared endpoint
+// resolves the same way every boot. A provider without an api field is
+// found through hostsWithoutAPI, by host, when nothing else matches.
+func providersFor(reg Registry, baseURL string) []string {
+	want := endpointOf(baseURL)
+	var (
+		best    []string
+		bestLen = -1
+	)
+	for id, p := range reg {
+		if p.API == "" {
+			continue
+		}
+		api := endpointOf(p.API)
+		if want != api && !strings.HasPrefix(want, api+"/") {
+			continue
+		}
+		switch {
+		case len(api) > bestLen:
+			best, bestLen = []string{id}, len(api)
+		case len(api) == bestLen:
+			best = append(best, id)
 		}
 	}
-	return "", Provider{}, false
+	if len(best) > 0 {
+		sort.Strings(best)
+		return best
+	}
+	if u, err := url.Parse(baseURL); err == nil {
+		if id, ok := hostsWithoutAPI[strings.ToLower(u.Hostname())]; ok {
+			if _, listed := reg[id]; listed {
+				return []string{id}
+			}
+		}
+	}
+	return nil
 }
 
 // Source is where a Table gets its prices from and what it prices.
 type Source struct {
 	URL    string
 	Client *http.Client
-	// LLMBaseURL and EmbedBaseURL are the endpoints whose hosts are looked
-	// up; EmbedModel is the one embedding model rongo calls.
+	// LLMBaseURL and EmbedBaseURL are the endpoints that are looked up;
+	// EmbedModel is the one embedding model rongo calls.
 	LLMBaseURL   string
 	EmbedBaseURL string
 	EmbedModel   string
@@ -186,8 +234,12 @@ func NewTable(override usage.Prices) *Table {
 	return t
 }
 
-// Prices is the current table. Never nil.
+// Prices is the current table. Never nil, and a nil Table is an empty one:
+// a deployment with no table shows tokens only rather than failing.
 func (t *Table) Prices() usage.Prices {
+	if t == nil {
+		return usage.Prices{}
+	}
 	return *t.current.Load()
 }
 

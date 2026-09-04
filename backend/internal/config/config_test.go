@@ -182,10 +182,10 @@ func TestLoad_pricesAreOptionalAndKeyedByModel(t *testing.T) {
 }
 
 func TestLoad_halfAPriceIsAnErrorNotAZero(t *testing.T) {
-	// Given: the output side mistyped, which envFloatOr reads as unset
+	// Given: the output side left empty
 	setEnv(t, map[string]string{
 		"BACKEND_PRICE_GATE_IN":  "0.1",
-		"BACKEND_PRICE_GATE_OUT": "0,4",
+		"BACKEND_PRICE_GATE_OUT": "",
 	})
 
 	// When
@@ -631,5 +631,35 @@ func TestLoad_pricesRegistryDefaultsToModelsDevAndEmptyTurnsItOff(t *testing.T) 
 	// Then: no URL, so main never fetches; tokens only unless a pair is set
 	if cfg.PricesURL != "" {
 		t.Errorf("PricesURL = %q, want empty", cfg.PricesURL)
+	}
+}
+
+func TestLoad_anExplicitZeroIsAPriceAndAMistypedOneIsAnError(t *testing.T) {
+	// Given: a flat-rate contract the registry gets wrong, overridden to 0
+	setEnv(t, map[string]string{
+		"BACKEND_PRICE_PRO_IN":  "0",
+		"BACKEND_PRICE_PRO_OUT": "0",
+		"BACKEND_PRICE_EMBED":   "0",
+	})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	// Then: present in the table at zero, not absent
+	if p, ok := cfg.Prices[llm.ProDeployment]; !ok || p.In != 0 || p.Out != 0 {
+		t.Errorf("Pro price = %+v (present %v), want 0/0 present", p, ok)
+	}
+	if _, ok := cfg.Prices["text-embedding-3-small"]; !ok {
+		t.Errorf("embed price absent although set to 0: %v", cfg.Prices)
+	}
+
+	// Given: a decimal comma
+	setEnv(t, map[string]string{
+		"BACKEND_PRICE_PRO_IN":  "0,4",
+		"BACKEND_PRICE_PRO_OUT": "1.6",
+	})
+	// Then: refused, not silently handed back to the registry
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_PRICE_PRO_IN") {
+		t.Errorf("Load() err = %v, want the mistyped variable named", err)
 	}
 }

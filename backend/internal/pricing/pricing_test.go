@@ -14,9 +14,11 @@ import (
 )
 
 // fixture is the shape of models.dev's api.json, cut down to what the
-// resolver reads: a provider's api host and each model's cost. "openai" has
-// no api field, as on the real site; "reseller" prices the deployments
-// differently, which is the whole reason the host decides.
+// resolver reads: a provider's api URL and each model's cost. Modelled on
+// the real file: "openai" has no api field; "reseller" prices the
+// deployments differently, which is why the endpoint decides; the vendor
+// and its coding plan share a host and differ by path; two aggregators
+// share one URL byte for byte; three local servers differ by port only.
 const fixture = `{
   "xiaomi": {
     "id": "xiaomi", "name": "Xiaomi", "api": "https://api.xiaomimimo.com/v1",
@@ -39,6 +41,48 @@ const fixture = `{
       "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 2.175, "output": 4.35}}
     }
   },
+  "vendor": {
+    "id": "vendor", "api": "https://api.vendor.example/api/paas/v4",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.6, "output": 2.2}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.1, "output": 0.3}}
+    }
+  },
+  "vendor-coding-plan": {
+    "id": "vendor-coding-plan", "api": "https://api.vendor.example/api/coding/paas/v4",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+    }
+  },
+  "gateway": {
+    "id": "gateway", "api": "https://api.gateway.example/v1",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.14, "output": 0.28}}
+    }
+  },
+  "gateway-providers": {
+    "id": "gateway-providers", "api": "https://api.gateway.example/v1",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.5, "output": 1}}
+    }
+  },
+  "local-a": {
+    "id": "local-a", "api": "http://127.0.0.1:1337/v1",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+    }
+  },
+  "local-b": {
+    "id": "local-b", "api": "http://127.0.0.1:1234/v1",
+    "models": {
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0, "output": 0}},
+      "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0, "output": 0}}
+    }
+  },
   "openai": {
     "id": "openai", "name": "OpenAI", "api": null,
     "models": {
@@ -46,6 +90,12 @@ const fixture = `{
     }
   }
 }`
+
+const (
+	xiaomiURL = "https://api.xiaomimimo.com/v1"
+	openaiURL = "https://api.openai.com/v1"
+	embed     = "text-embedding-3-small"
+)
 
 func serve(t *testing.T, body string, status int) *httptest.Server {
 	t.Helper()
@@ -67,12 +117,12 @@ func fetchFixture(t *testing.T) Registry {
 	return reg
 }
 
-func TestFetch_decodesProvidersHostsAndCosts(t *testing.T) {
+func TestFetch_decodesProvidersEndpointsAndCosts(t *testing.T) {
 	reg := fetchFixture(t)
-	if len(reg) != 4 {
-		t.Fatalf("decoded %d providers, want 4", len(reg))
+	if len(reg) != 10 {
+		t.Fatalf("decoded %d providers, want 10", len(reg))
 	}
-	if reg["xiaomi"].API != "https://api.xiaomimimo.com/v1" {
+	if reg["xiaomi"].API != xiaomiURL {
 		t.Errorf("xiaomi api = %q", reg["xiaomi"].API)
 	}
 	if reg["openai"].API != "" {
@@ -97,12 +147,12 @@ func TestFetch_reportsAFailedOrMalformedRegistry(t *testing.T) {
 	}
 }
 
-func TestResolve_pricesBothDeploymentsFromTheProviderServingTheHost(t *testing.T) {
+func TestResolve_pricesEveryModelFromTheProviderServingTheEndpoint(t *testing.T) {
 	// Given the pay-as-you-go endpoint and OpenAI embeddings
 	reg := fetchFixture(t)
 
 	// When
-	prices, warnings := Resolve(reg, "https://api.xiaomimimo.com/v1", "https://api.openai.com/v1", "text-embedding-3-small")
+	prices, warnings := Resolve(reg, xiaomiURL, openaiURL, embed)
 
 	// Then every model rongo calls is priced, and nothing is warned about
 	if p := prices[llm.ProDeployment]; p.In != 0.435 || p.Out != 0.87 {
@@ -111,7 +161,7 @@ func TestResolve_pricesBothDeploymentsFromTheProviderServingTheHost(t *testing.T
 	if p := prices[llm.ShortGateDeployment]; p.In != 0.14 || p.Out != 0.28 {
 		t.Errorf("gate = %+v, want 0.14/0.28", p)
 	}
-	if p := prices["text-embedding-3-small"]; p.In != 0.02 || p.Out != 0 {
+	if p := prices[embed]; p.In != 0.02 || p.Out != 0 {
 		t.Errorf("embed = %+v, want 0.02/0", p)
 	}
 	if len(warnings) != 0 {
@@ -119,17 +169,12 @@ func TestResolve_pricesBothDeploymentsFromTheProviderServingTheHost(t *testing.T
 	}
 }
 
-func TestResolve_theHostDecidesNotTheModelName(t *testing.T) {
+func TestResolve_aTokenPlanIsPricedAtZeroNotLeftOut(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// A reseller charges five times Xiaomi's price for the same name.
-	prices, _ := Resolve(reg, "https://llm.reseller.example/v1", "", "")
-	if p := prices[llm.ProDeployment]; p.In != 2.175 || p.Out != 4.35 {
-		t.Errorf("reseller pro = %+v, want 2.175/4.35", p)
-	}
-
 	// A token plan is flat rate: zero is a price, present in the table, so
-	// the browser shows a real $0 rather than nothing.
+	// the browser shows a real $0 rather than nothing. The trailing slash
+	// is what a copied URL often carries.
 	prices, warnings := Resolve(reg, "https://token-plan-ams.xiaomimimo.com/v1/", "", "")
 	p, ok := prices[llm.ProDeployment]
 	if !ok || p.In != 0 || p.Out != 0 {
@@ -140,47 +185,89 @@ func TestResolve_theHostDecidesNotTheModelName(t *testing.T) {
 	}
 }
 
-func TestResolve_anUnknownHostIsTokensOnlyWithAWarning(t *testing.T) {
+func TestResolve_thePathTellsACodingPlanFromPayAsYouGo(t *testing.T) {
 	reg := fetchFixture(t)
 
-	prices, warnings := Resolve(reg, "http://127.0.0.1:9/v1", "https://api.openai.com/v1", "text-embedding-3-small")
-
-	if _, ok := prices[llm.ProDeployment]; ok {
-		t.Error("an unknown host must not price the deployment")
+	// The vendor's two contracts share a host; the path is the difference,
+	// and the flat-rate one must not be billed at the metered price.
+	prices, warnings := Resolve(reg, "https://api.vendor.example/api/coding/paas/v4", "", "")
+	if p, ok := prices[llm.ProDeployment]; !ok || p.In != 0 {
+		t.Errorf("coding plan pro = %+v (present %v), want 0 present; warnings %v", p, ok, warnings)
 	}
-	if _, ok := prices["text-embedding-3-small"]; !ok {
-		t.Error("the embedding side is matched independently and must still be priced")
-	}
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "127.0.0.1") {
-		t.Errorf("warnings = %v, want one naming the host", warnings)
+	prices, _ = Resolve(reg, "https://api.vendor.example/api/paas/v4", "", "")
+	if p := prices[llm.ProDeployment]; p.In != 0.6 || p.Out != 2.2 {
+		t.Errorf("pay-as-you-go pro = %+v, want 0.6/2.2", p)
 	}
 }
 
-func TestResolve_aMatchedProviderMissingTheModelWarns(t *testing.T) {
+func TestResolve_thePortTellsLocalServersApart(t *testing.T) {
 	reg := fetchFixture(t)
 
-	// The reseller lists only the Pro deployment.
-	prices, warnings := Resolve(reg, "https://llm.reseller.example/v1", "https://api.openai.com/v1", "text-embedding-3-large")
+	// Two registry entries on 127.0.0.1; a third port is nobody's.
+	if prices, _ := Resolve(reg, "http://127.0.0.1:1234/v1", "", ""); len(prices) != 2 {
+		t.Errorf("the registry's own port must match, got %v", prices)
+	}
+	prices, warnings := Resolve(reg, "http://127.0.0.1:8000/v1", "", "")
+	if len(prices) != 0 {
+		t.Errorf("an unlisted port must not borrow a neighbour's price, got %v", prices)
+	}
+	if len(warnings) == 0 || !strings.Contains(warnings[0], "127.0.0.1:8000") {
+		t.Errorf("warnings = %v, want one naming the endpoint with its port", warnings)
+	}
+}
 
-	if _, ok := prices[llm.ShortGateDeployment]; ok {
-		t.Error("an unlisted model must stay unpriced")
+func TestResolve_providersSharingOneEndpointMustAgreeOrNothingIsPriced(t *testing.T) {
+	reg := fetchFixture(t)
+
+	// Both gateway entries price Pro alike but the gate differently: the
+	// endpoint alone does not say which contract applies.
+	prices, warnings := Resolve(reg, "https://api.gateway.example/v1", "", "")
+	if len(prices) != 0 {
+		t.Errorf("a disagreement must price nothing, got %v", prices)
 	}
-	if len(warnings) != 2 {
-		t.Fatalf("warnings = %v, want one for the gate deployment and one for the embedding model", warnings)
+	if len(warnings) < 1 || !strings.Contains(warnings[0], "differently") || !strings.Contains(warnings[0], llm.ShortGateDeployment) {
+		t.Errorf("warnings = %v, want the disagreement named", warnings)
 	}
-	if !strings.Contains(warnings[0], llm.ShortGateDeployment) || !strings.Contains(warnings[1], "text-embedding-3-large") {
-		t.Errorf("warnings = %v", warnings)
+}
+
+func TestResolve_anUnknownEndpointIsTokensOnlyForTheWholeTable(t *testing.T) {
+	reg := fetchFixture(t)
+
+	// The embedding side alone would resolve, and a total made of the
+	// embedding call only would read as the cost of the turn.
+	prices, warnings := Resolve(reg, "http://llm.internal.example/v1", openaiURL, embed)
+
+	if len(prices) != 0 {
+		t.Errorf("an unknown LLM endpoint must empty the whole table, got %v", prices)
+	}
+	if len(warnings) != 2 || !strings.Contains(warnings[0], "llm.internal.example") || !strings.Contains(warnings[1], "tokens only") {
+		t.Errorf("warnings = %v, want the endpoint named and the consequence stated", warnings)
+	}
+}
+
+func TestResolve_aMatchedProviderMissingOneModelEmptiesTheTable(t *testing.T) {
+	reg := fetchFixture(t)
+
+	// The reseller lists only the Pro deployment: a total without the gate
+	// calls would undercount every turn.
+	prices, warnings := Resolve(reg, "https://llm.reseller.example/v1", openaiURL, "text-embedding-3-large")
+
+	if len(prices) != 0 {
+		t.Errorf("one unpriced model must empty the table, got %v", prices)
+	}
+	if len(warnings) != 3 || !strings.Contains(warnings[0], llm.ShortGateDeployment) || !strings.Contains(warnings[1], "text-embedding-3-large") {
+		t.Errorf("warnings = %v, want one per gap and the consequence", warnings)
 	}
 }
 
 func TestResolve_anEmptyEmbedEndpointIsSkippedSilently(t *testing.T) {
 	reg := fetchFixture(t)
-	prices, warnings := Resolve(reg, "https://api.xiaomimimo.com/v1", "", "text-embedding-3-small")
-	if _, ok := prices["text-embedding-3-small"]; ok {
+	prices, warnings := Resolve(reg, xiaomiURL, "", embed)
+	if _, ok := prices[embed]; ok {
 		t.Error("nothing embeds without an endpoint, so nothing is priced")
 	}
-	if len(warnings) != 0 {
-		t.Errorf("warnings = %v, want none: indexing off is a configured state", warnings)
+	if len(prices) != 2 || len(warnings) != 0 {
+		t.Errorf("prices = %v, warnings = %v: indexing off is a configured state", prices, warnings)
 	}
 }
 
@@ -194,7 +281,7 @@ func TestTable_startsFromTheOverrideAndKeepsItOverTheRegistry(t *testing.T) {
 	srv := serve(t, fixture, http.StatusOK)
 	err := table.Refresh(context.Background(), Source{
 		URL: srv.URL, Client: srv.Client(),
-		LLMBaseURL: "https://api.xiaomimimo.com/v1", EmbedBaseURL: "https://api.openai.com/v1", EmbedModel: "text-embedding-3-small",
+		LLMBaseURL: xiaomiURL, EmbedBaseURL: openaiURL, EmbedModel: embed,
 	})
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
@@ -206,15 +293,22 @@ func TestTable_startsFromTheOverrideAndKeepsItOverTheRegistry(t *testing.T) {
 	if p := got[llm.ShortGateDeployment]; p.In != 0.14 {
 		t.Errorf("the rest comes from the registry, got %+v", p)
 	}
-	if p := got["text-embedding-3-small"]; p.In != 0.02 {
+	if p := got[embed]; p.In != 0.02 {
 		t.Errorf("embed from the registry, got %+v", p)
+	}
+}
+
+func TestTable_aNilTableIsAnEmptyOne(t *testing.T) {
+	var table *Table
+	if got := table.Prices(); got == nil || len(got) != 0 {
+		t.Errorf("nil table prices = %v, want empty", got)
 	}
 }
 
 func TestTable_aFailedRefreshLeavesTheTableUnchanged(t *testing.T) {
 	table := NewTable(nil)
 	good := serve(t, fixture, http.StatusOK)
-	src := Source{URL: good.URL, Client: good.Client(), LLMBaseURL: "https://api.xiaomimimo.com/v1"}
+	src := Source{URL: good.URL, Client: good.Client(), LLMBaseURL: xiaomiURL}
 	if err := table.Refresh(context.Background(), src); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -241,7 +335,7 @@ func TestTable_runFetchesOnceAndStopsWithTheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		table.Run(ctx, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: "https://api.xiaomimimo.com/v1"})
+		table.Run(ctx, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: xiaomiURL})
 		close(done)
 	}()
 	// Run applies the first table before it sleeps, so the goroutine can be
@@ -278,7 +372,7 @@ func TestStart_withAURLRunsTheWorkerUntilTheContextEnds(t *testing.T) {
 	srv := serve(t, fixture, http.StatusOK)
 	var workers sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
-	table := Start(ctx, &workers, nil, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: "https://api.xiaomimimo.com/v1"})
+	table := Start(ctx, &workers, nil, Source{URL: srv.URL, Client: srv.Client(), LLMBaseURL: xiaomiURL})
 	deadline := time.Now().Add(5 * time.Second)
 	for table.Prices()[llm.ProDeployment].In == 0 {
 		if time.Now().After(deadline) {

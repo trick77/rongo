@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
@@ -76,7 +77,7 @@ type Deps struct {
 	// because the table is refreshed from a registry behind the process's
 	// back. Nil or empty means the browser sees tokens only — the honest
 	// default when nothing says what the endpoint charges.
-	Prices usage.PriceSource
+	Prices *pricing.Table
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.

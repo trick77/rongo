@@ -743,8 +743,8 @@ export default function Ask({
                         </table>
                         <p className="mt-2 font-sans text-xs text-faint">
                           {turn.usage.cost_usd != null
-                            ? "Computed from the configured prices, USD per million tokens. Not a bill: the provider's invoice is."
-                            : "Tokens only. Set BACKEND_PRICE_* to see cost."}
+                            ? "Computed from the registry's list price for this endpoint, USD per million tokens, or from BACKEND_PRICE_* where set. Not a bill: the provider's invoice is."
+                            : "Tokens only: the price registry does not know this endpoint. The server log names it; BACKEND_PRICE_* overrides."}
                         </p>
                       </div>
                     )}

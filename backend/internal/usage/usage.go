@@ -84,16 +84,6 @@ type Price struct {
 // report carries tokens only.
 type Prices map[string]Price
 
-// PriceSource is where the HTTP layer reads the current table. A Prices map
-// is its own source, so a test hands over a literal; the process hands over
-// a table that a registry refreshes in the background.
-type PriceSource interface {
-	Prices() Prices
-}
-
-// Prices makes a static table its own source.
-func (p Prices) Prices() Prices { return p }
-
 // CallReport is one call with its cost, when the model is priced.
 type CallReport struct {
 	Call
