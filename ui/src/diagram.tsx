@@ -407,11 +407,20 @@ function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top:
         </text>
       );
     }
+    // Once its source is known the chip opens it, as a chip in the prose
+    // does: on a tablet there is no hover and no pane, and a chip that
+    // cannot be tapped leaves the reader no way to the source.
+    const open = known && hooks.onOpen;
     return (
       <g
         key={`${k}-c${i}`}
         onMouseEnter={() => known && hooks.onHover?.(m)}
         onMouseLeave={() => known && hooks.onHover?.(null)}
+        onClick={open ? () => hooks.onOpen?.(m) : undefined}
+        role={open ? "button" : undefined}
+        tabIndex={open ? 0 : undefined}
+        onKeyDown={open ? (e) => (e.key === "Enter" || e.key === " ") && hooks.onOpen?.(m) : undefined}
+        className={open ? "cursor-pointer" : undefined}
       >
         <rect x={cx - w / 2} y={y} width={w} height={CHIP_H} rx={3} className="fill-accent-dim" />
         <text x={cx} y={y + 11} textAnchor="middle" className="fill-accent-strong font-mono text-[10px] font-semibold">

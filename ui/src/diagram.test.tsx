@@ -315,6 +315,21 @@ describe("Diagram", () => {
       expect(container.querySelectorAll("rect.fill-accent-dim").length).toBe(4);
     });
 
+    it("open their source when tapped, as a chip in the prose does", () => {
+      const onOpen = vi.fn();
+      const { container } = render(<Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen }} />);
+      const chip = container.querySelector('g[role="button"]')!;
+      fireEvent.click(chip);
+      expect(onOpen).toHaveBeenLastCalledWith(3);
+      fireEvent.keyDown(chip, { key: "Enter" });
+      expect(onOpen).toHaveBeenCalledTimes(2);
+    });
+
+    it("are not buttons while the citations are unknown", () => {
+      const { container } = render(<Diagram spec={flow} hooks={{ onOpen: vi.fn() }} />);
+      expect(container.querySelector('g[role="button"]')).toBeNull();
+    });
+
     it("hand a hovered chip to the Sources pane, and nothing while unknown", () => {
       const onHover = vi.fn();
       const { container } = render(<Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onHover }} />);

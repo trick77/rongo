@@ -26,6 +26,9 @@ type renumberer struct {
 	order   []int       // the reader's number - 1 -> the prompt's
 	pending string      // what cannot be decided yet
 	inFence bool
+	// inDiagram says the open fence is a diagram, the one block whose
+	// numbers are claims rather than code.
+	inDiagram bool
 }
 
 func newRenumberer(sources int) *renumberer {
@@ -64,21 +67,31 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 	i := 0
 	for i < len(s) {
 		if r.inFence {
-			// Nothing in a fence is a marker; look for the close only.
+			// Nothing in a fence is a marker, with one exception: a diagram
+			// fence cites through the src arrays of its nodes, and those
+			// numbers are the same claim a marker in prose is, so they are
+			// renumbered with it (diagram.tsx draws them as the same chip).
 			if end := strings.Index(s[i:], "```"); end >= 0 {
-				b.WriteString(s[i : i+end+3])
+				b.WriteString(r.fenceBody(s[i:i+end], true))
+				b.WriteString("```")
 				i += end + 3
 				r.inFence = false
+				r.inDiagram = false
 				continue
 			}
 			if atEnd {
-				b.WriteString(s[i:])
+				b.WriteString(r.fenceBody(s[i:], true))
 				return b.String(), ""
 			}
 			// Trailing backticks may be the start of the close. Counted over
 			// what is left to decide, never over the whole buffer: the fence
 			// that opened at i is made of backticks too.
 			cut := len(s) - trailingBackticks(s[i:], 2)
+			if r.inDiagram {
+				out, rest := r.rewriteSrc(s[i:cut], false)
+				b.WriteString(out)
+				return b.String(), rest + s[cut:]
+			}
 			b.WriteString(s[i:cut])
 			return b.String(), s[cut:]
 		}
@@ -100,8 +113,20 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				return b.String(), s[i:]
 			}
 			if strings.HasPrefix(s[i:], "```") {
-				b.WriteString("```")
-				i += 3
+				// The info string says whether this is a diagram fence, whose
+				// src arrays renumber; held back until the line is whole,
+				// because the tag decides how the whole block is read.
+				nl := strings.IndexByte(s[i:], '\n')
+				if nl < 0 && !atEnd {
+					return b.String(), s[i:]
+				}
+				head := s[i:]
+				if nl >= 0 {
+					head = s[i : i+nl+1]
+				}
+				r.inDiagram = strings.TrimSpace(strings.Trim(head, "`\n")) == "diagram"
+				b.WriteString(head)
+				i += len(head)
 				r.inFence = true
 				continue
 			}
@@ -132,6 +157,61 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 		}
 		b.WriteByte('[')
 		i++
+	}
+	return b.String(), ""
+}
+
+// A src array of a diagram node, or the start of one. Anchored on the KEY,
+// never on the bracket: a node label may be `parts[2]`, and renumbering that
+// would mint a citation out of an index expression - the fabrication the
+// whole citation path exists to prevent.
+var (
+	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
+	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
+)
+
+// fenceBody hands a complete fence body to the renumberer for a diagram, and
+// passes anything else through untouched.
+func (r *renumberer) fenceBody(body string, atEnd bool) string {
+	if !r.inDiagram {
+		return body
+	}
+	out, rest := r.rewriteSrc(body, atEnd)
+	return out + rest
+}
+
+// rewriteSrc renumbers the src arrays of a diagram fence, holding back a key
+// or an array that has not arrived whole.
+func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) {
+	var b strings.Builder
+	i := 0
+	for i < len(s) {
+		j := strings.Index(s[i:], `"src"`)
+		if j < 0 {
+			// No key left, but the tail may be the start of one.
+			if !atEnd {
+				for k := len(s) - 1; k >= i && k > len(s)-6; k-- {
+					if srcPrefixRe.MatchString(s[k:]) {
+						b.WriteString(s[i:k])
+						return b.String(), s[k:]
+					}
+				}
+			}
+			b.WriteString(s[i:])
+			return b.String(), ""
+		}
+		b.WriteString(s[i : i+j])
+		i += j
+		if m := srcAtStart.FindStringSubmatch(s[i:]); m != nil {
+			b.WriteString(`"src":` + r.rewrite(m[1]))
+			i += len(m[0])
+			continue
+		}
+		if !atEnd && srcPrefixRe.MatchString(s[i:]) {
+			return b.String(), s[i:]
+		}
+		b.WriteString(`"src"`)
+		i += len(`"src"`)
 	}
 	return b.String(), ""
 }

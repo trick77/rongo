@@ -1,130 +1,137 @@
 package ask
 
 import (
+	"strings"
 	"testing"
 )
 
-func markers(cits []Citation) []int {
-	out := make([]int, 0, len(cits))
-	for _, c := range cits {
-		out = append(out, c.Marker)
-	}
-	return out
+// A diagram fence cites through the src arrays of its nodes. Those numbers
+// are the same claim a marker in prose is, so they pass through the same
+// renumberer and land in the same evidence panel.
+
+// renumbered runs the whole answer through the renumberer in one go.
+func renumbered(t *testing.T, sources int, text string) (string, *renumberer) {
+	t.Helper()
+	rn := newRenumberer(sources)
+	out := rn.feed(text) + rn.flush()
+	return out, rn
 }
 
-func equalInts(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func TestCitationsFor_aDiagramNodeCitesThroughItsSrc(t *testing.T) {
-	// A node's src array is the same claim-to-source link a marker in prose
-	// is; the chip on the node opens the same viewer.
+func TestRenumber_aDiagramNodeCitesThroughItsSrc(t *testing.T) {
 	text := "Prose without markers.\n```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"NewGrant","kind":"start","src":[1]},` +
-		`{"id":"b","label":"issueGrant","kind":"step","src":[2]}],"edges":[{"from":"a","to":"b"}]}` +
+		`{"type":"flow","nodes":[{"id":"a","label":"NewGrant","src":[2]},` +
+		`{"id":"b","label":"issueGrant","src":[1]}],"edges":[]}` +
 		"\n```\n"
 
-	got := citationsFor(text, twoSources())
+	out, rn := renumbered(t, 2, text)
 
-	if !equalInts(markers(got), []int{1, 2}) {
-		t.Errorf("markers = %v, want [1 2] from the two nodes", markers(got))
+	// First appearance decides the reader's number: source 2 is cited first.
+	if !strings.Contains(out, `"src":[1]`) || !strings.Contains(out, `"src":[2]`) {
+		t.Errorf("out = %q, want the src arrays renumbered 1 then 2", out)
+	}
+	cits := rn.citations(twoSources())
+	if len(cits) != 2 || cits[0].Path != "backend/internal/httpapi/grant.go" {
+		t.Errorf("citations = %+v, want both, the reader's [1] being prompt source 2", cits)
 	}
 }
 
-func TestCitationsFor_aSequenceStepCitesThroughItsSrc(t *testing.T) {
-	text := "```diagram\n" +
-		`{"type":"sequence","actors":[{"id":"u","label":"UI"},{"id":"s","label":"Store"}],` +
-		`"steps":[{"from":"u","to":"s","label":"issue","kind":"call","src":[2]}]}` +
+func TestRenumber_aDiagramAndTheProseShareOneNumbering(t *testing.T) {
+	// The invariant the feature rests on: a chip on a node is the chip in
+	// the prose, so the same source may not read [1] in one and [2] in the
+	// other.
+	text := "The grant is created in store.go [1].\n```diagram\n" +
+		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]},{"id":"b","label":"y","src":[1]}],"edges":[]}` +
 		"\n```"
 
-	got := citationsFor(text, twoSources())
+	out, rn := renumbered(t, 2, text)
 
-	if !equalInts(markers(got), []int{2}) {
-		t.Errorf("markers = %v, want [2]", markers(got))
+	if !strings.Contains(out, "store.go [1]") {
+		t.Errorf("out = %q, want the prose marker to stay the reader's [1]", out)
+	}
+	if !strings.Contains(out, `"src":[2]`) || !strings.Contains(out, `"src":[1]`) {
+		t.Errorf("out = %q, want the node on source 1 to read [1], as the prose does", out)
+	}
+	if len(rn.citations(twoSources())) != 2 {
+		t.Errorf("citations = %+v, want one row per source", rn.citations(twoSources()))
 	}
 }
 
-func TestCitationsFor_anIndexExpressionInADiagramLabelIsNotACitation(t *testing.T) {
-	// The fence body is never scanned as text: only the src arrays count.
+func TestRenumber_anIndexExpressionInADiagramLabelIsNotACitation(t *testing.T) {
+	// Anchored on the "src" key, never on a bracket: a label is text.
 	text := "```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"parts[2]","kind":"step","src":[]}],"edges":[]}` +
+		`{"type":"flow","nodes":[{"id":"a","label":"parts[2]","src":[]}],"edges":[]}` +
 		"\n```"
 
-	got := citationsFor(text, twoSources())
+	out, rn := renumbered(t, 2, text)
 
-	if len(got) != 0 {
-		t.Errorf("citations = %+v, want none: parts[2] is a label, not a claim", got)
+	if !strings.Contains(out, `"label":"parts[2]"`) {
+		t.Errorf("out = %q, want the label untouched", out)
+	}
+	if len(rn.citations(twoSources())) != 0 {
+		t.Errorf("citations = %+v, want none: parts[2] is a label, not a claim", rn.citations(twoSources()))
 	}
 }
 
-func TestCitationsFor_invalidDiagramJSONContributesNothingButProseStillCounts(t *testing.T) {
-	text := "The grant is created in store.go [1].\n```diagram\n{\"type\":\"flow\",\"nodes\":[{\"src\":[2]}\n```"
-
-	got := citationsFor(text, twoSources())
-
-	if !equalInts(markers(got), []int{1}) {
-		t.Errorf("markers = %v, want only the prose marker [1]", markers(got))
-	}
-}
-
-func TestCitationsFor_anUnclosedDiagramFenceContributesNothing(t *testing.T) {
-	// A stream cut inside the fence: the browser shows the raw block, and no
-	// entry is minted for a picture that was never drawn.
-	text := "Prose [1].\n```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","kind":"step","src":[2]}],"edges":[]}`
-
-	got := citationsFor(text, twoSources())
-
-	if !equalInts(markers(got), []int{1}) {
-		t.Errorf("markers = %v, want only [1]", markers(got))
-	}
-}
-
-func TestCitationsFor_anInventedNumberInSrcDropsAlone(t *testing.T) {
-	text := "```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","kind":"step","src":[1,9]}],"edges":[]}` +
+func TestRenumber_aCodeFenceNextToADiagramStillCitesNothing(t *testing.T) {
+	text := "```go\nx := a[1]\n// \"src\":[2]\n```\n```diagram\n" +
+		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]}],"edges":[]}` +
 		"\n```"
 
-	got := citationsFor(text, twoSources())
+	out, rn := renumbered(t, 2, text)
 
-	if !equalInts(markers(got), []int{1}) {
-		t.Errorf("markers = %v, want [1]: 9 has no source and drops alone", markers(got))
+	if !strings.Contains(out, "x := a[1]") || !strings.Contains(out, "// \"src\":[2]") {
+		t.Errorf("out = %q, want the go fence untouched, src-shaped comment included", out)
+	}
+	cits := rn.citations(twoSources())
+	if len(cits) != 1 || cits[0].Marker != 1 {
+		t.Errorf("citations = %+v, want only the diagram's source, as the reader's [1]", cits)
 	}
 }
 
-func TestCitationsFor_aCodeFenceStillContributesNothing(t *testing.T) {
-	// Regression for the pre-diagram rule: an index expression in a go fence
-	// is code, and a src-shaped key inside code is code too.
-	text := "```go\nx := a[1]\n// \"src\":[2]\n```\nProse [2]."
+func TestRenumber_anInventedNumberInSrcIsLeftAloneAndNeverCited(t *testing.T) {
+	text := "```diagram\n" +
+		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[1,9]}],"edges":[]}` +
+		"\n```"
 
-	got := citationsFor(text, twoSources())
+	out, rn := renumbered(t, 2, text)
 
-	if !equalInts(markers(got), []int{2}) {
-		t.Errorf("markers = %v, want only the prose [2]", markers(got))
+	if !strings.Contains(out, `"src":[1,9]`) {
+		t.Errorf("out = %q, want 9 left as it came", out)
+	}
+	if len(rn.citations(twoSources())) != 1 {
+		t.Errorf("citations = %+v, want only the real source", rn.citations(twoSources()))
 	}
 }
 
-func TestSplitFences_tagsBodiesAndClosure(t *testing.T) {
-	prose, fences := splitFences("a\n```go\nx\n```\nb\n```diagram\n{}\n")
+func TestRenumber_aDiagramSplitAcrossTokensStillRenumbers(t *testing.T) {
+	// The normal case: the fence, the key and the array all arrive in
+	// pieces, and a half-written src may not reach the reader as it came.
+	rn := newRenumberer(2)
+	var got strings.Builder
+	for _, tok := range []string{"Text.\n``", "`diag", "ram\n{\"nodes\":[{\"sr", "c\":[", "2", "]},{\"src\"", ": [1", ", 2]}]}\n``", "`\n"} {
+		got.WriteString(rn.feed(tok))
+	}
+	got.WriteString(rn.flush())
 
-	if prose != "a\n\nb\n" {
-		t.Errorf("prose = %q, want the fences blanked and the prose kept", prose)
+	out := got.String()
+	if !strings.Contains(out, `"src":[1]`) {
+		t.Errorf("out = %q, want the first src renumbered to the reader's [1]", out)
 	}
-	if len(fences) != 2 {
-		t.Fatalf("fences = %+v, want two", fences)
+	if !strings.Contains(out, `"src":[2, 1]`) {
+		t.Errorf("out = %q, want the grouped src renumbered, separators kept", out)
 	}
-	if fences[0].tag != "go" || fences[0].body != "x\n" || !fences[0].closed {
-		t.Errorf("fence 0 = %+v", fences[0])
+	if !strings.HasPrefix(out, "Text.\n```diagram\n") {
+		t.Errorf("out = %q, want the fence header intact", out)
 	}
-	if fences[1].tag != "diagram" || fences[1].closed {
-		t.Errorf("fence 1 = %+v, want an open diagram fence", fences[1])
+}
+
+func TestRenumber_anUnclosedDiagramFenceStillEndsWhole(t *testing.T) {
+	// A cut stream: the browser shows the block as text, so nothing may be
+	// held back for a close that never comes.
+	rn := newRenumberer(2)
+	out := rn.feed("```diagram\n{\"nodes\":[{\"src\":[2") + rn.flush()
+
+	if !strings.Contains(out, `"src":[2`) {
+		t.Errorf("out = %q, want the partial array flushed as it came", out)
 	}
 }
