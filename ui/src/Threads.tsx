@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { PlusIcon } from "./icons";
+
+/**
+ * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
+ * tracked eyebrow. Exported because the "History" umbrella in App is the same
+ * label as the day groups below it and must not drift from them.
+ */
+export const railLabel = "pl-1.5 text-xs/4 text-muted";
 
 export type Thread = {
   id: number;
@@ -46,7 +52,8 @@ export default function Threads({
   onList = () => {},
 }: {
   activeId: number | null;
-  onSelect: (id: number | null) => void;
+  /** Only ever a real thread: clearing to a new question is the rail's job. */
+  onSelect: (id: number) => void;
   version: number;
   busy?: boolean;
   /** Reports the loaded list, so the shell can name the open thread. */
@@ -85,28 +92,16 @@ export default function Threads({
   }
 
   const item =
-    "flex w-full items-baseline gap-2 rounded-ui-sm px-3 py-1 text-left text-sm disabled:opacity-50 " +
+    "flex h-7 w-full items-center gap-2 rounded-ui-sm pr-1 pl-1.5 text-left text-sm/5 disabled:opacity-50 " +
     "hover:bg-active hover:text-ink";
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
-      <div className="px-3 pt-1">
-        <button
-          type="button"
-          onClick={() => onSelect(null)}
-          disabled={busy}
-          className={item + " text-muted"}
-        >
-          <PlusIcon />
-          <span className="flex-1">New question</span>
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
+      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
         {groups.map((g) => (
           <div key={g.label}>
-            <h3 className="mt-3 mb-1 px-3 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
-              {g.label}
-            </h3>
+            <h3 className={"mt-3 mb-1 " + railLabel}>{g.label}</h3>
+            {/* No gap: the 28px row pitch is the rhythm, as ../loom has it. */}
             <ul className="flex flex-col">
               {g.items.map((t) => {
                 const active = t.id === activeId;
@@ -116,7 +111,12 @@ export default function Threads({
                       type="button"
                       aria-current={active ? "true" : undefined}
                       onClick={() => onSelect(t.id)}
-                      disabled={busy}
+                      // Switching away from a running turn is what busy locks
+                      // out. The running thread's own row is not a switch: it
+                      // is the way back from the Repos page while the answer
+                      // is still being written, and with the page nav gone it
+                      // is the only one.
+                      disabled={busy && !active}
                       className={item + " group " + (active ? "bg-active text-ink" : "text-muted")}
                     >
                       {/* The title runs out under a gradient to the row's own

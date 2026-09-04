@@ -578,7 +578,16 @@ export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: Mar
   const title = spec.type === "flow" ? "Flow diagram" : "Sequence diagram";
   return (
     <div className="mt-3 overflow-x-auto rounded-ui-sm border border-border bg-panel p-3">
-      <svg width={layout.width + 2 * PAD} height={layout.height + 2 * PAD} role="img" aria-label={title} className="block">
+      {/* font-sans explicitly: the diagram sits inside the answer's .ui-markdown
+          wrapper, which is serif prose. A node label is a name from the code,
+          not prose, and it reads as the rest of the chrome does. */}
+      <svg
+        width={layout.width + 2 * PAD}
+        height={layout.height + 2 * PAD}
+        role="img"
+        aria-label={title}
+        className="block font-sans"
+      >
         <title>{title}</title>
         <defs>
           <marker id={head} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">

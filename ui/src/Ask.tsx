@@ -642,8 +642,11 @@ export default function Ask({
                   />
                 )}
 
+                {/* ui-markdown carries the prose typography (index.css), the
+                    same block ../loom uses. The measure stays capped here:
+                    rongo's answer column is wider than loom's rail. */}
                 {turn.text && (
-                  <div className="mt-4 max-w-[68ch] text-base leading-[1.65] text-ink-dim">
+                  <div className="ui-markdown mt-4 max-w-[68ch]">
                     <Markdown
                       text={turn.text}
                       onMarkerHover={i === sourceTurnIndex ? setHot : undefined}

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Ask, { money } from "./Ask";
+import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
-import Threads, { type Thread } from "./Threads";
-import { AskIcon, ReposIcon } from "./icons";
+import Threads, { railLabel, type Thread } from "./Threads";
+import { PlusIcon } from "./icons";
 import logo from "./assets/rongo-wide.png";
 
 type Page = "ask" | "repos";
@@ -179,8 +180,14 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
   return status && { ok: status.ok, when: relative(status.last) };
 }
 
-const navItem =
-  "flex w-full items-center gap-3 rounded-ui-sm px-3 py-1.5 text-left text-[15px] hover:bg-active hover:text-ink";
+/**
+ * A rail button, ../loom's metrics: 26px tall, 14/20 text. The rail has two
+ * type sizes in total — this one and railLabel — plus the mono timestamp on a
+ * thread row.
+ */
+const railRow =
+  "flex h-[26px] w-full items-center gap-2.5 rounded-ui-sm px-1.5 text-left text-sm/5 " +
+  "hover:bg-active hover:text-ink disabled:opacity-50";
 
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
@@ -250,8 +257,9 @@ export default function App() {
         <div className="flex min-w-0 items-baseline gap-2.5 px-6 text-muted">
           {page === "ask" ? (
             <>
-              <span>Threads</span>
-              <span className="text-faint">/</span>
+              {/* No breadcrumb root: there is one list, and "Threads /" led
+                  nowhere you could click. The title stands on its own, and
+                  keeps the accent it was just given. */}
               <span className="truncate font-serif text-[19px] font-medium text-accent-strong">
                 {openTitle ?? "New question"}
               </span>
@@ -288,29 +296,38 @@ export default function App() {
 
       <div className="grid min-h-0 grid-cols-[300px_1fr]">
         <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
-          <div className="px-6 pt-4 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">Explore</div>
-          <nav aria-label="Pages" className="grid gap-px px-3 pb-1">
-            {(
-              [
-                ["ask", "Ask", <AskIcon key="a" />],
-                ["repos", "Repos", <ReposIcon key="r" />],
-              ] as const
-            ).map(([p, label, icon]) => (
-              <button
-                key={p}
-                type="button"
-                aria-current={page === p ? "page" : undefined}
-                onClick={() => setPage(p)}
-                className={navItem + " " + (page === p ? "bg-active text-ink" : "text-muted")}
+          {/*
+            The one action, at the top where it belongs. It used to sit inside
+            Threads and therefore under the "History" heading, which read as if
+            starting a question were a piece of history.
+          */}
+          <div className="p-2">
+            <button
+              type="button"
+              onClick={() => {
+                setPage("ask");
+                selectThread(null);
+              }}
+              disabled={busy}
+              className={railRow + " text-muted"}
+            >
+              <span
+                aria-hidden="true"
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-elevated text-ink-dim"
               >
-                {icon}
-                {label}
-              </button>
-            ))}
-          </nav>
-          <div className="flex items-center px-6 pt-3 pb-1 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
-            History
-            {threads.length > 0 && <span className="ml-auto font-mono tracking-normal">{threads.length}</span>}
+                <PlusIcon />
+              </span>
+              New question
+            </button>
+          </div>
+          {/* px-2 to sit in the same column as the day groups and the rows
+              below, which are inside Threads' own px-2 scroller; pr-1 so the
+              count lines up with their timestamps. */}
+          <div className="mt-5 px-2">
+            <div className={"flex items-center pr-1 " + railLabel}>
+              History
+              {threads.length > 0 && <span className="ml-auto font-mono">{threads.length}</span>}
+            </div>
           </div>
           <Threads
             activeId={threadId}
@@ -322,15 +339,31 @@ export default function App() {
             busy={busy}
             onList={setThreads}
           />
-          {index && (
-            <div className="m-3 flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
-              <span
-                aria-hidden="true"
-                className={"h-[7px] w-[7px] rounded-full " + (index.ok ? "bg-online" : "bg-ochre")}
-              />
-              {index.ok ? "Index current" : "Index has errors"} · {index.when}
-            </div>
-          )}
+          {/*
+            The foot. The index line is conditional — it needs a repo list to
+            say anything — but the way to the Repos page is not, so the link
+            sits outside that guard.
+          */}
+          <div className="p-2">
+            {index && (
+              <div className="mb-1.5 flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
+                <span
+                  aria-hidden="true"
+                  className={"h-[7px] w-[7px] rounded-full " + (index.ok ? "bg-online" : "bg-ochre")}
+                />
+                {index.ok ? "Index current" : "Index has errors"} · {index.when}
+              </div>
+            )}
+            <button
+              type="button"
+              aria-current={page === "repos" ? "page" : undefined}
+              onClick={() => setPage("repos")}
+              className={railRow + " " + (page === "repos" ? "bg-active text-ink" : "text-muted")}
+            >
+              <Icon name="code" size="21px" className="text-ink-dim" />
+              Repos
+            </button>
+          </div>
         </aside>
 
         <main className="min-h-0 min-w-0">
