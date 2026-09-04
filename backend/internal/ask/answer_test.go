@@ -303,12 +303,23 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		t.Error("the sources never reached the prompt with their markers")
 	}
 	// The UI colours a fence by its tag and guesses nothing; an untagged
-	// fence stays plain. Only the DEV answer carries code.
+	// fence stays plain. Only the DEV answer carries code; both may carry the
+	// one fence that is not code, the diagram.
 	if !strings.Contains(*promptDev, "```go") {
 		t.Error("the DEV prompt does not ask for a language tag on fenced code")
 	}
-	if strings.Contains(*promptBA, "```") {
+	if strings.Contains(*promptBA, "```go") {
 		t.Error("the BA prompt talks about fenced code, but a BA answer carries none")
+	}
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		if !strings.Contains(p, "```diagram") || !strings.Contains(p, `"src":[1]`) {
+			t.Errorf("the %s prompt does not name the diagram fence and its src arrays", name)
+		}
+	}
+	// The diagram rule follows the audience block, so "the audience rules
+	// above" are the ones the model just read.
+	if strings.Index(*promptBA, "Audience: business analyst") > strings.Index(*promptBA, "```diagram") {
+		t.Error("the diagram rule comes before the audience block it refers to")
 	}
 }
 

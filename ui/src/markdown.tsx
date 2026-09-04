@@ -1,10 +1,12 @@
 import type { JSX, ReactNode } from "react";
 import { highlightBlock, languageOf } from "./highlight";
+import Diagram, { parseDiagram } from "./diagram";
 
 /**
  * A small Markdown renderer covering exactly what the answer prompt produces:
  * headings, paragraphs, bold, inline code, fenced code (coloured by its
- * language tag, see highlight.tsx) and lists.
+ * language tag, see highlight.tsx), lists, and the one fence that is not
+ * code: a `diagram` fence, drawn by diagram.tsx.
  *
  * It builds React nodes and never HTML. The text is model output, and
  * dangerouslySetInnerHTML would turn a prompt injection into a script tag.
@@ -245,7 +247,7 @@ function startsBlock(line: string): boolean {
   );
 }
 
-type MarkerHooks = {
+export type MarkerHooks = {
   onHover?: (marker: number | null) => void;
   /** Opens the source behind a marker; the chip is a button only once
    * `backed` says there is one. */
@@ -272,15 +274,39 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
       while (i < lines.length && !fenceRe.test(lines[i])) body.push(lines[i++]);
       // Past the end when the stream stopped inside the block. The content is
       // still code and is shown as code.
+      const closed = i < lines.length;
       i++;
+      let tag = fence[1];
+      if (tag === "diagram") {
+        // A diagram fence is drawn once it is complete and parses. While it
+        // is still arriving the reader sees that a picture is on its way, not
+        // the JSON flashing by. Once the citations are known the turn is over:
+        // a fence still open then (a stream cut, or a stored answer holding
+        // one) is shown as the text it is, never a placeholder that waits
+        // for nothing.
+        const spec = closed ? parseDiagram(body.join("\n")) : null;
+        if (spec) {
+          out.push(<Diagram key={k++} spec={spec} hooks={hooks} />);
+          continue;
+        }
+        if (!closed && hooks.backed === undefined) {
+          out.push(
+            <div key={k++} className="mt-3 rounded-ui-sm border border-border bg-panel p-3 text-sm text-muted">
+              Drawing the diagram…
+            </div>,
+          );
+          continue;
+        }
+        tag = "json";
+      }
       // Coloured straight from the grammar, never through text(): a marker-
-      // shaped a[1] inside code is code, as the backend's withoutCode agrees.
+      // shaped a[1] inside code is code, as the backend's splitFences agrees.
       out.push(
         <pre
           key={k++}
           className="mt-3 overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
         >
-          <code>{highlightBlock(body.join("\n"), languageOf(fence[1]))}</code>
+          <code>{highlightBlock(body.join("\n"), languageOf(tag))}</code>
         </pre>,
       );
       continue;

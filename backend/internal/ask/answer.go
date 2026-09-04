@@ -147,6 +147,24 @@ where they carry the explanation. A fenced code block carries its language tag
 (` + "```go" + `, ` + "```typescript" + `), never a bare ` + "```" + `. Describe
 the control flow so that it can be followed in the code.`
 
+// answerDiagram follows the audience block, so "the audience rules above"
+// are the ones the model just read: a Developer diagram names functions and
+// files, an Analyst diagram speaks the domain. The fence is named literally,
+// as the DEV block names ` + "```go" + `: the model needs the syntax, not a
+// description of it. The src array is the marker syntax the prose uses.
+const answerDiagram = `
+
+At most one diagram, and only where control flow or a call sequence carries
+the explanation: a fenced block tagged ` + "```diagram" + ` holding JSON, either
+{"type":"flow","nodes":[{"id","label","kind":"start|end|step|decision","src":[1]}],
+ "edges":[{"from","to","label"}]} or
+{"type":"sequence","actors":[{"id","label"}],
+ "steps":[{"from","to","label","kind":"call|return|async","src":[1]}]}.
+src lists the markers the node rests on, as a claim in prose would. At most
+12 nodes, 5 actors, 12 steps. Labels follow the audience rules above and are
+written in the answer language; ids stay short ASCII. The prose still
+explains; the diagram is not a substitute.`
+
 // nothingFound is the answer when nothing was gathered, in the language the
 // reader asked for. It is not an apology and not a guess: the caller adds the
 // terms that were tried. Fixed text rather than a model call: an answer with
@@ -196,6 +214,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	} else {
 		system += answerBA
 	}
+	system += answerDiagram
 	// Said twice, first and last: the sources in between are code and comments
 	// in whatever language the repository uses, and a model that has just read
 	// two thousand tokens of English tends to answer in it.
