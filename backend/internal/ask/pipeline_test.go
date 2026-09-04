@@ -18,11 +18,43 @@ import (
 type fakeSearch struct {
 	hits []retrieve.Hit
 	got  retrieve.Query
+	// queries is every query the turn ran, in order. A comparison turn runs
+	// one per named repository, and only the sequence shows that.
+	queries []retrieve.Query
+	// indexed is what this fake index carries. Nil means "whatever the
+	// question named", which is what every test that does not care about
+	// scope wants: the guess passes through unchanged, as it did before
+	// ResolveRepos existed.
+	indexed []string
 }
 
 func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
 	f.got = q
+	f.queries = append(f.queries, q)
 	return f.hits, nil
+}
+
+// ResolveRepos answers from indexed: the names it holds are the ones this
+// fake index carries, and everything else the question named is unknown.
+func (f *fakeSearch) ResolveRepos(_ context.Context, want []string, _ string) (known, unknown []string, err error) {
+	if f.indexed == nil {
+		return want, nil, nil
+	}
+	for _, n := range want {
+		found := false
+		for _, have := range f.indexed {
+			if have == n {
+				found = true
+				break
+			}
+		}
+		if found {
+			known = append(known, n)
+		} else {
+			unknown = append(unknown, n)
+		}
+	}
+	return known, unknown, nil
 }
 
 // searchFunc adapts a plain function to Searcher, for tests that only care
@@ -33,15 +65,25 @@ func (f searchFunc) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit,
 	return f(q)
 }
 
+// ResolveRepos knows no repository: these tests never name one, and a fake
+// that invented an index would hide a turn that searched the wrong scope.
+func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known, unknown []string, err error) {
+	return nil, nil, nil
+}
+
 // fakeRouter returns a canned Decision regardless of input, so pipeline tests
 // can drive Run's ask/don't-ask branch without a database, a margin or a
 // model — Router's own ladder is route_test.go's job.
 type fakeRouter struct {
 	d   Decision
 	err error
+	// named is what Run passed as the question's resolved repositories, so a
+	// test can check the rung's input reaches the router at all.
+	named []string
 }
 
-func (f fakeRouter) Route(_ context.Context, _ string, _ Language, _ []retrieve.Hit) (Decision, error) {
+func (f *fakeRouter) Route(_ context.Context, _ string, _ Language, _ []retrieve.Hit, namedRepos []string) (Decision, error) {
+	f.named = namedRepos
 	return f.d, f.err
 }
 
@@ -73,7 +115,7 @@ func withRouterAsking(n int) pipelineOpt {
 			Hits:      []retrieve.Hit{{ChunkID: int64(i + 1), Repo: repo, Path: "a.go"}},
 		}
 	}
-	return func(f *pipelineFakes) { f.router = fakeRouter{d: Decision{Ask: true, Candidates: cs}} }
+	return func(f *pipelineFakes) { f.router = &fakeRouter{d: Decision{Ask: true, Candidates: cs}} }
 }
 
 // newTestPipeline builds a Pipeline over a migrated database, an upstream
@@ -84,7 +126,7 @@ func newTestPipeline(t *testing.T, opts ...pipelineOpt) *Pipeline {
 	t.Helper()
 	f := pipelineFakes{
 		search: &fakeSearch{},
-		router: fakeRouter{},
+		router: &fakeRouter{},
 	}
 	for _, o := range opts {
 		o(&f)
@@ -134,7 +176,7 @@ func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
 	hitID := seedChunk(t, db, "backend/internal/playbackgrant/store.go", 0, 1, 20, "NewGrant", "func NewGrant() {}")
 	search := &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}
 	c := twoStepUpstream(t, appleTVReply, "Access runs through a grant [1].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 	q := "How does an Apple TV get at the media file without signing in?"
 
 	got, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Events{})
@@ -162,7 +204,7 @@ func TestPipeline_nothingFoundNamesTheTermsItTried(t *testing.T) {
 	// whatever happened to be in context.
 	db := gatherDB(t)
 	c := twoStepUpstream(t, appleTVReply, "I suspect ...")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
 	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, Events{})
 	if err != nil {
@@ -185,7 +227,7 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
 	c := twoStepUpstream(t, appleTVReply, "So [1].")
 	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fakeRouter{})
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 	var steps []string
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN,
@@ -240,7 +282,7 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 
 	// When
 	answer, err := p.Resume(context.Background(), "frage", AudienceBA, LanguageEN,
-		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Events{})
+		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{}, Events{})
 
 	// Then
 	if err != nil {
@@ -261,7 +303,7 @@ func TestReexplainAnswersFromStoredSourcesWithoutSearchingOrGathering(t *testing
 	}))
 
 	answer, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
-		[]Source{{ChunkID: 1, Repo: "peeq", Path: "a.go", Text: "package a", StartLine: 1, EndLine: 1}}, Events{})
+		[]Source{{ChunkID: 1, Repo: "peeq", Path: "a.go", Text: "package a", StartLine: 1, EndLine: 1}}, Scope{}, Events{})
 	if err != nil {
 		t.Fatalf("reexplain: %v", err)
 	}
@@ -275,7 +317,7 @@ func TestReexplainRefusesWhenNothingIsLeftToAnswerFrom(t *testing.T) {
 	// different code would be a silent substitution — exactly what the
 	// invariants forbid.
 	p := newTestPipeline(t)
-	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN, nil, Events{})
+	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN, nil, Scope{}, Events{})
 	if err == nil {
 		t.Fatal("want an error when the gathered basis is gone")
 	}

@@ -77,6 +77,11 @@ type Turn = {
   // needs it; a turn still in flight has none yet.
   messageId: number | null;
   clarification: TurnClarification | null;
+  // What the turn had to say about its own scope - a repository the question
+  // named that the index does not carry. Empty on every ordinary turn, and
+  // shown above the answer rather than inside it: it is about the answer, not
+  // part of it.
+  notice: string;
   // The candidate picked on this turn's card, or null before a choice. Once
   // set it stays — picking a different candidate later starts a NEW turn,
   // never rewriting this one.
@@ -153,6 +158,9 @@ type Message = {
   answer: string;
   error: string;
   citations: Citation[] | null;
+  // The scope sentence, rendered by the backend in this message's own
+  // language. Empty on every turn that named nothing the index lacked.
+  notice?: string;
   clarification: { id: number; candidates: ClarifyCandidate[] } | null;
   from_candidate_idx: number;
   // The clarification this message resolved, or 0 when it did not resume
@@ -178,6 +186,7 @@ function storedTurn(m: Message): Turn {
     language: m.language ?? "en",
     text: m.answer ?? "",
     citations: m.citations ?? [],
+    notice: m.notice ?? "",
     steps: [],
     error: m.error ?? "",
     done: true,
@@ -204,6 +213,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     language,
     text: "",
     citations: [],
+    notice: "",
     steps: [],
     error: "",
     done: false,
@@ -521,7 +531,8 @@ export default function Ask({
             onActivity();
           } else if (name === "status") {
             patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
-          } else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
+          } else if (name === "notice") patchLast((t) => ({ ...t, notice: payload.text ?? "" }));
+          else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
           else if (name === "usage") patchLast((t) => ({ ...t, usage: payload as Usage }));
           else if (name === "clarification") {
@@ -710,6 +721,21 @@ export default function Ask({
                     session does. */}
                 {turn.live && (
                   <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} />
+                )}
+
+                {/* Above the answer, and not ochre: ochre means "your move",
+                    and there is no move to make here - the turn already did
+                    what it could and is saying what it could not. */}
+                {turn.notice && (
+                  <div
+                    role="note"
+                    className="mt-4 flex max-w-[68ch] items-start gap-2.5 rounded-ui-sm border border-border border-l-2 border-l-elevated-border bg-panel px-3.5 py-2.5"
+                  >
+                    <span aria-hidden="true" className="font-mono text-muted">
+                      !
+                    </span>
+                    <p className="m-0 text-[13.5px] text-muted">{turn.notice}</p>
+                  </div>
                 )}
 
                 {turn.clarification && (

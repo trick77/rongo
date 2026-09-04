@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -17,13 +18,16 @@ const searchK = 20
 // without an embedding endpoint.
 type Searcher interface {
 	Search(ctx context.Context, q retrieve.Query) ([]retrieve.Hit, error)
+	// ResolveRepos splits the understanding's guessed repository names into
+	// the ones the index carries and the ones it does not.
+	ResolveRepos(ctx context.Context, want []string, question string) (known, unknown []string, err error)
 }
 
 // Routes decides whether a turn can be answered from the gathered hits or
 // must ask the reader to choose among candidates. An interface — satisfied by
 // *Router — so the pipeline can be tested without a database or a model.
 type Routes interface {
-	Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit) (Decision, error)
+	Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -33,6 +37,10 @@ type Routes interface {
 type Clarification struct {
 	Understanding Understanding
 	Candidates    []Candidate
+	// Scope is what the question said about repositories. A turn that ends by
+	// asking has one too, and it is part of the record: the candidates on the
+	// card come from a corpus the named repository may have been missing from.
+	Scope Scope
 }
 
 // Events is how a caller watches a turn. Both may be nil.
@@ -42,6 +50,16 @@ type Events struct {
 	OnStatus func(step string)
 	// OnToken receives the answer as it is written.
 	OnToken func(tok string)
+	// OnNotice reports what the turn has to say about its own scope. Called
+	// before the search, at most once, and not at all when there is nothing
+	// to say — which is every ordinary turn.
+	OnNotice func(text string)
+}
+
+func (e Events) notice(text string) {
+	if text != "" && e.OnNotice != nil {
+		e.OnNotice(text)
+	}
 }
 
 func (e Events) status(step string) {
@@ -107,15 +125,26 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		return Answer{}, nil, err
 	}
 
+	known, unknown, err := p.search.ResolveRepos(ctx, u.Repos, question)
+	if err != nil {
+		return Answer{}, nil, fmt.Errorf("resolve the named repositories: %w", err)
+	}
+	scope := Scope{Known: known, Unknown: unknown}
+	// Sent before the search rather than with the answer: it is already known
+	// here, and a turn that goes on to fail or to ask has still told the
+	// reader what its scope was.
+	notice := ScopeNotice(lang, known, unknown)
+	ev.notice(notice)
+
 	texts := u.SearchTexts(question)
 	ev.status("searching")
-	hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: u.Repos, Question: question, K: searchK})
+	hits, err := p.searchScoped(ctx, question, texts, known)
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
 
 	ev.status("routing")
-	d, err := p.router.Route(ctx, question, lang, hits)
+	d, err := p.router.Route(ctx, question, lang, hits, known)
 	if err != nil {
 		return Answer{}, nil, err
 	}
@@ -123,7 +152,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		// The turn ends here. The understanding travels with it: a resumed
 		// turn that re-derives its own terms can search differently and
 		// answer from material the card never showed.
-		return Answer{}, &Clarification{Understanding: u, Candidates: d.Candidates}, nil
+		return Answer{}, &Clarification{Understanding: u, Candidates: d.Candidates, Scope: scope}, nil
 	}
 
 	// Gathering keeps starting from ALL hits, never from a candidate's own
@@ -136,12 +165,50 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		return Answer{}, nil, err
 	}
 	if len(sources) == 0 {
-		return Answer{Text: NothingFound(lang, texts)}, nil, nil
+		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil, nil
 	}
 
 	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	answer.Scope = scope
 	return answer, nil, err
+}
+
+// searchScoped runs the search the turn's scope calls for.
+//
+// One search over the whole corpus, or over the one repository the question
+// named, is the ordinary case and is unchanged. Two or more named repositories
+// is not: the fused list is cut to searchK and nothing reserves room in it per
+// repository — RepoDecay ships off, measured a wash in
+// docs/measurements/2026-08-22-repo-diversity.md — so one repository can fill
+// the cut and the "comparison" would have only one side to compare. Searching
+// each named repository separately makes the representation a fact rather
+// than a hope, and costs nothing but the extra query: no new retrieval
+// machinery, no knob, Query.Repos as it already is.
+//
+// searchK per repository, not searchK divided among them: each side gets the
+// same depth it would have got as the only named one, and gather applies no
+// cap to hits by design.
+func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, known []string) ([]retrieve.Hit, error) {
+	if len(known) < 2 {
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: question, K: searchK})
+	}
+	var all []retrieve.Hit
+	for _, repo := range known {
+		// Question is left out on purpose: it names every one of these
+		// repositories, and knownRepos would union them all back in, undoing
+		// the one-repository-at-a-time cut this exists for.
+		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, hits...)
+	}
+	// Ordered best first across the repositories, as one search would be: the
+	// router ranks candidates by their best hit and the gatherer walks in
+	// order, and neither should see the repositories' turn order instead.
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	return all, nil
 }
 
 // Resume continues a turn after the reader chose one candidate from a
@@ -149,7 +216,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 // candidate's own hits ARE the search result now — and gathers only from
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
-func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, ev Events) (Answer, error) {
+func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
@@ -157,7 +224,7 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
+	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -167,11 +234,11 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // first turn and the re-explain request, and answering the same question from
 // different code than the reader already saw would be a silent substitution —
 // exactly what "never invent" forbids.
-func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audience, lang Language, sources []Source, ev Events) (Answer, error) {
+func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audience, lang Language, sources []Source, scope Scope, ev Events) (Answer, error) {
 	if len(sources) == 0 {
 		return Answer{}, fmt.Errorf("reexplain: no sources left to answer from")
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, ev.tokens())
+	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
 }

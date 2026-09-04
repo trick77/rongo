@@ -1,0 +1,12 @@
+-- scope is what the question said about repositories, resolved against the
+-- index: {"known":[...],"unknown":[...]} as ask.Scope marshals it, or '' on
+-- every turn that named none.
+--
+-- The JSON is stored rather than the sentence a reader sees. Three paths need
+-- it and they need different things from it: the first turn renders the
+-- notice, a resumed turn and a re-explain rebuild the answer prompt's
+-- "these repositories are not indexed" rule from it, and the notice itself is
+-- language-dependent while the fact is not. Storing the rendered sentence
+-- would serve the first and leave the other two answering about repositories
+-- the index never had.
+ALTER TABLE messages ADD COLUMN scope TEXT NOT NULL DEFAULT '';

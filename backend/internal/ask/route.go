@@ -303,17 +303,30 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 	return r.judge(ctx, question, cs)
 }
 
-// Decide is the ladder's decision, given what each rung found: the margin
-// wins first, a manifest dependency next, and only then the judge's answer,
-// which is never defaulted.
+// Decide is the ladder's decision, given what each rung found: the question's
+// own scope wins first, then the margin, then a manifest dependency, and only
+// then the judge's answer, which is never defaulted.
 //
-// It is a pure function of the three rungs precisely so that it can be the
-// ONLY place this policy is written down. Route calls it, and so does the
-// eval harness's margin sweep, which needs to re-decide at six margins from
-// rungs it paid for once. Before this existed the harness carried its own
-// copy, which meant a change to the rung order here left the harness
-// compiling and silently measuring a policy the product no longer ran.
-func Decide(all []Candidate, margin float64, related, judged bool) bool {
+// It is a pure function of the rungs precisely so that it can be the ONLY
+// place this policy is written down. Route calls it, and so does the eval
+// harness's margin sweep, which needs to re-decide at six margins from rungs
+// it paid for once. Before this existed the harness carried its own copy,
+// which meant a change to the rung order here left the harness compiling and
+// silently measuring a policy the product no longer ran.
+//
+// namedRepos is how many repositories the question named that the index
+// actually carries. Two or more means the reader asked about both, and a card
+// offering a choice between them is a question they already answered — worse,
+// choosing forecloses the other half, because a resumed turn reads only the
+// chosen candidate's hits. This rung is deterministic and sits in front of
+// everything else; it is NOT the phase 4c evidence lever, which fed the judge
+// a "the question named this repository" signal and was measured twice
+// without landing (docs/measurements/2026-08-19-candidates.md). The judge's
+// prompt is untouched.
+func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int) bool {
+	if namedRepos >= 2 {
+		return false
+	}
 	if Dominates(all, margin) {
 		return false
 	}
@@ -327,10 +340,15 @@ func Decide(all []Candidate, margin float64, related, judged bool) bool {
 // case — the model. Which rungs are RUN is decided here, so the common fast
 // path — one candidate clearly ahead — still does no database query and no
 // model call; what the run rungs then MEAN is Decide's, and only Decide's.
-func (r *Router) Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit) (Decision, error) {
+func (r *Router) Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		return Decision{}, err
+	}
+	// Asked about both, so neither rung below can change the outcome and
+	// neither is worth a query or a model call.
+	if len(namedRepos) >= 2 {
+		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
 	if Dominates(ranked.All, r.margin) {
 		return Decision{Ask: false, Candidates: ranked.All}, nil
@@ -350,7 +368,7 @@ func (r *Router) Route(ctx context.Context, question string, lang Language, hits
 			return Decision{}, err
 		}
 	}
-	if !Decide(ranked.All, r.margin, related, judged) {
+	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos)) {
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
 	named, err := r.name(ctx, question, lang, cs)

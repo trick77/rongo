@@ -135,17 +135,42 @@ func routeMargin(t *testing.T) float64 {
 // Reusing expansions.json is the same reuse gather_test.go relies on: a
 // routing measurement should not also pay for a fresh understanding call per
 // question, and freezing is what makes the measurement repeatable.
-func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) []retrieve.Hit {
+// It also returns the named repositories the index actually carries, because
+// that is an input to ask.Decide and the harness has to hand Decide the same
+// thing the product does — a harness that passed nothing here would measure a
+// router without the comparison rung, which is the defect the exported ladder
+// exists to prevent.
+//
+// The search itself mirrors Pipeline.searchScoped: two or more named
+// repositories are searched one at a time, so neither side can be crowded out
+// of the cut by the other.
+func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) ([]retrieve.Hit, []string) {
 	t.Helper()
 	texts, ok := expansions[q.Text]
 	if !ok {
 		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
 	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], Question: q.Text, K: routeSearchK})
+	known, _, err := r.ResolveRepos(ctx, repos[q.Text], q.Text)
 	if err != nil {
-		t.Fatalf("search %q: %v", q.Text, err)
+		t.Fatalf("resolve repos %q: %v", q.Text, err)
 	}
-	return hits
+	if len(known) < 2 {
+		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: q.Text, K: routeSearchK})
+		if err != nil {
+			t.Fatalf("search %q: %v", q.Text, err)
+		}
+		return hits, known
+	}
+	var all []retrieve.Hit
+	for _, repo := range known {
+		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: routeSearchK})
+		if err != nil {
+			t.Fatalf("search %q in %s: %v", q.Text, repo, err)
+		}
+		all = append(all, hits...)
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
+	return all, known
 }
 
 // routingRow is one question's outcome under one routing arm, kept for the
@@ -160,8 +185,8 @@ func (r routingRow) correct() bool { return r.got == r.want }
 
 // reportRouting prints one arm's accuracy, overall and split by resolution —
 // the split matters because the two ways to be WRONG are opposite mistakes:
-// asking about a unique/composition question annoys the reader, answering an
-// ambiguous one silently guesses.
+// asking about a unique/composition/comparison question annoys the reader,
+// answering an ambiguous one silently guesses.
 func reportRouting(t *testing.T, label string, rows []routingRow) {
 	t.Helper()
 	var correct, ambigCorrect, ambigN, otherCorrect, otherN int
@@ -189,7 +214,7 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 			float64(ambigCorrect)/float64(ambigN), ambigCorrect, ambigN)
 	}
 	if otherN > 0 {
-		t.Logf("  unique+composition (want Ask=false)    = %.3f (%d/%d)",
+		t.Logf("  unique+composition+comparison (Ask=false) = %.3f (%d/%d)",
 			float64(otherCorrect)/float64(otherN), otherCorrect, otherN)
 	}
 
@@ -249,14 +274,14 @@ func TestEvalMeasureRouting(t *testing.T) {
 
 	var shortRows, proRows []routingRow
 	for _, q := range questions {
-		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		want := resolutionExpectsAsk(q.Resolution)
 
 		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin})
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged)})
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named))})
 
 		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin})
-		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged)})
+		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named))})
 	}
 
 	t.Logf("")
@@ -306,14 +331,15 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 		all     []ask.Candidate
 		related bool
 		judged  bool
+		named   int
 		want    bool
 		q       Question
 	}
 	rows := make([]perQuestion, 0, len(questions))
 	for _, q := range questions {
-		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins)
-		rows = append(rows, perQuestion{all: all, related: related, judged: judged, want: resolutionExpectsAsk(q.Resolution), q: q})
+		rows = append(rows, perQuestion{all: all, related: related, judged: judged, named: len(named), want: resolutionExpectsAsk(q.Resolution), q: q})
 	}
 
 	t.Logf("")
@@ -321,7 +347,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	for _, margin := range routeMargins {
 		correct := 0
 		for _, row := range rows {
-			if ask.Decide(row.all, margin, row.related, row.judged) == row.want {
+			if ask.Decide(row.all, margin, row.related, row.judged, row.named) == row.want {
 				correct++
 			}
 		}
@@ -379,8 +405,8 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var rows []groundingRow
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
-		hits := hitsFor(t, ctx, r, expansions, expansionRepos, q)
-		d, err := router.Route(ctx, q.Text, ask.LanguageEN, hits)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		d, err := router.Route(ctx, q.Text, ask.LanguageEN, hits, named)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
 		}
@@ -456,6 +482,8 @@ func TestResolutionExpectsAskMatchesTheSpec(t *testing.T) {
 		{ResolutionUnique, false},
 		{ResolutionAmbiguous, true},
 		{ResolutionComposition, false},
+		// The reader named both sides. Asking is the one wrong answer.
+		{ResolutionComparison, false},
 	}
 	for _, c := range cases {
 		if got := resolutionExpectsAsk(c.res); got != c.want {
@@ -479,7 +507,7 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	if anyMarginNeedsLadder(dominant, []float64{0.10, 0.40}) {
 		t.Error("a dominant pair never needs the ladder to go on at any margin in this sweep")
 	}
-	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */) {
+	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */, 0) {
 		t.Error("a dominant pair must answer without asking regardless of related/judged")
 	}
 
@@ -489,16 +517,16 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	}
 
 	// Once past Dominates, a manifest dependency short-circuits the judge.
-	if got := ask.Decide(tight, 0.10, true, true /* must not be read */); got {
+	if got := ask.Decide(tight, 0.10, true, true /* must not be read */, 0); got {
 		t.Error("a manifest dependency must not ask even if the judge would have said ask")
 	}
 
 	// Once past Dominates and with no manifest dependency, the judge's answer
 	// is what decides — never defaulted.
-	if got := ask.Decide(tight, 0.10, false, true); !got {
+	if got := ask.Decide(tight, 0.10, false, true, 0); !got {
 		t.Error("ask.Decide must read the judge's answer once the margin does not dominate and nothing is related")
 	}
-	if got := ask.Decide(tight, 0.10, false, false); got {
+	if got := ask.Decide(tight, 0.10, false, false, 0); got {
 		t.Error("ask.Decide must read the judge's answer, not default to true")
 	}
 

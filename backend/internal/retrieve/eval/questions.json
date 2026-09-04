@@ -992,5 +992,49 @@
         "verified": "understand.go code_terms - the guessed bridge from domain word to identifier"
       }
     ]
+  },
+  {
+    "question": "How do peeq and rongo each space their background loops apart?",
+    "kind": "how",
+    "resolution": "comparison",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/sched/sched.go"
+        ],
+        "verified": "read 2026-09-04: package sched, cancellable Sleep plus jittered intervals and slot arithmetic over math/rand, shared by the download worker, the scan scheduler and the channel-metadata refresher"
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/sched/sched.go"
+        ],
+        "verified": "read 2026-09-04: package sched, Jittered spreads an interval by +/-20% over math/rand/v2 so repositories on one interval do not hit their forge in the same second"
+      }
+    ],
+    "note": "The question names both repositories, so neither is an alternative to the other and both implementations belong in the answer. Asking which one is meant would ask the reader to answer a question they already answered, and choosing forecloses the other half: a resumed turn reads only the chosen candidate's hits."
+  },
+  {
+    "question": "How does peeq open its SQLite database compared to rongo?",
+    "kind": "how",
+    "resolution": "comparison",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "read 2026-09-04: package store, ncruces driver with the sqlite-vec WASM bindings imported for the vec0 table"
+      },
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/store/store.go"
+        ],
+        "verified": "read 2026-09-04: package store, same driver pair, documented as one unit that must be bumped together"
+      }
+    ],
+    "note": "Exactly the look-alike module pair that produces a wrong clarification when the question names neither repository - peeq/store and rongo/store. Named, it is a comparison and must be answered, which is what separates this cohort from ambiguous."
   }
 ]

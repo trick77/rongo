@@ -37,8 +37,20 @@ type Message struct {
 	Audience string `json:"audience"`
 	// Language is the language the answer was written in, per message like
 	// Audience: the selector sits on the input field.
-	Language  string         `json:"language"`
-	Question  string         `json:"question"`
+	Language string `json:"language"`
+	Question string `json:"question"`
+	// Scope is what the question said about repositories, resolved against
+	// the index. Stored as ask.Scope's JSON so a resumed turn and a
+	// re-explain can rebuild the same prompt rules the first turn ran under.
+	//
+	// Not sent to the browser, for the same reason Understanding is not: it is
+	// the machinery, and the page has no use for it. What the page gets is
+	// Notice, the one sentence a person reads.
+	Scope ask.Scope `json:"-"`
+	// Notice is Scope rendered in this message's own language. Derived on
+	// read rather than stored, so a sentence is never left behind in a
+	// language the turn was not answered in.
+	Notice    string         `json:"notice"`
 	Answer    string         `json:"answer"`
 	Error     string         `json:"error"`
 	Citations []ask.Citation `json:"citations"`
@@ -200,6 +212,38 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // ends — answered, asked back, found nothing, failed — because the gates ran
 // either way and a thread total that skipped them would be a lie. Nothing to
 // save writes nothing.
+// SetScope records what the turn's question said about repositories, once the
+// index has been asked which of those names it carries. Written before the
+// answer, because a turn that ends by asking or by failing has a scope too.
+// An empty scope writes nothing: the ordinary turn names no repository.
+func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) error {
+	if len(sc.Known) == 0 && len(sc.Unknown) == 0 {
+		return nil
+	}
+	blob, err := json.Marshal(sc)
+	if err != nil {
+		return fmt.Errorf("encode scope: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET scope = ? WHERE id = ?`, string(blob), messageID); err != nil {
+		return fmt.Errorf("store scope: %w", err)
+	}
+	return nil
+}
+
+// scanScope decodes a stored scope column. Unreadable JSON yields the zero
+// scope rather than an error: a message whose provenance cannot be read is
+// still a message, and the record must stay legible.
+func scanScope(blob string) ask.Scope {
+	if blob == "" {
+		return ask.Scope{}
+	}
+	var sc ask.Scope
+	if err := json.Unmarshal([]byte(blob), &sc); err != nil {
+		return ask.Scope{}
+	}
+	return sc
+}
+
 func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error {
 	if len(calls) == 0 {
 		return nil
@@ -277,11 +321,12 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var m Message
 	var created string
 	var fromClar sql.NullInt64
+	var scope string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &m.FromCandidateIdx, &fromClar, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -289,6 +334,8 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 		return Message{}, false, fmt.Errorf("read message: %w", err)
 	}
 	m.FromClarificationID = fromClar.Int64
+	m.Scope = scanScope(scope)
+	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope.Known, m.Scope.Unknown)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
@@ -304,7 +351,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ?
 		ORDER BY m.ordinal`, threadID, subject)
@@ -318,10 +365,13 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		var m Message
 		var created string
 		var fromClar sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &m.FromCandidateIdx, &fromClar, &created); err != nil {
+		var scope string
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &m.FromCandidateIdx, &fromClar, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64
+		m.Scope = scanScope(scope)
+		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope.Known, m.Scope.Unknown)
 		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, m)

@@ -167,7 +167,7 @@ func TestRouteAnswersWithoutAskingWhenOneCandidateDominates(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	})
+	}, nil)
 
 	// Then
 	if err != nil {
@@ -198,7 +198,7 @@ func TestRouteFastPathMakesNoDependencyQuery(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("route: %v — the dominant path must never reach the dependency query, which cannot run without repo_deps", err)
 	}
@@ -222,7 +222,7 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 	got, err := r.Route(context.Background(), "how does peeq open the database?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/store/store.go", Score: 0.50},
 		{Repo: "go-sqlite3", Path: "driver/driver.go", Score: 0.48},
-	})
+	}, nil)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -251,7 +251,7 @@ func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
 	got, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	})
+	}, nil)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -282,7 +282,7 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", LanguageEN, hits)
+	got, err := r.Route(context.Background(), "frage", LanguageEN, hits, nil)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestRouteJudgeDecodeFailureMeansAskNotCrashNotCompose(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	})
+	}, nil)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -365,7 +365,7 @@ func TestRouteNamingFailureKeepsTheModuleKeyAsTitle(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	})
+	}, nil)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -433,7 +433,7 @@ func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
 	if _, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -457,7 +457,7 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 	if _, err := base.Route(context.Background(), "frage", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -508,18 +508,18 @@ func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 
 	// The margin dominates: no rung below it is consulted at all, so whatever
 	// related and judged would have said must not be read.
-	if Decide(dominant, 0.25, true, true) {
+	if Decide(dominant, 0.25, true, true, 0) {
 		t.Error("a dominant pair answers without asking, whatever the later rungs would have said")
 	}
 	// A manifest dependency short-circuits the judge.
-	if Decide(tight, 0.25, true, true) {
+	if Decide(tight, 0.25, true, true, 0) {
 		t.Error("a manifest dependency is composition; the judge must not override it")
 	}
 	// Past both, the judge decides — and is never defaulted.
-	if !Decide(tight, 0.25, false, true) {
+	if !Decide(tight, 0.25, false, true, 0) {
 		t.Error("the judge said ask")
 	}
-	if Decide(tight, 0.25, false, false) {
+	if Decide(tight, 0.25, false, false, 0) {
 		t.Error("the judge said compose")
 	}
 }
@@ -567,7 +567,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	if _, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -584,7 +584,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	if _, err := cheap.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("route on the cheap lane: %v", err)
 	}
 	if models["judge"] != llm.ShortGateDeployment {
@@ -632,7 +632,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	if _, err := r.Route(context.Background(), "how is authentication done?", LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 

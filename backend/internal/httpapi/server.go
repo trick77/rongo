@@ -35,6 +35,9 @@ type Threads interface {
 	CandidateHits(ctx context.Context, subject string, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error)
 	LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error
 	SaveSources(ctx context.Context, messageID int64, sources []ask.Source) error
+	// SetScope records what the turn's question said about repositories, so a
+	// reload can render the notice and a resumed turn can rebuild the rules.
+	SetScope(ctx context.Context, messageID int64, scope ask.Scope) error
 	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
 	// SaveUsage records the paid calls one turn made, however it ended.
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error

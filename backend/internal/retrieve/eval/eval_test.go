@@ -56,6 +56,14 @@ const (
 	// mechanism. Asking would be wrong — it forces a choice between halves of
 	// the truth — and every part belongs in the answer.
 	ResolutionComposition Resolution = "composition"
+	// ResolutionComparison: several INDEPENDENT candidates in different
+	// repositories, which the QUESTION ITSELF named. Like ambiguous in that
+	// the mechanisms are unrelated, and the opposite of it in what to do:
+	// the reader named both sides, so asking which one is meant asks them to
+	// answer a question they already answered — and choosing forecloses the
+	// other half, because a resumed turn reads only the chosen candidate's
+	// hits. Every named repository belongs in the answer.
+	ResolutionComparison Resolution = "comparison"
 )
 
 // Candidate is one place that answers a question, in one repository.
@@ -553,6 +561,20 @@ func candidatesFound(hits []retrieve.Hit, q Question) int {
 	return n
 }
 
+// reposOf is the distinct repositories a question's candidates sit in.
+func reposOf(q Question) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range q.Candidates {
+		if seen[c.Repo] {
+			continue
+		}
+		seen[c.Repo] = true
+		out = append(out, c.Repo)
+	}
+	return out
+}
+
 // TestQuestionSetIsWellFormed runs WITHOUT an endpoint: it is the guard that a
 // question set edited months from now still has the shape the harness reads.
 //
@@ -597,8 +619,30 @@ func TestQuestionSetIsWellFormed(t *testing.T) {
 				// which, is the part a later reader cannot reconstruct.
 				t.Errorf("%q is %s and carries no note", q.Text, q.Resolution)
 			}
+		case ResolutionComparison:
+			if len(q.Candidates) < 2 {
+				t.Errorf("%q is a comparison but has %d candidate(s) — there is nothing to compare",
+					q.Text, len(q.Candidates))
+			}
+			if q.Note == "" {
+				t.Errorf("%q is a comparison and carries no note", q.Text)
+			}
+			// The whole cohort rests on the question naming its repositories
+			// itself: that is what the rung keys off, and a comparison
+			// question whose text names none would be scored against a rung
+			// that never fires.
+			lower := strings.ToLower(q.Text)
+			for _, c := range q.Candidates {
+				if !strings.Contains(lower, strings.ToLower(c.Repo)) {
+					t.Errorf("%q is a comparison but does not name %q — the rung keys off the question's own words",
+						q.Text, c.Repo)
+				}
+			}
+			if len(reposOf(q)) < 2 {
+				t.Errorf("%q is a comparison inside one repository; the cohort is about two", q.Text)
+			}
 		default:
-			t.Errorf("%q has resolution %q, want unique, ambiguous or composition", q.Text, q.Resolution)
+			t.Errorf("%q has resolution %q, want unique, ambiguous, composition or comparison", q.Text, q.Resolution)
 		}
 		byResolution[q.Resolution]++
 
