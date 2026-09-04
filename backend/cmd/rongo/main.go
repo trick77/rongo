@@ -260,12 +260,12 @@ func main() {
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}
-	// Prices come from the registry, matched by the hosts rongo talks to;
-	// BACKEND_PRICE_* sits on top. The table is read per report, so a fetch
-	// that lands after boot prices the thread that is already open.
-	deps.Prices = pricing.Start(pollCtx, &workers, cfg.Prices, pricing.Source{
+	// Prices come from the registry: the MiMo deployments at MiMo's own API
+	// listing whatever endpoint they are called at, the embedding model at
+	// its endpoint. The table is read per report, so a fetch that lands after
+	// boot prices the thread that is already open.
+	deps.Prices = pricing.Start(pollCtx, &workers, pricing.Source{
 		URL:          cfg.PricesURL,
-		LLMBaseURL:   cfg.LLMBaseURL,
 		EmbedBaseURL: cfg.EmbedBaseURL,
 		EmbedModel:   cfg.EmbedModel,
 	})

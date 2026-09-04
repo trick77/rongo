@@ -878,8 +878,8 @@ export default function Ask({
                         </table>
                         <p className="mt-2 font-sans text-xs text-faint">
                           {turn.usage.cost_usd != null
-                            ? "Computed from the registry's list price for this endpoint, USD per million tokens, or from BACKEND_PRICE_* where set. Not a bill: the provider's invoice is."
-                            : "Tokens only: the price registry does not know this endpoint. The server log names it; BACKEND_PRICE_* overrides."}
+                            ? "Computed from the registry's list price, USD per million tokens: the deployments at MiMo's own API whatever endpoint they were called at, embeddings at theirs. Not a bill: the provider's invoice is."
+                            : "Tokens only: no price table is loaded. The server log says why."}
                         </p>
                       </div>
                     )}

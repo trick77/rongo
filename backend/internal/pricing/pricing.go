@@ -1,16 +1,19 @@
-// Package pricing turns the endpoint rongo talks to into a price table,
-// without anyone typing a price.
+// Package pricing builds rongo's price table from models.dev, without anyone
+// typing a price.
 //
-// A price keyed by model name alone is a guess: the same deployment name
-// costs nothing on a flat-rate token plan, one figure at the vendor's
-// pay-as-you-go endpoint and up to five times that at a reseller. The price
-// belongs to the endpoint. models.dev lists every provider with its API base
-// URL and each model's cost, in USD per million tokens, and rongo already
-// knows its base URLs, so the lookup needs no configuration: match the
-// endpoint, take the provider's prices for the deployments rongo calls.
+// The two MiMo deployments are priced from MiMo's own API listing, whatever
+// endpoint rongo is configured to call. The same deployment name is listed at
+// zero on a flat-rate token plan and at a markup behind a reseller, and
+// neither figure is what a turn is worth: a plan hides the cost, a gateway
+// prices its own contract rather than the model. The vendor's API is the one
+// number that means the same thing on every host.
 //
-// An endpoint that is not in the registry is not guessed at. The table
-// stays empty, the UI shows tokens only, and the log says why.
+// The embedding model is the other case and keeps the endpoint lookup: it is
+// whatever endpoint the operator configured, and the registry lists every
+// provider with its API base URL, so matching the URL prices it exactly.
+//
+// A model the registry cannot price is not guessed at. The table stays empty,
+// the UI shows tokens only, and the log says why.
 package pricing
 
 import (
@@ -34,6 +37,11 @@ import (
 
 // DefaultURL is where the registry lives. BACKEND_PRICES_URL overrides it.
 const DefaultURL = "https://models.dev/api.json"
+
+// MiMoAPI is the endpoint whose listing prices the two deployments, whatever
+// endpoint rongo is configured to call. Not configurable: a price that moved
+// with the endpoint is exactly what made a token plan read as free.
+const MiMoAPI = "https://api.xiaomimimo.com/v1"
 
 // Registry is models.dev's api.json, cut down to what the resolver reads.
 type Registry map[string]Provider
@@ -93,15 +101,14 @@ func Fetch(ctx context.Context, rawURL string, client *http.Client) (Registry, e
 	return reg, nil
 }
 
-// Resolve builds the price table for the endpoints rongo calls. The LLM
-// endpoint prices both deployments, the embedding endpoint prices the
-// embedding model. An empty embedding endpoint is a configured state
-// (indexing off), skipped without a word.
+// Resolve builds the price table: MiMoAPI prices both deployments, the
+// embedding endpoint prices the embedding model. An empty embedding endpoint
+// is a configured state (indexing off), skipped without a word.
 //
 // All or nothing: a turn's total that silently leaves out the calls nobody
-// could price would read as the whole cost, so one model the registry
-// cannot price for its endpoint empties the table. Each gap is one warning.
-func Resolve(reg Registry, llmBaseURL, embedBaseURL, embedModel string) (usage.Prices, []string) {
+// could price would read as the whole cost, so one model the registry cannot
+// price empties the table. Each gap is one warning.
+func Resolve(reg Registry, embedBaseURL, embedModel string) (usage.Prices, []string) {
 	prices := usage.Prices{}
 	var warnings []string
 
@@ -121,12 +128,12 @@ func Resolve(reg Registry, llmBaseURL, embedBaseURL, embedModel string) (usage.P
 		}
 	}
 
-	price(llmBaseURL, llm.ProDeployment, llm.ShortGateDeployment)
+	price(MiMoAPI, llm.ProDeployment, llm.ShortGateDeployment)
 	if embedBaseURL != "" {
 		price(embedBaseURL, embedModel)
 	}
 	if len(warnings) > 0 {
-		return usage.Prices{}, append(warnings, "showing tokens only: every model rongo calls must be priced for its endpoint, or none is")
+		return usage.Prices{}, append(warnings, "showing tokens only: every model rongo calls must be priced, or none is")
 	}
 	return prices, nil
 }
@@ -207,13 +214,14 @@ func providersFor(reg Registry, baseURL string) []string {
 	return nil
 }
 
-// Source is where a Table gets its prices from and what it prices.
+// Source is where a Table gets its prices from and what it prices. The LLM
+// endpoint is deliberately absent: the deployments are priced from MiMoAPI,
+// not from wherever they happen to be called.
 type Source struct {
 	URL    string
 	Client *http.Client
-	// LLMBaseURL and EmbedBaseURL are the endpoints that are looked up;
-	// EmbedModel is the one embedding model rongo calls.
-	LLMBaseURL   string
+	// EmbedBaseURL is the endpoint that is looked up; EmbedModel is the one
+	// embedding model rongo calls.
 	EmbedBaseURL string
 	EmbedModel   string
 }
@@ -222,15 +230,22 @@ type Source struct {
 // report. Safe for concurrent readers while Run replaces it in the
 // background.
 type Table struct {
-	override usage.Prices
-	current  atomic.Pointer[usage.Prices]
+	current atomic.Pointer[usage.Prices]
 }
 
-// NewTable starts from override, the BACKEND_PRICE_* pairs, so a configured
-// price applies before the registry has answered and keeps applying after.
-func NewTable(override usage.Prices) *Table {
-	t := &Table{override: override}
+// NewTable starts empty: until the registry has answered, a report carries
+// tokens only. There is no hand-typed price to start from.
+func NewTable() *Table {
+	t := &Table{}
 	t.apply(nil)
+	return t
+}
+
+// NewFixedTable is a table that never changes. For tests: the process's table
+// is the one Start keeps current.
+func NewFixedTable(prices usage.Prices) *Table {
+	t := &Table{}
+	t.apply(prices)
 	return t
 }
 
@@ -243,17 +258,14 @@ func (t *Table) Prices() usage.Prices {
 	return *t.current.Load()
 }
 
-// apply installs fetched with the override on top: a pair someone set by
-// hand is the one figure the registry cannot know better.
+// apply installs fetched as the whole table. Copied, so a caller still
+// holding the map it passed in cannot change what readers see.
 func (t *Table) apply(fetched usage.Prices) {
-	merged := usage.Prices{}
+	installed := usage.Prices{}
 	for model, p := range fetched {
-		merged[model] = p
+		installed[model] = p
 	}
-	for model, p := range t.override {
-		merged[model] = p
-	}
-	t.current.Store(&merged)
+	t.current.Store(&installed)
 }
 
 // Refresh fetches the registry once and installs what it resolves. A failed
@@ -264,7 +276,7 @@ func (t *Table) Refresh(ctx context.Context, src Source) error {
 	if err != nil {
 		return err
 	}
-	prices, warnings := Resolve(reg, src.LLMBaseURL, src.EmbedBaseURL, src.EmbedModel)
+	prices, warnings := Resolve(reg, src.EmbedBaseURL, src.EmbedModel)
 	for _, w := range warnings {
 		slog.Warn("prices: "+w, "registry", src.URL)
 	}
@@ -303,14 +315,13 @@ func (t *Table) Run(ctx context.Context, src Source) {
 	}
 }
 
-// Start is the process's one entry point: the table with the override
-// applied, kept current on a worker for as long as ctx lives. An empty URL
-// is the lookup switched off, said once in the log: tokens only, unless a
-// pair was configured.
-func Start(ctx context.Context, workers *sync.WaitGroup, override usage.Prices, src Source) *Table {
-	t := NewTable(override)
+// Start is the process's one entry point: a table kept current on a worker
+// for as long as ctx lives. An empty URL is the lookup switched off, said
+// once in the log: tokens only.
+func Start(ctx context.Context, workers *sync.WaitGroup, src Source) *Table {
+	t := NewTable()
 	if src.URL == "" {
-		slog.Info("prices: registry lookup is off; showing tokens only unless BACKEND_PRICE_* is set")
+		slog.Info("prices: registry lookup is off; showing tokens only")
 		return t
 	}
 	workers.Add(1)

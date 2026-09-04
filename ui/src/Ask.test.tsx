@@ -548,7 +548,7 @@ describe("Ask, what a turn cost", () => {
     expect(screen.getByText("understand")).toBeTruthy();
     expect(screen.getByText("mimo-v2.5-pro")).toBeTruthy();
     expect(screen.getByText("embed")).toBeTruthy();
-    expect(screen.getByText(/registry does not know this endpoint/)).toBeTruthy();
+    expect(screen.getByText(/no price table is loaded/)).toBeTruthy();
   });
 
   it("shows money once the server prices the calls", async () => {
