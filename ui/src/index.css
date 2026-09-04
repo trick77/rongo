@@ -239,3 +239,61 @@ details[open] > summary .chev {
   appearance: none;
   -webkit-appearance: none;
 }
+
+/* Syntax colouring (highlight.js classes via lowlight, see highlight.tsx).
+   The palette is ../loom's, so code reads the same across the family. It
+   applies wherever a token appears: answer code blocks and the source viewer. */
+.hljs-comment,
+.hljs-quote {
+  color: #7d8a72;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag {
+  color: #e0915f;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: #a3b565;
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: #c08bc4;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section,
+.hljs-name {
+  color: #6fb3c9;
+}
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-title.class_,
+.hljs-type {
+  color: #d8c06a;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property {
+  color: #d2b07a;
+}
+.hljs-meta,
+.hljs-operator,
+.hljs-punctuation {
+  color: #9b9789;
+}
+.hljs-deletion {
+  color: #d97c6b;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}

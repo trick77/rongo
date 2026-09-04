@@ -38,7 +38,8 @@ describe("SourceView", () => {
 
     render(<SourceView source={source} onClose={() => {}} />);
 
-    await screen.findByText("func One() {}");
+    // A code line is split into coloured spans, so it is found by its number.
+    await waitFor(() => expect(document.querySelector('[data-line="3"]')).not.toBeNull());
     const url = String((fetchMock.mock.calls[0] as unknown[])[0]);
     expect(url).toContain("repo=peeq");
     expect(url).toContain("path=backend%2Finternal%2Fsched%2Fsched.go");
@@ -48,6 +49,9 @@ describe("SourceView", () => {
     expect(Array.from(hits).map((h) => h.getAttribute("data-line"))).toEqual(["3", "4"]);
     // The trailing newline is not a sixth, empty line.
     expect(document.querySelectorAll("[data-line]").length).toBe(5);
+    // Coloured by the file's language, the line text itself unchanged.
+    expect(document.querySelector('[data-line="3"] .hljs-keyword')?.textContent).toBe("func");
+    expect(document.querySelector('[data-line="3"]')?.textContent).toBe("3func One() {}");
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("sched.go");
     expect(dialog.textContent).toContain("0123abc");

@@ -1,8 +1,10 @@
 import type { JSX, ReactNode } from "react";
+import { highlightBlock, languageOf } from "./highlight";
 
 /**
  * A small Markdown renderer covering exactly what the answer prompt produces:
- * headings, paragraphs, bold, inline code, fenced code and lists.
+ * headings, paragraphs, bold, inline code, fenced code (coloured by its
+ * language tag, see highlight.tsx) and lists.
  *
  * It builds React nodes and never HTML. The text is model output, and
  * dangerouslySetInnerHTML would turn a prompt injection into a script tag.
@@ -114,7 +116,9 @@ function inline(src: string, key: string, hooks: MarkerHooks): ReactNode[] {
   return out;
 }
 
-const fenceRe = /^\s*```/;
+// The info string after the opening fence names the language; a closing fence
+// has none and the group stays empty.
+const fenceRe = /^\s*```\s*([\w+#-]*)/;
 const headingRe = /^(#{1,6})\s+(.*)$/;
 const bulletRe = /^\s*[-*]\s+(.*)$/;
 const orderedRe = /^\s*\d+[.)]\s+(.*)$/;
@@ -145,19 +149,22 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}): ReactNode[
   while (i < lines.length) {
     const line = lines[i];
 
-    if (fenceRe.test(line)) {
+    const fence = fenceRe.exec(line);
+    if (fence) {
       const body: string[] = [];
       i++;
       while (i < lines.length && !fenceRe.test(lines[i])) body.push(lines[i++]);
       // Past the end when the stream stopped inside the block. The content is
       // still code and is shown as code.
       i++;
+      // Coloured straight from the grammar, never through text(): a marker-
+      // shaped a[1] inside code is code, as the backend's withoutCode agrees.
       out.push(
         <pre
           key={k++}
           className="mt-3 overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
         >
-          <code>{body.join("\n")}</code>
+          <code>{highlightBlock(body.join("\n"), languageOf(fence[1]))}</code>
         </pre>,
       );
       continue;

@@ -144,8 +144,9 @@ a follow-up.`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
-where they carry the explanation. Describe the control flow so that it can be
-followed in the code.`
+where they carry the explanation. A fenced code block carries its language tag
+(` + "```go" + `, ` + "```typescript" + `), never a bare ` + "```" + `. Describe
+the control flow so that it can be followed in the code.`
 
 // nothingFound is the answer when nothing was gathered, in the language the
 // reader asked for. It is not an apology and not a guess: the caller adds the
