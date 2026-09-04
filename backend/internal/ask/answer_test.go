@@ -201,6 +201,14 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	if !strings.Contains(*promptBA, "[1]") || !strings.Contains(*promptBA, "playbackgrant/store.go") {
 		t.Error("the sources never reached the prompt with their markers")
 	}
+	// The UI colours a fence by its tag and guesses nothing; an untagged
+	// fence stays plain. Only the DEV answer carries code.
+	if !strings.Contains(*promptDev, "```go") {
+		t.Error("the DEV prompt does not ask for a language tag on fenced code")
+	}
+	if strings.Contains(*promptBA, "```") {
+		t.Error("the BA prompt talks about fenced code, but a BA answer carries none")
+	}
 }
 
 func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {

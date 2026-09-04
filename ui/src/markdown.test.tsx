@@ -24,6 +24,28 @@ describe("Markdown", () => {
     expect(container.textContent).not.toContain("```");
   });
 
+  describe("code block colouring", () => {
+    it("colours a fence by its language tag, text unchanged", () => {
+      const { container } = render(<Markdown text={"```go\nfunc main() {}\n```"} />);
+      expect(container.querySelector("pre code .hljs-keyword")?.textContent).toBe("func");
+      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+    });
+
+    it("leaves an untagged or unknown fence as plain text", () => {
+      for (const src of ["```\nfunc main() {}\n```", "```nosuch\nfunc main() {}\n```"]) {
+        const { container } = render(<Markdown text={src} />);
+        expect(container.querySelector("pre code span")).toBeNull();
+        expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+      }
+    });
+
+    it("keeps a marker-shaped expression inside code literal", () => {
+      const { container } = render(<Markdown text={"```go\nx := a[1]\n```"} />);
+      expect(container.querySelector("sup")).toBeNull();
+      expect(container.querySelector("pre code")?.textContent).toBe("x := a[1]");
+    });
+  });
+
   it("renders bullet points as a list", () => {
     const { container } = render(<Markdown text={"- one\n- two\n"} />);
     expect(container.querySelectorAll("li").length).toBe(2);
@@ -133,6 +155,7 @@ describe("Markdown", () => {
     it("does not swallow a code block that is still open", () => {
       const { container } = render(<Markdown text={"Text.\n\n```go\nfunc main() {"} />);
       expect(container.querySelector("pre code")?.textContent).toBe("func main() {");
+      expect(container.querySelector("pre code .hljs-keyword")?.textContent).toBe("func");
       expect(container.textContent).toContain("Text.");
     });
 

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { highlightLines, languageForPath } from "./highlight";
 
 /** What a source row knows about the file it points at. The commit is
  * optional because citations recorded before it travelled with them have
@@ -105,6 +106,13 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
   // shrunk past the cited range since, nothing would be marked and the
   // reader would take the answer for unbacked. Say what happened instead.
   const moved = loaded.state === "ready" && source.start_line > loaded.lines.length;
+  // Coloured once per file, not per render: the grammar is the file's, and
+  // the per-line grid below keeps its numbers, anchors and cited-range mark.
+  const lines = loaded.state === "ready" ? loaded.lines : null;
+  const coloured = useMemo(
+    () => (lines ? highlightLines(lines.join("\n"), languageForPath(source.path)) : []),
+    [lines, source.path],
+  );
 
   return (
     <div
@@ -177,7 +185,7 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
                   >
                     {n}
                   </span>
-                  <span className="pr-5 text-ink-dim">{line}</span>
+                  <span className="pr-5 text-ink-dim">{coloured[i] ?? line}</span>
                 </div>
               );
             })}
