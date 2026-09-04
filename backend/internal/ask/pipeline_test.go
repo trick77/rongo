@@ -193,7 +193,9 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	want := []string{"understanding", "searching", "routing", "gathering", "answering"}
+	// "writing" follows "answering" on the first token: the reader is told the
+	// model is thinking until there is text, and only then that it is writing.
+	want := []string{"understanding", "searching", "routing", "gathering", "answering", "writing"}
 	if len(steps) != len(want) {
 		t.Fatalf("steps = %v, want %v", steps, want)
 	}
