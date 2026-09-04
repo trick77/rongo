@@ -151,7 +151,10 @@ the control flow so that it can be followed in the code.`
 // are the ones the model just read: a Developer diagram names functions and
 // files, an Analyst diagram speaks the domain. The fence is named literally,
 // as the DEV block names ` + "```go" + `: the model needs the syntax, not a
-// description of it. The src array is the marker syntax the prose uses.
+// description of it. The src array cites the same sources the prose does,
+// but it is JSON: answerCommon's "one marker per bracket" reads as [6][25]
+// applied to an array, which is not JSON at all, so the fence says outright
+// that the rule stops here.
 const answerDiagram = `
 
 At most one diagram, and only where control flow or a call sequence carries
@@ -160,7 +163,9 @@ the explanation: a fenced block tagged ` + "```diagram" + ` holding JSON, either
  "edges":[{"from","to","label"}]} or
 {"type":"sequence","actors":[{"id","label"}],
  "steps":[{"from","to","label","kind":"call|return|async","src":[1]}]}.
-src lists the markers the node rests on, as a claim in prose would. At most
+src holds the markers the node rests on. It is a JSON array, not prose: two
+sources read "src":[6,25], never "src":[6][25] - the one-marker-per-bracket
+rule is about running text and does not reach inside the fence. At most
 12 nodes, 5 actors, 12 steps. Labels follow the audience rules above and are
 written in the answer language; ids stay short ASCII. The prose still
 explains; the diagram is not a substitute.`
