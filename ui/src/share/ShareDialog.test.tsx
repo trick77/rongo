@@ -121,6 +121,6 @@ describe("ShareDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Create link" }));
 
-    expect((await screen.findByRole("alert")).textContent).toMatch(/still being answered/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/still being written/);
   });
 });

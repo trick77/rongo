@@ -25,8 +25,16 @@ export function routeFromPath(path: string): Route {
   if (path.startsWith(threadPrefix)) {
     // Number(), then a finite check: "/thread/abc" is not a thread, and
     // NaN would be carried all the way to a fetch of /api/threads/NaN.
-    const id = Number(decodeURIComponent(path.slice(threadPrefix.length)));
-    if (Number.isFinite(id) && id > 0) return { view: "thread", id };
+    // Digits only, which is what the backend's ParseInt(s, 10, 64) accepts.
+    // Number() is far too willing: "1.5", "1e3", "0x10" and " 7" all come back
+    // as numbers, and the backend then answers 400 — which Ask reads as "not
+    // right now" rather than as a dead thread, leaving a blank column and that
+    // URL in the bar with no way back but the rail.
+    const raw = decodeURIComponent(path.slice(threadPrefix.length));
+    if (/^\d+$/.test(raw)) {
+      const id = Number(raw);
+      if (id > 0) return { view: "thread", id };
+    }
   }
   if (path.startsWith(sharePrefix)) {
     const token = decodeURIComponent(path.slice(sharePrefix.length));
@@ -60,11 +68,18 @@ export function pathForRoute(route: Route): string {
 }
 
 /**
- * Pushes a route into history. Guarded on the current path so that landing on
- * a thread from its own URL does not push the same entry a second time — Back
- * would then need two presses to leave it.
+ * Moves to a route. Guarded on the current path so that landing on a thread
+ * from its own URL does not push the same entry a second time — Back would
+ * then need two presses to leave it.
+ *
+ * `replace` is for the app CORRECTING an address the reader did not choose: a
+ * thread that turns out to be deleted or not theirs, and the one they just
+ * deleted themselves. Pushed instead, Back would return to that dead address,
+ * the correction would push again, and Back could never leave the app.
  */
-export function navigate(route: Route) {
+export function navigate(route: Route, replace = false) {
   const path = pathForRoute(route);
-  if (window.location.pathname !== path) window.history.pushState({}, "", path);
+  if (window.location.pathname === path) return;
+  if (replace) window.history.replaceState({}, "", path);
+  else window.history.pushState({}, "", path);
 }

@@ -653,11 +653,14 @@ export default function Ask({
       onReexplain: reexplain,
       onCopy: async (i: number) => {
         // Silent on a refusal (insecure context, permissions): the answer is
-        // still on screen to select, and a banner for it would be noise.
+        // still on screen to select, and a banner for it would be noise. The
+        // button is told, though — it must not say "Copied" over a clipboard
+        // that still holds whatever was there before.
         try {
           await navigator.clipboard.writeText(asMarkdown(turns[i]));
+          return true;
         } catch {
-          // See above.
+          return false;
         }
       },
       onFollowup: askFollowup,

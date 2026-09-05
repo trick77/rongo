@@ -5,7 +5,7 @@ import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
 import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
-import { navigate, routeFromLocation, type Route } from "./routing";
+import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
 import logo from "./assets/rongo-wide.png";
 
 type Page = "ask" | "repos" | "shared";
@@ -193,21 +193,34 @@ export default function App() {
   // One way to move: push the URL, then render what it says. Nothing sets the
   // route without the address bar following, so Back and a click land on the
   // same state.
-  const go = useCallback((next: Route) => {
-    navigate(next);
+  const go = useCallback((next: Route, replace = false) => {
+    navigate(next, replace);
     setRoute(next);
   }, []);
 
   const selectThread = useCallback(
-    (id: number | null) => go(id === null ? { view: "new" } : { view: "thread", id }),
+    (id: number | null, replace = false) =>
+      go(id === null ? { view: "new" } : { view: "thread", id }, replace),
     [go],
   );
 
-  // "/" is not a route: it replaceStates to /new, so the address bar says what
-  // is on screen from the first paint. Back and Forward then re-read it —
-  // pushState does not fire popstate, so this is the only listener needed.
+  // A thread the reader did not choose to leave: it turned out to be deleted
+  // or not theirs, or they just deleted it. The address is CORRECTED rather
+  // than added to, or Back would return to the dead one, the correction would
+  // fire again, and Back could never leave the app.
+  const closeDeadThread = useCallback(() => selectThread(null, true), [selectThread]);
+
+  // The address bar has to say what is on screen from the first paint. "/" is
+  // the everyday case, but so is anything that does not name a route — "/",
+  // "/nope", "/thread/1.5" all render the unasked question, and leaving one of
+  // those in the bar means a reload lands somewhere the app never was.
+  // replaceState, not push: nobody navigated here on purpose.
+  //
+  // Back and Forward then re-read the bar. pushState does not fire popstate,
+  // so this is the only listener needed.
   useEffect(() => {
-    if (window.location.pathname === "/") window.history.replaceState({}, "", "/new");
+    const settled = pathForRoute(routeFromLocation());
+    if (window.location.pathname !== settled) window.history.replaceState({}, "", settled);
     const onPop = () => setRoute(routeFromLocation());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -459,7 +472,7 @@ export default function App() {
               // The thread on screen has just been deleted: close it, so the
               // view falls back to the empty ask page rather than holding a
               // conversation whose record is gone.
-              if (id === threadId) selectThread(null);
+              if (id === threadId) closeDeadThread();
               refreshThreads();
             }}
             onRenamed={refreshThreads}
@@ -500,7 +513,10 @@ export default function App() {
           <div hidden={page !== "ask"} className="h-full">
             <Ask
               threadId={threadId}
-              onThread={selectThread}
+              // Null from Ask is never a reader's choice: it is the thread
+              // turning out to be deleted or not theirs. Correct the address
+              // rather than push a second entry over the dead one.
+              onThread={(id) => (id === null ? closeDeadThread() : selectThread(id))}
               onActivity={refreshThreads}
               onBusy={setBusy}
               onUsage={(u) =>

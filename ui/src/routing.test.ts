@@ -16,7 +16,12 @@ describe("routeFromPath", () => {
   it("falls back to the unasked question", () => {
     // Including the addresses that look like a thread but are not: NaN carried
     // into a fetch of /api/threads/NaN is a request nobody can answer.
-    for (const path of ["/", "/new", "/thread/", "/thread/abc", "/thread/0", "/thread/-2", "/share/", "/nope"]) {
+    // "1.5", "1e3" and "0x10" are finite numbers the backend rejects with a
+    // 400 that Ask reads as "not right now", not as a dead thread.
+    for (const path of [
+      "/", "/new", "/thread/", "/thread/abc", "/thread/0", "/thread/-2",
+      "/thread/1.5", "/thread/0x10", "/share/", "/nope",
+    ]) {
       expect(routeFromPath(path)).toEqual({ view: "new" });
     }
   });

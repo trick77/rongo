@@ -74,7 +74,9 @@ func (s *Server) writeShare(w http.ResponseWriter, sh threads.Share, err error) 
 		return
 	case errors.Is(err, threads.ErrUnfinished):
 		// 409, not 400: the request is well formed and will work in a moment.
-		http.Error(w, "The last turn is still being answered.", http.StatusConflict)
+		// It only reaches here when NOTHING in the thread has finished — a
+		// thread with any finished turn freezes below the one in flight.
+		http.Error(w, "This thread's first answer is still being written.", http.StatusConflict)
 		return
 	default:
 		slog.Error("share thread failed", "err", err)

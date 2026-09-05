@@ -48,7 +48,7 @@ export default function ShareDialog({
       if (typeof got === "number") {
         setError(
           got === conflict
-            ? "The last turn is still being answered. Try again once it has finished."
+            ? "The first answer is still being written. Try again once it has landed."
             : "That did not work. Try again in a moment.",
         );
         return;

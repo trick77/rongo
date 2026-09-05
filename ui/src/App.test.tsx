@@ -294,6 +294,35 @@ describe("App, the thread in the URL", () => {
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(window.location.pathname).toBe("/new"));
   });
+
+  it("corrects a dead address instead of stacking history on it", async () => {
+    // Pushed, Back would return to the dead thread, the correction would push
+    // /new again, and Back could never leave the app.
+    apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
+
+    // The thread turns out to be gone the next time it is read.
+    apiFetch([], []);
+    window.history.back();
+    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+
+    // One press of Back, not a loop: the correction replaced the dead entry.
+    window.history.back();
+    await waitFor(() => expect(window.location.pathname).not.toBe("/thread/7"));
+  });
+
+  it("does not treat a fractional id as a thread", async () => {
+    // The backend answers 400, which Ask reads as "not right now" rather than
+    // as a dead thread — leaving a blank column and that URL in the bar.
+    atPath("/thread/1.5");
+    apiFetch([], []);
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByRole("heading", { level: 1 });
+    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+  });
 });
 
 describe("App, the rail on a phone", () => {

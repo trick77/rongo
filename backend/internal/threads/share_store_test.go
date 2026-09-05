@@ -44,16 +44,19 @@ func TestShare_mintsALinkAtTheNewestTurn(t *testing.T) {
 	}
 }
 
-func TestShare_aThreadWithNoFinishedTurnIsNotShareable(t *testing.T) {
+func TestShare_aThreadWithNothingFinishedYetIsNotShareable(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
-	// Asked but never answered: the row exists from the moment the question is
-	// sent, and freezing here would keep half a sentence for good.
+	// Asked but never answered, and it is the only turn: there is nothing
+	// finished to freeze, and freezing the row itself would keep half a
+	// sentence for good.
 	if _, err := s.AddQuestion(ctx, th, "ba", "en", "How?", 0); err != nil {
 		t.Fatalf("add question: %v", err)
 	}
 
+	// ErrUnfinished, not ErrNoShare: this thread can be shared in a moment,
+	// and an empty one never can.
 	if _, err := s.Share(ctx, testSubject, th); !errors.Is(err, ErrUnfinished) {
-		t.Fatalf("share of an unfinished turn = %v, want ErrUnfinished", err)
+		t.Fatalf("share with nothing finished = %v, want ErrUnfinished", err)
 	}
 }
 
@@ -387,18 +390,58 @@ func TestRaiseShare_aThreadWithNoLinkHasNothingToRaise(t *testing.T) {
 	}
 }
 
-func TestRaiseShare_isRefusedWhileTheTurnIsStillBeingWritten(t *testing.T) {
+func TestShare_freezesBelowATurnStillBeingWritten(t *testing.T) {
+	// The link is the thread as it STANDS, and a turn still being written does
+	// not stand yet — so it is left off rather than the share refused. This is
+	// also what makes a row orphaned by a crash harmless: it can never lock a
+	// thread out of being shared.
 	s, ctx, th, _ := newThreadStore(t)
-	answeredTurn(t, s, th, "How?", "So.")
-	if _, err := s.Share(ctx, testSubject, th); err != nil {
-		t.Fatalf("share: %v", err)
-	}
-	if _, err := s.AddQuestion(ctx, th, "ba", "en", "And then?", 0); err != nil {
+	finished := answeredTurn(t, s, th, "How?", "So.")
+	inFlight, err := s.AddQuestion(ctx, th, "ba", "en", "And then?", 0)
+	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
 
-	if _, err := s.RaiseShare(ctx, testSubject, th); !errors.Is(err, ErrUnfinished) {
-		t.Fatalf("raise over an unfinished turn = %v, want ErrUnfinished", err)
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share over an in-flight turn: %v", err)
+	}
+	if sh.UpToMessageID != finished {
+		t.Errorf("ceiling = %d, want the newest FINISHED turn %d", sh.UpToMessageID, finished)
+	}
+	if sh.Turns != 1 || sh.Newer != 1 {
+		t.Errorf("turns/newer = %d/%d, want 1/1", sh.Turns, sh.Newer)
+	}
+
+	// And once it lands, Update takes it in like any other later turn.
+	if err := s.Finish(ctx, inFlight.ID, "Then this.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	raised, err := s.RaiseShare(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	if raised.UpToMessageID != inFlight.ID || raised.Newer != 0 {
+		t.Errorf("after the turn landed: ceiling %d, newer %d", raised.UpToMessageID, raised.Newer)
+	}
+}
+
+func TestShare_aCrashedTurnDoesNotLockTheThreadOut(t *testing.T) {
+	// A process killed mid-stream leaves a message with no answer, no error
+	// and no card, and nothing sweeps those up. Refusing while the NEWEST ROW
+	// is unfinished would refuse this thread for ever, while the UI showed it
+	// as perfectly finished.
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	if _, err := s.AddQuestion(ctx, th, "ba", "en", "Never answered", 0); err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	if _, err := s.Share(ctx, testSubject, th); err != nil {
+		t.Fatalf("share with an orphaned row in the thread: %v", err)
+	}
+	if _, err := s.RaiseShare(ctx, testSubject, th); err != nil {
+		t.Fatalf("raise with an orphaned row in the thread: %v", err)
 	}
 }
 

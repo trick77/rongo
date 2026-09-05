@@ -16,10 +16,11 @@ import (
 // yesterday" would be an oracle for guessing tokens.
 var ErrNoShare = errors.New("no such share")
 
-// ErrUnfinished refuses to freeze a thread whose newest turn is still being
-// written. The question row exists from the moment it is asked, so a link made
-// mid-stream would carry half a sentence for good.
-var ErrUnfinished = errors.New("the last turn is not finished")
+// ErrUnfinished is a thread with nothing finished to freeze yet: its only turn
+// is still being written. A thread that HAS a finished turn is always
+// shareable — the link freezes below the one in flight rather than refusing,
+// so a row left unfinished by a crash can never lock a thread out of sharing.
+var ErrUnfinished = errors.New("nothing finished to share yet")
 
 // Share is one thread readable by anyone holding the link.
 type Share struct {
@@ -54,26 +55,42 @@ func newShareToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// newestMessage is the id of the last row in a thread, and whether that row is
-// a finished turn. A turn is finished once it has an answer, an error, or a
-// clarification card — the three ways a turn can end.
-func (s *Store) newestMessage(ctx context.Context, subject string, threadID int64) (int64, bool, error) {
-	var id int64
-	var answer, errText string
-	var carded bool
-	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.answer, m.error,
-		       EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id)
+// ceilingFor is the newest FINISHED turn of a thread: the id a link freezes
+// at. A turn is finished once it has an answer, an error, or a clarification
+// card — the three ways a turn can end.
+//
+// It is the newest finished turn rather than the newest row, and that
+// distinction is the whole of it. A question row exists from the moment it is
+// asked, so freezing at the newest ROW would keep half a sentence for good;
+// refusing while the newest row is unfinished looks like the same rule but is
+// not, because a row can be unfinished for ever. A process killed mid-stream
+// leaves a message with no answer, no error and no card, and nothing sweeps
+// those up — that thread would refuse to be shared until somebody edited the
+// database, while the UI showed it as perfectly finished.
+//
+// Freezing below an in-flight turn instead is also the honest answer to what
+// the dialog promises: the link is the thread as it stands, and the turn still
+// being written does not stand yet. It arrives as "1 question newer" the
+// moment it lands, with Update beside it.
+//
+// found is false when the thread has no finished turn at all — either it is
+// empty, or it is not this reader's, which the caller must not tell apart.
+// live says whether an unfinished row exists, so a thread whose only turn is
+// in flight can be told "not yet" rather than "nothing here".
+func (s *Store) ceilingFor(ctx context.Context, subject string, threadID int64) (id int64, found, live bool, err error) {
+	var rows int
+	err = s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(MAX(CASE WHEN m.answer <> '' OR m.error <> ''
+			                    OR EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id)
+			                  THEN m.id END), 0),
+			COUNT(*)
 		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.thread_id = ? AND t.user_subject = ?
-		ORDER BY m.id DESC LIMIT 1`, threadID, subject).Scan(&id, &answer, &errText, &carded)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
+		WHERE m.thread_id = ? AND t.user_subject = ?`, threadID, subject).Scan(&id, &rows)
 	if err != nil {
-		return 0, false, fmt.Errorf("read newest message: %w", err)
+		return 0, false, false, fmt.Errorf("read thread ceiling: %w", err)
 	}
-	return id, answer != "" || errText != "" || carded, nil
+	return id, id != 0, rows > 0, nil
 }
 
 // Share makes this thread readable by anyone holding the link, or un-revokes
@@ -83,17 +100,19 @@ func (s *Store) newestMessage(ctx context.Context, subject string, threadID int6
 // somebody's inbox, and minting a second one would leave the first revoked
 // without anybody being told.
 func (s *Store) Share(ctx context.Context, subject string, threadID int64) (Share, error) {
-	newest, done, err := s.newestMessage(ctx, subject, threadID)
+	newest, found, live, err := s.ceilingFor(ctx, subject, threadID)
 	if err != nil {
 		return Share{}, err
 	}
-	if newest == 0 {
-		// No turn, or not this reader's thread. Both are "nothing to share",
-		// and telling them apart would say whose thread it is.
+	if !found {
+		// A thread whose only turn is still being written can be shared in a
+		// moment; one with no turn at all, or one that is not this reader's,
+		// cannot. The second two are one answer on purpose — telling them
+		// apart would say whose thread it is.
+		if live {
+			return Share{}, ErrUnfinished
+		}
 		return Share{}, ErrNoShare
-	}
-	if !done {
-		return Share{}, ErrUnfinished
 	}
 
 	token, err := newShareToken()
@@ -120,15 +139,15 @@ func (s *Store) Share(ctx context.Context, subject string, threadID int64) (Shar
 // the link was made become part of it. The token does not change: the point of
 // Update is that the link already sent out keeps working.
 func (s *Store) RaiseShare(ctx context.Context, subject string, threadID int64) (Share, error) {
-	newest, done, err := s.newestMessage(ctx, subject, threadID)
+	newest, found, live, err := s.ceilingFor(ctx, subject, threadID)
 	if err != nil {
 		return Share{}, err
 	}
-	if newest == 0 {
+	if !found {
+		if live {
+			return Share{}, ErrUnfinished
+		}
 		return Share{}, ErrNoShare
-	}
-	if !done {
-		return Share{}, ErrUnfinished
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE shared_threads SET up_to_message_id = ?, updated_at = datetime('now')

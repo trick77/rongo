@@ -39,7 +39,8 @@ import {
 export type ThreadActions = {
   onRetry: (i: number) => void;
   onReexplain: (i: number) => void;
-  onCopy: (i: number) => Promise<void>;
+  /** Reports whether the clipboard took it: the label must not say so if not. */
+  onCopy: (i: number) => Promise<boolean>;
   onFollowup: (i: number, question: string) => void;
   onChoose: (i: number, idx: number) => void;
 };
@@ -144,7 +145,10 @@ export default function ThreadView({
 
   async function copy(turnIndex: number) {
     if (!actions) return;
-    await actions.onCopy(turnIndex);
+    // Only on a clipboard that actually took it. In an insecure context, or
+    // with the permission refused, the button saying "Copied" would be a
+    // plain lie — and the reader would paste whatever was there before.
+    if (!(await actions.onCopy(turnIndex))) return;
     setCopied(turnIndex);
     setTimeout(() => setCopied(null), 1500);
   }

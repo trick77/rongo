@@ -413,18 +413,23 @@ func TestShareUpdate_aThreadWithNoLinkIsNotFound(t *testing.T) {
 	}
 }
 
-func TestShareUpdate_isRefusedWhileTheTurnIsStillBeingWritten(t *testing.T) {
+func TestShareUpdate_leavesATurnStillBeingWrittenOffTheLink(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	share(t, srv, th)
+	sh := share(t, srv, th)
 	if _, err := st.AddQuestion(ctx, th, "ba", "en", "And then?", 0); err != nil {
 		t.Fatalf("add question: %v", err)
 	}
 
 	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share/update", th), "")
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d (%s), want 409", rec.Code, rec.Body.String())
+	// Not refused: the update takes in every turn that has finished, and the
+	// one in flight arrives as "1 newer" the moment it lands.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(getPublic(srv, "/api/shares/"+sh.Token).Body.String(), "And then?") {
+		t.Error("a turn still being written is on the link")
 	}
 }
