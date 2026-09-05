@@ -326,18 +326,26 @@ function headOf(t: Turn): number | null {
  * retry is the card, which is still open, so it gets no request and no button
  * — two ways of spending the same resume on screen would be one too many.
  *
- * This used to walk backwards over neighbouring turns comparing question
- * text, because nothing stored told a resume apart from a reader who ignored
- * the card and typed the same words again. head_message_id stores exactly
- * that, so the guess is gone: the group is asked, not inferred.
+ * For a turn that carries the link the group is asked, not inferred. A turn
+ * written before the column existed carries none, and never will: a resume is
+ * linked to its card only when an answer lands, so a resume that FAILED back
+ * then left nothing behind at all and no backfill can reach it. Those keep the
+ * old rule — walk back for an open card on the same question, skipping the
+ * failures in between, because a card can be tried more than once. It is the
+ * guess it always was, and it stays only where there is nothing to read.
  */
 function storedRetries(turns: Turn[]): Turn[] {
-  return turns.map((t) => {
+  return turns.map((t, i) => {
     if (!t.error) return t;
     const head = headOf(t);
-    const openCard = turns.some(
-      (o) => headOf(o) === head && o.clarification && o.chosenIdx == null,
-    );
+    const openCard = t.headId
+      ? turns.some((o) => headOf(o) === head && o.clarification && o.chosenIdx == null)
+      : (() => {
+          let j = i - 1;
+          while (j >= 0 && turns[j].error && !turns[j].clarification && turns[j].question === t.question) j--;
+          const card = j >= 0 ? turns[j] : null;
+          return !!card && !!card.clarification && card.chosenIdx == null && card.question === t.question;
+        })();
     if (openCard) return t;
     return {
       ...t,
@@ -401,11 +409,16 @@ function roleName(a: Audience): string {
  * The audience rides on the attempt rather than on the turn, because a
  * re-explain is the same question answered for the other reader — not a new
  * question, and the eyebrow above already said who asked.
+ *
+ * first is whether this is the turn's own answer, the one every re-explain is
+ * built from. Read off position rather than off the audience: explaining a
+ * Developer answer for the Analyst and then back again lands on the audience
+ * the turn started with, and that third block is still a re-explain.
  */
-function stageLabel(turn: Turn, asked: Turn): string {
+function stageLabel(turn: Turn, first: boolean): string {
   if (turn.clarification) return "Clarification";
   if (turn.error) return "Failed";
-  if (turn.audience !== asked.audience) return `Re-explained · ${roleName(turn.audience)}`;
+  if (!first) return `Re-explained · ${roleName(turn.audience)}`;
   return `Answer · ${roleName(turn.audience)}`;
 }
 
@@ -631,8 +644,11 @@ export default function Ask({
     threadId.current = openThread;
     // A breakdown is a turn index into the thread that is being left; the
     // same index in the next thread is a different turn. And the total in
-    // the header belongs to the old thread until the new one has loaded.
+    // the header belongs to the old thread until the new one has loaded. An
+    // unfolded failure is an index into that thread too: kept, it would open
+    // a failure in the next thread that nobody clicked.
     setOpenUsage(null);
+    setOpenFailure(new Set());
     onUsage(null);
     // The body empties in the same commit as the header, not a beat behind
     // it: the conversation that was just left used to stand under the new
@@ -1136,13 +1152,18 @@ export default function Ask({
                   // line. The last one in a turn never folds: its Retry button
                   // is the only way on from there.
                   const superseded = !!turn.error && k < group.length - 1;
+                  // The turn's own answer: the first attempt that neither
+                  // asked back nor broke. Everything answered after it is a
+                  // re-explain of it.
+                  const firstAnswer =
+                    group.find((j) => !turns[j].clarification && !turns[j].error) === i;
                   const folded = superseded && !openFailure.has(i);
                   return (
                     <div key={i}>
                 {group.length > 1 && (
                   <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[.09em] text-faint">
                     <span className="-ml-[21px] h-1.5 w-1.5 rounded-full bg-muted outline-3 outline-bg" />
-                    {stageLabel(turn, asked)}
+                    {stageLabel(turn, firstAnswer)}
                     {turn.askedAt && <time className="font-mono text-[11px] font-normal normal-case tracking-normal">{clock(turn.askedAt)}</time>}
                     {superseded && (
                       <button

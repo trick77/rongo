@@ -278,28 +278,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		thread = t
 	}
 
-	// A retry names the turn it is another attempt at. Validated here, after
-	// the thread is known and before the stream opens: the row must exist, be
-	// the caller's, and live in THIS thread. A head from another thread would
-	// file an answer under a question it does not belong to, and the record is
-	// the one thing in rongo that has to stay honest.
-	if resume == nil && req.HeadMessageID != 0 {
-		head, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.HeadMessageID)
-		if err != nil {
-			slog.Error("resolve head message failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
-		}
-		// Refused, not explained — the same rule the clarification check above
-		// follows: whether the id exists is not confirmed to someone who does
-		// not own it.
-		if !ok || head.ThreadID != thread.ID {
-			http.Error(w, "no such message", http.StatusForbidden)
-			return
-		}
-		headID = head.Head()
-	}
-
 	// Every model call this turn makes carries the thread, so the whole
 	// conversation pins to one upstream node instead of scattering across the
 	// deployment. Attached once here: both the fresh and the resumed path land

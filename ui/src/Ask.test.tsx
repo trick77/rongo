@@ -1798,3 +1798,115 @@ describe("Ask, one question and its attempts", () => {
     expect(mock.mock.calls.some((c) => String(c[0]) === "/api/messages/9/reexplain")).toBe(true);
   });
 });
+
+describe("Ask, turns written before the head link existed", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  // A resume is linked to its card only when an answer lands, so a resume
+  // that failed before the column existed left nothing behind and no backfill
+  // can reach it. It keeps the old walk: an open card is still its retry, and
+  // a button beside the error would be a second way to spend the resume.
+  it("still leaves a legacy failed resume to its card", async () => {
+    const card = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 100,
+        candidates: [
+          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    // No head_message_id at all: the row predates the column.
+    const legacyFailedResume = {
+      id: 11,
+      ordinal: 1,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "The turn failed.",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:01:00Z",
+    };
+    routedFetch([card, legacyFailedResume]);
+    strict(<Ask threadId={7} />);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("calls a re-explain back to the first audience a re-explain", async () => {
+    // Developer answer, explained for the Analyst, explained back for the
+    // Developer. The third block lands on the audience the turn started with
+    // and is still a re-explain of the first answer.
+    const rows = [
+      {
+        id: 9,
+        ordinal: 0,
+        audience: "dev",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "Through a grant.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        created_at: "2026-08-17T10:00:00Z",
+      },
+      {
+        id: 10,
+        ordinal: 1,
+        audience: "ba",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "In domain terms.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        head_message_id: 9,
+        created_at: "2026-08-17T10:01:00Z",
+      },
+      {
+        id: 11,
+        ordinal: 2,
+        audience: "dev",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "And in types again.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        head_message_id: 9,
+        created_at: "2026-08-17T10:02:00Z",
+      },
+    ];
+    routedFetch(rows);
+    strict(<Ask threadId={7} />);
+
+    await screen.findByText(/And in types again/);
+    expect(screen.getAllByRole("article").length).toBe(1);
+    expect(screen.getByText("Answer · Developer")).toBeTruthy();
+    expect(screen.getAllByText("Re-explained · Developer").length).toBe(1);
+    expect(screen.getByText("Re-explained · Analyst")).toBeTruthy();
+  });
+});
