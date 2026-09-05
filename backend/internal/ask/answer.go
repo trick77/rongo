@@ -356,9 +356,10 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}
 	system += answerDiagram
-	// Said twice, first and last: the sources in between are code and comments
-	// in whatever language the repository uses, and a model that has just read
-	// two thousand tokens of English tends to answer in it.
+	// Said twice, first and at the end: the sources in between are code and
+	// comments in whatever language the repository uses, and a model that has
+	// just read two thousand tokens of English tends to answer in it. How that
+	// language is spelled follows it, closing the prompt.
 	system += fmt.Sprintf(answerLanguage, name)
 	system += languageStyle(lang)
 
