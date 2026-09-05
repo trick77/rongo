@@ -28,7 +28,7 @@ type Threads interface {
 	SetTitle(ctx context.Context, id int64, from, to string) error
 	Rename(ctx context.Context, subject string, id int64, title string) (bool, error)
 	Delete(ctx context.Context, subject string, id int64) (bool, error)
-	AddQuestion(ctx context.Context, threadID int64, audience, language, question string) (threads.Message, error)
+	AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (threads.Message, error)
 	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
 	Fail(ctx context.Context, messageID int64, msg string) error
 	List(ctx context.Context, subject string) ([]threads.Thread, error)

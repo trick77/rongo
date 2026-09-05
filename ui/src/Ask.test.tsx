@@ -1520,7 +1520,10 @@ describe("Ask, retrying a failed turn", () => {
 
   it("asks again as a new turn, leaving the failed one in the record", async () => {
     const mock = queuedPostFetch([
-      [ev("thread", { thread_id: 1, message_id: 5 }), ev("error", { message: "The turn failed." })],
+      [
+        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("error", { message: "The turn failed.", message_id: 5 }),
+      ],
       [
         ev("thread", { thread_id: 1, message_id: 6 }),
         ev("token", { text: "The answer." }),
@@ -1533,15 +1536,22 @@ describe("Ask, retrying a failed turn", () => {
     await user.click(retry);
 
     await screen.findByText("The answer.");
-    // The failed turn is still there: the thread is a record.
+    // One question, so one article and the question printed once.
+    expect(screen.getAllByRole("article").length).toBe(1);
+    // The failed attempt is still there: the thread is a record. It folds
+    // rather than opening the turn with the attempt that broke.
+    const show = await screen.findByRole("button", { name: "Show" });
+    await user.click(show);
     expect(screen.getByRole("alert").textContent).toContain("The turn failed.");
     const posts = mock.mock.calls.filter((c) => c[0] === "/api/ask");
     expect(posts.length).toBe(2);
+    // It asks the SAME question again rather than filing it a second time.
     expect(JSON.parse(String(posts[1][1]?.body))).toEqual({
       question: "How?",
       audience: "ba",
       language: "en",
       thread_id: 1,
+      head_message_id: 5,
     });
   });
 
@@ -1625,6 +1635,7 @@ describe("Ask, retrying a failed turn", () => {
         audience: "dev",
         language: "en",
         thread_id: 7,
+        head_message_id: 9,
       });
     });
   });
@@ -1692,7 +1703,11 @@ describe("Ask, retrying a failed turn", () => {
       citations: [],
       clarification: null,
       from_candidate_idx: -1,
+      // The choice is linked only when an answer lands, so a failed resume
+      // carries none. The head link is written when the row is inserted,
+      // which is what still puts it under the question it belongs to.
       from_clarification_id: 0,
+      head_message_id: 10,
       created_at: "2026-08-17T10:01:00Z",
     };
     routedFetch([card, failedResume]);
@@ -1772,15 +1787,251 @@ describe("Ask, retrying a failed turn", () => {
       clarification: null,
       from_candidate_idx: -1,
       from_clarification_id: 0,
+      head_message_id: 10,
       created_at: at,
     });
     routedFetch([card, failedResume(11, "2026-08-17T10:01:00Z"), failedResume(12, "2026-08-17T10:02:00Z")]);
     strict(<Ask threadId={7} />);
 
-    await waitFor(() => expect(screen.getAllByRole("alert").length).toBe(2));
+    // Both failures are in the record and both are on the page — the newest
+    // in full, the one the reader already moved past folded to a line.
+    await waitFor(() => expect(screen.getAllByRole("alert").length).toBe(1));
+    expect(screen.getAllByRole("button", { name: "Show" }).length).toBe(1);
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
       false,
     );
+  });
+});
+
+describe("Ask, one question and its attempts", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  const question = "Wie unterscheidet sich das von reinem RAG?";
+
+  // The record keeps one row per attempt and copies the question onto each,
+  // because nothing in a thread is ever rewritten. head_message_id is what
+  // says they are one turn, and the page reads it rather than reprinting the
+  // copies as if the reader had typed them again.
+  const card = {
+    id: 10,
+    ordinal: 0,
+    audience: "ba",
+    language: "de",
+    question,
+    answer: "",
+    error: "",
+    citations: [],
+    clarification: {
+      id: 100,
+      candidates: [
+        { idx: 0, title: "Codefragen mit Quellenangaben", summary: "A.", repo: "rongo", branch: "master" },
+        { idx: 1, title: "Freitext", summary: "B.", repo: "rongo", branch: "master" },
+      ],
+    },
+    from_candidate_idx: -1,
+    from_clarification_id: 0,
+    created_at: "2026-09-05T13:59:00Z",
+  };
+  const resumed = {
+    id: 11,
+    ordinal: 1,
+    audience: "ba",
+    language: "de",
+    question,
+    answer: "Reines RAG sucht Ausschnitte.",
+    error: "",
+    citations: [],
+    clarification: null,
+    from_candidate_idx: 0,
+    from_clarification_id: 100,
+    head_message_id: 10,
+    created_at: "2026-09-05T14:00:00Z",
+  };
+  const reexplained = {
+    id: 12,
+    ordinal: 2,
+    audience: "dev",
+    language: "de",
+    question,
+    answer: "Der Unterschied sitzt im Indexpfad.",
+    error: "",
+    citations: [],
+    clarification: null,
+    from_candidate_idx: -1,
+    from_clarification_id: 0,
+    head_message_id: 10,
+    created_at: "2026-09-05T14:02:00Z",
+  };
+
+  it("prints the question once, however many attempts it took", async () => {
+    routedFetch([card, resumed, reexplained]);
+    strict(<Ask threadId={7} />);
+
+    await screen.findByText(/Reines RAG/);
+    expect(screen.getAllByText(question).length).toBe(1);
+    expect(screen.getAllByRole("article").length).toBe(1);
+    // Turns count questions, not rows: three rows, one question, Turn 1.
+    expect(screen.getByText("Turn 1")).toBeTruthy();
+    expect(screen.queryByText("Turn 2")).toBeNull();
+  });
+
+  it("keeps every attempt on the page, each saying what it is", async () => {
+    routedFetch([card, resumed, reexplained]);
+    strict(<Ask threadId={7} />);
+
+    // Nothing is dropped: the card, the answer and the same answer for the
+    // other audience are all there, under the one question.
+    await screen.findByText(/Reines RAG/);
+    expect(screen.getByText(/Der Unterschied sitzt im Indexpfad/)).toBeTruthy();
+    expect(screen.getByText("Clarification")).toBeTruthy();
+    expect(screen.getByText("Answer · Analyst")).toBeTruthy();
+    expect(screen.getByText("Re-explained · Developer")).toBeTruthy();
+  });
+
+  it("gives a turn answered on the first try no stage labels at all", async () => {
+    routedFetch([storedTurn]);
+    strict(<Ask threadId={7} />);
+
+    await screen.findByText(/Through a grant/);
+    expect(screen.getAllByRole("article").length).toBe(1);
+    expect(screen.queryByText(/^Answer · /)).toBeNull();
+  });
+
+  it("re-explains into the turn the question was asked in", async () => {
+    const mock = queuedPostFetch(
+      [
+        [
+          ev("thread", { thread_id: 7, message_id: 21 }),
+          ev("token", { text: "An answer for the BA." }),
+          ev("done", { message_id: 21 }),
+        ],
+      ],
+      [storedTurn],
+    );
+    strict(<Ask threadId={7} />);
+    await screen.findByText(/Through a grant/);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
+    await screen.findByText(/An answer for the BA/);
+
+    // Same question, so still one article and the question printed once.
+    expect(screen.getAllByRole("article").length).toBe(1);
+    expect(screen.getAllByText(storedTurn.question).length).toBe(1);
+    expect(mock.mock.calls.some((c) => String(c[0]) === "/api/messages/9/reexplain")).toBe(true);
+  });
+});
+
+describe("Ask, turns written before the head link existed", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  // A resume is linked to its card only when an answer lands, so a resume
+  // that failed before the column existed left nothing behind and no backfill
+  // can reach it. It keeps the old walk: an open card is still its retry, and
+  // a button beside the error would be a second way to spend the resume.
+  it("still leaves a legacy failed resume to its card", async () => {
+    const card = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 100,
+        candidates: [
+          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    // No head_message_id at all: the row predates the column.
+    const legacyFailedResume = {
+      id: 11,
+      ordinal: 1,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "The turn failed.",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:01:00Z",
+    };
+    routedFetch([card, legacyFailedResume]);
+    strict(<Ask threadId={7} />);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("calls a re-explain back to the first audience a re-explain", async () => {
+    // Developer answer, explained for the Analyst, explained back for the
+    // Developer. The third block lands on the audience the turn started with
+    // and is still a re-explain of the first answer.
+    const rows = [
+      {
+        id: 9,
+        ordinal: 0,
+        audience: "dev",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "Through a grant.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        created_at: "2026-08-17T10:00:00Z",
+      },
+      {
+        id: 10,
+        ordinal: 1,
+        audience: "ba",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "In domain terms.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        head_message_id: 9,
+        created_at: "2026-08-17T10:01:00Z",
+      },
+      {
+        id: 11,
+        ordinal: 2,
+        audience: "dev",
+        language: "en",
+        question: "How does an Apple TV get at the file?",
+        answer: "And in types again.",
+        error: "",
+        citations: [],
+        clarification: null,
+        from_candidate_idx: -1,
+        from_clarification_id: 0,
+        head_message_id: 9,
+        created_at: "2026-08-17T10:02:00Z",
+      },
+    ];
+    routedFetch(rows);
+    strict(<Ask threadId={7} />);
+
+    await screen.findByText(/And in types again/);
+    expect(screen.getAllByRole("article").length).toBe(1);
+    expect(screen.getByText("Answer · Developer")).toBeTruthy();
+    expect(screen.getAllByText("Re-explained · Developer").length).toBe(1);
+    expect(screen.getByText("Re-explained · Analyst")).toBeTruthy();
   });
 });

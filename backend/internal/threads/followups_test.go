@@ -12,7 +12,7 @@ func TestSaveFollowups_survivesAReload(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How does shipping work?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?", 0)
 	if err := s.Finish(ctx, m.ID, "It ships.", nil); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestSaveFollowups_nothingToSaveWritesNothing(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 
 	if err := s.SaveFollowups(ctx, m.ID, nil); err != nil {
 		t.Fatalf("SaveFollowups: %v", err)
@@ -61,7 +61,7 @@ func TestSaveFollowups_unreadableJSONCostsThePillsNotTheMessage(t *testing.T) {
 	db := threadDB(t)
 	s := NewStore(db)
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 	if _, err := db.ExecContext(ctx, `UPDATE messages SET followups = ? WHERE id = ?`, "{not json", m.ID); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
