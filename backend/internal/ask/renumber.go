@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // renumberer rewrites citation markers while the answer streams, so the
@@ -32,6 +33,9 @@ type renumberer struct {
 	dense   map[int]int // the prompt's number -> the reader's
 	order   []int       // the reader's number - 1 -> the prompt's
 	pending string      // what cannot be decided yet
+	// lastOut is the last byte handed to the reader, so a fence minted
+	// around a bare spec knows whether it already stands at a line start.
+	lastOut byte
 	inFence bool
 	// inDiagram says the open fence is a diagram, the one block whose
 	// numbers are claims rather than code.
@@ -67,13 +71,22 @@ func (r *renumberer) feed(tok string) string {
 	r.pending += tok
 	out, rest := r.decide(r.pending, false)
 	r.pending = rest
+	r.remember(out)
 	return out
+}
+
+// remember keeps the last byte emitted, the one openFence asks about.
+func (r *renumberer) remember(out string) {
+	if out != "" {
+		r.lastOut = out[len(out)-1]
+	}
 }
 
 // flush ends the stream: whatever is still pending is decided as it stands.
 func (r *renumberer) flush() string {
 	out, _ := r.decide(r.pending, true)
 	r.pending = ""
+	r.remember(out)
 	return out
 }
 
@@ -113,14 +126,41 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 			b.WriteString(s[i:cut])
 			return b.String(), s[cut:]
 		}
-		// The earliest of: a fence, an inline span, a marker.
-		j := strings.IndexAny(s[i:], "`[")
+		// The earliest of: a fence, an inline span, a marker, a spec that
+		// arrived without a fence at all.
+		j := strings.IndexAny(s[i:], "`[{")
 		if j < 0 {
 			b.WriteString(s[i:])
 			return b.String(), ""
 		}
 		b.WriteString(s[i : i+j])
 		i += j
+		if s[i] == '{' {
+			// A diagram the model wrote as bare JSON. Without this the
+			// object is prose, and the src arrays inside it are read as
+			// citation markers: the [6] of "src":[6] would be renumbered as
+			// though the sentence around it had cited source 6.
+			if jsonish(s[i:]) {
+				end := jsonEnd(s[i:])
+				if end < 0 && !atEnd {
+					return b.String(), s[i:] // the object may still close
+				}
+				if end >= 0 && specKind(s[i:i+end]) != "" {
+					prev := r.lastOut
+					if b.Len() > 0 {
+						written := b.String()
+						prev = written[len(written)-1]
+					}
+					body, _ := r.rewriteSrc(s[i:i+end], true)
+					b.WriteString(openFence(prev) + body + "\n```\n")
+					i += end
+					continue
+				}
+			}
+			b.WriteByte('{')
+			i++
+			continue
+		}
 		if s[i] == '`' {
 			// One or two backticks at the end of what has arrived may be the
 			// start of an opening fence: held back, as the closing one is.
@@ -153,13 +193,42 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				if nl < 0 && !atEnd {
 					return b.String(), s[i:]
 				}
-				head := s[i:]
+				raw := s[i:]
 				if nl >= 0 {
-					head = s[i : i+nl+1]
+					raw = s[i : i+nl+1]
 				}
-				r.inDiagram = infoTag(head) == "diagram"
+				head := raw
+				r.inDiagram = infoTag(raw) == "diagram"
+				if !r.inDiagram {
+					// The tag is not the one the prompt asked for, so the
+					// body decides. A spec opened as ```json is still the
+					// picture the answer meant; left as it came it renumbers
+					// nowhere and the reader is handed the JSON. The header
+					// is rewritten to the one both ends agree on.
+					//
+					// The body is read no further than this fence: a block
+					// the stream cut off mid-object must not have its brace
+					// matched against whatever the rest of the answer holds.
+					body := s[i+len(raw):]
+					if k := strings.Index(body, "```"); k >= 0 {
+						body = body[:k]
+					}
+					if jsonish(body) {
+						end := jsonEnd(body)
+						if end < 0 && !atEnd {
+							return b.String(), s[i:]
+						}
+						if end >= 0 && specKind(body[:end]) != "" {
+							r.inDiagram = true
+							head = "```diagram"
+							if strings.HasSuffix(raw, "\n") {
+								head += "\n"
+							}
+						}
+					}
+				}
 				b.WriteString(head)
-				i += len(head)
+				i += len(raw)
 				r.inFence = true
 				continue
 			}
@@ -213,7 +282,10 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 // wrong source under a chip. Both groups are read and the value is emitted
 // as the one array it was meant to be.
 var (
-	srcGroup    = `\[(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\]`
+	// Whitespace is allowed everywhere JSON allows it: a model that writes
+	// "src" : [ 9 ] means the same array, and read strictly it went through
+	// unrenumbered - a prompt index drawn as a chip.
+	srcGroup    = `\[\s*(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\s*\]`
 	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*(` + srcGroup + `(?:\s*` + srcGroup + `)*)`)
 	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
 	// What may still grow into another group of the chain: nothing yet, or a
@@ -223,6 +295,143 @@ var (
 	// array should have carried.
 	srcJoinRe = regexp.MustCompile(`\]\s*\[`)
 )
+
+// Reading the content rather than the fence tag is what keeps a diagram a
+// diagram when the model opens the block as ```json, or writes it with no
+// fence at all: three times now a picture has been thrown away because one
+// exact match failed, and an exact match on the tag would have been the
+// fourth. So nothing here matches a fixed opening. A candidate is anything
+// shaped like a JSON object; it is read to its closing brace and then asked
+// what it is, which is the one question that does not go stale when the
+// model reorders its keys.
+
+// jsonish says s may be the start of a JSON object: a brace and then a key,
+// whitespace ignored. It is deliberately weak - it only decides whether the
+// text is worth holding until its closing brace arrives, and specKind makes
+// the real decision - but weak is not nothing: prose does not open a brace
+// and follow it with a quote, so an ordinary "{" in a sentence is passed
+// through rather than stalling the stream.
+func jsonish(s string) bool {
+	const want = `{"`
+	i := 0
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			continue
+		}
+		if i == len(want) || byte(r) != want[i] {
+			return i == len(want)
+		}
+		i++
+	}
+	return true // still a prefix of `{"`: it may yet become one
+}
+
+// specKind returns the top-level "type" of the JSON object o when it names a
+// diagram this renderer draws, and "" otherwise. The key is read at depth one
+// only, and read as a key rather than found anywhere in the text: rongo
+// indexes rongo, so an answer that quotes answerDiagram's own format carries
+// these very words inside a code block, and retagging that block would turn a
+// developer's example into a picture.
+func specKind(o string) string {
+	depth := 0
+	for i := 0; i < len(o); {
+		switch o[i] {
+		case '{', '[':
+			depth++
+			i++
+		case '}', ']':
+			depth--
+			i++
+		case '"':
+			key, next := jsonString(o, i)
+			if depth != 1 || key != "type" {
+				i = next
+				continue
+			}
+			j := skipSpace(o, next)
+			if j >= len(o) || o[j] != ':' {
+				i = next
+				continue
+			}
+			if j = skipSpace(o, j+1); j >= len(o) || o[j] != '"' {
+				return ""
+			}
+			switch v, _ := jsonString(o, j); v {
+			case "flow", "sequence":
+				return v
+			}
+			return ""
+		default:
+			i++
+		}
+	}
+	return ""
+}
+
+// jsonString reads the string literal starting at o[i] == '"' and returns its
+// content and the index just past the closing quote. The content is returned
+// raw: nothing here needs an unescaped "type".
+func jsonString(o string, i int) (string, int) {
+	for j := i + 1; j < len(o); j++ {
+		switch o[j] {
+		case '\\':
+			j++
+		case '"':
+			return o[i+1 : j], j + 1
+		}
+	}
+	return "", len(o)
+}
+
+func skipSpace(o string, i int) int {
+	for i < len(o) && (o[i] == ' ' || o[i] == '\t' || o[i] == '\n' || o[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// jsonEnd returns the index just past the object starting at s[0], or -1
+// when it has not arrived whole. A brace inside a string literal does not
+// count, or a node labelled "{ }" would end the spec early.
+func jsonEnd(s string) int {
+	depth, inStr, esc := 0, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return -1
+}
+
+// openFence writes the header for a spec that arrived without one. A fence
+// is read line by line (markdown.tsx fenceRe), so it needs a line of its own;
+// prev is the byte it would follow, 0 at the very start of the answer.
+func openFence(prev byte) string {
+	if prev == 0 || prev == '\n' {
+		return "```diagram\n"
+	}
+	return "\n```diagram\n"
+}
 
 // infoTag reads the language of a fence header the way the browser does
 // (markdown.tsx fenceRe): the first token of the info string. The two ends

@@ -244,6 +244,12 @@ function inline(src: string, key: string, hooks: MarkerHooks, fade: boolean): Re
  * Exported for diagramExport.ts, which walks the same fences to rewrite a
  * diagram for the clipboard. */
 export const fenceRe = /^\s*```\s*([\w+#-]*)/;
+/** specRe says a fence body that opens as a diagram spec. Anchored on the
+ * brace: an answer explaining the diagram format, or quoting a config that
+ * happens to hold a "type" of "flow", carries the same words somewhere in a
+ * code block, and labelling that block a failed diagram would hide real code
+ * behind a defect notice. */
+const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
 const headingRe = /^(#{1,6})\s+(.*)$/;
 const bulletRe = /^\s*[-*]\s+(.*)$/;
 const orderedRe = /^\s*\d+[.)]\s+(.*)$/;
@@ -287,6 +293,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       const closed = i < lines.length;
       i++;
       let tag = fence[1];
+      const wasDiagram = tag === "diagram";
       if (tag === "diagram") {
         // A diagram fence is drawn once it is complete and parses. While it
         // is still arriving the reader sees that a picture is on its way, not
@@ -311,6 +318,27 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
           continue;
         }
         tag = "json";
+      }
+      // A block that says it is a diagram and did not draw is a defect, and
+      // for three releases it looked like an ordinary code block: the reader
+      // saw JSON where a picture belonged and nobody could tell whether the
+      // model or the renderer had slipped. It says so now, and keeps the
+      // spec underneath so the next one can be diagnosed at a glance.
+      // `wasDiagram` is a block the backend already agreed was one; any other
+      // tag has to look like a spec from its first character.
+      if (closed && (wasDiagram || specRe.test(body.join("\n")))) {
+        out.push(
+          <details
+            key={k++}
+            className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted"
+          >
+            <summary className="cursor-pointer">Diagram could not be drawn</summary>
+            <pre className="mt-2 overflow-x-auto font-mono text-[13px] leading-relaxed">
+              <code>{body.join("\n")}</code>
+            </pre>
+          </details>,
+        );
+        continue;
       }
       // A fence still arriving ends on the newline its last line was written
       // with, and that empty line is not content yet — the next token fills

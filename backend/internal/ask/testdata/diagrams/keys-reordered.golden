@@ -1,0 +1,7 @@
+The type is not the first key, which no prefix match would have caught [1].
+
+```diagram
+{"nodes":[{"id":"a","label":"Read config","kind":"start","src":[1]},{"id":"b","label":"Start pipeline","kind":"end","src":[2]}],"edges":[{"from":"a","to":"b","label":"Ready"}],"type":"flow"}
+```
+
+The pipeline then runs [2].

@@ -1,0 +1,11 @@
+A spec written with room around the keys, and no fence to hold it [9].
+
+{ "type" : "flow" ,
+  "nodes" : [
+    { "id" : "a" , "label" : "Frage stellen" , "kind" : "start" , "src" : [ 9 ] } ,
+    { "id" : "b" , "label" : "Antwort mit { } im Label" , "kind" : "end" , "src" : [ 2 , 9 ] }
+  ] ,
+  "edges" : [ { "from" : "a" , "to" : "b" , "label" : "Routing" } ]
+}
+
+The braces inside the label must not end the object early [9].

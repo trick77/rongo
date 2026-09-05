@@ -36,29 +36,40 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isSrc(v: unknown): v is number[] {
-  return Array.isArray(v) && v.every((n) => Number.isInteger(n) && (n as number) > 0);
-}
-
-function ids(items: Record<string, unknown>[]): Set<string> | null {
-  const seen = new Set<string>();
-  for (const it of items) {
-    if (typeof it.id !== "string" || it.id === "" || seen.has(it.id)) return null;
-    seen.add(it.id);
-  }
-  return seen;
-}
-
-/** parseDiagram reads the fence body, or returns null when it is not a spec
- * this renderer draws. Null means the block is shown as the text it is.
+/** src keeps a node's markers only when the backend renumbered them, and it
+ * is all or nothing because the backend renumbers all or nothing:
+ * `renumber.go` matches a src array on a bracket of bare digits, so one
+ * quoted or fractional entry makes the WHOLE array miss, and every number in
+ * it is still the prompt's index rather than the reader's.
  *
- * Size is not a reason to return null. The prompt asks for at most 12 nodes,
- * 5 actors and 12 steps because that is what reads well, and this file used
- * to enforce those same numbers: a model that answered with eight actors had
- * its whole diagram thrown away and the reader got the JSON. A picture one
- * actor too wide is still the picture; the box it sits in scrolls. So the
- * gates here are structural only - the shape has to be drawable, and every
- * id a step or an edge names has to be one the spec declared. */
+ * Keeping the well-formed entries out of such an array is the worst outcome
+ * available: they look like reader numbers, and each one would draw a chip
+ * naming a different file than the node rests on - the invented attribution
+ * the whole citation path exists to prevent. So an array with anything in it
+ * that renumbering would not have touched is dropped whole, and the node is
+ * drawn without chips. */
+function src(v: unknown): number[] {
+  if (!Array.isArray(v)) return [];
+  if (!v.every((n) => Number.isInteger(n) && (n as number) > 0)) return [];
+  return v as number[];
+}
+
+/** parseDiagram reads the fence body, or returns null when there is no spec
+ * in it at all. Null means the block is shown as the text it is.
+ *
+ * It degrades per element, never per diagram. Three times a picture has been
+ * thrown away whole because one field did not match: too many actors (#60), a
+ * src written as prose (#45), a fence the model tagged its own way. Each fix
+ * hardened the one gate that had just failed, and the next deviation found
+ * the next gate. So the rule here is that a spec is drawn as far as it can
+ * be: an unknown kind falls back to the ordinary one, an edge naming an id
+ * nobody declared is dropped, a node with no label is dropped, and what is
+ * left is drawn. Only a body with no recognisable type, or one with nothing
+ * left to draw after that, is null.
+ *
+ * Size is not a reason to return null either. The prompt asks for at most 12
+ * nodes, 5 actors and 12 steps because that is what reads well; a picture one
+ * actor too wide is still the picture, and the box it sits in scrolls. */
 export function parseDiagram(body: string): DiagramSpec | null {
   let raw: unknown;
   try {
@@ -68,47 +79,44 @@ export function parseDiagram(body: string): DiagramSpec | null {
   }
   if (!isRecord(raw)) return null;
   if (raw.type === "flow") {
-    const { nodes, edges } = raw;
-    if (!Array.isArray(nodes) || !Array.isArray(edges)) return null;
-    if (nodes.length === 0) return null;
-    if (!nodes.every(isRecord) || !edges.every(isRecord)) return null;
-    const known = ids(nodes);
-    if (!known) return null;
+    const nodes = Array.isArray(raw.nodes) ? raw.nodes.filter(isRecord) : [];
+    const edges = Array.isArray(raw.edges) ? raw.edges.filter(isRecord) : [];
     const out: FlowNode[] = [];
+    const known = new Set<string>();
     for (const n of nodes) {
-      const kind = n.kind ?? "step";
-      if (typeof n.label !== "string" || !flowKinds.includes(kind as string)) return null;
-      if (n.src !== undefined && !isSrc(n.src)) return null;
-      out.push({ id: n.id as string, label: n.label, kind: kind as FlowKind, src: (n.src as number[]) ?? [] });
+      if (typeof n.id !== "string" || n.id === "" || known.has(n.id)) continue;
+      if (typeof n.label !== "string") continue;
+      const kind = flowKinds.includes(n.kind as string) ? (n.kind as FlowKind) : "step";
+      known.add(n.id);
+      out.push({ id: n.id, label: n.label, kind, src: src(n.src) });
     }
+    if (out.length === 0) return null;
     const es: FlowEdge[] = [];
     for (const e of edges) {
-      if (typeof e.from !== "string" || typeof e.to !== "string") return null;
-      if (!known.has(e.from) || !known.has(e.to)) return null;
-      if (e.label !== undefined && typeof e.label !== "string") return null;
-      es.push({ from: e.from, to: e.to, label: e.label as string | undefined });
+      if (typeof e.from !== "string" || typeof e.to !== "string") continue;
+      if (!known.has(e.from) || !known.has(e.to)) continue;
+      es.push({ from: e.from, to: e.to, label: typeof e.label === "string" ? e.label : undefined });
     }
     return { type: "flow", nodes: out, edges: es };
   }
   if (raw.type === "sequence") {
-    const { actors, steps } = raw;
-    if (!Array.isArray(actors) || !Array.isArray(steps)) return null;
-    if (actors.length === 0) return null;
-    if (!actors.every(isRecord) || !steps.every(isRecord)) return null;
-    const known = ids(actors);
-    if (!known) return null;
+    const actors = Array.isArray(raw.actors) ? raw.actors.filter(isRecord) : [];
+    const steps = Array.isArray(raw.steps) ? raw.steps.filter(isRecord) : [];
     const as: Actor[] = [];
+    const known = new Set<string>();
     for (const a of actors) {
-      if (typeof a.label !== "string") return null;
-      as.push({ id: a.id as string, label: a.label });
+      if (typeof a.id !== "string" || a.id === "" || known.has(a.id)) continue;
+      if (typeof a.label !== "string") continue;
+      known.add(a.id);
+      as.push({ id: a.id, label: a.label });
     }
+    if (as.length === 0) return null;
     const ss: SeqStep[] = [];
     for (const s of steps) {
-      const kind = s.kind ?? "call";
-      if (typeof s.from !== "string" || typeof s.to !== "string" || typeof s.label !== "string") return null;
-      if (!known.has(s.from) || !known.has(s.to) || !stepKinds.includes(kind as string)) return null;
-      if (s.src !== undefined && !isSrc(s.src)) return null;
-      ss.push({ from: s.from, to: s.to, label: s.label, kind: kind as StepKind, src: (s.src as number[]) ?? [] });
+      if (typeof s.from !== "string" || typeof s.to !== "string" || typeof s.label !== "string") continue;
+      if (!known.has(s.from) || !known.has(s.to)) continue;
+      const kind = stepKinds.includes(s.kind as string) ? (s.kind as StepKind) : "call";
+      ss.push({ from: s.from, to: s.to, label: s.label, kind, src: src(s.src) });
     }
     return { type: "sequence", actors: as, steps: ss };
   }

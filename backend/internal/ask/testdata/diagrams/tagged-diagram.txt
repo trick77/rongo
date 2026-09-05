@@ -1,0 +1,7 @@
+Das Diagramm zeigt den Fluss, wie das Projektgedächtnis entsteht [1].
+
+```diagram
+{"type":"flow","nodes":[{"id":"new_thread","label":"Neuer Thread","kind":"start","src":[6]},{"id":"save","label":"Gedächtnis speichern","kind":"step","src":[54]},{"id":"ready","label":"Gedächtnis bereit","kind":"end","src":[1]}],"edges":[{"from":"new_thread","to":"save","label":"Prüfung"},{"from":"save","to":"ready"}]}
+```
+
+Der Nutzer beginnt einen neuen Thread [2].

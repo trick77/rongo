@@ -1,0 +1,8 @@
+Eight actors, past the five the prompt asks for, and drawable in every other
+respect (#60) [1].
+
+```diagram
+{"type":"sequence","actors":[{"id":"cfg","label":"repos.yaml"},{"id":"startup","label":"Startup"},{"id":"indexer","label":"Indexer"},{"id":"git","label":"git"},{"id":"ctags","label":"universal-ctags"},{"id":"rg","label":"ripgrep"},{"id":"embed","label":"Embedding Service"},{"id":"db","label":"SQLite (FTS5 + vec)"}],"steps":[{"from":"cfg","to":"startup","label":"Load repository list","kind":"call","src":[1,2]},{"from":"startup","to":"indexer","label":"Sync specs and start pipeline","kind":"call","src":[2,3]},{"from":"indexer","to":"git","label":"Clone or fetch repository","kind":"call","src":[4,5]},{"from":"indexer","to":"ctags","label":"Extract symbols","kind":"call","src":[6,7]},{"from":"indexer","to":"rg","label":"Keyword indexing","kind":"call","src":[4,7]},{"from":"indexer","to":"embed","label":"Embed chunk text","kind":"call","src":[4,8]},{"from":"indexer","to":"db","label":"Store files, symbols, chunks","kind":"return","src":[7,9]}]}
+```
+
+Every step is attributed [1].
