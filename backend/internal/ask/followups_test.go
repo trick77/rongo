@@ -191,3 +191,16 @@ func TestFollowups_speaksTheReadersLanguageTheSwissWay(t *testing.T) {
 		t.Errorf("the German prompt does not ask for Swiss orthography:\n%s", up.prompt)
 	}
 }
+
+func TestFollowups_neverOffersTheSameQuestionTwice(t *testing.T) {
+	// A model writing a list restates its own entries. Two identical pills
+	// waste a third of the row and say nothing new.
+	c, _ := followupsLLM(t, "What happens on a re-index?\nWhat happens on a re-index?\nWhere is the SHA recorded?\n", http.StatusOK)
+
+	got := Followups(context.Background(), c, "q", "a", AudienceBA, followupsSources(), Scope{}, LanguageEN)
+
+	want := []string{"What happens on a re-index?", "Where is the SHA recorded?"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("Followups() = %q, want %q", got, want)
+	}
+}

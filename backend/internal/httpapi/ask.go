@@ -342,7 +342,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, req.Choice); err != nil {
 			slog.Error("link choice failed", "err", err)
 		}
-		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, lang, send, closeUsage)
+		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeUsage)
 		return
 	}
 
@@ -398,7 +398,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
 		slog.Error("record sources failed", "err", err)
 	}
-	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, lang, send, closeUsage)
+	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeUsage)
 }
 
 const (
@@ -432,18 +432,23 @@ const (
 // ctx is the turn's context, meter and all: the suggestion call is part of
 // what the turn cost and is metered with the rest of it. record outlives the
 // request, so the row is written even for a reader who closed the tab.
+// scope is passed rather than read off the answer: only Run fills Answer.Scope,
+// so a resumed or re-explained turn would hand the suggestion prompt an empty
+// one and lose the rule that keeps a pill off a repository the index lacks.
+// Both callers already have the scope in hand - they record it a few lines up.
 func (s *Server) finishTurn(
 	ctx, record context.Context,
 	messageID int64,
 	question string,
 	answer ask.Answer,
 	audience ask.Audience,
+	scope ask.Scope,
 	lang ask.Language,
 	send func(string, any),
 	closeUsage func(),
 ) {
 	send("citations", answer.Citations)
-	s.suggestFollowups(ctx, record, messageID, question, answer, audience, lang, send)
+	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
 	closeUsage()
 	send("done", map[string]any{"message_id": messageID})
 }
@@ -466,6 +471,7 @@ func (s *Server) suggestFollowups(
 	question string,
 	answer ask.Answer,
 	audience ask.Audience,
+	scope ask.Scope,
 	lang ask.Language,
 	send func(string, any),
 ) {
@@ -475,7 +481,7 @@ func (s *Server) suggestFollowups(
 	send("status", map[string]any{"step": "suggesting"})
 	call, cancel := context.WithTimeout(ctx, followupsCallTimeout)
 	defer cancel()
-	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, answer.Scope, lang)
+	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
 	if len(qs) == 0 {
 		return
 	}
@@ -711,7 +717,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
 		slog.Error("record sources failed", "err", err)
 	}
-	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, lang, send, closeUsage)
+	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeUsage)
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

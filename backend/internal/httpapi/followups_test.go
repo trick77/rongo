@@ -293,3 +293,56 @@ func TestResumedAndReexplainedTurnsAreFollowedUpToo(t *testing.T) {
 		t.Errorf("audience = %q, want the re-explained turn's", sp.audience)
 	}
 }
+
+func TestFollowups_aResumedTurnKeepsTheRepositoriesTheIndexLacks(t *testing.T) {
+	// Only Run fills Answer.Scope. Reading the scope off the answer would
+	// hand the suggestion prompt an empty one on every resumed and
+	// re-explained turn, and the pills could then offer a question about a
+	// repository the index never had - which can only come back as
+	// "nothing found".
+	sp := &suggesterSpy{reply: []string{"What happens on a re-index?"}}
+	srv, store, _ := newSuggestingServer(t, sp, withAskerResuming())
+	msgID, _ := seedClarification(t, store)
+	if err := store.SetScope(context.Background(), msgID, ask.Scope{Known: []string{"peeq"}, Unknown: []string{"shop-backend"}}); err != nil {
+		t.Fatalf("SetScope: %v", err)
+	}
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done in peeq and shop-backend?","clarification_message_id":%d,"choice":1}`, msgID))
+
+	if strings.Join(sp.scope.Unknown, ",") != "shop-backend" {
+		t.Errorf("scope.Unknown = %q, want the repositories the index lacks", sp.scope.Unknown)
+	}
+}
+
+func TestFollowups_aReexplainedTurnKeepsTheRepositoriesTheIndexLacks(t *testing.T) {
+	sp := &suggesterSpy{reply: []string{"What happens on a re-index?"}}
+	srv, store, db := newSuggestingServer(t, sp, func(f *fakeAsker) {
+		withAskerReexplaining()(f)
+		f.sources = []ask.Source{{ChunkID: 1, Reason: "hit"}}
+	})
+	answered := seedAnsweredMessageWithSources(t, store, db)
+	if err := store.SetScope(context.Background(), answered, ask.Scope{Known: []string{"peeq"}, Unknown: []string{"shop-backend"}}); err != nil {
+		t.Fatalf("SetScope: %v", err)
+	}
+
+	doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", answered), `{"audience":"dev"}`)
+
+	if strings.Join(sp.scope.Unknown, ",") != "shop-backend" {
+		t.Errorf("scope.Unknown = %q, want the repositories the index lacks", sp.scope.Unknown)
+	}
+}
+
+func TestFollowups_aFreshTurnPassesTheScopeTheAnswerCarried(t *testing.T) {
+	sp := &suggesterSpy{reply: []string{"What happens on a re-index?"}}
+	srv, _, _ := newSuggestingServer(t, sp, func(f *fakeAsker) {
+		withAskerAnswering()(f)
+		f.scope = ask.Scope{Known: []string{"peeq"}, Unknown: []string{"shop-backend"}}
+	})
+
+	doSSE(t, srv, "/api/ask", `{"question":"how is sign-in done in peeq and shop-backend?","audience":"ba","language":"en"}`)
+
+	if strings.Join(sp.scope.Unknown, ",") != "shop-backend" {
+		t.Errorf("scope.Unknown = %q, want the repositories the index lacks", sp.scope.Unknown)
+	}
+}

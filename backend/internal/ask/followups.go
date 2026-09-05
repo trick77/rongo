@@ -120,11 +120,16 @@ func followupsPaths(sources []Source) []string {
 // not a suggestion, whatever the model meant by it.
 func parseFollowups(out string) []string {
 	var got []string
+	// Deduplicated: a model writing a list often restates one of its own
+	// entries, and two identical pills are a wasted third of the row - as
+	// well as two React children under one key.
+	seen := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
 		q := cleanFollowup(line)
-		if q == "" {
+		if q == "" || seen[strings.ToLower(q)] {
 			continue
 		}
+		seen[strings.ToLower(q)] = true
 		got = append(got, q)
 		if len(got) == followupsMax {
 			break
