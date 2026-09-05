@@ -133,7 +133,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 	lang := ask.ParseLanguage(req.Language)
 
-	ctx := r.Context()
+	// The turn's own context, cancellable from outside the request: deleting
+	// the thread while it is being answered stops it here. Derived at the very
+	// top rather than once the thread id is known, because the meter, the
+	// thread id and the question's own INSERT all hang off ctx before that
+	// point and a cancel has to reach them too.
+	ctx, cancelTurn := context.WithCancelCause(r.Context())
+	defer cancelTurn(nil)
 
 	// Resuming a clarification is validated in full BEFORE the thread is
 	// touched: an out-of-range choice, a foreign clarification or a card that
@@ -313,6 +319,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
 
+	// Any call still in flight when the delete lands mints the thread's session
+	// id again on its way out — the suggester's, the title's — and puts back
+	// what the delete dropped. Last of this handler's defers, so it runs after
+	// the turn and its title have both let go.
+	defer func() {
+		if threadWasDeleted(ctx) {
+			llm.ForgetThread(thread.ID)
+		}
+	}()
+
+	// Registered from here on, where there is a thread id to register it
+	// under. Everything before this is validation; the paid work starts below.
+	defer s.turns.add(thread.ID, cancelTurn)()
+
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
 		slog.Error("record question failed", "err", err)
@@ -392,7 +412,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// or the header waits forever for one and reads "New question"
 			// for the rest of the thread's life.
 			if err := s.deps.Threads.SetTitle(record, thread.ID, thread.Title, ""); err != nil {
-				slog.Warn("settle thread title failed", "err", err)
+				recordMissed(ctx, "settle thread title failed", err)
 			}
 		} else {
 			settled := s.writeTitle(ctx, thread.ID, msg.ID, req.Question, thread.Title, lang, send)
@@ -418,7 +438,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.deps.Threads.SaveUsage(record, msg.ID, calls); err != nil {
-			slog.Error("record usage failed", "err", err)
+			recordFailed(ctx, "record usage failed", err)
 		}
 		send("usage", s.deps.Prices.Prices().Report(calls))
 	}
@@ -433,7 +453,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			send("notice", map[string]any{"text": notice})
 		}
 		if serr := s.deps.Threads.SetScope(record, msg.ID, resumeScope); serr != nil {
-			slog.Error("record scope failed", "err", serr)
+			recordFailed(ctx, "record scope failed", serr)
 		}
 		var answer ask.Answer
 		var err error
@@ -443,9 +463,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
 		}
 		if err != nil {
-			slog.Error("resumed turn failed", "err", err)
+			turnStopped(ctx, "resumed turn failed", thread.ID, err)
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
-				slog.Error("record turn failure failed", "err", ferr)
+				recordFailed(ctx, "record turn failure failed", ferr)
 			}
 			closeUsage()
 			// The id goes out with the failure, not only with a done: asking
@@ -461,16 +481,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// alone, and the row written above is what a failed resume leaves
 		// behind. The answer's own scope is the one the record keeps.
 		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
-			slog.Error("record scope failed", "err", serr)
+			recordFailed(ctx, "record scope failed", serr)
 		}
 		if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
-			slog.Error("record answer failed", "err", err)
+			recordFailed(ctx, "record answer failed", err)
 		}
 		if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
-			slog.Error("record sources failed", "err", err)
+			recordFailed(ctx, "record sources failed", err)
 		}
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, req.Choice); err != nil {
-			slog.Error("link choice failed", "err", err)
+			recordFailed(ctx, "link choice failed", err)
 		}
 		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeUsage)
 		return
@@ -478,9 +498,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
-		slog.Error("turn failed", "err", err)
+		turnStopped(ctx, "turn failed", thread.ID, err)
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
-			slog.Error("record turn failure failed", "err", ferr)
+			recordFailed(ctx, "record turn failure failed", ferr)
 		}
 		closeUsage()
 		// A generic message: the error may quote an upstream body, and that is
@@ -493,15 +513,15 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// resumed turn reads the scope back off this row.
 	if clar != nil {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, clar.Scope); serr != nil {
-			slog.Error("record scope failed", "err", serr)
+			recordFailed(ctx, "record scope failed", serr)
 		}
 	} else if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
-		slog.Error("record scope failed", "err", serr)
+		recordFailed(ctx, "record scope failed", serr)
 	}
 
 	if clar != nil {
 		if _, cerr := s.deps.Threads.Clarify(record, msg.ID, *clar); cerr != nil {
-			slog.Error("record clarification failed", "err", cerr)
+			recordFailed(ctx, "record clarification failed", cerr)
 			// Clarify writes the clarification and its candidates in one
 			// transaction precisely so that a card cannot go out with some
 			// candidates missing their stored hits. If the write failed, the
@@ -510,7 +530,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// is the only thing distinguishing "ended by asking" from "still
 			// in flight" — so the turn must be recorded as failed here.
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
-				slog.Error("record turn failure failed", "err", ferr)
+				recordFailed(ctx, "record turn failure failed", ferr)
 			}
 			closeUsage()
 			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
@@ -523,10 +543,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
-		slog.Error("record answer failed", "err", err)
+		recordFailed(ctx, "record answer failed", err)
 	}
 	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
-		slog.Error("record sources failed", "err", err)
+		recordFailed(ctx, "record sources failed", err)
 	}
 	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeUsage)
 }
@@ -620,7 +640,7 @@ func (s *Server) suggestFollowups(
 	if err := s.deps.Threads.SaveFollowups(record, messageID, qs); err != nil {
 		// The pills are worth a warning and nothing more: the answer is
 		// written and the turn is finished either way.
-		slog.Warn("record followups failed", "err", err)
+		recordMissed(ctx, "record followups failed", err)
 	}
 	send("followups", qs)
 }
@@ -648,9 +668,25 @@ func (s *Server) writeTitle(
 		// live pill misses it and the reload shows it.
 		titleMeter := usage.New()
 		bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
+		// A thread deleted before the call went out gets no title call at all:
+		// this is the one turn goroutine the cancel does not reach, since it
+		// runs detached on purpose, so the check stands in for it. There is
+		// nothing left to name, and the label is not worth paying for.
+		if threadWasDeleted(ctx) {
+			return
+		}
 		call, cancel := context.WithTimeout(bg, titleCallTimeout)
 		title := s.deps.Titler(call, question, lang)
 		cancel()
+		// Deleted while the call was out: the id the call just minted is a new
+		// entry in the session cache, put there after the delete dropped the
+		// old one, so it goes the same way. The writes below are no-ops on
+		// rows the cascade has taken, and say nothing.
+		defer func() {
+			if threadWasDeleted(ctx) {
+				llm.ForgetThread(threadID)
+			}
+		}()
 		// The writes run on bg, not on the call's context: a title call that
 		// used its whole budget must still be able to record what it spent.
 		//
@@ -660,7 +696,7 @@ func (s *Server) writeTitle(
 		// Create wrote and the rail is showing right now; handing it over
 		// makes the write a no-op once the reader has renamed the thread.
 		if err := s.deps.Threads.SetTitle(bg, threadID, placeholder, title); err != nil {
-			slog.Warn("set thread title failed", "err", err)
+			recordMissed(ctx, "set thread title failed", err)
 		} else if title != "" {
 			// The stream is still open on most turns — a title takes a
 			// second, an answer rather longer — so the header and the rail
@@ -670,7 +706,7 @@ func (s *Server) writeTitle(
 			send("title", map[string]any{"thread_id": threadID, "title": title})
 		}
 		if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
-			slog.Error("record title usage failed", "err", err)
+			recordFailed(ctx, "record title usage failed", err)
 		}
 	}()
 	return func() {
@@ -719,7 +755,10 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		audience = ask.AudienceDev
 	}
 
-	ctx := r.Context()
+	// A re-explain is a paid turn like any other, and stops the same way when
+	// the thread it re-answers is deleted under it.
+	ctx, cancelTurn := context.WithCancelCause(r.Context())
+	defer cancelTurn(nil)
 	msg, found, err := s.deps.Threads.Message(ctx, u.Subject, id)
 	if err != nil {
 		slog.Error("resolve message failed", "err", err)
@@ -735,6 +774,17 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// A re-explain is another turn in the same conversation, so it pins to the
 	// same upstream node as the turn it re-answers.
 	ctx = llm.WithThreadID(ctx, msg.ThreadID)
+	// Any call still in flight when the delete lands mints the thread's session
+	// id again on its way out — the suggester's, the title's — and puts back
+	// what the delete dropped. Last of this handler's defers, so it runs after
+	// the turn and its title have both let go.
+	defer func() {
+		if threadWasDeleted(ctx) {
+			llm.ForgetThread(msg.ThreadID)
+		}
+	}()
+
+	defer s.turns.add(msg.ThreadID, cancelTurn)()
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
 	lang := ask.ParseLanguage(msg.Language)
@@ -818,7 +868,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		send("notice", map[string]any{"text": notice})
 	}
 	if err := s.deps.Threads.SetScope(record, newMsg.ID, msg.Scope); err != nil {
-		slog.Error("record scope failed", "err", err)
+		recordFailed(ctx, "record scope failed", err)
 	}
 
 	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, ask.Events{
@@ -833,27 +883,27 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.deps.Threads.SaveUsage(record, newMsg.ID, calls); err != nil {
-			slog.Error("record usage failed", "err", err)
+			recordFailed(ctx, "record usage failed", err)
 		}
 		send("usage", s.deps.Prices.Prices().Report(calls))
 	}
 	if err != nil {
-		slog.Error("reexplain failed", "err", err)
+		turnStopped(ctx, "reexplain failed", msg.ThreadID, err)
 		if ferr := s.deps.Threads.Fail(record, newMsg.ID, turnFailed); ferr != nil {
-			slog.Error("record turn failure failed", "err", ferr)
+			recordFailed(ctx, "record turn failure failed", ferr)
 		}
 		closeUsage()
 		send("error", map[string]any{"message": turnFailed, "message_id": newMsg.ID})
 		return
 	}
 	if err := s.deps.Threads.Finish(record, newMsg.ID, answer.Text, answer.Citations); err != nil {
-		slog.Error("record answer failed", "err", err)
+		recordFailed(ctx, "record answer failed", err)
 	}
 	// The same sources, not answer.Sources: a re-explain answers from exactly
 	// what the original turn gathered, so the new turn can itself be
 	// re-explained later from that same, unchanged evidence.
 	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
-		slog.Error("record sources failed", "err", err)
+		recordFailed(ctx, "record sources failed", err)
 	}
 	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeUsage)
 }
@@ -994,6 +1044,17 @@ func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such thread", http.StatusNotFound)
 		return
 	}
+	// Everything else the thread left behind, and only once the delete has
+	// reported a row — so a 404 for someone else's thread cannot be used to
+	// cut their answer short or re-pin their conversation.
+	//
+	// The rows are gone by now, through the schema's cascades. What is left is
+	// a turn that may still be streaming into them, which would run its model
+	// calls to completion and be paid for, and the upstream affinity id minted
+	// for the thread, which would sit in the process until 4096 other threads
+	// pushed it out.
+	s.turns.cancel(id)
+	llm.ForgetThread(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

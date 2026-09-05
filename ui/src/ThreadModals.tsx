@@ -45,10 +45,13 @@ export function ModalShell({
       // still standing when it appears, and a body-mounted z-40 paints under
       // it.
       //
-      // ../loom's offset: the card centers in the content area rather than
-      // in the window, so it does not sit half-under the rail. 378 is the
-      // 362px rail plus the px-4 the other three sides get.
-      className="fixed inset-0 z-[60] grid place-items-center bg-black/50 px-4 backdrop-blur-[2px] lg:pr-4 lg:pl-[378px]"
+      // Centered in the window, like SourceView's and DiagramView's overlays.
+      // The card used to be offset by the rail so it would center in the
+      // content area instead, but there is no stable center there to aim at:
+      // Ask hangs a 300px sources aside on the right from xl, 340 from 2xl,
+      // and the Repos page has none — the offset was right at one width of
+      // one page and visibly off everywhere else.
+      className="fixed inset-0 z-[60] grid place-items-center bg-black/50 px-4 backdrop-blur-[2px]"
       // Only the backdrop itself dismisses: a click that started inside the
       // dialog and ended on the backdrop is a drag, not a cancel.
       onClick={(e) => {
