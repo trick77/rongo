@@ -26,6 +26,14 @@ func TestIsDocPath(t *testing.T) {
 		{"repos.example.yaml", false},
 		{"requirements.txt", false},
 		{"CMakeLists.txt", false},
+		// A prose stem on a source file is source. Without the extension in
+		// the rule these read as documentation, and a question answered
+		// entirely out of one of them would be told it had no code.
+		{"pkg/license/license.go", false},
+		{"backend/internal/notice.go", false},
+		{"scripts/authors.py", false},
+		{"src/main/java/com/example/Changelog.java", false},
+		{"ui/src/readme.tsx", false},
 		{"spec/openapi.yaml", false},
 		{"ui/src/Ask.tsx", false},
 		{"backend/internal/ask/document.go", false},

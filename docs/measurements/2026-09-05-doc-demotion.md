@@ -90,7 +90,20 @@ Two numbers, pulling opposite ways:
 - **doc-led recall@20** — the number that must not fall, and the reason a filter
   cannot pass.
 
-Run it as the package doc describes:
+**Re-freeze the expansions first.** Every arm reads `expansions.json` and fatals
+on a missing entry, by design — the three questions added here have none, and
+two others were already missing before them, so the diversity and routing arms
+are blocked too until `TestExpandQuestions` has run. It carries the existing
+file forward rather than replacing it, so nothing already paid for is lost.
+
+It needs its own `-run`: `TestEval` does not match it.
+
+```
+... the same environment as below ...
+go test -v -timeout 60m -run 'TestExpandQuestions|TestExpandQuestionRepos' ./internal/retrieve/eval/
+```
+
+Then the sweep, as the package doc describes:
 
 ```
 BACKEND_EVAL=1 \

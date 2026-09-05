@@ -21,9 +21,15 @@ var docExts = map[string]bool{
 	".asciidoc": true,
 }
 
-// docStems are basenames that are prose whatever extension they carry, or none
-// — README, README.txt and README.rst are the same file with three spellings,
-// and only the last of them has an extension docExts recognises.
+// docStems are basenames that are prose when they carry NO extension or a bare
+// ".txt" — README, README.txt and README.rst are the same file with three
+// spellings, and only the last of them has an extension docExts recognises.
+//
+// The extension is part of the rule, not decoration. A stem alone would make
+// license.go, notice.go, authors.py and Changelog.java documentation, and every
+// one of those is the mechanism: a question answered entirely out of
+// license.go would be told it had no code in front of it and the reader would
+// be told the same.
 var docStems = map[string]bool{
 	"readme":       true,
 	"changelog":    true,
@@ -57,12 +63,14 @@ func IsDocPath(path string) bool {
 	}
 
 	base := strings.ToLower(segs[len(segs)-1])
-	stem := base
-	if i := strings.LastIndexByte(base, '.'); i >= 0 {
-		if docExts[base[i:]] {
-			return true
-		}
-		stem = base[:i]
+	i := strings.LastIndexByte(base, '.')
+	if i < 0 {
+		return docStems[base]
 	}
-	return docStems[stem]
+	if docExts[base[i:]] {
+		return true
+	}
+	// ".txt" only, and only behind one of the stems: requirements.txt and
+	// CMakeLists.txt are mechanism, README.txt is not.
+	return base[i:] == ".txt" && docStems[base[:i]]
 }
