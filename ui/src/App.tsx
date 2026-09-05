@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Ask, { money } from "./Ask";
 import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
-import Threads, { railLabel, type Thread } from "./Threads";
+import Threads, { type Thread } from "./Threads";
 import { PlusIcon } from "./icons";
 import logo from "./assets/rongo-wide.png";
 
@@ -185,8 +185,8 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
  * SidebarItems.tsx has `h-[26px] rounded-md px-1.5 gap-2.5`. rounded-md rather
  * than the app's own rounded-ui-sm because the rail is loom's surface and 8px
  * reads rounder than loom's rows do; rounded-ui-sm stays for everything else.
- * The rail has two type sizes in total — this one and railLabel — plus the
- * mono timestamp on a thread row.
+ * The rail has two type sizes in total — this one and the day-group label in
+ * Threads — plus the mono timestamp on a thread row.
  */
 const railRow =
   "flex h-[26px] pointer-coarse:h-11 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
@@ -265,7 +265,7 @@ export default function App() {
     // it. The short-viewport row is the landscape phone, where 56px of header
     // out of 390px is a tenth of the screen spent on chrome.
     <div className="grid h-dvh grid-rows-[56px_1fr] [@media(max-height:500px)]:grid-rows-[44px_1fr]">
-      <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[300px_1fr_auto]">
+      <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[362px_1fr_auto]">
         <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
           {/*
             Deliberately not disabled={busy}: the rail's rows are, but the way
@@ -341,7 +341,9 @@ export default function App() {
         </div>
       </header>
 
-      <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[300px_1fr]">
+      {/* 362px, ../loom's expanded rail. The header above runs the same
+          column, so the seam under the wordmark stays on the rail's border. */}
+      <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[362px_1fr]">
         {/*
           The same rail at every width; below lg the box is off-canvas and
           slides in, ../loom's drawer. Its contents are untouched — one action
@@ -365,10 +367,10 @@ export default function App() {
         >
           {/*
             The one action, at the top where it belongs, and the way to Repos
-            under it. New question used to sit inside Threads and therefore
-            under the "History" heading, which read as if starting a question
-            were a piece of history; Repos spent a release at the foot, where
-            it read as part of the index status line rather than as a place.
+            under it. New question used to sit inside Threads, among the past
+            questions, which read as if starting one were already a piece of
+            history; Repos spent a release at the foot, where it read as part
+            of the index status line rather than as a place.
           */}
           <div className="px-2 pt-2">
             <button
@@ -408,25 +410,12 @@ export default function App() {
               Repos
             </button>
           </div>
-          {/* ../loom's label rhythm, taken from its SidebarSection: 20px above
-              a label, 8px below it. The action block above therefore carries
-              no bottom padding of its own — mt-5 alone is the whole gap, the
-              way it is between loom's last primary item and its first section
-              title.
-
-              The 8px BELOW this label is spent by the first group in Threads,
-              not here: on a morning with nothing asked yet the first thing
-              under "History" is another label, and two stacked labels want the
-              20px a label always gets, not 8. loom reaches the same 20 by
-              margin collapsing through its empty section; rongo's scroller is
-              a BFC, so the gap has to be owned on one side, and the group side
-              is the one that knows which case it is.
-
-              px-2 to sit in the same column as the day groups and the rows
-              below, which are inside Threads' own px-2 scroller. */}
-          <div className="mt-5 px-2">
-            <div className={railLabel}>History</div>
-          </div>
+          {/* No heading over the list: everything below the two actions is
+              history, and a label saying so named the obvious. The 20px that
+              ../loom's SidebarSection puts above a section is still spent —
+              by the first group in Threads, which is the side that knows
+              whether it is painted. The action block above therefore carries
+              no bottom padding of its own. */}
           <Threads
             activeId={threadId}
             onSelect={(id) => {

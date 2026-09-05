@@ -112,9 +112,9 @@ describe("Threads", () => {
     expect(title.parentElement?.className).toContain("pointer-coarse:h-11");
   });
 
-  // Today's threads head the list under App's own "History" label, so a
-  // "Today" heading names what the position already says. The day groups
-  // below it stay: there the day is the useful part.
+  // Today's threads head the list, so a "Today" heading names what the
+  // position already says. The day groups below it stay: there the day is
+  // the useful part.
   describe("day groups", () => {
     const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
     const mixed = [

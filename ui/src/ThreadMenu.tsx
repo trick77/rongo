@@ -83,7 +83,7 @@ function MenuIcon({ name }: { name: IconName }) {
 
 /**
  * What a thread row can be told to do. Anchored to the row's right edge, not
- * pushed off the title as ../loom does it: the rail is 300px wide and a menu
+ * pushed off the title as ../loom does it: the rail is 362px wide and a menu
  * offset past the title would run out of its scroller sideways.
  */
 export default function ThreadMenu({
