@@ -70,12 +70,19 @@ type fakeAsker struct {
 	// gotThread is what the handler read off the thread and handed the
 	// pipeline: what earlier turns narrowed to, and what they last answered.
 	gotThread ask.Thread
+
+	// during runs inside the turn, with the turn's own context, so a test can
+	// do something to the thread while it is being answered.
+	during func(ctx context.Context)
 }
 
 func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
 	f.gotLang = lang
 	f.gotThread = t
+	if f.during != nil {
+		f.during(ctx)
+	}
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}

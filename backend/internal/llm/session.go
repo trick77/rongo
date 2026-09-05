@@ -104,6 +104,31 @@ func chatSessionID(threadID string) string {
 	return id
 }
 
+// ForgetThread drops the affinity id minted for a thread. A deleted thread
+// leaves nothing behind, and this id — the one pinning its conversation to a
+// single upstream node — is the last of it. A thread that never made a model
+// call is a no-op.
+func ForgetThread(id int64) {
+	if id == 0 {
+		return
+	}
+	key := strconv.FormatInt(id, 10)
+	sessionCache.Lock()
+	defer sessionCache.Unlock()
+	if _, ok := sessionCache.byThread[key]; !ok {
+		return
+	}
+	delete(sessionCache.byThread, key)
+	// Out of the order too, or the FIFO would spend one of its 4096 slots
+	// evicting a key that is already gone.
+	for i, k := range sessionCache.order {
+		if k == key {
+			sessionCache.order = append(sessionCache.order[:i], sessionCache.order[i+1:]...)
+			break
+		}
+	}
+}
+
 // newSessionID mints "ses_" + 12 hex (timestamp+counter) + 14 base62 random.
 func newSessionID() string {
 	millis := uint64(time.Now().UnixMilli())

@@ -98,3 +98,53 @@ func TestChatSessionIDCacheIsBounded(t *testing.T) {
 		t.Fatalf("order slice grew to %d entries, limit is %d", len(sessionCache.order), sessionCacheLimit)
 	}
 }
+
+// TestForgetThreadDropsTheID pins what a deleted thread takes with it: the
+// affinity id minted for it, so nothing of the conversation outlives the row.
+func TestForgetThreadDropsTheID(t *testing.T) {
+	// Given
+	sessionCache.Lock()
+	sessionCache.byThread = map[string]string{}
+	sessionCache.order = nil
+	sessionCache.Unlock()
+	first := chatSessionID("7")
+
+	// When
+	ForgetThread(7)
+
+	// Then
+	sessionCache.Lock()
+	_, held := sessionCache.byThread["7"]
+	order := len(sessionCache.order)
+	sessionCache.Unlock()
+	if held {
+		t.Fatal("the id is still cached after ForgetThread")
+	}
+	if order != 0 {
+		t.Fatalf("order still holds %d entries, want 0", order)
+	}
+	if again := chatSessionID("7"); again == first {
+		t.Fatal("the forgotten id came back; the thread was not re-pinned")
+	}
+}
+
+// TestForgetThreadIgnoresWhatItNeverHeld covers the ordinary delete: a thread
+// that never made a model call has no id to drop, and no other thread's may go
+// with it.
+func TestForgetThreadIgnoresWhatItNeverHeld(t *testing.T) {
+	// Given
+	sessionCache.Lock()
+	sessionCache.byThread = map[string]string{}
+	sessionCache.order = nil
+	sessionCache.Unlock()
+	kept := chatSessionID("3")
+
+	// When
+	ForgetThread(9)
+	ForgetThread(0)
+
+	// Then
+	if chatSessionID("3") != kept {
+		t.Fatal("forgetting an unrelated thread re-pinned this one")
+	}
+}
