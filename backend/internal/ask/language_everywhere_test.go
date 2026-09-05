@@ -87,3 +87,74 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 		t.Errorf("the language is named %d times, want it first and last:\n%s", strings.Count(*prompt, "German"), *prompt)
 	}
 }
+
+// German is written the Swiss way. The static German strings already are, so a
+// model that writes "größer" next to them is a visible seam. The clause rides
+// on the language rather than on the step: everything a person reads carries
+// it, and no other language pays for it.
+
+func TestAnswer_germanAsksForSwissOrthography(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !strings.Contains(*prompt, "never the letter ß") {
+		t.Errorf("the German answer prompt does not ask for Swiss orthography:\n%s", *prompt)
+	}
+
+	// An Italian answer has no ß to avoid.
+	c, itPrompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Come?", AudienceBA, LanguageIT, twoSources(), Scope{}, nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if strings.Contains(*itPrompt, "Swiss orthography") {
+		t.Errorf("the Italian prompt carries the German orthography note:\n%s", *itPrompt)
+	}
+}
+
+func TestTitleAndCandidateNamesAskForSwissOrthography(t *testing.T) {
+	var titlePrompt string
+	tc := testLLM(t, func(p string) string {
+		titlePrompt = p
+		return "Anmeldung im Backend"
+	})
+	Title(context.Background(), tc, "wie wird angemeldet?", LanguageDE)
+	if !strings.Contains(titlePrompt, "never the letter ß") {
+		t.Errorf("the German title prompt does not ask for Swiss orthography:\n%s", titlePrompt)
+	}
+
+	var namePrompts []string
+	llmFake := testLLM(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			return `{"decision":"ask"}`
+		}
+		namePrompts = append(namePrompts, prompt)
+		return `{"title":"HTTP-Schicht","summary":"Nimmt Anfragen an."}`
+	})
+	r := newTestRouter(t, llmFake, testDBWithDeps(t, nil))
+	if _, err := r.Route(context.Background(), "wie wird angemeldet?", LanguageDE, []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
+		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
+	}, nil); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if len(namePrompts) == 0 {
+		t.Fatal("no naming call was made")
+	}
+	for _, p := range namePrompts {
+		if !strings.Contains(p, "never the letter ß") {
+			t.Errorf("the German naming prompt does not ask for Swiss orthography:\n%s", p)
+		}
+	}
+}
+
+func TestLanguageStyle_onlyGermanCarriesOne(t *testing.T) {
+	if languageStyle(LanguageDE) == "" {
+		t.Error("German has no style note")
+	}
+	for _, l := range []Language{LanguageEN, LanguageFR, LanguageIT, Language("xx")} {
+		if languageStyle(l) != "" {
+			t.Errorf("%s carries a style note: %q", l, languageStyle(l))
+		}
+	}
+}

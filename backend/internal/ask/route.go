@@ -494,7 +494,7 @@ type nameResult struct {
 // candidate's top three hits. A candidate whose naming call fails keeps its
 // module key as the title and an empty summary rather than failing the turn.
 func (r *Router) name(ctx context.Context, question string, lang Language, cs []Candidate) ([]Candidate, error) {
-	system := fmt.Sprintf(nameSystem, languageName(lang))
+	system := fmt.Sprintf(nameSystem, languageName(lang)) + languageStyle(lang)
 	named := make([]Candidate, len(cs))
 	copy(named, cs)
 

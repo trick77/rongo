@@ -57,6 +57,24 @@ func languageName(lang Language) string {
 	return languageNames[ParseLanguage(string(lang))]
 }
 
+// swissGerman is appended to every prompt that writes German for a reader.
+// The readers are in Switzerland, where the letter does not exist, and the
+// product's own German strings are already spelled this way (scopeNotice);
+// a model left to itself writes "größer" right next to them. It asks for
+// standard German too: naming the country alone is an invitation to dialect.
+const swissGerman = `
+
+Swiss orthography: standard written German, never the letter ß - always ss
+(ausser, grösser, heisst, Strasse). Not dialect.`
+
+// languageStyle is the orthography note for lang, empty where there is none.
+func languageStyle(lang Language) string {
+	if ParseLanguage(string(lang)) == LanguageDE {
+		return swissGerman
+	}
+	return ""
+}
+
 // answerMaxTokens is generous on purpose. This is the one call where a
 // truncated reply is worse than a long one: it is what a person reads.
 //
@@ -338,10 +356,12 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}
 	system += answerDiagram
-	// Said twice, first and last: the sources in between are code and comments
-	// in whatever language the repository uses, and a model that has just read
-	// two thousand tokens of English tends to answer in it.
+	// Said twice, first and at the end: the sources in between are code and
+	// comments in whatever language the repository uses, and a model that has
+	// just read two thousand tokens of English tends to answer in it. How that
+	// language is spelled follows it, closing the prompt.
 	system += fmt.Sprintf(answerLanguage, name)
+	system += languageStyle(lang)
 
 	// Every token passes the renumberer before it reaches the reader or the
 	// record, so the two are the same text; what it holds back is flushed
