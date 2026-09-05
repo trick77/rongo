@@ -469,8 +469,11 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 		}
 	}
 	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), roleCanChoose) {
-		// The candidates travel back so the turn composes from them instead of
-		// asking: the Analyst gets the answer covering all of them.
+		// The turn goes on to answer, and gathering starts from ALL hits, not
+		// from these candidates (pipeline.Run) — so what travels back is the
+		// same "not asking" every other rung returns. The named copies are
+		// carried rather than dropped only because a caller that reproduces
+		// the ladder reads Candidates on both branches.
 		return Decision{Ask: false, Candidates: named}, nil
 	}
 	return Decision{Ask: true, Candidates: named}, nil
@@ -679,9 +682,10 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 	wg.Wait()
 
 	allNamed := true
-	for _, named := range ok {
-		if !named {
+	for _, ok := range ok {
+		if !ok {
 			allNamed = false
+			break
 		}
 	}
 	return named, allNamed, nil
