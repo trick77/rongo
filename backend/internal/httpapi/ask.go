@@ -342,9 +342,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, req.Choice); err != nil {
 			slog.Error("link choice failed", "err", err)
 		}
-		send("citations", answer.Citations)
-		closeUsage()
-		send("done", map[string]any{"message_id": msg.ID})
+		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeUsage)
 		return
 	}
 
@@ -400,9 +398,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
 		slog.Error("record sources failed", "err", err)
 	}
-	send("citations", answer.Citations)
-	closeUsage()
-	send("done", map[string]any{"message_id": msg.ID})
+	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeUsage)
 }
 
 const (
@@ -419,7 +415,83 @@ const (
 	// ends — so the wait is short and the title, if it is late, simply
 	// reaches the reader on the next list fetch instead.
 	titleStreamGrace = 2 * time.Second
+	// followupsCallTimeout bounds the follow-up suggestions. Much shorter
+	// than the title's budget, because this one is synchronous: the browser
+	// re-enables the composer when the STREAM ends, not on the done event, so
+	// every second spent here is a second the reader cannot type in front of
+	// a finished answer. Two or three one-line questions are a second's work;
+	// anything slower is not worth the wait and is dropped.
+	followupsCallTimeout = 8 * time.Second
 )
+
+// finishTurn ends a turn that produced an answer: the citations, the follow-up
+// questions it offers next, what it paid, and the event that closes it. All
+// three answering paths - a fresh turn, a resumed clarification and a
+// re-explain - end here, so the order they end in cannot drift apart.
+//
+// ctx is the turn's context, meter and all: the suggestion call is part of
+// what the turn cost and is metered with the rest of it. record outlives the
+// request, so the row is written even for a reader who closed the tab.
+// scope is passed rather than read off the answer: only Run fills Answer.Scope,
+// so a resumed or re-explained turn would hand the suggestion prompt an empty
+// one and lose the rule that keeps a pill off a repository the index lacks.
+// Both callers already have the scope in hand - they record it a few lines up.
+func (s *Server) finishTurn(
+	ctx, record context.Context,
+	messageID int64,
+	question string,
+	answer ask.Answer,
+	audience ask.Audience,
+	scope ask.Scope,
+	lang ask.Language,
+	send func(string, any),
+	closeUsage func(),
+) {
+	send("citations", answer.Citations)
+	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
+	closeUsage()
+	send("done", map[string]any{"message_id": messageID})
+}
+
+// suggestFollowups offers two or three questions to ask next, under the answer
+// that prompted them.
+//
+// Synchronous, unlike the title: it is written FROM the answer, so it cannot
+// start earlier, and running it inline is what puts its tokens in the turn's
+// own usage report instead of a meter nobody reads until the next reload. The
+// step is announced first, because a wait a person can see is a wait and a
+// wait they cannot is a hang.
+//
+// An answer with no sources is the nothing-found reply. There is nothing to
+// follow up on, and suggesting anything there would be inventing a question
+// the index cannot answer.
+func (s *Server) suggestFollowups(
+	ctx, record context.Context,
+	messageID int64,
+	question string,
+	answer ask.Answer,
+	audience ask.Audience,
+	scope ask.Scope,
+	lang ask.Language,
+	send func(string, any),
+) {
+	if s.deps.Suggester == nil || len(answer.Sources) == 0 {
+		return
+	}
+	send("status", map[string]any{"step": "suggesting"})
+	call, cancel := context.WithTimeout(ctx, followupsCallTimeout)
+	defer cancel()
+	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
+	if len(qs) == 0 {
+		return
+	}
+	if err := s.deps.Threads.SaveFollowups(record, messageID, qs); err != nil {
+		// The pills are worth a warning and nothing more: the answer is
+		// written and the turn is finished either way.
+		slog.Warn("record followups failed", "err", err)
+	}
+	send("followups", qs)
+}
 
 // writeTitle names a thread in the background and returns the wait its caller
 // defers. The answer never waits for a title; this is the connection lingering
@@ -645,9 +717,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
 		slog.Error("record sources failed", "err", err)
 	}
-	send("citations", answer.Citations)
-	closeUsage()
-	send("done", map[string]any{"message_id": newMsg.ID})
+	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeUsage)
 }
 
 // thread returns the thread this turn belongs to, creating one when the request
