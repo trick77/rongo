@@ -82,7 +82,7 @@ type fakeRouter struct {
 	named []string
 }
 
-func (f *fakeRouter) Route(_ context.Context, _ string, _ Language, _ []retrieve.Hit, namedRepos []string) (Decision, error) {
+func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string) (Decision, error) {
 	f.named = namedRepos
 	return f.d, f.err
 }

@@ -169,6 +169,37 @@ Answer with JSON ONLY: {"decision":"ask"} or {"decision":"compose"}.
 When in doubt "ask": a follow-up question costs one click, an answer composed
 across independent mechanisms is simply wrong.`
 
+// choosableMarker is a phrase unique to the role gate's prompt, the way
+// judgeMarker is to the judge's. Tests use it to tell the calls apart.
+const choosableMarker = "can choose between these options"
+
+// choosableSystem is the role rung: the judge has already said these are
+// independent alternatives, and this asks whether the person who has to pick
+// one is equipped to. It runs for the Analyst only — a Developer reading the
+// same card sees two packages and knows which one they meant.
+//
+// It judges the CARD, not the code: the titles and summaries the naming call
+// just wrote are what the reader will actually see, and a choice that cannot
+// be made from them cannot be made at all.
+//
+// The safe side is the judge's, mirrored. The judge defaults to asking
+// because composing independent mechanisms is simply wrong; here the reader
+// cannot answer, so the default is to compose — a question nobody can answer
+// ends the turn with nothing.
+const choosableSystem = `You decide whether a reader who does not read code ` + choosableMarker + `.
+
+Answer with JSON ONLY: {"decision":"choose"} or {"decision":"cannot"}.
+
+  choose  The options do different things in the business domain. Someone who
+          knows the business but not the code can tell which one the question
+          meant.
+  cannot  The options are only tellable apart by code: the same thing for the
+          business, differing in implementation, layer, package or technology.
+          The reader would be guessing.
+
+When in doubt "cannot": an answer covering all of them costs the reader a
+paragraph, a question they cannot answer costs them the turn.`
+
 // nameSystem takes the language name as its one format argument: the card is
 // read by the person who asked, in the language they asked for.
 const nameSystem = `You name a candidate for a follow-up question, in %s.
@@ -181,6 +212,25 @@ Answer with JSON ONLY: {"title":"...","summary":"..."}
 
 Two candidates have to be tellable apart by their titles, even when both sit
 in the same package name.`
+
+// nameBA is added for the Analyst, and only for the Analyst: the Developer's
+// naming prompt is what it has always been. The card this writes is also what
+// the role gate reads, so a title that names a package rather than a business
+// step both misinforms the reader and hides the ambiguity from the rung that
+// decides whether to ask at all.
+const nameBA = `
+
+Audience: business analyst. The reader does not read code. Title and summary
+name what this does for the business - the process, the actor, the rule -
+never a package, a type, a file or a directory. Two candidates are told apart
+by what they do differently in the domain, not by where they live.`
+
+// nameLanguage closes the Analyst's naming prompt, so the language is named
+// first and last around the block above it — the same rule answerLanguage
+// applies to the answer.
+const nameLanguage = `
+
+Title and summary are written in %s. Repository names stay as they are.`
 
 // Decision is what routing produced: either an answer can be composed from
 // every candidate, or the reader has to be asked which one is meant.
@@ -296,16 +346,25 @@ func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 }
 
 // Judge asks the model whether cs are independent alternatives or parts of one
-// mechanism — Route's last rung before naming. Exported so the eval harness
-// can call it once per question and reuse the answer across every margin in
-// its sweep, rather than paying for the model call at each one.
+// mechanism — the rung that decides whether the CODE is ambiguous. Exported so
+// the eval harness can call it once per question and reuse the answer across
+// every margin in its sweep, rather than paying for the model call at each one.
 func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	return r.judge(ctx, question, cs)
 }
 
+// Choosable asks whether the named candidates are a choice the Analyst can
+// make — the rung that decides whether the READER is equipped to answer what
+// the judge found ambiguous. Route runs it for the Analyst only, over
+// candidates that have already been named. Exported for the eval harness.
+func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
+	return r.choosable(ctx, question, cs)
+}
+
 // Decide is the ladder's decision, given what each rung found: the question's
-// own scope wins first, then the margin, then a manifest dependency, and only
-// then the judge's answer, which is never defaulted.
+// own scope wins first, then the margin, then a manifest dependency, then the
+// judge's answer, and last whether the reader's role can answer the card at
+// all. Neither of the last two is ever defaulted.
 //
 // It is a pure function of the rungs precisely so that it can be the ONLY
 // place this policy is written down. Route calls it, and so does the eval
@@ -323,7 +382,14 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 // a "the question named this repository" signal and was measured twice
 // without landing (docs/measurements/2026-08-19-candidates.md). The judge's
 // prompt is untouched.
-func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int) bool {
+//
+// roleCanChoose is whether the reader's role can answer the card the judge's
+// "ask" would produce. The judge decides whether the CODE is ambiguous; this
+// decides whether the PERSON can resolve it. For the Developer it is always
+// true — that reader picks between two packages without effort — so the
+// Developer's decision, and every number measured against it, is unchanged.
+// The eval harness's sweep is audience-neutral and passes true as well.
+func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int, roleCanChoose bool) bool {
 	if namedRepos >= 2 {
 		return false
 	}
@@ -333,14 +399,22 @@ func Decide(all []Candidate, margin float64, related, judged bool, namedRepos in
 	if related {
 		return false
 	}
-	return judged
+	return judged && roleCanChoose
 }
 
 // Route runs the ladder: margin, then the manifest, then — only in the rest
-// case — the model. Which rungs are RUN is decided here, so the common fast
-// path — one candidate clearly ahead — still does no database query and no
-// model call; what the run rungs then MEAN is Decide's, and only Decide's.
-func (r *Router) Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error) {
+// case — the model, twice for the Analyst. Which rungs are RUN is decided
+// here, so the common fast path — one candidate clearly ahead — still does no
+// database query and no model call; what the run rungs then MEAN is Decide's,
+// and only Decide's.
+//
+// The Analyst's rung needs the card in front of it, so naming runs before the
+// decision rather than after it. That is the one piece of work this ordering
+// can waste: a card the reader could not have answered is named and then not
+// shown. It is a ShortGate call per candidate, it runs concurrently, and it
+// is what the gate judges — the reader's view of the ambiguity, not the
+// module keys underneath it.
+func (r *Router) Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		return Decision{}, err
@@ -361,19 +435,43 @@ func (r *Router) Route(ctx context.Context, question string, lang Language, hits
 	}
 	judged := false
 	if !related {
-		// The judge is the last rung and the only paid one: a manifest
-		// dependency has already settled the question without it.
+		// The judge is the first paid rung: a manifest dependency has already
+		// settled the question without it.
 		judged, err = r.Judge(ctx, question, cs)
 		if err != nil {
 			return Decision{}, err
 		}
 	}
-	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos)) {
+
+	// Nothing below can turn a "no" into a card, so a decision already made
+	// pays for neither naming nor the role gate.
+	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), true) {
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
-	named, err := r.name(ctx, question, lang, cs)
+
+	named, allNamed, err := r.name(ctx, question, audience, lang, cs)
 	if err != nil {
 		return Decision{}, err
+	}
+
+	roleCanChoose := true
+	if audience != AudienceDev {
+		// A candidate whose naming call failed still carries its module key as
+		// a title — a directory path, which is the one thing an Analyst's card
+		// must never show. That is settled without a model call.
+		if !allNamed {
+			roleCanChoose = false
+		} else {
+			roleCanChoose, err = r.Choosable(ctx, question, named)
+			if err != nil {
+				return Decision{}, err
+			}
+		}
+	}
+	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), roleCanChoose) {
+		// The candidates travel back so the turn composes from them instead of
+		// asking: the Analyst gets the answer covering all of them.
+		return Decision{Ask: false, Candidates: named}, nil
 	}
 	return Decision{Ask: true, Candidates: named}, nil
 }
@@ -484,6 +582,42 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	return got.Decision != "compose", nil
 }
 
+// choosableDecision is the shape of the role gate's reply.
+type choosableDecision struct {
+	Decision string `json:"decision"`
+}
+
+// choosable asks whether the card just named is one the Analyst can answer. It
+// sees the titles and summaries, not the code: that is the reader's view of
+// the ambiguity, and a choice that cannot be made from it cannot be made.
+//
+// A reply that fails to decode means compose, the mirror of judge's fallback:
+// there the safe side is asking, because a composed answer across independent
+// mechanisms is wrong; here it is answering, because a question the reader
+// cannot answer ends the turn with nothing at all.
+func (r *Router) choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Question: %s\n\nOptions:\n", question)
+	for i, c := range cs {
+		fmt.Fprintf(&b, "%d. %s - %s\n", i+1, c.Title, c.Summary)
+	}
+
+	out, _, err := r.llm.Complete(ctx, []llm.Message{
+		{Role: "system", Content: choosableSystem},
+		{Role: "user", Content: b.String()},
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+		llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route"))
+	if err != nil {
+		return false, fmt.Errorf("judge whether the role can choose: %w", err)
+	}
+
+	var got choosableDecision
+	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+		return false, nil
+	}
+	return got.Decision == "choose", nil
+}
+
 // nameResult is the shape of a naming reply.
 type nameResult struct {
 	Title   string `json:"title"`
@@ -492,11 +626,21 @@ type nameResult struct {
 
 // name runs one Complete per candidate concurrently, each seeing that
 // candidate's top three hits. A candidate whose naming call fails keeps its
-// module key as the title and an empty summary rather than failing the turn.
-func (r *Router) name(ctx context.Context, question string, lang Language, cs []Candidate) ([]Candidate, error) {
-	system := fmt.Sprintf(nameSystem, languageName(lang)) + languageStyle(lang)
+// module key as the title and an empty summary rather than failing the turn;
+// the second return value is false when that happened to any of them, which
+// is what lets the Analyst's rung refuse a card carrying a path.
+//
+// The Analyst's prompt carries nameBA, the Developer's is unchanged.
+func (r *Router) name(ctx context.Context, question string, audience Audience, lang Language, cs []Candidate) ([]Candidate, bool, error) {
+	name := languageName(lang)
+	system := fmt.Sprintf(nameSystem, name)
+	if audience != AudienceDev {
+		system += nameBA + fmt.Sprintf(nameLanguage, name)
+	}
+	system += languageStyle(lang)
 	named := make([]Candidate, len(cs))
 	copy(named, cs)
+	ok := make([]bool, len(cs))
 
 	var wg sync.WaitGroup
 	for i := range named {
@@ -527,12 +671,20 @@ func (r *Router) name(ctx context.Context, question string, lang Language, cs []
 			}
 			if got.Title != "" {
 				c.Title = got.Title
+				ok[i] = true
 			}
 			c.Summary = got.Summary
 		}(i)
 	}
 	wg.Wait()
-	return named, nil
+
+	allNamed := true
+	for _, named := range ok {
+		if !named {
+			allNamed = false
+		}
+	}
+	return named, allNamed, nil
 }
 
 // firstN returns at most n hits.
