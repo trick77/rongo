@@ -324,7 +324,9 @@ describe("layoutSequence", () => {
 describe("Diagram", () => {
   it("draws a flow as SVG shapes: pills for start and end, a diamond for a decision", () => {
     const { container } = render(<Diagram spec={flow} hooks={{}} />);
-    const svg = container.querySelector("svg")!;
+    // The drawing, not the control strip: the two icon buttons above it are
+    // inline SVG as well.
+    const svg = container.querySelector('svg[role="img"]')!;
     expect(svg.getAttribute("role")).toBe("img");
     expect(container.querySelectorAll("polygon").length).toBe(1);
     const rects = Array.from(container.querySelectorAll("rect")).filter((r) => r.getAttribute("height") === "40");
@@ -408,7 +410,7 @@ describe("Diagram", () => {
     const { container } = render(
       <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
     );
-    const svg = container.querySelector("svg")!;
+    const svg = container.querySelector('svg[role="img"]')!;
     expect(svg.getAttribute("viewBox")).toBeNull();
     expect(svg.parentElement!.className).toContain("overflow-x-auto");
     expect(svg.parentElement!.className).toContain("max-w-full");
@@ -440,6 +442,48 @@ describe("Diagram", () => {
         expect(a.l >= b.r || a.r <= b.l).toBe(true);
       }
     }
+  });
+
+  it("offers the full view and the file, without being hovered first", () => {
+    // A phone has no hover, and the full view is the only way it sees a wide
+    // diagram whole.
+    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
+    expect(getByLabelText("Sequence diagram: full view")).toBeTruthy();
+    expect(getByLabelText("Sequence diagram: download SVG")).toBeTruthy();
+  });
+
+  it("keeps the controls out of the scroller, so they cannot scroll away", () => {
+    const { container, getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
+    const scroller = container.querySelector(".overflow-x-auto") as HTMLElement;
+    expect(scroller.querySelector("svg")).toBeTruthy();
+    expect(scroller.contains(getByLabelText("Sequence diagram: full view"))).toBe(false);
+  });
+
+  it("opens the full view on the button and closes it again", () => {
+    const { getByLabelText, queryByRole } = render(<Diagram spec={seq} hooks={{}} />);
+    expect(queryByRole("dialog")).toBeNull();
+    fireEvent.click(getByLabelText("Sequence diagram: full view"));
+    expect(queryByRole("dialog")).toBeTruthy();
+    fireEvent.click(getByLabelText("Close"));
+    expect(queryByRole("dialog")).toBeNull();
+  });
+
+  it("downloads the drawing, not an empty file", () => {
+    let written = "";
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: (b: Blob) => ((written = (b as unknown as { parts?: string }).parts ?? ""), "blob:x"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      written = this.download;
+    });
+    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
+    fireEvent.click(getByLabelText("Sequence diagram: download SVG"));
+    expect(written).toBe("rongo-sequence-diagram.svg");
+    click.mockRestore();
   });
 
   it("gives two diagrams on one page distinct arrowhead ids", () => {
