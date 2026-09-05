@@ -101,15 +101,16 @@ describe("Threads", () => {
     expect(onSelect).toHaveBeenCalledWith(7);
   });
 
-  // 28px is a mouse's row, not a thumb's. jsdom matches no media query, so the
-  // class is what can be asserted here; the size itself is checked in a touch
-  // browser context. The height sits on the row that holds the title and the
-  // actions button, not on the title alone.
-  it("gives the row a thumb's height on a touch screen", async () => {
+  // The 28px row is the pitch on every pointer: a touch screen once got 44px,
+  // and the rail's own spacing, tuned against 28, stayed standing around it.
+  // The height sits on the row that holds the title and the actions button,
+  // not on the title alone.
+  it("keeps the desktop row height on a touch screen", async () => {
     threadList(two);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
     const title = await screen.findByRole("button", { name: "How does shipping work?" });
-    expect(title.parentElement?.className).toContain("pointer-coarse:h-11");
+    expect(title.parentElement?.className).toContain("h-7");
+    expect(title.parentElement?.className).not.toContain("pointer-coarse:");
   });
 
   // Today's threads head the list, so a "Today" heading names what the

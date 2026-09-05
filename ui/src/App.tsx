@@ -189,7 +189,7 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
  * Threads — plus the mono timestamp on a thread row.
  */
 const railRow =
-  "flex h-[26px] pointer-coarse:h-11 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
+  "flex h-[26px] w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
   "disabled:opacity-50";
 
 export default function App() {
