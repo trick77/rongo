@@ -116,6 +116,13 @@ func main() {
 		slog.Error("apply migrations", "err", err)
 		os.Exit(1)
 	}
+	// A title call cannot outlive the process that started it, so a thread
+	// still waiting for one was orphaned by the last shutdown. Left pending it
+	// would hold "New question" in its header for good.
+	if err := threads.NewStore(db).SettleTitles(ctx); err != nil {
+		slog.Error("settle orphaned thread titles", "err", err)
+		os.Exit(1)
+	}
 	// The vec0 table's width is fixed when the database is created. Pointing a
 	// differently configured process at an existing file is a loud failure
 	// here rather than a rejected insert on every chunk much later — and, worse,

@@ -21,9 +21,14 @@ import (
 
 // Thread is one conversation.
 type Thread struct {
-	ID        int64     `json:"id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	// TitlePending is true while the model's title call is still running. The
+	// Title on such a row is the question's first words, which is enough to
+	// tell one sidebar row from another and is not a title: the header says
+	// "New question" rather than show a question cut mid-word.
+	TitlePending bool      `json:"title_pending"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // Message is one question and the answer it got.
@@ -143,7 +148,9 @@ func (s *Store) Create(ctx context.Context, subject, question string) (Thread, e
 	if err != nil {
 		return Thread{}, fmt.Errorf("create thread: %w", err)
 	}
-	return Thread{ID: id, Title: title, CreatedAt: time.Now().UTC()}, nil
+	// Pending: the row carries the placeholder and the title call has not run
+	// yet. SetTitle settles it whichever way that call ends.
+	return Thread{ID: id, Title: title, TitlePending: true, CreatedAt: time.Now().UTC()}, nil
 }
 
 // SetTitle replaces the placeholder, but only while the placeholder is still
@@ -154,15 +161,37 @@ func (s *Store) Create(ctx context.Context, subject, question string) (Thread, e
 //
 // A failure is swallowed by the caller on purpose: a missing title is
 // cosmetic, and it must never fail a turn.
+//
+// Either way the row is settled: the header holds a place for a title only
+// while one is still coming, and an empty `to` — the title call failed, or
+// wrote something that was not a title — ends the waiting with the
+// placeholder standing. It must therefore be called on every path that forks
+// the title off, including the ones that decide not to.
 func (s *Store) SetTitle(ctx context.Context, id int64, from, to string) error {
 	to = strings.TrimSpace(to)
 	if to == "" {
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE threads SET title_settled = 1 WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("settle thread title: %w", err)
+		}
 		return nil
 	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE threads SET title = ? WHERE id = ? AND title = ?`, to, id, from)
+		`UPDATE threads SET title = ?, title_settled = 1 WHERE id = ? AND title = ?`, to, id, from)
 	if err != nil {
 		return fmt.Errorf("set thread title: %w", err)
+	}
+	return nil
+}
+
+// SettleTitles ends the waiting for every thread still expecting one, and is
+// meant for boot and nowhere else. A row is pending only while a title call is
+// in flight, and no call survives the process that made it: whatever is still
+// pending when rongo starts was orphaned by the last shutdown or crash, and
+// left alone it would read as "New question" in the header for good.
+func (s *Store) SettleTitles(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE threads SET title_settled = 1 WHERE title_settled = 0`); err != nil {
+		return fmt.Errorf("settle orphaned thread titles: %w", err)
 	}
 	return nil
 }
@@ -175,8 +204,11 @@ func (s *Store) Rename(ctx context.Context, subject string, id int64, title stri
 	if title == "" {
 		return false, nil
 	}
+	// Settled too: a name the reader typed is a title, and the header must
+	// show it rather than wait for a model call that will find the row
+	// renamed and leave it alone.
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE threads SET title = ? WHERE id = ? AND user_subject = ?`, title, id, subject)
+		`UPDATE threads SET title = ?, title_settled = 1 WHERE id = ? AND user_subject = ?`, title, id, subject)
 	if err != nil {
 		return false, fmt.Errorf("rename thread: %w", err)
 	}
@@ -339,7 +371,7 @@ func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
 // List returns a user's threads, newest first.
 func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
+		`SELECT id, title, title_settled, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -348,9 +380,11 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	for rows.Next() {
 		var t Thread
 		var created string
-		if err := rows.Scan(&t.ID, &t.Title, &created); err != nil {
+		var settled bool
+		if err := rows.Scan(&t.ID, &t.Title, &settled, &created); err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
+		t.TitlePending = !settled
 		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, t)
 	}

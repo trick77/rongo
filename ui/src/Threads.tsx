@@ -14,6 +14,13 @@ const railLabel = "px-1.5 text-xs/4 text-rail-label";
 export type Thread = {
   id: number;
   title: string;
+  /**
+   * True while the model's title call is still running. The title on such a
+   * thread is the question's first words cut at 48 runes — enough for the rail,
+   * where it tells one row from another, and not a title: the header says
+   * "New question" instead of showing a question cut mid-word.
+   */
+  title_pending?: boolean;
   created_at: string;
 };
 

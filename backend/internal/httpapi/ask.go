@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -221,9 +223,26 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
+	// The title goroutine below writes to this stream from outside the
+	// handler's own goroutine, so the writer is taken under a lock and the
+	// stream is shut to further writes the moment the handler returns: a
+	// write to a ResponseWriter whose handler has finished is not merely
+	// ignored, it races the server's own cleanup.
+	var sendMu sync.Mutex
+	sendClosed := false
+	defer func() {
+		sendMu.Lock()
+		sendClosed = true
+		sendMu.Unlock()
+	}()
 	send := func(event string, payload any) {
 		body, err := json.Marshal(payload)
 		if err != nil {
+			return
+		}
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if sendClosed {
 			return
 		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
@@ -232,39 +251,35 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	send("thread", map[string]any{"thread_id": thread.ID, "title": thread.Title, "message_id": msg.ID})
 
-	// The title is written alongside the answer and never in front of it. It is
-	// a label; the answer must not wait for it, and a title that never arrives
-	// is not a failure anyone needs to see.
-	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
-		go func(id, messageID int64, question, placeholder string) {
-			// WithoutCancel keeps the context's values, the turn's meter
-			// among them. The title gets its own so it cannot write into a
-			// meter that has already been read and stored; its call is
-			// recorded against this message when it finishes — after the
-			// turn's usage event, so the live pill misses it and the reload
-			// shows it. A label written in the background is not worth
-			// holding the answer for.
-			titleMeter := usage.New()
-			bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
-			if title := s.deps.Titler(bg, question, lang); title != "" {
-				// `placeholder` is the title Create wrote and the rail is
-				// showing right now. Handing it over makes the write a
-				// no-op once the reader has renamed the thread themselves.
-				if err := s.deps.Threads.SetTitle(bg, id, placeholder, title); err != nil {
-					slog.Warn("set thread title failed", "err", err)
-				}
-			}
-			if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
-				slog.Error("record title usage failed", "err", err)
-			}
-		}(thread.ID, msg.ID, req.Question, thread.Title)
-	}
-
 	// The record is written on a context that outlives the request. A reader
 	// who closes the tab mid-answer cancels r.Context(), and writing the
 	// outcome on it would leave a row with neither an answer nor an error —
 	// indistinguishable from a turn still in flight.
 	record := context.WithoutCancel(ctx)
+
+	// The title is written alongside the answer and never in front of it. It is
+	// a label; the answer must not wait for it, and a title that never arrives
+	// is not a failure anyone needs to see.
+	//
+	// Only ever on a thread's first turn. A later turn is handed a Thread with
+	// no Title on it — s.thread and the resume path build one from the id
+	// alone — so anything keyed off thread.Title here would fire on every
+	// continuation, and settling one while the first turn's title call is
+	// still in flight would put the cut question back in the header, which is
+	// the whole thing this exists to prevent.
+	if msg.Ordinal == 0 {
+		if s.deps.Titler == nil || thread.Title == "" {
+			// No title is coming: no titler configured. Settle the row now,
+			// or the header waits forever for one and reads "New question"
+			// for the rest of the thread's life.
+			if err := s.deps.Threads.SetTitle(record, thread.ID, thread.Title, ""); err != nil {
+				slog.Warn("settle thread title failed", "err", err)
+			}
+		} else {
+			settled := s.writeTitle(ctx, thread.ID, msg.ID, req.Question, thread.Title, lang, send)
+			defer settled()
+		}
+	}
 
 	events := ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
@@ -381,6 +396,78 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	send("citations", answer.Citations)
 	closeUsage()
 	send("done", map[string]any{"message_id": msg.ID})
+}
+
+const (
+	// titleCallTimeout bounds the title call itself. The answer's own budget
+	// is fifteen minutes, which is the right order for an answer and absurd
+	// for a six-word label: a stalled title would hold a goroutine, a meter
+	// and a row's pending flag for a quarter of an hour.
+	titleCallTimeout = 30 * time.Second
+	// titleStreamGrace is how long the finished turn holds its stream open
+	// for a title still in flight. A title is started with the turn and takes
+	// a second or two, so on a real answer it has landed long before this is
+	// reached and the wait costs nothing. What it must never do is keep the
+	// composer disabled — the browser only re-enables it when the stream
+	// ends — so the wait is short and the title, if it is late, simply
+	// reaches the reader on the next list fetch instead.
+	titleStreamGrace = 2 * time.Second
+)
+
+// writeTitle names a thread in the background and returns the wait its caller
+// defers. The answer never waits for a title; this is the connection lingering
+// a moment after the last word so a title that is nearly there still reaches
+// the browser on the stream it belongs to.
+func (s *Server) writeTitle(
+	ctx context.Context,
+	threadID, messageID int64,
+	question, placeholder string,
+	lang ask.Language,
+	send func(string, any),
+) func() {
+	done := make(chan struct{})
+	go func() {
+		// Closed last, after the title event has gone out: the caller's wait
+		// is what keeps the stream open for it.
+		defer close(done)
+		// WithoutCancel keeps the context's values, the turn's meter among
+		// them. The title gets its own so it cannot write into a meter that
+		// has already been read and stored; its call is recorded against this
+		// message when it finishes — after the turn's usage event, so the
+		// live pill misses it and the reload shows it.
+		titleMeter := usage.New()
+		bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
+		call, cancel := context.WithTimeout(bg, titleCallTimeout)
+		title := s.deps.Titler(call, question, lang)
+		cancel()
+		// The writes run on bg, not on the call's context: a title call that
+		// used its whole budget must still be able to record what it spent.
+		//
+		// SetTitle is called even when the call came back empty — that write
+		// settles the row with the placeholder standing, and the header stops
+		// waiting for a title that is not coming. `placeholder` is the title
+		// Create wrote and the rail is showing right now; handing it over
+		// makes the write a no-op once the reader has renamed the thread.
+		if err := s.deps.Threads.SetTitle(bg, threadID, placeholder, title); err != nil {
+			slog.Warn("set thread title failed", "err", err)
+		} else if title != "" {
+			// The stream is still open on most turns — a title takes a
+			// second, an answer rather longer — so the header and the rail
+			// can have the title now instead of at the end of the turn.
+			// `send` is a no-op once the handler has returned, so a late one
+			// costs nothing and says nothing.
+			send("title", map[string]any{"thread_id": threadID, "title": title})
+		}
+		if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
+			slog.Error("record title usage failed", "err", err)
+		}
+	}()
+	return func() {
+		select {
+		case <-done:
+		case <-time.After(titleStreamGrace):
+		}
+	}
 }
 
 // handleReexplain re-answers a finished turn's question for the other

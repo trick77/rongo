@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
+import Question from "./Question";
 import Trace, { type Step, type TraceState } from "./Trace";
 import { Chevron } from "./icons";
 import SourceView, { type SourceRef } from "./SourceView";
@@ -623,6 +624,11 @@ export default function Ask({
             // The placeholder title is written by Create, so the entry can
             // appear in the list the moment the question is sent.
             onActivity();
+          } else if (name === "title") {
+            // The model's title, the moment it exists rather than at the end
+            // of the turn. The text itself is not kept here: the rail and the
+            // header read the list, so refreshing it is the whole update.
+            onActivity();
           } else if (name === "status") {
             patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
           } else if (name === "notice") patchLast((t) => ({ ...t, notice: payload.text ?? "" }));
@@ -822,12 +828,10 @@ export default function Ask({
                 <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
                   {roleName(turn.audience)}
                 </div>
-                {/* The question wears the accent its own eyebrow does, and the
-                    header title above it: a turn's heading and the shell's
-                    speak in one voice. */}
-                <p className="mt-1.5 max-w-[30ch] font-serif text-[21px] font-medium leading-[1.3] tracking-tight text-accent-strong text-balance sm:text-[26px] [@media(max-height:500px)]:text-[19px]">
-                  {turn.question}
-                </p>
+                {/* The accent is the eyebrow's alone now: the question is what
+                    was typed, at whatever length it was typed, and it reads as
+                    the reader's words rather than as a headline. */}
+                <Question text={turn.question} />
                 <div className="mt-2.5 flex items-center gap-1.5">
                   {turn.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(turn.askedAt)}</time>}
                   <span className={pill + " bg-active text-muted"}>Turn {i + 1}</span>
