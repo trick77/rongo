@@ -26,9 +26,6 @@ export type SeqStep = { from: string; to: string; label: string; kind: StepKind;
 export type SequenceSpec = { type: "sequence"; actors: Actor[]; steps: SeqStep[] };
 export type DiagramSpec = FlowSpec | SequenceSpec;
 
-/** The prompt's caps. A spec past them is rejected and shown as its text. */
-export const caps = { nodes: 12, actors: 5, steps: 12 } as const;
-
 const flowKinds: readonly string[] = ["start", "end", "step", "decision"];
 const stepKinds: readonly string[] = ["call", "return", "async"];
 
@@ -50,7 +47,15 @@ function ids(items: Record<string, unknown>[]): Set<string> | null {
 }
 
 /** parseDiagram reads the fence body, or returns null when it is not a spec
- * this renderer draws. Null means the block is shown as the text it is. */
+ * this renderer draws. Null means the block is shown as the text it is.
+ *
+ * Size is not a reason to return null. The prompt asks for at most 12 nodes,
+ * 5 actors and 12 steps because that is what reads well, and this file used
+ * to enforce those same numbers: a model that answered with eight actors had
+ * its whole diagram thrown away and the reader got the JSON. A picture one
+ * actor too wide is still the picture; the box it sits in scrolls. So the
+ * gates here are structural only - the shape has to be drawable, and every
+ * id a step or an edge names has to be one the spec declared. */
 export function parseDiagram(body: string): DiagramSpec | null {
   let raw: unknown;
   try {
@@ -62,7 +67,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
   if (raw.type === "flow") {
     const { nodes, edges } = raw;
     if (!Array.isArray(nodes) || !Array.isArray(edges)) return null;
-    if (nodes.length === 0 || nodes.length > caps.nodes) return null;
+    if (nodes.length === 0) return null;
     if (!nodes.every(isRecord) || !edges.every(isRecord)) return null;
     const known = ids(nodes);
     if (!known) return null;
@@ -85,7 +90,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
   if (raw.type === "sequence") {
     const { actors, steps } = raw;
     if (!Array.isArray(actors) || !Array.isArray(steps)) return null;
-    if (actors.length === 0 || actors.length > caps.actors || steps.length > caps.steps) return null;
+    if (actors.length === 0) return null;
     if (!actors.every(isRecord) || !steps.every(isRecord)) return null;
     const known = ids(actors);
     if (!known) return null;
