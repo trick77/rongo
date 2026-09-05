@@ -311,6 +311,14 @@ body {
   animation: pulse 1.2s ease-in-out infinite;
 }
 
+/* The shape of a thread while it is being fetched. It holds the place of the
+   turn that is coming, so the column does not sit empty and does not keep the
+   previous conversation standing under a title that has already changed. */
+.skeleton {
+  background: var(--color-active);
+  animation: skeleton-fade 1.4s ease-in-out infinite;
+}
+
 /* Streaming fade: a segment of newly arrived answer text appears once, from
    dim to full, the same effect as ../loom's .ui-stream-seg. Done on opacity
    rather than on colour: loom's keyframe ends on an explicit colour, and a
@@ -354,11 +362,17 @@ body {
     opacity: 0;
   }
 }
+@keyframes skeleton-fade {
+  50% {
+    opacity: 0.45;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .node-now::before,
   .busybar,
   .caret,
   .pulse,
+  .skeleton,
   .stream-seg {
     animation: none;
   }

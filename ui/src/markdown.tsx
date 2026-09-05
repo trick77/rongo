@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { JSX, ReactNode } from "react";
 import { highlightBlock, languageOf } from "./highlight";
 import Diagram, { parseDiagram } from "./diagram";
@@ -371,7 +372,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
 }
 
 /** Markdown renders one answer. */
-export default function Markdown({
+function Markdown({
   text: src,
   onMarkerHover,
   onMarkerOpen,
@@ -393,3 +394,16 @@ export default function Markdown({
 }) {
   return <>{renderMarkdown(src, { onHover: onMarkerHover, onOpen: onMarkerOpen, backed }, fade)}</>;
 }
+
+/**
+ * Memoized, because rendering an answer is not cheap: every fenced block is
+ * run through lowlight here, synchronously, and a thread on screen holds a
+ * dozen of them. Without this the whole conversation was highlighted again on
+ * every re-render of the shell — including the two renders of the thread being
+ * LEFT that a rail click causes, before the new one has even been fetched.
+ *
+ * The props are stable by construction: the text and the citation set belong
+ * to a turn, and the callers hand over callbacks that keep their identity
+ * (see Ask's markerOpen).
+ */
+export default memo(Markdown);
