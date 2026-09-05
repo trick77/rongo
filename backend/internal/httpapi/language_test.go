@@ -82,3 +82,21 @@ func TestAsk_aFollowupIsAnsweredInTheThreadsLanguage(t *testing.T) {
 		t.Errorf("messages = %+v, want the follow-up stored as de", msgs)
 	}
 }
+
+// The composer cannot know a thread's language before it asks - it may be a
+// thread still loading, or one whose turns are older than the pin. The stream
+// says which language the record took, first thing.
+func TestAsk_theThreadEventCarriesTheLanguageTheRecordTook(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+
+	postAsk(t, deps, `{"question":"Wie?","audience":"ba","language":"de"}`)
+	list, _ := st.List(context.Background(), testSubject)
+
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"Und dann?","audience":"ba","language":"fr","thread_id":%d}`, list[0].ID))
+	for _, e := range events(rec.Body.String()) {
+		if e[0] == "thread" && !strings.Contains(e[1], `"language":"de"`) {
+			t.Errorf("thread event = %s, want the thread's language on it", e[1])
+		}
+	}
+}

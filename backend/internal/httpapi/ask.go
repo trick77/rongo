@@ -288,7 +288,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		_ = rc.Flush()
 	}
 
-	send("thread", map[string]any{"thread_id": thread.ID, "title": thread.Title, "message_id": msg.ID})
+	// The language goes out with the thread, because the record may not have
+	// taken the one that was asked for: a thread answers in the language of its
+	// first turn. Sent first thing, so a composer that guessed corrects itself
+	// before the answer starts arriving in a language it did not expect.
+	send("thread", map[string]any{
+		"thread_id":  thread.ID,
+		"title":      thread.Title,
+		"message_id": msg.ID,
+		"language":   string(lang),
+	})
 
 	// The record is written on a context that outlives the request. A reader
 	// who closes the tab mid-answer cancels r.Context(), and writing the
@@ -495,7 +504,9 @@ func (s *Server) finishTurn(
 	send("citations", answer.Citations)
 	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
 	closeUsage()
-	send("done", map[string]any{"message_id": messageID})
+	// Language again, for the re-explain path: it opens no thread event, and
+	// its turn is filed in the thread's language whatever it asked for.
+	send("done", map[string]any{"message_id": messageID, "language": string(lang)})
 }
 
 // suggestFollowups offers two or three questions to ask next, under the answer

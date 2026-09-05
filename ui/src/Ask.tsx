@@ -98,6 +98,11 @@ type Turn = {
   // The id of the message this turn was recorded as, once known. Reexplain
   // needs it; a turn still in flight has none yet.
   messageId: number | null;
+  // Whether the server has a row for this turn. A turn that failed before the
+  // record was written is on screen but not in the thread, and must not pin
+  // the thread's language — the reader has to be able to pick another one and
+  // try again.
+  recorded: boolean;
   clarification: TurnClarification | null;
   // What the turn had to say about its own scope - a repository the question
   // named that the index does not carry. Empty on every ordinary turn, and
@@ -224,6 +229,7 @@ function storedTurn(m: Message): Turn {
     retry: null,
     done: true,
     messageId: m.id,
+    recorded: true,
     clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
     chosenIdx: null,
     live: false,
@@ -251,6 +257,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     steps: [],
     error: "",
     retry: null,
+    recorded: false,
     done: false,
     messageId: null,
     clarification: null,
@@ -703,6 +710,11 @@ export default function Ask({
             threadId.current = payload.thread_id;
             shown.current = payload.thread_id;
             onThread(payload.thread_id);
+            // The turn is on record now, in the language the record took. That
+            // is not always the one that was asked for — a thread answers in
+            // the language of its first turn — so the turn on screen, and with
+            // it the composer, follow the server rather than the guess.
+            patchLast((t) => ({ ...t, recorded: true, language: payload.language ?? t.language }));
             // The placeholder title is written by Create, so the entry can
             // appear in the list the moment the question is sent.
             onActivity();
@@ -736,6 +748,10 @@ export default function Ask({
               done: true,
               endedAt: t.endedAt ?? Date.now(),
               messageId: payload.message_id ?? t.messageId,
+              // A re-explain opens no thread event, and it too is filed in the
+              // thread's language rather than the one it asked for.
+              recorded: true,
+              language: payload.language ?? t.language,
             }));
             // The model-written title replaces the placeholder in a background
             // goroutine that has no way to push it here. Without this the
@@ -768,10 +784,12 @@ export default function Ask({
    * English suggestions. The backend pins the same way when the record is
    * written; this is what keeps the composer from promising otherwise.
    *
-   * Null on a thread with no turn yet, which is where the remembered
-   * preference still applies.
+   * Null until a turn is on record — a first question that failed before the
+   * server wrote its row left a turn on screen but nothing in the thread, and
+   * locking the composer to it would strand the reader in a language they
+   * cannot change.
    */
-  const threadLanguage = turns.length > 0 ? turns[0].language : null;
+  const threadLanguage = turns.find((t) => t.recorded)?.language ?? null;
   // What the next question will actually be answered in.
   const asking = threadLanguage ?? language;
 
@@ -1292,11 +1310,7 @@ export default function Ask({
                   language the thread is in, it just no longer offers a change.
                   The title says why, for the reader who tries. */}
               <label
-                title={
-                  threadLanguage
-                    ? `This thread is answered in ${languages.find((l) => l.code === threadLanguage)?.name ?? threadLanguage}.`
-                    : undefined
-                }
+                title={threadLanguage ? "Pinned to the language of the first question." : undefined}
                 className={
                   "relative inline-flex h-9 items-center rounded-full border border-border bg-bg pl-3 text-xs text-muted sm:h-8 " +
                   (threadLanguage ? "pr-3 opacity-75" : "pr-2.5 hover:border-elevated-border hover:text-ink")

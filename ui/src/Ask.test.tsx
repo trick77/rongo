@@ -1265,6 +1265,43 @@ describe("Ask, the language a thread is answered in", () => {
   });
 });
 
+describe("Ask, a language the record decided", () => {
+  // The composer can guess wrong: a question sent while the thread is still
+  // loading carries the remembered language, and the server answers in the
+  // thread's. The stream says which one it took, and the turn - with it the
+  // pinned pill - follows the record rather than the guess.
+  it("follows the language the stream reports", async () => {
+    streamFrames([ev("thread", { thread_id: 3, message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => {
+      const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(select.value).toBe("fr");
+    });
+  });
+
+  // A first question that failed before the server wrote its row left a turn
+  // on screen and nothing in the thread. Locking the composer to it would
+  // strand the reader in a language they never got an answer in.
+  it("stays switchable when the first turn never reached the record", async () => {
+    streamFrames([ev("error", { message: "The turn failed." })]);
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await screen.findByRole("alert");
+    const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+    await user.selectOptions(select, "de");
+    expect(select.value).toBe("de");
+  });
+});
+
 describe("Ask, the caret of a streaming answer", () => {
   // The caret used to be a sibling element of the markdown, which made it a
   // block of its own: it blinked on the line BELOW the words it belongs to.
