@@ -309,6 +309,11 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
         }
         tag = "json";
       }
+      // A fence still arriving ends on the newline its last line was written
+      // with, and that empty line is not content yet — the next token fills
+      // it. Kept, it opens a blank line inside the block, and the streaming
+      // caret (index.css) blinks on it instead of after the code.
+      if (!closed && body.length > 0 && body[body.length - 1] === "") body.pop();
       // Coloured straight from the grammar, never through text(): a marker-
       // shaped a[1] inside code is code, as the backend's splitFences agrees.
       out.push(

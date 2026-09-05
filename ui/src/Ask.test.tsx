@@ -1159,6 +1159,40 @@ describe("Ask, the answer language across a reload", () => {
   });
 });
 
+describe("Ask, the caret of a streaming answer", () => {
+  // The caret used to be a sibling element of the markdown, which made it a
+  // block of its own: it blinked on the line BELOW the words it belongs to.
+  // It is now drawn on the last block itself (index.css), so what the markup
+  // has to get right is the marker class and which block comes last.
+  it("marks the answer block as streaming so the caret sits on its last line", async () => {
+    streamFrames([ev("thread", { thread_id: 1, message_id: 2 }), ev("token", { text: "Indexing walks the repo." })]);
+    await ask("How does indexing work?");
+
+    const para = await screen.findByText(
+      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Indexing walks the repo"),
+    );
+    const block = document.querySelector(".ui-markdown.streaming");
+    expect(block).toBeTruthy();
+    expect(block?.lastElementChild).toBe(para);
+    expect(block?.querySelector(".caret")).toBe(null);
+  });
+
+  it("drops the streaming mark once the answer is done", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1, message_id: 2 }),
+      ev("token", { text: "Indexing walks the repo." }),
+      ev("done", { message_id: 2 }),
+    ]);
+    await ask("How does indexing work?");
+
+    await screen.findByText(
+      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Indexing walks the repo"),
+    );
+    await waitFor(() => expect(document.querySelector(".ui-markdown.streaming")).toBe(null));
+    expect(document.querySelector(".ui-markdown")).toBeTruthy();
+  });
+});
+
 describe("Ask, the composer on a phone", () => {
   // A field rendering under 16px makes iOS Safari zoom the page in on focus
   // and never zoom back out: the whole app is then permanently wider than the

@@ -32,6 +32,19 @@ describe("Markdown", () => {
       expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
     });
 
+    it("does not open a blank line at the end of a fence still arriving", () => {
+      // The newline the last line was written with is not content yet. Kept,
+      // the block ends on an empty line and the streaming caret (index.css)
+      // blinks there instead of after the code.
+      const { container } = render(<Markdown text={"```go\nfunc main() {}\n"} />);
+      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+    });
+
+    it("keeps the blank line of a fence that closed on one", () => {
+      const { container } = render(<Markdown text={"```go\nfunc main() {}\n\n```"} />);
+      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}\n");
+    });
+
     it("leaves an untagged or unknown fence as plain text", () => {
       for (const src of ["```\nfunc main() {}\n```", "```nosuch\nfunc main() {}\n```"]) {
         const { container } = render(<Markdown text={src} />);
