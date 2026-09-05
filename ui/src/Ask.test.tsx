@@ -584,6 +584,39 @@ describe("Ask, a stored thread", () => {
  * re-explaining both post a SECOND time in the same test, and the queue is
  * what tells the two calls apart.
  */
+/**
+ * Like queuedPostFetch, but the frames are chosen from the request body rather
+ * than from the position in a queue. Use it where a test asks a turn and then
+ * resumes it: the two POSTs are told apart by what they say, so nothing
+ * depends on which other request the page happened to make in between.
+ */
+function postFetchByRequest(frames: (body: Record<string, unknown>) => string[], threadsJson: unknown = []) {
+  const encoder = new TextEncoder();
+  const mock = vi.fn(async (_url: string, opts?: RequestInit) => {
+    if (opts?.method !== "POST") {
+      return { ok: true, status: 200, json: async () => threadsJson };
+    }
+    const chosen = frames(JSON.parse(String(opts?.body ?? "{}")));
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          let i = 0;
+          return {
+            async read() {
+              if (i >= chosen.length) return { done: true, value: undefined };
+              return { done: false, value: encoder.encode(chosen[i++]) };
+            },
+          };
+        },
+      },
+    };
+  });
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
 function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
   const encoder = new TextEncoder();
   let next = 0;
@@ -831,26 +864,29 @@ describe("Ask, the clarification and re-explaining", () => {
   });
 
   it("sends the picked repositories and streams the answer into a new turn", async () => {
-    const mock = queuedPostFetch([
-      [
-        ev("thread", { thread_id: 7, message_id: 5 }),
-        ev("clarification", {
-          message_id: 5,
-          too_broad: true,
-          candidates: [
-            { idx: 0, title: "", summary: "", repo: "peeq", branch: "master" },
-            { idx: 1, title: "", summary: "", repo: "loom", branch: "main" },
-            { idx: 2, title: "", summary: "", repo: "ledger", branch: "main" },
+    // Keyed on the request, not on call order: the answer belongs to the
+    // resume, and a queue hands it to whichever call happens to come second.
+    const mock = postFetchByRequest((body) =>
+      body.clarification_message_id
+        ? [
+            ev("thread", { thread_id: 7, message_id: 6 }),
+            ev("token", { text: "Both retry with capped exponential backoff." }),
+            ev("done", { message_id: 6 }),
+          ]
+        : [
+            ev("thread", { thread_id: 7, message_id: 5 }),
+            ev("clarification", {
+              message_id: 5,
+              too_broad: true,
+              candidates: [
+                { idx: 0, title: "", summary: "", repo: "peeq", branch: "master" },
+                { idx: 1, title: "", summary: "", repo: "loom", branch: "main" },
+                { idx: 2, title: "", summary: "", repo: "ledger", branch: "main" },
+              ],
+            }),
+            ev("done", { message_id: 5 }),
           ],
-        }),
-        ev("done", { message_id: 5 }),
-      ],
-      [
-        ev("thread", { thread_id: 7, message_id: 6 }),
-        ev("token", { text: "Both retry with capped exponential backoff." }),
-        ev("done", { message_id: 6 }),
-      ],
-    ]);
+    );
 
     const user = await ask("How is retry done?");
     await screen.findByText("That is too broad to ask about.");
