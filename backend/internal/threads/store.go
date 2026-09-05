@@ -29,6 +29,10 @@ type Thread struct {
 	// "New question" rather than show a question cut mid-word.
 	TitlePending bool      `json:"title_pending"`
 	CreatedAt    time.Time `json:"created_at"`
+	// Shared is true while a live link points at this thread. It is what the
+	// rail marks a row with; the link itself is not sent with the list,
+	// because the rail has nothing to do with it.
+	Shared bool `json:"shared,omitempty"`
 }
 
 // Message is one ANSWER ATTEMPT: a question and what came of it. It is not
@@ -133,6 +137,19 @@ type Candidate struct {
 }
 
 // Store reads and writes threads.
+// anySubject is what a read passes when its authorisation is not a session but
+// a share token: the token already decided the caller may see this thread, and
+// there is no signed-in subject to match.
+//
+// A sentinel rather than "": an empty subject arriving from a broken handler
+// must match no row at all. `user_subject` is NOT NULL and every value in it
+// comes from an identity provider, so nothing can ever equal this string.
+const anySubject = "\x00 share"
+
+// noCeiling reads a thread whole. Share reads pass the share's own ceiling
+// instead, so a turn asked after the link was made is not in the result.
+const noCeiling = int64(1<<63 - 1)
+
 type Store struct {
 	db *sql.DB
 }
@@ -477,7 +494,20 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, t)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// One extra query for the whole list rather than a join on the statement
+	// above: nearly every reader has no share at all, and the join would be
+	// paid on every load of the rail — which is every turn.
+	shared, err := s.SharedIDs(ctx, subject)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Shared = shared[out[i].ID]
+	}
+	return out, nil
 }
 
 // ThreadScope is the repositories this thread has already narrowed to: the
@@ -602,14 +632,23 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 
 // Messages returns a thread's turns in order, with their citations.
 func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([]Message, error) {
+	return s.messages(ctx, subject, threadID, noCeiling)
+}
+
+// messages is the one place a thread's turns are assembled. Both the owner's
+// read and the public share read go through it, so the two can never drift
+// apart in what a turn carries.
+//
+// ceiling caps the read at a message id; noCeiling reads the whole thread.
+func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling int64) ([]Message, error) {
 	// The subject is part of the query rather than checked afterwards: a thread
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.thread_id = ? AND t.user_subject = ?
-		ORDER BY m.ordinal`, threadID, subject)
+		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
+		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling)
 	if err != nil {
 		return nil, fmt.Errorf("read thread: %w", err)
 	}
@@ -735,6 +774,9 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 // message did not end in one, or the message does not belong to a thread
 // owned by subject. A foreign id yields nil, never someone else's card — the
 // caller (Messages) already knows the subject, but every entry point that
+// anySubject is the one value that skips the check, and only a share read
+// passes it: there the token is the authorisation and there is no session.
+//
 // takes a bare id off the wire re-checks it here rather than trusting a
 // handler to have done so.
 func (s *Store) Clarification(ctx context.Context, subject string, messageID int64) (*Clarification, error) {
@@ -749,7 +791,7 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 		FROM clarifications c
 		JOIN messages m ON m.id = c.message_id
 		JOIN threads t ON t.id = m.thread_id
-		WHERE c.message_id = ? AND t.user_subject = ?`, messageID, subject).
+		WHERE c.message_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3)`, messageID, subject, anySubject).
 		Scan(&c.ID, &c.ThreadID, &understanding, &c.Answered)
 	if err == sql.ErrNoRows {
 		return nil, nil

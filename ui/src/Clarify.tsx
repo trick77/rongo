@@ -28,10 +28,17 @@ export default function Clarify({
   candidates,
   chosenIdx = null,
   onChoose,
+  readOnly = false,
 }: {
   candidates: ClarifyCandidate[];
   chosenIdx?: number | null;
   onChoose: (idx: number) => void;
+  /**
+   * On a shared page the card is a record and nothing more: the candidates are
+   * inert, and it never wears the ochre. Ochre means "your move", and a reader
+   * following a link has none — the choice was, and stays, the owner's.
+   */
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(chosenIdx == null);
   // Collapses the instant a choice lands, and opens again if that choice is
@@ -52,7 +59,7 @@ export default function Clarify({
     <div
       className={
         "mt-4 rounded-ui border bg-panel " +
-        (chosenIdx == null ? "border-ochre" : "border-border")
+        (chosenIdx == null && !readOnly ? "border-ochre" : "border-border")
       }
     >
       <button
@@ -63,7 +70,13 @@ export default function Clarify({
       >
         <Chevron open={open} />
         {chosenIdx == null ? (
-          <span className="font-medium text-ochre">Which one do you mean?</span>
+          readOnly ? (
+            // Not a question here: nobody on this page can answer it, and
+            // asking anyway would leave a reader looking for a button.
+            <span className="text-muted">Asked back: which one was meant</span>
+          ) : (
+            <span className="font-medium text-ochre">Which one do you mean?</span>
+          )
         ) : (
           <>
             <span>Chosen: {chosen?.title}</span>
@@ -83,11 +96,11 @@ export default function Clarify({
               <button
                 type="button"
                 onClick={() => onChoose(c.idx)}
-                disabled={chosenIdx != null}
+                disabled={chosenIdx != null || readOnly}
                 aria-pressed={c.idx === chosenIdx}
                 className={
                   "w-full rounded-ui-sm border bg-bg px-3.5 py-3 text-left " +
-                  (chosenIdx == null ? "hover:border-accent " : "") +
+                  (chosenIdx == null && !readOnly ? "hover:border-accent " : "") +
                   (c.idx === chosenIdx ? "border-accent ring-1 ring-accent" : "border-border")
                 }
               >

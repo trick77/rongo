@@ -21,6 +21,8 @@ const CODEPOINTS = {
   edit: 0xe064,
   moreVertical: 0xe062,
   trash: 0xe101,
+  upload: 0xe06d,
+  eyeOff: 0xe06a,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;

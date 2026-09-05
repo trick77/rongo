@@ -7,7 +7,16 @@ import App from "./App";
 afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
+  window.history.replaceState({}, "", "/");
 });
+
+/**
+ * The address bar is where the app is now, so a test that wants a thread open
+ * says so the way a reader would: by being at its URL.
+ */
+function atPath(path: string) {
+  window.history.replaceState({}, "", path);
+}
 
 /**
  * Replaces window.location so a navigation can be observed instead of
@@ -158,7 +167,7 @@ describe("App", () => {
   // The action used to live inside the thread list, among the past
   // questions, which read as if starting one were already history.
   it("clears the open thread from the rail's New question", async () => {
-    localStorage.setItem("rongo.thread", "7");
+    atPath("/thread/7");
     apiFetch(oneThread, []);
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
@@ -167,14 +176,14 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "New question" }));
 
-    expect(localStorage.getItem("rongo.thread")).toBe(null);
+    expect(window.location.pathname).toBe("/new");
     // The header names the open thread; with none open it falls back.
     expect(screen.getAllByText("New question").length).toBeGreaterThan(1);
   });
 
   // "Threads /" pointed at nothing you could click once the nav went.
   it("heads the answer with the thread title alone", async () => {
-    localStorage.setItem("rongo.thread", "7");
+    atPath("/thread/7");
     apiFetch(oneThread, []);
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
@@ -209,27 +218,50 @@ const oneTurn = [
   },
 ];
 
-describe("App, the thread across a reload", () => {
-  it("brings back the thread that was last open", async () => {
-    localStorage.setItem("rongo.thread", "7");
+describe("App, the thread in the URL", () => {
+  it("opens the thread its address names", async () => {
+    atPath("/thread/7");
     apiFetch(oneThread, oneTurn);
     render(<StrictMode><App /></StrictMode>);
     expect(await screen.findByText(/Through a job/)).toBeTruthy();
   });
 
-  it("remembers the chosen thread", async () => {
+  it("puts the thread in the address bar when one is opened", async () => {
+    // The whole point of the URL: a thread can be sent to someone, reloaded
+    // into, and reached with Back.
     apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
     await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(localStorage.getItem("rongo.thread")).toBe("7"));
+    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
+  });
+
+  it("names the unasked question /new rather than /", async () => {
+    atPath("/");
+    apiFetch([], []);
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByRole("heading", { level: 1 });
+    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+  });
+
+  it("follows Back out of a thread", async () => {
+    apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
+
+    window.history.back();
+
+    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+    await waitFor(() => expect(screen.getAllByText("New question").length).toBeGreaterThan(1));
   });
 
   // The placeholder title is the question's first 48 runes, cut mid-word. It
   // is a label for a rail row, never a title, and the header showing it cut it
   // a second time with its own truncate.
   it("holds New question in the header while the title is still coming", async () => {
-    localStorage.setItem("rongo.thread", "7");
+    atPath("/thread/7");
     apiFetch(
       [{ id: 7, title: "How does shipping work, and what happens when…", title_pending: true, created_at: "2026-08-17T10:00:00Z" }],
       oneTurn,
@@ -245,7 +277,7 @@ describe("App, the thread across a reload", () => {
   });
 
   it("puts the title in the header once it has settled", async () => {
-    localStorage.setItem("rongo.thread", "7");
+    atPath("/thread/7");
     apiFetch([{ id: 7, title: "Shipping, end to end", title_pending: false, created_at: "2026-08-17T10:00:00Z" }], oneTurn);
     render(<StrictMode><App /></StrictMode>);
 
@@ -254,12 +286,13 @@ describe("App, the thread across a reload", () => {
   });
 
   // A thread that is not yours, or was purged, comes back as an empty list with
-  // status 200. Keeping the id would make every later reload open nothing.
-  it("forgets a thread id that leads nowhere", async () => {
-    localStorage.setItem("rongo.thread", "999");
+  // status 200. The address has to fall back with it, or every reload of that
+  // URL opens nothing and says nothing.
+  it("leaves a thread address that leads nowhere", async () => {
+    atPath("/thread/999");
     apiFetch([], []);
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(localStorage.getItem("rongo.thread")).toBeNull());
+    await waitFor(() => expect(window.location.pathname).toBe("/new"));
   });
 });
 

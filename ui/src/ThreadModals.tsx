@@ -7,11 +7,11 @@ import { createPortal } from "react-dom";
  * only things on screen while they are up.
  */
 
-const cancelButton =
+export const cancelButton =
   "h-8 rounded-ui-sm px-3.5 text-sm font-medium text-ink-dim transition-colors hover:bg-elevated";
 const dangerButton =
   "h-8 rounded-ui-sm bg-danger px-3.5 text-sm font-medium text-ink transition-colors hover:brightness-110 disabled:opacity-50";
-const saveButton =
+export const saveButton =
   "h-8 rounded-ui-sm bg-accent-fill px-3.5 text-sm font-medium text-ink transition-colors hover:bg-accent-strong disabled:opacity-50";
 
 export function ModalShell({

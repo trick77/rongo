@@ -1,23 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import Markdown from "./markdown";
-import Clarify, { type ClarifyCandidate } from "./Clarify";
-import Question from "./Question";
-import Trace, { type Step, type TraceState } from "./Trace";
+import ThreadView, { SourcesPane } from "./ThreadView";
+import SourceView from "./SourceView";
 import { Chevron } from "./icons";
-import SourceView, { type SourceRef } from "./SourceView";
-import { mermaidize } from "./diagramExport";
+import {
+  asMarkdown,
+  freshTurn,
+  headOf,
+  languages,
+  linkChosenCandidates,
+  roleName,
+  storedRetries,
+  storedTurn,
+  threadUsage,
+  type Audience,
+  type Citation,
+  type Message,
+  type Turn,
+  type Usage,
+} from "./turns";
 
-type Citation = SourceRef;
-
-type Audience = "ba" | "dev";
-
-/** The languages the answer can be written in; the backend's allowlist. */
-export const languages: { code: string; name: string }[] = [
-  { code: "en", name: "English" },
-  { code: "de", name: "Deutsch" },
-  { code: "fr", name: "Français" },
-  { code: "it", name: "Italiano" },
-];
+// The pieces of a turn the rest of the app still reaches for through Ask.
+// Re-exported rather than moved twice: App imports money and threadUsage for
+// the header's running total, and the tests import languages.
+export { languages, money, threadUsage } from "./turns";
+export type { Usage, UsageCall } from "./turns";
 
 /** What the empty page and the composer say, in the language the select is
  * set to: the two pieces of chrome a reader meets before any answer, so they
@@ -65,314 +71,6 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
   },
 };
 
-/** The clarification a turn ended with, as this view needs it: the id of the
- * message that carries the card (used to resume it) and its candidates. */
-type TurnClarification = {
-  messageId: number;
-  candidates: ClarifyCandidate[];
-};
-
-/** What a failed turn is asked again with: the endpoint and the body of the
- * request that failed, kept so a retry re-issues exactly that. Null on a turn
- * that has nothing to offer — one still running, one that answered, and a
- * resume, whose card is its own retry. */
-type RetryRequest = {
-  url: string;
-  body: Record<string, unknown>;
-};
-
-type Turn = {
-  question: string;
-  audience: Audience;
-  language: string;
-  text: string;
-  citations: Citation[];
-  // Every "status" event in order, with its arrival time, for the timeline.
-  steps: Step[];
-  error: string;
-  // The request this turn was made with, kept so a failure can be asked
-  // again. Set while the turn streams, so it is there whichever way the turn
-  // ends; only a turn that also carries an error ever shows the button.
-  retry: RetryRequest | null;
-  done: boolean;
-  // The id of the message this turn was recorded as, once known. Reexplain
-  // needs it; a turn still in flight has none yet.
-  messageId: number | null;
-  // Whether the server has a row for this turn. A turn that failed before the
-  // record was written is on screen but not in the thread, and must not pin
-  // the thread's language — the reader has to be able to pick another one and
-  // try again.
-  recorded: boolean;
-  // The question this turn is an attempt at: the message id of the turn that
-  // carried it, or null when this turn IS that one. A resume, a retry and a
-  // re-explain all repeat the question text of the turn they continue — the
-  // thread is a record and nothing in it is rewritten — so this link is the
-  // only thing that says the question was asked once, and it is what the view
-  // groups by. Without it the page would print the same question three times
-  // and claim it was typed three times.
-  headId: number | null;
-  clarification: TurnClarification | null;
-  // What the turn had to say about its own scope - a repository the question
-  // named that the index does not carry. Empty on every ordinary turn, and
-  // shown above the answer rather than inside it: it is about the answer, not
-  // part of it.
-  notice: string;
-  // The candidate picked on this turn's card, or null before a choice. Once
-  // set it stays — picking a different candidate later starts a NEW turn,
-  // never rewriting this one.
-  chosenIdx: number | null;
-  // True for a turn created in this session. A turn restored from the
-  // record carries no live trace — it is finished by definition.
-  live: boolean;
-  // When the turn was sent and when it closed, for the timeline's totals.
-  startedAt: number;
-  endedAt: number | null;
-  // What the turn paid for — every call it made, summed, and priced when
-  // the server has prices. Null until the usage event arrives, and for a
-  // stored turn older than the record of it.
-  usage: Usage | null;
-  // The moment the question was asked, as the record has it, or now.
-  askedAt: string;
-  // The questions this answer offers to ask next. Only the newest answered
-  // turn shows them: the older ones are a record of what was asked, and a
-  // thread of stale offers would compete with the answer in front of the
-  // reader.
-  followups: string[];
-};
-
-/** One paid call of a turn, as the usage event and the record carry it. */
-export type UsageCall = {
-  step: string;
-  model: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  cost_usd?: number;
-};
-
-/** Usage is the usage event's payload and a stored message's `usage`. */
-export type Usage = {
-  calls: UsageCall[];
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  // Present as soon as the server has any price configured, absent when it
-  // has none. Absent and zero are different things: zero is "priced, and it
-  // cost nothing", absent is "not priced here".
-  cost_usd?: number;
-};
-
-/** tokens formats a count the way the pill shows it. */
-function tokens(n: number): string {
-  return n.toLocaleString("en-GB") + " tok";
-}
-
-/** money formats a USD figure at the resolution a turn costs: a turn is
- * fractions of a cent, a thread whole cents, so three decimals until a
- * dollar and two beyond. */
-export function money(usd: number): string {
-  return "$" + (usd >= 1 ? usd.toFixed(2) : usd.toFixed(3));
-}
-
-/** threadUsage sums every turn that has usage. Cost is a number only when
- * some turn carried one, so a thread on an unpriced server shows no money. */
-export function threadUsage(turns: Turn[]): { tokens: number; cost: number | null } | null {
-  let total = 0;
-  let cost: number | null = null;
-  let any = false;
-  for (const t of turns) {
-    if (!t.usage) continue;
-    any = true;
-    total += t.usage.total_tokens;
-    if (t.usage.cost_usd != null) cost = (cost ?? 0) + t.usage.cost_usd;
-  }
-  return any ? { tokens: total, cost } : null;
-}
-
-/** Message is one stored turn, as GET /api/threads/{id} serves it. */
-type Message = {
-  id: number;
-  ordinal: number;
-  audience: string;
-  language?: string;
-  question: string;
-  answer: string;
-  error: string;
-  citations: Citation[] | null;
-  // The scope sentence, rendered by the backend in this message's own
-  // language. Empty on every turn that named nothing the index lacked.
-  notice?: string;
-  clarification: { id: number; candidates: ClarifyCandidate[] } | null;
-  from_candidate_idx: number;
-  // The clarification this message resolved, or 0 when it did not resume
-  // one. The link the backend actually stored — matching on it, not on
-  // position, is what tells two clarifications open in the same thread
-  // apart.
-  from_clarification_id: number;
-  // The turn this row is an attempt at, or 0 when the row IS the turn. Absent
-  // on a row written before the column existed, which stays its own turn.
-  head_message_id?: number;
-  created_at?: string;
-  // What this answer offered to ask next. Absent on a turn that ended in a
-  // card, a failure or a nothing-found, and on every turn older than the
-  // column.
-  followups?: string[] | null;
-  // Absent for a turn with nothing on record: older than the usage table,
-  // or one that paid for nothing.
-  usage?: Usage | null;
-};
-
-/**
- * A stored turn renders exactly as it was answered — including the failure,
- * which stays in the record. It is finished by definition, so it carries no
- * live trace.
- */
-function storedTurn(m: Message): Turn {
-  return {
-    question: m.question,
-    audience: m.audience === "dev" ? "dev" : "ba",
-    language: m.language ?? "en",
-    text: m.answer ?? "",
-    citations: m.citations ?? [],
-    notice: m.notice ?? "",
-    steps: [],
-    error: m.error ?? "",
-    // Filled in by storedRetries, which needs the turn's neighbours.
-    retry: null,
-    done: true,
-    messageId: m.id,
-    recorded: true,
-    headId: m.head_message_id || null,
-    clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
-    chosenIdx: null,
-    live: false,
-    startedAt: 0,
-    endedAt: 0,
-    usage: m.usage ?? null,
-    askedAt: m.created_at ?? "",
-    followups: m.followups ?? [],
-  };
-}
-
-/**
- * A fresh, in-flight turn — asked, resumed from a candidate, or
- * re-explained. All three start the same way: no answer yet, no steps yet.
- *
- * headId is the question this one is another attempt at. Null only when the
- * reader typed it: a resume, a retry and a re-explain all name the turn they
- * belong to, because the words are the same and nothing else would tell the
- * record they are one question.
- */
-function freshTurn(question: string, audience: Audience, language: string, headId: number | null = null): Turn {
-  const now = Date.now();
-  return {
-    question,
-    audience,
-    language,
-    text: "",
-    citations: [],
-    notice: "",
-    steps: [],
-    error: "",
-    retry: null,
-    recorded: false,
-    done: false,
-    messageId: null,
-    headId,
-    clarification: null,
-    chosenIdx: null,
-    live: true,
-    startedAt: now,
-    endedAt: null,
-    usage: null,
-    askedAt: new Date(now).toISOString(),
-    followups: [],
-  };
-}
-
-/**
- * Marks each clarification's chosen candidate from the link the backend
- * actually stored (from_clarification_id → from_candidate_idx), never from
- * position: two clarifications can be open in the same thread at once, and
- * the older one can be the one resolved second, so "the next message"
- * points at the wrong card.
- */
-function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
-  const chosenByClarification = new Map<number, number>();
-  for (const m of list) {
-    if (m.from_clarification_id) chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
-  }
-  return turns.map((t, i) => {
-    const clarId = list[i].clarification?.id;
-    if (clarId == null) return t;
-    const idx = chosenByClarification.get(clarId);
-    return idx === undefined ? t : { ...t, chosenIdx: idx };
-  });
-}
-
-/** headOf is the turn a stored turn belongs to: the question it is an attempt
- * at, or its own id when it IS that question. Null only while a turn asked in
- * this session has no id yet. */
-function headOf(t: Turn): number | null {
-  return t.headId ?? t.messageId;
-}
-
-/**
- * Gives every failed turn in a restored thread the request that asks it
- * again, and points that request at the turn it retries so the record keeps
- * saying the question was asked once.
- *
- * The card exception keeps the resume rule holding across a reload: a failed
- * turn belonging to a card nobody has answered IS that card's resume. Its
- * retry is the card, which is still open, so it gets no request and no button
- * — two ways of spending the same resume on screen would be one too many.
- *
- * For a turn that carries the link the group is asked, not inferred. A turn
- * written before the column existed carries none, and never will: a resume is
- * linked to its card only when an answer lands, so a resume that FAILED back
- * then left nothing behind at all and no backfill can reach it. Those keep the
- * old rule — walk back for an open card on the same question, skipping the
- * failures in between, because a card can be tried more than once. It is the
- * guess it always was, and it stays only where there is nothing to read.
- */
-function storedRetries(turns: Turn[]): Turn[] {
-  return turns.map((t, i) => {
-    if (!t.error) return t;
-    const head = headOf(t);
-    const openCard = t.headId
-      ? turns.some((o) => headOf(o) === head && o.clarification && o.chosenIdx == null)
-      : (() => {
-          let j = i - 1;
-          while (j >= 0 && turns[j].error && !turns[j].clarification && turns[j].question === t.question) j--;
-          const card = j >= 0 ? turns[j] : null;
-          return !!card && !!card.clarification && card.chosenIdx == null && card.question === t.question;
-        })();
-    if (openCard) return t;
-    return {
-      ...t,
-      retry: {
-        url: "/api/ask",
-        body: {
-          question: t.question,
-          audience: t.audience,
-          language: t.language,
-          // The turn this asks again, so the retry lands in it rather than
-          // filing the same question a second time.
-          head_message_id: head,
-        },
-      },
-    };
-  });
-}
-
-/** The trace's states — the turn does not merely finish or not: it can end
- * by asking (and that closes on the waiting node, not the check), lose the
- * colour once the reader has chosen, or break. */
-function traceState(turn: Turn): TraceState {
-  if (turn.error) return "failed";
-  if (turn.clarification) return turn.chosenIdx == null ? "waiting" : "decided";
-  return turn.done ? "done" : "running";
-}
-
 /**
  * Parses an SSE body incrementally. The whole point of streaming is that the
  * reader sees the first sentence before the last one exists, so this consumes
@@ -393,81 +91,6 @@ function drain(buffer: string, onEvent: (name: string, data: string) => void): s
   return rest;
 }
 
-function forgeLine(c: Citation): string {
-  return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
-}
-
-function roleName(a: Audience): string {
-  return a === "dev" ? "Developer" : "Analyst";
-}
-
-/**
- * What one attempt inside a turn is called. Only ever shown for a turn that
- * took more than one: the label answers "why is there a second block under
- * the same question", and there is nothing to answer when there is only one.
- *
- * The audience rides on the attempt rather than on the turn, because a
- * re-explain is the same question answered for the other reader — not a new
- * question, and the eyebrow above already said who asked.
- *
- * first is whether this is the turn's own answer, the one every re-explain is
- * built from. Read off position rather than off the audience: explaining a
- * Developer answer for the Analyst and then back again lands on the audience
- * the turn started with, and that third block is still a re-explain.
- */
-function stageLabel(turn: Turn, first: boolean): string {
-  if (turn.clarification) return "Clarification";
-  if (turn.error) return "Failed";
-  if (!first) return `Re-explained · ${roleName(turn.audience)}`;
-  return `Answer · ${roleName(turn.audience)}`;
-}
-
-/**
- * Groups the turns by the question they are attempts at, keeping the order
- * they were recorded in. One group is one article: the question printed once,
- * with everything that came of it under it.
- *
- * A turn asked in this session has no id until the server answers, so it
- * keys on its position until then. Nothing can join it before it has one —
- * the actions that would are all disabled while a turn is in flight.
- */
-function groupByQuestion(turns: Turn[]): number[][] {
-  const at = new Map<number | string, number>();
-  const out: number[][] = [];
-  turns.forEach((t, i) => {
-    const key = headOf(t) ?? `live-${i}`;
-    const g = at.get(key);
-    if (g === undefined) {
-      at.set(key, out.length);
-      out.push([i]);
-    } else {
-      out[g].push(i);
-    }
-  });
-  return out;
-}
-
-function clock(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-}
-
-/** asMarkdown is what "Copy as Markdown" puts on the clipboard: the answer
- * with its markers, and the sources they point at.
- *
- * A diagram travels as mermaid rather than as the `diagram` fence it is
- * written in. The fence is rongo's own shape and draws nowhere else, so a
- * pasted answer used to carry a block of JSON where its picture had been. */
-function asMarkdown(turn: Turn): string {
-  const lines = [`# ${turn.question}`, "", mermaidize(turn.text.trim())];
-  if (turn.citations.length > 0) {
-    lines.push("", "Sources:", ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`));
-  }
-  return lines.join("\n") + "\n";
-}
-
-const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";
 
 /**
  * The composer's answer language, remembered across reloads — someone who
@@ -529,26 +152,15 @@ export default function Ask({
   // the welcome to a reader who has just opened a conversation.
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  // The marker under the pointer, so the Sources pane can point back.
+  // The marker under the pointer, reported up by ThreadView so the pane in
+  // the column beside it can point back. Everything else the reading half
+  // remembers — the open usage block, the unfolded failure, the file in the
+  // viewer — lives inside ThreadView, where it belongs.
   const [hot, setHot] = useState<number | null>(null);
-  // The source open in the viewer, or null while it is closed.
+  // The source open in the viewer, or null while it is closed. Page-level:
+  // the overlay covers the whole app, and both the text and the pane beside
+  // it open one.
   const [viewing, setViewing] = useState<Citation | null>(null);
-  const [copied, setCopied] = useState<number | null>(null);
-  // The turn whose usage breakdown is open, if any. One at a time: it is a
-  // glance at what a turn cost, not a report to keep open.
-  const [openUsage, setOpenUsage] = useState<number | null>(null);
-  // The superseded failures the reader has unfolded. A failure stays in the
-  // record and stays on the page, but a turn that went on to answer should
-  // not open with the attempt that broke — so it folds to a line, and the
-  // line says what it is.
-  const [openFailure, setOpenFailure] = useState<Set<number>>(new Set());
-  function toggleFailure(i: number) {
-    setOpenFailure((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(i)) next.add(i);
-      return next;
-    });
-  }
   const threadId = useRef<number | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -621,39 +233,6 @@ export default function Ask({
   // the reader moves it.
   const opened = useRef(false);
 
-  // Markdown is memoized, and a fresh arrow per render would defeat it on
-  // every turn at once. One handler per turn index is kept instead, and it
-  // reads the turns through a ref so it never goes stale: the index is the
-  // position in the thread on screen, which is what the reader clicked in.
-  const live = useRef(turns);
-  live.current = turns;
-  const markerOpen = useRef(new Map<number, (marker: number) => void>());
-  function openMarker(i: number) {
-    let f = markerOpen.current.get(i);
-    if (!f) {
-      f = (marker: number) => {
-        const c = live.current[i]?.citations.find((x) => x.marker === marker);
-        if (c) showSource(c);
-      };
-      markerOpen.current.set(i, f);
-    }
-    return f;
-  }
-
-  // The same for the set of backed markers: it is derived from a turn's
-  // citations, so it is cached against that very array and only rebuilt when
-  // the citations themselves are replaced.
-  const backedSets = useRef(new WeakMap<Citation[], Set<number>>());
-  function backedMarkers(turn: Turn) {
-    if (!turn.done) return undefined;
-    let s = backedSets.current.get(turn.citations);
-    if (!s) {
-      s = new Set(turn.citations.map((c) => c.marker));
-      backedSets.current.set(turn.citations, s);
-    }
-    return s;
-  }
-
   // Retires a thread load still in the air, with everything that was waiting
   // on it. The record must not land on top of what the reader is doing — and
   // the skeleton would otherwise sit above their new turn for good, with the
@@ -686,13 +265,10 @@ export default function Ask({
     const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
-    // A breakdown is a turn index into the thread that is being left; the
-    // same index in the next thread is a different turn. And the total in
-    // the header belongs to the old thread until the new one has loaded. An
-    // unfolded failure is an index into that thread too: kept, it would open
-    // a failure in the next thread that nobody clicked.
-    setOpenUsage(null);
-    setOpenFailure(new Set());
+    // The total in the header belongs to the old thread until the new one has
+    // loaded. The per-turn state that is also an index into the thread being
+    // left — the open breakdown, the unfolded failure — is ThreadView's, and
+    // it drops with the turns it belonged to.
     onUsage(null);
     // The body empties in the same commit as the header, not a beat behind
     // it: the conversation that was just left used to stand under the new
@@ -727,7 +303,7 @@ export default function Ask({
           if (seq === loadSeq.current) arrive([]);
           return;
         }
-        const list = await res.json();
+        const list = (await res.json()) as Message[];
         if (seq !== loadSeq.current) return;
         // A thread that is not yours, or no longer exists, comes back as an
         // empty list with status 200 — the owner check sits inside the query.
@@ -1067,35 +643,29 @@ export default function Ask({
     );
   }
 
-  async function copy(turnIndex: number) {
-    try {
-      await navigator.clipboard.writeText(asMarkdown(turns[turnIndex]));
-      setCopied(turnIndex);
-      setTimeout(() => setCopied(null), 1500);
-    } catch {
-      // No clipboard (insecure context, permissions): the button simply does
-      // nothing visible; the answer is still on screen to select.
-    }
-  }
-
-  // One article per question. The list itself stays flat — every action here
-  // addresses a turn by its position in it — and only the rendering groups.
-  const groups = useMemo(() => groupByQuestion(turns), [turns]);
-
-  // The Sources pane shows the latest turn that has any: the one the reader
-  // is most likely looking at, and the only one whose markers can be pointed
-  // back to.
-  const sourceTurnIndex = (() => {
-    for (let i = turns.length - 1; i >= 0; i--) if (turns[i].citations.length > 0) return i;
-    return -1;
-  })();
-  const sourceTurn = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
-
-  // A highlight belongs to the turn the pane shows. When the pane moves to a
-  // newer turn, the old Markdown's mouseleave never fires for it.
-  useEffect(() => {
-    setHot(null);
-  }, [sourceTurnIndex]);
+  // The five things a reader can do to a turn. ThreadView draws the turns and
+  // knows nothing about the stream; this is the whole of what it can set off.
+  // A memo, because a fresh object per render would remount every turn on
+  // every streamed token.
+  const actions = useMemo(
+    () => ({
+      onRetry: retry,
+      onReexplain: reexplain,
+      onCopy: async (i: number) => {
+        // Silent on a refusal (insecure context, permissions): the answer is
+        // still on screen to select, and a banner for it would be noise.
+        try {
+          await navigator.clipboard.writeText(asMarkdown(turns[i]));
+        } catch {
+          // See above.
+        }
+      },
+      onFollowup: askFollowup,
+      onChoose: chooseCandidate,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [turns],
+  );
 
   return (
     // The Sources pane takes a fixed column only when there is room for it;
@@ -1175,324 +745,14 @@ export default function Ask({
               </div>
             )}
 
-            {groups.map((group, g) => {
-              const asked = turns[group[0]];
-              return (
-              <article
-                key={group[0]}
-                className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
-              >
-                <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
-                  {roleName(asked.audience)}
-                </div>
-                {/* The accent is the eyebrow's alone now: the question is what
-                    was typed, at whatever length it was typed, and it reads as
-                    the reader's words rather than as a headline.
-
-                    Once, because it was asked once. Everything below is what
-                    came of it — a card, a failure, the answer, the same answer
-                    for the other audience — and each of those is a row in the
-                    record carrying a copy of these words. Printing the copies
-                    would say the reader typed the question again, which they
-                    did not. */}
-                <Question text={asked.question} />
-                <div className="mt-2.5 flex items-center gap-1.5">
-                  {asked.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(asked.askedAt)}</time>}
-                  {/* Counted in questions, not in rows: a turn asked twice
-                      because the first attempt broke is still the first turn. */}
-                  <span className={pill + " bg-active text-muted"}>Turn {g + 1}</span>
-                  {asked.language !== "en" && (
-                    <span className={pill + " bg-active text-muted"}>
-                      {languages.find((l) => l.code === asked.language)?.name ?? asked.language}
-                    </span>
-                  )}
-                </div>
-
-                {/* One entry per attempt. A turn answered on the first try has
-                    exactly one and looks as it always did: no rail, no label,
-                    nothing added for a thread that never needed grouping. */}
-                <div className={group.length > 1 ? "mt-3.5 grid gap-5 border-l-2 border-border pl-4" : ""}>
-                {group.map((i, k) => {
-                  const turn = turns[i];
-                  // A failure the reader has already moved past folds to a
-                  // line. The last one in a turn never folds: its Retry button
-                  // is the only way on from there.
-                  const superseded = !!turn.error && k < group.length - 1;
-                  // The turn's own answer: the first attempt that neither
-                  // asked back nor broke. Everything answered after it is a
-                  // re-explain of it.
-                  const firstAnswer =
-                    group.find((j) => !turns[j].clarification && !turns[j].error) === i;
-                  const folded = superseded && !openFailure.has(i);
-                  return (
-                    <div key={i}>
-                {group.length > 1 && (
-                  <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[.09em] text-faint">
-                    <span className="-ml-[21px] h-1.5 w-1.5 rounded-full bg-muted outline-3 outline-bg" />
-                    {stageLabel(turn, firstAnswer)}
-                    {turn.askedAt && <time className="font-mono text-[11px] font-normal normal-case tracking-normal">{clock(turn.askedAt)}</time>}
-                    {superseded && (
-                      <button
-                        type="button"
-                        onClick={() => toggleFailure(i)}
-                        className="font-sans text-[11px] font-normal normal-case tracking-normal text-muted underline decoration-border underline-offset-2 hover:text-ink"
-                      >
-                        {folded ? "Show" : "Hide"}
-                      </button>
-                    )}
-                  </div>
-                )}
-                {!folded && (
-                  <>
-
-                {/* A restored turn is finished by definition and carries no live
-                    trace — only a turn asked, resumed or re-explained in THIS
-                    session does. */}
-                {turn.live && (
-                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} />
-                )}
-
-                {/* Above the answer, and not ochre: ochre means "your move",
-                    and there is no move to make here - the turn already did
-                    what it could and is saying what it could not. */}
-                {turn.notice && (
-                  <div
-                    role="note"
-                    className="mt-4 flex max-w-[68ch] items-start gap-2.5 rounded-ui-sm border border-border border-l-2 border-l-elevated-border bg-panel px-3.5 py-2.5"
-                  >
-                    <span aria-hidden="true" className="font-mono text-muted">
-                      !
-                    </span>
-                    <p className="m-0 text-[13.5px] text-muted">{turn.notice}</p>
-                  </div>
-                )}
-
-                {turn.clarification && (
-                  <Clarify
-                    candidates={turn.clarification.candidates}
-                    chosenIdx={turn.chosenIdx}
-                    onChoose={(idx) => chooseCandidate(i, idx)}
-                  />
-                )}
-
-                {/* ui-markdown carries the prose typography (index.css), the
-                    same block ../loom uses. The measure stays capped here:
-                    rongo's answer column is wider than loom's rail.
-
-                    streaming draws the caret (index.css) on the answer's last
-                    block rather than after the container: as a sibling of the
-                    markdown the caret was a block of its own, and blinked on
-                    the line below the words it belongs to. */}
-                {turn.text && (
-                  <div
-                    className={`ui-markdown mt-4 max-w-[68ch]${turn.done ? "" : " streaming"}`}
-                  >
-                    <Markdown
-                      text={turn.text}
-                      onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
-                      // Every turn, from its own list: the pane shows only
-                      // the newest, and a tablet has no pane at all.
-                      onMarkerOpen={openMarker(i)}
-                      // Known once the turn is done: the citations event is
-                      // the last thing before done, so a finished turn with
-                      // none has none.
-                      backed={backedMarkers(turn)}
-                      // Only a turn of THIS session fades its text in: it is
-                      // the one whose words are arriving. A stored thread is
-                      // mounted whole, and fading it would replay a
-                      // conversation that was written long ago.
-                      //
-                      // Kept on for the rest of the turn's life rather than
-                      // dropped at `done`: turning it off unwraps the
-                      // segments, and the last ones - younger than the fade
-                      // itself - would snap to full brightness at the moment
-                      // the answer ends. Nothing re-fades, because the
-                      // segments keep their keys and never remount.
-                      fade={turn.live}
-                    />
-                  </div>
-                )}
-
-                {/* The retry sits beside the error, not in the footer below:
-                    the footer only renders for a turn that has usage, and a
-                    turn whose first call never reached the upstream has none.
-                    It stays for the life of the turn — a second click is a
-                    third turn, which is honest, and a "already retried" flag
-                    would not survive a reload anyway. */}
-                {turn.error && (
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <p role="alert" className="m-0 text-accent-strong">
-                      {turn.error}
-                    </p>
-                    {turn.retry && (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => retry(i)}
-                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {turn.citations.length > 0 && (
-                  <details className="mt-4 text-sm">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
-                      <Chevron /> How does rongo know this?{" "}
-                      <span className="text-faint">{turn.citations.length} sources</span>
-                    </summary>
-                    <ul className="mt-2 space-y-1">
-                      {turn.citations.map((c) => (
-                        <li key={c.marker}>
-                          <sup className="font-mono text-accent-strong">{c.marker}</sup>{" "}
-                          <button
-                            type="button"
-                            onClick={() => showSource(c)}
-                            className="border-b border-transparent font-mono text-[13px] text-muted hover:border-accent hover:text-ink"
-                          >
-                            {forgeLine(c)}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-
-                {/* What to ask next, under the answer that prompted it and
-                    above the actions on it. Only on the newest turn: an older
-                    answer's offers are spent, and a card or a failed turn
-                    below means the reader's move is there, not here.
-
-                    Never ochre — ochre is "your move", and nothing here is
-                    waiting on the reader. */}
-                {i === turns.length - 1 && turn.done && turn.followups.length > 0 && (
-                  <nav aria-label="Follow-up questions" className="mt-4 flex flex-wrap gap-2">
-                    {turn.followups.map((q) => (
-                      <button
-                        key={q}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => askFollowup(i, q)}
-                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-left text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </nav>
-                )}
-
-                {/* The footer: the two actions need a stored answer to build
-                    from — never on a turn that failed or ended by asking. The
-                    usage pill does not: a turn that asked back or failed still
-                    paid for its gates, and the thread total counts them. */}
-                {turn.done && (turn.usage || (turn.messageId && !turn.error && !turn.clarification)) && (
-                  <div className="mt-4">
-                    <div className="flex items-center gap-2">
-                      {turn.messageId && !turn.error && !turn.clarification && (
-                        <>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => reexplain(i)}
-                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
-                          >
-                            {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => copy(i)}
-                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
-                          >
-                            {copied === i ? "Copied" : "Copy as Markdown"}
-                          </button>
-                        </>
-                      )}
-                      {turn.usage && (
-                        <button
-                          type="button"
-                          aria-expanded={openUsage === i}
-                          aria-label={`Usage of turn ${i + 1}`}
-                          onClick={() => setOpenUsage(openUsage === i ? null : i)}
-                          className={
-                            pill +
-                            " ml-auto inline-flex items-center gap-1.5 font-mono " +
-                            (openUsage === i ? "bg-elevated text-muted" : "bg-active text-faint hover:text-muted")
-                          }
-                        >
-                          {tokens(turn.usage.total_tokens)}
-                          {turn.usage.cost_usd != null && (
-                            <>
-                              <span className="opacity-50">·</span>
-                              {money(turn.usage.cost_usd)}
-                            </>
-                          )}
-                          <Chevron open={openUsage === i} />
-                        </button>
-                      )}
-                    </div>
-                    {turn.usage && openUsage === i && (
-                      <div className="mt-2.5 ml-auto w-full max-w-[470px] overflow-x-auto rounded-ui border border-border bg-panel px-3.5 py-2.5 font-mono text-xs">
-                        <table className="w-full border-collapse">
-                          <thead>
-                            <tr className="text-faint">
-                              <th className="border-b border-border-soft pb-1.5 text-left font-normal">call</th>
-                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">in</th>
-                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">out</th>
-                              {turn.usage.cost_usd != null && (
-                                <th className="border-b border-border-soft pb-1.5 text-right font-normal">cost</th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {turn.usage.calls.map((c, k) => (
-                              <tr key={k} className="text-muted">
-                                <td className="py-1 text-ink-dim">
-                                  {c.step}
-                                  <span className="ml-2 text-faint">{c.model}</span>
-                                </td>
-                                <td className="py-1 text-right">{c.prompt_tokens.toLocaleString("en-GB")}</td>
-                                <td className="py-1 text-right">
-                                  {c.completion_tokens > 0 ? c.completion_tokens.toLocaleString("en-GB") : "–"}
-                                </td>
-                                {turn.usage!.cost_usd != null && (
-                                  <td className="py-1 text-right">{c.cost_usd != null ? money(c.cost_usd) : "–"}</td>
-                                )}
-                              </tr>
-                            ))}
-                            <tr className="text-ink-dim">
-                              <td className="border-t border-border-soft pt-1.5">total</td>
-                              <td className="border-t border-border-soft pt-1.5 text-right">
-                                {turn.usage.prompt_tokens.toLocaleString("en-GB")}
-                              </td>
-                              <td className="border-t border-border-soft pt-1.5 text-right">
-                                {turn.usage.completion_tokens.toLocaleString("en-GB")}
-                              </td>
-                              {turn.usage.cost_usd != null && (
-                                <td className="border-t border-border-soft pt-1.5 text-right">{money(turn.usage.cost_usd)}</td>
-                              )}
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p className="mt-2 font-sans text-xs text-faint">
-                          {turn.usage.cost_usd != null
-                            ? "Computed from the registry's list price, USD per million tokens: the deployments at MiMo's own API whatever endpoint they were called at, embeddings at theirs. Not a bill: the provider's invoice is."
-                            : "Tokens only: no price table is loaded. The server log says why."}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                  </>
-                )}
-                    </div>
-                  );
-                })}
-                </div>
-              </article>
-              );
-            })}
+            <ThreadView
+              turns={turns}
+              busy={busy}
+              actions={actions}
+              onOpenSource={showSource}
+              onHot={setHot}
+              threadKey={openThread}
+            />
             <div ref={bottom} />
           </div>
         </div>
@@ -1597,51 +857,7 @@ export default function Ask({
         </form>
       </div>
 
-      <aside aria-label="Sources" className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
-        <header className="flex items-center border-b border-border px-4.5 py-3.5 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
-          Sources
-          {sourceTurn && (
-            <span className="ml-auto font-mono tracking-normal">
-              {/* The turn the reader sees, counted in questions like the pill
-                  on the article — not the row's place in the record. */}
-              turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {sourceTurn.citations.length}
-            </span>
-          )}
-        </header>
-        <div className="min-h-0 flex-1 overflow-auto">
-          {!sourceTurn && (
-            <p className="px-4.5 py-4 text-[13px] text-faint">
-              The files an answer was written from appear here, numbered like the markers in the text.
-            </p>
-          )}
-          {sourceTurn?.citations.map((c) => (
-            // The whole row opens the file; the file name underlines on
-            // hover so the row reads as something to open, without a glyph.
-            <button
-              key={c.marker}
-              type="button"
-              onClick={() => showSource(c)}
-              className={
-                "group grid w-full grid-cols-[26px_1fr] gap-x-2 gap-y-0.5 border-b border-border-soft px-4.5 py-3.5 text-left text-[13px] " +
-                (hot === c.marker ? "bg-active" : "hover:bg-active")
-              }
-            >
-              <span className="row-span-2 font-mono font-semibold text-accent-strong">{c.marker}</span>
-              <span className="font-medium text-ink">
-                {c.repo}
-                <span className="ml-1.5 font-mono text-[11.5px] font-normal text-faint">{c.branch}</span>
-              </span>
-              <span className="font-mono text-xs break-all text-muted">
-                {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
-                <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
-                  {c.path.slice(c.path.lastIndexOf("/") + 1)}
-                </b>
-                :{c.start_line}-{c.end_line}
-              </span>
-            </button>
-          ))}
-        </div>
-      </aside>
+      <SourcesPane turns={turns} hot={hot} onOpen={showSource} />
 
       {viewing && <SourceView source={viewing} onClose={() => setViewing(null)} />}
     </div>

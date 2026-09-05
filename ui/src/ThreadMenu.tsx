@@ -87,9 +87,11 @@ function MenuIcon({ name }: { name: IconName }) {
  * offset past the title would run out of its scroller sideways.
  */
 export default function ThreadMenu({
+  onShare,
   onRename,
   onDelete,
 }: {
+  onShare: () => void;
   onRename: () => void;
   onDelete: () => void;
 }) {
@@ -105,6 +107,10 @@ export default function ThreadMenu({
         verticalClass
       }
     >
+      <button type="button" role="menuitem" className={plainEntry} onClick={onShare}>
+        <MenuIcon name="upload" />
+        Share
+      </button>
       <button type="button" role="menuitem" className={plainEntry} onClick={onRename}>
         <MenuIcon name="edit" />
         Rename

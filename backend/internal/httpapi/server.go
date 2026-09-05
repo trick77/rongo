@@ -55,6 +55,19 @@ type Threads interface {
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
 	// SaveFollowups records what the finished answer offered to ask next.
 	SaveFollowups(ctx context.Context, messageID int64, questions []string) error
+
+	// Sharing. Share/RaiseShare/RevokeShare/ShareFor/Shares/SharedIDs all take
+	// a subject: a link is made, moved and taken back by the thread's owner.
+	// SharedThread and SharedCitation do not — the token is the authorisation,
+	// and they are the only two reads in rongo that answer without a session.
+	Share(ctx context.Context, subject string, threadID int64) (threads.Share, error)
+	RaiseShare(ctx context.Context, subject string, threadID int64) (threads.Share, error)
+	RevokeShare(ctx context.Context, subject string, threadID int64) (bool, error)
+	ShareFor(ctx context.Context, subject string, threadID int64) (threads.Share, error)
+	Shares(ctx context.Context, subject string) ([]threads.Share, error)
+	SharedIDs(ctx context.Context, subject string) (map[int64]bool, error)
+	SharedThread(ctx context.Context, token string) (threads.Share, []threads.Message, error)
+	SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error)
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
@@ -153,6 +166,21 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
+
+	// Making, moving and taking back a link is the owner's, so these are gated
+	// like every other thread action.
+	s.mux.Handle("POST /api/threads/{id}/share", s.requireAuth(http.HandlerFunc(s.handleShare)))
+	s.mux.Handle("POST /api/threads/{id}/share/update", s.requireAuth(http.HandlerFunc(s.handleShareUpdate)))
+	s.mux.Handle("DELETE /api/threads/{id}/share", s.requireAuth(http.HandlerFunc(s.handleRevokeShare)))
+	s.mux.Handle("GET /api/shares", s.requireAuth(http.HandlerFunc(s.handleShares)))
+
+	// The only unauthenticated output path in rongo. Registered with
+	// HandleFunc, so they never enter the middleware at all: an anonymous
+	// reader has no session and gating them would answer 401 to the one
+	// audience they exist for. The token is the authorisation, the ceiling is
+	// the limit, and neither handler can reach a turn the link does not cover.
+	s.mux.HandleFunc("GET /api/shares/{token}", s.handlePublicShare)
+	s.mux.HandleFunc("GET /api/shares/{token}/source", s.handlePublicShareSource)
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	s.mux.Handle("/", web.Handler())
