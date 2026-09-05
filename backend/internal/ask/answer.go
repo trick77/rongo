@@ -204,6 +204,22 @@ for them and you know nothing about them. Say in one sentence that they are not
 in the index, answer for the rest, and make no claim of any kind about their
 code - not a guess, not a comparison, not "presumably".`
 
+// answerAllDenied is added when the question asked for every repository and
+// the thread is narrowed to some. Its one format argument is what the thread
+// carries.
+//
+// Without it the model holds a question explicitly asking for a comparison
+// across the corpus and sources from one thread's worth of it, which is the
+// position answerMissingRepo guards against with a name in it and this one
+// without.
+const answerAllDenied = `
+
+The question asks about every repository. Only %s is in front of you, and this
+thread covers nothing else. Say in one sentence that the answer is for those
+alone and that a new thread can answer across the whole corpus, then answer for
+them. Make no claim of any kind about any other repository - not a guess, not a
+comparison, not "presumably".`
+
 // answerFollowUp is added when the turn continues a thread that already
 // answered something. Its one format argument is the PREVIOUS QUESTION.
 //
@@ -346,6 +362,14 @@ type Scope struct {
 	// a lie, and saying nothing would let the answer look like it covered the
 	// repository that was asked about.
 	Outside []string `json:"outside,omitempty"`
+	// AllDenied is the question having asked for every repository inside a
+	// thread that is narrowed to some. The narrowing wins — a thread does not
+	// widen — but the reader asked for the whole corpus and is getting one
+	// thread's worth, and that difference has to be said out loud for the same
+	// reason Outside does. It is the "all repositories" case of Outside, which
+	// cannot be expressed there because the question named no repository at
+	// all.
+	AllDenied bool `json:"all_denied,omitempty"`
 	// All is the reader asking for the whole corpus on purpose — either the
 	// question said so, or they picked "all repositories" off a repository
 	// card. It is what tells the repository rung in Decide that a turn
@@ -422,6 +446,18 @@ var outsideNotice = map[Language]string{
 	LanguageIT: "Questo thread è ristretto a %s. %s non è stato cercato. Apri un nuovo thread per quello.",
 }
 
+// allDeniedNotice is outsideNotice's other half: the question asked for every
+// repository, so there is no name to put in the second slot — the thread's own
+// repositories are the only thing to name, and the way out is the same one.
+//
+// One format argument: the repositories the thread carries.
+var allDeniedNotice = map[Language]string{
+	LanguageEN: "This thread is narrowed to %s. It cannot answer across every repository. Open a new thread for that.",
+	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Repositories hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
+	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des dépôts. Ouvrez un nouveau fil pour cela.",
+	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i repository. Apri un nuovo thread per quello.",
+}
+
 // docsOnlyNotice is the "this answer stood on documentation alone" sentence.
 // Templated for the same reason scopeNotice is: a person reads it, so the
 // language invariant applies, and its content is already known.
@@ -462,6 +498,9 @@ func ScopeNotice(lang Language, sc Scope) string {
 	if len(sc.Outside) > 0 && len(sc.Known) > 0 {
 		parts = append(parts, fmt.Sprintf(outsideNotice[l],
 			strings.Join(sc.Known, ", "), strings.Join(sc.Outside, ", ")))
+	}
+	if sc.AllDenied && len(sc.Known) > 0 {
+		parts = append(parts, fmt.Sprintf(allDeniedNotice[l], strings.Join(sc.Known, ", ")))
 	}
 	if sc.DocsOnly {
 		parts = append(parts, docsOnlyNotice[l])
@@ -552,6 +591,9 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}
 	if len(scope.Outside) > 0 {
 		system += fmt.Sprintf(answerOutsideRepo, strings.Join(scope.Outside, ", "))
+	}
+	if scope.AllDenied && len(scope.Known) > 0 {
+		system += fmt.Sprintf(answerAllDenied, strings.Join(scope.Known, ", "))
 	}
 	if followingUp != "" {
 		system += fmt.Sprintf(answerFollowUp, followingUp)

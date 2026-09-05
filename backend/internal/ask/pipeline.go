@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -175,7 +176,25 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// thread does not widen.
 	outside := outsideThePin(known, pin)
 	all := u.AllRepos
+	allDenied := false
 	if len(pin) > 0 {
+		// The pin comes off a stored row, and between the turn that wrote it
+		// and this one the repository can leave repos.yaml or be renamed. A
+		// restriction the index cannot resolve is not a narrow search, it is no
+		// search at all: knownRepos drops a name it does not carry and an empty
+		// restriction means the whole corpus, so the turn would answer from
+		// everything while the notice, the pills and the record all said one
+		// repository. Same reasoning as ResumeRepo's, and the same outcome — the
+		// turn fails rather than substituting a corpus for a thread.
+		live, _, err := p.search.ResolveRepos(ctx, pin, "")
+		if err != nil {
+			return Answer{}, nil, fmt.Errorf("resolve the thread's repositories: %w", err)
+		}
+		if len(live) == 0 {
+			return Answer{}, nil, fmt.Errorf("this thread is about %s, which the index no longer carries",
+				strings.Join(pin, ", "))
+		}
+		pin = live
 		// Narrowing, not replacing. A thread pinned to two repositories by a
 		// comparison is still a thread, and "and in rongo?" inside it has to
 		// reach rongo alone. Naming nothing the pin holds — the ordinary
@@ -187,9 +206,16 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		} else {
 			known = pin
 		}
+		// "In allen Repositories" is a widening, and a thread does not widen.
+		// Refusing it is right; refusing it silently is not — the question
+		// asked for the whole corpus and the answer will cover one thread's
+		// worth, which is exactly the kind of quiet substitution Scope.Outside
+		// exists to stop. Recorded so the reader is told and the model is
+		// forbidden to fill the gap from its own training.
+		allDenied = all
 		all = false
 	}
-	scope := Scope{Known: known, Unknown: unknown, Outside: outside, All: all}
+	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -197,7 +223,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// beside it for the same reason: under one, "known" is the thread's doing
 	// rather than the question's.
 	slog.Info("scope", "thread", llm.ThreadID(ctx), "known", known, "unknown", unknown,
-		"outside", outside, "pin", pin, "all_repos", all)
+		"outside", outside, "pin", pin, "all_repos", all, "all_denied", allDenied)
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
@@ -205,7 +231,18 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
-	hits, err := p.searchScoped(ctx, question, texts, known)
+	// The question is left out of a pinned search, for the reason searchScoped's
+	// comparison loop leaves it out: knownRepos UNIONS in every indexed
+	// repository the question names as a whole word, and that union is what
+	// makes a guess unable to exclude what the reader typed. Under a pin it
+	// would undo the pin — "und wie macht das loom?" would search loom while
+	// the notice said loom was not searched and the prompt said the turn knows
+	// nothing about it. The narrowing has to be a fact, not a sentence.
+	scopedQuestion := question
+	if len(pin) > 0 {
+		scopedQuestion = ""
+	}
+	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known)
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}

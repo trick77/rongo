@@ -533,6 +533,89 @@ func TestRunSaysWhichNamedRepositoryTheThreadLeftOut(t *testing.T) {
 	if !strings.Contains(joined, "loom") || !strings.Contains(joined, "new thread") {
 		t.Errorf("notice = %q, want it to name loom and the way to ask about it", joined)
 	}
+	// And the narrowing is a fact, not just a sentence: knownRepos unions in
+	// every indexed repository the QUESTION names as a whole word, so a pinned
+	// search that carried the question would search loom after all — while the
+	// notice above said it had not and the prompt said the turn knows nothing
+	// about it.
+	if search.got.Question != "" {
+		t.Errorf("pinned search carried the question (%q), which unions the named repository back in", search.got.Question)
+	}
+	if len(search.got.Repos) != 1 || search.got.Repos[0] != "rongo" {
+		t.Errorf("searched repos = %v, want the pin alone", search.got.Repos)
+	}
+}
+
+// TestRunFailsWhenTheThreadsRepositoryLeftTheIndex: the pin comes off a stored
+// row, and a repository can leave repos.yaml between two turns. knownRepos
+// drops a name it does not carry and an empty restriction means the whole
+// corpus, so the turn would answer from everything while the notice and the
+// record both said one repository — the substitution ResumeRepo already fails
+// rather than commits.
+func TestRunFailsWhenTheThreadsRepositoryLeftTheIndex(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"peeq"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	_, _, err := p.Run(context.Background(), "und wie schnell ist das?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"rongo"}}, Events{})
+	if err == nil {
+		t.Fatal("want an error when the thread's own repository is gone from the index")
+	}
+	if !strings.Contains(err.Error(), "rongo") {
+		t.Errorf("err = %v, want it to name the repository that went missing", err)
+	}
+	if len(search.queries) != 0 {
+		t.Errorf("ran %d searches, want none — an unresolvable pin must not become the whole corpus", len(search.queries))
+	}
+}
+
+// TestRunSaysSoWhenAPinnedThreadCannotAnswerAcrossTheCorpus: refusing to widen
+// is right, refusing silently is not. The question asked for every repository
+// and names none, so there is nothing for Outside to carry — and without this
+// the turn would hand the model a corpus-wide comparison question, one
+// thread's sources, and no rule about the gap between them.
+func TestRunSaysSoWhenAPinnedThreadCannotAnswerAcrossTheCorpus(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	var notices []string
+	got, _, err := p.Run(context.Background(), "vergleiche das mit allen anderen Repositories", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"rongo"}}, Events{OnNotice: func(text string) { notices = append(notices, text) }})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !got.Scope.AllDenied {
+		t.Error("the record never learned the reader asked for the whole corpus and did not get it")
+	}
+	if got.Scope.All {
+		t.Error("a pinned thread must not record permission to answer across the corpus")
+	}
+	joined := strings.Join(notices, " ")
+	if !strings.Contains(joined, "every repository") || !strings.Contains(joined, "new thread") {
+		t.Errorf("notice = %q, want the reader told what they are not getting and how to get it", joined)
+	}
+}
+
+// TestTheAnswerPromptForbidsInventingTheRestOfTheCorpus is the other half of
+// that: the model holds a question asking about every repository and sources
+// from one, which is answerMissingRepo's position with no name to put in it.
+func TestTheAnswerPromptForbidsInventingTheRestOfTheCorpus(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	sc := Scope{Known: []string{"rongo"}, AllDenied: true}
+	if _, err := NewAnswerer(c).Answer(context.Background(), "vergleiche das mit allen Repositories",
+		AudienceBA, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !strings.Contains(*prompt, "Only rongo is in front of you") {
+		t.Errorf("the prompt never says what the turn actually has:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Make no claim of any kind about any other repository") {
+		t.Errorf("nothing stops the model from writing the rest of the corpus out of training:\n%s", *prompt)
+	}
 }
 
 // TestTheAnswerPromptForbidsClaimsAboutARepositoryTheThreadLeftOut: the model
