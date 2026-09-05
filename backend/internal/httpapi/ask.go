@@ -23,7 +23,9 @@ import (
 // Asker runs one question end to end. An interface so the HTTP layer can be
 // tested without a model endpoint.
 type Asker interface {
-	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error)
+	// t is what earlier turns of this thread left behind: the repositories it
+	// narrowed to, and the last question it answered. Zero for a first turn.
+	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 	// Resume continues a turn from the hits one clarification candidate was
 	// built from — no search, no routing.
 	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, scope ask.Scope, ev ask.Events) (ask.Answer, error)
@@ -249,6 +251,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		headID = head.Head()
 	}
 
+	// prior is what earlier turns of this thread left behind: what they
+	// narrowed to, and the last question they answered. Read before the stream
+	// opens, from the same subject the ownership check used. A thread that
+	// cannot be read is treated as a first turn rather than failing this one:
+	// an un-narrowed answer is worse than a narrowed one and better than no
+	// answer, and the reader is told the scope either way.
+	var prior ask.Thread
 	var thread threads.Thread
 	switch {
 	case resume != nil:
@@ -276,6 +285,21 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		thread = t
+		if req.ThreadID != 0 {
+			if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, req.ThreadID); err != nil {
+				slog.Error("read thread scope failed", "err", err)
+			} else {
+				prior.Pin = pin
+			}
+			// The last ANSWERED turn, which is what a follow-up points at:
+			// "kannst du das in einem Diagramm aufzeigen?" names no mechanism
+			// because the reader named it a turn ago.
+			if last, ok, err := s.deps.Threads.LastTurn(ctx, u.Subject, req.ThreadID); err != nil {
+				slog.Error("read last turn failed", "err", err)
+			} else if ok {
+				prior.Question, prior.Answer = last.Question, last.Answer
+			}
+		}
 	}
 
 	// Every model call this turn makes carries the thread, so the whole
@@ -452,7 +476,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, events)
+	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
 		slog.Error("turn failed", "err", err)
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {

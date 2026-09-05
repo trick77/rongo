@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -114,6 +115,35 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 	}
 }
 
+// Thread is what earlier turns of a conversation left behind, and the whole of
+// what a later turn inherits from them. Zero is the first turn of a thread,
+// which inherits nothing and behaves exactly as every turn did before this
+// existed.
+//
+// It is two different things on purpose, because they are read by different
+// steps and answer different questions:
+//
+//   - Pin is WHERE the turn may look. A ceiling on the repositories, applied
+//     after the question has been understood, and the reason a follow-up is
+//     never asked which repository was meant.
+//   - Question and Answer are WHAT the turn is about. They reach the
+//     understanding step and nothing else, so that "show me that as a diagram"
+//     resolves to the subject the reader is following up on instead of being
+//     searched for as the word "diagram".
+//
+// Answer is the previous answer's TEXT, and it is deliberately kept out of the
+// answering prompt: sources are the truth, and a model handed its own earlier
+// prose as context ends up citing itself. Only the previous QUESTION goes
+// there, as the thing a pronoun points at.
+type Thread struct {
+	// Pin is the repositories the thread has already narrowed to.
+	Pin []string
+	// Question is the last question this thread asked and got an answer to.
+	Question string
+	// Answer is the answer that question got.
+	Answer string
+}
+
 // Run answers one question, or ends the turn by asking which of several
 // independent candidates was meant. Exactly one of the returned Answer and
 // *Clarification is meaningful: a non-nil Clarification means the turn ended
@@ -123,9 +153,12 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 // tried, never with an answer assembled from whatever was in context. Naming
 // the terms is the difference between a dead end someone can act on — the
 // vocabulary was wrong, ask differently — and a shrug.
-func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, lang Language, ev Events) (Answer, *Clarification, error) {
+//
+// t is what earlier turns of this thread left behind, zero for the first one.
+func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, lang Language, t Thread, ev Events) (Answer, *Clarification, error) {
+	pin := t.Pin
 	ev.status("understanding")
-	u, err := p.understander.Understand(ctx, question)
+	u, err := p.understander.Understand(ctx, question, t)
 	if err != nil {
 		return Answer{}, nil, err
 	}
@@ -134,13 +167,63 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("resolve the named repositories: %w", err)
 	}
-	scope := Scope{Known: known, Unknown: unknown, All: u.AllRepos}
+	// The thread's own narrowing wins over anything this question says about
+	// repositories, in one direction only: it can take repositories away, it
+	// can never add one. A follow-up names nothing because the reader already
+	// named it a turn ago, and answering it across the corpus — or asking
+	// which repository was meant — throws away the one thing the thread had
+	// established. AllRepos goes with it: "in all repos" is a widening, and a
+	// thread does not widen.
+	outside := outsideThePin(known, pin)
+	all := u.AllRepos
+	allDenied := false
+	if len(pin) > 0 {
+		// The pin comes off a stored row, and between the turn that wrote it
+		// and this one the repository can leave repos.yaml or be renamed. A
+		// restriction the index cannot resolve is not a narrow search, it is no
+		// search at all: knownRepos drops a name it does not carry and an empty
+		// restriction means the whole corpus, so the turn would answer from
+		// everything while the notice, the pills and the record all said one
+		// repository. Same reasoning as ResumeRepo's, and the same outcome — the
+		// turn fails rather than substituting a corpus for a thread.
+		live, _, err := p.search.ResolveRepos(ctx, pin, "")
+		if err != nil {
+			return Answer{}, nil, fmt.Errorf("resolve the thread's repositories: %w", err)
+		}
+		if len(live) == 0 {
+			return Answer{}, nil, fmt.Errorf("this thread is about %s, which the index no longer carries",
+				strings.Join(pin, ", "))
+		}
+		pin = live
+		// Narrowing, not replacing. A thread pinned to two repositories by a
+		// comparison is still a thread, and "and in rongo?" inside it has to
+		// reach rongo alone. Naming nothing the pin holds — the ordinary
+		// follow-up, and the one that named a repository the thread left
+		// behind — falls back to the whole pin, because the alternative is an
+		// empty restriction, which means the whole corpus.
+		if narrowed := intersect(known, pin); len(narrowed) > 0 {
+			known = narrowed
+		} else {
+			known = pin
+		}
+		// "In allen Repositories" is a widening, and a thread does not widen.
+		// Refusing it is right; refusing it silently is not — the question
+		// asked for the whole corpus and the answer will cover one thread's
+		// worth, which is exactly the kind of quiet substitution Scope.Outside
+		// exists to stop. Recorded so the reader is told and the model is
+		// forbidden to fill the gap from its own training.
+		allDenied = all
+		all = false
+	}
+	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
-	// repository, and the reader is certain they named one.
+	// repository, and the reader is certain they named one. The pin is logged
+	// beside it for the same reason: under one, "known" is the thread's doing
+	// rather than the question's.
 	slog.Info("scope", "thread", llm.ThreadID(ctx), "known", known, "unknown", unknown,
-		"all_repos", u.AllRepos)
+		"outside", outside, "pin", pin, "all_repos", all, "all_denied", allDenied)
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
@@ -148,13 +231,24 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
-	hits, err := p.searchScoped(ctx, question, texts, known)
+	// The question is left out of a pinned search, for the reason searchScoped's
+	// comparison loop leaves it out: knownRepos UNIONS in every indexed
+	// repository the question names as a whole word, and that union is what
+	// makes a guess unable to exclude what the reader typed. Under a pin it
+	// would undo the pin — "und wie macht das loom?" would search loom while
+	// the notice said loom was not searched and the prompt said the turn knows
+	// nothing about it. The narrowing has to be a fact, not a sentence.
+	scopedQuestion := question
+	if len(pin) > 0 {
+		scopedQuestion = ""
+	}
+	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known)
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
 
 	ev.status("routing")
-	d, err := p.router.Route(ctx, question, audience, lang, hits, known, u.AllRepos)
+	d, err := p.router.Route(ctx, question, audience, lang, hits, known, all)
 	if err != nil {
 		return Answer{}, nil, err
 	}
@@ -169,8 +263,49 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// subset. The published 0.955 was measured that way; narrowing here would
 	// be an unmeasured regression. Routing decides whether to ask, not what
 	// to read.
-	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, texts, ev)
+	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, texts, t.Question, ev)
 	return answer, nil, err
+}
+
+// outsideThePin is the repositories the question named, the index carries, and
+// the thread does not — the ones a pinned turn will not search after all.
+//
+// It is not an error and not a mishearing: the name was right and the code is
+// indexed. It is the funnel's cost, and it is said out loud above the answer
+// (Scope.Outside) for the same reason an unindexed name is: an answer that
+// silently dropped half of what was asked about reads exactly like an answer
+// that covered it.
+func outsideThePin(named, pin []string) []string {
+	if len(pin) == 0 || len(named) == 0 {
+		return nil
+	}
+	in := make(map[string]bool, len(pin))
+	for _, p := range pin {
+		in[p] = true
+	}
+	var out []string
+	for _, n := range named {
+		if !in[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// intersect is the names in both, in the order the question named them — the
+// thread narrowing further inside what it already carries.
+func intersect(named, pin []string) []string {
+	in := make(map[string]bool, len(pin))
+	for _, p := range pin {
+		in[p] = true
+	}
+	var out []string
+	for _, n := range named {
+		if in[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
@@ -186,7 +321,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 // terms are the search terms for the "nothing found" answer; a resume has none
 // to report, having searched nothing.
 func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audience Audience, lang Language,
-	hits []retrieve.Hit, scope Scope, terms []string, ev Events) (Answer, error) {
+	hits []retrieve.Hit, scope Scope, terms []string, followingUp string, ev Events) (Answer, error) {
 
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
@@ -206,7 +341,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 	}
 
 	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
 	return answer, err
 }
@@ -263,7 +398,7 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
-	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, ev)
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, "", ev)
 }
 
 // ResumeRepo continues a turn after the reader chose a REPOSITORY off a
@@ -323,7 +458,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	}
 
 	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
 	answer.Scope = scope
 	return answer, err
 }
@@ -341,5 +476,5 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	}
 
 	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
 }

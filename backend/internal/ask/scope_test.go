@@ -37,7 +37,7 @@ func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	// built to prevent.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		twoSources(), Scope{Known: []string{"peeq", "rongo"}}, nil)
+		twoSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	}
 }
 
-func TestDecideDoesNotAskWhenTheQuestionNamedBothRepositories(t *testing.T) {
+func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// Given two candidates too close for the margin, which every later rung
 	// would turn into a card.
 	tight := []Candidate{{Score: 1.0}, {Score: 0.99}}
@@ -59,10 +59,16 @@ func TestDecideDoesNotAskWhenTheQuestionNamedBothRepositories(t *testing.T) {
 	if Decide(tight, 0.25, false, true, 2, false, true) {
 		t.Error("a question naming two repositories must be answered, not asked about")
 	}
-	// One named repository is not a comparison, and changes nothing.
-	if !Decide(tight, 0.25, false, true, 1, false, true) {
-		t.Error("one named repository must leave the ladder alone")
+	// One named repository is the same thing said from the other side: the
+	// reader pointed at a product, and what is still ambiguous inside it is
+	// modules — composed, never put back to them as a question. This is the
+	// rung a follow-up rides on too, because a pinned thread arrives here as
+	// one named repository.
+	if Decide(tight, 0.25, false, true, 1, false, true) {
+		t.Error("a question naming one repository must be answered, not asked about")
 	}
+	// Naming none leaves the ladder alone: the judge's card is still real for
+	// the first turn of a thread.
 	if !Decide(tight, 0.25, false, true, 0, false, true) {
 		t.Error("no named repository must leave the ladder alone")
 	}
@@ -95,6 +101,37 @@ func TestRouteSkipsTheJudgeWhenTwoRepositoriesWereNamed(t *testing.T) {
 	}
 }
 
+// TestRouteSkipsTheJudgeWhenOneRepositoryWasNamed is the rung a follow-up
+// rides on: a pinned thread reaches Route as one named repository, and so does
+// a first question that simply said which product it meant. Neither is worth a
+// judge call, a role gate or a naming call — the card they would produce asks
+// something the reader already settled.
+func TestRouteSkipsTheJudgeWhenOneRepositoryWasNamed(t *testing.T) {
+	// Given a router whose model must not be called at all.
+	db := testDBWithDeps(t, nil)
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("naming the repository settles it; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), db)
+
+	// When two modules inside that one repository sit too close for the margin.
+	got, err := r.Route(context.Background(), "how does rongo cite sources?", AudienceDev, LanguageEN, []retrieve.Hit{
+		{Repo: "rongo", Path: "backend/internal/ask/answer.go", Score: 0.50},
+		{Repo: "rongo", Path: "backend/internal/sourceview/view.go", Score: 0.49},
+	}, []string{"rongo"}, false)
+
+	// Then
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if got.Ask {
+		t.Error("a question naming a repository must be answered, not asked about")
+	}
+	if len(got.Candidates) != 2 {
+		t.Errorf("both modules must stay in the turn and be composed, got %d", len(got.Candidates))
+	}
+}
+
 func TestPipelineSearchesEachNamedRepositoryOnItsOwn(t *testing.T) {
 	// Given a corpus carrying both named repositories.
 	// One fused cut of 20 can be filled entirely by one repository, and then
@@ -107,7 +144,7 @@ func TestPipelineSearchesEachNamedRepositoryOnItsOwn(t *testing.T) {
 
 	// When
 	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ in session handling?",
-		AudienceBA, LanguageEN, Events{}); err != nil {
+		AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -162,7 +199,7 @@ func TestPipelineTellsTheRouterWhichRepositoriesWereNamed(t *testing.T) {
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), router)
 
 	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ?",
-		AudienceBA, LanguageEN, Events{}); err != nil {
+		AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -181,7 +218,7 @@ func TestPipelineSaysWhenANamedRepositoryIsNotIndexed(t *testing.T) {
 	p := NewPipeline(c, &fakeSearch{indexed: []string{"peeq", "rongo"}},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "How do loom and rongo differ?", AudienceBA, LanguageEN,
+	got, _, err := p.Run(context.Background(), "How do loom and rongo differ?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -213,7 +250,7 @@ func TestPipelineSaysNothingWhenEveryNamedRepositoryIsIndexed(t *testing.T) {
 	p := NewPipeline(c, &fakeSearch{indexed: []string{"peeq", "rongo"}},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
+	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -255,7 +292,7 @@ func TestAnswerPromptCarriesTheComparisonAndTheMissingRepository(t *testing.T) {
 	// loom's side out of its training.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -278,7 +315,7 @@ func TestAnswerPromptStaysUnchangedForAnOrdinaryTurn(t *testing.T) {
 	// prompt must be what it was before any of this existed.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN,
-		twoSources(), Scope{Known: []string{"peeq"}}, nil)
+		twoSources(), Scope{Known: []string{"peeq"}}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

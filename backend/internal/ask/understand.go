@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -105,6 +106,13 @@ Fields:
               without naming them ("in all repos", "across all products",
               "in multiple repositories"), else false
 
+A question may arrive with the previous turn of the conversation above it. That
+material is there for ONE purpose: to resolve what the current question leaves
+out - "that", "this", "it", "and how about the other one", a question with no
+subject at all. Everything you answer with describes the CURRENT question. A
+follow-up that stays on the subject inherits it; a follow-up that changes the
+subject gets the new one, and the previous turn contributes nothing to it.
+
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"
 means "AirPlay" in the code; someone asking about "disk almost full" means
@@ -113,16 +121,63 @@ simply repeat the words of the question.
 
 No running text, no explanation, just the JSON object.`
 
+// answerRecall is how much of the previous answer the understanding step is
+// shown. A BA answer is the core mechanism in three to five paragraphs, so the
+// opening carries the subject; the rest is edge cases, and this call is a gate
+// that emits four JSON fields, not a reader.
+const answerRecall = 1200
+
+// fenceRe matches a fenced block in an answer, closed or running to the end of
+// the text. Unclosed counts: the excerpt is cut to length anyway, so an answer
+// whose fence is the last thing in it would otherwise contribute its opening
+// brace and nothing else.
+var fenceRe = regexp.MustCompile("(?s)```.*?(```|$)")
+
+// recall is the user message: the previous turn, when there is one, above the
+// question being asked now.
+//
+// One message, labelled, rather than a user/assistant pair of real turns. The
+// difference matters here: this call runs at temperature 0 with thinking off
+// and its reply has to parse as JSON, and an assistant turn of prose directly
+// before the question invites the model to continue the conversation instead of
+// answering with a schema. Labelled context inside one user message is read as
+// material, which is what it is.
+//
+// The previous answer arrives stripped and cut short. Citation markers number
+// sources this call cannot see and will not use. Fenced blocks are worse than
+// useless: an answer's diagram fence is a JSON spec, and 1200 characters of
+// {"nodes":[{"id":...}]} is what the excerpt would otherwise consist of for
+// any follow-up to a turn that drew one. What is left is the prose, which is
+// the only part that says what the turn was about.
+func recall(question string, t Thread) string {
+	if t.Question == "" {
+		return question
+	}
+	var b strings.Builder
+	b.WriteString("Previous question: ")
+	b.WriteString(t.Question)
+	b.WriteString("\n")
+	prose := markerGroupRe.ReplaceAllString(fenceRe.ReplaceAllString(t.Answer, " "), "")
+	if prev := excerptOf(prose, answerRecall); prev != "" {
+		b.WriteString("Previous answer (excerpt): ")
+		b.WriteString(prev)
+		b.WriteString("\n")
+	}
+	b.WriteString("\nQuestion: ")
+	b.WriteString(question)
+	return b.String()
+}
+
 // Understand turns a question into search material.
 //
 // Runs on the short-gate deployment: the output is a structured blob nobody
 // reads, so the expensive queue would buy nothing. Thinking is disabled as a
 // SEPARATE decision, for a reason of its own — MiMo's reasoning channel can
 // bleed into the content, and here the content has to parse as JSON.
-func (u *Understander) Understand(ctx context.Context, question string) (Understanding, error) {
+func (u *Understander) Understand(ctx context.Context, question string, t Thread) (Understanding, error) {
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: understandSystem},
-		{Role: "user", Content: question},
+		{Role: "user", Content: recall(question, t)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
 		return Understanding{}, fmt.Errorf("understand the question: %w", err)

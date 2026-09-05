@@ -92,7 +92,7 @@ func TestAnswerPromptCarriesTheDocumentationOnlyRule(t *testing.T) {
 	// does say it, and may have said it for a year while the code moved.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
-		docSources(), Scope{}, nil)
+		docSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestAnswerPromptOmitsTheRuleWhenCodeIsPresent(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	mixed := append(docSources(), twoSources()[0])
 	_, err := NewAnswerer(c).Answer(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
-		mixed, Scope{}, nil)
+		mixed, Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPipelineSaysWhenTheTurnStoodOnDocumentationAlone(t *testing.T) {
 	p := NewPipeline(c, &fakeSearch{hits: docOnlyHits()},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
+	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -157,7 +157,7 @@ func TestPipelineSaysNothingWhenTheTurnHadCode(t *testing.T) {
 	p := NewPipeline(c, &fakeSearch{hits: hits},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
+	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

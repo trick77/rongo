@@ -63,10 +63,17 @@ func languageName(lang Language) string {
 // product's own German strings are already spelled this way (scopeNotice);
 // a model left to itself writes "größer" right next to them. It asks for
 // standard German too: naming the country alone is an invitation to dialect.
+//
+// The umlauts are spelled out because the ß rule alone was over-applied: a
+// model told to drop one non-ASCII letter drops the rest as well, and a card
+// came back offering "Sequenzdiagramm fuer Geschaeftsprozesse". That is not
+// Swiss, it is not German, and it is what a person reads.
 const swissGerman = `
 
 Swiss orthography: standard written German, never the letter ß - always ss
-(ausser, grösser, heisst, Strasse). Not dialect.`
+(ausser, grösser, heisst, Strasse). Keep every umlaut as an umlaut: ä ö ü,
+never ae/oe/ue - "für" not "fuer", "Geschäftsprozess" not
+"Geschaeftsprozess". Not dialect.`
 
 // languageStyle is the orthography note for lang, empty where there is none.
 func languageStyle(lang Language) string {
@@ -197,6 +204,53 @@ for them and you know nothing about them. Say in one sentence that they are not
 in the index, answer for the rest, and make no claim of any kind about their
 code - not a guess, not a comparison, not "presumably".`
 
+// answerAllDenied is added when the question asked for every repository and
+// the thread is narrowed to some. Its one format argument is what the thread
+// carries.
+//
+// Without it the model holds a question explicitly asking for a comparison
+// across the corpus and sources from one thread's worth of it, which is the
+// position answerMissingRepo guards against with a name in it and this one
+// without.
+const answerAllDenied = `
+
+The question asks about every repository. Only %s is in front of you, and this
+thread covers nothing else. Say in one sentence that the answer is for those
+alone and that a new thread can answer across the whole corpus, then answer for
+them. Make no claim of any kind about any other repository - not a guess, not a
+comparison, not "presumably".`
+
+// answerFollowUp is added when the turn continues a thread that already
+// answered something. Its one format argument is the PREVIOUS QUESTION.
+//
+// The previous answer's text is not here and must not be: the sources are what
+// a claim rests on, and a model handed its own earlier prose alongside them
+// ends up restating it and citing the new sources for it. The question is
+// enough for both things this rule is for — telling the model what a pronoun
+// points at, and telling it not to write the same answer again with a picture
+// on top.
+const answerFollowUp = `
+
+This is a follow-up to an earlier question in the same thread: %s. Answer the
+NEW question. Where it points at something without naming it ("that", "this",
+"it"), it points at the subject of that earlier question. Do not restate what
+was already explained - the reader has it directly above.`
+
+// answerOutsideRepo is added when the question named a repository this THREAD
+// does not carry. The model's position is the same one answerMissingRepo
+// guards: named on one side, no sources on the other, and nothing but training
+// to fill the gap with. The reason differs and so does the sentence — the
+// repository is indexed and rongo could answer about it, just not in this
+// thread — but the rule is identical, because an invented comparison is
+// invented either way.
+const answerOutsideRepo = `
+
+The question names repositories this thread does not cover: %s. There are no
+sources for them here and you know nothing about them. Say in one sentence that
+this thread does not cover them and that a new thread can, answer for the rest,
+and make no claim of any kind about their code - not a guess, not a comparison,
+not "presumably".`
+
 // answerDocsOnly is added when every source is a documentation file. Without
 // it the model is handed a README and writes what the README says as though it
 // had read the code — the failure this whole prompt exists to prevent, in the
@@ -300,6 +354,22 @@ type Scope struct {
 	// result — so this is the only thing that keeps a turn from answering
 	// about code the reader never asked about.
 	Unknown []string
+	// Outside are repositories the question named that the THREAD does not
+	// carry — named, indexed, and still not searched, because a turn in this
+	// thread already narrowed to something else and a thread only ever
+	// narrows. Distinct from Unknown, which is a name the index does not have
+	// at all: saying "not indexed" about a repository rongo indexes would be
+	// a lie, and saying nothing would let the answer look like it covered the
+	// repository that was asked about.
+	Outside []string `json:"outside,omitempty"`
+	// AllDenied is the question having asked for every repository inside a
+	// thread that is narrowed to some. The narrowing wins — a thread does not
+	// widen — but the reader asked for the whole corpus and is getting one
+	// thread's worth, and that difference has to be said out loud for the same
+	// reason Outside does. It is the "all repositories" case of Outside, which
+	// cannot be expressed there because the question named no repository at
+	// all.
+	AllDenied bool `json:"all_denied,omitempty"`
 	// All is the reader asking for the whole corpus on purpose — either the
 	// question said so, or they picked "all repositories" off a repository
 	// card. It is what tells the repository rung in Decide that a turn
@@ -359,6 +429,35 @@ var scopeNoticeWhole = map[Language]string{
 	LanguageIT: "Nessun repository di nome %s nell'indice. Cercato in tutti i repository indicizzati.",
 }
 
+// outsideNotice is the "this thread is narrowed, and the repository you just
+// named is not in it" sentence. Templated for the same reason scopeNotice is.
+//
+// It names the way out, because there is one and it is not obvious: a thread
+// only ever narrows, so the repository that was asked about is reachable from
+// a new thread and from nowhere else. Without the second half the reader is
+// told what did not happen and given nothing to do about it.
+//
+// Two format arguments: the repositories the thread carries, then the ones it
+// does not.
+var outsideNotice = map[Language]string{
+	LanguageEN: "This thread is narrowed to %s. %s was not searched. Open a new thread for it.",
+	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. %s wurde nicht durchsucht. Dafür einen neuen Thread öffnen.",
+	LanguageFR: "Ce fil est restreint à %s. %s n'a pas été consulté. Ouvrez un nouveau fil pour cela.",
+	LanguageIT: "Questo thread è ristretto a %s. %s non è stato cercato. Apri un nuovo thread per quello.",
+}
+
+// allDeniedNotice is outsideNotice's other half: the question asked for every
+// repository, so there is no name to put in the second slot — the thread's own
+// repositories are the only thing to name, and the way out is the same one.
+//
+// One format argument: the repositories the thread carries.
+var allDeniedNotice = map[Language]string{
+	LanguageEN: "This thread is narrowed to %s. It cannot answer across every repository. Open a new thread for that.",
+	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Repositories hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
+	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des dépôts. Ouvrez un nouveau fil pour cela.",
+	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i repository. Apri un nuovo thread per quello.",
+}
+
 // docsOnlyNotice is the "this answer stood on documentation alone" sentence.
 // Templated for the same reason scopeNotice is: a person reads it, so the
 // language invariant applies, and its content is already known.
@@ -375,15 +474,15 @@ var docsOnlyNotice = map[Language]string{
 }
 
 // ScopeNotice is what the reader is told above the answer about the turn's own
-// footing: a repository the index does not carry, an answer that stood on
-// documentation alone, or "" when neither applies — which is the ordinary
-// case, and says nothing.
+// footing: a repository the index does not carry, a repository this thread has
+// already narrowed away, an answer that stood on documentation alone, or "" when
+// none of them applies — which is the ordinary case, and says nothing.
 //
 // It takes the whole Scope rather than its parts so that every caller —
 // the pipeline, a resume and a re-explain — renders from one value and none of
 // them has to be found again when the Scope grows a field.
 //
-// Both sentences applying is not a contradiction and both are said, scope
+// Several sentences applying is not a contradiction and all are said, scope
 // first: which repositories were searched comes before what was found in them.
 func ScopeNotice(lang Language, sc Scope) string {
 	l := ParseLanguage(string(lang))
@@ -395,6 +494,13 @@ func ScopeNotice(lang Language, sc Scope) string {
 		} else {
 			parts = append(parts, fmt.Sprintf(scopeNotice[l], missing, strings.Join(sc.Known, ", ")))
 		}
+	}
+	if len(sc.Outside) > 0 && len(sc.Known) > 0 {
+		parts = append(parts, fmt.Sprintf(outsideNotice[l],
+			strings.Join(sc.Known, ", "), strings.Join(sc.Outside, ", ")))
+	}
+	if sc.AllDenied && len(sc.Known) > 0 {
+		parts = append(parts, fmt.Sprintf(allDeniedNotice[l], strings.Join(sc.Known, ", ")))
 	}
 	if sc.DocsOnly {
 		parts = append(parts, docsOnlyNotice[l])
@@ -452,8 +558,11 @@ func coveredRepos(known []string, sources []Source) []string {
 // the model. A model handed only a question and a system prompt answers it
 // fluently from its own training, and that answer would be about some other
 // codebase — the single most expensive failure this product can produce.
+// followingUp is the question this thread asked last, empty when there is
+// none. Only the question: see answerFollowUp for why the previous answer's
+// text stays out of here.
 func (a *Answerer) Answer(ctx context.Context, question string, audience Audience, lang Language,
-	sources []Source, scope Scope, onToken func(string)) (Answer, error) {
+	sources []Source, scope Scope, followingUp string, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, nil)}, nil
@@ -479,6 +588,15 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
+	}
+	if len(scope.Outside) > 0 {
+		system += fmt.Sprintf(answerOutsideRepo, strings.Join(scope.Outside, ", "))
+	}
+	if scope.AllDenied && len(scope.Known) > 0 {
+		system += fmt.Sprintf(answerAllDenied, strings.Join(scope.Known, ", "))
+	}
+	if followingUp != "" {
+		system += fmt.Sprintf(answerFollowUp, followingUp)
 	}
 	// Computed from the sources rather than read off the scope, so this block
 	// is right even for a caller that has not filled the field in.
