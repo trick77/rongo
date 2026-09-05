@@ -6,10 +6,10 @@ import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
 
 /**
  * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
- * tracked eyebrow. Exported because the "History" umbrella in App is the same
- * label as the day groups below it and must not drift from them.
+ * tracked eyebrow. The day groups below are the only thing wearing it — the
+ * rail has no heading of its own, the titles stand alone.
  */
-export const railLabel = "px-1.5 text-xs/4 text-rail-label";
+const railLabel = "px-1.5 text-xs/4 text-rail-label";
 
 export type Thread = {
   id: number;
@@ -178,16 +178,16 @@ export default function Threads({
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
         {groups.map((g) => (
-          // "Today" is not painted: it always heads the list, directly under
-          // the "History" label, and would only name the same thing twice.
-          // The group still exists, so tomorrow's threads split off it.
+          // "Today" is not painted: it always heads the list, and naming the
+          // day a thread was asked on is only worth the line once the day is
+          // no longer this one. The group still exists, so tomorrow's threads
+          // split off it.
           //
-          // Unpainted, it owes "History" the 8px a label owes its rows, so it
-          // carries mt-2 itself. A painted group owes the 20px a label gets
-          // instead, which its own h3 carries — that is what keeps a morning
-          // with nothing asked yet, where "Yesterday" is the first thing under
-          // "History", reading as two labels rather than a label and a gap.
-          <div key={g.label} className={g.label === "Today" ? "mt-2" : ""}>
+          // Unpainted, it has to carry the gap from the actions above the
+          // scroller itself: mt-5, the 20px a rail section gets. A painted
+          // first group reaches the same 20 through its own h3, so the list
+          // starts on one rhythm whichever case a morning falls into.
+          <div key={g.label} className={g.label === "Today" ? "mt-5" : ""}>
             {/* ../loom's SidebarSection metrics: 20px above a label, 8px
                 below. Its sections are Starred/Projects/Recents rather than
                 days, but the day groups are the same thing — a named run of

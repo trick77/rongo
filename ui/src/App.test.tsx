@@ -155,8 +155,8 @@ describe("App", () => {
     );
   });
 
-  // The action used to live inside the thread list, and therefore under the
-  // "History" heading, which read as if starting a question were history.
+  // The action used to live inside the thread list, among the past
+  // questions, which read as if starting one were already history.
   it("clears the open thread from the rail's New question", async () => {
     localStorage.setItem("rongo.thread", "7");
     apiFetch(oneThread, []);
