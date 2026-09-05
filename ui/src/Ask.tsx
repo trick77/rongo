@@ -3,7 +3,7 @@ import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
 import Question from "./Question";
 import Trace, { type Step, type TraceState } from "./Trace";
-import { Chevron } from "./icons";
+import { CheckIcon, Chevron, CopyIcon } from "./icons";
 import SourceView, { type SourceRef } from "./SourceView";
 import { mermaidize } from "./diagramExport";
 
@@ -534,6 +534,10 @@ export default function Ask({
   // The source open in the viewer, or null while it is closed.
   const [viewing, setViewing] = useState<Citation | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+  // The question copied, by the index of the turn it was asked in. Its own
+  // state: copying the question and copying the answer are two controls, and
+  // one flag would light both.
+  const [copiedQuestion, setCopiedQuestion] = useState<number | null>(null);
   // The turn whose usage breakdown is open, if any. One at a time: it is a
   // glance at what a turn cost, not a report to keep open.
   const [openUsage, setOpenUsage] = useState<number | null>(null);
@@ -1078,6 +1082,22 @@ export default function Ask({
     }
   }
 
+  // The question alone, as it was typed. Not asMarkdown's heading: this is
+  // for quoting the question somewhere else — a ticket, a message, the
+  // composer of another thread — and a `# ` in front of it is rongo's
+  // formatting, not the reader's words. The full text is always in the DOM,
+  // so a folded question copies whole.
+  async function copyQuestion(turnIndex: number) {
+    try {
+      await navigator.clipboard.writeText(turns[turnIndex].question);
+      setCopiedQuestion(turnIndex);
+      setTimeout(() => setCopiedQuestion(null), 1500);
+    } catch {
+      // No clipboard (insecure context, permissions): the button simply does
+      // nothing visible; the question is still on screen to select.
+    }
+  }
+
   // One article per question. The list itself stays flat — every action here
   // addresses a turn by its position in it — and only the rendering groups.
   const groups = useMemo(() => groupByQuestion(turns), [turns]);
@@ -1206,6 +1226,23 @@ export default function Ask({
                       {languages.find((l) => l.code === asked.language)?.name ?? asked.language}
                     </span>
                   )}
+                  {/* The question's own copy, next to the words it copies.
+                      The answer's footer copies the whole turn as Markdown,
+                      which is the wrong thing to paste into a ticket or the
+                      composer of another thread; and selecting the prose by
+                      hand fights a question folded at three lines.
+
+                      Always drawn, never revealed on hover: a phone has no
+                      hover, the same reason the diagram toolbar gives. */}
+                  <button
+                    type="button"
+                    onClick={() => copyQuestion(group[0])}
+                    aria-label={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
+                    title={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
+                    className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
+                  >
+                    {copiedQuestion === group[0] ? <CheckIcon /> : <CopyIcon />}
+                  </button>
                 </div>
 
                 {/* One entry per attempt. A turn answered on the first try has

@@ -81,3 +81,44 @@ export function DownloadIcon() {
     </svg>
   );
 }
+
+/** Two sheets, one behind the other: the question on the clipboard. */
+export function CopyIcon() {
+  return (
+    <svg
+      className="h-[14px] w-[14px] shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 3.5A1.5 1.5 0 0 0 9 2H4a1.5 1.5 0 0 0-1.5 1.5v5A1.5 1.5 0 0 0 4 10" />
+    </svg>
+  );
+}
+
+/**
+ * The copy landed. Takes the copy glyph's place for a moment: the answer's
+ * own copy button swaps its label the same way, and on a page where nothing
+ * else moved a click with no feedback reads as a click that missed.
+ */
+export function CheckIcon() {
+  return (
+    <svg
+      className="h-[14px] w-[14px] shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+    </svg>
+  );
+}

@@ -354,6 +354,23 @@ describe("Ask, a stored thread", () => {
     expect(written[0]).toContain("[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)");
   });
 
+  it("copies the question as it was typed, from the question's own control", async () => {
+    // The answer's footer copies the whole turn as Markdown. Quoting the
+    // question elsewhere means selecting prose that folds at three lines, so
+    // the question carries its own copy: the text, verbatim, nothing around it.
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
+    });
+    routedFetch([storedTurn]);
+    strict(<Ask threadId={7} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy the question" }));
+    await screen.findByRole("button", { name: "Question copied" });
+    expect(written).toEqual([storedTurn.question]);
+  });
+
   it("opens a source from a chip in an older turn, not only from the pane", async () => {
     // On a tablet the pane is not there and hover does not exist. The chip
     // is the way to the source, in every turn, from that turn's own list.
