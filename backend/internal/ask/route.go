@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -524,22 +525,140 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // answer this rung exists to stop, which is the opposite of what the gate is
 // for.
 func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) bool {
+	ask, _ := DecideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose)
+	return ask
+}
+
+// Rung names are what DecideWhy reports and what the route log line carries.
+// They are the names the comment above Decide already uses, so a line in the
+// log and the policy it came from read the same way.
+const (
+	rungNamedRepos = "named_repos"
+	rungAllRepos   = "all_repos"
+	rungRepoDeps   = "repo_deps"
+	rungRepository = "repository"
+	rungMargin     = "margin"
+	rungJudge      = "judge"
+	rungRole       = "role"
+)
+
+// DecideWhy is Decide plus the name of the rung that settled it — the ladder's
+// body, which Decide now wraps. Decide keeps its signature because the eval
+// harness calls it by that shape, and the reason travels beside the decision
+// rather than being re-derived by a second copy of the order, which is the
+// duplication Decide exists to prevent.
+//
+// A card the judge asked for and the role gate then refused reports "role", not
+// "judge": both rungs said their piece, and the second one is what changed the
+// outcome.
+func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) (bool, string) {
 	if namedRepos >= 2 {
-		return false
+		return false, rungNamedRepos
 	}
 	if allRepos {
-		return false
+		return false, rungAllRepos
 	}
 	if related {
-		return false
+		return false, rungRepoDeps
 	}
 	if namedRepos == 0 && distinctRepos(all) >= 2 {
-		return true
+		return true, rungRepository
 	}
 	if Dominates(all, margin) {
-		return false
+		return false, rungMargin
 	}
-	return judged && roleCanChoose
+	if !judged {
+		return false, rungJudge
+	}
+	if !roleCanChoose {
+		return false, rungRole
+	}
+	return true, rungJudge
+}
+
+// ladder is what the rungs found on one turn, for the single line Route logs.
+// Nothing in the product reads it: the decision itself travels in Decision, and
+// this exists so a card that surprised the person who got it can be explained
+// from the log without re-running the turn.
+//
+// The Checked and Ran flags matter as much as the values beside them: a false
+// "related" on a turn that never queried the manifest means something quite
+// different from one that queried it and found no edge.
+type ladder struct {
+	rung           string
+	candidates     int
+	capped         int
+	repos          int
+	named          int
+	allRepos       bool
+	spans          bool
+	lead           float64
+	runnerUp       float64
+	dominates      bool
+	relatedChecked bool
+	related        bool
+	judgeRan       bool
+	judged         bool
+	roleGate       bool
+	allNamed       bool
+	roleCanChoose  bool
+}
+
+// rank records what the grouping rung produced. The two scores are logged raw
+// beside the margin: "dominates false" says the leader was not far enough
+// ahead, and only the numbers say by how little.
+func (l *ladder) rank(rk Ranked, namedRepos []string, allRepos bool, margin float64) {
+	l.candidates = len(rk.All)
+	l.capped = len(rk.Capped)
+	l.repos = distinctRepos(rk.All)
+	l.named = len(namedRepos)
+	l.allRepos = allRepos
+	if len(rk.All) > 0 {
+		l.lead = rk.All[0].Score
+	}
+	if len(rk.All) > 1 {
+		l.runnerUp = rk.All[1].Score
+	}
+	l.dominates = Dominates(rk.All, margin)
+}
+
+// log writes the turn's routing decision. Info rather than debug: it is one
+// line per turn, and the question it answers — why did it ask me that — is
+// asked after the fact, when nobody can go back and raise the level.
+//
+// It carries counts, scores and rung names — no question text and no code
+// excerpt, because what explains a decision is which rung fired. The two gate
+// lines below are the deliberate exception: an unreadable reply is the case
+// they exist for, and free text from the model can echo the question or a
+// snippet the prompt fed it. That is why they are capped at 120 bytes, and why
+// nothing here quotes a prompt.
+func (l ladder) log(ctx context.Context, margin float64, ask bool) {
+	decision := "answer"
+	if ask {
+		decision = "ask"
+	}
+	slog.Info("route",
+		"thread", llm.ThreadID(ctx),
+		"decision", decision,
+		"rung", l.rung,
+		"candidates", l.candidates,
+		"capped", l.capped,
+		"repos", l.repos,
+		"named", l.named,
+		"all_repos", l.allRepos,
+		"spans", l.spans,
+		"lead", l.lead,
+		"runner_up", l.runnerUp,
+		"margin", margin,
+		"dominates", l.dominates,
+		"related_checked", l.relatedChecked,
+		"related", l.related,
+		"judge_ran", l.judgeRan,
+		"judged", l.judged,
+		"role_gate", l.roleGate,
+		"all_named", l.allNamed,
+		"role_can_choose", l.roleCanChoose,
+	)
 }
 
 // Route runs the ladder: the question's own scope, the manifest, the
@@ -557,15 +676,37 @@ func Decide(all []Candidate, margin float64, related, judged bool, namedRepos in
 // module keys underneath it. A repository card skips the gate entirely, so it
 // is never named twice over.
 func (r *Router) Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
-	ranked, err := r.Rank(ctx, hits)
+	d, l, err := r.route(ctx, question, audience, lang, hits, namedRepos, allRepos)
 	if err != nil {
+		// A rung that failed has no decision to explain, and the caller logs
+		// the error itself. A half-filled ladder line here would read as a
+		// decision that was made.
 		return Decision{}, err
 	}
+	l.log(ctx, r.margin, d.Ask)
+	return d, nil
+}
+
+// route is Route's body. It returns what each rung found alongside the
+// decision, so the one log line Route writes reports the rungs that actually
+// ran rather than a reconstruction of them.
+func (r *Router) route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, ladder, error) {
+	// Both start true, matching what Decide is passed on a turn where the rung
+	// never runs: a turn that names no candidate has nothing to report as
+	// incomplete, and a card the role gate does not apply to was refused by
+	// nobody. Logging false for either would read as a rung that said no.
+	l := ladder{allNamed: true, roleCanChoose: true}
+	ranked, err := r.Rank(ctx, hits)
+	if err != nil {
+		return Decision{}, l, err
+	}
+	l.rank(ranked, namedRepos, allRepos, r.margin)
 	// Asked about both, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
 	// can change the outcome and none is worth a query or a model call.
 	if len(namedRepos) >= 2 || allRepos {
-		return Decision{Ask: false, Candidates: ranked.All}, nil
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
+		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
 
 	// The repository rung is live when the question named no repository and
@@ -573,10 +714,12 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 	// worth paying for on an otherwise dominant turn, so it is computed before
 	// the margin short-circuit rather than after it.
 	spans := len(namedRepos) == 0 && distinctRepos(ranked.All) >= 2
+	l.spans = spans
 	if !spans && Dominates(ranked.All, r.margin) {
 		// The fast path is unchanged: hits inside one repository with a clear
 		// leader still reach an answer without a query or a model call.
-		return Decision{Ask: false, Candidates: ranked.All}, nil
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
+		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
 
 	// Over EVERY repository when the repository rung is live, not over the
@@ -595,8 +738,10 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 	}
 	related, err := r.Related(ctx, depsOver)
 	if err != nil {
-		return Decision{}, err
+		return Decision{}, l, err
 	}
+	l.relatedChecked = true
+	l.related = related
 	judged := false
 	if !related && !spans && !Dominates(ranked.All, r.margin) {
 		// The judge is the first paid rung, and a manifest dependency, the
@@ -604,33 +749,44 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 		// settled the question without it.
 		judged, err = r.Judge(ctx, question, cs)
 		if err != nil {
-			return Decision{}, err
+			return Decision{}, l, err
 		}
+		l.judgeRan = true
+		l.judged = judged
 	}
 
 	// Nothing below can turn a "no" into a card, so a decision already made
 	// pays for neither naming nor the role gate.
-	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, true) {
-		return Decision{Ask: false, Candidates: cs}, nil
+	ask, rung := DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, true)
+	l.rung = rung
+	if !ask {
+		return Decision{Ask: false, Candidates: cs}, l, nil
 	}
 
 	// A repository card is settled: the rung is deterministic, and the role
 	// gate does not apply to it (see Decide). Name the repositories and ask.
 	if spans {
-		named, _, err := r.name(ctx, question, audience, lang, capRepoCandidates(repos))
+		named, allNamed, err := r.name(ctx, question, audience, lang, capRepoCandidates(repos))
 		if err != nil {
-			return Decision{}, err
+			return Decision{}, l, err
 		}
-		return Decision{Ask: true, Candidates: withAllRepos(named, lang)}, nil
+		// The role gate does not read this on a repository card — see Decide —
+		// but the log does. A naming call that failed here leaves the bare
+		// repository name on the card, and "all_named: true" would rule out
+		// exactly the cause of it.
+		l.allNamed = allNamed
+		return Decision{Ask: true, Candidates: withAllRepos(named, lang)}, l, nil
 	}
 
 	named, allNamed, err := r.name(ctx, question, audience, lang, cs)
 	if err != nil {
-		return Decision{}, err
+		return Decision{}, l, err
 	}
+	l.allNamed = allNamed
 
 	roleCanChoose := true
 	if audience != AudienceDev {
+		l.roleGate = true
 		// A candidate whose naming call failed still carries its module key as
 		// a title — a directory path, which is the one thing an Analyst's card
 		// must never show. That is settled without a model call.
@@ -639,19 +795,22 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 		} else {
 			roleCanChoose, err = r.Choosable(ctx, question, named)
 			if err != nil {
-				return Decision{}, err
+				return Decision{}, l, err
 			}
 		}
 	}
-	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, roleCanChoose) {
+	l.roleCanChoose = roleCanChoose
+	ask, rung = DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, roleCanChoose)
+	l.rung = rung
+	if !ask {
 		// The turn goes on to answer, and gathering starts from ALL hits, not
 		// from these candidates (pipeline.Run) — so what travels back is the
 		// same "not asking" every other rung returns. The named copies are
 		// carried rather than dropped only because a caller that reproduces
 		// the ladder reads Candidates on both branches.
-		return Decision{Ask: false, Candidates: named}, nil
+		return Decision{Ask: false, Candidates: named}, l, nil
 	}
-	return Decision{Ask: true, Candidates: named}, nil
+	return Decision{Ask: true, Candidates: named}, l, nil
 }
 
 // moduleLookup builds the moduleOf closure candidates() needs, from a single
@@ -751,13 +910,21 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		return false, fmt.Errorf("judge candidates: %w", err)
 	}
 
+	// Not a crash and not a silent compose: a decision that could not be read
+	// is treated exactly like "ask", the safe side of the ladder. The raw reply
+	// is logged either way, because that fallback and a judge that deliberately
+	// asked are the same "ask" to everything downstream, and only the text tells
+	// them apart.
+	ask, decoded := true, true
 	var got judgeDecision
 	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
-		// Not a crash and not a silent compose: a decision that could not be
-		// read is treated exactly like "ask", the safe side of the ladder.
-		return true, nil
+		decoded = false
+	} else {
+		ask = got.Decision != "compose"
 	}
-	return got.Decision != "compose", nil
+	slog.Info("route judge", "thread", llm.ThreadID(ctx), "reply", excerptOf(out, 120),
+		"decoded", decoded, "ask", ask)
+	return ask, nil
 }
 
 // choosableDecision is the shape of the role gate's reply.
@@ -789,11 +956,19 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 		return false, fmt.Errorf("judge whether the role can choose: %w", err)
 	}
 
+	// The mirror of judge's fallback, and logged for the same reason: an
+	// unreadable reply and a gate that deliberately refused both arrive
+	// downstream as "cannot".
+	choose, decoded := false, true
 	var got choosableDecision
 	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
-		return false, nil
+		decoded = false
+	} else {
+		choose = got.Decision == "choose"
 	}
-	return got.Decision == "choose", nil
+	slog.Info("route role gate", "thread", llm.ThreadID(ctx), "reply", excerptOf(out, 120),
+		"decoded", decoded, "choose", choose)
+	return choose, nil
 }
 
 // nameResult is the shape of a naming reply.

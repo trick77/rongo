@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -134,6 +135,12 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		return Answer{}, nil, fmt.Errorf("resolve the named repositories: %w", err)
 	}
 	scope := Scope{Known: known, Unknown: unknown, All: u.AllRepos}
+	// The rung above routing. A question that names a repository the index does
+	// not carry arrives at Route as "named nothing" and cards on the repository
+	// rung; without this line the route log reports a question that named no
+	// repository, and the reader is certain they named one.
+	slog.Info("scope", "thread", llm.ThreadID(ctx), "known", known, "unknown", unknown,
+		"all_repos", u.AllRepos)
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.

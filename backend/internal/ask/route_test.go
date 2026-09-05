@@ -763,6 +763,53 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 // left the harness compiling while it silently measured a policy the product
 // no longer ran. Route calls Decide too, so there is nothing left to drift
 // apart — this test fixes what Decide must say at each rung.
+// TestDecideWhyNamesTheRungThatSettledIt pins the reason beside the decision.
+// The log line is the only account anyone gets of a card after the fact, so a
+// rung name that drifts from the rung that actually fired would be worse than
+// no name at all.
+func TestDecideWhyNamesTheRungThatSettledIt(t *testing.T) {
+	tight := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "peeq", Score: 0.49}}
+	spread := []Candidate{{Repo: "peeq", Score: 0.60}, {Repo: "loom", Score: 0.20}}
+	dominant := []Candidate{{Repo: "peeq", Score: 0.60}, {Repo: "peeq", Score: 0.20}}
+
+	cases := []struct {
+		name          string
+		cs            []Candidate
+		related       bool
+		judged        bool
+		namedRepos    int
+		allRepos      bool
+		roleCanChoose bool
+		wantAsk       bool
+		wantRung      string
+	}{
+		{"the question named both", spread, false, false, 2, false, true, false, rungNamedRepos},
+		{"the question asked for all", spread, false, false, 0, true, true, false, rungAllRepos},
+		{"a manifest edge joins them", spread, true, false, 0, false, true, false, rungRepoDeps},
+		{"two repositories, none named", spread, false, false, 0, false, true, true, rungRepository},
+		{"a clear leader inside one repository", dominant, false, false, 0, false, true, false, rungMargin},
+		{"the judge composed", tight, false, false, 0, false, true, false, rungJudge},
+		{"the judge asked", tight, false, true, 0, false, true, true, rungJudge},
+		{"the role gate refused the card", tight, false, true, 0, false, false, false, rungRole},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose)
+			if ask != tc.wantAsk {
+				t.Errorf("ask = %v, want %v", ask, tc.wantAsk)
+			}
+			if rung != tc.wantRung {
+				t.Errorf("rung = %q, want %q", rung, tc.wantRung)
+			}
+			// Decide is a wrapper now; it must keep answering the same thing.
+			if got := Decide(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose); got != ask {
+				t.Errorf("Decide = %v, DecideWhy = %v — the wrapper drifted", got, ask)
+			}
+		})
+	}
+}
+
 func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 	dominant := []Candidate{{Score: 0.60}, {Score: 0.20}} // ratio 0.667
 	tight := []Candidate{{Score: 0.51}, {Score: 0.49}}    // ratio 0.039
