@@ -297,10 +297,11 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 }
 
 func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
-	// The spec says two to five named candidates. A card with eleven is not a
-	// question a person answers. Eleven repositories is the repository card,
-	// so the cap it lands on is four repositories plus the "all repositories"
-	// entry — five buttons, the same as a module card's five.
+	// The spec says two to five named candidates. A repository card lands on
+	// four repositories plus the "all repositories" entry — five buttons, the
+	// same as a module card's five. Four is also the most a card ever sees
+	// now: past that the turn asks for a narrower question instead, which is
+	// TestRouteAsksToNarrowWhenMoreRepositoriesMatchThanACardCanShow.
 	r := newTestRouter(t, testLLM(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"ask"}`
@@ -309,7 +310,7 @@ func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 	}), testDBWithDeps(t, nil))
 
 	var hits []retrieve.Hit
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 4; i++ {
 		hits = append(hits, retrieve.Hit{
 			Repo:  fmt.Sprintf("r%d", i),
 			Path:  fmt.Sprintf("m%d/f.go", i),
@@ -549,22 +550,23 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 	}
 }
 
-// TestRouteSeesADependencyBeyondTheCardsCap is the cap's one real hazard: the
-// card shows four repositories, but the edge that makes this composition can
-// sit on the fifth. Asking repodeps about the shortened list would card where
-// AGENTS.md says answer.
-func TestRouteSeesADependencyBeyondTheCardsCap(t *testing.T) {
+// TestASinglePairDoesNotCompoundFiveRepositories pins where the manifest edge
+// stops carrying: anyDependency says yes on ONE joined pair, and one pair out
+// of five is not the same claim as "these five are one system". Below five the
+// edge still composes, which the tests above cover; at five the turn asks for
+// a narrower question instead of spreading searchK over all of them.
+func TestASinglePairDoesNotCompoundFiveRepositories(t *testing.T) {
 	db := testDBWithDeps(t, map[string]string{
 		"r4": "module github.com/trick77/r4\n\nrequire github.com/trick77/r0 v1.0.0\n",
 		"r0": "module github.com/trick77/r0\n",
 	})
 	r := newTestRouter(t, testLLM(t, func(prompt string) string {
-		t.Fatalf("the fifth repository's manifest edge settles it; no model may be asked. prompt: %q", prompt)
+		t.Errorf("five repositories are already too many to ask about; no model may be asked. prompt: %q", prompt)
 		return ""
 	}), db)
 
-	// Five repositories clear the floor. Only r0 and r4 are joined, and r4 is
-	// the one the card would have dropped.
+	// Five repositories clear the floor. Only r0 and r4 are joined — one pair
+	// out of five, which is what anyDependency answers "yes" to.
 	var hits []retrieve.Hit
 	for i := 0; i < 5; i++ {
 		hits = append(hits, retrieve.Hit{
@@ -578,8 +580,11 @@ func TestRouteSeesADependencyBeyondTheCardsCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
-	if got.Ask {
-		t.Error("Related must see every repository, not just the four the card would show")
+	if !got.TooBroad {
+		t.Error("a single manifest edge among five repositories is not permission to answer from all five")
+	}
+	if len(got.Candidates) != 5 {
+		t.Errorf("candidates = %d, want all five named on the panel", len(got.Candidates))
 	}
 }
 
@@ -1016,5 +1021,84 @@ func TestExcerptOfCutsOnARuneBoundary(t *testing.T) {
 	// The bound is still a bound: nothing longer may come back.
 	if len(got) > 10 {
 		t.Errorf("excerpt is %d bytes, want at most 10", len(got))
+	}
+}
+
+// A question that fits five repositories or more is not a question a card can
+// put to anyone: the card shows four and never mentions the rest. The rung
+// sits above the manifest edge on purpose — one dependency among twenty
+// repositories would otherwise compose an answer out of twenty repositories'
+// worth of nothing.
+func TestDecideWhyAsksToNarrowWhenMoreRepositoriesMatchThanACardCanShow(t *testing.T) {
+	var wide []Candidate
+	for _, r := range []string{"a", "b", "c", "d", "e"} {
+		wide = append(wide, Candidate{Repo: r, Score: 0.5})
+	}
+	four := wide[:4]
+
+	cases := []struct {
+		name       string
+		cs         []Candidate
+		related    bool
+		namedRepos int
+		wantAsk    bool
+		wantRung   string
+	}{
+		{"five repositories, none named", wide, false, 0, true, rungTooBroad},
+		{"five repositories and a manifest edge", wide, true, 0, true, rungTooBroad},
+		{"four still fit on a card", four, false, 0, true, rungRepository},
+		{"the reader already named one", wide, false, 1, false, rungNamedRepos},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, false, tc.namedRepos, false, true)
+			if ask != tc.wantAsk {
+				t.Errorf("ask = %v, want %v", ask, tc.wantAsk)
+			}
+			if rung != tc.wantRung {
+				t.Errorf("rung = %q, want %q", rung, tc.wantRung)
+			}
+		})
+	}
+}
+
+// The card can show four repositories. Past that the turn does not ask which
+// one and does not answer across them either: it hands back every repository
+// that matched and asks for a narrower question. No model is paid for that —
+// the names are already known, so there is nothing to name.
+func TestRouteAsksToNarrowWhenMoreRepositoriesMatchThanACardCanShow(t *testing.T) {
+	db := testDBWithDeps(t, map[string]string{})
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Errorf("nothing to judge and nothing to name; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), db)
+
+	var hits []retrieve.Hit
+	for i := 0; i < 6; i++ {
+		hits = append(hits, retrieve.Hit{
+			Repo:  fmt.Sprintf("r%d", i),
+			Path:  fmt.Sprintf("m%d/f.go", i),
+			Score: 0.50 - float64(i)/1000,
+		})
+	}
+
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.Ask || !got.TooBroad {
+		t.Fatalf("ask = %v, too broad = %v, want both true", got.Ask, got.TooBroad)
+	}
+	if len(got.Candidates) != 6 {
+		t.Fatalf("candidates = %d, want every one of the six repositories", len(got.Candidates))
+	}
+	for _, c := range got.Candidates {
+		if c.Repo == "" {
+			t.Error("a too-broad entry stands for one repository; none of them is the all-repositories row")
+		}
+		if c.Title != "" {
+			t.Errorf("title = %q, want none — the panel prints repository names, not written titles", c.Title)
+		}
 	}
 }

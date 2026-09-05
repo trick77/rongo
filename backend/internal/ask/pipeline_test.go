@@ -339,7 +339,7 @@ func TestResumeRepoSearchesTheChosenRepositoryAtFullDepth(t *testing.T) {
 	}))
 
 	answer, err := p.ResumeRepo(context.Background(), "how are token costs calculated in $?",
-		Understanding{CodeTerms: []string{"pricing"}}, "loom", AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+		Understanding{CodeTerms: []string{"pricing"}}, []string{"loom"}, AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
 	if err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestResumeRepoWithNoRepositorySearchesTheWholeCorpus(t *testing.T) {
 		return []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, nil
 	}))
 
-	if _, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, "",
+	if _, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, nil,
 		AudienceBA, LanguageEN, Scope{All: true}, Events{}); err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
@@ -392,7 +392,7 @@ func TestResumeRepoSaysNothingFoundRatherThanAnswering(t *testing.T) {
 		return nil, nil
 	}))
 
-	got, err := p.ResumeRepo(context.Background(), "frage", Understanding{CodeTerms: []string{"AirPlay"}}, "loom",
+	got, err := p.ResumeRepo(context.Background(), "frage", Understanding{CodeTerms: []string{"AirPlay"}}, []string{"loom"},
 		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
 	if err != nil {
 		t.Fatalf("resume repo: %v", err)
@@ -419,7 +419,7 @@ func TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex(t *testing.T) {
 		return nil, nil
 	}))
 
-	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, "loom",
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"loom"},
 		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
 	if err == nil {
 		t.Fatal("want an error when the chosen repository is gone from the index")
@@ -720,5 +720,64 @@ func TestReexplainRefusesWhenNothingIsLeftToAnswerFrom(t *testing.T) {
 	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN, nil, Scope{}, Events{})
 	if err == nil {
 		t.Fatal("want an error when the gathered basis is gone")
+	}
+}
+
+// TestResumeRepoSearchesEveryChosenRepositorySeparately is the too-broad
+// panel's own resume: the reader picked more than one repository off it, and
+// two or more named repositories are a comparison, which searches each side at
+// full depth rather than letting one of them fill a single fused cut.
+func TestResumeRepoSearchesEveryChosenRepositorySeparately(t *testing.T) {
+	var queries []retrieve.Query
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom", "peeq"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
+		queries = append(queries, q)
+		return []retrieve.Hit{{ChunkID: 1, Repo: q.Repos[0], Path: "a.go"}}, nil
+	}))
+
+	answer, err := p.ResumeRepo(context.Background(), "how is retry done?",
+		Understanding{CodeTerms: []string{"retry"}}, []string{"loom", "peeq"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Events{})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+	if len(queries) != 2 {
+		t.Fatalf("ran %d searches, want one per chosen repository", len(queries))
+	}
+	for i, q := range queries {
+		if len(q.Repos) != 1 {
+			t.Errorf("search %d covered %v, want one repository at a time", i, q.Repos)
+		}
+		if q.K != searchK {
+			t.Errorf("search %d used K = %d, want each side at full depth (%d)", i, q.K, searchK)
+		}
+		if q.Question != "" {
+			t.Errorf("search %d kept the question (%q); knownRepos would union the others back in", i, q.Question)
+		}
+	}
+	if answer.Text == "" {
+		t.Error("want an answer")
+	}
+}
+
+// The router's "too broad" has to reach the record, or a reload renders the
+// panel as a card and offers twenty buttons where the turn asked for a
+// narrower question.
+func TestRunCarriesTooBroadIntoTheClarification(t *testing.T) {
+	p := newTestPipeline(t, func(f *pipelineFakes) {
+		f.router = &fakeRouter{d: Decision{Ask: true, TooBroad: true, Candidates: []Candidate{
+			{Repo: "peeq", Branch: "master"},
+			{Repo: "loom", Branch: "main"},
+		}}}
+	})
+
+	_, clar, err := p.Run(context.Background(), "frage", AudienceBA, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if clar == nil {
+		t.Fatal("want a clarification")
+	}
+	if !clar.TooBroad {
+		t.Error("the turn asked for a narrower question; the record must say so")
 	}
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
+import Narrow from "./Narrow";
 import Question from "./Question";
 import Trace, { type Step, type TraceState } from "./Trace";
 import { Chevron } from "./icons";
@@ -70,6 +71,10 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
 type TurnClarification = {
   messageId: number;
   candidates: ClarifyCandidate[];
+  // True when the turn ended by asking for a NARROWER question rather than by
+  // offering a choice. The rows look the same either way — a repository and a
+  // branch — so the panel and the card cannot be told apart without it.
+  tooBroad: boolean;
 };
 
 /** What a failed turn is asked again with: the endpoint and the body of the
@@ -119,8 +124,13 @@ type Turn = {
   notice: string;
   // The candidate picked on this turn's card, or null before a choice. Once
   // set it stays — picking a different candidate later starts a NEW turn,
-  // never rewriting this one.
+  // never rewriting this one. A turn resumed from the too-broad panel carries
+  // -1: it came from the panel as a whole, not from a row on it.
   chosenIdx: number | null;
+  // The repositories a too-broad panel was narrowed to, once the turn it
+  // started has run. Null on every other turn, and on the panel itself until
+  // the reader picks.
+  narrowedTo: string[] | null;
   // True for a turn created in this session. A turn restored from the
   // record carries no live trace — it is finished by definition.
   live: boolean;
@@ -201,7 +211,11 @@ type Message = {
   // The scope sentence, rendered by the backend in this message's own
   // language. Empty on every turn that named nothing the index lacked.
   notice?: string;
-  clarification: { id: number; candidates: ClarifyCandidate[] } | null;
+  clarification: { id: number; candidates: ClarifyCandidate[]; too_broad?: boolean } | null;
+  // The repositories THIS turn was narrowed to off a too-broad panel. Absent
+  // on every other turn; the panel above reads it back to say what it
+  // narrowed to after a reload.
+  narrowed_to?: string[];
   from_candidate_idx: number;
   // The clarification this message resolved, or 0 when it did not resume
   // one. The link the backend actually stored — matching on it, not on
@@ -242,8 +256,15 @@ function storedTurn(m: Message): Turn {
     messageId: m.id,
     recorded: true,
     headId: m.head_message_id || null,
-    clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
+    clarification: m.clarification
+      ? {
+          messageId: m.id,
+          candidates: m.clarification.candidates,
+          tooBroad: m.clarification.too_broad ?? false,
+        }
+      : null,
     chosenIdx: null,
+    narrowedTo: null,
     live: false,
     startedAt: 0,
     endedAt: 0,
@@ -280,6 +301,7 @@ function freshTurn(question: string, audience: Audience, language: string, headI
     headId,
     clarification: null,
     chosenIdx: null,
+    narrowedTo: null,
     live: true,
     startedAt: now,
     endedAt: null,
@@ -298,14 +320,20 @@ function freshTurn(question: string, audience: Audience, language: string, headI
  */
 function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
   const chosenByClarification = new Map<number, number>();
+  // What the answering turn narrowed to, for the panel that asked. A card
+  // names its own choice by title and needs nothing here.
+  const narrowedByClarification = new Map<number, string[]>();
   for (const m of list) {
-    if (m.from_clarification_id) chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+    if (!m.from_clarification_id) continue;
+    chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+    if (m.narrowed_to?.length) narrowedByClarification.set(m.from_clarification_id, m.narrowed_to);
   }
   return turns.map((t, i) => {
     const clarId = list[i].clarification?.id;
     if (clarId == null) return t;
     const idx = chosenByClarification.get(clarId);
-    return idx === undefined ? t : { ...t, chosenIdx: idx };
+    if (idx === undefined) return t;
+    return { ...t, chosenIdx: idx, narrowedTo: narrowedByClarification.get(clarId) ?? null };
   });
 }
 
@@ -873,7 +901,11 @@ export default function Ask({
             patchLast((t) => ({
               ...t,
               messageId: payload.message_id,
-              clarification: { messageId: payload.message_id, candidates: payload.candidates ?? [] },
+              clarification: {
+                messageId: payload.message_id,
+                candidates: payload.candidates ?? [],
+                tooBroad: payload.too_broad ?? false,
+              },
             }));
           } else if (name === "error") {
             ok = false;
@@ -990,6 +1022,41 @@ export default function Ask({
       choice: idx,
     }, false);
     if (!ok) setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+  }
+
+  /**
+   * Narrowing is the too-broad panel's own move: the reader picks the
+   * repositories they meant and the turn goes on across those.
+   *
+   * It is a resume, not a new question — the same words, joining the same
+   * turn — but it resumes from the panel as a whole rather than from a row on
+   * it, which is why it sends repositories instead of a choice. The panel is
+   * answered once, exactly as a card is, and a failed turn hands it back.
+   */
+  async function narrowTo(turnIndex: number, repos: string[]) {
+    if (busy || repos.length === 0) return;
+    const turn = turns[turnIndex];
+    if (!turn.clarification || turn.chosenIdx != null) return;
+
+    retireLoad();
+    setTurns((prev) => [
+      ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: -1, narrowedTo: repos } : t)),
+      freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
+    ]);
+
+    const ok = await stream("/api/ask", {
+      thread_id: threadId.current ?? 0,
+      question: turn.question,
+      audience: turn.audience,
+      language: turn.language,
+      clarification_message_id: turn.clarification.messageId,
+      repos,
+    }, false);
+    if (!ok) {
+      setTurns((prev) =>
+        prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null, narrowedTo: null } : t)),
+      );
+    }
   }
 
   /**
@@ -1267,13 +1334,23 @@ export default function Ask({
                   </div>
                 )}
 
-                {turn.clarification && (
-                  <Clarify
-                    candidates={turn.clarification.candidates}
-                    chosenIdx={turn.chosenIdx}
-                    onChoose={(idx) => chooseCandidate(i, idx)}
-                  />
-                )}
+                {turn.clarification &&
+                  (turn.clarification.tooBroad ? (
+                    <Narrow
+                      repos={turn.clarification.candidates.map((c) => ({
+                        repo: c.repo,
+                        branch: c.branch,
+                      }))}
+                      narrowedTo={turn.narrowedTo}
+                      onAsk={(repos) => narrowTo(i, repos)}
+                    />
+                  ) : (
+                    <Clarify
+                      candidates={turn.clarification.candidates}
+                      chosenIdx={turn.chosenIdx}
+                      onChoose={(idx) => chooseCandidate(i, idx)}
+                    />
+                  ))}
 
                 {/* ui-markdown carries the prose typography (index.css), the
                     same block ../loom uses. The measure stays capped here:

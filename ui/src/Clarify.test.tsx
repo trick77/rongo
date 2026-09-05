@@ -26,15 +26,31 @@ const candidates = [
 
 describe("Clarify", () => {
   it("names every candidate with its repo and one line", () => {
+    // The repository is the first thing on the entry and stands on a line of
+    // its own: it is what tells two candidates with the same shape apart, and
+    // trailing it after the title left it reading as a footnote.
     strict(<Clarify candidates={candidates} onChoose={() => {}} />);
 
     expect(screen.getByText("Through the login service")).toBeTruthy();
-    expect(screen.getByText("peeq · master")).toBeTruthy();
+    expect(screen.getByText("peeq")).toBeTruthy();
+    expect(screen.getByText("master")).toBeTruthy();
     expect(screen.getByText(/central login service/)).toBeTruthy();
 
     expect(screen.getByText("Through the legacy adapter")).toBeTruthy();
-    expect(screen.getByText("peeq-legacy · release-2024.3")).toBeTruthy();
+    expect(screen.getByText("peeq-legacy")).toBeTruthy();
+    expect(screen.getByText("release-2024.3")).toBeTruthy();
     expect(screen.getByText(/against LDAP/)).toBeTruthy();
+  });
+
+  it("puts the repository above the title, not after it", () => {
+    strict(<Clarify candidates={candidates} onChoose={() => {}} />);
+
+    const entry = screen.getByText("Through the login service").closest("button");
+    const text = entry?.textContent ?? "";
+    expect(text.indexOf("peeq")).toBeLessThan(text.indexOf("Through the login service"));
+    // The separator went with the line break: a repo and a branch on their own
+    // row do not need one, and it is what made the pair read as one grey blur.
+    expect(text).not.toContain("·");
   });
 
   it("reports the candidate index back on a choice", async () => {
@@ -102,8 +118,11 @@ describe("Clarify", () => {
     strict(<Clarify candidates={repoCandidates} onChoose={onChoose} />);
 
     const entry = screen.getByText("All repositories").closest("button");
-    expect(entry?.textContent).not.toContain("·");
-    expect(screen.getByText("Token cost per turn").closest("button")?.textContent).toContain("peeq · master");
+    expect(entry?.textContent).not.toContain("peeq");
+    expect(entry?.textContent).not.toContain("master");
+    const named = screen.getByText("Token cost per turn").closest("button")?.textContent ?? "";
+    expect(named).toContain("peeq");
+    expect(named).toContain("master");
 
     await user.click(screen.getByText("All repositories"));
     expect(onChoose).toHaveBeenCalledWith(2);

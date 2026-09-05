@@ -47,6 +47,11 @@ type Clarification struct {
 	// asking has one too, and it is part of the record: the candidates on the
 	// card come from a corpus the named repository may have been missing from.
 	Scope Scope
+	// TooBroad is the turn having asked for a narrower question instead of
+	// asking which candidate was meant. The candidates are then every
+	// repository that matched, one row each, named by the index rather than
+	// by a model.
+	TooBroad bool
 }
 
 // Events is how a caller watches a turn. Both may be nil.
@@ -256,7 +261,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		// The turn ends here. The understanding travels with it: a resumed
 		// turn that re-derives its own terms can search differently and
 		// answer from material the card never showed.
-		return Answer{}, &Clarification{Understanding: u, Candidates: d.Candidates, Scope: scope}, nil
+		return Answer{}, &Clarification{Understanding: u, Candidates: d.Candidates, Scope: scope, TooBroad: d.TooBroad}, nil
 	}
 
 	// Gathering keeps starting from ALL hits, never from a candidate's own
@@ -413,17 +418,21 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // the same depth a question naming it would have got — the same reasoning, and
 // the same searchK, as searchScoped's per-repository pass.
 //
-// repo empty is the card's "all repositories" entry: the whole corpus, exactly
+// More than one repository is the too-broad panel's own resume: the reader
+// picked a handful off it, which is the same thing as a question that named
+// them, so it searches each one at full depth the way a comparison does.
+//
+// repos empty is the card's "all repositories" entry: the whole corpus, exactly
 // the search the turn would have run without a card at all. The question goes
 // back in there because knownRepos may narrow on what it names; in the scoped
 // case it is left out for the reason searchScoped gives, or the other
 // repositories would be unioned straight back in.
-func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repo string,
+func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repos []string,
 	audience Audience, lang Language, scope Scope, ev Events) (Answer, error) {
 
 	texts := u.SearchTexts(question)
-	q := retrieve.Query{Texts: texts, Question: question, K: searchK}
-	if repo != "" {
+	var hits []retrieve.Hit
+	if len(repos) > 0 {
 		// A restriction the index cannot resolve is not a narrow search, it is
 		// no search at all: knownRepos drops a name it does not carry, and an
 		// empty restriction means the whole corpus. Between the card being
@@ -433,19 +442,31 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// the one that was picked — the exact substitution this rung exists to
 		// prevent. Failing leaves the card open and ochre for another choice,
 		// which is what a failed turn is for.
-		known, _, err := p.search.ResolveRepos(ctx, []string{repo}, "")
+		known, _, err := p.search.ResolveRepos(ctx, repos, "")
 		if err != nil {
-			return Answer{}, fmt.Errorf("resolve the chosen repository: %w", err)
+			return Answer{}, fmt.Errorf("resolve the chosen repositories: %w", err)
 		}
 		if len(known) == 0 {
-			return Answer{}, fmt.Errorf("the chosen repository %q is no longer in the index", repo)
+			return Answer{}, fmt.Errorf("the chosen repositories %s are no longer in the index",
+				strings.Join(repos, ", "))
 		}
-		q = retrieve.Query{Texts: texts, Repos: known, K: searchK}
-	}
-	ev.status("searching")
-	hits, err := p.search.Search(ctx, q)
-	if err != nil {
-		return Answer{}, fmt.Errorf("search: %w", err)
+		ev.status("searching")
+		// searchScoped, not one fused search: more than one chosen repository
+		// is a comparison, and a single cut lets one side fill it. The
+		// question is left out for the reason the single-repository search
+		// left it out — knownRepos would union the other repositories back in
+		// and undo the choice.
+		hits, err = p.searchScoped(ctx, "", texts, known)
+		if err != nil {
+			return Answer{}, fmt.Errorf("search: %w", err)
+		}
+	} else {
+		ev.status("searching")
+		var err error
+		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Question: question, K: searchK})
+		if err != nil {
+			return Answer{}, fmt.Errorf("search: %w", err)
+		}
 	}
 
 	ev.status("gathering")

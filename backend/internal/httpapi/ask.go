@@ -34,7 +34,7 @@ type Asker interface {
 	// the whole corpus. The one resume path that searches again; see
 	// ask.Pipeline.ResumeRepo for why a repository card cannot replay stored
 	// hits.
-	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repo string,
+	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repos []string,
 		audience ask.Audience, lang ask.Language, scope ask.Scope, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
@@ -46,6 +46,14 @@ type Asker interface {
 // thread history is served back to the browser too — a generic message in one
 // place and the raw text in the other would leak it through the other door.
 const turnFailed = "The turn failed."
+
+// maxNarrowRepos is how many repositories a too-broad panel lets the reader
+// pick. Three, because every one of them costs its own search at full depth
+// and the fused result is still cut to one comparison's worth — a fourth side
+// competes for room rather than adding any. Enforced here rather than in the
+// page: the cap is a product rule, and the page is not the only thing that
+// can post.
+const maxNarrowRepos = 3
 
 // basisGone is what a re-explain says when the code an answer was written
 // from is no longer indexed. Not turnFailed: the pipeline never ran, and
@@ -70,6 +78,13 @@ type askRequest struct {
 	// and the index of the candidate the reader picked.
 	ClarificationMessageID int64 `json:"clarification_message_id"`
 	Choice                 int   `json:"choice"`
+	// Repos resumes a turn that ended by asking for a NARROWER question: the
+	// repositories the reader picked off that panel, at most maxNarrowRepos of
+	// them. Present instead of Choice, never beside it — the panel offers no
+	// candidate to choose, only repositories to narrow to. Every name is
+	// checked against the panel before anything is searched: a browser sending
+	// its own list must not widen a turn past what the reader was shown.
+	Repos []string `json:"repos"`
 	// HeadMessageID is the turn this question is another attempt at, sent when
 	// the reader retries one that failed. The question text is the same, so
 	// without it the record would say the question was asked twice. A resume
@@ -152,10 +167,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	var headID int64
 	var resumeHits []retrieve.Hit
 	var resumeScope ask.Scope
-	// resumeRepoChoice marks a card whose entries were repositories; resumeRepo
-	// is the one chosen, empty for the card's "all repositories" entry.
+	// resumeRepoChoice marks a card whose entries were repositories;
+	// resumeRepos are the ones chosen, empty for the card's "all
+	// repositories" entry. A card yields exactly one; the too-broad panel
+	// yields up to maxNarrowRepos.
 	var resumeRepoChoice bool
-	var resumeRepo string
+	var resumeRepos []string
 	if req.ClarificationMessageID != 0 {
 		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
@@ -169,11 +186,49 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no such clarification", http.StatusForbidden)
 			return
 		}
-		if req.Choice < 0 || req.Choice >= len(c.Candidates) {
+		narrowing := len(req.Repos) > 0
+		if narrowing && !c.TooBroad {
+			// A card is one question with one answer. Narrowing to a handful
+			// is the other panel's move, and accepting it here would answer
+			// from repositories the card never offered as a set.
+			http.Error(w, "this clarification is a card, not a narrowing", http.StatusBadRequest)
+			return
+		}
+		if !narrowing && (req.Choice < 0 || req.Choice >= len(c.Candidates)) {
 			// Answering from a candidate nobody offered is worse than
 			// refusing: it would look like an answer to the question asked.
 			http.Error(w, "choice out of range", http.StatusBadRequest)
 			return
+		}
+		var narrowed []string
+		if narrowing {
+			offered := map[string]bool{}
+			for _, cand := range c.Candidates {
+				if cand.Repo != "" {
+					offered[cand.Repo] = true
+				}
+			}
+			seen := map[string]bool{}
+			for _, r := range req.Repos {
+				if !offered[r] {
+					// Not "unknown repository": the panel is the offer, and
+					// anything outside it was never put to the reader.
+					http.Error(w, "that repository was not offered", http.StatusBadRequest)
+					return
+				}
+				if seen[r] {
+					// A repeat is one repository named twice, not two sides of
+					// a comparison. Folded rather than refused — the reader
+					// cannot produce one, and it narrows nothing.
+					continue
+				}
+				seen[r] = true
+				narrowed = append(narrowed, r)
+			}
+			if len(narrowed) > maxNarrowRepos {
+				http.Error(w, "too many repositories to compare at once", http.StatusBadRequest)
+				return
+			}
 		}
 		if c.Answered {
 			// A card is answered once. The answer it produced is in the
@@ -187,9 +242,19 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// the resumed turn searches that repository instead. Reading the
 		// discriminator off the candidate keeps every card stored before this
 		// existed resuming exactly as it did.
-		chosen := c.Candidates[req.Choice]
-		resumeRepoChoice = chosen.ModuleKey == ""
-		resumeRepo = chosen.Repo
+		if narrowing {
+			// The panel stores no hits to replay and offers no module: every
+			// entry is a repository, and the resumed turn searches the picked
+			// ones at full depth.
+			resumeRepoChoice = true
+			resumeRepos = narrowed
+		} else {
+			chosen := c.Candidates[req.Choice]
+			resumeRepoChoice = chosen.ModuleKey == ""
+			if chosen.Repo != "" {
+				resumeRepos = []string{chosen.Repo}
+			}
+		}
 		var hits []retrieve.Hit
 		if !resumeRepoChoice {
 			_, hits, err = s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
@@ -223,11 +288,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// still said out loud, whichever entry was picked. An empty repo is
 			// the "all repositories" entry, which is the reader's own
 			// permission to answer across the corpus and is recorded as such.
-			resumeScope.All = resumeRepo == ""
-			resumeScope.Known = nil
-			if resumeRepo != "" {
-				resumeScope.Known = []string{resumeRepo}
-			}
+			resumeScope.All = len(resumeRepos) == 0
+			resumeScope.Known = resumeRepos
 		}
 		resume = c
 		resumeHits = hits
@@ -458,7 +520,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		var answer ask.Answer
 		var err error
 		if resumeRepoChoice {
-			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepo, audience, lang, resumeScope, events)
+			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepos, audience, lang, resumeScope, events)
 		} else {
 			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
 		}
@@ -489,7 +551,14 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
 			recordFailed(ctx, "record sources failed", err)
 		}
-		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, req.Choice); err != nil {
+		// -1 is the column's own "no candidate": a narrowing resumed from the
+		// panel as a whole, and there is no row on it that the answer came
+		// from. The link to the clarification is what closes it either way.
+		choiceIdx := req.Choice
+		if len(req.Repos) > 0 {
+			choiceIdx = -1
+		}
+		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
 			recordFailed(ctx, "link choice failed", err)
 		}
 		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeUsage)
@@ -537,7 +606,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		closeUsage()
-		send("clarification", map[string]any{"message_id": msg.ID, "candidates": wireCandidates(clar.Candidates)})
+		send("clarification", map[string]any{"message_id": msg.ID, "too_broad": clar.TooBroad,
+			"candidates": wireCandidates(clar.Candidates)})
 		send("done", map[string]any{"message_id": msg.ID})
 		return
 	}

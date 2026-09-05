@@ -715,3 +715,116 @@ func TestLinkChoiceRefusesToPairAMessageAndAClarificationFromDifferentThreads(t 
 		t.Errorf("FromCandidateIdx = %d, want -1 — the cross-thread link must not have taken effect", msgs[0].FromCandidateIdx)
 	}
 }
+
+func TestClarifyRemembersThatTheCardWasTooBroadToShow(t *testing.T) {
+	// A turn that ended by asking for a narrower question stores the same
+	// record as a card — the repositories it matched, in order — and has to
+	// come back as that panel after a reload rather than as a card offering
+	// twenty buttons.
+	s, ctx, threadID, _ := newThreadStore(t)
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "how is retry done?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	if _, err := s.Clarify(ctx, msg.ID, ask.Clarification{
+		TooBroad: true,
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master"},
+			{Repo: "loom", Branch: "main"},
+			{Repo: "ledger", Branch: "main"},
+			{Repo: "gateway", Branch: "main"},
+			{Repo: "ingest", Branch: "main"},
+		},
+	}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if msgs[0].Clarification == nil {
+		t.Fatal("the stored turn must carry what it asked")
+	}
+	if !msgs[0].Clarification.TooBroad {
+		t.Error("a too-broad turn must not come back as an ordinary card")
+	}
+	if len(msgs[0].Clarification.Candidates) != 5 {
+		t.Errorf("got %d repositories, want all five", len(msgs[0].Clarification.Candidates))
+	}
+}
+
+func TestAnOrdinaryCardIsNotTooBroad(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
+	if _, err := s.Clarify(ctx, msg.ID, twoCandidateClarification()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	msgs, _ := s.Messages(ctx, testSubject, threadID)
+	if msgs[0].Clarification.TooBroad {
+		t.Error("two candidates are a card, not a corpus too wide to ask about")
+	}
+}
+
+func TestATurnResumedFromTheTooBroadPanelSaysWhatItNarrowedTo(t *testing.T) {
+	// The card collapses to "Chosen: <title>". The panel has no titles, so it
+	// collapses to the repositories that were picked — and after a reload
+	// those have to come from the record, not from a click the page no longer
+	// remembers.
+	s, ctx, threadID, _ := newThreadStore(t)
+	asked, _ := s.AddQuestion(ctx, threadID, "ba", "en", "how is retry done?", 0)
+	clarID, err := s.Clarify(ctx, asked.ID, ask.Clarification{
+		TooBroad:   true,
+		Candidates: []ask.Candidate{{Repo: "peeq", Branch: "master"}, {Repo: "loom", Branch: "main"}},
+	})
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	answered, _ := s.AddQuestion(ctx, threadID, "ba", "en", "how is retry done?", 0)
+	if err := s.SetScope(ctx, answered.ID, ask.Scope{Known: []string{"peeq", "loom"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	// -1 is the column's "no candidate": the answer came from the panel as a
+	// whole, not from a row on it.
+	if err := s.LinkChoice(ctx, testSubject, answered.ID, clarID, -1); err != nil {
+		t.Fatalf("link choice: %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	got := msgs[1].NarrowedTo
+	if len(got) != 2 || got[0] != "peeq" || got[1] != "loom" {
+		t.Errorf("narrowed to %v, want both repositories the reader picked", got)
+	}
+	if len(msgs[0].NarrowedTo) != 0 {
+		t.Error("the turn that ASKED narrowed to nothing; only the one that answered did")
+	}
+}
+
+func TestATurnResumedFromACardNarrowsToNothingItHasToRepeat(t *testing.T) {
+	// A card already says what was chosen, by title, on the card itself. The
+	// answering turn repeating it as a repository list would put the same
+	// decision in the record twice, in two shapes.
+	s, ctx, threadID, _ := newThreadStore(t)
+	asked, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
+	clarID, err := s.Clarify(ctx, asked.ID, twoCandidateClarification())
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	answered, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
+	if err := s.SetScope(ctx, answered.ID, ask.Scope{Known: []string{"peeq"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	if err := s.LinkChoice(ctx, testSubject, answered.ID, clarID, 1); err != nil {
+		t.Fatalf("link choice: %v", err)
+	}
+
+	msgs, _ := s.Messages(ctx, testSubject, threadID)
+	if len(msgs[1].NarrowedTo) != 0 {
+		t.Errorf("narrowed to %v, want nothing — the card names the choice itself", msgs[1].NarrowedTo)
+	}
+}
