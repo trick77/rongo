@@ -286,6 +286,13 @@ type Scope struct {
 	// result — so this is the only thing that keeps a turn from answering
 	// about code the reader never asked about.
 	Unknown []string
+	// All is the reader asking for the whole corpus on purpose — either the
+	// question said so, or they picked "all repositories" off a repository
+	// card. It is what tells the repository rung in Decide that a turn
+	// spanning several repositories is wanted rather than ambiguous, and it is
+	// part of the record: a resumed or re-explained turn must answer under the
+	// same permission the first one had.
+	All bool `json:"All,omitempty"`
 	// DocsOnly is true when every source the answer was written from is
 	// documentation. Not something the question said, but it belongs here for
 	// the same reason Unknown does: it is what the turn has to tell the reader
@@ -379,6 +386,31 @@ func ScopeNotice(lang Language, sc Scope) string {
 		parts = append(parts, docsOnlyNotice[l])
 	}
 	return strings.Join(parts, " ")
+}
+
+// allReposTitle and allReposSummary are the last entry on a repository card:
+// the reader saying "I meant all of them". Templated rather than written by a
+// model, exactly like scopeNotice and nothingFound — the text is already
+// known, and a person reads it, so the answer language applies.
+var allReposTitle = map[Language]string{
+	LanguageEN: "All repositories",
+	LanguageDE: "Alle Repositories",
+	LanguageFR: "Tous les dépôts",
+	LanguageIT: "Tutti i repository",
+}
+
+var allReposSummary = map[Language]string{
+	LanguageEN: "Answer across every indexed repository.",
+	LanguageDE: "Über alle indexierten Repositories hinweg antworten.",
+	LanguageFR: "Répondre sur l'ensemble des dépôts indexés.",
+	LanguageIT: "Rispondere su tutti i repository indicizzati.",
+}
+
+// AllReposChoice is the title and summary of a repository card's last entry,
+// in the language the reader asked for.
+func AllReposChoice(lang Language) (title, summary string) {
+	l := ParseLanguage(string(lang))
+	return allReposTitle[l], allReposSummary[l]
 }
 
 // coveredRepos is the named repositories that actually have a source in front

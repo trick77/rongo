@@ -296,8 +296,14 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // documentation alone has something to say about its own footing even when the
 // question named no repository at all, which is the ordinary shape of that
 // turn.
+//
+// All is not emptiness either. A turn that asked for every repository — said
+// so, or picked it off a card — names none and still has a scope worth
+// keeping: a later re-explain has to answer under the same permission, and
+// without this it would read a zero scope and be asked which repository was
+// meant all over again.
 func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) error {
-	if len(sc.Known) == 0 && len(sc.Unknown) == 0 && !sc.DocsOnly {
+	if len(sc.Known) == 0 && len(sc.Unknown) == 0 && !sc.DocsOnly && !sc.All {
 		return nil
 	}
 	blob, err := json.Marshal(sc)

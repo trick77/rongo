@@ -56,14 +56,14 @@ func TestDecideDoesNotAskWhenTheQuestionNamedBothRepositories(t *testing.T) {
 	// When the question named two indexed repositories.
 	// Then no rung below can reach: the reader asked about both, and a card
 	// would ask them to answer a question they already answered.
-	if Decide(tight, 0.25, false, true, 2, true) {
+	if Decide(tight, 0.25, false, true, 2, false, true) {
 		t.Error("a question naming two repositories must be answered, not asked about")
 	}
 	// One named repository is not a comparison, and changes nothing.
-	if !Decide(tight, 0.25, false, true, 1, true) {
+	if !Decide(tight, 0.25, false, true, 1, false, true) {
 		t.Error("one named repository must leave the ladder alone")
 	}
-	if !Decide(tight, 0.25, false, true, 0, true) {
+	if !Decide(tight, 0.25, false, true, 0, false, true) {
 		t.Error("no named repository must leave the ladder alone")
 	}
 }
@@ -81,7 +81,7 @@ func TestRouteSkipsTheJudgeWhenTwoRepositoriesWereNamed(t *testing.T) {
 	got, err := r.Route(context.Background(), "how do peeq and rongo differ?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "rongo", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, []string{"peeq", "rongo"})
+	}, []string{"peeq", "rongo"}, false)
 
 	// Then
 	if err != nil {

@@ -47,6 +47,12 @@ type fakeAsker struct {
 
 	resumeTokens []string
 	resumeErr    error
+	// resumedRepo records the repository a repo-grained resume searched, and
+	// resumedRepoCall whether that path ran at all — the two are different
+	// facts, because the card's "all repositories" entry resumes with an
+	// empty repo on purpose.
+	resumedRepo     string
+	resumedRepoCall bool
 
 	reexplainTokens []string
 	reexplainErr    error
@@ -106,6 +112,33 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 	}
 	// A resumed turn always carries the sources it was written from, so the
 	// handler has something to persist for a later re-explain.
+	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
+}
+
+// ResumeRepo is the repository card's resume: it searches the chosen
+// repository again rather than replaying stored hits, so the fake records
+// which repository it was handed.
+func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understanding, repo string,
+	aud ask.Audience, lang ask.Language, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+
+	f.gotAud = aud
+	f.gotScope = gotScope
+	f.gotLang = lang
+	f.resumedRepo = repo
+	f.resumedRepoCall = true
+	for _, c := range f.calls {
+		usage.Record(ctx, c)
+	}
+	if f.resumeErr != nil {
+		return ask.Answer{}, f.resumeErr
+	}
+	var text string
+	for _, tok := range f.resumeTokens {
+		text += tok
+		if ev.OnToken != nil {
+			ev.OnToken(tok)
+		}
+	}
 	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
@@ -232,6 +265,40 @@ func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string
 			{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
 				Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
 		},
+	})
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	return msg.ID, clarID
+}
+
+// seedRepoClarification seeds a thread whose card offered REPOSITORIES: two
+// of them plus the "all repositories" entry, which carries no repository at
+// all. The empty module key is the discriminator the handler reads, so this
+// helper differs from seedClarification in exactly the way a stored repository
+// card does.
+func seedRepoClarification(t *testing.T, store *threads.Store) (msgID, clarID int64) {
+	t.Helper()
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "how are token costs calculated in $?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how are token costs calculated in $?")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.SetScope(ctx, msg.ID, ask.Scope{Unknown: []string{"shopfront"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
+		Understanding: ask.Understanding{CodeTerms: []string{"pricing"}},
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master", Title: "Token cost per turn", Summary: "s1"},
+			{Repo: "loom", Branch: "master", Title: "Per-request cost", Summary: "s2"},
+			{Title: "All repositories", Summary: "Answer across every indexed repository."},
+		},
+		Scope: ask.Scope{Unknown: []string{"shopfront"}},
 	})
 	if err != nil {
 		t.Fatalf("clarify: %v", err)
@@ -945,6 +1012,90 @@ func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 		t.Errorf("new turn records candidate %d, want 1", last.FromCandidateIdx)
 	}
 	_ = clarID
+}
+
+// TestChoosingARepositorySearchesItAgainRatherThanReplayingHits: a repository
+// card stores no hits worth replaying — it grouped one fused list, and the
+// runner-up repository's share of it is not an answer. The handler tells the
+// two card shapes apart by the stored module key, so cards written before this
+// existed still resume from their hits.
+func TestChoosingARepositorySearchesItAgainRatherThanReplayingHits(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	msgID, _ := seedRepoClarification(t, store)
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how are token costs calculated in $?","clarification_message_id":%d,"choice":1}`, msgID))
+
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("a chosen repository must produce an answer:\n%s", body)
+	}
+	if !asker.resumedRepoCall {
+		t.Fatal("a repository choice must take the searching resume, not the stored-hits one")
+	}
+	if asker.resumedRepo != "loom" {
+		t.Errorf("searched %q, want the repository that was chosen", asker.resumedRepo)
+	}
+	// The choice IS the scope now, and the repository the question named that
+	// the index does not carry is still said out loud.
+	if len(asker.gotScope.Known) != 1 || asker.gotScope.Known[0] != "loom" {
+		t.Errorf("scope.Known = %v, want only the chosen repository", asker.gotScope.Known)
+	}
+	if len(asker.gotScope.Unknown) != 1 || asker.gotScope.Unknown[0] != "shopfront" {
+		t.Errorf("scope.Unknown = %v, want the stored notice carried over", asker.gotScope.Unknown)
+	}
+	if asker.gotScope.All {
+		t.Error("choosing one repository is not asking for all of them")
+	}
+}
+
+// TestChoosingAllRepositoriesAnswersAcrossTheCorpusAndRecordsThat is the
+// card's last entry: today's behaviour, one click instead of retyping the
+// question — and recorded, so a later re-explain answers under the same
+// permission rather than being asked which repository was meant.
+func TestChoosingAllRepositoriesAnswersAcrossTheCorpusAndRecordsThat(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	msgID, _ := seedRepoClarification(t, store)
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how are token costs calculated in $?","clarification_message_id":%d,"choice":2}`, msgID))
+
+	if !asker.resumedRepoCall {
+		t.Fatal("the all-repositories entry is a repository choice too")
+	}
+	if asker.resumedRepo != "" {
+		t.Errorf("searched %q, want the whole corpus", asker.resumedRepo)
+	}
+	if !asker.gotScope.All {
+		t.Error("the turn must know it was allowed to answer across every repository")
+	}
+	if len(asker.gotScope.Known) != 0 {
+		t.Errorf("scope.Known = %v, want none — every repository is not a list of them", asker.gotScope.Known)
+	}
+
+	msgs, err := store.Messages(context.Background(), testSubject, threadOf(t, store, msgID))
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if last := msgs[len(msgs)-1]; !last.Scope.All {
+		t.Errorf("stored scope = %+v, want the permission in the record", last.Scope)
+	}
+}
+
+// TestChoosingAModuleStillResumesFromItsStoredHits is the other half of the
+// discriminator: nothing about the module card changed.
+func TestChoosingAModuleStillResumesFromItsStoredHits(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	msgID, _ := seedClarification(t, store)
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
+
+	if asker.resumedRepoCall {
+		t.Error("a module choice must replay the hits the card offered, never search again")
+	}
 }
 
 func TestAClarificationIsAnsweredOnceAndASecondChoiceIsRefused(t *testing.T) {

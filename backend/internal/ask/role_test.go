@@ -16,11 +16,17 @@ import (
 // Developer's path as untouched by it.
 
 // twoUnrelated is the shape every test here routes: two candidates at almost
-// the same score, in repositories with no manifest edge between them, which
-// is what carries the ladder past the margin and the dependency rung.
+// the same score, which is what carries the ladder past the margin and the
+// dependency rung.
+//
+// Both sit in ONE repository, and that is not incidental. The role gate is the
+// ladder's last rung, below the repository rung: candidates spanning two
+// repositories are settled there — a card asking which product, which an
+// Analyst can always answer — and never reach this gate at all. The ambiguity
+// this rung exists for is two ways of doing the same thing inside one system.
 var twoUnrelated = []retrieve.Hit{
 	{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
-	{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
+	{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
 }
 
 func TestRouteDoesNotAskTheAnalystAQuestionOnlyCodeCanAnswer(t *testing.T) {
@@ -40,7 +46,7 @@ func TestRouteDoesNotAskTheAnalystAQuestionOnlyCodeCanAnswer(t *testing.T) {
 	}), testDBWithDeps(t, nil))
 
 	// When the reader is the Analyst
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
 
 	// Then the turn answers across the candidates instead of asking
 	if err != nil {
@@ -80,7 +86,7 @@ func TestRouteAsksTheAnalystWhenTheOptionsDifferInTheDomain(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -100,14 +106,14 @@ func TestRouteNeverShowsTheAnalystACardCarryingAPath(t *testing.T) {
 		case strings.Contains(prompt, choosableMarker):
 			gateCalls++
 			return `{"decision":"choose"}`
-		case strings.Contains(prompt, "loom"):
+		case strings.Contains(prompt, "internal/login"):
 			return `not json`
 		default:
 			return `{"title":"Anmeldung","summary":"Meldet den Benutzer an."}`
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -133,7 +139,7 @@ func TestRouteComposesForTheAnalystWhenTheGateCannotBeRead(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -155,7 +161,7 @@ func TestTheDeveloperPathIsUntouchedByTheRoleRung(t *testing.T) {
 		return `{"title":"Session handling","summary":"Takes requests and answers them."}`
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, twoUnrelated, nil)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, twoUnrelated, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -193,7 +199,7 @@ func TestTheAnalystIsNamedInDomainWordingAndInTheReadersLanguage(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceBA, LanguageDE, twoUnrelated, nil); err != nil {
+	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceBA, LanguageDE, twoUnrelated, nil, false); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 	if len(namePrompts) == 0 {

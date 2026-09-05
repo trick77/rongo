@@ -31,7 +31,7 @@ type Searcher interface {
 // must ask the reader to choose among candidates. An interface — satisfied by
 // *Router — so the pipeline can be tested without a database or a model.
 type Routes interface {
-	Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error)
+	Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -133,7 +133,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("resolve the named repositories: %w", err)
 	}
-	scope := Scope{Known: known, Unknown: unknown}
+	scope := Scope{Known: known, Unknown: unknown, All: u.AllRepos}
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
@@ -147,7 +147,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	}
 
 	ev.status("routing")
-	d, err := p.router.Route(ctx, question, audience, lang, hits, known)
+	d, err := p.router.Route(ctx, question, audience, lang, hits, known, u.AllRepos)
 	if err != nil {
 		return Answer{}, nil, err
 	}
@@ -257,6 +257,52 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 // anything else.
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
 	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, ev)
+}
+
+// ResumeRepo continues a turn after the reader chose a REPOSITORY off a
+// clarification card, rather than a module.
+//
+// It searches again, which no other resume path does. A module card stores the
+// hits its candidate was built from and replays them, because the answer has
+// to be built from exactly what was offered. A repository card cannot work
+// that way: the hits it grouped came from one fused list of searchK, and a
+// list skewed to the leading repository leaves the runner-up two or three
+// chunks to answer from. Searching the chosen repository on its own gives it
+// the same depth a question naming it would have got — the same reasoning, and
+// the same searchK, as searchScoped's per-repository pass.
+//
+// repo empty is the card's "all repositories" entry: the whole corpus, exactly
+// the search the turn would have run without a card at all. The question goes
+// back in there because knownRepos may narrow on what it names; in the scoped
+// case it is left out for the reason searchScoped gives, or the other
+// repositories would be unioned straight back in.
+func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repo string,
+	audience Audience, lang Language, scope Scope, ev Events) (Answer, error) {
+
+	texts := u.SearchTexts(question)
+	q := retrieve.Query{Texts: texts, Question: question, K: searchK}
+	if repo != "" {
+		q = retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK}
+	}
+	ev.status("searching")
+	hits, err := p.search.Search(ctx, q)
+	if err != nil {
+		return Answer{}, fmt.Errorf("search: %w", err)
+	}
+
+	ev.status("gathering")
+	sources, err := p.gatherer.Gather(ctx, hits)
+	if err != nil {
+		return Answer{}, err
+	}
+	if len(sources) == 0 {
+		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
+	}
+
+	ev.status("answering")
+	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	answer.Scope = scope
+	return answer, err
 }
 
 // Reexplain answers the same question for the other audience from sources a

@@ -69,22 +69,41 @@ func anyMarginNeedsLadder(all []ask.Candidate, margins []float64) bool {
 // as Route()'s own short-circuit does. The three returned values are then fed
 // into ask.Decide for as many margins as the caller wants, at no further database
 // or model cost.
-func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string, hits []retrieve.Hit, margins []float64) (all []ask.Candidate, related, judged bool) {
+//
+// named is how many repositories the question named that the index carries.
+// It is not there to be re-decided here — ask.Decide does that — but because
+// the repository rung is NOT keyed off the margin: a question that names no
+// repository and whose candidates span several reaches Related whatever the
+// margin says, and asks it about the repositories rather than the capped
+// module list. A harness that kept paying for Related on the margin alone
+// would hand Decide related=false on exactly those turns and measure a card
+// where the product composes.
+func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string, hits []retrieve.Hit, margins []float64, named int) (all []ask.Candidate, related, judged bool) {
 	t.Helper()
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		t.Fatalf("rank %q: %v", question, err)
 	}
 	all = ranked.All
-	if !anyMarginNeedsLadder(all, margins) {
+	spans := ask.SpansRepos(all, named)
+	if !spans && !anyMarginNeedsLadder(all, margins) {
 		return all, false, false
 	}
-	related, err = r.Related(ctx, ranked.Capped)
+	depsOver := ranked.Capped
+	if spans {
+		depsOver = ask.RepoCandidates(all)
+	}
+	related, err = r.Related(ctx, depsOver)
 	if err != nil {
 		t.Fatalf("related %q: %v", question, err)
 	}
 	if related {
 		return all, true, false
+	}
+	if spans {
+		// The repository rung decides on its own; Route never pays the judge
+		// here, so neither does the sweep.
+		return all, false, false
 	}
 	judged, err = r.Judge(ctx, question, ranked.Capped)
 	if err != nil {
@@ -277,11 +296,11 @@ func TestEvalMeasureRouting(t *testing.T) {
 		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
 		want := resolutionExpectsAsk(q.Resolution)
 
-		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin})
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named), true)})
+		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin}, len(named))
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named), false, true)})
 
-		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin})
-		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named), true)})
+		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin}, len(named))
+		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named), false, true)})
 	}
 
 	t.Logf("")
@@ -338,7 +357,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	rows := make([]perQuestion, 0, len(questions))
 	for _, q := range questions {
 		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
-		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins)
+		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins, len(named))
 		rows = append(rows, perQuestion{all: all, related: related, judged: judged, named: len(named), want: resolutionExpectsAsk(q.Resolution), q: q})
 	}
 
@@ -347,7 +366,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	for _, margin := range routeMargins {
 		correct := 0
 		for _, row := range rows {
-			if ask.Decide(row.all, margin, row.related, row.judged, row.named, true) == row.want {
+			if ask.Decide(row.all, margin, row.related, row.judged, row.named, false, true) == row.want {
 				correct++
 			}
 		}
@@ -406,7 +425,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
 		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
-		d, err := router.Route(ctx, q.Text, ask.AudienceDev, ask.LanguageEN, hits, named)
+		d, err := router.Route(ctx, q.Text, ask.AudienceDev, ask.LanguageEN, hits, named, false)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
 		}
@@ -507,7 +526,7 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	if anyMarginNeedsLadder(dominant, []float64{0.10, 0.40}) {
 		t.Error("a dominant pair never needs the ladder to go on at any margin in this sweep")
 	}
-	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */, 0, true) {
+	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */, 0, false, true) {
 		t.Error("a dominant pair must answer without asking regardless of related/judged")
 	}
 
@@ -517,16 +536,16 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	}
 
 	// Once past Dominates, a manifest dependency short-circuits the judge.
-	if got := ask.Decide(tight, 0.10, true, true /* must not be read */, 0, true); got {
+	if got := ask.Decide(tight, 0.10, true, true /* must not be read */, 0, false, true); got {
 		t.Error("a manifest dependency must not ask even if the judge would have said ask")
 	}
 
 	// Once past Dominates and with no manifest dependency, the judge's answer
 	// is what decides — never defaulted.
-	if got := ask.Decide(tight, 0.10, false, true, 0, true); !got {
+	if got := ask.Decide(tight, 0.10, false, true, 0, false, true); !got {
 		t.Error("ask.Decide must read the judge's answer once the margin does not dominate and nothing is related")
 	}
-	if got := ask.Decide(tight, 0.10, false, false, 0, true); got {
+	if got := ask.Decide(tight, 0.10, false, false, 0, false, true); got {
 		t.Error("ask.Decide must read the judge's answer, not default to true")
 	}
 
