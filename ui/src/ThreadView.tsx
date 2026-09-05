@@ -3,7 +3,7 @@ import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Question from "./Question";
 import Trace from "./Trace";
-import { Chevron } from "./icons";
+import { CheckIcon, Chevron, CopyIcon } from "./icons";
 import {
   clock,
   forgeLine,
@@ -41,6 +41,7 @@ export type ThreadActions = {
   onReexplain: (i: number) => void;
   /** Reports whether the clipboard took it: the label must not say so if not. */
   onCopy: (i: number) => Promise<boolean>;
+  onCopyQuestion: (i: number) => Promise<boolean>;
   onFollowup: (i: number, question: string) => void;
   onChoose: (i: number, idx: number) => void;
 };
@@ -84,6 +85,10 @@ export default function ThreadView({
   threadKey = null,
 }: ThreadViewProps) {
   const [copied, setCopied] = useState<number | null>(null);
+  // The question copied, by the index of the turn it was asked in. Its own
+  // state: copying the question and copying the answer are two controls, and
+  // one flag would light both.
+  const [copiedQuestion, setCopiedQuestion] = useState<number | null>(null);
   // The turn whose usage breakdown is open, if any. One at a time: it is a
   // glance at what a turn cost, not a report to keep open.
   const [openUsage, setOpenUsage] = useState<number | null>(null);
@@ -153,6 +158,13 @@ export default function ThreadView({
     setTimeout(() => setCopied(null), 1500);
   }
 
+  async function copyQuestion(turnIndex: number) {
+    if (!actions) return;
+    if (!(await actions.onCopyQuestion(turnIndex))) return;
+    setCopiedQuestion(turnIndex);
+    setTimeout(() => setCopiedQuestion(null), 1500);
+  }
+
   // One article per question. The list itself stays flat — every action here
   // addresses a turn by its position in it — and only the rendering groups.
   const groups = useMemo(() => groupByQuestion(turns), [turns]);
@@ -205,6 +217,28 @@ export default function ThreadView({
                     <span className={pill + " bg-active text-muted"}>
                       {languages.find((l) => l.code === asked.language)?.name ?? asked.language}
                     </span>
+                  )}
+                  {/* The question's own copy, next to the words it copies.
+                      The answer's footer copies the whole turn as Markdown,
+                      which is the wrong thing to paste into a ticket or the
+                      composer of another thread; and selecting the prose by
+                      hand fights a question folded at three lines.
+
+                      Always drawn, never revealed on hover: a phone has no
+                      hover, the same reason the diagram toolbar gives. Not on
+                      a shared page, where the footer's copy is gone too — one
+                      copy control without the other would read as an
+                      oversight rather than as a decision. */}
+                  {actions && (
+                    <button
+                      type="button"
+                      onClick={() => copyQuestion(group[0])}
+                      aria-label={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
+                      title={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
+                      className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
+                    >
+                      {copiedQuestion === group[0] ? <CheckIcon /> : <CopyIcon />}
+                    </button>
                   )}
                 </div>
 

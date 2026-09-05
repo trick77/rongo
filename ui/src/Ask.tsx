@@ -136,7 +136,8 @@ export default function Ask({
   /** Something changed that the thread list should see. */
   onActivity?: () => void;
   /** Reports whether a turn is in flight, so the thread list can lock. */
-  onBusy?: (busy: boolean) => void;
+  /** Whether a turn is running, and the thread it is being written into. */
+  onBusy?: (busy: boolean, threadId: number | null) => void;
   /** Reports the thread's running total — every turn on screen summed, the
    * ones that asked back or failed included — or null when nothing is
    * known yet. The header shows it next to the title. */
@@ -154,8 +155,8 @@ export default function Ask({
   const [busy, setBusy] = useState(false);
   // The marker under the pointer, reported up by ThreadView so the pane in
   // the column beside it can point back. Everything else the reading half
-  // remembers — the open usage block, the unfolded failure, the file in the
-  // viewer — lives inside ThreadView, where it belongs.
+  // remembers — the open usage block, the unfolded failure, which turn has
+  // just been copied — lives inside ThreadView, where it belongs.
   const [hot, setHot] = useState<number | null>(null);
   // The source open in the viewer, or null while it is closed. Page-level:
   // the overlay covers the whole app, and both the text and the pane beside
@@ -233,6 +234,16 @@ export default function Ask({
   // the reader moves it.
   const opened = useRef(false);
 
+  // Markdown is memoized, and a fresh arrow per render would defeat it on
+  // every turn at once. One handler per turn index is kept instead, and it
+  // reads the turns through a ref so it never goes stale: the index is the
+  // position in the thread on screen, which is what the reader clicked in.
+  const live = useRef(turns);
+  live.current = turns;
+  // The per-turn marker handlers that used to sit here are ThreadView's now,
+  // with the rest of the reading half. `live` stays: appendTurn and patchLast
+  // read it to write into the turn being streamed.
+
   // Retires a thread load still in the air, with everything that was waiting
   // on it. The record must not land on top of what the reader is doing — and
   // the skeleton would otherwise sit above their new turn for good, with the
@@ -244,16 +255,58 @@ export default function Ask({
     opened.current = false;
   }
 
-  function patchLast(patch: (t: Turn) => Turn) {
-    setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
+  /**
+   * The thread a turn is being written into, and its whole conversation as the
+   * stream has it so far. The pair is what lets the reader walk away from an
+   * answer and come back to it: the tokens keep landing in this list whether or
+   * not it is the one on screen, and opening that thread again restores it
+   * instead of fetching a record the turn has not reached yet.
+   *
+   * A ref, not state: every token patches it, and the arrival has to be there
+   * for the next patch in the same tick rather than after a commit.
+   */
+  const liveThread = useRef<number | null>(null);
+  const liveTurns = useRef<Turn[] | null>(null);
+
+  /**
+   * Appends a turn and hands the new list to the stream that is about to write
+   * into it. Every path that asks something goes through here — a question, a
+   * resumed card, a re-explain, a retry, a suggestion — because every one of
+   * them is a turn the reader may walk away from.
+   */
+  function appendTurn(t: Turn, edit: (list: Turn[]) => Turn[] = (l) => l) {
+    const next = [...edit(live.current), t];
+    // live mirrors the rendered turns and is what the next patch reads, so it
+    // is moved on now rather than at the commit this schedules.
+    live.current = next;
+    liveTurns.current = next;
+    liveThread.current = threadId.current;
+    setTurns(next);
   }
 
-  // Announced upwards as well as kept locally: switching threads mid-stream
-  // would swap the turn list under patchLast, and the tokens still arriving
-  // would be written into the wrong conversation.
-  function markBusy(b: boolean) {
+  function patchLast(patch: (t: Turn) => Turn) {
+    const parked = liveTurns.current;
+    // Only a running turn is ever patched, and a running turn always has its
+    // parked list: every path into stream() appends through appendTurn first,
+    // and the list is dropped only once the stream is over.
+    if (!parked) return;
+    const next = parked.map((t, i) => (i === parked.length - 1 ? patch(t) : t));
+    liveTurns.current = next;
+    // Only the thread on screen is repainted. The reader may be reading
+    // another conversation entirely, and writing this turn into it is exactly
+    // what the old lock existed to prevent.
+    if (shown.current === liveThread.current) {
+      live.current = next;
+      setTurns(next);
+    }
+  }
+
+  // Announced upwards with the thread it belongs to: the rail withholds that
+  // one row's actions, and the composer says an answer is still arriving even
+  // when the reader has moved to a thread where nothing is happening.
+  function markBusy(b: boolean, id: number | null = null) {
     setBusy(b);
-    onBusy(b);
+    onBusy(b, id);
   }
 
   useEffect(() => {
@@ -270,6 +323,23 @@ export default function Ask({
     // left — the open breakdown, the unfolded failure — is ThreadView's, and
     // it drops with the turns it belonged to.
     onUsage(null);
+    // The thread being written comes back from the parked copy, never from the
+    // server: the record has no answer on it yet — the row is only finished
+    // when the turn is — so a fetch would replace a half-written answer with
+    // an empty one and the rest of the tokens would land out of sight.
+    if (openThread !== null && openThread === liveThread.current && liveTurns.current) {
+      const parked = liveTurns.current;
+      live.current = parked;
+      setTurns(parked);
+      setLoading(false);
+      onUsage(threadUsage(parked));
+      // Not an opened record but an answer in flight: the view belongs at the
+      // foot, following what is still arriving, exactly as it did when the
+      // reader left it.
+      opened.current = false;
+      following.current = true;
+      return;
+    }
     // The body empties in the same commit as the header, not a beat behind
     // it: the conversation that was just left used to stand under the new
     // thread's title for as long as the load took, which is the whole of the
@@ -389,7 +459,7 @@ export default function Ask({
    * untouched.
    */
   async function stream(url: string, body: Record<string, unknown>, retryable = true): Promise<boolean> {
-    markBusy(true);
+    markBusy(true, liveThread.current);
     let ok = true;
     // Terminal events, the two ways a turn is meant to end. A stream that
     // closes without one of them — a proxy FIN, a backend restart mid-answer —
@@ -422,9 +492,22 @@ export default function Ask({
         buffer = drain(buffer, (name, data) => {
           const payload = data ? JSON.parse(data) : {};
           if (name === "thread") {
-            threadId.current = payload.thread_id;
-            shown.current = payload.thread_id;
-            onThread(payload.thread_id);
+            // The turn was appended before the thread existed, so this is
+            // where it learns which conversation it is parked under. Always,
+            // whatever the reader is looking at: the parking is what keeps
+            // the tokens out of the thread in front of them.
+            liveThread.current = payload.thread_id;
+            markBusy(true, payload.thread_id);
+            // The rest only if the reader is still standing where they asked.
+            // A first question whose thread id arrives after they have opened
+            // another conversation must not drag them back to it — and
+            // threadId, which is where the NEXT question is filed, belongs to
+            // the thread they are in, not to the one they left.
+            if (shown.current === null) {
+              threadId.current = payload.thread_id;
+              shown.current = payload.thread_id;
+              onThread(payload.thread_id);
+            }
             // The turn is on record now, in the language the record took. That
             // is not always the one that was asked for — a thread answers in
             // the language of its first turn — so the turn on screen, and with
@@ -494,6 +577,11 @@ export default function Ask({
       ok = false;
       patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
     } finally {
+      // The turn is over, so the parked copy is dropped: from here the record
+      // is complete — answer, citations, suggestions and all — and coming back
+      // to the thread reads it from the server like any other.
+      liveTurns.current = null;
+      liveThread.current = null;
       markBusy(false);
     }
     return ok;
@@ -529,7 +617,7 @@ export default function Ask({
     // load is what the reader expects anyway: they have moved on.
     retireLoad();
 
-    setTurns((prev) => [...prev, freshTurn(q, audience, asking)]);
+    appendTurn(freshTurn(q, audience, asking));
     setQuestion("");
 
     await stream("/api/ask", { question: q, audience, language: asking, thread_id: threadId.current ?? 0 });
@@ -552,11 +640,15 @@ export default function Ask({
     if (!turn.clarification || turn.chosenIdx != null) return;
 
     retireLoad();
-    setTurns((prev) => [
-      ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
+    appendTurn(
       freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
-    ]);
+      (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
+    );
 
+    // The card belongs to the thread it was asked in, and turnIndex is an
+    // index into that thread's turns — in another one it points at a
+    // different turn entirely.
+    const cardThread = threadId.current;
     const ok = await stream("/api/ask", {
       thread_id: threadId.current ?? 0,
       question: turn.question,
@@ -565,7 +657,12 @@ export default function Ask({
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
     }, false);
-    if (!ok) setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+    // A reader who has moved on gets the unlock from the record instead: the
+    // choice is stored only when an answer lands, so the card they come back
+    // to is open again anyway.
+    if (!ok && shown.current === cardThread) {
+      setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+    }
   }
 
   /**
@@ -581,7 +678,7 @@ export default function Ask({
     const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
     retireLoad();
-    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language, headOf(turn))]);
+    appendTurn(freshTurn(turn.question, nextAudience, turn.language, headOf(turn)));
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
   }
@@ -600,7 +697,7 @@ export default function Ask({
     const turn = turns[turnIndex];
 
     retireLoad();
-    setTurns((prev) => [...prev, freshTurn(question, turn.audience, turn.language)]);
+    appendTurn(freshTurn(question, turn.audience, turn.language));
 
     await stream("/api/ask", {
       question,
@@ -625,7 +722,7 @@ export default function Ask({
     const head = headOf(turn);
 
     retireLoad();
-    setTurns((prev) => [...prev, freshTurn(turn.question, turn.audience, turn.language, head)]);
+    appendTurn(freshTurn(turn.question, turn.audience, turn.language, head));
 
     // The thread id is taken now, not from the stored body: the thread may
     // have been created by the very turn that failed, and a stored turn's
@@ -643,21 +740,36 @@ export default function Ask({
     );
   }
 
-  // The five things a reader can do to a turn. ThreadView draws the turns and
+  // The six things a reader can do to a turn. ThreadView draws the turns and
   // knows nothing about the stream; this is the whole of what it can set off.
   // A memo, because a fresh object per render would remount every turn on
   // every streamed token.
+  //
+  // Both copies report whether the clipboard took it: in an insecure context,
+  // or with the permission refused, a button saying "Copied" over a clipboard
+  // that still holds whatever was there before is a plain lie. Nothing else is
+  // said about it — the text is on screen to select, and a banner would be
+  // noise.
   const actions = useMemo(
     () => ({
       onRetry: retry,
       onReexplain: reexplain,
       onCopy: async (i: number) => {
-        // Silent on a refusal (insecure context, permissions): the answer is
-        // still on screen to select, and a banner for it would be noise. The
-        // button is told, though — it must not say "Copied" over a clipboard
-        // that still holds whatever was there before.
         try {
-          await navigator.clipboard.writeText(asMarkdown(turns[i]));
+          await navigator.clipboard.writeText(asMarkdown(live.current[i]));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      // The question alone, as it was typed. Not asMarkdown's heading: this
+      // is for quoting the question somewhere else — a ticket, a message, the
+      // composer of another thread — and a `# ` in front of it is rongo's
+      // formatting, not the reader's words. The full text is always in the
+      // DOM, so a folded question copies whole.
+      onCopyQuestion: async (i: number) => {
+        try {
+          await navigator.clipboard.writeText(live.current[i].question);
           return true;
         } catch {
           return false;
@@ -805,43 +917,35 @@ export default function Ask({
                   </button>
                 ))}
               </fieldset>
-              {/* Pinned once the thread has a turn: dimmed, no chevron, no
-                  hover — the pill stays where it was and still says which
-                  language the thread is in, it just no longer offers a change.
-                  The title says why, for the reader who tries. */}
-              <label
-                title={threadLanguage ? "Pinned to the language of the first question." : undefined}
-                className={
-                  "relative inline-flex h-9 items-center rounded-full border border-border bg-bg pl-3 text-xs text-muted sm:h-8 " +
-                  (threadLanguage ? "pr-3 opacity-75" : "pr-2.5 hover:border-elevated-border hover:text-ink")
-                }
-              >
-                <span className="sr-only">Answer language</span>
-                <select
-                  aria-label="Answer language"
-                  value={asking}
-                  disabled={threadLanguage !== null}
-                  onChange={(e) => {
-                    setLanguage(e.target.value);
-                    rememberLanguage(e.target.value);
-                  }}
-                  className={
-                    "lang-select border-0 bg-transparent text-inherit outline-none pointer-coarse:text-base " +
-                    (threadLanguage ? "cursor-default opacity-100" : "cursor-pointer pr-4")
-                  }
-                >
-                  {languages.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-                {!threadLanguage && (
+              {/* Only while the choice is still open. A thread answers in the
+                  language of its first question, so from the second turn on
+                  this offered nothing: it stood there pinned and dimmed, a
+                  control that refused every hand laid on it. The turn's own
+                  pill above the answer already says which language the thread
+                  is in, and it says it where the answer is. */}
+              {!threadLanguage && (
+                <label className="relative inline-flex h-9 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink sm:h-8">
+                  <span className="sr-only">Answer language</span>
+                  <select
+                    aria-label="Answer language"
+                    value={asking}
+                    onChange={(e) => {
+                      setLanguage(e.target.value);
+                      rememberLanguage(e.target.value);
+                    }}
+                    className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none pointer-coarse:text-base"
+                  >
+                    {languages.map((l) => (
+                      <option key={l.code} value={l.code}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
                   <span className="pointer-events-none absolute right-2 rotate-90">
                     <Chevron />
                   </span>
-                )}
-              </label>
+                </label>
+              )}
               {/* ml-auto belongs to the pair, not to the hint: the hint is not
                   rendered below sm, and with the push on it the Ask button
                   lost its right edge on exactly the width that needs it. */}
@@ -856,6 +960,16 @@ export default function Ask({
                 </button>
               </div>
             </div>
+            {/* The Ask button is dead here and the reason is somewhere else
+                entirely — a turn still being written in another thread. A
+                dimmed button with no explanation is the thing this whole
+                change is about. Only when the answer is out of sight: in the
+                thread being written, the running turn is right above. */}
+            {busy && liveThread.current !== shown.current && (
+              <p className="mt-2 px-1 text-xs text-muted">
+                Another thread is still being answered — the next question waits for it.
+              </p>
+            )}
           </div>
         </form>
       </div>
