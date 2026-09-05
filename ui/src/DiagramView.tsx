@@ -28,7 +28,15 @@ export default function DiagramView({
   const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
-  const [fit, setFit] = useState(true);
+  // Fitting is the default on a screen with room for it, and only there.
+  // Below sm the sheet is a phone's width, and fitting a seven-actor sequence
+  // lands near 0.34: the 10px chips reach 3.5px, which is neither readable nor
+  // tappable — exactly what diagram.tsx keeps the drawing unscaled to avoid.
+  // A phone opens at 1:1 and scrolls, as the card behind it does, and the
+  // toggle is there to take the whole picture in deliberately.
+  const [fit, setFit] = useState(
+    () => typeof matchMedia !== "function" || matchMedia("(min-width: 40rem)").matches,
+  );
   const [box, setBox] = useState({ width: 0, height: 0 });
   const title = diagramTitle(spec);
   const size = diagramSize(spec);

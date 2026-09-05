@@ -120,6 +120,24 @@ describe("DiagramView", () => {
     observing(400, 400);
   });
 
+  it("opens at 1:1 on a phone, rather than shrinking the chips out of reach", () => {
+    // At 390px fitting this diagram lands near 0.34, and the 10px chips with
+    // it. The phone scrolls the picture, as the card behind it does.
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const { container, getByText } = render(<DiagramView spec={seq} hooks={{}} onClose={() => {}} />);
+    expect(container.querySelector("[data-scale]")?.getAttribute("data-scale")).toBe("1");
+    // And the toggle is there to fit it on purpose.
+    expect(getByText("Fit")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("still fits by default where there is room for it", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    const { container } = render(<DiagramView spec={seq} hooks={{}} onClose={() => {}} />);
+    expect(Number(container.querySelector("[data-scale]")?.getAttribute("data-scale"))).toBeLessThan(1);
+    vi.unstubAllGlobals();
+  });
+
   it("keeps Fit reachable on a phone, where it scales hardest", () => {
     const { getByText } = render(<DiagramView spec={seq} hooks={{}} onClose={() => {}} />);
     expect(getByText("Fit").className).not.toContain("hidden");
