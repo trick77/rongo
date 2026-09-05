@@ -3,10 +3,12 @@ import Ask, { money } from "./Ask";
 import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
+import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
+import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
 import logo from "./assets/rongo-wide.png";
 
-type Page = "ask" | "repos";
+type Page = "ask" | "repos" | "shared";
 
 type Me = { subject: string; email: string; is_admin: boolean };
 
@@ -115,33 +117,6 @@ async function logout() {
   }
 }
 
-/**
- * threadKey is where the open thread survives a reload. The conversation is a
- * record on the server; this is only the bookmark into it.
- */
-const threadKey = "rongo.thread";
-
-// Guarded because Safari's private mode throws on storage access. Losing the
-// bookmark is a small annoyance; a blank page instead of the app is not.
-function storedThread(): number | null {
-  try {
-    const raw = localStorage.getItem(threadKey);
-    if (!raw) return null;
-    const id = Number(raw);
-    return Number.isFinite(id) && id > 0 ? id : null;
-  } catch {
-    return null;
-  }
-}
-
-function rememberThread(id: number | null) {
-  try {
-    if (id === null) localStorage.removeItem(threadKey);
-    else localStorage.setItem(threadKey, String(id));
-  } catch {
-    // See storedThread.
-  }
-}
 
 /**
  * The index line at the foot of the rail: whether the index is current, and
@@ -193,12 +168,16 @@ const railRow =
   "disabled:opacity-50";
 
 export default function App() {
-  const [page, setPage] = useState<Page>("ask");
+  // The URL is where the app is. A thread has an address, so it can be sent to
+  // someone, reloaded into, and reached with Back — none of which was true
+  // while the open thread lived in localStorage.
+  const [route, setRoute] = useState<Route>(routeFromLocation);
   // Below lg the rail is an off-canvas drawer: 300px of it beside a 390px
-  // phone left the thread 90px. There is no router, so this is the only place
-  // the drawer's state can live.
+  // phone left the thread 90px. Not a route: it is not somewhere you are, and
+  // Back must close a thread rather than a drawer.
   const [navOpen, setNavOpen] = useState(false);
-  const [threadId, setThreadId] = useState<number | null>(storedThread);
+  const page: Page = route.view === "repos" || route.view === "shared" ? route.view : "ask";
+  const threadId = route.view === "thread" ? route.id : null;
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
   // background goroutine — and neither can push.
@@ -215,9 +194,40 @@ export default function App() {
   const session = useSession();
   const index = useIndexStatus(session.state === "in", threadsVersion);
 
-  const selectThread = useCallback((id: number | null) => {
-    setThreadId(id);
-    rememberThread(id);
+  // One way to move: push the URL, then render what it says. Nothing sets the
+  // route without the address bar following, so Back and a click land on the
+  // same state.
+  const go = useCallback((next: Route, replace = false) => {
+    navigate(next, replace);
+    setRoute(next);
+  }, []);
+
+  const selectThread = useCallback(
+    (id: number | null, replace = false) =>
+      go(id === null ? { view: "new" } : { view: "thread", id }, replace),
+    [go],
+  );
+
+  // A thread the reader did not choose to leave: it turned out to be deleted
+  // or not theirs, or they just deleted it. The address is CORRECTED rather
+  // than added to, or Back would return to the dead one, the correction would
+  // fire again, and Back could never leave the app.
+  const closeDeadThread = useCallback(() => selectThread(null, true), [selectThread]);
+
+  // The address bar has to say what is on screen from the first paint. "/" is
+  // the everyday case, but so is anything that does not name a route — "/",
+  // "/nope", "/thread/1.5" all render the unasked question, and leaving one of
+  // those in the bar means a reload lands somewhere the app never was.
+  // replaceState, not push: nobody navigated here on purpose.
+  //
+  // Back and Forward then re-read the bar. pushState does not fire popstate,
+  // so this is the only listener needed.
+  useEffect(() => {
+    const settled = pathForRoute(routeFromLocation());
+    if (window.location.pathname !== settled) window.history.replaceState({}, "", settled);
+    const onPop = () => setRoute(routeFromLocation());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
@@ -265,6 +275,9 @@ export default function App() {
   // there showed a question cut mid-word — then cut a second time by the
   // header's own truncate. The rail keeps the placeholder, where first words
   // are what tells one pending row from another.
+  // Counted off the thread list the rail already loaded rather than fetched
+  // again: the same query answers both, and the number is only chrome.
+  const sharedCount = threads.filter((t) => t.shared).length;
   const openThread = threadId === null ? null : (threads.find((t) => t.id === threadId) ?? null);
   const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
   const total = threadId === null ? null : usageTotal;
@@ -338,10 +351,17 @@ export default function App() {
                 </span>
               )}
             </>
-          ) : (
+          ) : page === "repos" ? (
             <>
               <span className="font-serif text-[19px] font-medium text-accent-strong">Repos</span>
               <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
+            </>
+          ) : (
+            <>
+              <span className="font-serif text-[19px] font-medium text-accent-strong">Shared</span>
+              <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
+                {sharedCount === 1 ? "1 live" : `${sharedCount} live`}
+              </span>
             </>
           )}
         </div>
@@ -388,7 +408,6 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                setPage("ask");
                 selectThread(null);
                 setNavOpen(false);
               }}
@@ -410,7 +429,7 @@ export default function App() {
               type="button"
               aria-current={page === "repos" ? "page" : undefined}
               onClick={() => {
-                setPage("repos");
+                go({ view: "repos" });
                 setNavOpen(false);
               }}
               className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
@@ -424,6 +443,23 @@ export default function App() {
               </span>
               Repos
             </button>
+            {/* The audit view for the links this reader has handed out. Under
+                Repos rather than in a settings modal rongo does not have: a
+                live link is a place, and it has to be somewhere you can go. */}
+            <button
+              type="button"
+              aria-current={page === "shared" ? "page" : undefined}
+              onClick={() => {
+                go({ view: "shared" });
+                setNavOpen(false);
+              }}
+              className={railRow + " " + (page === "shared" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="upload" size="21px" className="text-ink-dim" />
+              </span>
+              Shared
+            </button>
           </div>
           {/* No heading over the list: everything below the two actions is
               history, and a label saying so named the obvious. The 20px that
@@ -434,7 +470,6 @@ export default function App() {
           <Threads
             activeId={threadId}
             onSelect={(id) => {
-              setPage("ask");
               selectThread(id);
               setNavOpen(false);
             }}
@@ -442,11 +477,12 @@ export default function App() {
             busy={busy}
             busyId={busyThread}
             onList={setThreads}
+            onShared={refreshThreads}
             onDeleted={(id) => {
               // The thread on screen has just been deleted: close it, so the
               // view falls back to the empty ask page rather than holding a
               // conversation whose record is gone.
-              if (id === threadId) selectThread(null);
+              if (id === threadId) closeDeadThread();
               refreshThreads();
             }}
             onRenamed={refreshThreads}
@@ -487,7 +523,10 @@ export default function App() {
           <div hidden={page !== "ask"} className="h-full">
             <Ask
               threadId={threadId}
-              onThread={selectThread}
+              // Null from Ask is never a reader's choice: it is the thread
+              // turning out to be deleted or not theirs. Correct the address
+              // rather than push a second entry over the dead one.
+              onThread={(id) => (id === null ? closeDeadThread() : selectThread(id))}
               onActivity={refreshThreads}
               onBusy={(b, id) => {
                 setBusy(b);
@@ -517,6 +556,26 @@ export default function App() {
                   deleted.
                 </p>
                 <RepoList />
+              </div>
+            </div>
+          )}
+          {page === "shared" && (
+            <div className="h-full overflow-auto">
+              <div className="max-w-[1100px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
+                  Shared threads
+                </h2>
+                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+                  Every link below is readable by anyone who has it, without signing in. A link is frozen at
+                  the turn it was made: later questions are not on it until you update it. Revoking is
+                  immediate, and sharing again returns the same link.
+                </p>
+                <SharedLinks
+                  onChange={() => {
+                    refreshThreads();
+                  }}
+                  onOpenThread={(id) => selectThread(id)}
+                />
               </div>
             </div>
           )}

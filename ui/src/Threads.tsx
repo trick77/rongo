@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
 import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
+import ShareDialog from "./share/ShareDialog";
+import { shareFor, type Share } from "./share/api";
 
 /**
  * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
@@ -22,6 +24,8 @@ export type Thread = {
    */
   title_pending?: boolean;
   created_at: string;
+  /** True while a live link points at this thread. */
+  shared?: boolean;
 };
 
 /** The day group a thread lands in, in the words the rail uses. */
@@ -55,6 +59,7 @@ export default function Threads({
   onList = () => {},
   onDeleted = () => {},
   onRenamed = () => {},
+  onShared = () => {},
 }: {
   activeId: number | null;
   /** Only ever a real thread: clearing to a new question is the rail's job. */
@@ -74,6 +79,8 @@ export default function Threads({
   onDeleted?: (id: number) => void;
   /** A thread has a new title; the shell reloads the list. */
   onRenamed?: () => void;
+  /** A link was made or taken back; the row markers are stale. */
+  onShared?: () => void;
 }) {
   const [threads, setThreads] = useState<Thread[]>([]);
   // Which row's menu is open, and which thread a dialog is asking about.
@@ -81,6 +88,10 @@ export default function Threads({
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [renaming, setRenaming] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState<Thread | null>(null);
+  // The thread whose link is being handed out, and the link it already has.
+  // Fetched before the dialog opens, so it never flashes "Share thread" at
+  // someone whose thread is already shared.
+  const [sharing, setSharing] = useState<{ thread: Thread; share: Share | null } | null>(null);
   const [pending, setPending] = useState(false);
 
   // The menu closes on a pointer anywhere but the menu itself and the kebabs
@@ -159,6 +170,23 @@ export default function Threads({
     } finally {
       setPending(false);
     }
+  }
+
+  /**
+   * Opens the dialog on what the thread already has. The list is asked first
+   * rather than the dialog fetching for itself: a dialog that opened on "not
+   * shared" and corrected itself a beat later would offer Create on a thread
+   * that is already out there.
+   */
+  async function openShare(t: Thread) {
+    let share: Share | null = null;
+    try {
+      share = await shareFor(t.id);
+    } catch {
+      // Treated as "no link yet": Create then answers with the link the thread
+      // already has, because the server keeps the token it minted.
+    }
+    setSharing({ thread: t, share });
   }
 
   async function remove(t: Thread) {
@@ -268,6 +296,23 @@ export default function Threads({
                           keeps its place down the list — is one the composer
                           already accounts for, and it is not worth a mark on
                           every other turn. */}
+                      {/* A live link is a different kind of fact: it is true
+                          of the thread until somebody revokes it, not for the
+                          length of a turn, and it is the only way to see from
+                          the rail that a conversation is readable by people
+                          who are not here. A dot, not a word — the row is 28px
+                          of pitch on a 362px rail, and a "Shared" pill would
+                          eat the title. The index status line's own green, so
+                          it reads as "live" rather than as a colour of its
+                          own. */}
+                      {t.shared && (
+                        <span
+                          title="Shared with a link"
+                          className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-online"
+                        >
+                          <span className="sr-only">Shared</span>
+                        </span>
+                      )}
                       {/* No actions on the thread being written: deleting it
                           would pull the record out from under the answer still
                           landing on it. Every other row keeps its own. */}
@@ -300,6 +345,10 @@ export default function Threads({
                     </div>
                     {menuOpen && (
                       <ThreadMenu
+                        onShare={() => {
+                          setOpenMenu(null);
+                          void openShare(t);
+                        }}
                         onRename={() => {
                           setOpenMenu(null);
                           setRenaming(t);
@@ -331,6 +380,22 @@ export default function Threads({
           busy={pending}
           onCancel={() => setDeleting(null)}
           onDelete={() => void remove(deleting)}
+        />
+      )}
+      {sharing && (
+        <ShareDialog
+          threadID={sharing.thread.id}
+          title={sharing.thread.title}
+          share={sharing.share}
+          onCancel={() => setSharing(null)}
+          onChange={(share) => {
+            // The row's marker follows the link, without waiting for a reload.
+            setThreads((prev) =>
+              prev.map((x) => (x.id === sharing.thread.id ? { ...x, shared: share !== null } : x)),
+            );
+            setSharing((prev) => (prev ? { ...prev, share } : prev));
+            onShared();
+          }}
         />
       )}
     </nav>
