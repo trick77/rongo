@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/retrieve"
 )
 
 // Audience is the altitude the answer is written at. It affects THIS step only:
@@ -141,10 +142,15 @@ You are given numbered sources. The rules, without exception:
   the configuration are visible, the inside is not.
 - A comment is a claim, not proof. What the code does not deliver does not
   hold - and where comment and code contradict each other, say it.
-- The same for documentation files (README, docs, markdown): they supply
-  intent and context the code alone does not show, but the code decides what
-  actually happens. Where a document and the code disagree, say so and side
-  with the code.
+- The same for documentation files (README, AGENTS.md, docs, markdown): they
+  supply intent and context the code alone does not show, but the code decides
+  what actually happens. Where a document and the code disagree, say so and
+  side with the code.
+- Documentation is written once and the code moves on, so a document may be
+  out of date without saying so. A claim resting only on a documentation
+  source names that in the sentence that makes it - what the document states,
+  not what the system does - and says the code for it is not among the
+  sources.
 - Only use markers that exist. An invented number is worse than no marker.
 - One marker per bracket: a claim resting on two sources reads [1][2], never
   [1, 2].`
@@ -190,6 +196,20 @@ The question names repositories that are NOT indexed: %s. There are no sources
 for them and you know nothing about them. Say in one sentence that they are not
 in the index, answer for the rest, and make no claim of any kind about their
 code - not a guess, not a comparison, not "presumably".`
+
+// answerDocsOnly is added when every source is a documentation file. Without
+// it the model is handed a README and writes what the README says as though it
+// had read the code — the failure this whole prompt exists to prevent, in the
+// one shape the "invent nothing" rule does not catch, because nothing is
+// invented: the document really does say it, and may have said it for a year
+// while the code moved.
+const answerDocsOnly = `
+
+Every source here is a documentation file. There is no code in front of you for
+this question. Report what the documents state, attributed to them, and say in
+one sentence that the code was not among the sources - so what they describe is
+the intent on record, not verified behaviour. Make no claim about how the code
+actually works, and do not present a document's description as the mechanism.`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
@@ -261,6 +281,32 @@ type Scope struct {
 	// result — so this is the only thing that keeps a turn from answering
 	// about code the reader never asked about.
 	Unknown []string
+	// DocsOnly is true when every source the answer was written from is
+	// documentation. Not something the question said, but it belongs here for
+	// the same reason Unknown does: it is what the turn has to tell the reader
+	// about its own footing, and it has to survive into the record so a resume
+	// and a re-explain rebuild the same notice and the same prompt rule.
+	//
+	// The column is a JSON blob, so an older row simply decodes to false and
+	// no migration is needed.
+	DocsOnly bool `json:"docs_only,omitempty"`
+}
+
+// DocsOnly reports whether every source is documentation — prose about the
+// mechanism, with none of the mechanism itself in front of the model.
+//
+// Empty is FALSE, not true: a turn with no sources at all is the "nothing
+// found" answer, which says what it tried and claims nothing.
+func DocsOnly(sources []Source) bool {
+	if len(sources) == 0 {
+		return false
+	}
+	for _, s := range sources {
+		if !retrieve.IsDocPath(s.Path) {
+			return false
+		}
+	}
+	return true
 }
 
 // scopeNotice is the "one of the repositories you named is not indexed"
@@ -287,19 +333,47 @@ var scopeNoticeWhole = map[Language]string{
 	LanguageIT: "Nessun repository di nome %s nell'indice. Cercato in tutti i repository indicizzati.",
 }
 
-// ScopeNotice is what the reader is told about a repository the index does not
-// carry, or "" when every named repository was found — which is the ordinary
+// docsOnlyNotice is the "this answer stood on documentation alone" sentence.
+// Templated for the same reason scopeNotice is: a person reads it, so the
+// language invariant applies, and its content is already known.
+//
+// It says the second half — that documentation can lag — because the first
+// half alone reads as a footnote about provenance. What the reader has to take
+// away is that nothing verified the document, which is the difference between
+// a citation and a guarantee.
+var docsOnlyNotice = map[Language]string{
+	LanguageEN: "Answered from documentation alone: no code for this was among the sources. Documentation can lag the code it describes.",
+	LanguageDE: "Nur aus der Dokumentation beantwortet: Zu dieser Frage lag kein Code in den Quellen. Dokumentation kann dem Code hinterherhinken.",
+	LanguageFR: "Réponse fondée sur la seule documentation : aucun code correspondant ne figurait dans les sources. La documentation peut être en retard sur le code.",
+	LanguageIT: "Risposta basata solo sulla documentazione: nessun codice corrispondente era tra le fonti. La documentazione può essere più vecchia del codice.",
+}
+
+// ScopeNotice is what the reader is told above the answer about the turn's own
+// footing: a repository the index does not carry, an answer that stood on
+// documentation alone, or "" when neither applies — which is the ordinary
 // case, and says nothing.
-func ScopeNotice(lang Language, known, unknown []string) string {
-	if len(unknown) == 0 {
-		return ""
-	}
+//
+// It takes the whole Scope rather than its parts so that every caller —
+// the pipeline, a resume and a re-explain — renders from one value and none of
+// them has to be found again when the Scope grows a field.
+//
+// Both sentences applying is not a contradiction and both are said, scope
+// first: which repositories were searched comes before what was found in them.
+func ScopeNotice(lang Language, sc Scope) string {
 	l := ParseLanguage(string(lang))
-	missing := strings.Join(unknown, ", ")
-	if len(known) == 0 {
-		return fmt.Sprintf(scopeNoticeWhole[l], missing)
+	var parts []string
+	if len(sc.Unknown) > 0 {
+		missing := strings.Join(sc.Unknown, ", ")
+		if len(sc.Known) == 0 {
+			parts = append(parts, fmt.Sprintf(scopeNoticeWhole[l], missing))
+		} else {
+			parts = append(parts, fmt.Sprintf(scopeNotice[l], missing, strings.Join(sc.Known, ", ")))
+		}
 	}
-	return fmt.Sprintf(scopeNotice[l], missing, strings.Join(known, ", "))
+	if sc.DocsOnly {
+		parts = append(parts, docsOnlyNotice[l])
+	}
+	return strings.Join(parts, " ")
 }
 
 // coveredRepos is the named repositories that actually have a source in front
@@ -354,6 +428,11 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
+	}
+	// Computed from the sources rather than read off the scope, so this block
+	// is right even for a caller that has not filled the field in.
+	if DocsOnly(sources) {
+		system += answerDocsOnly
 	}
 	system += answerDiagram
 	// Said twice, first and at the end: the sources in between are code and

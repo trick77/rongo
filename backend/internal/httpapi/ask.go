@@ -310,7 +310,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// notice stops at the card, and a re-explain of the resumed answer
 		// reads an empty scope and drops the rule that keeps the model from
 		// writing about a repository the index never had.
-		if notice := ask.ScopeNotice(lang, resumeScope.Known, resumeScope.Unknown); notice != "" {
+		if notice := ask.ScopeNotice(lang, resumeScope); notice != "" {
 			send("notice", map[string]any{"text": notice})
 		}
 		if serr := s.deps.Threads.SetScope(record, msg.ID, resumeScope); serr != nil {
@@ -325,6 +325,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			closeUsage()
 			send("error", map[string]any{"message": turnFailed})
 			return
+		}
+		// Written a second time, over the scope stored before the call: the
+		// turn only learns after gathering whether it stood on documentation
+		// alone, and the row written above is what a failed resume leaves
+		// behind. The answer's own scope is the one the record keeps.
+		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
+			slog.Error("record scope failed", "err", serr)
 		}
 		if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
 			slog.Error("record answer failed", "err", err)
@@ -597,7 +604,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// same question, same corpus, so the same rules about what was and was not
 	// in the index. Rendered for this turn's reader too — the new message is a
 	// turn of its own and has to stand on its own after a reload.
-	if notice := ask.ScopeNotice(lang, msg.Scope.Known, msg.Scope.Unknown); notice != "" {
+	if notice := ask.ScopeNotice(lang, msg.Scope); notice != "" {
 		send("notice", map[string]any{"text": notice})
 	}
 	if err := s.deps.Threads.SetScope(record, newMsg.ID, msg.Scope); err != nil {

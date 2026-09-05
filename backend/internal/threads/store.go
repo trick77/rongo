@@ -291,9 +291,13 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // SetScope records what the turn's question said about repositories, once the
 // index has been asked which of those names it carries. Written before the
 // answer, because a turn that ends by asking or by failing has a scope too.
-// An empty scope writes nothing: the ordinary turn names no repository.
+// An empty scope writes nothing: the ordinary turn names no repository and
+// found code to answer from. DocsOnly counts as content — a turn that stood on
+// documentation alone has something to say about its own footing even when the
+// question named no repository at all, which is the ordinary shape of that
+// turn.
 func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) error {
-	if len(sc.Known) == 0 && len(sc.Unknown) == 0 {
+	if len(sc.Known) == 0 && len(sc.Unknown) == 0 && !sc.DocsOnly {
 		return nil
 	}
 	blob, err := json.Marshal(sc)
@@ -413,7 +417,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	}
 	m.FromClarificationID = fromClar.Int64
 	m.Scope = scanScope(scope)
-	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope.Known, m.Scope.Unknown)
+	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
@@ -449,7 +453,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		}
 		m.FromClarificationID = fromClar.Int64
 		m.Scope = scanScope(scope)
-		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope.Known, m.Scope.Unknown)
+		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, m)

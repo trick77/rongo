@@ -226,7 +226,7 @@ func TestPipelineSaysNothingWhenEveryNamedRepositoryIsIndexed(t *testing.T) {
 func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	// Everything a person reads follows ask.Language. The notice is read by a
 	// person, and it is templated rather than written by a model.
-	de := ScopeNotice(LanguageDE, []string{"rongo"}, []string{"loom"})
+	de := ScopeNotice(LanguageDE, Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}})
 	if !strings.Contains(de, "Kein Repository") {
 		t.Errorf("German notice = %q", de)
 	}
@@ -235,16 +235,16 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	}
 	// An unknown language falls back to English rather than to an empty
 	// string: a missing notice is worse than an English one.
-	if got := ScopeNotice(Language("xx"), []string{"rongo"}, []string{"loom"}); !strings.Contains(got, "No repository") {
+	if got := ScopeNotice(Language("xx"), Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}}); !strings.Contains(got, "No repository") {
 		t.Errorf("fallback notice = %q", got)
 	}
 	// Nothing missing, nothing said.
-	if got := ScopeNotice(LanguageEN, []string{"rongo"}, nil); got != "" {
+	if got := ScopeNotice(LanguageEN, Scope{Known: []string{"rongo"}}); got != "" {
 		t.Errorf("notice = %q, want none when every named repository was found", got)
 	}
 	// Nothing named that the index knows: the turn searched everything, and
 	// saying "answered for  alone" would name nothing at all.
-	if got := ScopeNotice(LanguageEN, nil, []string{"loom"}); !strings.Contains(got, "all indexed repositories") {
+	if got := ScopeNotice(LanguageEN, Scope{Unknown: []string{"loom"}}); !strings.Contains(got, "all indexed repositories") {
 		t.Errorf("notice = %q, want it to say the whole corpus was searched", got)
 	}
 }

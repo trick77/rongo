@@ -73,6 +73,9 @@ type Retriever struct {
 	// the zero value, so a struct-literal Retriever keeps the behaviour that
 	// shipped before it existed — is off.
 	TestDecay float64
+	// DocDecay cuts a documentation hit's fused score; see DefaultDocDecay.
+	// Reads its zero the way TestDecay does.
+	DocDecay float64
 }
 
 // New builds a Retriever with the default bounds.
@@ -84,6 +87,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		Candidates:  defaultCandidates,
 		RepoDecay:   DefaultRepoDecay,
 		TestDecay:   DefaultTestDecay,
+		DocDecay:    DefaultDocDecay,
 	}
 }
 
@@ -433,7 +437,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 		}
 	}
 
-	fused := FuseWeightedDiverseTests(lanes, k, r.RepoDecay, r.TestDecay)
+	fused := FuseWeightedDecayed(lanes, k, Decays{Repo: r.RepoDecay, Test: r.TestDecay, Doc: r.DocDecay})
 	if fused == nil {
 		// An empty slice, never nil: the caller distinguishes "nothing found"
 		// from an error, not from a nil check.

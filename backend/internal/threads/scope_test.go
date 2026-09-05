@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -61,5 +62,33 @@ func TestScopeOfAnOrdinaryTurnWritesNothing(t *testing.T) {
 	}
 	if len(got.Scope.Known) != 0 || len(got.Scope.Unknown) != 0 {
 		t.Errorf("scope = %+v, want the zero value", got.Scope)
+	}
+}
+
+func TestDocsOnlySurvivesAReloadWithoutANamedRepository(t *testing.T) {
+	// The ordinary documentation-only turn names no repository at all, so the
+	// "nothing to say, write nothing" shortcut above would drop the one thing
+	// it does have to say — and the reader would see the notice while the turn
+	// streamed and never again after a reload.
+	s, ctx, threadID, _ := newThreadStore(t)
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "Which choices are locked?")
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	if err := s.SetScope(ctx, msg.ID, ask.Scope{DocsOnly: true}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+
+	got, ok, err := s.Message(ctx, testSubject, msg.ID)
+	if err != nil || !ok {
+		t.Fatalf("read message: %v ok=%v", err, ok)
+	}
+	if !got.Scope.DocsOnly {
+		t.Error("scope.DocsOnly = false after a reload")
+	}
+	// The notice is rendered off the row, so this is what the reader gets back.
+	if !strings.Contains(got.Notice, "documentation alone") {
+		t.Errorf("notice = %q, want the documentation-only sentence", got.Notice)
 	}
 }

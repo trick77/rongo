@@ -1036,5 +1036,51 @@
       }
     ],
     "note": "Exactly the look-alike module pair that produces a wrong clarification when the question names neither repository - peeq/store and rongo/store. Named, it is a comparison and must be answered, which is what separates this cohort from ambiguous."
+  },
+  {
+    "question": "Which technical choices in rongo are locked and must not be changed without agreement?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "AGENTS.md"
+        ],
+        "verified": "read 2026-09-05: AGENTS.md:11 'Locked choices (do not change without agreement)' - the pure-Go SQLite pair, no tree-sitter, one SQLite file, stdlib net/http. Nothing in the code states this; it exists only in the document."
+      }
+    ],
+    "note": "Doc-led on purpose: the answer exists ONLY in documentation, so a doc demotion that turns into a filter loses it. This is the downside axis the doc-decay sweep is read against."
+  },
+  {
+    "question": "What has to be installed on the machine before rongo's development environment will start?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "README.md",
+          "docs/manual-verification.md"
+        ],
+        "verified": "read 2026-09-05: README.md:27 'Needs Go, Node.js, git, rg and universal-ctags'; docs/manual-verification.md:8-15 lists the same prerequisites and the brew install line. The startup check in code names ctags alone, never the full list."
+      }
+    ],
+    "note": "Doc-led. Two documents in one repository are one candidate: the reader is not choosing between a README and the manual-verification page."
+  },
+  {
+    "question": "Which attribute key does peeq use when it logs an error?",
+    "kind": "what",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "peeq",
+        "paths": [
+          "AGENTS.md"
+        ],
+        "verified": "read 2026-09-05: AGENTS.md:16 'Error attr key is err, never error'. The convention is stated only in the document; the code merely follows it at every call site."
+      }
+    ],
+    "note": "Doc-led, and the one where document and code are about the SAME fact: the rule is written down once, the practice is spread over every slog call. A demotion strong enough to hide the document answers this from a call site instead of from the rule."
   }
 ]
