@@ -1185,9 +1185,21 @@ describe("Ask, the caret of a streaming answer", () => {
   // block of its own: it blinked on the line BELOW the words it belongs to.
   // It is now drawn on the last block itself (index.css), so what the markup
   // has to get right is the marker class and which block comes last.
+  // The connection stays open for the assertions: a stream that closes with
+  // no `done` is a lost connection now, and the turn ends with an error rather
+  // than sitting there mid-answer.
   it("marks the answer block as streaming so the caret sits on its last line", async () => {
-    streamFrames([ev("thread", { thread_id: 1, message_id: 2 }), ev("token", { text: "Indexing walks the repo." })]);
-    await ask("How does indexing work?");
+    const stream = pushableStream();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask />
+      </StrictMode>,
+    );
+    await user.type(screen.getByLabelText("Question"), "How does indexing work?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await stream.push(ev("thread", { thread_id: 1, message_id: 2 }));
+    await stream.push(ev("token", { text: "Indexing walks the repo." }));
 
     const para = await screen.findByText(
       (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Indexing walks the repo"),
@@ -1247,5 +1259,281 @@ describe("Ask, the composer on a phone", () => {
     expect(hint.className).not.toContain("ml-auto");
     expect(hint.parentElement?.className).toContain("ml-auto");
     expect(hint.parentElement?.contains(screen.getByRole("button", { name: "Ask" }))).toBe(true);
+  });
+});
+
+/**
+ * A turn that ends badly must not be a dead end: the error stays in the
+ * record and a Retry beside it asks the same question again as a NEW turn.
+ * A failed resume is the one exception — its card unlocks itself, and that
+ * is the retry.
+ */
+describe("Ask, retrying a failed turn", () => {
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  it("asks again as a new turn, leaving the failed one in the record", async () => {
+    const mock = queuedPostFetch([
+      [ev("thread", { thread_id: 1, message_id: 5 }), ev("error", { message: "The turn failed." })],
+      [
+        ev("thread", { thread_id: 1, message_id: 6 }),
+        ev("token", { text: "The answer." }),
+        ev("done", { message_id: 6 }),
+      ],
+    ]);
+
+    const user = await ask("How?");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    await user.click(retry);
+
+    await screen.findByText("The answer.");
+    // The failed turn is still there: the thread is a record.
+    expect(screen.getByRole("alert").textContent).toContain("The turn failed.");
+    const posts = mock.mock.calls.filter((c) => c[0] === "/api/ask");
+    expect(posts.length).toBe(2);
+    expect(JSON.parse(String(posts[1][1]?.body))).toEqual({
+      question: "How?",
+      audience: "ba",
+      language: "en",
+      thread_id: 1,
+    });
+  });
+
+  it("holds the retry while another turn is streaming", async () => {
+    const stream = pushableStream();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask />
+      </StrictMode>,
+    );
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await stream.push(ev("error", { message: "The turn failed." }));
+
+    // The error has landed but the connection is still open: nothing may be
+    // started on top of it.
+    expect((await screen.findByRole("button", { name: "Retry" })).hasAttribute("disabled")).toBe(true);
+    await stream.end();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled")).toBe(false),
+    );
+  });
+
+  it("ends a turn whose stream closes with neither done nor error", async () => {
+    // A proxy FIN or a backend restart mid-answer closes the stream cleanly.
+    // Without a terminal event the turn used to tick forever with no error
+    // and no way out.
+    streamFrames([ev("thread", { thread_id: 1 }), ev("status", { step: "answering" })]);
+
+    await ask("How?");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("The connection was lost."),
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("offers no retry on a turn that answered", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("token", { text: "The answer." }),
+      ev("done", { message_id: 1 }),
+    ]);
+
+    await ask("How?");
+
+    await screen.findByText("The answer.");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("offers the retry on a failed turn restored from the record", async () => {
+    const failed = {
+      id: 9,
+      ordinal: 0,
+      audience: "dev",
+      language: "en",
+      question: "How does the grant work?",
+      answer: "",
+      error: "The turn failed.",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    const mock = routedFetch(
+      [failed],
+      [ev("thread", { thread_id: 7, message_id: 10 }), ev("done", { message_id: 10 })],
+    );
+    strict(<Ask threadId={7} />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      const post = mock.mock.calls.find((c) => c[0] === "/api/ask");
+      expect(post).toBeTruthy();
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        question: "How does the grant work?",
+        audience: "dev",
+        language: "en",
+        thread_id: 7,
+      });
+    });
+  });
+
+  it("leaves a failed resume to its card, live", async () => {
+    queuedPostFetch([
+      [
+        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("clarification", {
+          message_id: 5,
+          candidates: [
+            { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
+            { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+          ],
+        }),
+        ev("done", { message_id: 5 }),
+      ],
+      [ev("thread", { thread_id: 7, message_id: 6 }), ev("error", { message: "The turn failed." })],
+    ]);
+
+    const user = await ask("How is sign-in done?");
+    await user.click(await screen.findByText("Through the login service"));
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    // The card took the choice back; a Retry button beside the error would be
+    // a second way to spend the same resume.
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("leaves a failed resume to its card after a reload", async () => {
+    const card = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 100,
+        candidates: [
+          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    // The resume never linked its choice — the server records it only when the
+    // answer lands — so the row is the same question, failed, right after a
+    // card that is still open.
+    const failedResume = {
+      id: 11,
+      ordinal: 1,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "The turn failed.",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:01:00Z",
+    };
+    routedFetch([card, failedResume]);
+    strict(<Ask threadId={7} />);
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("retries a failed re-explain as a re-explain, never as a fresh question", async () => {
+    // A re-explain answers from sources the earlier turn already gathered.
+    // Retrying it as /api/ask would search again and answer from different
+    // code than the reader was shown.
+    const mock = queuedPostFetch(
+      [
+        [ev("thread", { thread_id: 7, message_id: 20 }), ev("error", { message: "The turn failed." })],
+        [
+          ev("thread", { thread_id: 7, message_id: 21 }),
+          ev("token", { text: "An answer for the BA." }),
+          ev("done", { message_id: 21 }),
+        ],
+      ],
+      [storedTurn],
+    );
+    strict(<Ask threadId={7} />);
+    await screen.findByText(/Through a grant/);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await screen.findByText(/An answer for the BA/);
+    const posts = mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/messages/"));
+    expect(posts.length).toBe(2);
+    expect(String(posts[1][0])).toBe("/api/messages/9/reexplain");
+    expect(JSON.parse(String(posts[1][1]?.body))).toEqual({ audience: "ba" });
+    expect(mock.mock.calls.some((c) => String(c[0]) === "/api/ask")).toBe(false);
+  });
+
+  it("leaves a second failed resume to the same card after a reload", async () => {
+    // A card can be tried more than once: pick, fail, pick again, fail again.
+    // Both failures sit under the one card that is still open, and reading
+    // only the turn directly above would give the second one a button that
+    // posts a fresh question and opens a second card beside the first.
+    const card = {
+      id: 10,
+      ordinal: 0,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "",
+      citations: [],
+      clarification: {
+        id: 100,
+        candidates: [
+          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
+          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+        ],
+      },
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: "2026-08-17T10:00:00Z",
+    };
+    const failedResume = (id: number, at: string) => ({
+      id,
+      ordinal: id - 9,
+      audience: "ba",
+      language: "en",
+      question: "How is sign-in done?",
+      answer: "",
+      error: "The turn failed.",
+      citations: [],
+      clarification: null,
+      from_candidate_idx: -1,
+      from_clarification_id: 0,
+      created_at: at,
+    });
+    routedFetch([card, failedResume(11, "2026-08-17T10:01:00Z"), failedResume(12, "2026-08-17T10:02:00Z")]);
+    strict(<Ask threadId={7} />);
+
+    await waitFor(() => expect(screen.getAllByRole("alert").length).toBe(2));
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 });
