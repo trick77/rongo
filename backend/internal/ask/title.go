@@ -32,7 +32,7 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		return ""
 	}
 	out, _, err := c.Complete(ctx, []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(titleSystem, languageName(lang))},
+		{Role: "system", Content: fmt.Sprintf(titleSystem, languageName(lang)) + languageStyle(lang)},
 		{Role: "user", Content: question},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(titleMaxTokens), llm.WithStep("title"))
 	if err != nil {
