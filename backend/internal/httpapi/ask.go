@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -221,9 +222,26 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)
+	// The title goroutine below writes to this stream from outside the
+	// handler's own goroutine, so the writer is taken under a lock and the
+	// stream is shut to further writes the moment the handler returns: a
+	// write to a ResponseWriter whose handler has finished is not merely
+	// ignored, it races the server's own cleanup.
+	var sendMu sync.Mutex
+	sendClosed := false
+	defer func() {
+		sendMu.Lock()
+		sendClosed = true
+		sendMu.Unlock()
+	}()
 	send := func(event string, payload any) {
 		body, err := json.Marshal(payload)
 		if err != nil {
+			return
+		}
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if sendClosed {
 			return
 		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
@@ -232,11 +250,37 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	send("thread", map[string]any{"thread_id": thread.ID, "title": thread.Title, "message_id": msg.ID})
 
+	// The record is written on a context that outlives the request. A reader
+	// who closes the tab mid-answer cancels r.Context(), and writing the
+	// outcome on it would leave a row with neither an answer nor an error —
+	// indistinguishable from a turn still in flight.
+	record := context.WithoutCancel(ctx)
+
 	// The title is written alongside the answer and never in front of it. It is
 	// a label; the answer must not wait for it, and a title that never arrives
 	// is not a failure anyone needs to see.
-	if s.deps.Titler != nil && thread.Title != "" && msg.Ordinal == 0 {
+	if s.deps.Titler == nil || thread.Title == "" || msg.Ordinal != 0 {
+		// No title is coming for this thread — no titler configured, or this
+		// is not its first turn. Settle the row anyway: the header waits for
+		// a title only while one is on its way, and a row left pending would
+		// read as "New question" for the rest of the thread's life. A first
+		// turn settles the row it just created; a later turn settles nothing
+		// that was not settled long ago.
+		if err := s.deps.Threads.SetTitle(record, thread.ID, thread.Title, ""); err != nil {
+			slog.Warn("settle thread title failed", "err", err)
+		}
+	} else {
+		// Waited for before the stream is shut, so a title that lands while
+		// the answer is still streaming always reaches the browser, and one
+		// that lands after `done` still reaches it rather than being dropped
+		// on a stream that closed a microsecond earlier. The answer never
+		// waits for the title — this is the connection lingering after the
+		// last word, not the reader waiting for the first.
+		var titleWG sync.WaitGroup
+		titleWG.Add(1)
+		defer titleWG.Wait()
 		go func(id, messageID int64, question, placeholder string) {
+			defer titleWG.Done()
 			// WithoutCancel keeps the context's values, the turn's meter
 			// among them. The title gets its own so it cannot write into a
 			// meter that has already been read and stored; its call is
@@ -246,25 +290,29 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// holding the answer for.
 			titleMeter := usage.New()
 			bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
-			if title := s.deps.Titler(bg, question, lang); title != "" {
-				// `placeholder` is the title Create wrote and the rail is
-				// showing right now. Handing it over makes the write a
-				// no-op once the reader has renamed the thread themselves.
-				if err := s.deps.Threads.SetTitle(bg, id, placeholder, title); err != nil {
-					slog.Warn("set thread title failed", "err", err)
-				}
+			title := s.deps.Titler(bg, question, lang)
+			// Called even when the call came back empty: that write settles
+			// the row with the placeholder standing, and the header stops
+			// waiting for a title that is not coming.
+			//
+			// `placeholder` is the title Create wrote and the rail is showing
+			// right now. Handing it over makes the write a no-op once the
+			// reader has renamed the thread themselves.
+			if err := s.deps.Threads.SetTitle(bg, id, placeholder, title); err != nil {
+				slog.Warn("set thread title failed", "err", err)
+			} else if title != "" {
+				// The stream is still open on most turns — a title takes a
+				// second, an answer rather longer — so the header and the
+				// rail can have the title now instead of at the end of the
+				// turn. `send` is a no-op once the handler has returned, so
+				// the late case costs nothing and says nothing.
+				send("title", map[string]any{"thread_id": id, "title": title})
 			}
 			if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
 				slog.Error("record title usage failed", "err", err)
 			}
 		}(thread.ID, msg.ID, req.Question, thread.Title)
 	}
-
-	// The record is written on a context that outlives the request. A reader
-	// who closes the tab mid-answer cancels r.Context(), and writing the
-	// outcome on it would leave a row with neither an answer nor an error —
-	// indistinguishable from a turn still in flight.
-	record := context.WithoutCancel(ctx)
 
 	events := ask.Events{
 		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },

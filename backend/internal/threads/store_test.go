@@ -125,6 +125,60 @@ func TestSetTitle_anEmptyModelTitleLeavesThePlaceholderStanding(t *testing.T) {
 	}
 }
 
+func TestCreate_marksTheTitlePendingUntilTheCallSettlesIt(t *testing.T) {
+	// The header shows a title, never the question's first 48 runes. It can
+	// only tell the two apart if the row says which it is holding.
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if !th.TitlePending {
+		t.Error("a fresh thread carries the placeholder; it must say so")
+	}
+	list, _ := s.List(ctx, "anna")
+	if !list[0].TitlePending {
+		t.Error("the list must say so too; it is what the header reads")
+	}
+}
+
+func TestSetTitle_anEmptyTitleStillEndsTheWaiting(t *testing.T) {
+	// The title call failed, or wrote something that was not a title. The
+	// placeholder stands, but nothing more is coming: a row left pending would
+	// read as "New question" in the header for the rest of its life.
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if err := s.SetTitle(ctx, th.ID, th.Title, ""); err != nil {
+		t.Fatalf("SetTitle: %v", err)
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if list[0].TitlePending {
+		t.Error("still pending after the title call came back empty")
+	}
+	if list[0].Title != th.Title {
+		t.Errorf("title = %q, want the placeholder left standing", list[0].Title)
+	}
+}
+
+func TestRename_endsTheWaitingToo(t *testing.T) {
+	// A name the reader typed is a title. The header must show it rather than
+	// hold its place for a model call that will find the row renamed.
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if _, err := s.Rename(ctx, "anna", th.ID, "Mine"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if list[0].TitlePending {
+		t.Error("a typed name is a title; the thread is not waiting for one")
+	}
+}
+
 func TestSetTitle_replacesThePlaceholderItWasHanded(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
@@ -137,6 +191,9 @@ func TestSetTitle_replacesThePlaceholderItWasHanded(t *testing.T) {
 	list, _ := s.List(ctx, "anna")
 	if list[0].Title != "Shipping, end to end" {
 		t.Errorf("title = %q, want the model's", list[0].Title)
+	}
+	if list[0].TitlePending {
+		t.Error("the title arrived; the row must stop reading as pending")
 	}
 }
 

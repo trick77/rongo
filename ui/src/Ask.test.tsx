@@ -96,6 +96,27 @@ describe("Ask", () => {
     await screen.findByText(/Shipping runs through a job/);
   });
 
+  // The model's title is written by a background goroutine with no way to
+  // push, so before this event the header and the rail kept the placeholder
+  // until the turn was over — and, if the title landed after that refresh,
+  // until the next reload.
+  it("refreshes the list the moment the title lands, not at the end of the turn", async () => {
+    streamFrames([
+      ev("thread", { thread_id: 1 }),
+      ev("title", { thread_id: 1, title: "Shipping, end to end" }),
+      ev("token", { text: "Still writing…" }),
+    ]);
+    const onActivity = vi.fn();
+    const user = userEvent.setup();
+    render(<Ask onActivity={onActivity} />);
+    await user.type(screen.getByLabelText("Question"), "How does shipping work?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await screen.findByText(/Still writing/);
+    // Twice: the thread event, then the title — both before `done`.
+    expect(onActivity.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("shows the running step while nothing is finished", async () => {
     streamFrames([ev("thread", { thread_id: 1 }), ev("status", { step: "gathering" })]);
 

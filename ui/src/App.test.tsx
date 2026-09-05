@@ -225,6 +225,34 @@ describe("App, the thread across a reload", () => {
     await waitFor(() => expect(localStorage.getItem("rongo.thread")).toBe("7"));
   });
 
+  // The placeholder title is the question's first 48 runes, cut mid-word. It
+  // is a label for a rail row, never a title, and the header showing it cut it
+  // a second time with its own truncate.
+  it("holds New question in the header while the title is still coming", async () => {
+    localStorage.setItem("rongo.thread", "7");
+    apiFetch(
+      [{ id: 7, title: "How does shipping work, and what happens when…", title_pending: true, created_at: "2026-08-17T10:00:00Z" }],
+      oneTurn,
+    );
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByRole("heading", { level: 1 });
+
+    // The rail keeps the placeholder — there the first words are what tells
+    // one pending row from another — and the header does not.
+    await screen.findByRole("button", { name: "How does shipping work, and what happens when…" });
+    expect(screen.queryAllByText("How does shipping work, and what happens when…").length).toBe(1);
+    expect(screen.getAllByText("New question").length).toBeGreaterThan(1);
+  });
+
+  it("puts the title in the header once it has settled", async () => {
+    localStorage.setItem("rongo.thread", "7");
+    apiFetch([{ id: 7, title: "Shipping, end to end", title_pending: false, created_at: "2026-08-17T10:00:00Z" }], oneTurn);
+    render(<StrictMode><App /></StrictMode>);
+
+    // Twice: the rail row and the header.
+    await waitFor(() => expect(screen.getAllByText("Shipping, end to end").length).toBe(2));
+  });
+
   // A thread that is not yours, or was purged, comes back as an empty list with
   // status 200. Keeping the id would make every later reload open nothing.
   it("forgets a thread id that leads nowhere", async () => {

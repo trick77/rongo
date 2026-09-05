@@ -256,7 +256,13 @@ export default function App() {
     );
   }
 
-  const openTitle = threadId === null ? null : (threads.find((t) => t.id === threadId)?.title ?? null);
+  // Only a settled title reaches the header. Until the model's title call
+  // lands, the row holds the question's first 48 runes, and putting that up
+  // there showed a question cut mid-word — then cut a second time by the
+  // header's own truncate. The rail keeps the placeholder, where first words
+  // are what tells one pending row from another.
+  const openThread = threadId === null ? null : (threads.find((t) => t.id === threadId) ?? null);
+  const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
   const total = threadId === null ? null : usageTotal;
 
   return (
