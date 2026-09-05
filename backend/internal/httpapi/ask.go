@@ -194,6 +194,14 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "this clarification is a card, not a narrowing", http.StatusBadRequest)
 			return
 		}
+		if !narrowing && c.TooBroad {
+			// The other direction, and the one that costs something: Choice
+			// defaults to 0, the panel always has a row 0, and the turn would
+			// answer from the highest-scoring repository the reader never
+			// picked — then record it as a choice they never made.
+			http.Error(w, "this clarification is a narrowing, not a card", http.StatusBadRequest)
+			return
+		}
 		if !narrowing && (req.Choice < 0 || req.Choice >= len(c.Candidates)) {
 			// Answering from a candidate nobody offered is worse than
 			// refusing: it would look like an answer to the question asked.

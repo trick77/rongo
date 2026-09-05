@@ -1522,3 +1522,23 @@ func TestAsk_aNarrowingIsRefusedBeyondWhatWasOffered(t *testing.T) {
 		})
 	}
 }
+
+func TestAsk_theTooBroadPanelIsNotResumableAsACard(t *testing.T) {
+	// Without repos the request falls through to Choice, which defaults to 0 —
+	// and the panel always has a row 0. That would answer from the
+	// highest-scoring repository the reader never picked, and record it as a
+	// choice they never made.
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	msgID, _ := seedTooBroad(t, st)
+
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d}`, msgID))
+
+	if code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", code)
+	}
+	if asker.resumedRepoCall {
+		t.Error("a panel with nothing picked must not reach the pipeline")
+	}
+}

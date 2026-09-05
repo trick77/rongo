@@ -781,3 +781,24 @@ func TestRunCarriesTooBroadIntoTheClarification(t *testing.T) {
 		t.Error("the turn asked for a narrower question; the record must say so")
 	}
 }
+
+// A repository can leave repos.yaml between the panel being shown and the
+// reader picking off it. Searching the survivors would answer from two
+// repositories while the record, the notice and the prompt rules all say
+// three — the same substitution the single-repository path already fails on.
+func TestResumeRepoFailsWhenOneOfTheChosenRepositoriesIsGone(t *testing.T) {
+	searched := false
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom"}, func(retrieve.Query) ([]retrieve.Hit, error) {
+		searched = true
+		return nil, nil
+	}))
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"loom", "peeq"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Events{})
+	if err == nil {
+		t.Fatal("want an error when one of the chosen repositories is gone from the index")
+	}
+	if searched {
+		t.Error("a turn that cannot cover what it claims must not search at all")
+	}
+}

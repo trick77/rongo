@@ -446,7 +446,13 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		if err != nil {
 			return Answer{}, fmt.Errorf("resolve the chosen repositories: %w", err)
 		}
-		if len(known) == 0 {
+		if len(known) != len(repos) {
+			// Not just "all of them gone": a subset is worse, because the turn
+			// would run and look right. The scope, the notice and the prompt
+			// rules were all written from the full list a few lines up in the
+			// handler, so searching the survivors answers from two
+			// repositories while the record says three — the substitution this
+			// check exists to stop, one repository at a time.
 			return Answer{}, fmt.Errorf("the chosen repositories %s are no longer in the index",
 				strings.Join(repos, ", "))
 		}
