@@ -439,6 +439,17 @@ export default function Ask({
     return s;
   }
 
+  // Retires a thread load still in the air, with everything that was waiting
+  // on it. The record must not land on top of what the reader is doing — and
+  // the skeleton would otherwise sit above their new turn for good, with the
+  // scroll effects still sitting the load out, so the answer they are watching
+  // would write itself off the bottom edge.
+  function retireLoad() {
+    loadSeq.current++;
+    setLoading(false);
+    opened.current = false;
+  }
+
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
   }
@@ -661,7 +672,7 @@ export default function Ask({
     // would be patched into the last STORED answer instead, corrupting a
     // finished turn on screen while this question disappeared. Retiring the
     // load is what the reader expects anyway: they have moved on.
-    loadSeq.current++;
+    retireLoad();
 
     setTurns((prev) => [...prev, freshTurn(q, audience, language)]);
     setQuestion("");
@@ -685,7 +696,7 @@ export default function Ask({
     const turn = turns[turnIndex];
     if (!turn.clarification || turn.chosenIdx != null) return;
 
-    loadSeq.current++;
+    retireLoad();
     setTurns((prev) => [
       ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
       freshTurn(turn.question, turn.audience, turn.language),
@@ -714,7 +725,7 @@ export default function Ask({
     if (!turn.messageId) return;
     const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
-    loadSeq.current++;
+    retireLoad();
     setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language)]);
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
@@ -784,7 +795,10 @@ export default function Ask({
                 land in. It is the shape of a turn, not a spinner — the column
                 does not move again when the text replaces it. */}
             {loading && (
-              <div className="max-w-[68ch]" aria-busy="true" aria-label="Opening the thread">
+              // role="status": a bare div may carry no accessible name, so a
+              // reader who does not see the shape would be told nothing at all
+              // while the thread is on its way.
+              <div className="max-w-[68ch]" role="status" aria-busy="true" aria-label="Opening the thread">
                 <div className="skeleton h-3 w-[7ch] rounded-ui-sm" />
                 <div className="skeleton mt-2.5 h-7 w-[24ch] rounded-ui-sm" />
                 <div className="mt-4 flex gap-1.5">

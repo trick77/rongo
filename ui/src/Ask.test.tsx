@@ -478,10 +478,16 @@ describe("Ask, a stored thread", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/The new answer/);
 
+    // And the skeleton goes with the load that was retired: it would
+    // otherwise sit above the turn being written for the rest of the session,
+    // with the view refusing to follow the answer down.
+    expect(screen.queryByLabelText("Opening the thread")).toBeNull();
+
     release();
     await act(async () => {});
     expect(screen.getByText(/The new answer/)).toBeTruthy();
     expect(screen.getByText("And now?")).toBeTruthy();
+    expect(screen.queryByLabelText("Opening the thread")).toBeNull();
   });
 
   it("does not forget the thread when the server stumbles briefly", async () => {
