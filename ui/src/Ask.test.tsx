@@ -1393,7 +1393,7 @@ describe("Ask, a language the record decided", () => {
   // The composer can guess wrong: a question sent while the thread is still
   // loading carries the remembered language, and the server answers in the
   // thread's. The stream says which one it took, and the turn - with it the
-  // its pill - follows the record rather than the guess.
+  // pill it carries - follows the record rather than the guess.
   it("follows the language the stream reports", async () => {
     streamFrames([ev("thread", { thread_id: 3, message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
     const user = userEvent.setup();

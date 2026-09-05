@@ -278,9 +278,11 @@ export default function App() {
       <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[362px_1fr_auto]">
         <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
           {/*
-            Deliberately not disabled={busy}: the rail's rows are, but the way
-            back TO the rail must not be. With the drawer shut and the toggle
-            dead there would be no navigation at all while an answer streams.
+            Deliberately not disabled={busy}: with the drawer shut and the
+            toggle dead there would be no navigation at all while an answer
+            streams — and the rail behind it is fully live now, so the one
+            thing standing between the reader and another thread would be
+            this button.
           */}
           <button
             type="button"
@@ -390,7 +392,10 @@ export default function App() {
                 selectThread(null);
                 setNavOpen(false);
               }}
-              disabled={busy}
+              // Live while an answer streams, like the rows under it. The
+              // question cannot be SENT until the turn finishes, and the
+              // composer says so in words; a dead button here would be the
+              // one place left where the rail refuses without explaining.
               className={railRow + " text-rail hover:bg-rail-hover"}
             >
               <span

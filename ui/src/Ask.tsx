@@ -697,19 +697,19 @@ export default function Ask({
 
   function patchLast(patch: (t: Turn) => Turn) {
     const parked = liveTurns.current;
-    if (parked) {
-      const next = parked.map((t, i) => (i === parked.length - 1 ? patch(t) : t));
-      liveTurns.current = next;
-      // Only the thread on screen is repainted. The reader may be reading
-      // another conversation entirely; writing this turn into it is exactly
-      // what the old lock existed to prevent.
-      if (shown.current === liveThread.current) {
-        live.current = next;
-        setTurns(next);
-      }
-      return;
+    // Only a running turn is ever patched, and a running turn always has its
+    // parked list: every path into stream() appends through appendTurn first,
+    // and the list is dropped only once the stream is over.
+    if (!parked) return;
+    const next = parked.map((t, i) => (i === parked.length - 1 ? patch(t) : t));
+    liveTurns.current = next;
+    // Only the thread on screen is repainted. The reader may be reading
+    // another conversation entirely, and writing this turn into it is exactly
+    // what the old lock existed to prevent.
+    if (shown.current === liveThread.current) {
+      live.current = next;
+      setTurns(next);
     }
-    setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
   }
 
   // Announced upwards with the thread it belongs to: the rail withholds that
@@ -906,16 +906,19 @@ export default function Ask({
         buffer = drain(buffer, (name, data) => {
           const payload = data ? JSON.parse(data) : {};
           if (name === "thread") {
-            threadId.current = payload.thread_id;
             // The turn was appended before the thread existed, so this is
-            // where it learns which conversation it is parked under.
+            // where it learns which conversation it is parked under. Always,
+            // whatever the reader is looking at: the parking is what keeps
+            // the tokens out of the thread in front of them.
             liveThread.current = payload.thread_id;
             markBusy(true, payload.thread_id);
-            // Only if the reader is still standing where they asked. A first
-            // question whose thread id arrives after they have opened another
-            // conversation must not drag them back to it; the turn goes on
-            // being written and their rail row is waiting for them.
+            // The rest only if the reader is still standing where they asked.
+            // A first question whose thread id arrives after they have opened
+            // another conversation must not drag them back to it — and
+            // threadId, which is where the NEXT question is filed, belongs to
+            // the thread they are in, not to the one they left.
             if (shown.current === null) {
+              threadId.current = payload.thread_id;
               shown.current = payload.thread_id;
               onThread(payload.thread_id);
             }
@@ -1056,6 +1059,10 @@ export default function Ask({
       (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
     );
 
+    // The card belongs to the thread it was asked in, and turnIndex is an
+    // index into that thread's turns — in another one it points at a
+    // different turn entirely.
+    const cardThread = threadId.current;
     const ok = await stream("/api/ask", {
       thread_id: threadId.current ?? 0,
       question: turn.question,
@@ -1064,7 +1071,12 @@ export default function Ask({
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
     }, false);
-    if (!ok) setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+    // A reader who has moved on gets the unlock from the record instead: the
+    // choice is stored only when an answer lands, so the card they come back
+    // to is open again anyway.
+    if (!ok && shown.current === cardThread) {
+      setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+    }
   }
 
   /**

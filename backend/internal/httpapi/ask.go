@@ -642,6 +642,15 @@ func (s *Server) suggestFollowups(
 	// reason. The meter rides along: WithoutCancel keeps the values.
 	call, cancel := context.WithTimeout(record, followupsCallTimeout)
 	defer cancel()
+	// Dropping the request's cancellation does not mean dropping the thread's:
+	// a reader who deletes the thread WHILE this call is running is owed the
+	// same stop as one who deleted it a moment earlier, and the row the answer
+	// would be written to is going with it either way.
+	defer context.AfterFunc(ctx, func() {
+		if threadWasDeleted(ctx) {
+			cancel()
+		}
+	})()
 	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
 	if len(qs) == 0 {
 		return
