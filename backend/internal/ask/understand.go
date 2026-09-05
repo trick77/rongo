@@ -55,6 +55,13 @@ type Understanding struct {
 	// Repos narrows the search when the question names a system. Empty means
 	// the whole corpus.
 	Repos []string `json:"repos"`
+	// AllRepos is the reader asking for every repository at once, without
+	// naming any of them: "in all repos", "across all products". Without it a
+	// question that names nothing cannot be told apart from a question that
+	// means everything, and the repository rung in Decide would card on both.
+	// It is the reader's own permission to answer across the corpus, so it is
+	// read from the question and never inferred from the hits.
+	AllRepos bool `json:"all_repos"`
 }
 
 // SearchTexts assembles what the retriever should search for. The raw question
@@ -94,6 +101,9 @@ Fields:
               package and protocol names, written the way a developer would
               write them
   repos       names of the repositories, if the question names any, else []
+  all_repos   true when the question asks for every repository, or for several
+              without naming them ("in all repos", "across all products",
+              "in multiple repositories"), else false
 
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"

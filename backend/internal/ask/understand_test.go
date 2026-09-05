@@ -147,3 +147,47 @@ func TestUnderstand_malformedJsonIsAnErrorNotAnEmptyExpansion(t *testing.T) {
 		t.Fatal("prose answer accepted as an understanding")
 	}
 }
+
+// TestUnderstand_readsTheAskForEveryRepository pins the one thing that lets a
+// reader opt out of the repository card in advance: saying so in the question.
+// Without it "in all repos, how are token costs calculated?" is
+// indistinguishable from a question that named nothing, and the router would
+// ask which repository was meant after the reader already said.
+func TestUnderstand_readsTheAskForEveryRepository(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{
+  "intent": "how",
+  "terms": ["token cost"],
+  "code_terms": ["pricing"],
+  "repos": [],
+  "all_repos": true
+}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "in all repos, how are token costs calculated in $?")
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if !got.AllRepos {
+		t.Error("all_repos must reach the understanding, or the reader's own words never leave this step")
+	}
+	if len(got.Repos) != 0 {
+		t.Errorf("Repos = %v, want none named", got.Repos)
+	}
+	if !strings.Contains(*prompt, "all_repos") {
+		t.Errorf("the prompt never asks for the field:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll is the default the
+// rung rests on: a question that says nothing about scope must not arrive
+// with permission to answer across the corpus.
+func TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll(t *testing.T) {
+	c, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "how are token costs calculated in $?")
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if got.AllRepos {
+		t.Error("a reply that says nothing about all_repos must not mean every repository")
+	}
+}

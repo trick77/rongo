@@ -167,7 +167,7 @@ func TestRouteAnswersWithoutAskingWhenOneCandidateDominates(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	}, nil)
+	}, nil, false)
 
 	// Then
 	if err != nil {
@@ -198,7 +198,7 @@ func TestRouteFastPathMakesNoDependencyQuery(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v — the dominant path must never reach the dependency query, which cannot run without repo_deps", err)
 	}
@@ -222,7 +222,7 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 	got, err := r.Route(context.Background(), "how does peeq open the database?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/store/store.go", Score: 0.50},
 		{Repo: "go-sqlite3", Path: "driver/driver.go", Score: 0.48},
-	}, nil)
+	}, nil, false)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -236,8 +236,10 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 }
 
 func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
-	// Given two close candidates with no dependency between them — peeq and
-	// loom both have an httpapi package and neither pulls the other.
+	// Given two close candidates in ONE repository with no dependency between
+	// them: peeq authenticates in two places and neither calls the other.
+	// Inside a repository the judge is still what decides — the repository
+	// rung above it only fires when the candidates span several.
 	var prompts []string
 	llmFake := testLLM(t, func(prompt string) string {
 		prompts = append(prompts, prompt)
@@ -250,8 +252,8 @@ func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
 
 	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
-		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil)
+		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
+	}, nil, false)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -281,8 +283,8 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil)
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -296,7 +298,9 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 
 func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 	// The spec says two to five named candidates. A card with eleven is not a
-	// question a person answers.
+	// question a person answers. Eleven repositories is the repository card,
+	// so the cap it lands on is four repositories plus the "all repositories"
+	// entry — five buttons, the same as a module card's five.
 	r := newTestRouter(t, testLLM(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"ask"}`
@@ -313,12 +317,269 @@ func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil)
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
 	if len(got.Candidates) != maxCandidates {
 		t.Errorf("card offers %d candidates, want %d", len(got.Candidates), maxCandidates)
+	}
+}
+
+// TestRouteCapsAModuleCardAtFiveCandidates is the same cap on the other card
+// shape: eleven modules inside ONE repository never reach the repository rung,
+// so the judge decides and maxCandidates applies to the modules themselves.
+func TestRouteCapsAModuleCardAtFiveCandidates(t *testing.T) {
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			return `{"decision":"ask"}`
+		}
+		return `{"title":"T","summary":"S"}`
+	}), testDBWithDeps(t, nil))
+
+	var hits []retrieve.Hit
+	for i := 0; i < 11; i++ {
+		hits = append(hits, retrieve.Hit{
+			Repo:  "peeq",
+			Path:  fmt.Sprintf("m%d/f.go", i),
+			Score: 0.50 - float64(i)/1000,
+		})
+	}
+
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if len(got.Candidates) != maxCandidates {
+		t.Errorf("card offers %d candidates, want %d", len(got.Candidates), maxCandidates)
+	}
+	for i, c := range got.Candidates {
+		if c.ModuleKey == "" {
+			t.Errorf("candidate %d has no module key; a single repository must still produce a module card", i)
+		}
+	}
+}
+
+// TestRouteAsksWhichRepositoryWhenTheQuestionNamedNone is the rung end to end:
+// a generic question — "how are token costs calculated in $?" names no
+// system — whose hits land in two repositories ends with a card offering the
+// repositories, not their modules, and never pays the judge to get there.
+func TestRouteAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
+	var prompts []string
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		prompts = append(prompts, prompt)
+		if strings.Contains(prompt, judgeMarker) {
+			t.Errorf("the repository rung decides on its own; the judge must not be paid for:\n%s", prompt)
+			return `{"decision":"compose"}`
+		}
+		return `{"title":"Token cost per turn","summary":"Prices a turn from the model's own rates."}`
+	}), testDBWithDeps(t, nil))
+
+	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.60},
+		{Repo: "peeq", Path: "backend/internal/usage/meter.go", Score: 0.58},
+		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.30},
+	}, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.Ask {
+		t.Fatal("a question naming no repository whose hits span two must ask which one")
+	}
+	if len(got.Candidates) != 3 {
+		t.Fatalf("card offers %d entries, want 2 repositories plus \"all repositories\"", len(got.Candidates))
+	}
+	for i, c := range got.Candidates[:2] {
+		if c.ModuleKey != "" {
+			t.Errorf("entry %d has module key %q; a repository card offers repositories", i, c.ModuleKey)
+		}
+		if c.Title == "" || c.Summary == "" {
+			t.Errorf("entry %d has no title or summary", i)
+		}
+	}
+	if got.Candidates[0].Repo != "peeq" || got.Candidates[1].Repo != "loom" {
+		t.Errorf("entries are %q then %q, want the repositories best first",
+			got.Candidates[0].Repo, got.Candidates[1].Repo)
+	}
+	// peeq's two modules are one entry now, and it carries both their hits.
+	if n := len(got.Candidates[0].Hits); n != 2 {
+		t.Errorf("peeq's entry carries %d hits, want both of its modules'", n)
+	}
+	last := got.Candidates[len(got.Candidates)-1]
+	wantTitle, wantSummary := AllReposChoice(LanguageEN)
+	if last.Repo != "" || last.Title != wantTitle || last.Summary != wantSummary {
+		t.Errorf("last entry = %+v, want the templated \"all repositories\" choice", last)
+	}
+	// two naming calls, one per repository — the "all" entry is templated and
+	// the judge was never asked
+	if len(prompts) != 2 {
+		t.Errorf("made %d model calls, want 2 (one name per repository)", len(prompts))
+	}
+}
+
+// TestRouteAsksWhichRepositoryEvenWhenOneLeadsClearly is the reported defect
+// itself: "How are token costs calculated in $?" was answered across every
+// repository because one module led by more than the margin. A leader says
+// which module scored best, never which product the reader meant, so the
+// repository rung sits ABOVE the margin and the card is asked anyway.
+func TestRouteAsksWhichRepositoryEvenWhenOneLeadsClearly(t *testing.T) {
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		if strings.Contains(prompt, judgeMarker) {
+			t.Errorf("the repository rung decides on its own; the judge must not be paid for:\n%s", prompt)
+		}
+		return `{"title":"Token cost per turn","summary":"Prices a turn."}`
+	}), testDBWithDeps(t, nil))
+
+	// (0.60-0.30)/0.60 = 0.5, twice the 0.25 margin: the old ladder answered
+	// here without asking anything.
+	hits := []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.60},
+		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.30},
+	}
+	ranked, err := r.Rank(context.Background(), hits)
+	if err != nil {
+		t.Fatalf("rank: %v", err)
+	}
+	if !Dominates(ranked.All, 0.25) {
+		t.Fatal("the fixture must be one the margin dominates, or this test proves nothing")
+	}
+
+	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, hits, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if !got.Ask {
+		t.Error("a dominant margin must not decide which repository the reader meant")
+	}
+}
+
+// TestRouteDoesNotAskWhichRepositoryWhenTheReaderAskedForAllOfThem is the
+// other half of the rung: "in all repos, how are token costs calculated?" is
+// the reader answering the card in advance.
+func TestRouteDoesNotAskWhichRepositoryWhenTheReaderAskedForAllOfThem(t *testing.T) {
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("asking for every repository settles it; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), testDBWithDeps(t, nil))
+
+	got, err := r.Route(context.Background(), "in all repos, how are token costs calculated?", AudienceDev, LanguageEN, []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.50},
+		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.49},
+	}, nil, true)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if got.Ask {
+		t.Error("a reader who asked for every repository must not be asked which one")
+	}
+	if len(got.Candidates) != 2 {
+		t.Errorf("both repositories must stay in the turn, got %d", len(got.Candidates))
+	}
+}
+
+// TestRouteDoesNotAskWhichRepositoryWhenTheyDependOnEachOther is the
+// exception the repo_deps invariant buys: loom requiring what peeq publishes
+// is one mechanism, and the rung sits below that check on purpose.
+func TestRouteDoesNotAskWhichRepositoryWhenTheyDependOnEachOther(t *testing.T) {
+	db := testDBWithDeps(t, map[string]string{
+		"loom": "module github.com/trick77/loom\n\nrequire github.com/trick77/peeq v1.0.0\n",
+		"peeq": "module github.com/trick77/peeq\n",
+	})
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("a manifest dependency is a hard signal; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), db)
+
+	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, []retrieve.Hit{
+		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.60},
+		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.20},
+	}, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if got.Ask {
+		t.Error("repositories joined by a manifest are composition, not a choice between products")
+	}
+}
+
+// TestRepoCandidatesUnionTheHitsBestFirst pins what an entry on a repository
+// card carries: every hit its modules put on the list, ordered best first so
+// the naming call reads the repository's strongest code rather than whichever
+// module happened to come first.
+func TestRepoCandidatesUnionTheHitsBestFirst(t *testing.T) {
+	got := repoCandidates([]Candidate{
+		{Repo: "peeq", ModuleKey: "a", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}, {ChunkID: 2, Score: 0.30}}},
+		{Repo: "loom", ModuleKey: "c", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 4, Score: 0.50}}},
+		{Repo: "peeq", ModuleKey: "b", Score: 0.55, Hits: []retrieve.Hit{{ChunkID: 3, Score: 0.55}}},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want one per repository", len(got))
+	}
+	if got[0].Repo != "peeq" || got[0].Score != 0.60 {
+		t.Errorf("leader = %q at %v, want peeq at its best module's score", got[0].Repo, got[0].Score)
+	}
+	if got[0].ModuleKey != "" {
+		t.Errorf("module key = %q, want empty — that is what marks a repository entry", got[0].ModuleKey)
+	}
+	var ids []int64
+	for _, h := range got[0].Hits {
+		ids = append(ids, h.ChunkID)
+	}
+	if fmt.Sprint(ids) != "[1 3 2]" {
+		t.Errorf("peeq's hits are %v, want both modules' hits best first", ids)
+	}
+}
+
+func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
+	var cs []Candidate
+	for i := 0; i < 9; i++ {
+		cs = append(cs, Candidate{Repo: fmt.Sprintf("r%d", i), Score: 0.50 - float64(i)/1000})
+	}
+	// The regrouping itself keeps every repository — the dependency check has
+	// to see all of them — and only the card is cut.
+	all := repoCandidates(cs)
+	if len(all) != 9 {
+		t.Errorf("regrouped to %d repositories, want all 9: a capped list hides manifest edges from Related", len(all))
+	}
+	got := capRepoCandidates(all)
+	if len(got) != maxRepoCandidates {
+		t.Errorf("offered %d repositories, want %d so the \"all repositories\" entry keeps the card at %d buttons",
+			len(got), maxRepoCandidates, maxCandidates)
+	}
+}
+
+// TestRouteSeesADependencyBeyondTheCardsCap is the cap's one real hazard: the
+// card shows four repositories, but the edge that makes this composition can
+// sit on the fifth. Asking repodeps about the shortened list would card where
+// AGENTS.md says answer.
+func TestRouteSeesADependencyBeyondTheCardsCap(t *testing.T) {
+	db := testDBWithDeps(t, map[string]string{
+		"r4": "module github.com/trick77/r4\n\nrequire github.com/trick77/r0 v1.0.0\n",
+		"r0": "module github.com/trick77/r0\n",
+	})
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("the fifth repository's manifest edge settles it; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), db)
+
+	// Five repositories clear the floor. Only r0 and r4 are joined, and r4 is
+	// the one the card would have dropped.
+	var hits []retrieve.Hit
+	for i := 0; i < 5; i++ {
+		hits = append(hits, retrieve.Hit{
+			Repo:  fmt.Sprintf("r%d", i),
+			Path:  fmt.Sprintf("m%d/f.go", i),
+			Score: 0.50 - float64(i)/1000,
+		})
+	}
+
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if got.Ask {
+		t.Error("Related must see every repository, not just the four the card would show")
 	}
 }
 
@@ -337,8 +598,8 @@ func TestRouteJudgeDecodeFailureMeansAskNotCrashNotCompose(t *testing.T) {
 
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil)
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -364,8 +625,8 @@ func TestRouteNamingFailureKeepsTheModuleKeyAsTitle(t *testing.T) {
 
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil)
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false)
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -432,8 +693,8 @@ func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
 
 	if _, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil); err != nil {
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -456,8 +717,8 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil)
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -485,8 +746,8 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 
 	if _, err := base.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
-		{Repo: "loom", Path: "b/y.go", Score: 0.49},
-	}, nil); err != nil {
+		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
+	}, nil, false); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -508,25 +769,59 @@ func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 
 	// The margin dominates: no rung below it is consulted at all, so whatever
 	// related and judged would have said must not be read.
-	if Decide(dominant, 0.25, true, true, 0, true) {
+	if Decide(dominant, 0.25, true, true, 0, false, true) {
 		t.Error("a dominant pair answers without asking, whatever the later rungs would have said")
 	}
 	// A manifest dependency short-circuits the judge.
-	if Decide(tight, 0.25, true, true, 0, true) {
+	if Decide(tight, 0.25, true, true, 0, false, true) {
 		t.Error("a manifest dependency is composition; the judge must not override it")
 	}
 	// Past both, the judge decides — and is never defaulted.
-	if !Decide(tight, 0.25, false, true, 0, true) {
+	if !Decide(tight, 0.25, false, true, 0, false, true) {
 		t.Error("the judge said ask")
 	}
-	if Decide(tight, 0.25, false, false, 0, true) {
+	if Decide(tight, 0.25, false, false, 0, false, true) {
 		t.Error("the judge said compose")
 	}
 	// Last rung: the judge found the code ambiguous, but the reader's role
 	// cannot resolve it, so the turn answers instead of asking a question
 	// nobody can answer.
-	if Decide(tight, 0.25, false, true, 0, false) {
+	if Decide(tight, 0.25, false, true, 0, false, false) {
 		t.Error("a card the role cannot answer is not asked")
+	}
+}
+
+// TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone pins the repository
+// rung: it is deterministic, it sits above the margin and above the judge,
+// and the only things that outrank it are the reader's own words.
+func TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
+	// A question naming no repository whose best hits are a clear leader in
+	// one repository and a runner-up in another. The margin dominates
+	// outright — 0.667 against 0.25 — and that is exactly the case this rung
+	// exists for: a leader says which MODULE scored best, never which product
+	// the reader meant.
+	spread := []Candidate{{Repo: "peeq", Score: 0.60}, {Repo: "loom", Score: 0.20}}
+	if !Decide(spread, 0.25, false, false, 0, false, true) {
+		t.Error("candidates in two repositories with none named are a card, whatever the margin says")
+	}
+	if Decide(spread, 0.25, false, false, 0, true, true) {
+		t.Error("a reader who asked for all repositories has already answered the card")
+	}
+	if Decide(spread, 0.25, true, false, 0, false, true) {
+		t.Error("repositories joined by a manifest dependency are composition, not a choice")
+	}
+	if Decide(spread, 0.25, false, true, 1, false, true) {
+		t.Error("a question that named the repository must not be asked which repository it meant")
+	}
+
+	// One repository, two modules: the rung does not fire, and the ladder
+	// below it decides exactly as before.
+	oneRepo := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "peeq", Score: 0.49}}
+	if Decide(oneRepo, 0.25, false, false, 0, false, true) {
+		t.Error("a single repository is not a choice between repositories; the judge decides")
+	}
+	if !Decide(oneRepo, 0.25, false, true, 0, false, true) {
+		t.Error("within one repository the judge still decides")
 	}
 }
 
@@ -572,8 +867,8 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
-		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil); err != nil {
+		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
+	}, nil, false); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -589,8 +884,8 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	cheap := r.WithJudgeDeployment(llm.ShortGate())
 	if _, err := cheap.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
-		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil); err != nil {
+		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
+	}, nil, false); err != nil {
 		t.Fatalf("route on the cheap lane: %v", err)
 	}
 	if models["judge"] != llm.ShortGateDeployment {
@@ -637,8 +932,8 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
-		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil); err != nil {
+		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
+	}, nil, false); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 

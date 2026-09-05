@@ -87,6 +87,36 @@ describe("Clarify", () => {
     }
   });
 
+  // A repository card's last entry stands for every repository at once, so it
+  // carries no repo and no branch. Printing the pair anyway leaves a bare "·"
+  // where an identifier should be, which reads as a missing value.
+  const repoCandidates = [
+    { idx: 0, title: "Token cost per turn", summary: "Prices a turn.", repo: "peeq", branch: "master" },
+    { idx: 1, title: "Per-request cost", summary: "Costs one request.", repo: "loom", branch: "master" },
+    { idx: 2, title: "All repositories", summary: "Answer across every indexed repository.", repo: "", branch: "" },
+  ];
+
+  it("offers the all-repositories entry without a repo line", async () => {
+    const onChoose = vi.fn();
+    const user = userEvent.setup();
+    strict(<Clarify candidates={repoCandidates} onChoose={onChoose} />);
+
+    const entry = screen.getByText("All repositories").closest("button");
+    expect(entry?.textContent).not.toContain("·");
+    expect(screen.getByText("Token cost per turn").closest("button")?.textContent).toContain("peeq · master");
+
+    await user.click(screen.getByText("All repositories"));
+    expect(onChoose).toHaveBeenCalledWith(2);
+  });
+
+  it("records the all-repositories choice without a bare separator", () => {
+    strict(<Clarify candidates={repoCandidates} chosenIdx={2} onChoose={() => {}} />);
+
+    const header = screen.getByRole("button", { name: /Chosen/ });
+    expect(header.textContent).toContain("Chosen: All repositories");
+    expect(header.textContent).not.toContain("·");
+  });
+
   it("rotates the chevron by 90 degrees on open, without swapping the glyph", async () => {
     // AGENTS.md: chevron only — no triangle, no plus/minus, no glyph swap.
     const user = userEvent.setup();

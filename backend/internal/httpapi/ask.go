@@ -27,6 +27,13 @@ type Asker interface {
 	// Resume continues a turn from the hits one clarification candidate was
 	// built from — no search, no routing.
 	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+	// ResumeRepo continues a turn after the reader chose a REPOSITORY off a
+	// card, searching that repository at full depth — or, for an empty repo,
+	// the whole corpus. The one resume path that searches again; see
+	// ask.Pipeline.ResumeRepo for why a repository card cannot replay stored
+	// hits.
+	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repo string,
+		audience ask.Audience, lang ask.Language, scope ask.Scope, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
 	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, scope ask.Scope, ev ask.Events) (ask.Answer, error)
@@ -125,6 +132,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	var resume *threads.Clarification
 	var resumeHits []retrieve.Hit
 	var resumeScope ask.Scope
+	// resumeRepoChoice marks a card whose entries were repositories; resumeRepo
+	// is the one chosen, empty for the card's "all repositories" entry.
+	var resumeRepoChoice bool
+	var resumeRepo string
 	if req.ClarificationMessageID != 0 {
 		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
@@ -151,11 +162,22 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "this clarification was already answered", http.StatusConflict)
 			return
 		}
-		_, hits, err := s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
-		if err != nil {
-			slog.Error("resolve candidate hits failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
+		// An empty module key is what a repository card writes: the choice was
+		// a repository, not a module, and there are no stored hits to replay —
+		// the resumed turn searches that repository instead. Reading the
+		// discriminator off the candidate keeps every card stored before this
+		// existed resuming exactly as it did.
+		chosen := c.Candidates[req.Choice]
+		resumeRepoChoice = chosen.ModuleKey == ""
+		resumeRepo = chosen.Repo
+		var hits []retrieve.Hit
+		if !resumeRepoChoice {
+			_, hits, err = s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
+			if err != nil {
+				slog.Error("resolve candidate hits failed", "err", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
 		}
 		// The scope the card was asked under carries over. Without it a resumed
 		// turn re-answers "how do loom and rongo differ" from rongo-only
@@ -169,6 +191,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		if ok {
 			resumeScope = m.Scope
+		}
+		if resumeRepoChoice {
+			// The choice IS the scope now. Unknown carries over untouched: a
+			// repository the question named that the index does not have is
+			// still said out loud, whichever entry was picked. An empty repo is
+			// the "all repositories" entry, which is the reader's own
+			// permission to answer across the corpus and is recorded as such.
+			resumeScope.All = resumeRepo == ""
+			resumeScope.Known = nil
+			if resumeRepo != "" {
+				resumeScope.Known = []string{resumeRepo}
+			}
 		}
 		resume = c
 		resumeHits = hits
@@ -316,7 +350,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, resumeScope); serr != nil {
 			slog.Error("record scope failed", "err", serr)
 		}
-		answer, err := s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
+		var answer ask.Answer
+		var err error
+		if resumeRepoChoice {
+			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepo, audience, lang, resumeScope, events)
+		} else {
+			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
+		}
 		if err != nil {
 			slog.Error("resumed turn failed", "err", err)
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {

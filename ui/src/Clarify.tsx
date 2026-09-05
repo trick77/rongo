@@ -67,9 +67,11 @@ export default function Clarify({
         ) : (
           <>
             <span>Chosen: {chosen?.title}</span>
-            <span className="ml-auto font-mono text-[11.5px] text-faint">
-              {chosen?.repo} · {chosen?.branch}
-            </span>
+            {chosen?.repo && (
+              <span className="ml-auto font-mono text-[11.5px] text-faint">
+                {chosen.repo} · {chosen.branch}
+              </span>
+            )}
           </>
         )}
       </button>
@@ -77,7 +79,7 @@ export default function Clarify({
       {open && (
         <ul className="grid gap-2 px-4 pb-4">
           {candidates.map((c) => (
-            <li key={c.idx}>
+            <li key={c.idx} className={c.repo ? undefined : "mt-1 border-t border-border pt-3"}>
               <button
                 type="button"
                 onClick={() => onChoose(c.idx)}
@@ -91,9 +93,15 @@ export default function Clarify({
               >
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-ink">{c.title}</span>
-                  <span className="font-mono text-[11.5px] text-faint">
-                    {c.repo} · {c.branch}
-                  </span>
+                  {/* An entry with no repository is the card's "all
+                      repositories" choice: it stands for every one of them,
+                      so there is nothing to print here and a bare "·" would
+                      read as a missing value. */}
+                  {c.repo && (
+                    <span className="font-mono text-[11.5px] text-faint">
+                      {c.repo} · {c.branch}
+                    </span>
+                  )}
                   {c.idx === chosenIdx && (
                     <span className="ml-auto text-xs font-medium text-accent-strong">Chosen</span>
                   )}

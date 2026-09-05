@@ -71,6 +71,31 @@ func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known
 	return nil, nil, nil
 }
 
+// indexedSearch is searchFunc plus an index that carries some repositories.
+// ResumeRepo asks whether the chosen one is still there before searching, so
+// a fake that knows nothing would make every repository look deleted.
+type indexedSearch struct {
+	searchFunc
+	indexed []string
+}
+
+func (s indexedSearch) ResolveRepos(_ context.Context, want []string, _ string) (known, unknown []string, err error) {
+	for _, w := range want {
+		for _, i := range s.indexed {
+			if w == i {
+				known = append(known, w)
+			}
+		}
+	}
+	return known, nil, nil
+}
+
+// withIndexedSearcher overrides the searcher with one whose index carries
+// exactly the named repositories.
+func withIndexedSearcher(indexed []string, fn func(retrieve.Query) ([]retrieve.Hit, error)) pipelineOpt {
+	return func(f *pipelineFakes) { f.search = indexedSearch{searchFunc: searchFunc(fn), indexed: indexed} }
+}
+
 // fakeRouter returns a canned Decision regardless of input, so pipeline tests
 // can drive Run's ask/don't-ask branch without a database, a margin or a
 // model — Router's own ladder is route_test.go's job.
@@ -80,10 +105,14 @@ type fakeRouter struct {
 	// named is what Run passed as the question's resolved repositories, so a
 	// test can check the rung's input reaches the router at all.
 	named []string
+	// all is the understanding's "the reader asked for every repository"
+	// signal, for the same reason.
+	all bool
 }
 
-func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string) (Decision, error) {
+func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
 	f.named = namedRepos
+	f.all = allRepos
 	return f.d, f.err
 }
 
@@ -293,6 +322,131 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 	}
 	if len(answer.Sources) == 0 {
 		t.Error("the answer must carry what it was written from, so the turn can be re-explained later")
+	}
+}
+
+// TestResumeRepoSearchesTheChosenRepositoryAtFullDepth is the one resume path
+// that searches again. A repository card groups hits out of ONE fused list of
+// searchK, so the runner-up repository may have contributed two or three
+// chunks; answering from those would make the choice worse than the answer it
+// replaced. Searching the chosen repository on its own gives it the depth a
+// question naming it would have got.
+func TestResumeRepoSearchesTheChosenRepositoryAtFullDepth(t *testing.T) {
+	var got retrieve.Query
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
+		got = q
+		return []retrieve.Hit{{ChunkID: 1, Repo: "loom", Path: "a.go"}}, nil
+	}))
+
+	answer, err := p.ResumeRepo(context.Background(), "how are token costs calculated in $?",
+		Understanding{CodeTerms: []string{"pricing"}}, "loom", AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+	if len(got.Repos) != 1 || got.Repos[0] != "loom" {
+		t.Errorf("searched repos = %v, want only the chosen one", got.Repos)
+	}
+	if got.K != searchK {
+		t.Errorf("searched K = %d, want the same depth a named repository gets (%d)", got.K, searchK)
+	}
+	if got.Question != "" {
+		t.Errorf("Question = %q, want it left out — knownRepos would union the other repositories back in", got.Question)
+	}
+	if got.Texts[0] != "how are token costs calculated in $?" {
+		t.Errorf("texts = %v, want the stored understanding's search texts, question first", got.Texts)
+	}
+	if answer.Text == "" {
+		t.Error("want an answer")
+	}
+	if answer.Scope.Known[0] != "loom" {
+		t.Errorf("scope = %+v, want the choice carried into the record", answer.Scope)
+	}
+}
+
+// TestResumeRepoWithNoRepositorySearchesTheWholeCorpus is the card's "all
+// repositories" entry: the search the turn would have run had it never asked.
+func TestResumeRepoWithNoRepositorySearchesTheWholeCorpus(t *testing.T) {
+	var got retrieve.Query
+	p := newTestPipeline(t, withSearcher(func(q retrieve.Query) ([]retrieve.Hit, error) {
+		got = q
+		return []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, nil
+	}))
+
+	if _, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, "",
+		AudienceBA, LanguageEN, Scope{All: true}, Events{}); err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+	if len(got.Repos) != 0 {
+		t.Errorf("searched repos = %v, want the whole corpus", got.Repos)
+	}
+	if got.Question == "" {
+		t.Error("the unscoped search keeps the question, the way an ordinary turn does")
+	}
+}
+
+// TestResumeRepoSaysNothingFoundRatherThanAnswering: a repository can be
+// chosen and turn out to hold nothing for this question. "No hit means no
+// hit" — never an answer assembled from what the card happened to show.
+func TestResumeRepoSaysNothingFoundRatherThanAnswering(t *testing.T) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom"}, func(retrieve.Query) ([]retrieve.Hit, error) {
+		return nil, nil
+	}))
+
+	got, err := p.ResumeRepo(context.Background(), "frage", Understanding{CodeTerms: []string{"AirPlay"}}, "loom",
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+	if !strings.Contains(got.Text, "found nothing") {
+		t.Errorf("text = %q, want the nothing-found answer", got.Text)
+	}
+	if !strings.Contains(strings.ToLower(got.Text), "airplay") {
+		t.Errorf("text = %q, want the terms it tried named", got.Text)
+	}
+}
+
+// TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex: a restriction the
+// index cannot resolve is not a narrow search, it is no search at all —
+// knownRepos drops a name it does not carry, and an empty restriction means
+// the whole corpus. Between the card and the choice the repository can leave
+// repos.yaml or be renamed. Answering from every repository while the record
+// says it answered from the chosen one is the substitution this rung exists
+// to prevent, so the turn fails instead and the card stays open for another
+// choice.
+func TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex(t *testing.T) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(retrieve.Query) ([]retrieve.Hit, error) {
+		t.Fatal("a repository the index no longer carries must not be searched for across the whole corpus")
+		return nil, nil
+	}))
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, "loom",
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+	if err == nil {
+		t.Fatal("want an error when the chosen repository is gone from the index")
+	}
+	if !strings.Contains(err.Error(), "loom") {
+		t.Errorf("err = %v, want it to name the repository that went missing", err)
+	}
+}
+
+// TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord: the reader's own
+// words have to reach the rung that would otherwise ask them again, and the
+// stored scope, so a re-explain answers under the same permission.
+func TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord(t *testing.T) {
+	fr := &fakeRouter{}
+	db := gatherDB(t)
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+
+	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?", AudienceBA, LanguageEN, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !fr.all {
+		t.Error("the router never learned the reader asked for every repository")
+	}
+	if !got.Scope.All {
+		t.Error("the record never learned it either, so a re-explain would ask which repository was meant")
 	}
 }
 
