@@ -240,7 +240,10 @@ function inline(src: string, key: string, hooks: MarkerHooks, fade: boolean): Re
 
 // The info string after the opening fence names the language; a closing fence
 // has none and the group stays empty.
-const fenceRe = /^\s*```\s*([\w+#-]*)/;
+/** fenceRe opens or closes a fenced block; the capture is the info string.
+ * Exported for diagramExport.ts, which walks the same fences to rewrite a
+ * diagram for the clipboard. */
+export const fenceRe = /^\s*```\s*([\w+#-]*)/;
 const headingRe = /^(#{1,6})\s+(.*)$/;
 const bulletRe = /^\s*[-*]\s+(.*)$/;
 const orderedRe = /^\s*\d+[.)]\s+(.*)$/;

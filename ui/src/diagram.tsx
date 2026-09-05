@@ -1,5 +1,8 @@
-import { useId, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { MarkerHooks } from "./markdown";
+import { download, fileName, toSvgFile } from "./diagramExport";
+import DiagramView from "./DiagramView";
+import { DownloadIcon, ExpandIcon } from "./icons";
 
 /**
  * One diagram in an answer: a fenced block tagged `diagram` holding a small
@@ -472,6 +475,9 @@ function Chips({ src, left, top, hooks, k }: { src: number[]; left: number; top:
             width={w + 2}
             height={CHIP_H + 18}
             className="fill-transparent"
+            // A downloaded file has nothing to tap: diagramExport.ts drops
+            // these by the marker rather than by guessing at a fill.
+            data-export="skip"
           />
         )}
         <rect x={cx - w / 2} y={y} width={w} height={CHIP_H} rx={3} className="fill-accent-dim" />
@@ -588,53 +594,134 @@ function Sequence({ layout, hooks, head, open }: { layout: SeqLayout; hooks: Mar
   );
 }
 
-/** Diagram draws one parsed spec. The arrowhead markers carry a per-instance
- * id: a thread holds many answers, and url(#arrow) would resolve to the first
- * one's marker. */
-export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: MarkerHooks }): ReactNode {
+/** diagramTitle names the picture, in the accessible label, the file and the
+ * full view's header. */
+export function diagramTitle(spec: DiagramSpec): string {
+  return spec.type === "flow" ? "Flow diagram" : "Sequence diagram";
+}
+
+/** diagramSize is the drawing's intrinsic size. The full view scales itself
+ * against it, and does so without measuring anything: the layout is a
+ * character estimate, so this is the same number on the server, in a test and
+ * on a phone. */
+export function diagramSize(spec: DiagramSpec): { width: number; height: number } {
+  const layout = spec.type === "flow" ? layoutFlow(spec) : layoutSequence(spec);
+  return { width: layout.width + 2 * PAD, height: layout.height + 2 * PAD };
+}
+
+/** DiagramSvg draws one parsed spec. The arrowhead markers carry a
+ * per-instance id: a thread holds many answers, and url(#arrow) would resolve
+ * to the first one's marker.
+ *
+ * Separate from the card below it because the full view (DiagramView.tsx)
+ * draws the same picture in a different box, and a second renderer would be a
+ * second drawing to keep in step. */
+export function DiagramSvg({
+  spec,
+  hooks,
+  svgRef,
+}: {
+  spec: DiagramSpec;
+  hooks: MarkerHooks;
+  svgRef?: RefObject<SVGSVGElement | null>;
+}): ReactNode {
   const id = useId().replace(/[^A-Za-z0-9_-]/g, "");
   const head = `${id}-head`;
   const open = `${id}-open`;
   const layout = spec.type === "flow" ? layoutFlow(spec) : layoutSequence(spec);
-  const title = spec.type === "flow" ? "Flow diagram" : "Sequence diagram";
+  const title = diagramTitle(spec);
   return (
-    <div className="mt-3 max-w-full overflow-x-auto overscroll-x-contain rounded-ui-sm border border-border bg-panel p-3">
-      {/* font-sans explicitly: the diagram sits inside the answer's .ui-markdown
-          wrapper, which is serif prose. A node label is a name from the code,
-          not prose, and it reads as the rest of the chrome does.
+    // font-sans explicitly: the diagram sits inside the answer's .ui-markdown
+    // wrapper, which is serif prose. A node label is a name from the code,
+    // not prose, and it reads as the rest of the chrome does.
+    //
+    // Sized in px and deliberately given no viewBox, so on a phone it scrolls
+    // inside its box rather than scaling. A viewBox would fit a 530px sequence
+    // into 310px at 0.55: the 10px chip text lands near 5.5px and the chip
+    // itself near 14x8, which is neither readable nor tappable — and a diagram
+    // that cites like prose has to be both. With the width attribute and no
+    // viewBox, any CSS that narrows the element clips the drawing instead of
+    // scaling it, so it must keep its own intrinsic width. The full view
+    // scales it on purpose, with a transform, and only downwards.
+    <svg
+      ref={svgRef}
+      width={layout.width + 2 * PAD}
+      height={layout.height + 2 * PAD}
+      role="img"
+      aria-label={title}
+      className="block font-sans"
+    >
+      <title>{title}</title>
+      <defs>
+        <marker id={head} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <path d="M0 0L8 3L0 6z" className="fill-muted" />
+        </marker>
+        <marker id={open} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polyline points="0 0, 8 3, 0 6" className="fill-none stroke-muted" strokeWidth={1.2} />
+        </marker>
+      </defs>
+      <g transform={`translate(${PAD + ("originX" in layout ? layout.originX : 0)},${PAD})`}>
+        {spec.type === "flow" ? (
+          <Flow layout={layout as FlowLayout} hooks={hooks} head={head} />
+        ) : (
+          <Sequence layout={layout as SeqLayout} hooks={hooks} head={head} open={open} />
+        )}
+      </g>
+    </svg>
+  );
+}
 
-          Sized in px and deliberately given no viewBox, so on a phone it
-          scrolls inside the box above rather than scaling. A viewBox would fit
-          a 530px sequence into 310px at 0.55: the 10px chip text lands near
-          5.5px and the chip itself near 14x8, which is neither readable nor
-          tappable — and a diagram that cites like prose has to be both. With
-          the width attribute and no viewBox, any CSS that narrows the element
-          clips the drawing instead of scaling it, so it must keep its own
-          intrinsic width. */}
-      <svg
-        width={layout.width + 2 * PAD}
-        height={layout.height + 2 * PAD}
-        role="img"
-        aria-label={title}
-        className="block font-sans"
-      >
-        <title>{title}</title>
-        <defs>
-          <marker id={head} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-            <path d="M0 0L8 3L0 6z" className="fill-muted" />
-          </marker>
-          <marker id={open} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-            <polyline points="0 0, 8 3, 0 6" className="fill-none stroke-muted" strokeWidth={1.2} />
-          </marker>
-        </defs>
-        <g transform={`translate(${PAD + ("originX" in layout ? layout.originX : 0)},${PAD})`}>
-          {spec.type === "flow" ? (
-            <Flow layout={layout as FlowLayout} hooks={hooks} head={head} />
-          ) : (
-            <Sequence layout={layout as SeqLayout} hooks={hooks} head={head} open={open} />
-          )}
-        </g>
-      </svg>
+/** Diagram is the picture as it sits in an answer: the scrolling card, and the
+ * two ways out of it — the full view, and the file.
+ *
+ * The scroller is an inner element rather than the card itself. The controls
+ * are positioned against the card, and a positioned child of a scroller
+ * travels with its content: on a wide diagram the buttons would slide off the
+ * left edge on the first drag. */
+export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: MarkerHooks }): ReactNode {
+  const svg = useRef<SVGSVGElement>(null);
+  const [full, setFull] = useState(false);
+  const title = diagramTitle(spec);
+
+  function save() {
+    if (svg.current) download(fileName(spec), toSvgFile(svg.current));
+  }
+
+  return (
+    <div className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3">
+      {/* Always drawn, never revealed on hover: a phone has no hover, and the
+          full view is the only way it can see a wide diagram whole. The fade
+          is Threads.tsx's, for the same reason — the drawing scrolls under
+          the buttons and would otherwise end against them mid-line. */}
+      {/* pointer-events-none on the strip, restored on the buttons: the box
+          is ~110px wide with its fade, and it lies over the top-right of the
+          drawing. Solid, it would swallow the taps meant for a chip that
+          scrolled under it — the same target the hit rect in Chips is drawn
+          to protect. */}
+      <div className="pointer-events-none absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6">
+        <button
+          type="button"
+          onClick={() => setFull(true)}
+          title="Full view"
+          aria-label={`${title}: full view`}
+          className="pointer-events-auto grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
+        >
+          <ExpandIcon />
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          title="Download SVG"
+          aria-label={`${title}: download SVG`}
+          className="pointer-events-auto grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
+        >
+          <DownloadIcon />
+        </button>
+      </div>
+      <div className="max-w-full overflow-x-auto overscroll-x-contain">
+        <DiagramSvg spec={spec} hooks={hooks} svgRef={svg} />
+      </div>
+      {full && <DiagramView spec={spec} hooks={hooks} onClose={() => setFull(false)} />}
     </div>
   );
 }

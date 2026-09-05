@@ -329,6 +329,31 @@ describe("Ask, a stored thread", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("copies a diagram as mermaid, not as the fence rongo writes it in", async () => {
+    // The fence is rongo's own shape and draws nowhere else: pasted, the
+    // reader used to get a block of JSON where the picture had been.
+    const spec = JSON.stringify({
+      type: "sequence",
+      actors: [{ id: "ui", label: "Ask.tsx" }],
+      steps: [{ from: "ui", to: "ui", label: "render", kind: "call", src: [1] }],
+    });
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
+    });
+    routedFetch([{ ...storedTurn, answer: "Through a grant [1].\n\n```diagram\n" + spec + "\n```" }]);
+    strict(<Ask threadId={7} />);
+
+    fireEvent.click(await screen.findByText("Copy as Markdown"));
+    await screen.findByText("Copied");
+    expect(written[0]).toContain("```mermaid");
+    expect(written[0]).toContain("ui->>ui: render [1]");
+    expect(written[0]).not.toContain("```diagram");
+    // The markers still point into the list underneath.
+    expect(written[0]).toContain("[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)");
+  });
+
   it("opens a source from a chip in an older turn, not only from the pane", async () => {
     // On a tablet the pane is not there and hover does not exist. The chip
     // is the way to the source, in every turn, from that turn's own list.

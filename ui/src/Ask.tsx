@@ -5,6 +5,7 @@ import Question from "./Question";
 import Trace, { type Step, type TraceState } from "./Trace";
 import { Chevron } from "./icons";
 import SourceView, { type SourceRef } from "./SourceView";
+import { mermaidize } from "./diagramExport";
 
 type Citation = SourceRef;
 
@@ -366,10 +367,14 @@ function clock(iso: string): string {
   return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** asMarkdown is what "Copy as Markdown" puts on the clipboard: the raw
- * answer with its markers, and the sources they point at. */
+/** asMarkdown is what "Copy as Markdown" puts on the clipboard: the answer
+ * with its markers, and the sources they point at.
+ *
+ * A diagram travels as mermaid rather than as the `diagram` fence it is
+ * written in. The fence is rongo's own shape and draws nowhere else, so a
+ * pasted answer used to carry a block of JSON where its picture had been. */
 function asMarkdown(turn: Turn): string {
-  const lines = [`# ${turn.question}`, "", turn.text.trim()];
+  const lines = [`# ${turn.question}`, "", mermaidize(turn.text.trim())];
   if (turn.citations.length > 0) {
     lines.push("", "Sources:", ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`));
   }
