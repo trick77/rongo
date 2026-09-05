@@ -364,6 +364,11 @@ export default function Ask({
   const [audience, setAudience] = useState<Audience>("ba");
   const [language, setLanguage] = useState(storedLanguage);
   const [turns, setTurns] = useState<Turn[]>([]);
+  // Whether a thread's turns are on their way. Distinct from busy, which is a
+  // turn being answered: this is the record being fetched, and it is what
+  // tells the empty column to hold the shape of a thread instead of offering
+  // the welcome to a reader who has just opened a conversation.
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   // The marker under the pointer, so the Sources pane can point back.
   const [hot, setHot] = useState<number | null>(null);
@@ -401,6 +406,39 @@ export default function Ask({
   // the reader moves it.
   const opened = useRef(false);
 
+  // Markdown is memoized, and a fresh arrow per render would defeat it on
+  // every turn at once. One handler per turn index is kept instead, and it
+  // reads the turns through a ref so it never goes stale: the index is the
+  // position in the thread on screen, which is what the reader clicked in.
+  const live = useRef(turns);
+  live.current = turns;
+  const markerOpen = useRef(new Map<number, (marker: number) => void>());
+  function openMarker(i: number) {
+    let f = markerOpen.current.get(i);
+    if (!f) {
+      f = (marker: number) => {
+        const c = live.current[i]?.citations.find((x) => x.marker === marker);
+        if (c) setViewing(c);
+      };
+      markerOpen.current.set(i, f);
+    }
+    return f;
+  }
+
+  // The same for the set of backed markers: it is derived from a turn's
+  // citations, so it is cached against that very array and only rebuilt when
+  // the citations themselves are replaced.
+  const backedSets = useRef(new WeakMap<Citation[], Set<number>>());
+  function backedMarkers(turn: Turn) {
+    if (!turn.done) return undefined;
+    let s = backedSets.current.get(turn.citations);
+    if (!s) {
+      s = new Set(turn.citations.map((c) => c.marker));
+      backedSets.current.set(turn.citations, s);
+    }
+    return s;
+  }
+
   function patchLast(patch: (t: Turn) => Turn) {
     setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? patch(t) : t)));
   }
@@ -427,10 +465,29 @@ export default function Ask({
     // the header belongs to the old thread until the new one has loaded.
     setOpenUsage(null);
     onUsage(null);
+    // The body empties in the same commit as the header, not a beat behind
+    // it: the conversation that was just left used to stand under the new
+    // thread's title for as long as the load took, which is the whole of the
+    // stagger a reader sees when switching threads. The turns go now and the
+    // skeleton holds their place — an empty list alone would offer the
+    // welcome to someone who has just opened a thread.
+    setTurns([]);
+    opened.current = true;
     if (openThread === null) {
-      setTurns([]);
+      setLoading(false);
+      opened.current = false;
       return;
     }
+    setLoading(true);
+    // The whole arrival in one commit: the turns, the header's running total
+    // and the end of the skeleton. Leaving the total to the effect that
+    // watches `turns` painted the thread first and the total a frame later,
+    // which is the last of the steps a reader could see.
+    const arrive = (next: Turn[]) => {
+      setTurns(next);
+      setLoading(false);
+      onUsage(threadUsage(next));
+    };
     (async () => {
       try {
         const res = await fetch(`/api/threads/${openThread}`);
@@ -438,7 +495,7 @@ export default function Ask({
           // 503, 500 and 401 mean "not right now", not "not yours". Treating
           // them as a dead thread would drop the bookmark on a passing blip and
           // the conversation would be gone on the next reload.
-          if (seq === loadSeq.current) setTurns([]);
+          if (seq === loadSeq.current) arrive([]);
           return;
         }
         const list = await res.json();
@@ -448,20 +505,19 @@ export default function Ask({
         // Rendering that as an empty thread would keep a dead id around
         // forever, so it is handed back as "no thread".
         if (!Array.isArray(list) || list.length === 0) {
-          setTurns([]);
+          arrive([]);
           shown.current = null;
           threadId.current = null;
           onThread(null);
           return;
         }
-        opened.current = true;
-        setTurns(linkChosenCandidates(list, list.map(storedTurn)));
+        arrive(linkChosenCandidates(list, list.map(storedTurn)));
       } catch {
         // The turns are cleared rather than left standing: the ids have already
         // moved to the new thread, and a visible conversation that belongs to
         // the old one would send the next question somewhere the reader is not
         // looking.
-        if (seq === loadSeq.current) setTurns([]);
+        if (seq === loadSeq.current) arrive([]);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -485,6 +541,10 @@ export default function Ask({
   useEffect(() => {
     const el = view.current;
     if (!el) return;
+    // The emptying that precedes a load is not an arrival: consuming
+    // `opened` here would spend it on the skeleton, and the turns that follow
+    // would then be taken for a new question and scrolled to the foot.
+    if (loading) return;
     if (opened.current) {
       opened.current = false;
       following.current = false;
@@ -710,12 +770,33 @@ export default function Ask({
           <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. */}
-            {turns.length === 0 && (
+            {turns.length === 0 && !loading && (
               <div className="max-w-[52ch]">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
                   {(welcome[language] ?? welcome.en).title}
                 </h2>
                 <p className="mt-3 text-muted">{(welcome[language] ?? welcome.en).body}</p>
+              </div>
+            )}
+
+            {/* The thread that is being fetched, in outline: the eyebrow, the
+                question and a few lines of answer, in the places they will
+                land in. It is the shape of a turn, not a spinner — the column
+                does not move again when the text replaces it. */}
+            {loading && (
+              <div className="max-w-[68ch]" aria-busy="true" aria-label="Opening the thread">
+                <div className="skeleton h-3 w-[7ch] rounded-ui-sm" />
+                <div className="skeleton mt-2.5 h-7 w-[24ch] rounded-ui-sm" />
+                <div className="mt-4 flex gap-1.5">
+                  <div className="skeleton h-5 w-[8ch] rounded-full" />
+                  <div className="skeleton h-5 w-[6ch] rounded-full" />
+                </div>
+                <div className="mt-6 space-y-2.5">
+                  <div className="skeleton h-3.5 w-full rounded-ui-sm" />
+                  <div className="skeleton h-3.5 w-full rounded-ui-sm" />
+                  <div className="skeleton h-3.5 w-[86%] rounded-ui-sm" />
+                  <div className="skeleton h-3.5 w-[62%] rounded-ui-sm" />
+                </div>
               </div>
             )}
 
@@ -783,14 +864,11 @@ export default function Ask({
                       onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
                       // Every turn, from its own list: the pane shows only
                       // the newest, and a tablet has no pane at all.
-                      onMarkerOpen={(marker) => {
-                        const c = turn.citations.find((x) => x.marker === marker);
-                        if (c) setViewing(c);
-                      }}
+                      onMarkerOpen={openMarker(i)}
                       // Known once the turn is done: the citations event is
                       // the last thing before done, so a finished turn with
                       // none has none.
-                      backed={turn.done ? new Set(turn.citations.map((c) => c.marker)) : undefined}
+                      backed={backedMarkers(turn)}
                       // Only a turn of THIS session fades its text in: it is
                       // the one whose words are arriving. A stored thread is
                       // mounted whole, and fading it would replay a

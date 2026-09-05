@@ -428,6 +428,41 @@ describe("Ask, a stored thread", () => {
     expect(screen.queryByText(/Through a grant/)).toBeNull();
   });
 
+  it("empties the column the moment another thread is picked", async () => {
+    // The rail changes the title at once, and the load takes as long as it
+    // takes. What used to stand in the column for that whole window was the
+    // conversation just left, under the new thread's name — the stagger a
+    // reader sees when switching threads.
+    let hold: Promise<void> | null = null;
+    let release!: () => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).startsWith("/api/threads/8")) {
+          await hold;
+          return { ok: true, status: 200, json: async () => [{ ...storedTurn, id: 11, answer: "A different record [1]." }] };
+        }
+        return { ok: true, status: 200, json: async () => [storedTurn] };
+      }),
+    );
+
+    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    await screen.findByText(/Through a grant/);
+
+    hold = new Promise<void>((r) => (release = r));
+    rerender(<Ask threadId={8} onThread={() => {}} />);
+
+    expect(screen.queryByText(/Through a grant/)).toBeNull();
+    // A shape in its place, and not the welcome: nobody who has just opened a
+    // thread is being invited to ask their first question.
+    expect(screen.getByLabelText("Opening the thread")).toBeTruthy();
+    expect(screen.queryByText("Ask about the code.")).toBeNull();
+
+    release();
+    await screen.findByText(/A different record/);
+    expect(screen.queryByLabelText("Opening the thread")).toBeNull();
+  });
+
   it("does not overwrite a running turn with the stored record", async () => {
     // A reload onto a remembered thread while the backend is slow: the question
     // is already sent when the record arrives. Without a guard the running turn
