@@ -68,6 +68,15 @@ func threadIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// ThreadID is threadIDFromContext for callers outside this package: the thread a
+// turn belongs to, or "" for a call made outside one. It exists so a log line
+// written elsewhere in the turn can carry the same id the affinity header does,
+// which is what makes a routing decision and the upstream calls it made line up
+// in the log.
+func ThreadID(ctx context.Context) string {
+	return threadIDFromContext(ctx)
+}
+
 // chatSessionID returns the session/affinity id to send for a turn. Every
 // request in one conversation reuses the same id — that is the point of the
 // affinity header — so ids are minted once per thread and cached until eviction.
