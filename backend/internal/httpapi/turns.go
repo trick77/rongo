@@ -76,6 +76,12 @@ func (t *turns) cancel(threadID int64) {
 	}
 }
 
+// threadWasDeleted reports whether ctx is a turn stopped because its thread is
+// gone, rather than one that failed or whose reader closed the tab.
+func threadWasDeleted(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), errThreadDeleted)
+}
+
 // recordFailed reports a record write that did not land, and says nothing when
 // the reason is that the thread was deleted while the turn ran. Every one of
 // those writes hangs off a message row the cascade already took, so they fail
@@ -83,7 +89,7 @@ func (t *turns) cancel(threadID int64) {
 // asked to be rid of. ctx is the TURN's context, never the record's: the record
 // outlives the request precisely by dropping the cancellation this reads.
 func recordFailed(ctx context.Context, msg string, err error) {
-	if err == nil || errors.Is(context.Cause(ctx), errThreadDeleted) {
+	if err == nil || threadWasDeleted(ctx) {
 		return
 	}
 	slog.Error(msg, "err", err)
@@ -95,7 +101,7 @@ func recordFailed(ctx context.Context, msg string, err error) {
 // error, and logging it as one would put a red line in the log for every
 // delete that landed on a live turn.
 func turnStopped(ctx context.Context, msg string, threadID int64, err error) {
-	if errors.Is(context.Cause(ctx), errThreadDeleted) {
+	if threadWasDeleted(ctx) {
 		slog.Info("turn stopped, thread deleted", "thread", threadID)
 		return
 	}
@@ -105,7 +111,7 @@ func turnStopped(ctx context.Context, msg string, threadID int64, err error) {
 // recordMissed is recordFailed for the writes a turn can lose without losing
 // anything a reader needs — a title, the follow-up pills.
 func recordMissed(ctx context.Context, msg string, err error) {
-	if err == nil || errors.Is(context.Cause(ctx), errThreadDeleted) {
+	if err == nil || threadWasDeleted(ctx) {
 		return
 	}
 	slog.Warn(msg, "err", err)

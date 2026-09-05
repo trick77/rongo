@@ -319,12 +319,30 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
 
+	// Any call still in flight when the delete lands mints the thread's session
+	// id again on its way out — the suggester's, the title's — and puts back
+	// what the delete dropped. Last of this handler's defers, so it runs after
+	// the turn and its title have both let go.
+	defer func() {
+		if threadWasDeleted(ctx) {
+			llm.ForgetThread(thread.ID)
+		}
+	}()
+
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
 	defer s.turns.add(thread.ID, cancelTurn)()
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
+		// The thread can be deleted between the ownership check above and this
+		// insert, and the row's foreign key is what catches it — which is a
+		// thread that is gone, not a server that is broken. Nothing paid for
+		// has happened yet, so the turn simply does not start.
+		if owns, oerr := s.deps.Threads.Owns(ctx, u.Subject, thread.ID); oerr == nil && !owns {
+			http.Error(w, "no such thread", http.StatusNotFound)
+			return
+		}
 		slog.Error("record question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -658,9 +676,25 @@ func (s *Server) writeTitle(
 		// live pill misses it and the reload shows it.
 		titleMeter := usage.New()
 		bg := usage.WithMeter(context.WithoutCancel(ctx), titleMeter)
+		// A thread deleted before the call went out gets no title call at all:
+		// this is the one turn goroutine the cancel does not reach, since it
+		// runs detached on purpose, so the check stands in for it. There is
+		// nothing left to name, and the label is not worth paying for.
+		if threadWasDeleted(ctx) {
+			return
+		}
 		call, cancel := context.WithTimeout(bg, titleCallTimeout)
 		title := s.deps.Titler(call, question, lang)
 		cancel()
+		// Deleted while the call was out: the id the call just minted is a new
+		// entry in the session cache, put there after the delete dropped the
+		// old one, so it goes the same way. The writes below are no-ops on
+		// rows the cascade has taken, and say nothing.
+		defer func() {
+			if threadWasDeleted(ctx) {
+				llm.ForgetThread(threadID)
+			}
+		}()
 		// The writes run on bg, not on the call's context: a title call that
 		// used its whole budget must still be able to record what it spent.
 		//
@@ -748,6 +782,16 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// A re-explain is another turn in the same conversation, so it pins to the
 	// same upstream node as the turn it re-answers.
 	ctx = llm.WithThreadID(ctx, msg.ThreadID)
+	// Any call still in flight when the delete lands mints the thread's session
+	// id again on its way out — the suggester's, the title's — and puts back
+	// what the delete dropped. Last of this handler's defers, so it runs after
+	// the turn and its title have both let go.
+	defer func() {
+		if threadWasDeleted(ctx) {
+			llm.ForgetThread(msg.ThreadID)
+		}
+	}()
+
 	defer s.turns.add(msg.ThreadID, cancelTurn)()
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
@@ -798,6 +842,13 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// default -1: this row did not resume a clarification.
 	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
+		// Same as handleAsk: the thread can go while the turn runs, and the
+		// row's foreign key is what catches it. A gone thread is a 404, not a
+		// 500, and there is nothing left to write the re-explain into.
+		if owns, oerr := s.deps.Threads.Owns(ctx, u.Subject, msg.ThreadID); oerr == nil && !owns {
+			http.Error(w, "no such thread", http.StatusNotFound)
+			return
+		}
 		slog.Error("record re-explain question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return

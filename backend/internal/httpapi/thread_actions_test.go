@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/threads"
 )
@@ -213,6 +214,39 @@ func TestDeleteThread_stopsTheAnswerBeingWrittenIntoIt(t *testing.T) {
 	}
 	// And nothing was written back into it: the answer that was in flight has
 	// nowhere to land, which is the point of deleting a thread.
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("threads = %+v, want the list empty", list)
+	}
+}
+
+// TestDeleteThread_nothingIsWrittenBackAfterwards covers the writes that run on
+// contexts the cancel does not reach: the record's, which outlives the request
+// on purpose, and the title's, which is forked before the turn and settles the
+// row from its own goroutine. None of them may put a row back.
+func TestDeleteThread_nothingIsWrittenBackAfterwards(t *testing.T) {
+	// Given a turn with a title in flight, whose thread is deleted under it
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"It runs through a job."}})
+	deps.Titler = func(context.Context, string, ask.Language) string { return "Shipping, end to end" }
+	srv := NewServer(deps)
+	deps.Ask.(*fakeAsker).during = func(ctx context.Context) {
+		list, _ := st.List(ctx, testSubject)
+		if len(list) != 1 {
+			t.Fatalf("threads = %+v, want the one being answered", list)
+		}
+		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", list[0].ID), ""); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete status = %d, want 204", rec.Code)
+		}
+	}
+
+	// When
+	do(srv, httptest.NewRequest(http.MethodPost, "/api/ask", strings.NewReader(
+		`{"question":"How does shipping work?","audience":"ba"}`)))
+
+	// Then
 	list, err := st.List(context.Background(), testSubject)
 	if err != nil {
 		t.Fatalf("List: %v", err)
