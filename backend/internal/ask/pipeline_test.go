@@ -208,7 +208,7 @@ func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
 	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Events{})
+	got, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestPipeline_nothingFoundNamesTheTermsItTried(t *testing.T) {
 	c := twoStepUpstream(t, appleTVReply, "I suspect ...")
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, Events{})
+	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 	var steps []string
 
-	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN,
+	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{},
 		Events{OnStatus: func(s string) { steps = append(steps, s) }}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestRunEndsTheTurnWithAClarification(t *testing.T) {
 	p := newTestPipeline(t, withRouterAsking(2))
 
 	// When
-	answer, clar, err := p.Run(context.Background(), "frage", AudienceBA, LanguageEN, Events{})
+	answer, clar, err := p.Run(context.Background(), "frage", AudienceBA, LanguageEN, Thread{}, Events{})
 
 	// Then
 	if err != nil {
@@ -438,7 +438,7 @@ func TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord(t *testing.T) {
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
 
-	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?", AudienceBA, LanguageEN, Events{})
+	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -447,6 +447,169 @@ func TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord(t *testing.T) {
 	}
 	if !got.Scope.All {
 		t.Error("the record never learned it either, so a re-explain would ask which repository was meant")
+	}
+}
+
+// TestRunAnswersAFollowUpOutOfTheThreadsOwnRepository is the funnel. The
+// follow-up names no repository — the reader named it a turn ago — and before
+// the pin existed it was searched across the corpus and carded back with
+// "which repository did you mean?", the one question the thread had already
+// answered.
+func TestRunAnswersAFollowUpOutOfTheThreadsOwnRepository(t *testing.T) {
+	// Given a question that names nothing, in a thread narrowed to rongo.
+	fr := &fakeRouter{}
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+
+	// When the turn runs with the thread's pin.
+	got, clar, err := p.Run(context.Background(), "Kannst du das in einem Diagramm aufzeigen?",
+		AudienceBA, LanguageEN, Thread{Pin: []string{"rongo"}}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Then the search, the router and the record all say rongo.
+	if clar != nil {
+		t.Fatal("a thread that already narrowed must not be asked which repository was meant")
+	}
+	if len(search.got.Repos) != 1 || search.got.Repos[0] != "rongo" {
+		t.Errorf("searched repos = %v, want the thread's own", search.got.Repos)
+	}
+	if len(fr.named) != 1 || fr.named[0] != "rongo" {
+		t.Errorf("router saw named = %v, want the pin — the rung that would otherwise card reads this", fr.named)
+	}
+	if len(got.Scope.Known) != 1 || got.Scope.Known[0] != "rongo" {
+		t.Errorf("scope = %+v, want the inherited repository in the record", got.Scope)
+	}
+}
+
+// TestRunNeverWidensAPinnedThread: a thread narrows and never the other way.
+// "In all repos" is a widening, so inside a pinned thread it is not honoured —
+// the way out is a new thread, and the notice says so.
+func TestRunNeverWidensAPinnedThread(t *testing.T) {
+	fr := &fakeRouter{}
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+
+	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?",
+		AudienceBA, LanguageEN, Thread{Pin: []string{"rongo"}}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if fr.all || got.Scope.All {
+		t.Error("a pinned thread must not answer across the corpus, whatever the question asks for")
+	}
+	if len(search.got.Repos) != 1 || search.got.Repos[0] != "rongo" {
+		t.Errorf("searched repos = %v, want the pin to hold", search.got.Repos)
+	}
+}
+
+// TestRunSaysWhichNamedRepositoryTheThreadLeftOut: the name was right and the
+// code is indexed, and the turn still did not read it. An answer that dropped
+// half of what was asked about silently reads exactly like one that covered it.
+func TestRunSaysWhichNamedRepositoryTheThreadLeftOut(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["loom"]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	var notices []string
+	got, _, err := p.Run(context.Background(), "und wie macht das loom?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"rongo"}}, Events{OnNotice: func(text string) { notices = append(notices, text) }})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got.Scope.Outside) != 1 || got.Scope.Outside[0] != "loom" {
+		t.Errorf("scope.Outside = %v, want the named repository the thread does not carry", got.Scope.Outside)
+	}
+	if len(got.Scope.Unknown) != 0 {
+		t.Errorf("scope.Unknown = %v, want it empty — loom is indexed, it is just not this thread", got.Scope.Unknown)
+	}
+	joined := strings.Join(notices, " ")
+	if !strings.Contains(joined, "loom") || !strings.Contains(joined, "new thread") {
+		t.Errorf("notice = %q, want it to name loom and the way to ask about it", joined)
+	}
+}
+
+// TestTheAnswerPromptForbidsClaimsAboutARepositoryTheThreadLeftOut: the model
+// is handed "und wie macht das loom?" and rongo-only sources. Without a rule it
+// writes loom's side out of its own training, which is the invention the whole
+// prompt is built to prevent — the same position an unindexed repository puts
+// it in, for a different reason.
+func TestTheAnswerPromptForbidsClaimsAboutARepositoryTheThreadLeftOut(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	sc := Scope{Known: []string{"rongo"}, Outside: []string{"loom"}}
+	if _, err := NewAnswerer(c).Answer(context.Background(), "und wie macht das loom?",
+		AudienceBA, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !strings.Contains(*prompt, "this thread does not cover: loom") {
+		t.Errorf("the prompt never names the repository the thread left out:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "make no claim of any kind about their code") {
+		t.Errorf("the prompt never forbids inventing that repository's side:\n%s", *prompt)
+	}
+}
+
+// TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer holds the line
+// this whole feature has to stay behind. The previous QUESTION is what a
+// pronoun points at, so it goes in. The previous ANSWER is prose the model
+// wrote itself, and handing it back alongside real sources is how a claim ends
+// up carrying a citation it was never read from.
+func TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Kannst du das in einem Diagramm aufzeigen?",
+		AudienceBA, LanguageEN, twoSources(), Scope{},
+		"Wie unterscheidet sich rongo von reinem RAG?", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !strings.Contains(*prompt, "Wie unterscheidet sich rongo von reinem RAG?") {
+		t.Errorf("the previous question never reached the prompt:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Do not restate what") {
+		t.Errorf("nothing stops the turn from writing the same answer again:\n%s", *prompt)
+	}
+}
+
+// TestTheAnswerPromptOfAFirstTurnSaysNothingAboutAFollowUp: the rule is added,
+// never templated in empty.
+func TestTheAnswerPromptOfAFirstTurnSaysNothingAboutAFollowUp(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How is pricing resolved?",
+		AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if strings.Contains(*prompt, "This is a follow-up") {
+		t.Errorf("a first turn must not be told it is following something up:\n%s", *prompt)
+	}
+}
+
+// TestRunNarrowsFurtherInsideThePin: the pin is a ceiling, not a floor. A
+// thread pinned to two repositories by a comparison is still a thread, and
+// "and in rongo?" inside it has to reach rongo alone.
+func TestRunNarrowsFurtherInsideThePin(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"peeq", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["rongo"]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	got, _, err := p.Run(context.Background(), "and in rongo?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got.Scope.Known) != 1 || got.Scope.Known[0] != "rongo" {
+		t.Errorf("scope = %+v, want the narrower half of the pin", got.Scope)
+	}
+	if len(got.Scope.Outside) != 0 {
+		t.Errorf("scope.Outside = %v, want nothing — rongo is inside the pin", got.Scope.Outside)
+	}
+	if len(search.got.Repos) != 1 || search.got.Repos[0] != "rongo" {
+		t.Errorf("searched repos = %v, want only the narrowed one", search.got.Repos)
 	}
 }
 

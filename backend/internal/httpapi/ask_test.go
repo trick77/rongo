@@ -66,11 +66,16 @@ type fakeAsker struct {
 	// the nothing-found answer, which is what the real pipeline returns when
 	// it gathered nothing.
 	sources []ask.Source
+
+	// gotThread is what the handler read off the thread and handed the
+	// pipeline: what earlier turns narrowed to, and what they last answered.
+	gotThread ask.Thread
 }
 
-func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
+func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
 	f.gotAud = aud
 	f.gotLang = lang
+	f.gotThread = t
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}
@@ -689,6 +694,90 @@ func TestAsk_theAudienceReachesThePipeline(t *testing.T) {
 
 	if a.gotAud != ask.AudienceDev {
 		t.Errorf("audience = %q, want dev", a.gotAud)
+	}
+}
+
+// TestAsk_aFollowUpInheritsWhatTheThreadNarrowedTo: the funnel, from the door
+// the browser knocks on. The second turn sends nothing but a question and a
+// thread id; the repository has to come off the record.
+func TestAsk_aFollowUpInheritsWhatTheThreadNarrowedTo(t *testing.T) {
+	// Given a thread whose first turn answered out of rongo.
+	a := &fakeAsker{tokens: []string{"x"}, scope: ask.Scope{Known: []string{"rongo"}}}
+	deps, _ := askDeps(t, a)
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+
+	threads, err := deps.Threads.List(context.Background(), testSubject)
+	if err != nil || len(threads) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(threads))
+	}
+
+	// When a follow-up names no repository at all.
+	a.gotThread.Pin = nil
+	postAsk(t, deps, `{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":`+itoa(threads[0].ID)+`}`)
+
+	// Then the pipeline is told which repository the thread is about, which is
+	// what keeps the repository card from asking it again — and what the
+	// thread last answered, which is what "das" points at.
+	if len(a.gotThread.Pin) != 1 || a.gotThread.Pin[0] != "rongo" {
+		t.Errorf("pin = %v, want the repository the thread already narrowed to", a.gotThread.Pin)
+	}
+	if a.gotThread.Question != "How does rongo cite sources?" {
+		t.Errorf("question = %q, want the one the thread last asked", a.gotThread.Question)
+	}
+	if a.gotThread.Answer != "x" {
+		t.Errorf("answer = %q, want the one it got", a.gotThread.Answer)
+	}
+}
+
+// TestAsk_theFirstTurnOfAThreadInheritsNothing: there is nothing to inherit,
+// and the whole ladder — repository card included — has to stay reachable.
+func TestAsk_theFirstTurnOfAThreadInheritsNothing(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, _ := askDeps(t, a)
+
+	postAsk(t, deps, `{"question":"How is pricing resolved?","audience":"ba"}`)
+
+	if len(a.gotThread.Pin) != 0 {
+		t.Errorf("pin = %v, want nothing for a thread that never narrowed", a.gotThread.Pin)
+	}
+	if a.gotThread.Question != "" || a.gotThread.Answer != "" {
+		t.Errorf("thread = %+v, want nothing to follow up on", a.gotThread)
+	}
+}
+
+// TestAsk_thePinAndTheMemoryComeFromDifferentTurns: they are two reads of two
+// different rows, and a thread can easily put them in different places — the
+// last turn that NARROWED is not always the last turn that ANSWERED.
+func TestAsk_thePinAndTheMemoryComeFromDifferentTurns(t *testing.T) {
+	// Given a thread that narrowed on its first turn and whose second turn
+	// failed, so the second row carries neither a scope nor an answer.
+	a := &fakeAsker{tokens: []string{"x"}, scope: ask.Scope{Known: []string{"rongo"}}}
+	deps, st := askDeps(t, a)
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+
+	list, err := deps.Threads.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	id := itoa(list[0].ID)
+	failed, err := st.AddQuestion(context.Background(), list[0].ID, "ba", "en", "Und wie schnell?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Fail(context.Background(), failed.ID, "the turn failed"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	// When a third turn asks a follow-up.
+	a.gotThread = ask.Thread{}
+	postAsk(t, deps, `{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":`+id+`}`)
+
+	// Then both come off the first turn, which is the only one that has them.
+	if len(a.gotThread.Pin) != 1 || a.gotThread.Pin[0] != "rongo" {
+		t.Errorf("pin = %v, want the narrowing a failed turn cannot undo", a.gotThread.Pin)
+	}
+	if a.gotThread.Question != "How does rongo cite sources?" {
+		t.Errorf("question = %q, want the last one that actually answered", a.gotThread.Question)
 	}
 }
 

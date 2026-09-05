@@ -143,3 +143,199 @@ func TestScopeStoredBeforeAllExistedStillReads(t *testing.T) {
 		t.Errorf("scope = %+v, want the stored repository", got.Scope)
 	}
 }
+
+// TestThreadScopeIsTheNarrowingAnEarlierTurnMade is the funnel: a follow-up
+// names no repository because the reader named it a turn ago, and without this
+// it would be asked which repository was meant all over again.
+func TestThreadScopeIsTheNarrowingAnEarlierTurnMade(t *testing.T) {
+	// Given a thread whose first turn answered out of one repository.
+	s, ctx, threadID, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, first.ID, ask.Scope{Known: []string{"rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+
+	// When a later turn asks what the thread has narrowed to.
+	got, err := s.ThreadScope(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("thread scope: %v", err)
+	}
+
+	// Then it is the repository that turn answered out of.
+	if len(got) != 1 || got[0] != "rongo" {
+		t.Errorf("thread scope = %v, want the repository the thread narrowed to", got)
+	}
+}
+
+// TestThreadScopeTakesTheNewestNarrowing: a thread only ever narrows, so the
+// most recent turn that named repositories is the narrowest.
+func TestThreadScopeTakesTheNewestNarrowing(t *testing.T) {
+	// Given two turns, the second narrower than the first.
+	s, ctx, threadID, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How do peeq and rongo differ?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, first.ID, ask.Scope{Known: []string{"peeq", "rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	second, err := s.AddQuestion(ctx, threadID, "ba", "en", "And in rongo alone?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, second.ID, ask.Scope{Known: []string{"rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+
+	// When the pin is read.
+	got, err := s.ThreadScope(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("thread scope: %v", err)
+	}
+
+	// Then it is the newer, narrower one.
+	if len(got) != 1 || got[0] != "rongo" {
+		t.Errorf("thread scope = %v, want the newest narrowing", got)
+	}
+}
+
+// TestThreadScopeIgnoresAnAllRepositoriesTurn: "all repositories" narrows
+// nothing, so it pins nothing — and an older, narrower turn still wins.
+func TestThreadScopeIgnoresAnAllRepositoriesTurn(t *testing.T) {
+	// Given a narrowed turn followed by one the reader opened up on purpose.
+	s, ctx, threadID, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, first.ID, ask.Scope{Known: []string{"rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	second, err := s.AddQuestion(ctx, threadID, "ba", "en", "In all repos, how is pricing resolved?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, second.ID, ask.Scope{All: true}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+
+	// When the pin is read, Then the All turn is skipped: it narrows nothing
+	// of its own and it does not end the thread's narrowing either.
+	got, err := s.ThreadScope(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("thread scope: %v", err)
+	}
+	if len(got) != 1 || got[0] != "rongo" {
+		t.Errorf("thread scope = %v, want the narrowing an All turn cannot undo", got)
+	}
+}
+
+// TestThreadScopeOfAFreshThreadIsEmpty: the first turn of a thread has nothing
+// to inherit, and the ladder runs whole.
+func TestThreadScopeOfAFreshThreadIsEmpty(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	got, err := s.ThreadScope(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("thread scope: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("thread scope = %v, want nothing for a thread that never narrowed", got)
+	}
+}
+
+// TestThreadScopeOfSomeoneElsesThreadIsEmpty: the id comes from the browser,
+// and a thread belongs to the person who asked.
+func TestThreadScopeOfSomeoneElsesThreadIsEmpty(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, msg.ID, ask.Scope{Known: []string{"rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+
+	got, err := s.ThreadScope(ctx, "someone-else", threadID)
+	if err != nil {
+		t.Fatalf("thread scope: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("thread scope = %v, want nothing for a thread that is not theirs", got)
+	}
+}
+
+// TestLastTurnIsWhatAFollowUpIsAFollowUpTo: the newest turn that actually
+// answered, which is what "das" in the next question points at.
+func TestLastTurnIsWhatAFollowUpIsAFollowUpTo(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, first.ID, "Every claim carries repo, file and line.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	if err != nil || !ok {
+		t.Fatalf("last turn: %v ok=%v", err, ok)
+	}
+	if got.Question != "How does rongo cite sources?" {
+		t.Errorf("question = %q, want the one the thread last asked", got.Question)
+	}
+	if got.Answer != "Every claim carries repo, file and line." {
+		t.Errorf("answer = %q, want the one it got", got.Answer)
+	}
+}
+
+// TestLastTurnSkipsATurnThatNeverAnswered: a turn that failed and a turn that
+// asked back are not something a later question can point at. Both leave the
+// answer column empty, and the turn before them is still the last one.
+func TestLastTurnSkipsATurnThatNeverAnswered(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	answered, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, answered.ID, "Every claim carries repo, file and line.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	failed, err := s.AddQuestion(ctx, threadID, "ba", "en", "Und wie schnell?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Fail(ctx, failed.ID, "the turn failed"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	if err != nil || !ok {
+		t.Fatalf("last turn: %v ok=%v", err, ok)
+	}
+	if got.ID != answered.ID {
+		t.Errorf("last turn = %d, want the last one that answered (%d)", got.ID, answered.ID)
+	}
+}
+
+// TestLastTurnOfAFreshOrForeignThreadIsNothing: nothing to point at, and a
+// thread belongs to the person who asked.
+func TestLastTurnOfAFreshOrForeignThreadIsNothing(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	if _, ok, err := s.LastTurn(ctx, testSubject, threadID); err != nil || ok {
+		t.Errorf("fresh thread: ok=%v err=%v, want nothing to follow up on", ok, err)
+	}
+
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, msg.ID, "An answer.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, ok, err := s.LastTurn(ctx, "someone-else", threadID); err != nil || ok {
+		t.Errorf("foreign thread: ok=%v err=%v, want nothing", ok, err)
+	}
+}

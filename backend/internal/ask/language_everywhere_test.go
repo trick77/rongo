@@ -80,7 +80,7 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 	// that has just read two thousand tokens of English tends to answer in
 	// it. The closing line is what keeps a German answer German.
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Count(*prompt, "German") < 2 {
@@ -95,7 +95,7 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 
 func TestAnswer_germanAsksForSwissOrthography(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if !strings.Contains(*prompt, "never the letter ß") {
@@ -104,7 +104,7 @@ func TestAnswer_germanAsksForSwissOrthography(t *testing.T) {
 
 	// An Italian answer has no ß to avoid.
 	c, itPrompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Come?", AudienceBA, LanguageIT, twoSources(), Scope{}, nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Come?", AudienceBA, LanguageIT, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Contains(*itPrompt, "Swiss orthography") {

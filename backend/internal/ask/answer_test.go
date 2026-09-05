@@ -78,7 +78,7 @@ func TestAnswer_streamsAndResolvesTheMarkersItUsed(t *testing.T) {
 	var seen []string
 
 	// When
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, collect(&seen))
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	// under an answer — the failure this product can least afford.
 	c, _, _ := streamUpstream(t, "This happens in delivery [7].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestAnswer_aGroupedMarkerCountsForEachNumberInIt(t *testing.T) {
 	// leads nowhere.
 	c, _, _ := streamUpstream(t, "Compared on poll [1, 2], and again [2,1].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAnswer_aGroupedMarkerCountsForEachNumberInIt(t *testing.T) {
 func TestAnswer_anInventedNumberInsideAGroupIsDroppedAlone(t *testing.T) {
 	c, _, _ := streamUpstream(t, "Compared on poll [1, 9].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAnswer_anIndexExpressionInCodeIsNotACitation(t *testing.T) {
 	c, _, _ := streamUpstream(t,
 		"The call is in store.go [2]:\n\n```go\nname := args[1]\nvalue := parts[1]\n```\n")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestAnswer_markersAreRenumberedInOrderOfFirstAppearance(t *testing.T) {
 	c, _, _ := streamUpstream(t, "Issued in grant.go [", "2", "], stored [1] and again [2].")
 	var seen []string
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, collect(&seen))
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestAnswer_markersAreRenumberedInOrderOfFirstAppearance(t *testing.T) {
 func TestAnswer_aGroupedMarkerIsRenumberedPerNumber(t *testing.T) {
 	c, _, _ := streamUpstream(t, "Compared on poll [2, 1] and [9, 2].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAnswer_aMarkerInsideInlineCodeIsNotRenumbered(t *testing.T) {
 	// closing backtick says it is code.
 	c, _, _ := streamUpstream(t, "Use `args[", "2]` as in grant.go [2].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestAnswer_anUnclosedBacktickIsProseAtTheEnd(t *testing.T) {
 	// a stray backtick with a marker after it is prose, and the marker counts.
 	c, _, _ := streamUpstream(t, "A stray ` and then [2]")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestAnswer_aCutAnswerIsStillRenumberedAndFlushed(t *testing.T) {
 	c, _, _ := streamUpstreamEnding(t, "length", []string{"Stored [2] and then [", "1"})
 	var seen []string
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, collect(&seen))
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestAnswer_withoutSourcesItSaysSoAndNeverCallsTheModel(t *testing.T) {
 	// built from nothing but the question and the system prompt.
 	c, _, calls := streamUpstream(t, "I suspect that ...")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, nil, Scope{}, nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, nil, Scope{}, "", nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -290,11 +290,11 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	// The role changes only this step: language level, depth, whether code is
 	// embedded. A prompt that ignored it would make the BA/DEV switch decorative.
 	cBA, promptBA, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, nil); err != nil {
+	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	cDev, promptDev, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil); err != nil {
+	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 
@@ -332,7 +332,7 @@ func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {
 	c, _, _ := streamUpstream(t)
 	a := NewAnswerer(c)
 
-	_, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil)
+	_, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil)
 
 	if err == nil {
 		t.Fatal("Answer: nil error on an empty completion")
@@ -349,7 +349,7 @@ func TestAnswer_aCutAnswerKeepsWhatTheReaderAlreadySaw(t *testing.T) {
 	c, _, _ := streamUpstreamEnding(t, "length", []string{"The grant ", "is created in store.go [1]."})
 	a := NewAnswerer(c)
 
-	got, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil)
+	got, err := a.Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil)
 
 	if err != nil {
 		t.Fatalf("Answer: %v, want the partial text kept", err)
@@ -362,7 +362,7 @@ func TestAnswer_aCutAnswerKeepsWhatTheReaderAlreadySaw(t *testing.T) {
 func TestAnswer_aCutAnswerWithNoTextIsStillAnError(t *testing.T) {
 	c, _, _ := streamUpstreamEnding(t, "length", nil)
 
-	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, nil)
+	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil)
 
 	if err == nil || !strings.Contains(err.Error(), "length") {
 		t.Fatalf("err = %v, want the length failure surfaced", err)

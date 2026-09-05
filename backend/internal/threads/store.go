@@ -480,6 +480,92 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	return out, rows.Err()
 }
 
+// ThreadScope is the repositories this thread has already narrowed to: the
+// most recent message whose scope names any, or nothing when no turn in it
+// ever did.
+//
+// A thread is a funnel. Once a turn answered out of one repository — because
+// the question named it, or because the reader picked it off a card — every
+// later turn in that thread answers out of it too, without being asked again.
+// The alternative is what shipped before this existed: a follow-up says "and
+// show me that as a diagram", names no repository because the reader already
+// did, and gets a repository card offering the whole corpus back.
+//
+// "All repositories" narrows nothing, so it pins nothing: a scope carrying
+// only All is skipped and an older, narrower one may still win. Scanning by
+// descending ordinal rather than intersecting every scope is the same rule
+// stated once — the newest narrowing is the narrowest, because no turn is
+// allowed to widen.
+//
+// Ownership is checked the way Message checks it: the id comes from the
+// browser, and a thread belongs to the person who asked.
+func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.scope
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.thread_id = ? AND t.user_subject = ? AND m.scope != ''
+		ORDER BY m.ordinal DESC`, threadID, subject)
+	if err != nil {
+		return nil, fmt.Errorf("read thread scope: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var blob string
+		if err := rows.Scan(&blob); err != nil {
+			return nil, fmt.Errorf("read thread scope: %w", err)
+		}
+		// scanScope yields the zero scope for unreadable JSON, which reads
+		// here as "this turn narrowed nothing" — the pin is lost, never the
+		// turn, exactly as an unreadable scope costs the pills and not the
+		// message.
+		if sc := scanScope(blob); len(sc.Known) > 0 {
+			return sc.Known, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read thread scope: %w", err)
+	}
+	return nil, nil
+}
+
+// LastTurn is the most recent turn of this thread that actually answered, or
+// false when none has. It is what a follow-up is a follow-up TO.
+//
+// "Kannst du das in einem Diagramm aufzeigen?" names no mechanism, no module
+// and no repository, because the reader named all three a turn ago. Without
+// this the question reaches the pipeline as a bare sentence, the search runs
+// on the word "Diagramm", and the answer is about whatever renders diagrams.
+//
+// An answer is the filter, not a row: a turn that failed writes `error` and a
+// turn that asked back writes a clarification, and neither is something a
+// later question can point at. Ownership is checked the way Message checks it.
+func (s *Store) LastTurn(ctx context.Context, subject string, threadID int64) (Message, bool, error) {
+	var m Message
+	var created string
+	var fromClar sql.NullInt64
+	var scope string
+	var followups string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.thread_id = ? AND t.user_subject = ? AND m.answer != ''
+		ORDER BY m.ordinal DESC
+		LIMIT 1`, threadID, subject).
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
+	if err == sql.ErrNoRows {
+		return Message{}, false, nil
+	}
+	if err != nil {
+		return Message{}, false, fmt.Errorf("read last turn: %w", err)
+	}
+	m.FromClarificationID = fromClar.Int64
+	m.Scope = scanScope(scope)
+	m.Followups = scanFollowups(followups)
+	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
+	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	return m, true, nil
+}
+
 // Message returns one turn by id, or false when it does not belong to a
 // thread owned by subject. Re-explaining needs the original question text to
 // re-run the answerer from stored sources, without the caller having to load

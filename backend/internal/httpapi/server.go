@@ -35,6 +35,13 @@ type Threads interface {
 	Message(ctx context.Context, subject string, messageID int64) (threads.Message, bool, error)
 	Messages(ctx context.Context, subject string, threadID int64) ([]threads.Message, error)
 	Owns(ctx context.Context, subject string, threadID int64) (bool, error)
+	// ThreadScope is the repositories earlier turns of this thread already
+	// narrowed to, so a follow-up inherits them instead of being asked which
+	// repository was meant.
+	ThreadScope(ctx context.Context, subject string, threadID int64) ([]string, error)
+	// LastTurn is the most recent turn of this thread that answered, so a
+	// follow-up can be resolved against what it is a follow-up to.
+	LastTurn(ctx context.Context, subject string, threadID int64) (threads.Message, bool, error)
 	Clarify(ctx context.Context, messageID int64, c ask.Clarification) (int64, error)
 	Clarification(ctx context.Context, subject string, messageID int64) (*threads.Clarification, error)
 	CandidateHits(ctx context.Context, subject string, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error)

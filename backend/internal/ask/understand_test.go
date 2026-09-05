@@ -53,7 +53,7 @@ func TestUnderstand_returnsTermsAndGuessedCodeVocabulary(t *testing.T) {
 	c, _, _ := modelUpstream(t, appleTVReply)
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, err := NewUnderstander(c).Understand(context.Background(), q)
+	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{})
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestUnderstand_searchTextsCarryBothLanguages(t *testing.T) {
 	c, _, _ := modelUpstream(t, appleTVReply)
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, err := NewUnderstander(c).Understand(context.Background(), q)
+	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{})
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestUnderstand_runsOnTheShortGateDeployment(t *testing.T) {
 	// would pay the expensive queue for a JSON blob.
 	c, model, prompt := modelUpstream(t, appleTVReply)
 
-	if _, err := NewUnderstander(c).Understand(context.Background(), "How does shipping work?"); err != nil {
+	if _, err := NewUnderstander(c).Understand(context.Background(), "How does shipping work?", Thread{}); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestUnderstand_toleratesAFencedJsonBlock(t *testing.T) {
 	// parse failure would make the step flaky for no reason.
 	c, _, _ := modelUpstream(t, "```json\n"+appleTVReply+"\n```")
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "x")
+	got, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{})
 
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
@@ -141,7 +141,7 @@ func TestUnderstand_malformedJsonIsAnErrorNotAnEmptyExpansion(t *testing.T) {
 	// look like the expansion simply did not help.
 	c, _, _ := modelUpstream(t, "I think you mean the playback code?")
 
-	_, err := NewUnderstander(c).Understand(context.Background(), "x")
+	_, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{})
 
 	if err == nil {
 		t.Fatal("prose answer accepted as an understanding")
@@ -162,7 +162,7 @@ func TestUnderstand_readsTheAskForEveryRepository(t *testing.T) {
   "all_repos": true
 }`)
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "in all repos, how are token costs calculated in $?")
+	got, err := NewUnderstander(c).Understand(context.Background(), "in all repos, how are token costs calculated in $?", Thread{})
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -183,11 +183,96 @@ func TestUnderstand_readsTheAskForEveryRepository(t *testing.T) {
 func TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll(t *testing.T) {
 	c, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "how are token costs calculated in $?")
+	got, err := NewUnderstander(c).Understand(context.Background(), "how are token costs calculated in $?", Thread{})
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 	if got.AllRepos {
 		t.Error("a reply that says nothing about all_repos must not mean every repository")
+	}
+}
+
+// TestUnderstand_carriesThePreviousTurnSoAFollowUpCanBeResolved: "Kannst du
+// das in einem Diagramm aufzeigen?" names no mechanism, no module and no
+// repository, because the reader named all three a turn ago. Alone it is
+// searched for as the word "Diagramm".
+func TestUnderstand_carriesThePreviousTurnSoAFollowUpCanBeResolved(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+	prev := Thread{
+		Question: "Wie unterscheidet sich rongo von reinem RAG auf dem Quellcode?",
+		Answer:   "rongo indexiert Symbole mit universal-ctags [1] und zitiert jede Aussage [2].",
+	}
+
+	if _, err := NewUnderstander(c).Understand(context.Background(),
+		"Kannst du das in einem Diagramm aufzeigen?", prev); err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+
+	if !strings.Contains(*prompt, prev.Question) {
+		t.Errorf("the previous question never reached the call:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "universal-ctags") {
+		t.Errorf("the previous answer never reached the call:\n%s", *prompt)
+	}
+	if strings.Contains(*prompt, "[1]") {
+		t.Errorf("citation markers number sources this call cannot see:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Question: Kannst du das in einem Diagramm aufzeigen?") {
+		t.Errorf("the question being asked now must be the last thing in the message:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_thePreviousAnswersDiagramIsNotWhatTheFollowUpIsAbout: an
+// answer that drew one carries a fence of JSON, and 1200 characters of node
+// specs is what the excerpt would otherwise consist of.
+func TestUnderstand_thePreviousAnswersDiagramIsNotWhatTheFollowUpIsAbout(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+	prev := Thread{
+		Question: "Wie läuft das Indexieren ab?",
+		Answer: "Der Indexer holt den Checkout und schneidet ihn in Chunks.\n\n" +
+			"```diagram\n{\"nodes\":[{\"id\":\"fetch\",\"label\":\"Fetch\",\"src\":[1]}]}\n```\n\n" +
+			"Danach werden die Embeddings gecacht.",
+	}
+
+	if _, err := NewUnderstander(c).Understand(context.Background(), "Und wo wird das gecacht?", prev); err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+
+	if strings.Contains(*prompt, "\"nodes\"") {
+		t.Errorf("the diagram spec reached the call, where it is pure noise:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Embeddings gecacht") {
+		t.Errorf("the prose after the fence was thrown away with it:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_afirstTurnCarriesNothing: without a previous turn the call is
+// exactly what it was before any of this existed — the bare question, with no
+// labels around it to explain away.
+func TestUnderstand_afirstTurnCarriesNothing(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+
+	if _, err := NewUnderstander(c).Understand(context.Background(), "How is pricing resolved?", Thread{}); err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if strings.Contains(*prompt, "Previous question") {
+		t.Errorf("a first turn must not be told about a turn that does not exist:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_theSystemPromptSaysThePreviousTurnOnlyResolvesTheQuestion is
+// the risk the previous turn brings with it: a follow-up that CHANGES the
+// subject must be expanded as the new subject, not as the old one. That is a
+// prompt rule, so this is the test that it is written down at all.
+func TestUnderstand_theSystemPromptSaysThePreviousTurnOnlyResolvesTheQuestion(t *testing.T) {
+	if !strings.Contains(strings.Join(strings.Fields(understandSystem), " "),
+		"resolve what the current question leaves out") {
+		t.Error("the prompt never says what the previous turn is for")
+	}
+	// Whitespace-folded: the constant is hard-wrapped, and a rule split across
+	// two lines is still the rule.
+	flat := strings.Join(strings.Fields(understandSystem), " ")
+	if !strings.Contains(flat, "changes the subject gets the new one") {
+		t.Error("the prompt never says a follow-up may change the subject")
 	}
 }

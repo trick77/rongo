@@ -481,11 +481,15 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // silently measuring a policy the product no longer ran.
 //
 // namedRepos is how many repositories the question named that the index
-// actually carries. Two or more means the reader asked about both, and a card
-// offering a choice between them is a question they already answered — worse,
-// choosing forecloses the other half, because a resumed turn reads only the
-// chosen candidate's hits. This rung is deterministic and sits in front of
-// everything else; it is NOT the phase 4c evidence lever, which fed the judge
+// actually carries — or, for a follow-up, the repositories the thread has
+// already narrowed to. ANY of them means the reader has already answered the
+// only question a card could put to them, so no card is asked. Two or more is
+// a comparison, and choosing there forecloses the other half, because a
+// resumed turn reads only the chosen candidate's hits. Exactly one is the
+// reader having pointed at a product: what is still ambiguous inside it is
+// modules, layers or packages, and composing those is the answer they asked
+// for rather than a second question. This rung is deterministic and sits in
+// front of everything else; it is NOT the phase 4c evidence lever, which fed the judge
 // a "the question named this repository" signal and was measured twice
 // without landing (docs/measurements/2026-08-19-candidates.md). The judge's
 // prompt is untouched.
@@ -512,9 +516,17 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // roleCanChoose is whether the reader's role can answer the card the judge's
 // "ask" would produce. The judge decides whether the CODE is ambiguous; this
 // decides whether the PERSON can resolve it. For the Developer it is always
-// true — that reader picks between two packages without effort — so the
-// Developer's decision, and every number measured against it, is unchanged.
-// The eval harness's sweep is audience-neutral and passes true as well.
+// true — that reader picks between two packages without effort — so this gate
+// never changed the Developer's decision. The numbers measured against it did
+// move, but on the rung above: a question naming one repository no longer
+// reaches the gate at all, for either role, so the eval sweep has to be re-run
+// and the shift written down. The sweep is audience-neutral and passes true.
+//
+// The judge's card therefore survives in one shape only: a question that named
+// no repository, in a thread that has narrowed to none, whose candidates all
+// sit inside one repository. That is the first turn of a thread and nothing
+// else. The rung is kept rather than deleted because that turn is real and it
+// is where a card is worth its click.
 //
 // It gates the JUDGE's card only, never the repository rung above it. That
 // rung's options are products, which is the one thing an Analyst can always
@@ -552,7 +564,7 @@ const (
 // "judge": both rungs said their piece, and the second one is what changed the
 // outcome.
 func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) (bool, string) {
-	if namedRepos >= 2 {
+	if namedRepos >= 1 {
 		return false, rungNamedRepos
 	}
 	if allRepos {
@@ -701,10 +713,10 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 		return Decision{}, l, err
 	}
 	l.rank(ranked, namedRepos, allRepos, r.margin)
-	// Asked about both, or asked for all of them: the reader has already
+	// Named a repository, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
 	// can change the outcome and none is worth a query or a model call.
-	if len(namedRepos) >= 2 || allRepos {
+	if len(namedRepos) >= 1 || allRepos {
 		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
 		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
