@@ -102,17 +102,13 @@ func withIndexedSearcher(indexed []string, fn func(retrieve.Query) ([]retrieve.H
 type fakeRouter struct {
 	d   Decision
 	err error
-	// named is what Run passed as the question's resolved repositories, so a
-	// test can check the rung's input reaches the router at all.
-	named []string
-	// all is the understanding's "the reader asked for every repository"
-	// signal, for the same reason.
-	all bool
+	// asked is the question's own scope as Run handed it over, so a test can
+	// check those rungs' inputs reach the router at all.
+	asked Asked
 }
 
-func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
-	f.named = namedRepos
-	f.all = allRepos
+func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, asked Asked) (Decision, error) {
+	f.asked = asked
 	return f.d, f.err
 }
 
@@ -442,7 +438,7 @@ func TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !fr.all {
+	if !fr.asked.AllRepos {
 		t.Error("the router never learned the reader asked for every repository")
 	}
 	if !got.Scope.All {

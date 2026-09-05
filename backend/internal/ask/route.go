@@ -332,6 +332,22 @@ const nameLanguage = `
 
 Title and summary are written in %s. Repository names stay as they are.`
 
+// Asked is the question's own scope: what the reader said about which system
+// they meant, before any rung looked at a score, a manifest or a model. The
+// three travel together because they are one thing — the reader's words — and
+// they are the rungs Decide reads first.
+type Asked struct {
+	// NamedRepos is how many repositories the question named that the index
+	// actually carries.
+	NamedRepos int
+	// AllRepos is the reader asking for the whole corpus without naming any
+	// of it.
+	AllRepos bool
+	// WholeSystem is the reader asking about a system entire rather than
+	// about a mechanism inside it.
+	WholeSystem bool
+}
+
 // Decision is what routing produced: either an answer can be composed from
 // every candidate, or the reader has to be asked which one is meant.
 type Decision struct {
@@ -447,6 +463,12 @@ func Dominates(cs []Candidate, margin float64) bool {
 // What is passed matters as much as when. On the repository rung it takes
 // RepoCandidates over the UNCAPPED ranking: a capped list can leave out the
 // one repository holding the manifest edge.
+//
+// There is a third case in which Route does not pay for it at all: a
+// whole-system question inside one repository returns above this, the same
+// way a dominant margin does. Both answers would have been compose, so the
+// ordering is invisible from the outside, and the harness never meets the
+// case — it passes a zero Asked and measures the module rungs.
 func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 	return r.anyDependency(ctx, cs)
 }
@@ -467,10 +489,17 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 	return r.choosable(ctx, question, cs)
 }
 
-// Decide is the ladder's decision, given what each rung found: the question's
-// own scope wins first, then a manifest dependency, then the repository rung,
-// then the margin, then the judge's answer, and last whether the reader's role
-// can answer the card at all. Neither of the last two is ever defaulted.
+// Decide is the ladder's decision, given what each rung found: the scope the
+// question named wins first, then a manifest dependency, then the repository
+// rung, then the scope the question meant entire, then the margin, then the
+// judge's answer, and last whether the reader's role can answer the card at
+// all. Neither of the last two is ever defaulted.
+//
+// The reader's own words are read in two places rather than one, and the
+// repository rung is why: Asked.NamedRepos and Asked.AllRepos say which
+// system, so nothing below them can matter, while Asked.WholeSystem says only
+// that no part of one was meant — a question that says it about no named
+// repository still has to be asked which repository.
 //
 // It is a pure function of the rungs precisely so that it can be the ONLY
 // place this policy is written down. Route calls it, and so does the eval
@@ -479,7 +508,7 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // which meant a change to the rung order here left the harness compiling and
 // silently measuring a policy the product no longer ran.
 //
-// namedRepos is how many repositories the question named that the index
+// Asked.NamedRepos is how many repositories the question named that the index
 // actually carries. Two or more means the reader asked about both, and a card
 // offering a choice between them is a question they already answered — worse,
 // choosing forecloses the other half, because a resumed turn reads only the
@@ -489,9 +518,22 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // without landing (docs/measurements/2026-08-19-candidates.md). The judge's
 // prompt is untouched.
 //
-// allRepos is the reader having asked for the whole corpus. Like namedRepos it
-// is the question's own scope, and it says the same thing from the other side:
-// the reader already decided, so there is nothing to ask.
+// Asked.AllRepos is the reader having asked for the whole corpus. Like
+// Asked.NamedRepos it is the question's own scope, and it says the same thing
+// from the other side: the reader already decided, so there is nothing to ask.
+//
+// Asked.WholeSystem is the third shape those words come in, and the one the
+// card had no answer for: the reader meant a system entire, not a mechanism
+// inside it. Every candidate is then a part of what was asked about, and a
+// card offering parts asks a question that was already answered. Neither
+// model rung below can see this. The judge is asked whether the CODE is
+// ambiguous, and the parts of one product are independent mechanisms by any
+// reading of it; the role gate reads titles the naming call wrote with the
+// question in front of it, so a product-level question comes back as five
+// product-level topics and looks maximally tellable apart. It sits BELOW the
+// repository rung on purpose: "as a whole" says the reader meant no part of
+// something, never which something they meant, so a whole-system question
+// naming no repository is still asked which one.
 //
 // The repository rung — no repository named, candidates spanning two or more —
 // is deterministic and sits ABOVE the margin, not below it. A leader clear of
@@ -523,18 +565,21 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // Refusing it would put the Analyst back on exactly the cross-repository
 // answer this rung exists to stop, which is the opposite of what the gate is
 // for.
-func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) bool {
-	if namedRepos >= 2 {
+func Decide(all []Candidate, margin float64, related, judged bool, asked Asked, roleCanChoose bool) bool {
+	if asked.NamedRepos >= 2 {
 		return false
 	}
-	if allRepos {
+	if asked.AllRepos {
 		return false
 	}
 	if related {
 		return false
 	}
-	if namedRepos == 0 && distinctRepos(all) >= 2 {
+	if asked.NamedRepos == 0 && distinctRepos(all) >= 2 {
 		return true
+	}
+	if asked.WholeSystem {
+		return false
 	}
 	if Dominates(all, margin) {
 		return false
@@ -543,8 +588,8 @@ func Decide(all []Candidate, margin float64, related, judged bool, namedRepos in
 }
 
 // Route runs the ladder: the question's own scope, the manifest, the
-// repository rung, the margin, then — only in the rest case — the model, twice
-// for the Analyst. Which rungs are RUN is decided here, so the common fast
+// repository rung, the margin, the reader having meant a system entire, then
+// — only in the rest case — the model, twice for the Analyst. Which rungs are RUN is decided here, so the common fast
 // path — one candidate clearly ahead inside one repository — still does no
 // database query and no model call; what the run rungs then MEAN is Decide's,
 // and only Decide's.
@@ -556,7 +601,7 @@ func Decide(all []Candidate, margin float64, related, judged bool, namedRepos in
 // is what the gate judges — the reader's view of the ambiguity, not the
 // module keys underneath it. A repository card skips the gate entirely, so it
 // is never named twice over.
-func (r *Router) Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
+func (r *Router) Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, asked Asked) (Decision, error) {
 	ranked, err := r.Rank(ctx, hits)
 	if err != nil {
 		return Decision{}, err
@@ -564,7 +609,7 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 	// Asked about both, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
 	// can change the outcome and none is worth a query or a model call.
-	if len(namedRepos) >= 2 || allRepos {
+	if asked.NamedRepos >= 2 || asked.AllRepos {
 		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
 
@@ -572,10 +617,18 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 	// the candidates span more than one. It is the only reason Related is
 	// worth paying for on an otherwise dominant turn, so it is computed before
 	// the margin short-circuit rather than after it.
-	spans := len(namedRepos) == 0 && distinctRepos(ranked.All) >= 2
+	spans := asked.NamedRepos == 0 && distinctRepos(ranked.All) >= 2
 	if !spans && Dominates(ranked.All, r.margin) {
 		// The fast path is unchanged: hits inside one repository with a clear
 		// leader still reach an answer without a query or a model call.
+		return Decision{Ask: false, Candidates: ranked.All}, nil
+	}
+	if !spans && asked.WholeSystem {
+		// The reader meant the system entire, and which system is settled —
+		// so nothing below can turn this into a card, exactly as on the
+		// margin's line above. Returning here is what keeps the judge, the
+		// naming and the role gate unpaid on a question none of them can
+		// read correctly.
 		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
 
@@ -610,7 +663,7 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 
 	// Nothing below can turn a "no" into a card, so a decision already made
 	// pays for neither naming nor the role gate.
-	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, true) {
+	if !Decide(ranked.All, r.margin, related, judged, asked, true) {
 		return Decision{Ask: false, Candidates: cs}, nil
 	}
 
@@ -643,7 +696,7 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 			}
 		}
 	}
-	if !Decide(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, roleCanChoose) {
+	if !Decide(ranked.All, r.margin, related, judged, asked, roleCanChoose) {
 		// The turn goes on to answer, and gathering starts from ALL hits, not
 		// from these candidates (pipeline.Run) — so what travels back is the
 		// same "not asking" every other rung returns. The named copies are

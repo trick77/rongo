@@ -46,7 +46,7 @@ func TestRouteDoesNotAskTheAnalystAQuestionOnlyCodeCanAnswer(t *testing.T) {
 	}), testDBWithDeps(t, nil))
 
 	// When the reader is the Analyst
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, Asked{})
 
 	// Then the turn answers across the candidates instead of asking
 	if err != nil {
@@ -86,7 +86,7 @@ func TestRouteAsksTheAnalystWhenTheOptionsDifferInTheDomain(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestRouteNeverShowsTheAnalystACardCarryingAPath(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRouteComposesForTheAnalystWhenTheGateCannotBeRead(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, nil, false)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceBA, LanguageEN, twoUnrelated, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestTheDeveloperPathIsUntouchedByTheRoleRung(t *testing.T) {
 		return `{"title":"Session handling","summary":"Takes requests and answers them."}`
 	}), testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, twoUnrelated, nil, false)
+	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, twoUnrelated, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestTheAnalystIsNamedInDomainWordingAndInTheReadersLanguage(t *testing.T) {
 		}
 	}), testDBWithDeps(t, nil))
 
-	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceBA, LanguageDE, twoUnrelated, nil, false); err != nil {
+	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceBA, LanguageDE, twoUnrelated, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 	if len(namePrompts) == 0 {

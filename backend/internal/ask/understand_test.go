@@ -191,3 +191,44 @@ func TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll(t *testing.T) {
 		t.Error("a reply that says nothing about all_repos must not mean every repository")
 	}
 }
+
+// TestUnderstand_readsTheAskAboutTheSystemAsAWhole pins the other word the
+// reader can say about scope: not which repository, but that they meant it
+// entire. Without it a comparison of two products reads as a question about
+// some module inside one of them, and the router asks which part was meant.
+func TestUnderstand_readsTheAskAboutTheSystemAsAWhole(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{
+  "intent": "how",
+  "terms": ["retrieval approach"],
+  "code_terms": ["Retrieve"],
+  "repos": ["rongo"],
+  "whole_system": true
+}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(),
+		"someone built a similar app that only does RAG over the source - how does that differ from rongo?")
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if !got.WholeSystem {
+		t.Error("whole_system must reach the understanding, or the reader's own words never leave this step")
+	}
+	if !strings.Contains(*prompt, "whole_system") {
+		t.Errorf("the prompt never asks for the field:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_ordinaryQuestionIsNotAboutTheSystemAsAWhole is the default
+// the rung rests on: a question about one mechanism must not arrive claiming
+// the reader meant the product entire.
+func TestUnderstand_ordinaryQuestionIsNotAboutTheSystemAsAWhole(t *testing.T) {
+	c, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["rongo"]}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "how does routing work in rongo?")
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if got.WholeSystem {
+		t.Error("a reply that says nothing about whole_system must not mean the system as a whole")
+	}
+}

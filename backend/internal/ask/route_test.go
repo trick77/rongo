@@ -167,7 +167,7 @@ func TestRouteAnswersWithoutAskingWhenOneCandidateDominates(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	}, nil, false)
+	}, Asked{})
 
 	// Then
 	if err != nil {
@@ -198,7 +198,7 @@ func TestRouteFastPathMakesNoDependencyQuery(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie prueft peeq den Plattenplatz?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
 		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.1},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v — the dominant path must never reach the dependency query, which cannot run without repo_deps", err)
 	}
@@ -222,7 +222,7 @@ func TestRouteDoesNotAskWhenTheRepositoriesDependOnEachOther(t *testing.T) {
 	got, err := r.Route(context.Background(), "how does peeq open the database?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/store/store.go", Score: 0.50},
 		{Repo: "go-sqlite3", Path: "driver/driver.go", Score: 0.48},
-	}, nil, false)
+	}, Asked{})
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -253,7 +253,7 @@ func TestRouteAsksAndNamesTheCandidates(t *testing.T) {
 	got, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -284,7 +284,7 @@ func TestRouteNamesNobodyWhenTheJudgeSaysCompose(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestRouteCapsTheCardAtFiveCandidates(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestRouteCapsAModuleCardAtFiveCandidates(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestRouteAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
 		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.60},
 		{Repo: "peeq", Path: "backend/internal/usage/meter.go", Score: 0.58},
 		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.30},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestRouteAsksWhichRepositoryEvenWhenOneLeadsClearly(t *testing.T) {
 		t.Fatal("the fixture must be one the margin dominates, or this test proves nothing")
 	}
 
-	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, hits, nil, false)
+	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, hits, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestRouteDoesNotAskWhichRepositoryWhenTheReaderAskedForAllOfThem(t *testing
 	got, err := r.Route(context.Background(), "in all repos, how are token costs calculated?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.49},
-	}, nil, true)
+	}, Asked{AllRepos: true})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -493,7 +493,7 @@ func TestRouteDoesNotAskWhichRepositoryWhenTheyDependOnEachOther(t *testing.T) {
 	got, err := r.Route(context.Background(), "how are token costs calculated in $?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "loom", Path: "backend/internal/cost/cost.go", Score: 0.60},
 		{Repo: "peeq", Path: "backend/internal/pricing/price.go", Score: 0.20},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -574,7 +574,7 @@ func TestRouteSeesADependencyBeyondTheCardsCap(t *testing.T) {
 		})
 	}
 
-	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -599,7 +599,7 @@ func TestRouteJudgeDecodeFailureMeansAskNotCrashNotCompose(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -626,7 +626,7 @@ func TestRouteNamingFailureKeepsTheModuleKeyAsTitle(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 
 	if err != nil {
 		t.Fatalf("route: %v", err)
@@ -694,7 +694,7 @@ func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
 	if _, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -718,7 +718,7 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -747,7 +747,7 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 	if _, err := base.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
 		{Repo: "peeq", Path: "b/y.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -769,24 +769,24 @@ func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 
 	// The margin dominates: no rung below it is consulted at all, so whatever
 	// related and judged would have said must not be read.
-	if Decide(dominant, 0.25, true, true, 0, false, true) {
+	if Decide(dominant, 0.25, true, true, Asked{}, true) {
 		t.Error("a dominant pair answers without asking, whatever the later rungs would have said")
 	}
 	// A manifest dependency short-circuits the judge.
-	if Decide(tight, 0.25, true, true, 0, false, true) {
+	if Decide(tight, 0.25, true, true, Asked{}, true) {
 		t.Error("a manifest dependency is composition; the judge must not override it")
 	}
 	// Past both, the judge decides — and is never defaulted.
-	if !Decide(tight, 0.25, false, true, 0, false, true) {
+	if !Decide(tight, 0.25, false, true, Asked{}, true) {
 		t.Error("the judge said ask")
 	}
-	if Decide(tight, 0.25, false, false, 0, false, true) {
+	if Decide(tight, 0.25, false, false, Asked{}, true) {
 		t.Error("the judge said compose")
 	}
 	// Last rung: the judge found the code ambiguous, but the reader's role
 	// cannot resolve it, so the turn answers instead of asking a question
 	// nobody can answer.
-	if Decide(tight, 0.25, false, true, 0, false, false) {
+	if Decide(tight, 0.25, false, true, Asked{}, false) {
 		t.Error("a card the role cannot answer is not asked")
 	}
 }
@@ -801,26 +801,26 @@ func TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
 	// exists for: a leader says which MODULE scored best, never which product
 	// the reader meant.
 	spread := []Candidate{{Repo: "peeq", Score: 0.60}, {Repo: "loom", Score: 0.20}}
-	if !Decide(spread, 0.25, false, false, 0, false, true) {
+	if !Decide(spread, 0.25, false, false, Asked{}, true) {
 		t.Error("candidates in two repositories with none named are a card, whatever the margin says")
 	}
-	if Decide(spread, 0.25, false, false, 0, true, true) {
+	if Decide(spread, 0.25, false, false, Asked{AllRepos: true}, true) {
 		t.Error("a reader who asked for all repositories has already answered the card")
 	}
-	if Decide(spread, 0.25, true, false, 0, false, true) {
+	if Decide(spread, 0.25, true, false, Asked{}, true) {
 		t.Error("repositories joined by a manifest dependency are composition, not a choice")
 	}
-	if Decide(spread, 0.25, false, true, 1, false, true) {
+	if Decide(spread, 0.25, false, true, Asked{NamedRepos: 1}, true) {
 		t.Error("a question that named the repository must not be asked which repository it meant")
 	}
 
 	// One repository, two modules: the rung does not fire, and the ladder
 	// below it decides exactly as before.
 	oneRepo := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "peeq", Score: 0.49}}
-	if Decide(oneRepo, 0.25, false, false, 0, false, true) {
+	if Decide(oneRepo, 0.25, false, false, Asked{}, true) {
 		t.Error("a single repository is not a choice between repositories; the judge decides")
 	}
-	if !Decide(oneRepo, 0.25, false, true, 0, false, true) {
+	if !Decide(oneRepo, 0.25, false, true, Asked{}, true) {
 		t.Error("within one repository the judge still decides")
 	}
 }
@@ -868,7 +868,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 
@@ -885,7 +885,7 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 	if _, err := cheap.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route on the cheap lane: %v", err)
 	}
 	if models["judge"] != llm.ShortGateDeployment {
@@ -933,7 +933,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 

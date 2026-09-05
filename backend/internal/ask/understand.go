@@ -39,8 +39,10 @@ const understandMaxTokens = 512
 // The answer call is NOT pinned. A person reads that one.
 const gateTemperature = 0
 
-// Understanding is what the first step produces. Nobody reads it — it exists to
-// aim the search.
+// Understanding is what the first step produces. Routing reads its scope
+// fields — the reader's own words about which system was meant, and whether a
+// part of one was meant at all; everything else exists to aim the search and
+// is read by nobody.
 type Understanding struct {
 	// Intent is how, why, where or conformance. Phase 4a answers how.
 	Intent string `json:"intent"`
@@ -62,6 +64,13 @@ type Understanding struct {
 	// It is the reader's own permission to answer across the corpus, so it is
 	// read from the question and never inferred from the hits.
 	AllRepos bool `json:"all_repos"`
+	// WholeSystem is the reader asking about a system as a whole rather than
+	// a mechanism inside it: what it is, what it is for, how its approach
+	// compares with another's. Every candidate is then a part of the thing
+	// that was asked about, and a card offering parts is a question the
+	// reader already answered. Like AllRepos it is the reader's own scope,
+	// read from the question and never inferred from the hits.
+	WholeSystem bool `json:"whole_system"`
 }
 
 // SearchTexts assembles what the retriever should search for. The raw question
@@ -104,6 +113,10 @@ Fields:
   all_repos   true when the question asks for every repository, or for several
               without naming them ("in all repos", "across all products",
               "in multiple repositories"), else false
+  whole_system true when the question is about a system as a whole rather than
+              a mechanism inside it: what it is, what it is for, how it is
+              built, how its approach compares with another's. False when the
+              question asks how, where or why one specific thing works
 
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"

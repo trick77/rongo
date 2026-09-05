@@ -27,7 +27,7 @@ func TestRouteNamesTheCandidatesInTheReadersLanguage(t *testing.T) {
 	got, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceDev, LanguageDE, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil, false)
+	}, Asked{})
 	if err != nil {
 		t.Fatalf("route: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestTitleAndCandidateNamesAskForSwissOrthography(t *testing.T) {
 	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceDev, LanguageDE, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
-	}, nil, false); err != nil {
+	}, Asked{}); err != nil {
 		t.Fatalf("route: %v", err)
 	}
 	if len(namePrompts) == 0 {
