@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * The dialogs the rail's row menu opens, ../loom's two. Both are modal: a
@@ -30,9 +31,24 @@ export function ModalShell({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
-  return (
+  // Mounted on the body, not where it is written. The rail these dialogs
+  // open from is a drawer that slides, and a translated ancestor is the
+  // containing block for everything fixed inside it — `inset-0` resolved to
+  // the 362px rail, so the scrim, the blur and the centering all stopped at
+  // its border. ../loom escapes the same transform by rendering its modals
+  // from the thread shell instead; a portal is that, without moving the
+  // state out of the component that owns it.
+  return createPortal(
     <div
-      className="fixed inset-0 z-40 grid place-items-center bg-black/50 px-4 backdrop-blur-[2px]"
+      // Above the rail's own z-50, not the z-40 an in-rail dialog could get
+      // away with: on a phone the dialog is opened from the drawer, which is
+      // still standing when it appears, and a body-mounted z-40 paints under
+      // it.
+      //
+      // ../loom's offset: the card centers in the content area rather than
+      // in the window, so it does not sit half-under the rail. 378 is the
+      // 362px rail plus the px-4 the other three sides get.
+      className="fixed inset-0 z-[60] grid place-items-center bg-black/50 px-4 backdrop-blur-[2px] lg:pr-4 lg:pl-[378px]"
       // Only the backdrop itself dismisses: a click that started inside the
       // dialog and ended on the backdrop is a drag, not a cancel.
       onClick={(e) => {
@@ -50,7 +66,8 @@ export function ModalShell({
         </h2>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
