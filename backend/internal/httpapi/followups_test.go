@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -38,14 +39,26 @@ type suggesterSpy struct {
 	// suggestion call handed a cancelled one never reaches the model, and the
 	// answer keeps no suggestions for good.
 	ctxErr error
+	// duringCall stands in for whatever happens while a real model call is in
+	// flight — the reader deleting the thread out from under it, say. Given
+	// the call's own context, and ctxErr is read AFTER it returns.
+	duringCall func(context.Context)
 }
 
 func (sp *suggesterSpy) fn(ctx context.Context, question, answer string, audience ask.Audience,
 	sources []ask.Source, scope ask.Scope, lang ask.Language,
 ) []string {
 	sp.calls++
+	if sp.duringCall != nil {
+		sp.duringCall(ctx)
+	}
 	sp.ctxErr = ctx.Err()
 	sp.question, sp.answer, sp.audience, sp.lang, sp.sources, sp.scope = question, answer, audience, lang, sources, scope
+	// A stopped call comes back with nothing, as the real one does: the model
+	// request is what the context cancels.
+	if sp.ctxErr != nil {
+		return nil
+	}
 	if sp.pays != nil {
 		usage.Record(ctx, *sp.pays)
 	}
@@ -308,6 +321,44 @@ func TestAsk_theSuggestionsSurviveAReaderWhoLeftMidTurn(t *testing.T) {
 	}
 	if got := msgs[0].Followups; strings.Join(got, "|") != strings.Join(sp.reply, "|") {
 		t.Errorf("stored followups = %q, want %q", got, sp.reply)
+	}
+}
+
+// Dropping the request's cancellation is not dropping the thread's. A reader
+// who deletes the thread while the suggestions are being written is owed the
+// same stop as one who deleted it a moment earlier: the row the pills would go
+// on is going with it, and the call is money spent on nothing.
+func TestAsk_deletingTheThreadStopsTheSuggestionCall(t *testing.T) {
+	// Given a turn whose thread is deleted while the suggester is running
+	sp := &suggesterSpy{reply: []string{"What happens on a re-index?"}}
+	srv, store, _ := newSuggestingServer(t, sp, withAskerAnswering())
+	sp.duringCall = func(call context.Context) {
+		list, err := store.List(context.Background(), testSubject)
+		if err != nil || len(list) == 0 {
+			t.Errorf("no thread to delete: %v", err)
+			return
+		}
+		srv.turns.cancel(list[0].ID)
+		// The stop travels through a context.AfterFunc, so it lands on its own
+		// goroutine rather than inside cancel().
+		select {
+		case <-call.Done():
+		case <-time.After(2 * time.Second):
+		}
+	}
+
+	// When it is asked
+	body := doSSE(t, srv, "/api/ask", `{"question":"how are citations stored?","audience":"ba","language":"en"}`)
+
+	// Then the call in flight was stopped
+	if sp.calls != 1 {
+		t.Fatalf("suggester calls = %d, want 1", sp.calls)
+	}
+	if sp.ctxErr == nil {
+		t.Error("the suggestion call outlived the thread it was written for")
+	}
+	if strings.Contains(body, "event: followups") {
+		t.Errorf("pills for a deleted thread:\n%s", body)
 	}
 }
 
