@@ -2,6 +2,7 @@ package ask
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -20,6 +21,12 @@ import (
 // a marker, because `args[1]` is an index expression, and minting a citation
 // for it would put a reference under the answer the model never made. A
 // number outside 1..n stays as it came; the UI drops it to plain text.
+//
+// A run of markers standing together is written back sorted ascending, one
+// number per bracket, with a repeat dropped: the reader gets [2][6][7], not
+// the order the model happened to reach for its sources in. The numbering
+// itself is still first use, so a run is sorted only after its numbers are
+// assigned, and the citation list is unaffected.
 type renumberer struct {
 	n       int         // how many sources the prompt numbered
 	dense   map[int]int // the prompt's number -> the reader's
@@ -38,10 +45,21 @@ func newRenumberer(sources int) *renumberer {
 // A complete marker at the start of the text, or the start of one. The
 // prompt asks for [1][2], but a claim resting on several sources still comes
 // out as [1, 2] often enough; read as one marker it matched nothing.
+//
+// A claim resting on several sources also comes out as a chain of groups,
+// [6][2], and a run is sorted as a whole - so the chain is matched as a
+// whole. Its seam is spaces and tabs, never \s: a run reaching over a newline
+// would swallow the break between the marker that ends one paragraph and the
+// one that opens the next.
 var (
-	markerAtStart  = regexp.MustCompile(`^\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`)
+	markerGroup    = `\[\d{1,3}(?:\s*,\s*\d{1,3})*\]`
+	markerGroupRe  = regexp.MustCompile(markerGroup)
+	chainAtStart   = regexp.MustCompile(`^` + markerGroup + `(?:[ \t]*` + markerGroup + `)*`)
 	markerPrefixRe = regexp.MustCompile(`^\[[\d\s,]*$`)
-	numberRe       = regexp.MustCompile(`\d+`)
+	// What may still grow into another group of the run: nothing yet, or a
+	// bracket that has not closed.
+	chainMoreRe = regexp.MustCompile(`^[ \t]*(\[[\d\s,]*)?$`)
+	numberRe    = regexp.MustCompile(`\d+`)
 )
 
 // feed takes one streamed token and returns what can be emitted so far.
@@ -162,9 +180,15 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 			continue
 		}
 		// A marker, the start of one, or a bracket.
-		if m := markerAtStart.FindStringSubmatch(s[i:]); m != nil {
-			b.WriteString(r.rewrite(m[1]))
-			i += len(m[0])
+		if m := chainAtStart.FindString(s[i:]); m != "" {
+			// A run that ends where the text does is decided only once what
+			// follows it has arrived: the next token may bring another group,
+			// and the run is sorted as a whole.
+			if !atEnd && chainMoreRe.MatchString(s[i+len(m):]) {
+				return b.String(), s[i:]
+			}
+			b.WriteString(r.rewriteChain(m))
+			i += len(m)
 			continue
 		}
 		if !atEnd && markerPrefixRe.MatchString(s[i:]) {
@@ -249,7 +273,7 @@ func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) 
 			if !atEnd && srcMoreRe.MatchString(s[i+len(m[0]):]) {
 				return b.String(), s[i:]
 			}
-			b.WriteString(`"src":` + r.rewrite(srcGroups(m[1])))
+			b.WriteString(`"src":` + r.rewriteArray(srcGroups(m[1])))
 			i += len(m[0])
 			continue
 		}
@@ -263,8 +287,9 @@ func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) 
 }
 
 // srcGroups flattens a chain of bracket groups into the one group they meant,
-// so [6][25] renumbers and is written back as the array [6,25]. A single
-// group passes through with its own separators intact.
+// so [6][25] renumbers and is written back as the array [6,25]. What comes
+// back out is rewriteArray's own array, sorted; only a group carrying an
+// invented number keeps the separators it came in with.
 func srcGroups(chain string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(srcJoinRe.ReplaceAllString(chain, ","), "["), "]")
 }
@@ -276,14 +301,83 @@ func (r *renumberer) rewrite(group string) string {
 		if err != nil || n < 1 || n > r.n {
 			return num // invented: left alone, and never a citation
 		}
-		d, ok := r.dense[n]
-		if !ok {
-			r.order = append(r.order, n)
-			d = len(r.order)
-			r.dense[n] = d
-		}
-		return strconv.Itoa(d)
+		return strconv.Itoa(r.denseOf(n))
 	}) + "]"
+}
+
+// denseOf is the reader's number for a source of the prompt, minted on first
+// use: that is what makes an answer count [1], [2], [3] as it is written.
+func (r *renumberer) denseOf(n int) int {
+	d, ok := r.dense[n]
+	if !ok {
+		r.order = append(r.order, n)
+		d = len(r.order)
+		r.dense[n] = d
+	}
+	return d
+}
+
+// markerRun renumbers every number of one run of markers, in the order they
+// were written - first use still decides the number, so citations() is
+// untouched - and returns them sorted ascending with a repeat dropped. Only
+// the reading order changes: [6][2][7] is the same three sources as
+// [2][6][7], counted up the way a reader expects them to be.
+//
+// ok is false when the run carries a number outside 1..n. That one is
+// invented and never becomes a citation, so ordering the run would interleave
+// real chips with the plain text the UI drops it to; the caller renumbers the
+// groups where they stand instead.
+func (r *renumberer) markerRun(s string) (dense []int, ok bool) {
+	nums := numberRe.FindAllString(s, -1)
+	for _, num := range nums {
+		if n, err := strconv.Atoi(num); err != nil || n < 1 || n > r.n {
+			return nil, false
+		}
+	}
+	seen := make(map[int]bool, len(nums))
+	for _, num := range nums {
+		n, _ := strconv.Atoi(num)
+		d := r.denseOf(n)
+		if !seen[d] {
+			seen[d] = true
+			dense = append(dense, d)
+		}
+	}
+	sort.Ints(dense)
+	return dense, true
+}
+
+// rewriteChain writes one run of prose markers back sorted, one number per
+// bracket - the shape answerCommon asks the model for in the first place.
+func (r *renumberer) rewriteChain(chain string) string {
+	dense, ok := r.markerRun(chain)
+	if !ok {
+		return markerGroupRe.ReplaceAllStringFunc(chain, func(g string) string {
+			return r.rewrite(strings.Trim(g, "[]"))
+		})
+	}
+	var b strings.Builder
+	for _, d := range dense {
+		b.WriteByte('[')
+		b.WriteString(strconv.Itoa(d))
+		b.WriteByte(']')
+	}
+	return b.String()
+}
+
+// rewriteArray writes a diagram node's src back sorted, as the one array the
+// browser parses. Its chips are the chips of the prose, so they are ordered
+// the same way.
+func (r *renumberer) rewriteArray(group string) string {
+	dense, ok := r.markerRun(group)
+	if !ok {
+		return r.rewrite(group)
+	}
+	parts := make([]string, len(dense))
+	for i, d := range dense {
+		parts[i] = strconv.Itoa(d)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // citations resolves the markers the answer used, in the reader's numbering.

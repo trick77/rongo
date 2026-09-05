@@ -775,9 +775,16 @@ export default function Ask({
 
                 {/* ui-markdown carries the prose typography (index.css), the
                     same block ../loom uses. The measure stays capped here:
-                    rongo's answer column is wider than loom's rail. */}
+                    rongo's answer column is wider than loom's rail.
+
+                    streaming draws the caret (index.css) on the answer's last
+                    block rather than after the container: as a sibling of the
+                    markdown the caret was a block of its own, and blinked on
+                    the line below the words it belongs to. */}
                 {turn.text && (
-                  <div className="ui-markdown mt-4 max-w-[68ch]">
+                  <div
+                    className={`ui-markdown mt-4 max-w-[68ch]${turn.done ? "" : " streaming"}`}
+                  >
                     <Markdown
                       text={turn.text}
                       onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
@@ -804,7 +811,6 @@ export default function Ask({
                       // segments keep their keys and never remount.
                       fade={turn.live}
                     />
-                    {!turn.done && <span className="caret" aria-hidden="true" />}
                   </div>
                 )}
 

@@ -118,8 +118,8 @@ func TestRenumber_aDiagramSplitAcrossTokensStillRenumbers(t *testing.T) {
 	if !strings.Contains(out, `"src":[1]`) {
 		t.Errorf("out = %q, want the first src renumbered to the reader's [1]", out)
 	}
-	if !strings.Contains(out, `"src":[2, 1]`) {
-		t.Errorf("out = %q, want the grouped src renumbered, separators kept", out)
+	if !strings.Contains(out, `"src":[1,2]`) {
+		t.Errorf("out = %q, want the grouped src renumbered and sorted", out)
 	}
 	if !strings.HasPrefix(out, "Text.\n```diagram\n") {
 		t.Errorf("out = %q, want the fence header intact", out)

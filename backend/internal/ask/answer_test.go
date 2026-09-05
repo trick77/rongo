@@ -200,8 +200,10 @@ func TestAnswer_aGroupedMarkerIsRenumberedPerNumber(t *testing.T) {
 		t.Fatalf("Answer: %v", err)
 	}
 
-	// An invented number stays as it came, so the UI drops it to plain text.
-	if got.Text != "Compared on poll [1, 2] and [9, 1]." {
+	// The real group is renumbered, sorted and split one number per bracket.
+	// The group carrying an invented number keeps the shape it came in with,
+	// so the UI can drop that number to plain text where it stands.
+	if got.Text != "Compared on poll [1][2] and [9, 1]." {
 		t.Errorf("text = %q", got.Text)
 	}
 	if len(got.Citations) != 2 {

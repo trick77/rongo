@@ -297,7 +297,16 @@ body {
   z-index: 1;
 }
 
-.caret {
+/* The caret of a streaming answer, drawn at the end of its last block so it
+   stands right after the last word written. A sibling element cannot: the
+   blocks around it are blocks, so it would sit on the line below, blinking
+   under text it has nothing to do with. Named blocks rather than :last-child
+   on its own: a list draws the caret on its last item, not once on the <ul>
+   and again on the item, and a diagram - a picture, or the box saying one is
+   coming - is not a line of writing and gets none. */
+.ui-markdown.streaming > :is(p, h2, h3, h4, pre):last-child::after,
+.ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after {
+  content: "";
   display: inline-block;
   width: 2px;
   height: 1em;
@@ -357,7 +366,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .node-now::before,
   .busybar,
-  .caret,
+  .ui-markdown.streaming > :is(p, h2, h3, h4, pre):last-child::after,
+  .ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
   .pulse,
   .stream-seg {
     animation: none;
