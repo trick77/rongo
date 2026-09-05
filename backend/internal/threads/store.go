@@ -184,6 +184,18 @@ func (s *Store) SetTitle(ctx context.Context, id int64, from, to string) error {
 	return nil
 }
 
+// SettleTitles ends the waiting for every thread still expecting one, and is
+// meant for boot and nowhere else. A row is pending only while a title call is
+// in flight, and no call survives the process that made it: whatever is still
+// pending when rongo starts was orphaned by the last shutdown or crash, and
+// left alone it would read as "New question" in the header for good.
+func (s *Store) SettleTitles(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE threads SET title_settled = 1 WHERE title_settled = 0`); err != nil {
+		return fmt.Errorf("settle orphaned thread titles: %w", err)
+	}
+	return nil
+}
+
 // Rename gives a thread the title its owner typed. Reports whether a row
 // matched: a thread that is gone, or was never this reader's, is not an error
 // here, it is a 404 at the edge.

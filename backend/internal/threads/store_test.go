@@ -162,6 +162,27 @@ func TestSetTitle_anEmptyTitleStillEndsTheWaiting(t *testing.T) {
 	}
 }
 
+func TestSettleTitles_endsTheWaitingLeftBehindByACrash(t *testing.T) {
+	// A title call cannot outlive its process. Whatever is still pending at
+	// boot was orphaned, and a single-turn thread never gets a later turn to
+	// settle it: without this it holds "New question" in the header for good.
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	if err := s.SettleTitles(ctx); err != nil {
+		t.Fatalf("SettleTitles: %v", err)
+	}
+
+	list, _ := s.List(ctx, "anna")
+	if list[0].TitlePending {
+		t.Error("a thread orphaned mid-title must not go on waiting")
+	}
+	if list[0].Title != th.Title {
+		t.Errorf("title = %q, want the placeholder left standing", list[0].Title)
+	}
+}
+
 func TestRename_endsTheWaitingToo(t *testing.T) {
 	// A name the reader typed is a title. The header must show it rather than
 	// hold its place for a model call that will find the row renamed.

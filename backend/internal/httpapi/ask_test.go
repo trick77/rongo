@@ -507,6 +507,40 @@ func TestAsk_theModelsTitleIsSentAndTheThreadStopsBeingPending(t *testing.T) {
 	}
 }
 
+func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
+	// A continuation and a resumed clarification are both handed a thread
+	// built from an id alone, with no title on it. Settling on those would put
+	// the cut question back in the header the moment a reader answered a card
+	// before the first turn's title had landed.
+	ctx := context.Background()
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	// The dev user is made on the first request; this thread has to exist
+	// before one, so its owner does too.
+	if _, err := svc.UpsertUser("dev-user", "dev@x.invalid", false); err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	st := threads.NewStore(db)
+	deps := Deps{Auth: svc, Ask: &fakeAsker{tokens: []string{"And that is the rest of it."}}, Threads: st}
+	th, err := st.Create(ctx, "dev-user", "How does shipping work, and what happens when it does not?")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := st.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?"); err != nil {
+		t.Fatalf("AddQuestion: %v", err)
+	}
+
+	postAsk(t, deps, fmt.Sprintf(`{"thread_id":%d,"question":"And the rest?","audience":"ba"}`, th.ID))
+
+	list, _ := st.List(ctx, "dev-user")
+	if len(list) != 1 {
+		t.Fatalf("threads = %+v, want one", list)
+	}
+	if !list[0].TitlePending {
+		t.Error("the first turn's title is still coming; a later turn must leave the row alone")
+	}
+}
+
 func TestAsk_withoutATitlerTheThreadIsNotLeftWaitingForOne(t *testing.T) {
 	// No titler configured: the placeholder is the title this thread will
 	// ever have. A row left pending would read as "New question" in the
