@@ -59,3 +59,44 @@ func TestReexplainInheritsTheLanguageOfTheTurnItReanswers(t *testing.T) {
 		t.Errorf("new turn language = %q, want fr inherited from the original", last.Language)
 	}
 }
+
+// A thread is answered in one language. A follow-up asking for another one is
+// answered in the thread's, and the pipeline is told the same thing the record
+// holds — otherwise a stale tab would produce a French answer stored as German.
+func TestAsk_aFollowupIsAnsweredInTheThreadsLanguage(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+
+	postAsk(t, deps, `{"question":"How?","audience":"ba","language":"de"}`)
+	list, _ := st.List(context.Background(), testSubject)
+	threadID := list[0].ID
+
+	a.gotLang = ""
+	postAsk(t, deps, fmt.Sprintf(`{"question":"And then?","audience":"ba","language":"fr","thread_id":%d}`, threadID))
+
+	if a.gotLang != ask.LanguageDE {
+		t.Errorf("language = %q, want de — the thread's language, not the composer's", a.gotLang)
+	}
+	msgs, _ := st.Messages(context.Background(), testSubject, threadID)
+	if len(msgs) != 2 || msgs[1].Language != "de" {
+		t.Errorf("messages = %+v, want the follow-up stored as de", msgs)
+	}
+}
+
+// The composer cannot know a thread's language before it asks - it may be a
+// thread still loading, or one whose turns are older than the pin. The stream
+// says which language the record took, first thing.
+func TestAsk_theThreadEventCarriesTheLanguageTheRecordTook(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+
+	postAsk(t, deps, `{"question":"Wie?","audience":"ba","language":"de"}`)
+	list, _ := st.List(context.Background(), testSubject)
+
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"Und dann?","audience":"ba","language":"fr","thread_id":%d}`, list[0].ID))
+	for _, e := range events(rec.Body.String()) {
+		if e[0] == "thread" && !strings.Contains(e[1], `"language":"de"`) {
+			t.Errorf("thread event = %s, want the thread's language on it", e[1])
+		}
+	}
+}

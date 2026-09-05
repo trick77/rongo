@@ -98,6 +98,11 @@ type Turn = {
   // The id of the message this turn was recorded as, once known. Reexplain
   // needs it; a turn still in flight has none yet.
   messageId: number | null;
+  // Whether the server has a row for this turn. A turn that failed before the
+  // record was written is on screen but not in the thread, and must not pin
+  // the thread's language — the reader has to be able to pick another one and
+  // try again.
+  recorded: boolean;
   clarification: TurnClarification | null;
   // What the turn had to say about its own scope - a repository the question
   // named that the index does not carry. Empty on every ordinary turn, and
@@ -224,6 +229,7 @@ function storedTurn(m: Message): Turn {
     retry: null,
     done: true,
     messageId: m.id,
+    recorded: true,
     clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
     chosenIdx: null,
     live: false,
@@ -251,6 +257,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     steps: [],
     error: "",
     retry: null,
+    recorded: false,
     done: false,
     messageId: null,
     clarification: null,
@@ -385,9 +392,9 @@ const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";
 
 /**
  * The composer's answer language, remembered across reloads — someone who
- * works in German re-picked it on every reload otherwise. Only the composer's
- * default: a turn keeps the language it was asked in, and a follow-up still
- * inherits from the turn it continues.
+ * works in German re-picked it on every reload otherwise. Only the default for
+ * a NEW thread: once a thread has a turn it is answered in that turn's
+ * language, and the select shows it without offering a change.
  *
  * Guarded like App's thread bookmark, because Safari's private mode throws on
  * storage access, and a blank page is worse than a forgotten preference. A
@@ -703,6 +710,11 @@ export default function Ask({
             threadId.current = payload.thread_id;
             shown.current = payload.thread_id;
             onThread(payload.thread_id);
+            // The turn is on record now, in the language the record took. That
+            // is not always the one that was asked for — a thread answers in
+            // the language of its first turn — so the turn on screen, and with
+            // it the composer, follow the server rather than the guess.
+            patchLast((t) => ({ ...t, recorded: true, language: payload.language ?? t.language }));
             // The placeholder title is written by Create, so the entry can
             // appear in the list the moment the question is sent.
             onActivity();
@@ -736,6 +748,10 @@ export default function Ask({
               done: true,
               endedAt: t.endedAt ?? Date.now(),
               messageId: payload.message_id ?? t.messageId,
+              // A re-explain opens no thread event, and it too is filed in the
+              // thread's language rather than the one it asked for.
+              recorded: true,
+              language: payload.language ?? t.language,
             }));
             // The model-written title replaces the placeholder in a background
             // goroutine that has no way to push it here. Without this the
@@ -759,6 +775,24 @@ export default function Ask({
     return ok;
   }
 
+  /**
+   * A thread is answered in one language: the one its first question was asked
+   * in. Everything else in the thread already works that way — the title is
+   * written once from the first turn, and follow-up pills, re-explains, retries
+   * and resumed cards all replay the language of the turn they continue — so a
+   * mid-thread switch produced a German answer under an English title beside
+   * English suggestions. The backend pins the same way when the record is
+   * written; this is what keeps the composer from promising otherwise.
+   *
+   * Null until a turn is on record — a first question that failed before the
+   * server wrote its row left a turn on screen but nothing in the thread, and
+   * locking the composer to it would strand the reader in a language they
+   * cannot change.
+   */
+  const threadLanguage = turns.find((t) => t.recorded)?.language ?? null;
+  // What the next question will actually be answered in.
+  const asking = threadLanguage ?? language;
+
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     const q = question.trim();
@@ -771,10 +805,10 @@ export default function Ask({
     // load is what the reader expects anyway: they have moved on.
     retireLoad();
 
-    setTurns((prev) => [...prev, freshTurn(q, audience, language)]);
+    setTurns((prev) => [...prev, freshTurn(q, audience, asking)]);
     setQuestion("");
 
-    await stream("/api/ask", { question: q, audience, language, thread_id: threadId.current ?? 0 });
+    await stream("/api/ask", { question: q, audience, language: asking, thread_id: threadId.current ?? 0 });
   }
 
   /**
@@ -929,9 +963,9 @@ export default function Ask({
             {turns.length === 0 && !loading && (
               <div className="max-w-[52ch]">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  {(welcome[language] ?? welcome.en).title}
+                  {(welcome[asking] ?? welcome.en).title}
                 </h2>
-                <p className="mt-3 text-muted">{(welcome[language] ?? welcome.en).body}</p>
+                <p className="mt-3 text-muted">{(welcome[asking] ?? welcome.en).body}</p>
               </div>
             )}
 
@@ -1246,7 +1280,7 @@ export default function Ask({
               ref={box}
               rows={1}
               aria-label="Question"
-              placeholder={(welcome[language] ?? welcome.en).placeholder}
+              placeholder={(welcome[asking] ?? welcome.en).placeholder}
               // 16px on a touch screen, and the same on the language select
               // below: iOS Safari zooms the page in when a focused field
               // renders under 16px and never zooms back out, leaving the app
@@ -1271,16 +1305,30 @@ export default function Ask({
                   </button>
                 ))}
               </fieldset>
-              <label className="relative inline-flex h-9 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink sm:h-8">
+              {/* Pinned once the thread has a turn: dimmed, no chevron, no
+                  hover — the pill stays where it was and still says which
+                  language the thread is in, it just no longer offers a change.
+                  The title says why, for the reader who tries. */}
+              <label
+                title={threadLanguage ? "Pinned to the language of the first question." : undefined}
+                className={
+                  "relative inline-flex h-9 items-center rounded-full border border-border bg-bg pl-3 text-xs text-muted sm:h-8 " +
+                  (threadLanguage ? "pr-3 opacity-75" : "pr-2.5 hover:border-elevated-border hover:text-ink")
+                }
+              >
                 <span className="sr-only">Answer language</span>
                 <select
                   aria-label="Answer language"
-                  value={language}
+                  value={asking}
+                  disabled={threadLanguage !== null}
                   onChange={(e) => {
                     setLanguage(e.target.value);
                     rememberLanguage(e.target.value);
                   }}
-                  className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none pointer-coarse:text-base"
+                  className={
+                    "lang-select border-0 bg-transparent text-inherit outline-none pointer-coarse:text-base " +
+                    (threadLanguage ? "cursor-default opacity-100" : "cursor-pointer pr-4")
+                  }
                 >
                   {languages.map((l) => (
                     <option key={l.code} value={l.code}>
@@ -1288,9 +1336,11 @@ export default function Ask({
                     </option>
                   ))}
                 </select>
-                <span className="pointer-events-none absolute right-2 rotate-90">
-                  <Chevron />
-                </span>
+                {!threadLanguage && (
+                  <span className="pointer-events-none absolute right-2 rotate-90">
+                    <Chevron />
+                  </span>
+                )}
               </label>
               {/* ml-auto belongs to the pair, not to the hint: the hint is not
                   rendered below sm, and with the push on it the Ask button

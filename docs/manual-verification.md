@@ -70,7 +70,9 @@ Checks:
    short-gate model, and the turn's total includes it.
 3. Click a pill. The question is asked as a new turn in the same thread, with
    the same role and language as the answer it came from - even if the composer
-   has been switched to another role or language in the meantime. The answer it
+   has been switched to another role in the meantime. The language cannot be
+   switched at all once the thread has a turn: the select is dim, carries no
+   chevron and reads the thread's language. The answer it
    came from is unchanged, and the pills are now under the new answer only.
 4. Reload the thread. The pills are back under the last answer and nowhere
    else.
