@@ -31,7 +31,7 @@ type Searcher interface {
 // must ask the reader to choose among candidates. An interface — satisfied by
 // *Router — so the pipeline can be tested without a database or a model.
 type Routes interface {
-	Route(ctx context.Context, question string, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error)
+	Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string) (Decision, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -148,7 +148,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	}
 
 	ev.status("routing")
-	d, err := p.router.Route(ctx, question, lang, hits, known)
+	d, err := p.router.Route(ctx, question, audience, lang, hits, known)
 	if err != nil {
 		return Answer{}, nil, err
 	}

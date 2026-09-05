@@ -24,7 +24,7 @@ func TestRouteNamesTheCandidatesInTheReadersLanguage(t *testing.T) {
 	})
 	r := newTestRouter(t, llmFake, testDBWithDeps(t, nil))
 
-	got, err := r.Route(context.Background(), "wie wird angemeldet?", LanguageDE, []retrieve.Hit{
+	got, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceDev, LanguageDE, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}, nil)
@@ -132,7 +132,7 @@ func TestTitleAndCandidateNamesAskForSwissOrthography(t *testing.T) {
 		return `{"title":"HTTP-Schicht","summary":"Nimmt Anfragen an."}`
 	})
 	r := newTestRouter(t, llmFake, testDBWithDeps(t, nil))
-	if _, err := r.Route(context.Background(), "wie wird angemeldet?", LanguageDE, []retrieve.Hit{
+	if _, err := r.Route(context.Background(), "wie wird angemeldet?", AudienceDev, LanguageDE, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "loom", Path: "backend/internal/auth/session.go", Score: 0.49},
 	}, nil); err != nil {

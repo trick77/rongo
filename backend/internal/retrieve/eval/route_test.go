@@ -278,10 +278,10 @@ func TestEvalMeasureRouting(t *testing.T) {
 		want := resolutionExpectsAsk(q.Resolution)
 
 		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin})
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named))})
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named), true)})
 
 		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin})
-		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named))})
+		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named), true)})
 	}
 
 	t.Logf("")
@@ -347,7 +347,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	for _, margin := range routeMargins {
 		correct := 0
 		for _, row := range rows {
-			if ask.Decide(row.all, margin, row.related, row.judged, row.named) == row.want {
+			if ask.Decide(row.all, margin, row.related, row.judged, row.named, true) == row.want {
 				correct++
 			}
 		}
@@ -406,7 +406,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
 		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
-		d, err := router.Route(ctx, q.Text, ask.LanguageEN, hits, named)
+		d, err := router.Route(ctx, q.Text, ask.AudienceDev, ask.LanguageEN, hits, named)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
 		}
@@ -507,7 +507,7 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	if anyMarginNeedsLadder(dominant, []float64{0.10, 0.40}) {
 		t.Error("a dominant pair never needs the ladder to go on at any margin in this sweep")
 	}
-	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */, 0) {
+	if ask.Decide(dominant, 0.10, true /* must not be read */, true /* must not be read */, 0, true) {
 		t.Error("a dominant pair must answer without asking regardless of related/judged")
 	}
 
@@ -517,16 +517,16 @@ func TestSweepBookkeepingMatchesTheLadder(t *testing.T) {
 	}
 
 	// Once past Dominates, a manifest dependency short-circuits the judge.
-	if got := ask.Decide(tight, 0.10, true, true /* must not be read */, 0); got {
+	if got := ask.Decide(tight, 0.10, true, true /* must not be read */, 0, true); got {
 		t.Error("a manifest dependency must not ask even if the judge would have said ask")
 	}
 
 	// Once past Dominates and with no manifest dependency, the judge's answer
 	// is what decides — never defaulted.
-	if got := ask.Decide(tight, 0.10, false, true, 0); !got {
+	if got := ask.Decide(tight, 0.10, false, true, 0, true); !got {
 		t.Error("ask.Decide must read the judge's answer once the margin does not dominate and nothing is related")
 	}
-	if got := ask.Decide(tight, 0.10, false, false, 0); got {
+	if got := ask.Decide(tight, 0.10, false, false, 0, true); got {
 		t.Error("ask.Decide must read the judge's answer, not default to true")
 	}
 
