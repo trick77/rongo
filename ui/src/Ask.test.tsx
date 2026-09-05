@@ -601,6 +601,39 @@ describe("Ask, a stored thread", () => {
  * re-explaining both post a SECOND time in the same test, and the queue is
  * what tells the two calls apart.
  */
+/**
+ * Like queuedPostFetch, but the frames are chosen from the request body rather
+ * than from the position in a queue. Use it where a test asks a turn and then
+ * resumes it: the two POSTs are told apart by what they say, so nothing
+ * depends on which other request the page happened to make in between.
+ */
+function postFetchByRequest(frames: (body: Record<string, unknown>) => string[], threadsJson: unknown = []) {
+  const encoder = new TextEncoder();
+  const mock = vi.fn(async (_url: string, opts?: RequestInit) => {
+    if (opts?.method !== "POST") {
+      return { ok: true, status: 200, json: async () => threadsJson };
+    }
+    const chosen = frames(JSON.parse(String(opts?.body ?? "{}")));
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader() {
+          let i = 0;
+          return {
+            async read() {
+              if (i >= chosen.length) return { done: true, value: undefined };
+              return { done: false, value: encoder.encode(chosen[i++]) };
+            },
+          };
+        },
+      },
+    };
+  });
+  vi.stubGlobal("fetch", mock);
+  return mock;
+}
+
 function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
   const encoder = new TextEncoder();
   let next = 0;
@@ -817,6 +850,95 @@ describe("Ask, the clarification and re-explaining", () => {
       clarification_message_id: 5,
       choice: 0,
     });
+  });
+
+
+  it("renders the narrowing panel, not a card, when the question was too broad", async () => {
+    queuedPostFetch([
+      [
+        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("clarification", {
+          message_id: 5,
+          too_broad: true,
+          candidates: [
+            { idx: 0, title: "", summary: "", repo: "peeq", branch: "master" },
+            { idx: 1, title: "", summary: "", repo: "loom", branch: "main" },
+            { idx: 2, title: "", summary: "", repo: "ledger", branch: "main" },
+            { idx: 3, title: "", summary: "", repo: "gateway", branch: "main" },
+            { idx: 4, title: "", summary: "", repo: "ingest", branch: "main" },
+          ],
+        }),
+        ev("done", { message_id: 5 }),
+      ],
+    ]);
+
+    await ask("How is retry done?");
+
+    expect(await screen.findByText("That is too broad to ask about.")).toBeTruthy();
+    expect(screen.queryByText("Which one do you mean?")).toBeNull();
+    expect(screen.getByRole("button", { name: /gateway/ })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Waiting for a choice");
+  });
+
+  it("sends the picked repositories and streams the answer into a new turn", async () => {
+    // Keyed on the request, not on call order: the answer belongs to the
+    // resume, and a queue hands it to whichever call happens to come second.
+    const mock = postFetchByRequest((body) =>
+      body.clarification_message_id
+        ? [
+            ev("thread", { thread_id: 7, message_id: 6 }),
+            ev("token", { text: "Both retry with capped exponential backoff." }),
+            ev("done", { message_id: 6 }),
+          ]
+        : [
+            ev("thread", { thread_id: 7, message_id: 5 }),
+            ev("clarification", {
+              message_id: 5,
+              too_broad: true,
+              candidates: [
+                { idx: 0, title: "", summary: "", repo: "peeq", branch: "master" },
+                { idx: 1, title: "", summary: "", repo: "loom", branch: "main" },
+                { idx: 2, title: "", summary: "", repo: "ledger", branch: "main" },
+              ],
+            }),
+            ev("done", { message_id: 5 }),
+          ],
+    );
+
+    const user = await ask("How is retry done?");
+    await screen.findByText("That is too broad to ask about.");
+    // Waited for, not assumed: narrowing is refused while a turn is still
+    // streaming, and clicking into that window loses the click in silence.
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Waiting for a choice"));
+
+    await user.click(screen.getByRole("button", { name: /peeq/ }));
+    await user.click(screen.getByRole("button", { name: /ledger/ }));
+    const askThese = screen.getByRole("button", { name: /^Ask these/ });
+    expect(askThese.textContent).toContain("2");
+    await user.click(askThese);
+
+    // What this test is actually about, asserted first so a slow render never
+    // reads as a request that was never sent.
+    const posted = () => mock.mock.calls.filter((c) => c[1]?.method === "POST");
+    await waitFor(() => expect(posted()).toHaveLength(2));
+    const body = JSON.parse(String(posted()[1][1]?.body));
+    expect(body).toMatchObject({
+      thread_id: 7,
+      clarification_message_id: 5,
+      repos: ["peeq", "ledger"],
+    });
+    expect(body.choice).toBeUndefined();
+
+    // And the answer lands in a turn of its own. The prose is cut into
+    // segments for the streaming fade, so only the paragraph holds it whole.
+    await screen.findByText(
+      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("capped exponential backoff"),
+      {},
+      { timeout: 5000 },
+    );
+    // The panel stays, collapsed to what it narrowed to — the answer only
+    // reads correctly beside the repositories it came from.
+    expect(await screen.findByRole("button", { name: /Narrowed to/ })).toBeTruthy();
   });
 
   it("sends nothing when an answered card is clicked again", async () => {

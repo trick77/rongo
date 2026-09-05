@@ -532,7 +532,11 @@ export default function Ask({
             patchLast((t) => ({
               ...t,
               messageId: payload.message_id,
-              clarification: { messageId: payload.message_id, candidates: payload.candidates ?? [] },
+              clarification: {
+                messageId: payload.message_id,
+                candidates: payload.candidates ?? [],
+                tooBroad: payload.too_broad ?? false,
+              },
             }));
           } else if (name === "error") {
             ok = false;
@@ -666,6 +670,43 @@ export default function Ask({
   }
 
   /**
+   * Narrowing is the too-broad panel's own move: the reader picks the
+   * repositories they meant and the turn goes on across those.
+   *
+   * It is a resume, not a new question — the same words, joining the same
+   * turn — but it resumes from the panel as a whole rather than from a row on
+   * it, which is why it sends repositories instead of a choice. The panel is
+   * answered once, exactly as a card is, and a failed turn hands it back.
+   */
+  async function narrowTo(turnIndex: number, repos: string[]) {
+    if (busy || repos.length === 0) return;
+    const turn = turns[turnIndex];
+    if (!turn.clarification || turn.chosenIdx != null) return;
+
+    retireLoad();
+    appendTurn(
+      freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
+      (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: -1, narrowedTo: repos } : t)),
+    );
+
+    // The panel belongs to the thread it was asked in, the way a card does.
+    const panelThread = threadId.current;
+    const ok = await stream("/api/ask", {
+      thread_id: threadId.current ?? 0,
+      question: turn.question,
+      audience: turn.audience,
+      language: turn.language,
+      clarification_message_id: turn.clarification.messageId,
+      repos,
+    }, false);
+    if (!ok && shown.current === panelThread) {
+      setTurns((prev) =>
+        prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null, narrowedTo: null } : t)),
+      );
+    }
+  }
+
+  /**
    * Re-explaining is a NEW turn for the other audience, from sources a prior
    * turn already gathered — never a rewrite, and never a fresh /api/ask
    * question. The language is inherited on the server from the turn it
@@ -777,6 +818,7 @@ export default function Ask({
       },
       onFollowup: askFollowup,
       onChoose: chooseCandidate,
+      onNarrow: narrowTo,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [turns],

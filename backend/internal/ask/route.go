@@ -338,6 +338,12 @@ Title and summary are written in %s. Repository names stay as they are.`
 type Decision struct {
 	Ask        bool
 	Candidates []Candidate
+	// TooBroad is the turn ending by asking for a narrower question rather
+	// than by asking which of the candidates was meant. It comes with every
+	// repository that matched, unnamed and uncapped: the panel prints the
+	// names the index already carries, so nothing was named by a model and
+	// nothing was left out.
+	TooBroad bool
 }
 
 // Router decides whether a turn can be answered or has to ask.
@@ -549,6 +555,7 @@ const (
 	rungAllRepos   = "all_repos"
 	rungRepoDeps   = "repo_deps"
 	rungRepository = "repository"
+	rungTooBroad   = "too_broad"
 	rungMargin     = "margin"
 	rungJudge      = "judge"
 	rungRole       = "role"
@@ -569,6 +576,14 @@ func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos
 	}
 	if allRepos {
 		return false, rungAllRepos
+	}
+	// Above the manifest edge, not below it. A card can offer four
+	// repositories and does not mention the rest, so past four it would put a
+	// question to the reader that hides most of its own answer. Composing
+	// instead is no better: one dependency among twenty repositories would
+	// spread searchK over twenty of them and answer from none.
+	if namedRepos == 0 && distinctRepos(all) > maxRepoCandidates {
+		return true, rungTooBroad
 	}
 	if related {
 		return false, rungRepoDeps
@@ -732,6 +747,17 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 		// leader still reach an answer without a query or a model call.
 		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
 		return Decision{Ask: false, Candidates: ranked.All}, l, nil
+	}
+
+	// Past what a card can show, the turn stops here. It pays for neither the
+	// manifest query nor the naming call: the panel prints repository names
+	// the index already carries, and there is no fifth row to write. This is
+	// also why repoCandidates' refusal to cap no longer has to protect the
+	// manifest check from a hidden fifth repository — with more than four
+	// there is no card left to protect.
+	if spans && distinctRepos(ranked.All) > maxRepoCandidates {
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
+		return Decision{Ask: true, TooBroad: true, Candidates: repoCandidates(ranked.All)}, l, nil
 	}
 
 	// Over EVERY repository when the repository rung is live, not over the

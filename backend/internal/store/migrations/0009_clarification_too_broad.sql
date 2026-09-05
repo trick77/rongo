@@ -1,0 +1,12 @@
+-- too_broad separates the two turns that both end by asking.
+--
+-- A card names two to five candidates a model wrote titles for. A too-broad
+-- turn names every repository that matched, unnamed, because past four of them
+-- a card would show four and never mention the rest. Both are a clarification
+-- row with candidates, and nothing in the rows themselves tells them apart
+-- once the browser has them: a repository card's rows carry a repo and no
+-- module key, and so do these.
+--
+-- Existing rows are cards. Nothing before this migration could be anything
+-- else.
+ALTER TABLE clarifications ADD COLUMN too_broad INTEGER NOT NULL DEFAULT 0;

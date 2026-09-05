@@ -30,6 +30,10 @@ export const languages: { code: string; name: string }[] = [
 export type TurnClarification = {
   messageId: number;
   candidates: ClarifyCandidate[];
+  // True when the turn ended by asking for a NARROWER question rather than by
+  // offering a choice. The rows look the same either way — a repository and a
+  // branch — so the panel and the card cannot be told apart without it.
+  tooBroad: boolean;
 };
 
 /** What a failed turn is asked again with: the endpoint and the body of the
@@ -81,6 +85,10 @@ export type Turn = {
   // set it stays — picking a different candidate later starts a NEW turn,
   // never rewriting this one.
   chosenIdx: number | null;
+  // The repositories a too-broad panel was narrowed to, once the turn it
+  // started has run. Null on every other turn, and on the panel itself until
+  // the reader picks.
+  narrowedTo: string[] | null;
   // True for a turn created in this session. A turn restored from the
   // record carries no live trace — it is finished by definition.
   live: boolean;
@@ -160,7 +168,11 @@ export type Message = {
   // The scope sentence, rendered by the backend in this message's own
   // language. Empty on every turn that named nothing the index lacked.
   notice?: string;
-  clarification: { id: number; candidates: ClarifyCandidate[] } | null;
+  clarification: { id: number; candidates: ClarifyCandidate[]; too_broad?: boolean } | null;
+  // The repositories THIS turn was narrowed to off a too-broad panel. Absent
+  // on every other turn; the panel above reads it back to say what it
+  // narrowed to after a reload.
+  narrowed_to?: string[];
   from_candidate_idx: number;
   // The clarification this message resolved, or 0 when it did not resume
   // one. The link the backend actually stored — matching on it, not on
@@ -201,8 +213,15 @@ export function storedTurn(m: Message): Turn {
     messageId: m.id,
     recorded: true,
     headId: m.head_message_id || null,
-    clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
+    clarification: m.clarification
+      ? {
+          messageId: m.id,
+          candidates: m.clarification.candidates,
+          tooBroad: m.clarification.too_broad ?? false,
+        }
+      : null,
     chosenIdx: null,
+    narrowedTo: null,
     live: false,
     startedAt: 0,
     endedAt: 0,
@@ -239,6 +258,7 @@ export function freshTurn(question: string, audience: Audience, language: string
     headId,
     clarification: null,
     chosenIdx: null,
+    narrowedTo: null,
     live: true,
     startedAt: now,
     endedAt: null,
@@ -256,14 +276,20 @@ export function freshTurn(question: string, audience: Audience, language: string
  */
 export function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
   const chosenByClarification = new Map<number, number>();
+  // What the answering turn narrowed to, for the panel that asked. A card
+  // names its own choice by title and needs nothing here.
+  const narrowedByClarification = new Map<number, string[]>();
   for (const m of list) {
-    if (m.from_clarification_id) chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+    if (!m.from_clarification_id) continue;
+    chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
+    if (m.narrowed_to?.length) narrowedByClarification.set(m.from_clarification_id, m.narrowed_to);
   }
   return turns.map((t, i) => {
     const clarId = list[i].clarification?.id;
     if (clarId == null) return t;
     const idx = chosenByClarification.get(clarId);
-    return idx === undefined ? t : { ...t, chosenIdx: idx };
+    if (idx === undefined) return t;
+    return { ...t, chosenIdx: idx, narrowedTo: narrowedByClarification.get(clarId) ?? null };
   });
 }
 

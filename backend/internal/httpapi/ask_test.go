@@ -52,6 +52,7 @@ type fakeAsker struct {
 	// facts, because the card's "all repositories" entry resumes with an
 	// empty repo on purpose.
 	resumedRepo     string
+	resumedRepos    []string
 	resumedRepoCall bool
 
 	reexplainTokens []string
@@ -135,13 +136,17 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 // ResumeRepo is the repository card's resume: it searches the chosen
 // repository again rather than replaying stored hits, so the fake records
 // which repository it was handed.
-func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understanding, repo string,
+func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understanding, repos []string,
 	aud ask.Audience, lang ask.Language, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
 
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
-	f.resumedRepo = repo
+	f.resumedRepos = repos
+	f.resumedRepo = ""
+	if len(repos) > 0 {
+		f.resumedRepo = repos[0]
+	}
 	f.resumedRepoCall = true
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
@@ -1399,5 +1404,141 @@ func TestReexplainAFailedTurnIsRecordedAsFailedNotFinished(t *testing.T) {
 	last := msgs[len(msgs)-1]
 	if last.ID == msgID || last.Error == "" || last.Answer != "" {
 		t.Errorf("new turn = %+v, want it recorded as failed with an empty answer", last)
+	}
+}
+
+// seedTooBroad seeds a turn that ended by asking for a narrower question:
+// five repositories, no written titles, and no "all repositories" entry —
+// answering across all of them is the thing this panel exists to refuse.
+func seedTooBroad(t *testing.T, store *threads.Store) (msgID, clarID int64) {
+	t.Helper()
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "how is retry done?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how is retry done?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
+		TooBroad:      true,
+		Understanding: ask.Understanding{CodeTerms: []string{"retry"}},
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master"},
+			{Repo: "loom", Branch: "main"},
+			{Repo: "ledger", Branch: "main"},
+			{Repo: "gateway", Branch: "main"},
+			{Repo: "ingest", Branch: "main"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	return msg.ID, clarID
+}
+
+func TestAsk_theTooBroadPanelSaysSoOnTheWire(t *testing.T) {
+	// The browser cannot tell the two apart from the rows alone: a repository
+	// card's rows carry a repo and no module key, and so do these.
+	srv := newTestServer(t, func(f *fakeAsker) {
+		f.clarification = &ask.Clarification{
+			TooBroad:      true,
+			Understanding: ask.Understanding{CodeTerms: []string{"retry"}},
+			Candidates: []ask.Candidate{
+				{Repo: "peeq", Branch: "master"},
+				{Repo: "loom", Branch: "main"},
+			},
+		}
+	})
+
+	body := doSSE(t, srv, "/api/ask", `{"question":"how is retry done?","audience":"ba"}`)
+
+	if !strings.Contains(body, "event: clarification") {
+		t.Fatalf("the turn did not ask:\n%s", body)
+	}
+	if !strings.Contains(body, `"too_broad":true`) {
+		t.Errorf("the clarification event must say the panel is not a card:\n%s", body)
+	}
+}
+
+func TestAsk_theTooBroadPanelResumesAcrossEveryRepositoryPicked(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	msgID, _ := seedTooBroad(t, st)
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,"repos":["peeq","ledger"]}`, msgID))
+
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the resumed turn did not finish:\n%s", body)
+	}
+	if len(asker.resumedRepos) != 2 || asker.resumedRepos[0] != "peeq" || asker.resumedRepos[1] != "ledger" {
+		t.Errorf("resumed over %v, want both repositories the reader picked", asker.resumedRepos)
+	}
+	if len(asker.gotScope.Known) != 2 {
+		t.Errorf("scope = %+v, want the picked repositories — the choice IS the scope", asker.gotScope)
+	}
+	if asker.gotScope.All {
+		t.Error("picking repositories is the opposite of asking for all of them")
+	}
+}
+
+func TestAsk_aNarrowingIsRefusedBeyondWhatWasOffered(t *testing.T) {
+	// The cap and the membership check are product rules, not conveniences of
+	// the page: a browser that sends its own list must not widen a turn past
+	// what the panel put in front of the reader.
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"a repository the panel never offered", `"repos":["peeq","shopfront"]`},
+		{"more repositories than a comparison can carry", `"repos":["peeq","loom","ledger","gateway"]`},
+		{"the same repository over and over to get past the cap", `"repos":["peeq","peeq","peeq","peeq"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, st := newTestServerWithStore(t, withAskerResuming())
+			asker := srv.deps.Ask.(*fakeAsker)
+			msgID, _ := seedTooBroad(t, st)
+
+			req := fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,%s}`, msgID, tc.body)
+
+			if tc.name == "the same repository over and over to get past the cap" {
+				// Deduplicated to one, which is inside the cap and a perfectly
+				// ordinary narrowing.
+				doSSE(t, srv, "/api/ask", req)
+				if len(asker.resumedRepos) != 1 || asker.resumedRepos[0] != "peeq" {
+					t.Errorf("resumed over %v, want the repeat folded into one", asker.resumedRepos)
+				}
+				return
+			}
+			if code := doStatus(t, srv, "/api/ask", req); code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", code)
+			}
+			if asker.resumedRepoCall {
+				t.Error("a refused narrowing must not reach the pipeline")
+			}
+		})
+	}
+}
+
+func TestAsk_theTooBroadPanelIsNotResumableAsACard(t *testing.T) {
+	// Without repos the request falls through to Choice, which defaults to 0 —
+	// and the panel always has a row 0. That would answer from the
+	// highest-scoring repository the reader never picked, and record it as a
+	// choice they never made.
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	msgID, _ := seedTooBroad(t, st)
+
+	code := doStatus(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d}`, msgID))
+
+	if code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", code)
+	}
+	if asker.resumedRepoCall {
+		t.Error("a panel with nothing picked must not reach the pipeline")
 	}
 }

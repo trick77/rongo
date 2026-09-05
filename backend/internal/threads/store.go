@@ -74,6 +74,11 @@ type Message struct {
 	// Clarification is set when this turn ended by asking which mechanism was
 	// meant, so a reload renders the card instead of a turn that looks stuck.
 	Clarification *Clarification `json:"clarification,omitempty"`
+	// NarrowedTo is the repositories a turn resumed from the too-broad panel
+	// was narrowed to. Derived on read from Scope, the same way Notice is, and
+	// empty on every other turn: a card names its own choice by title, and a
+	// turn that resumed nothing narrowed nothing.
+	NarrowedTo []string `json:"narrowed_to,omitempty"`
 	// FromCandidateIdx is the candidate this turn resumed from, or -1 when it
 	// did not resume a clarification.
 	FromCandidateIdx int `json:"from_candidate_idx"`
@@ -118,6 +123,11 @@ type Clarification struct {
 	// asked for. The column stays.
 	Understanding ask.Understanding `json:"-"`
 	Candidates    []Candidate       `json:"candidates"`
+	// TooBroad is the turn having ended by asking for a narrower question
+	// rather than by offering a choice. The browser needs it to tell the two
+	// apart after a reload: both are a message with candidates, but one is a
+	// card with written titles and one is a list of repository names.
+	TooBroad bool `json:"too_broad"`
 	// Answered is true once a turn resumed from this card. A card is answered
 	// once: the handler refuses a second resume with it, before the choice
 	// costs a model call. Not sent to the browser — the page derives the same
@@ -592,6 +602,7 @@ func (s *Store) LastTurn(ctx context.Context, subject string, threadID int64) (M
 	m.Scope = scanScope(scope)
 	m.Followups = scanFollowups(followups)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
+	m.NarrowedTo = narrowedTo(m)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	return m, true, nil
 }
@@ -621,6 +632,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	m.Scope = scanScope(scope)
 	m.Followups = scanFollowups(followups)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
+	m.NarrowedTo = narrowedTo(m)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
@@ -668,6 +680,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		m.Scope = scanScope(scope)
 		m.Followups = scanFollowups(followups)
 		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
+		m.NarrowedTo = narrowedTo(m)
 		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 		out = append(out, m)
@@ -741,8 +754,8 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO clarifications (message_id, understanding) VALUES (?, ?)`,
-		messageID, string(understanding))
+		`INSERT INTO clarifications (message_id, understanding, too_broad) VALUES (?, ?, ?)`,
+		messageID, string(understanding), c.TooBroad)
 	if err != nil {
 		return 0, fmt.Errorf("store clarification: %w", err)
 	}
@@ -786,13 +799,13 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 	// the card: a clarification is closed by the answer that came out of it,
 	// and that link already exists on the answering turn.
 	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, m.thread_id, c.understanding,
+		SELECT c.id, m.thread_id, c.understanding, c.too_broad,
 		       EXISTS (SELECT 1 FROM messages a WHERE a.from_clarification_id = c.id)
 		FROM clarifications c
 		JOIN messages m ON m.id = c.message_id
 		JOIN threads t ON t.id = m.thread_id
 		WHERE c.message_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3)`, messageID, subject, anySubject).
-		Scan(&c.ID, &c.ThreadID, &understanding, &c.Answered)
+		Scan(&c.ID, &c.ThreadID, &understanding, &c.TooBroad, &c.Answered)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -958,4 +971,18 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (s
 		return nil, 0, err
 	}
 	return out, total, nil
+}
+
+// narrowedTo is the repositories a turn resumed from the too-broad panel was
+// narrowed to, and nothing at all for every other turn.
+//
+// The discriminator is the pair the resume itself wrote: a clarification to
+// point at, and -1 where a candidate index would be. A card's resume carries a
+// real index and names its choice on the card, so repeating the repository
+// here would put one decision in the record twice, in two shapes.
+func narrowedTo(m Message) []string {
+	if m.FromClarificationID == 0 || m.FromCandidateIdx != -1 {
+		return nil
+	}
+	return m.Scope.Known
 }

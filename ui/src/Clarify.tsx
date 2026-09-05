@@ -79,11 +79,12 @@ export default function Clarify({
           )
         ) : (
           <>
-            <span>Chosen: {chosen?.title}</span>
             {chosen?.repo && (
-              <span className="ml-auto font-mono text-[11.5px] text-faint">
-                {chosen.repo} · {chosen.branch}
-              </span>
+              <span className="font-mono text-[12.5px] font-medium text-ochre">{chosen.repo}</span>
+            )}
+            <span>Chosen: {chosen?.title}</span>
+            {chosen?.branch && (
+              <span className="ml-auto font-mono text-[11.5px] text-faint">{chosen.branch}</span>
             )}
           </>
         )}
@@ -99,22 +100,30 @@ export default function Clarify({
                 disabled={chosenIdx != null || readOnly}
                 aria-pressed={c.idx === chosenIdx}
                 className={
-                  "w-full rounded-ui-sm border bg-bg px-3.5 py-3 text-left " +
+                  "w-full rounded-ui-sm border border-l-[3px] bg-bg py-3 pr-3.5 pl-3 text-left " +
                   (chosenIdx == null && !readOnly ? "hover:border-accent " : "") +
-                  (c.idx === chosenIdx ? "border-accent ring-1 ring-accent" : "border-border")
+                  (c.idx === chosenIdx
+                    ? "border-accent ring-1 ring-accent"
+                    : "border-border " + (c.repo ? "border-l-accent-dim" : ""))
                 }
               >
+                {/* The repository leads, on a line of its own. It is what
+                    tells two candidates of the same shape apart, and after
+                    the title it read as a footnote to it rather than as the
+                    thing being chosen between.
+
+                    An entry with no repository is the card's "all
+                    repositories" choice: it stands for every one of them, so
+                    the line is left out entirely rather than printed empty. */}
+                {c.repo && (
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="font-mono text-[12.5px] font-medium text-ochre">{c.repo}</span>
+                    <span className="font-mono text-[11.5px] text-faint">{c.branch}</span>
+                    <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-ink">{c.title}</span>
-                  {/* An entry with no repository is the card's "all
-                      repositories" choice: it stands for every one of them,
-                      so there is nothing to print here and a bare "·" would
-                      read as a missing value. */}
-                  {c.repo && (
-                    <span className="font-mono text-[11.5px] text-faint">
-                      {c.repo} · {c.branch}
-                    </span>
-                  )}
                   {c.idx === chosenIdx && (
                     <span className="ml-auto text-xs font-medium text-accent-strong">Chosen</span>
                   )}

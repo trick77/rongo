@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
+import Narrow from "./Narrow";
 import Question from "./Question";
 import Trace from "./Trace";
 import { CheckIcon, Chevron, CopyIcon } from "./icons";
@@ -44,6 +45,8 @@ export type ThreadActions = {
   onCopyQuestion: (i: number) => Promise<boolean>;
   onFollowup: (i: number, question: string) => void;
   onChoose: (i: number, idx: number) => void;
+  // The too-broad panel's move: the repositories the reader picked off it.
+  onNarrow: (i: number, repos: string[]) => void;
 };
 
 export type ThreadViewProps = {
@@ -184,6 +187,7 @@ export default function ThreadView({
   const retry = (i: number) => actions?.onRetry(i);
   const askFollowup = (i: number, q: string) => actions?.onFollowup(i, q);
   const chooseCandidate = (i: number, idx: number) => actions?.onChoose(i, idx);
+  const narrowTo = (i: number, repos: string[]) => actions?.onNarrow(i, repos);
 
   return (
     <>
@@ -301,14 +305,25 @@ export default function ThreadView({
                   </div>
                 )}
 
-                {turn.clarification && (
-                  <Clarify
-                    candidates={turn.clarification.candidates}
-                    chosenIdx={turn.chosenIdx}
-                    onChoose={(idx) => chooseCandidate(i, idx)}
-                    readOnly={!actions}
-                  />
-                )}
+                {turn.clarification &&
+                  (turn.clarification.tooBroad ? (
+                    <Narrow
+                      repos={turn.clarification.candidates.map((c) => ({
+                        repo: c.repo,
+                        branch: c.branch,
+                      }))}
+                      narrowedTo={turn.narrowedTo}
+                      onAsk={(repos) => narrowTo(i, repos)}
+                      readOnly={!actions}
+                    />
+                  ) : (
+                    <Clarify
+                      candidates={turn.clarification.candidates}
+                      chosenIdx={turn.chosenIdx}
+                      onChoose={(idx) => chooseCandidate(i, idx)}
+                      readOnly={!actions}
+                    />
+                  ))}
 
                 {/* ui-markdown carries the prose typography (index.css), the
                     same block ../loom uses. The measure stays capped here:
