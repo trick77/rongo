@@ -103,7 +103,7 @@ describe("follow-up suggestions", () => {
     await user.click(screen.getByRole("button", { name: "Was passiert beim Neuindexieren?" }));
 
     await waitFor(() => expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2));
-    const second = JSON.parse(mock.mock.calls.filter((c) => c[0] === "/api/ask")[1][1].body);
+    const second = JSON.parse(String(mock.mock.calls.filter((c) => c[0] === "/api/ask")[1][1]?.body));
     expect(second.question).toBe("Was passiert beim Neuindexieren?");
     expect(second.audience).toBe("dev");
     expect(second.language).toBe("de");
