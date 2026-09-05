@@ -1,0 +1,8 @@
+The same reordering, and no fence either [1].
+
+```diagram
+{"actors":[{"id":"ui","label":"UI"},{"id":"api","label":"Backend"}],"steps":[{"from":"ui","to":"api","label":"Frage stellen","kind":"call","src":[1]},{"from":"api","to":"ui","label":"Antwort streamen","kind":"return","src":[2]}],"type":"sequence"}
+```
+
+
+Both ends have to agree that this is a diagram [2].

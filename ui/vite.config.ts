@@ -13,6 +13,11 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     proxy: { "/api": "http://127.0.0.1:8080" },
+    // The diagram corpus lives in the backend's testdata and both ends read
+    // it (src/corpus.test.ts): a spec the backend normalises and this end
+    // will not draw is a defect only a shared corpus catches. Reading above
+    // the UI root is refused by default, so the repo root is allowed.
+    fs: { allow: [".."] },
   },
   test: {
     environment: "jsdom",

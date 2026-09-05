@@ -54,22 +54,66 @@ describe("parseDiagram", () => {
     expect((s as SequenceSpec).steps[0]).toEqual({ from: "u", to: "u", label: "tick", kind: "call", src: [] });
   });
 
-  it("rejects what it cannot draw, so the block stays text", () => {
+  it("returns null only when there is nothing to draw", () => {
     const bad = [
       "{not json",
       '"a string"',
       '{"type":"pie","nodes":[],"edges":[]}',
       '{"type":"flow","nodes":[],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","kind":"blob"}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x"},{"id":"a","label":"y"}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x"}],"edges":[{"from":"a","to":"zz"}]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":["1"]}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[0]}],"edges":[]}',
       '{"type":"flow","nodes":[{"id":"a","label":5}],"edges":[]}',
-      '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"v","label":"x"}]}',
-      '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"u","label":"x","kind":"shout"}]}',
+      '{"type":"sequence","actors":[],"steps":[]}',
     ];
     for (const b of bad) expect(parseDiagram(b), b).toBeNull();
+  });
+
+  it("drops the element it cannot read and draws the rest", () => {
+    const unknownKind = parseDiagram(
+      '{"type":"flow","nodes":[{"id":"a","label":"x","kind":"blob"}],"edges":[]}',
+    ) as FlowSpec;
+    expect(unknownKind.nodes[0].kind).toBe("step");
+
+    const dupe = parseDiagram(
+      '{"type":"flow","nodes":[{"id":"a","label":"x"},{"id":"a","label":"y"}],"edges":[]}',
+    ) as FlowSpec;
+    expect(dupe.nodes).toHaveLength(1);
+    expect(dupe.nodes[0].label).toBe("x");
+
+    const danglingEdge = parseDiagram(
+      '{"type":"flow","nodes":[{"id":"a","label":"x"}],"edges":[{"from":"a","to":"zz"}]}',
+    ) as FlowSpec;
+    expect(danglingEdge.nodes).toHaveLength(1);
+    expect(danglingEdge.edges).toHaveLength(0);
+
+    const shout = parseDiagram(
+      '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"u","label":"x","kind":"shout"}]}',
+    ) as SequenceSpec;
+    expect(shout.steps[0].kind).toBe("call");
+
+    const danglingStep = parseDiagram(
+      '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"v","label":"x"}]}',
+    ) as SequenceSpec;
+    expect(danglingStep.actors).toHaveLength(1);
+    expect(danglingStep.steps).toHaveLength(0);
+  });
+
+  // A src array the backend never renumbered still carries the prompt's own
+  // indices. Renumbering misses the whole array on one bad entry, so keeping
+  // the well-formed ones would draw chips naming the wrong files.
+  it("drops a src array renumbering would have missed, whole", () => {
+    for (const body of [
+      '{"type":"flow","nodes":[{"id":"a","label":"x","src":["1"]}],"edges":[]}',
+      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[0]}],"edges":[]}',
+      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[1.5]}],"edges":[]}',
+      '{"type":"flow","nodes":[{"id":"a","label":"x","src":"1"}],"edges":[]}',
+    ]) {
+      expect((parseDiagram(body) as FlowSpec).nodes[0].src, body).toEqual([]);
+    }
+    // The backend leaves this array exactly as it came, so 2 and 4 are still
+    // the prompt's numbers: drawn as chips they would name the wrong files.
+    const mixed = parseDiagram(
+      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[2,"3",4]}],"edges":[]}',
+    ) as FlowSpec;
+    expect(mixed.nodes[0].src).toEqual([]);
   });
 });
 

@@ -1,0 +1,8 @@
+Two sources carry the first step, and the model wrote them the way the prose
+rule asks for rather than as the array the fence needs (#45) [1].
+
+```diagram
+{"type":"flow","nodes":[{"id":"a","label":"Read config","kind":"start","src":[2,3]},{"id":"b","label":"Start pipeline","kind":"end","src":[4]}],"edges":[{"from":"a","to":"b"}]}
+```
+
+The pipeline then runs [1].

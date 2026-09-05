@@ -1,0 +1,7 @@
+The sequence below follows one indexing pass [3].
+
+```mermaid
+{"type":"sequence","actors":[{"id":"idx","label":"Indexer"},{"id":"db","label":"SQLite"}],"steps":[{"from":"idx","to":"db","label":"Store chunks","kind":"call","src":[7]},{"from":"db","to":"idx","label":"Rows written","kind":"return","src":[7,12]}]}
+```
+
+The pass ends once the rows are written [3].

@@ -1,0 +1,25 @@
+Das Diagramm zeigt den Fluss, wie das Projektgedächtnis entsteht [1].
+
+```json
+{
+  "type": "flow",
+  "nodes": [
+    {"id": "new_thread", "label": "Neuer Thread wird erstellt", "kind": "start", "src": [6]},
+    {"id": "process_msgs", "label": "Nachrichten verarbeiten und speichern", "kind": "step", "src": [23]},
+    {"id": "enough_threads", "label": "Genug Threads vorhanden?", "kind": "decision", "src": [1]},
+    {"id": "generate", "label": "Zusammenfassung generieren", "kind": "step", "src": [27]},
+    {"id": "save_memory", "label": "Gedächtnis speichern", "kind": "step", "src": [54]},
+    {"id": "memory_available", "label": "Projektgedächtnis bereit", "kind": "end", "src": [1]}
+  ],
+  "edges": [
+    {"from": "new_thread", "to": "process_msgs", "label": "Nachrichten austauschen"},
+    {"from": "process_msgs", "to": "enough_threads", "label": "Prüfung"},
+    {"from": "enough_threads", "to": "new_thread", "label": "Nein"},
+    {"from": "enough_threads", "to": "generate", "label": "Ja"},
+    {"from": "generate", "to": "save_memory", "label": "Zusammenfassung erstellen"},
+    {"from": "save_memory", "to": "memory_available", "label": "Bereitstellung"}
+  ]
+}
+```
+
+Der Nutzer beginnt einen neuen Thread, in dem er Nachrichten austauscht [2].

@@ -1,0 +1,7 @@
+The type is not the first key, which no prefix match would have caught [5].
+
+```json
+{"nodes":[{"id":"a","label":"Read config","kind":"start","src":[5]},{"id":"b","label":"Start pipeline","kind":"end","src":[8]}],"edges":[{"from":"a","to":"b","label":"Ready"}],"type":"flow"}
+```
+
+The pipeline then runs [8].

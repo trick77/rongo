@@ -230,6 +230,13 @@ the control flow so that it can be followed in the code.`
 // them: a spec one actor too wide used to be dropped and shown as its JSON,
 // which is worse than a wide picture in a box that scrolls. They stay strict
 // here because that is what keeps a diagram compact in the first place.
+//
+// The closing paragraph settles a contradiction the model was left to resolve
+// on its own: answerBA bars source code from an Analyst answer, and a diagram
+// is syntactically a code fence, so the block came back tagged ```json or with
+// no fence at all and the reader got JSON. The prompt is not the guard,
+// though - renumber.go recognises the spec by its content whatever the fence
+// says, because a prompt this one only ever holds most of the time.
 const answerDiagram = `
 
 At most one diagram, and only where control flow or a call sequence carries
@@ -243,7 +250,14 @@ sources read "src":[6,25], never "src":[6][25] - the one-marker-per-bracket
 rule is about running text and does not reach inside the fence. At most
 12 nodes, 5 actors, 12 steps. Labels follow the audience rules above and are
 written in the answer language; ids stay short ASCII. The prose still
-explains; the diagram is not a substitute.`
+explains; the diagram is not a substitute.
+
+The block is a diagram, not source code: an audience rule that bars code,
+signatures or file paths from running text does not bar it, and it is written
+for every audience. Open it with ` + "```diagram" + ` and nothing else - not
+` + "```json" + `, not ` + "```mermaid" + `, and never as bare JSON without a
+fence. A block opened any other way is printed as text and the reader gets no
+picture.`
 
 // nothingFound is the answer when nothing was gathered, in the language the
 // reader asked for. It is not an apology and not a guess: the caller adds the

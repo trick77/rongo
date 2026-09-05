@@ -302,10 +302,28 @@ describe("Markdown", () => {
       expect(Array.from(container.querySelectorAll("text.fill-muted")).some((t) => t.textContent === "[2]")).toBe(true);
     });
 
-    it("falls back to the code block when the JSON is not a spec it can draw", () => {
+    it("says so when a block meant to be a diagram did not draw", () => {
+      // For three releases this looked like an ordinary code block and the
+      // reader could not tell whether the model or the renderer had slipped.
       const { container } = render(<Markdown text={'```diagram\n{"type":"flow","nodes":[{"id"\n```'} />);
       expect(container.querySelector("svg")).toBeNull();
+      expect(container.textContent).toContain("Diagram could not be drawn");
       expect(container.querySelector("pre code")?.textContent).toBe('{"type":"flow","nodes":[{"id"');
+    });
+
+    it("says the same about a spec the model fenced as something else", () => {
+      const { container } = render(<Markdown text={'```json\n{"type":"sequence","actors":[{"id"\n```'} />);
+      expect(container.textContent).toContain("Diagram could not be drawn");
+    });
+
+    it("leaves an ordinary code block alone", () => {
+      // A config that happens to hold a "type" of "flow" is code, not a
+      // failed picture: hiding it behind a defect notice would lose the
+      // reader real content and the highlighting with it.
+      const body = '{"pipeline":{"type": "flow","steps":2}}';
+      const { container } = render(<Markdown text={"```json\n" + body + "\n```"} />);
+      expect(container.textContent).not.toContain("Diagram could not be drawn");
+      expect(container.querySelector("pre code")?.textContent).toBe(body);
     });
 
     it("promises the picture while the fence is still open", () => {
