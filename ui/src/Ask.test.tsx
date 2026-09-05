@@ -354,6 +354,23 @@ describe("Ask, a stored thread", () => {
     expect(written[0]).toContain("[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)");
   });
 
+  it("copies the question as it was typed, from the question's own control", async () => {
+    // The answer's footer copies the whole turn as Markdown. Quoting the
+    // question elsewhere means selecting prose that folds at three lines, so
+    // the question carries its own copy: the text, verbatim, nothing around it.
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
+    });
+    routedFetch([storedTurn]);
+    strict(<Ask threadId={7} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copy the question" }));
+    await screen.findByRole("button", { name: "Question copied" });
+    expect(written).toEqual([storedTurn.question]);
+  });
+
   it("opens a source from a chip in an older turn, not only from the pane", async () => {
     // On a tablet the pane is not there and hover does not exist. The chip
     // is the way to the source, in every turn, from that turn's own list.
@@ -1115,8 +1132,11 @@ describe("Ask, the clarification and re-explaining", () => {
   });
 
   it("posts a re-explain to the reexplain route and never to /api/ask", async () => {
+    // thread_id 7, the thread being read: a stream that named a different one
+    // is a turn the reader walked away from, and its tokens deliberately stop
+    // repainting the conversation in front of them.
     const mock = routedFetch([storedTurn], [
-      ev("thread", { thread_id: 3, message_id: 20 }),
+      ev("thread", { thread_id: 7, message_id: 20 }),
       ev("token", { text: "An answer for the BA." }),
       ev("done", { message_id: 20 }),
     ]);
@@ -1453,11 +1473,11 @@ describe("Ask, the answer language across a reload", () => {
 });
 
 describe("Ask, the language a thread is answered in", () => {
-  // The thread is answered in the language its first question was asked in.
-  // The select stays where it was - it just stops offering a change, because
-  // the title, the follow-up pills and every resumed turn are already written
-  // in that language.
-  it("pins the composer to the first question's language", async () => {
+  // The thread is answered in the language its first question was asked in,
+  // so from the second question on there is no choice left to offer and the
+  // control goes. What it used to say is said where it belongs: on the turn's
+  // own pill, beside the answer written in that language.
+  it("takes the language control away once the thread has one", async () => {
     streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
@@ -1465,11 +1485,8 @@ describe("Ask, the language a thread is answered in", () => {
     await user.type(screen.getByLabelText("Question"), "Wie?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => {
-      const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
-      expect(select.disabled).toBe(true);
-      expect(select.value).toBe("de");
-    });
+    await waitFor(() => expect(screen.queryByLabelText("Answer language")).toBeNull());
+    expect(screen.getByText("Deutsch")).toBeTruthy();
   });
 
   // A thread opened from the sidebar is answered in ITS language, whatever the
@@ -1484,9 +1501,8 @@ describe("Ask, the language a thread is answered in", () => {
     );
 
     await screen.findByText(/Through a grant/);
-    const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
-    expect(select.value).toBe("fr");
-    expect(select.disabled).toBe(true);
+    expect(screen.queryByLabelText("Answer language")).toBeNull();
+    expect(screen.getByText("Français")).toBeTruthy();
   });
 
   // The composer sends the thread's language even when storage remembers
@@ -1516,7 +1532,7 @@ describe("Ask, a language the record decided", () => {
   // The composer can guess wrong: a question sent while the thread is still
   // loading carries the remembered language, and the server answers in the
   // thread's. The stream says which one it took, and the turn - with it the
-  // pinned pill - follows the record rather than the guess.
+  // pill it carries - follows the record rather than the guess.
   it("follows the language the stream reports", async () => {
     streamFrames([ev("thread", { thread_id: 3, message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
     const user = userEvent.setup();
@@ -1524,11 +1540,8 @@ describe("Ask, a language the record decided", () => {
     await user.type(screen.getByLabelText("Question"), "How?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => {
-      const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
-      expect(select.disabled).toBe(true);
-      expect(select.value).toBe("fr");
-    });
+    await waitFor(() => expect(screen.queryByLabelText("Answer language")).toBeNull());
+    expect(screen.getByText("Français")).toBeTruthy();
   });
 
   // A first question that failed before the server wrote its row left a turn

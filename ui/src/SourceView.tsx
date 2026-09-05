@@ -29,7 +29,20 @@ const contextAbove = 3;
  * than a page: the reader is checking a claim and goes straight back to the
  * answer.
  */
-export default function SourceView({ source, onClose }: { source: SourceRef; onClose: () => void }) {
+export default function SourceView({
+  source,
+  onClose,
+  endpoint = "/api/source",
+}: {
+  source: SourceRef;
+  onClose: () => void;
+  /**
+   * Where the file is read from. The share page passes its own endpoint,
+   * which serves a repo/path/sha only when the link actually cites it —
+   * /api/source takes any of them and is a reader for the whole corpus.
+   */
+  endpoint?: string;
+}) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
@@ -63,7 +76,7 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
     (async () => {
       try {
         const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
-        const res = await fetch(`/api/source?${q}`);
+        const res = await fetch(`${endpoint}?${q}`);
         if (cancelled) return;
         if (!res.ok) {
           // The server's message is written for the reader (not in the
@@ -86,7 +99,7 @@ export default function SourceView({ source, onClose }: { source: SourceRef; onC
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [source, endpoint]);
 
   // Once the file is there, the cited range comes into view with a little
   // context above it. Guarded like the thread's own scroll: jsdom has no

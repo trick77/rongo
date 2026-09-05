@@ -102,6 +102,22 @@ describe("Narrow", () => {
     expect(screen.getByRole("button", { name: /loom/ }).hasAttribute("disabled")).toBe(true);
   });
 
+
+  it("asks nobody to narrow on a page where nobody can", async () => {
+    // A shared thread is read: the ochre and the buttons would leave a reader
+    // looking for a way to answer a question that is not theirs to answer.
+    const onAsk = vi.fn();
+    const user = userEvent.setup();
+    strict(<Narrow repos={repos} readOnly onAsk={onAsk} />);
+
+    expect(screen.queryByText("That is too broad to ask about.")).toBeNull();
+    expect(screen.getByText("Asked back: too broad to answer")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Ask these/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /peeq/ }));
+    expect(onAsk).not.toHaveBeenCalled();
+  });
+
   it("rotates the chevron by 90 degrees on open, without swapping the glyph", async () => {
     const user = userEvent.setup();
     strict(<Narrow repos={repos} narrowedTo={["peeq"]} onAsk={() => {}} />);

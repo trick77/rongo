@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
 import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
+import ShareDialog from "./share/ShareDialog";
+import { shareFor, type Share } from "./share/api";
 
 /**
  * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
@@ -22,6 +24,8 @@ export type Thread = {
    */
   title_pending?: boolean;
   created_at: string;
+  /** True while a live link points at this thread. */
+  shared?: boolean;
 };
 
 /** The day group a thread lands in, in the words the rail uses. */
@@ -51,21 +55,32 @@ export default function Threads({
   onSelect,
   version,
   busy = false,
+  busyId = null,
   onList = () => {},
   onDeleted = () => {},
   onRenamed = () => {},
+  onShared = () => {},
 }: {
   activeId: number | null;
   /** Only ever a real thread: clearing to a new question is the rail's job. */
   onSelect: (id: number) => void;
   version: number;
   busy?: boolean;
+  /**
+   * The thread being answered, if any. Not always the open one: the rail is
+   * live while a turn streams, so the reader can be reading somewhere else
+   * entirely. Nothing paints it — an answer is asked at the top of the rail
+   * and the row is right there — it only says whose actions to withhold.
+   */
+  busyId?: number | null;
   /** Reports the loaded list, so the shell can name the open thread. */
   onList?: (list: Thread[]) => void;
   /** A thread is gone. The shell closes it if it was the one on screen. */
   onDeleted?: (id: number) => void;
   /** A thread has a new title; the shell reloads the list. */
   onRenamed?: () => void;
+  /** A link was made or taken back; the row markers are stale. */
+  onShared?: () => void;
 }) {
   const [threads, setThreads] = useState<Thread[]>([]);
   // Which row's menu is open, and which thread a dialog is asking about.
@@ -73,6 +88,10 @@ export default function Threads({
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [renaming, setRenaming] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState<Thread | null>(null);
+  // The thread whose link is being handed out, and the link it already has.
+  // Fetched before the dialog opens, so it never flashes "Share thread" at
+  // someone whose thread is already shared.
+  const [sharing, setSharing] = useState<{ thread: Thread; share: Share | null } | null>(null);
   const [pending, setPending] = useState(false);
 
   // The menu closes on a pointer anywhere but the menu itself and the kebabs
@@ -153,6 +172,23 @@ export default function Threads({
     }
   }
 
+  /**
+   * Opens the dialog on what the thread already has. The list is asked first
+   * rather than the dialog fetching for itself: a dialog that opened on "not
+   * shared" and corrected itself a beat later would offer Create on a thread
+   * that is already out there.
+   */
+  async function openShare(t: Thread) {
+    let share: Share | null = null;
+    try {
+      share = await shareFor(t.id);
+    } catch {
+      // Treated as "no link yet": Create then answers with the link the thread
+      // already has, because the server keeps the token it minted.
+    }
+    setSharing({ thread: t, share });
+  }
+
   async function remove(t: Thread) {
     setPending(true);
     try {
@@ -175,10 +211,11 @@ export default function Threads({
     //
     // The 28px pitch is the rhythm on every pointer. A touch screen used to
     // get a 44px row, but it left the rail's own spacing — tuned against 28 —
-    // standing around it, and an iPad read far too airy for it.
+    // standing around it, and an iPad read far too airy for it. What the 28px
+    // does demand is that the whole of it be tappable: see the title button.
     //
-    // No disabled: dimming — this class dresses the row's <div>, which cannot
-    // be disabled. The title button inside it carries its own.
+    // Nothing here dims. A running turn no longer closes the rail — any thread
+    // can be opened while an answer is being written elsewhere.
     "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5";
 
   return (
@@ -204,10 +241,14 @@ export default function Threads({
             <ul className="flex flex-col">
               {g.items.map((t) => {
                 const active = t.id === activeId;
-                // Gated on busy as well as on the id: the trigger is dropped
-                // the moment a turn starts, and a menu left standing over it
-                // would still offer Delete on the thread being written.
-                const menuOpen = openMenu === t.id && !busy;
+                // The thread this turn is being written into. Its actions are
+                // the only ones a running turn withholds.
+                const writing = busy && t.id === busyId;
+                // Gated on the writing row as well as on the id: the trigger
+                // is dropped the moment that thread's turn starts, and a menu
+                // left standing over it would still offer Delete on the
+                // thread being written.
+                const menuOpen = openMenu === t.id && !writing;
                 return (
                   <li key={t.id} className="relative min-w-0">
                     <div
@@ -219,13 +260,21 @@ export default function Threads({
                         type="button"
                         aria-current={active ? "true" : undefined}
                         onClick={() => onSelect(t.id)}
-                        // Switching away from a running turn is what busy
-                        // locks out. The running thread's own row is not a
-                        // switch: it is the way back from the Repos page
-                        // while the answer is still being written, and with
-                        // the page nav gone it is the only one.
-                        disabled={busy && !active}
-                        className="relative min-w-0 flex-1 overflow-hidden text-left whitespace-nowrap disabled:opacity-50"
+                        // self-stretch, and it is not cosmetic: without it the
+                        // button is a flex child under items-center and shrinks
+                        // to its 20px line box inside a 28px row, leaving a 4px
+                        // dead band along the top and bottom of every row that
+                        // selects nothing. On a finger that is a third of the
+                        // row, and on the topmost row — where the 20px above it
+                        // is the group's own margin — a tap that lands high
+                        // hits nothing at all, while the same miss further down
+                        // lands on the row above and at least does something.
+                        // The button paints no ground of its own, so filling
+                        // the row moves not one pixel.
+                        // items-center keeps the title on the line it was on:
+                        // a 28px button holding a 20px line would otherwise
+                        // set the text 4px higher than it sits today.
+                        className="relative flex min-w-0 flex-1 items-center self-stretch overflow-hidden text-left whitespace-nowrap"
                       >
                         {/* The title runs out under a gradient to the row's
                             own background rather than ending in an ellipsis,
@@ -239,13 +288,35 @@ export default function Threads({
                           }
                         />
                       </button>
-                      {active && busy && (
-                        <span aria-hidden="true" className="pulse h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-strong" />
+                      {/* No dot on the row being written: a question is asked
+                          at the top of the rail and its row is the one right
+                          there, under the actions, so a marker beside it says
+                          what the reader just did. The one case it would speak
+                          for — a follow-up asked in an older thread, whose row
+                          keeps its place down the list — is one the composer
+                          already accounts for, and it is not worth a mark on
+                          every other turn. */}
+                      {/* A live link is a different kind of fact: it is true
+                          of the thread until somebody revokes it, not for the
+                          length of a turn, and it is the only way to see from
+                          the rail that a conversation is readable by people
+                          who are not here. A dot, not a word — the row is 28px
+                          of pitch on a 362px rail, and a "Shared" pill would
+                          eat the title. The index status line's own green, so
+                          it reads as "live" rather than as a colour of its
+                          own. */}
+                      {t.shared && (
+                        <span
+                          title="Shared with a link"
+                          className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-online"
+                        >
+                          <span className="sr-only">Shared</span>
+                        </span>
                       )}
-                      {/* No actions at all while a turn is running: deleting
-                          the thread being written would pull the record out
-                          from under the answer still landing on it. */}
-                      {!busy && (
+                      {/* No actions on the thread being written: deleting it
+                          would pull the record out from under the answer still
+                          landing on it. Every other row keeps its own. */}
+                      {!writing && (
                         <button
                           type="button"
                           aria-haspopup="menu"
@@ -255,8 +326,14 @@ export default function Threads({
                           // Quiet on an idle row, but never unreachable: it
                           // comes back for the keyboard and on touch, where
                           // there is no hover to reveal it.
+                          //
+                          // The 24px square is the paint; the tap box reaches
+                          // the row's full 28px through the after: rectangle,
+                          // for the same reason the title does. Extending the
+                          // square itself would enlarge the hover ground with
+                          // it, and that IS paint.
                           className={
-                            "grid h-6 w-6 shrink-0 place-items-center rounded-md text-rail transition-colors hover:bg-active hover:text-ink " +
+                            "relative grid h-6 w-6 shrink-0 place-items-center rounded-md text-rail transition-colors after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-[''] hover:bg-active hover:text-ink " +
                             (active || menuOpen
                               ? ""
                               : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
@@ -268,6 +345,10 @@ export default function Threads({
                     </div>
                     {menuOpen && (
                       <ThreadMenu
+                        onShare={() => {
+                          setOpenMenu(null);
+                          void openShare(t);
+                        }}
                         onRename={() => {
                           setOpenMenu(null);
                           setRenaming(t);
@@ -299,6 +380,22 @@ export default function Threads({
           busy={pending}
           onCancel={() => setDeleting(null)}
           onDelete={() => void remove(deleting)}
+        />
+      )}
+      {sharing && (
+        <ShareDialog
+          threadID={sharing.thread.id}
+          title={sharing.thread.title}
+          share={sharing.share}
+          onCancel={() => setSharing(null)}
+          onChange={(share) => {
+            // The row's marker follows the link, without waiting for a reload.
+            setThreads((prev) =>
+              prev.map((x) => (x.id === sharing.thread.id ? { ...x, shared: share !== null } : x)),
+            );
+            setSharing((prev) => (prev ? { ...prev, share } : prev));
+            onShared();
+          }}
         />
       )}
     </nav>

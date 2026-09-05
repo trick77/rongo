@@ -36,10 +36,16 @@ const maxPicked = 3;
 export default function Narrow({
   repos,
   narrowedTo = null,
+  readOnly = false,
   onAsk,
 }: {
   repos: NarrowRepo[];
   narrowedTo?: string[] | null;
+  // A shared thread is read, not answered. The panel still says what the turn
+  // asked for — that is the record — but it drops the ochre and every way to
+  // act on it, so a reader is not left looking for a button that would post
+  // into someone else's thread.
+  readOnly?: boolean;
   onAsk: (repos: string[]) => void;
 }) {
   const decided = narrowedTo != null && narrowedTo.length > 0;
@@ -61,7 +67,11 @@ export default function Narrow({
     setPicked((p) => (p.includes(repo) ? p.filter((r) => r !== repo) : [...p, repo]));
 
   return (
-    <div className={"mt-4 rounded-ui border bg-panel " + (decided ? "border-border" : "border-ochre")}>
+    <div
+      className={
+        "mt-4 rounded-ui border bg-panel " + (decided || readOnly ? "border-border" : "border-ochre")
+      }
+    >
       <button
         type="button"
         aria-expanded={open}
@@ -76,6 +86,8 @@ export default function Narrow({
               {narrowedTo!.join(", ")}
             </span>
           </>
+        ) : readOnly ? (
+          <span className="text-muted">Asked back: too broad to answer</span>
         ) : (
           <span className="font-medium text-ochre">That is too broad to ask about.</span>
         )}
@@ -85,8 +97,10 @@ export default function Narrow({
         <div className="px-4 pb-4">
           <p className="m-0 mb-3 max-w-[70ch] text-sm text-muted">
             <span className="font-medium text-ink-dim">{repos.length} repositories</span> match this
-            question about equally well. Pick the ones you meant — at most {maxPicked} — or ask
-            again with a repository name in your question.
+            question about equally well.{" "}
+            {readOnly
+              ? "The question was too broad to answer from any one of them."
+              : `Pick the ones you meant — at most ${maxPicked} — or ask again with a repository name in your question.`}
           </p>
           <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
             {repos.map((r) => {
@@ -100,14 +114,14 @@ export default function Narrow({
                   <button
                     type="button"
                     onClick={() => toggle(r.repo)}
-                    disabled={decided || full}
+                    disabled={decided || readOnly || full}
                     aria-pressed={on}
                     className={
                       "flex items-center gap-2 rounded-ui-sm border px-2.5 py-1 font-mono text-[11.5px] " +
                       (on
                         ? "border-accent bg-accent-dim text-ink"
                         : "border-elevated-border bg-elevated text-ink-dim") +
-                      (decided || full ? " opacity-40" : " hover:border-accent")
+                      (decided || readOnly || full ? " opacity-40" : " hover:border-accent")
                     }
                   >
                     <span>{r.repo}</span>
@@ -117,7 +131,7 @@ export default function Narrow({
               );
             })}
           </ul>
-          {!decided && (
+          {!decided && !readOnly && (
             <div className="flex items-center gap-3">
               <button
                 type="button"

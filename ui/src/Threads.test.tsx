@@ -76,24 +76,26 @@ describe("Threads", () => {
     expect(within(list).queryAllByRole("button")).toHaveLength(0);
   });
 
-  it("locks switching while an answer is streaming", async () => {
+  // A turn being written no longer closes the rail. The answer is parked on
+  // its own thread and goes on arriving there, so reading something else
+  // while it lands costs nothing.
+  it("opens another thread while an answer is streaming", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId={7} onSelect={onSelect} version={0} busy />);
+    render(<Threads activeId={7} onSelect={onSelect} version={0} busy busyId={7} />);
     const other = await screen.findByRole("button", { name: "Where does the token come from?" });
-    expect((other as HTMLButtonElement).disabled).toBe(true);
+    expect((other as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
     await user.click(other);
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith(3);
   });
 
   // With the page nav gone, this row is the only way back to a streaming
-  // answer from the Repos page. Locking it would strand the reader there
-  // until the turn finished.
+  // answer from the Repos page.
   it("keeps the running thread's own row clickable while it streams", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId={7} onSelect={onSelect} version={0} busy />);
+    render(<Threads activeId={7} onSelect={onSelect} version={0} busy busyId={7} />);
     const own = await screen.findByRole("button", { name: "How does shipping work?" });
     expect((own as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
@@ -111,6 +113,23 @@ describe("Threads", () => {
     const title = await screen.findByRole("button", { name: "How does shipping work?" });
     expect(title.parentElement?.className).toContain("h-7");
     expect(title.parentElement?.className).not.toContain("pointer-coarse:");
+  });
+
+  // The whole of that 28px has to be tappable. The title button is a flex
+  // child under items-center, so without self-stretch it shrinks to its 20px
+  // line box and leaves a dead 4px band along the top and bottom of every
+  // row — which on the topmost row, under 20px of the group's own margin, is
+  // a tap that lands on nothing at all.
+  it("gives the title the whole height of its row to be tapped in", async () => {
+    threadList(two);
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const title = await screen.findByRole("button", { name: "How does shipping work?" });
+    expect(title.className).toContain("self-stretch");
+    // And the actions button reaches the same 28px without its 24px hover
+    // square growing with it.
+    const actions = screen.getAllByRole("button", { name: /^Actions for/ })[0];
+    expect(actions.className).toContain("h-6");
+    expect(actions.className).toContain("after:-inset-y-0.5");
   });
 
   // Today's threads head the list, so a "Today" heading names what the
@@ -191,18 +210,31 @@ describe("Threads", () => {
       await openMenu("How does shipping work?");
       expect(screen.getByRole("menu")).toBeTruthy();
 
-      rerender(<Threads activeId={7} onSelect={() => {}} version={0} busy />);
+      rerender(<Threads activeId={7} onSelect={() => {}} version={0} busy busyId={7} />);
 
       expect(screen.queryByRole("menu")).toBeNull();
     });
 
     // Deleting the thread being written would pull the record out from under
-    // the answer still landing on it.
-    it("is not offered at all while a turn runs", async () => {
+    // the answer still landing on it. Only that one: every other row keeps
+    // its actions, because nothing is being written into it.
+    it("is withheld from the thread being written, and from no other", async () => {
       threadList(two);
-      render(<Threads activeId={7} onSelect={() => {}} version={0} busy />);
+      render(<Threads activeId={7} onSelect={() => {}} version={0} busy busyId={7} />);
       await screen.findByRole("button", { name: "How does shipping work?" });
-      expect(screen.queryByRole("button", { name: /^Actions for/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
+    });
+
+    // The reader has walked away from the answer and is reading another
+    // thread: the row they are ON keeps its actions, and the one being
+    // written — wherever it sits — does not.
+    it("follows the thread being written, not the one on screen", async () => {
+      threadList(two);
+      render(<Threads activeId={3} onSelect={() => {}} version={0} busy busyId={7} />);
+      await screen.findByRole("button", { name: "How does shipping work?" });
+      expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
     });
 
     it("deletes the thread once the dialog is confirmed, and not before", async () => {

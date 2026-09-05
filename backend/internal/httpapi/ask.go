@@ -705,12 +705,30 @@ func (s *Server) suggestFollowups(
 	lang ask.Language,
 	send func(string, any),
 ) {
-	if s.deps.Suggester == nil || len(answer.Sources) == 0 {
+	// Never for a thread the reader deleted while it was being answered: the
+	// message row this would be written to is already gone with it, and the
+	// call would be paid for to fill a column nobody will ever read.
+	if s.deps.Suggester == nil || len(answer.Sources) == 0 || threadWasDeleted(ctx) {
 		return
 	}
 	send("status", map[string]any{"step": "suggesting"})
-	call, cancel := context.WithTimeout(ctx, followupsCallTimeout)
+	// record, not ctx: a reader who closes the tab, reloads, or loses the
+	// connection between the last word and this call cancelled the request,
+	// and with it the only chance this answer ever had at suggestions - the
+	// column is written once, here, and nothing goes back for it later. The
+	// answer itself is already stored on record a few lines up for the same
+	// reason. The meter rides along: WithoutCancel keeps the values.
+	call, cancel := context.WithTimeout(record, followupsCallTimeout)
 	defer cancel()
+	// Dropping the request's cancellation does not mean dropping the thread's:
+	// a reader who deletes the thread WHILE this call is running is owed the
+	// same stop as one who deleted it a moment earlier, and the row the answer
+	// would be written to is going with it either way.
+	defer context.AfterFunc(ctx, func() {
+		if threadWasDeleted(ctx) {
+			cancel()
+		}
+	})()
 	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
 	if len(qs) == 0 {
 		return
