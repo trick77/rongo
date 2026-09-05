@@ -46,6 +46,8 @@ type Threads interface {
 	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
 	// SaveUsage records the paid calls one turn made, however it ended.
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
+	// SaveFollowups records what the finished answer offered to ask next.
+	SaveFollowups(ctx context.Context, messageID int64, questions []string) error
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
@@ -81,6 +83,11 @@ type Deps struct {
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string, lang ask.Language) string
+	// Suggester writes the follow-up questions offered under a finished
+	// answer. Optional, on the same terms as Titler: without it the answer
+	// simply ends, which is what it did before the pills existed.
+	Suggester func(ctx context.Context, question, answer string, audience ask.Audience,
+		sources []ask.Source, scope ask.Scope, lang ask.Language) []string
 	// Prices turns stored tokens into money, per model, read at report time
 	// because the table is refreshed from a registry behind the process's
 	// back. Nil or empty means the browser sees tokens only — the honest

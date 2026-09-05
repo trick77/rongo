@@ -106,6 +106,11 @@ type Turn = {
   usage: Usage | null;
   // The moment the question was asked, as the record has it, or now.
   askedAt: string;
+  // The questions this answer offers to ask next. Only the newest answered
+  // turn shows them: the older ones are a record of what was asked, and a
+  // thread of stale offers would compete with the answer in front of the
+  // reader.
+  followups: string[];
 };
 
 /** One paid call of a turn, as the usage event and the record carry it. */
@@ -177,6 +182,10 @@ type Message = {
   // apart.
   from_clarification_id: number;
   created_at?: string;
+  // What this answer offered to ask next. Absent on a turn that ended in a
+  // card, a failure or a nothing-found, and on every turn older than the
+  // column.
+  followups?: string[] | null;
   // Absent for a turn with nothing on record: older than the usage table,
   // or one that paid for nothing.
   usage?: Usage | null;
@@ -206,6 +215,7 @@ function storedTurn(m: Message): Turn {
     endedAt: 0,
     usage: m.usage ?? null,
     askedAt: m.created_at ?? "",
+    followups: m.followups ?? [],
   };
 }
 
@@ -233,6 +243,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     endedAt: null,
     usage: null,
     askedAt: new Date(now).toISOString(),
+    followups: [],
   };
 }
 
@@ -634,6 +645,7 @@ export default function Ask({
           } else if (name === "notice") patchLast((t) => ({ ...t, notice: payload.text ?? "" }));
           else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
+          else if (name === "followups") patchLast((t) => ({ ...t, followups: payload ?? [] }));
           else if (name === "usage") patchLast((t) => ({ ...t, usage: payload as Usage }));
           else if (name === "clarification") {
             patchLast((t) => ({
@@ -735,6 +747,30 @@ export default function Ask({
     setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language)]);
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
+  }
+
+  /**
+   * A suggested question is asked like any other, in this thread. It carries
+   * the ANSWERING turn's role and language, not whatever the composer is set
+   * to now: the pill was written for that reader in that language, and a
+   * German suggestion answered in English reads as a different product.
+   *
+   * The thread is a record — this appends a turn, and the answer the pill
+   * came from is left exactly as it was.
+   */
+  async function askFollowup(turnIndex: number, question: string) {
+    if (busy) return;
+    const turn = turns[turnIndex];
+
+    retireLoad();
+    setTurns((prev) => [...prev, freshTurn(question, turn.audience, turn.language)]);
+
+    await stream("/api/ask", {
+      question,
+      audience: turn.audience,
+      language: turn.language,
+      thread_id: threadId.current ?? 0,
+    });
   }
 
   async function copy(turnIndex: number) {
@@ -937,6 +973,29 @@ export default function Ask({
                       ))}
                     </ul>
                   </details>
+                )}
+
+                {/* What to ask next, under the answer that prompted it and
+                    above the actions on it. Only on the newest turn: an older
+                    answer's offers are spent, and a card or a failed turn
+                    below means the reader's move is there, not here.
+
+                    Never ochre — ochre is "your move", and nothing here is
+                    waiting on the reader. */}
+                {i === turns.length - 1 && turn.done && turn.followups.length > 0 && (
+                  <nav aria-label="Follow-up questions" className="mt-4 flex flex-wrap gap-2">
+                    {turn.followups.map((q) => (
+                      <button
+                        key={q}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => askFollowup(i, q)}
+                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-left text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </nav>
                 )}
 
                 {/* The footer: the two actions need a stored answer to build

@@ -55,6 +55,11 @@ type fakeAsker struct {
 	// scope is what it hands back for the record.
 	notice string
 	scope  ask.Scope
+
+	// sources is what the answer claims to have been written from. Empty is
+	// the nothing-found answer, which is what the real pipeline returns when
+	// it gathered nothing.
+	sources []ask.Source
 }
 
 func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
@@ -82,7 +87,7 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text, Citations: f.citations, Scope: f.scope}, nil, nil
+	return ask.Answer{Text: text, Citations: f.citations, Scope: f.scope, Sources: f.sources}, nil, nil
 }
 
 // Resume answers from the candidate's own hits — it never searches, which is
@@ -126,7 +131,7 @@ func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, l
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text}, nil
+	return ask.Answer{Text: text, Sources: f.sources}, nil
 }
 
 // withAskerAsking makes Run end the turn with a two-candidate clarification.

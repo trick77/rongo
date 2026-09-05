@@ -267,6 +267,11 @@ func main() {
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}
+	deps.Suggester = func(ctx context.Context, question, answer string, audience ask.Audience,
+		sources []ask.Source, scope ask.Scope, lang ask.Language,
+	) []string {
+		return ask.Followups(ctx, models, question, answer, audience, sources, scope, lang)
+	}
 	// Prices come from the registry: the MiMo deployments at MiMo's own API
 	// listing whatever endpoint they are called at, the embedding model at
 	// its endpoint. The table is read per report, so a fetch that lands after

@@ -32,6 +32,8 @@ const stepLabels: Record<string, string> = {
   // "writing" on the first token.
   answering: "Thinking about the answer",
   writing: "Writing the answer",
+  // After the answer, not during it: the questions are written from it.
+  suggesting: "Suggesting follow-ups",
 };
 
 export function stepLabel(step: string): string {

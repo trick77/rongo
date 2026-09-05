@@ -54,3 +54,29 @@ Checks:
    backend log: no retrieval/search call fires, only the re-explain request
    on the stored sources. A new turn appears below with the Developer answer; the
    original Analyst answer stays untouched above it.
+
+## Follow-up suggestions
+
+`make dev`; UI at `http://127.0.0.1:5173/`, against an index with at least one
+repository in it.
+
+Checks:
+
+1. Ask a question that answers. After the citations, the trace shows
+   "Suggesting follow-ups" and then Done; two or three pills appear between the
+   "How does rongo know this?" block and the "Explain as ..." row. They are
+   never ochre.
+2. Open the usage pill: its call table lists a `followups` row on the
+   short-gate model, and the turn's total includes it.
+3. Click a pill. The question is asked as a new turn in the same thread, with
+   the same role and language as the answer it came from - even if the composer
+   has been switched to another role or language in the meantime. The answer it
+   came from is unchanged, and the pills are now under the new answer only.
+4. Reload the thread. The pills are back under the last answer and nowhere
+   else.
+5. Ask in German (Deutsch). The pills are German, spelled the Swiss way (ss,
+   never ß), while the Analyst/Developer buttons stay English.
+6. Ask something the index has nothing on. The nothing-found answer gets no
+   pills, and no `followups` row appears in the usage table.
+7. End a turn with a clarification card. No pills beside it, and the previous
+   answer's pills are gone while the card is the newest turn.

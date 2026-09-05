@@ -59,6 +59,11 @@ type Message struct {
 	Answer    string         `json:"answer"`
 	Error     string         `json:"error"`
 	Citations []ask.Citation `json:"citations"`
+	// Followups are the questions this answer offered to ask next, in the
+	// message's own language. Stored with the turn so a reload shows what the
+	// reader was offered rather than a fresh set of guesses; empty on a turn
+	// that ended in a card, a failure or a nothing-found.
+	Followups []string `json:"followups"`
 	// Clarification is set when this turn ended by asking which mechanism was
 	// meant, so a reload renders the card instead of a turn that looks stuck.
 	Clarification *Clarification `json:"clarification,omitempty"`
@@ -310,6 +315,37 @@ func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) err
 	return nil
 }
 
+// SaveFollowups records the questions this answer offered to ask next.
+// Written after the answer, because it is written from it. Nothing to save
+// writes nothing, and a failure here is never a turn failure: the caller logs
+// it and carries on, exactly as it does for the sources.
+func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string) error {
+	if len(qs) == 0 {
+		return nil
+	}
+	blob, err := json.Marshal(qs)
+	if err != nil {
+		return fmt.Errorf("encode followups: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET followups = ? WHERE id = ?`, string(blob), messageID); err != nil {
+		return fmt.Errorf("store followups: %w", err)
+	}
+	return nil
+}
+
+// scanFollowups decodes a stored followups column, on the same terms as
+// scanScope: unreadable JSON costs the pills, never the message.
+func scanFollowups(blob string) []string {
+	if blob == "" {
+		return nil
+	}
+	var qs []string
+	if err := json.Unmarshal([]byte(blob), &qs); err != nil {
+		return nil
+	}
+	return qs
+}
+
 // scanScope decodes a stored scope column. Unreadable JSON yields the zero
 // scope rather than an error: a message whose provenance cannot be read is
 // still a message, and the record must stay legible.
@@ -404,11 +440,12 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var created string
 	var fromClar sql.NullInt64
 	var scope string
+	var followups string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &m.FromCandidateIdx, &fromClar, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -417,6 +454,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	}
 	m.FromClarificationID = fromClar.Int64
 	m.Scope = scanScope(scope)
+	m.Followups = scanFollowups(followups)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
@@ -433,7 +471,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ?
 		ORDER BY m.ordinal`, threadID, subject)
@@ -448,11 +486,13 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		var created string
 		var fromClar sql.NullInt64
 		var scope string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &m.FromCandidateIdx, &fromClar, &created); err != nil {
+		var followups string
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64
 		m.Scope = scanScope(scope)
+		m.Followups = scanFollowups(followups)
 		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 		m.ThreadID = threadID
 		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
