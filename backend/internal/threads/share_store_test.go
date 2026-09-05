@@ -344,3 +344,132 @@ func TestList_marksTheThreadsThatAreLiveOnALink(t *testing.T) {
 		}
 	}
 }
+
+// Every share method reads or writes, so every one of them has a branch for a
+// database that will not answer. Those branches decide whether an operator
+// sees the real reason in the log or a caller sees an empty list and believes
+// it — a shut database is the cheapest way to reach all of them at once.
+func TestShareStore_everyCallReportsABrokenDatabase(t *testing.T) {
+	s, ctx, th, db := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	calls := map[string]func() error{
+		"Share":          func() error { _, err := s.Share(ctx, testSubject, th); return err },
+		"RaiseShare":     func() error { _, err := s.RaiseShare(ctx, testSubject, th); return err },
+		"RevokeShare":    func() error { _, err := s.RevokeShare(ctx, testSubject, th); return err },
+		"ShareFor":       func() error { _, err := s.ShareFor(ctx, testSubject, th); return err },
+		"Shares":         func() error { _, err := s.Shares(ctx, testSubject); return err },
+		"SharedIDs":      func() error { _, err := s.SharedIDs(ctx, testSubject); return err },
+		"SharedThread":   func() error { _, _, err := s.SharedThread(ctx, sh.Token); return err },
+		"SharedCitation": func() error { _, err := s.SharedCitation(ctx, sh.Token, "r", "p", "s"); return err },
+		"List":           func() error { _, err := s.List(ctx, testSubject); return err },
+	}
+	for name, call := range calls {
+		if err := call(); err == nil {
+			t.Errorf("%s returned no error against a closed database", name)
+		}
+	}
+}
+
+func TestRaiseShare_aThreadWithNoLinkHasNothingToRaise(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+
+	if _, err := s.RaiseShare(ctx, testSubject, th); !errors.Is(err, ErrNoShare) {
+		t.Fatalf("raise without a link = %v, want ErrNoShare", err)
+	}
+}
+
+func TestRaiseShare_isRefusedWhileTheTurnIsStillBeingWritten(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	if _, err := s.Share(ctx, testSubject, th); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	if _, err := s.AddQuestion(ctx, th, "ba", "en", "And then?", 0); err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	if _, err := s.RaiseShare(ctx, testSubject, th); !errors.Is(err, ErrUnfinished) {
+		t.Fatalf("raise over an unfinished turn = %v, want ErrUnfinished", err)
+	}
+}
+
+func TestRaiseShare_anEmptyThreadHasNothingToRaise(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+
+	if _, err := s.RaiseShare(ctx, testSubject, th); !errors.Is(err, ErrNoShare) {
+		t.Fatalf("raise on an empty thread = %v, want ErrNoShare", err)
+	}
+}
+
+func TestShareFor_aThreadWithNoLinkSaysSo(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+
+	if _, err := s.ShareFor(ctx, testSubject, th); !errors.Is(err, ErrNoShare) {
+		t.Fatalf("share for an unshared thread = %v, want ErrNoShare", err)
+	}
+}
+
+func TestShare_aTurnThatEndedInACardCanBeShared(t *testing.T) {
+	// A card IS how that turn ended, so the thread is not mid-stream: freezing
+	// here keeps a complete record, and the reader of the link sees the card
+	// as the record it is.
+	s, ctx, th, _ := newThreadStore(t)
+	m, err := s.AddQuestion(ctx, th, "ba", "en", "Where does the budget live?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := s.Clarify(ctx, m.ID, twoCandidateClarification()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share of a carded turn: %v", err)
+	}
+	_, msgs, err := s.SharedThread(ctx, sh.Token)
+	if err != nil {
+		t.Fatalf("shared thread: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Clarification == nil {
+		t.Fatalf("the card did not travel with the link: %+v", msgs)
+	}
+	if len(msgs[0].Clarification.Candidates) != 2 {
+		t.Errorf("candidates = %d, want the two the card offered", len(msgs[0].Clarification.Candidates))
+	}
+}
+
+func TestShare_aTurnThatFailedCanBeShared(t *testing.T) {
+	// A failure is how that turn ended, and the record keeps it: a shared
+	// thread that quietly dropped the turns that went wrong is a different
+	// thread from the one that was shared.
+	s, ctx, th, _ := newThreadStore(t)
+	m, err := s.AddQuestion(ctx, th, "ba", "en", "How?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Fail(ctx, m.ID, "the upstream did not answer"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share of a failed turn: %v", err)
+	}
+	_, msgs, err := s.SharedThread(ctx, sh.Token)
+	if err != nil {
+		t.Fatalf("shared thread: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Error == "" {
+		t.Fatalf("the failure did not travel with the link: %+v", msgs)
+	}
+}
