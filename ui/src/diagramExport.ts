@@ -112,6 +112,35 @@ export function fileName(spec: DiagramSpec): string {
 
 // ---- mermaid ----
 
+/** Words mermaid reads as syntax rather than as a name. `end` is the one that
+ * matters: the flow spec has a node kind called "end", so `{"id":"end"}` is
+ * exactly what a model writes — and `end` closes a block in sequenceDiagram
+ * and is a parse error as a flowchart node, taking the whole picture down. */
+const reserved = new Set([
+  "end",
+  "graph",
+  "subgraph",
+  "class",
+  "classDef",
+  "style",
+  "click",
+  "link",
+  "linkStyle",
+  "direction",
+  "flowchart",
+  "participant",
+  "actor",
+  "note",
+  "loop",
+  "alt",
+  "else",
+  "opt",
+  "par",
+  "rect",
+  "activate",
+  "deactivate",
+]);
+
 /** Ids are model output and may hold spaces, dots or dashes; a mermaid
  * identifier may not. Sanitizing can collide ("a.b" and "a-b" both become
  * "a_b"), so the map keeps them apart. */
@@ -119,7 +148,8 @@ function safeIds(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
   const taken = new Set<string>();
   for (const id of ids) {
-    const base = id.replace(/[^A-Za-z0-9_]/g, "_") || "n";
+    let base = id.replace(/[^A-Za-z0-9_]/g, "_") || "n";
+    if (reserved.has(base)) base = `${base}_`;
     let name = base;
     for (let n = 2; taken.has(name); n++) name = `${base}_${n}`;
     taken.add(name);
@@ -162,7 +192,9 @@ export function toMermaid(spec: DiagramSpec): string {
   if (spec.type === "sequence") {
     const id = safeIds(spec.actors.map((a) => a.id));
     const out = ["sequenceDiagram"];
-    for (const a of spec.actors) out.push(`    participant ${id.get(a.id)} as ${bare(a.label)}`);
+    // An empty label is a spec parseDiagram accepts, and `participant x as `
+    // with nothing after it takes the whole diagram down with a parse error.
+    for (const a of spec.actors) out.push(`    participant ${id.get(a.id)} as ${bare(a.label) || a.id}`);
     for (const s of spec.steps) {
       const arrow = arrows[s.kind] ?? arrows.call;
       out.push(`    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}${markers(s.src)}`);

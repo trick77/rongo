@@ -459,6 +459,17 @@ describe("Diagram", () => {
     expect(scroller.contains(getByLabelText("Sequence diagram: full view"))).toBe(false);
   });
 
+  it("lets a tap through the control strip to the chip beneath it", () => {
+    // The strip is ~110px wide with its fade and lies over the top-right of
+    // the drawing; solid, it would eat the taps meant for a chip scrolled
+    // under it.
+    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
+    const strip = getByLabelText("Sequence diagram: full view").parentElement!;
+    expect(strip.className).toContain("pointer-events-none");
+    expect(getByLabelText("Sequence diagram: full view").className).toContain("pointer-events-auto");
+    expect(getByLabelText("Sequence diagram: download SVG").className).toContain("pointer-events-auto");
+  });
+
   it("opens the full view on the button and closes it again", () => {
     const { getByLabelText, queryByRole } = render(<Diagram spec={seq} hooks={{}} />);
     expect(queryByRole("dialog")).toBeNull();

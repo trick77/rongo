@@ -60,6 +60,27 @@ describe("DiagramView", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("keeps Tab inside, so it cannot reach the chips behind the scrim", () => {
+    // Those chips are focusable groups; Enter on one would open SourceView
+    // under this dialog, two z-30 overlays deep.
+    const { getByRole, getByLabelText, getByText } = render(
+      <DiagramView spec={seq} hooks={{}} onClose={() => {}} />,
+    );
+    const dialog = getByRole("dialog");
+    const close = getByLabelText("Close");
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(getByText("Fit"));
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("draws its chrome in the sans face, not the answer's serif prose", () => {
+    const { getByRole } = render(<DiagramView spec={seq} hooks={{}} onClose={() => {}} />);
+    expect(getByRole("dialog").className).toContain("font-sans");
+  });
+
   it("scales a diagram wider than the sheet down to fit, never up", () => {
     const { container } = render(<DiagramView spec={seq} hooks={{}} onClose={() => {}} />);
     const size = diagramSize(seq);

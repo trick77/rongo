@@ -61,6 +61,33 @@ describe("toMermaid", () => {
     expect(toMermaid(seq)).toContain("[1] [2]");
   });
 
+  it("renames an id mermaid reads as syntax", () => {
+    // "end" is the flow spec's own node kind, so it is what a model writes.
+    // Left alone it closes a block in a sequence and fails to parse in a
+    // flowchart, taking the picture with it.
+    const out = toMermaid({
+      type: "flow",
+      nodes: [
+        { id: "start", label: "Begin", kind: "start", src: [] },
+        { id: "end", label: "Done", kind: "end", src: [] },
+      ],
+      edges: [{ from: "start", to: "end" }],
+    });
+    expect(out).toContain('end_(["Done"])');
+    expect(out).toContain("start --> end_");
+    expect(out).not.toMatch(/^\s+end\(/m);
+  });
+
+  it("falls back to the id when an actor has no label", () => {
+    const out = toMermaid({
+      type: "sequence",
+      actors: [{ id: "ui", label: "" }],
+      steps: [{ from: "ui", to: "ui", label: "tick", kind: "call", src: [] }],
+    });
+    expect(out).toContain("participant ui as ui");
+    expect(out).not.toMatch(/ as\s*$/m);
+  });
+
   it("writes a flow with the kind in the node shape", () => {
     const out = toMermaid(flow);
     expect(out.split("\n")[0]).toBe("flowchart TD");

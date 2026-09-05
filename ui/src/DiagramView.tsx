@@ -25,6 +25,7 @@ export default function DiagramView({
   onClose: () => void;
 }) {
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const [fit, setFit] = useState(true);
@@ -40,9 +41,31 @@ export default function DiagramView({
     return () => before?.focus?.();
   }, []);
 
+  // Escape closes, and Tab stays inside. SourceView has one control and can
+  // simply refocus it; this dialog has several, so the ends of the ring wrap
+  // to each other. Without it, Tab reaches the citation chips in the answer
+  // behind the scrim — they are focusable groups — and Enter there would open
+  // a second z-30 overlay under this one, which is the very thing the chip
+  // hand-off above stands aside to avoid.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const inside = dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
+      if (!inside || inside.length === 0) return;
+      const first = inside[0];
+      const last = inside[inside.length - 1];
+      const on = document.activeElement;
+      if (!e.shiftKey && (on === last || !dialog.current?.contains(on))) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && (on === first || !dialog.current?.contains(on))) {
+        e.preventDefault();
+        last.focus();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -89,11 +112,16 @@ export default function DiagramView({
         if (e.target === e.currentTarget) onClose();
       }}
     >
+      {/* font-sans explicitly: this is mounted from inside the answer's
+          .ui-markdown wrapper, which is serif prose, and the dialog is chrome
+          — the same reason DiagramSvg names it. SourceView needs no such line
+          because Ask.tsx mounts it outside the prose. */}
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
+        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel font-sans shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
       >
         <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4.5 sm:py-3">
           <span className="min-w-0 truncate text-[13.5px] text-ink">{title}</span>

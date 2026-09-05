@@ -693,13 +693,18 @@ export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: Mar
           full view is the only way it can see a wide diagram whole. The fade
           is Threads.tsx's, for the same reason — the drawing scrolls under
           the buttons and would otherwise end against them mid-line. */}
-      <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6">
+      {/* pointer-events-none on the strip, restored on the buttons: the box
+          is ~110px wide with its fade, and it lies over the top-right of the
+          drawing. Solid, it would swallow the taps meant for a chip that
+          scrolled under it — the same target the hit rect in Chips is drawn
+          to protect. */}
+      <div className="pointer-events-none absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6">
         <button
           type="button"
           onClick={() => setFull(true)}
           title="Full view"
           aria-label={`${title}: full view`}
-          className="grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
+          className="pointer-events-auto grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
         >
           <ExpandIcon />
         </button>
@@ -708,7 +713,7 @@ export default function Diagram({ spec, hooks }: { spec: DiagramSpec; hooks: Mar
           onClick={save}
           title="Download SVG"
           aria-label={`${title}: download SVG`}
-          className="grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
+          className="pointer-events-auto grid h-7 w-7 place-items-center rounded-ui-sm text-faint hover:bg-active hover:text-ink-dim"
         >
           <DownloadIcon />
         </button>
