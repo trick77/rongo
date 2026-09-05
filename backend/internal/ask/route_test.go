@@ -536,10 +536,50 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 	for i := 0; i < 9; i++ {
 		cs = append(cs, Candidate{Repo: fmt.Sprintf("r%d", i), Score: 0.50 - float64(i)/1000})
 	}
-	got := repoCandidates(cs)
+	// The regrouping itself keeps every repository — the dependency check has
+	// to see all of them — and only the card is cut.
+	all := repoCandidates(cs)
+	if len(all) != 9 {
+		t.Errorf("regrouped to %d repositories, want all 9: a capped list hides manifest edges from Related", len(all))
+	}
+	got := capRepoCandidates(all)
 	if len(got) != maxRepoCandidates {
 		t.Errorf("offered %d repositories, want %d so the \"all repositories\" entry keeps the card at %d buttons",
 			len(got), maxRepoCandidates, maxCandidates)
+	}
+}
+
+// TestRouteSeesADependencyBeyondTheCardsCap is the cap's one real hazard: the
+// card shows four repositories, but the edge that makes this composition can
+// sit on the fifth. Asking repodeps about the shortened list would card where
+// AGENTS.md says answer.
+func TestRouteSeesADependencyBeyondTheCardsCap(t *testing.T) {
+	db := testDBWithDeps(t, map[string]string{
+		"r4": "module github.com/trick77/r4\n\nrequire github.com/trick77/r0 v1.0.0\n",
+		"r0": "module github.com/trick77/r0\n",
+	})
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("the fifth repository's manifest edge settles it; no model may be asked. prompt: %q", prompt)
+		return ""
+	}), db)
+
+	// Five repositories clear the floor. Only r0 and r4 are joined, and r4 is
+	// the one the card would have dropped.
+	var hits []retrieve.Hit
+	for i := 0; i < 5; i++ {
+		hits = append(hits, retrieve.Hit{
+			Repo:  fmt.Sprintf("r%d", i),
+			Path:  fmt.Sprintf("m%d/f.go", i),
+			Score: 0.50 - float64(i)/1000,
+		})
+	}
+
+	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, hits, nil, false)
+	if err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if got.Ask {
+		t.Error("Related must see every repository, not just the four the card would show")
 	}
 }
 

@@ -282,7 +282,23 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	texts := u.SearchTexts(question)
 	q := retrieve.Query{Texts: texts, Question: question, K: searchK}
 	if repo != "" {
-		q = retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK}
+		// A restriction the index cannot resolve is not a narrow search, it is
+		// no search at all: knownRepos drops a name it does not carry, and an
+		// empty restriction means the whole corpus. Between the card being
+		// asked and the choice being made the repository can leave repos.yaml
+		// or be renamed, and without this the turn would answer from every
+		// repository while the record and the notice both say it answered from
+		// the one that was picked — the exact substitution this rung exists to
+		// prevent. Failing leaves the card open and ochre for another choice,
+		// which is what a failed turn is for.
+		known, _, err := p.search.ResolveRepos(ctx, []string{repo}, "")
+		if err != nil {
+			return Answer{}, fmt.Errorf("resolve the chosen repository: %w", err)
+		}
+		if len(known) == 0 {
+			return Answer{}, fmt.Errorf("the chosen repository %q is no longer in the index", repo)
+		}
+		q = retrieve.Query{Texts: texts, Repos: known, K: searchK}
 	}
 	ev.status("searching")
 	hits, err := p.search.Search(ctx, q)

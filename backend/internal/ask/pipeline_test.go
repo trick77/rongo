@@ -71,6 +71,31 @@ func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known
 	return nil, nil, nil
 }
 
+// indexedSearch is searchFunc plus an index that carries some repositories.
+// ResumeRepo asks whether the chosen one is still there before searching, so
+// a fake that knows nothing would make every repository look deleted.
+type indexedSearch struct {
+	searchFunc
+	indexed []string
+}
+
+func (s indexedSearch) ResolveRepos(_ context.Context, want []string, _ string) (known, unknown []string, err error) {
+	for _, w := range want {
+		for _, i := range s.indexed {
+			if w == i {
+				known = append(known, w)
+			}
+		}
+	}
+	return known, nil, nil
+}
+
+// withIndexedSearcher overrides the searcher with one whose index carries
+// exactly the named repositories.
+func withIndexedSearcher(indexed []string, fn func(retrieve.Query) ([]retrieve.Hit, error)) pipelineOpt {
+	return func(f *pipelineFakes) { f.search = indexedSearch{searchFunc: searchFunc(fn), indexed: indexed} }
+}
+
 // fakeRouter returns a canned Decision regardless of input, so pipeline tests
 // can drive Run's ask/don't-ask branch without a database, a margin or a
 // model — Router's own ladder is route_test.go's job.
@@ -308,7 +333,7 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 // question naming it would have got.
 func TestResumeRepoSearchesTheChosenRepositoryAtFullDepth(t *testing.T) {
 	var got retrieve.Query
-	p := newTestPipeline(t, withSearcher(func(q retrieve.Query) ([]retrieve.Hit, error) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
 		got = q
 		return []retrieve.Hit{{ChunkID: 1, Repo: "loom", Path: "a.go"}}, nil
 	}))
@@ -363,7 +388,7 @@ func TestResumeRepoWithNoRepositorySearchesTheWholeCorpus(t *testing.T) {
 // chosen and turn out to hold nothing for this question. "No hit means no
 // hit" — never an answer assembled from what the card happened to show.
 func TestResumeRepoSaysNothingFoundRatherThanAnswering(t *testing.T) {
-	p := newTestPipeline(t, withSearcher(func(retrieve.Query) ([]retrieve.Hit, error) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"loom"}, func(retrieve.Query) ([]retrieve.Hit, error) {
 		return nil, nil
 	}))
 
@@ -377,6 +402,30 @@ func TestResumeRepoSaysNothingFoundRatherThanAnswering(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(got.Text), "airplay") {
 		t.Errorf("text = %q, want the terms it tried named", got.Text)
+	}
+}
+
+// TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex: a restriction the
+// index cannot resolve is not a narrow search, it is no search at all —
+// knownRepos drops a name it does not carry, and an empty restriction means
+// the whole corpus. Between the card and the choice the repository can leave
+// repos.yaml or be renamed. Answering from every repository while the record
+// says it answered from the chosen one is the substitution this rung exists
+// to prevent, so the turn fails instead and the card stays open for another
+// choice.
+func TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex(t *testing.T) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(retrieve.Query) ([]retrieve.Hit, error) {
+		t.Fatal("a repository the index no longer carries must not be searched for across the whole corpus")
+		return nil, nil
+	}))
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, "loom",
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+	if err == nil {
+		t.Fatal("want an error when the chosen repository is gone from the index")
+	}
+	if !strings.Contains(err.Error(), "loom") {
+		t.Errorf("err = %v, want it to name the repository that went missing", err)
 	}
 }
 

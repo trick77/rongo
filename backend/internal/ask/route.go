@@ -178,6 +178,12 @@ func RepoCandidates(cs []Candidate) []Candidate {
 // Hits are the union of the repository's modules, sorted best first. The
 // naming call reads only the first few, and unsorted they would be the first
 // module's hits rather than the repository's best ones.
+//
+// It does NOT cap. The cap belongs to the card, and applying it here would
+// hide repositories from the manifest-dependency check: five repositories
+// where only the fifth depends on the first would be asked about as four, the
+// edge would go unseen, and the turn would card where AGENTS.md says compose.
+// Route caps with capRepoCandidates, after Related has seen every one.
 func repoCandidates(cs []Candidate) []Candidate {
 	index := map[string]int{}
 	var out []Candidate
@@ -198,10 +204,17 @@ func repoCandidates(cs []Candidate) []Candidate {
 		sort.SliceStable(hits, func(a, b int) bool { return hits[a].Score > hits[b].Score })
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
-	if len(out) > maxRepoCandidates {
-		out = out[:maxRepoCandidates]
-	}
 	return out
+}
+
+// capRepoCandidates cuts the regrouping to what a card may show. Separate from
+// repoCandidates so the manifest-dependency check runs over every repository
+// and only the question put to the reader is shortened.
+func capRepoCandidates(cs []Candidate) []Candidate {
+	if len(cs) > maxRepoCandidates {
+		return cs[:maxRepoCandidates]
+	}
+	return cs
 }
 
 // withAllRepos appends the card's last entry: the reader saying they meant
@@ -423,11 +436,17 @@ func Dominates(cs []Candidate, margin float64) bool {
 
 // Related reports whether any two of cs are joined by a manifest dependency —
 // Route's composition rung. This is the expensive, O(n²) database query the
-// ladder is ordered to avoid on the common path: Route only calls it after
-// Dominates has already said no, and callers that reproduce the ladder
-// outside Route (the eval harness's margin sweep) must keep that ordering —
-// calling it unconditionally is exactly the regression this method's
-// separation from Rank exists to prevent.
+// ladder is ordered to avoid on the common path: Route calls it when Dominates
+// has said no, OR when the repository rung is live (SpansRepos), because that
+// rung sits below composition and above the margin. Callers that reproduce the
+// ladder outside Route (the eval harness's margin sweep) must keep BOTH
+// conditions — paying for it on the margin alone measures a card where the
+// product composes, and calling it unconditionally is the regression this
+// method's separation from Rank exists to prevent.
+//
+// What is passed matters as much as when. On the repository rung it takes
+// RepoCandidates over the UNCAPPED ranking: a capped list can leave out the
+// one repository holding the manifest edge.
 func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 	return r.anyDependency(ctx, cs)
 }
@@ -449,9 +468,9 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 }
 
 // Decide is the ladder's decision, given what each rung found: the question's
-// own scope wins first, then the margin, then a manifest dependency, then the
-// judge's answer, and last whether the reader's role can answer the card at
-// all. Neither of the last two is ever defaulted.
+// own scope wins first, then a manifest dependency, then the repository rung,
+// then the margin, then the judge's answer, and last whether the reader's role
+// can answer the card at all. Neither of the last two is ever defaulted.
 //
 // It is a pure function of the rungs precisely so that it can be the ONLY
 // place this policy is written down. Route calls it, and so does the eval
@@ -560,12 +579,14 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 		return Decision{Ask: false, Candidates: ranked.All}, nil
 	}
 
-	// Over the REPOSITORIES when the repository rung is live, not over the
-	// capped module list. The top five modules can sit in two repositories
-	// while a third repository's best module ranks sixth: asking repodeps
-	// about the capped list would miss that repository's manifest edge and
-	// card anyway. anyDependency skips same-repo pairs, so one entry per
-	// repository is fewer queries, not more.
+	// Over EVERY repository when the repository rung is live, not over the
+	// capped module list and not over the capped repository list either. The
+	// top five modules can sit in two repositories while a third repository's
+	// best module ranks sixth, and the fifth repository can be the only one
+	// with an edge to the first: a capped list misses that edge and cards
+	// where AGENTS.md says compose. anyDependency skips same-repo pairs, so
+	// one entry per repository is fewer queries than the module list, not
+	// more. The cap is applied to the card alone, below.
 	repos := repoCandidates(ranked.All)
 	cs := ranked.Capped
 	depsOver := cs
@@ -596,7 +617,7 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 	// A repository card is settled: the rung is deterministic, and the role
 	// gate does not apply to it (see Decide). Name the repositories and ask.
 	if spans {
-		named, _, err := r.name(ctx, question, audience, lang, repos)
+		named, _, err := r.name(ctx, question, audience, lang, capRepoCandidates(repos))
 		if err != nil {
 			return Decision{}, err
 		}
