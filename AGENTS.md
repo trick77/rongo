@@ -57,6 +57,7 @@
 - Expandable → chevron, rotates 90° on open. No triangle, no plus/minus, no glyph swap.
 - Activity trace is a timeline, **one per turn**, **never collapsible**: it grows live as steps arrive, with the time each took. Progress is watched, not opened. A clarification ends the turn: ochre waiting node, not the Done check.
 - Ochre means "your move". Once decided, it loses the colour.
+- Streaming answer: the view follows; any reader touch of the column (wheel, touchmove, pointerdown, a source opened) stops it for the turn. Back at the foot ≠ re-arm; only the next turn re-arms. Intent events, never the scroll event alone — a scroll lands after the next token has already pulled the view back. The scroll net ignores anything resting at the foot: markdown resolving shortens the column and the browser's clamp is not the reader.
 - Look and tokens: Warm Editorial dark, the same `@theme` and fonts as ../loom and ../peeq (`ui/src/index.css`). Reference: `docs/plans/rongo-ui-mock.html`.
 - Roles read "Analyst" and "Developer" in the UI; the wire values stay `ba`/`dev`.
 - **Everything a person reads follows the answer language** (`ask.Language`): answer, clarification card titles and summaries, thread title, nothing-found text, the empty-page welcome. Prompts name the language first AND last; identifiers, paths, code and the role names stay untranslated — a body naming "un Analyste" beside a button reading "Analyst" points at nothing. The rest of the chrome (nav, Sources, Sign out) stays English. Model-internal calls (understand, judge, relevance) stay English.

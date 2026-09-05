@@ -468,11 +468,34 @@ export default function Ask({
   const loadSeq = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   // The scrolling column, and whether the view is currently following what
-  // arrives into it. It follows while the reader sits at the foot of the
-  // thread, stops the moment they scroll up to read something back, and
-  // follows again once they return to the bottom.
+  // arrives into it. It follows from the moment a turn is asked and lets go
+  // for the rest of that turn as soon as the reader touches the column —
+  // scrolling it, taking hold of the text, opening a source. Coming back to
+  // the foot does not hand the view back: the answer is theirs to read at
+  // their own pace until the next question is asked.
   const view = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  // Where this view put itself last. A reader's scroll is told from the
+  // view's own by the position it lands at, not by the distance to the foot:
+  // the answer grows between the scroll and its event, so a measured distance
+  // reads as "they left" on a batch of tokens nobody touched.
+  const selfTop = useRef(0);
+  function stopFollowing() {
+    following.current = false;
+  }
+  // Every scroll this view makes itself goes through here, so the event it
+  // provokes is recognised when it arrives.
+  function scrollSelf(el: HTMLDivElement, top: number) {
+    el.scrollTop = top;
+    selfTop.current = el.scrollTop;
+  }
+  // A source opens from the pane beside the thread as well as from the text,
+  // and the pane is outside the scrolling column, so its click reaches none of
+  // the column's own handlers.
+  function showSource(c: Citation) {
+    stopFollowing();
+    setViewing(c);
+  }
   // Set when the turns on screen come from opening a thread rather than from
   // asking. A record is read from its beginning: the question and the answer
   // it was opened for are at the top, so the view lands there and stays until
@@ -491,7 +514,7 @@ export default function Ask({
     if (!f) {
       f = (marker: number) => {
         const c = live.current[i]?.citations.find((x) => x.marker === marker);
-        if (c) setViewing(c);
+        if (c) showSource(c);
       };
       markerOpen.current.set(i, f);
     }
@@ -614,6 +637,7 @@ export default function Ask({
     if (opened.current) return;
     following.current = true;
     bottom.current?.scrollIntoView?.({ block: "end" });
+    if (view.current) selfTop.current = view.current.scrollTop;
   }, [turns.length]);
 
   // The answer grows downwards while it streams, so the view follows it —
@@ -632,10 +656,10 @@ export default function Ask({
     if (opened.current) {
       opened.current = false;
       following.current = false;
-      el.scrollTop = 0;
+      scrollSelf(el, 0);
       return;
     }
-    if (following.current) el.scrollTop = el.scrollHeight;
+    if (following.current) scrollSelf(el, el.scrollHeight);
   }, [turns]);
 
   // The running total follows the turns: it grows when a usage event lands
@@ -912,14 +936,29 @@ export default function Ask({
         {busy && <div className="busybar" aria-hidden="true" />}
         <div
           ref={view}
-          // Wheel, trackpad, touch and the keyboard all arrive here, so one
-          // handler covers every way of leaving the bottom. The scrolls this
-          // view makes itself land at the bottom and keep it following — bar
-          // the jump to the top when a thread is opened, which is a reader
-          // sitting at the head of a record, not following anything.
+          // The reader's own intent, caught as it happens: a scroll event is
+          // delivered a beat later, and by then the next token has already
+          // pulled the view back to the foot, so the reader watches their
+          // scroll being undone. Wheel and touch are the two ways of moving
+          // the column; a pointer going down in it is a text selection, a
+          // scrollbar drag, or a chip or diagram being opened — all of them
+          // reasons to stop writing under the reader's hands.
+          onWheel={stopFollowing}
+          onTouchMove={stopFollowing}
+          onPointerDown={stopFollowing}
+          // The net under all of it: find-in-page, a scroll restored by the
+          // browser, anything that moves the column without an intent event.
+          // It only ever lets go — the view's own scrolls land at the
+          // position recorded for them, and nothing here takes the view back.
+          // A scroll that comes to rest at the foot is never the reader
+          // leaving it: markdown resolving mid-stream (a fence closing, a row
+          // becoming a table) shortens the column, and the browser's own
+          // clamp arrives as a scroll nobody asked for. Latched, that would
+          // stop the follow for good on a turn the reader never touched.
           onScroll={() => {
             const el = view.current;
-            if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 48;
+            if (!el || el.scrollTop === selfTop.current) return;
+            if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) stopFollowing();
           }}
           className="min-h-0 flex-1 overflow-auto"
         >
@@ -1085,7 +1124,7 @@ export default function Ask({
                           <sup className="font-mono text-accent-strong">{c.marker}</sup>{" "}
                           <button
                             type="button"
-                            onClick={() => setViewing(c)}
+                            onClick={() => showSource(c)}
                             className="border-b border-transparent font-mono text-[13px] text-muted hover:border-accent hover:text-ink"
                           >
                             {forgeLine(c)}
@@ -1331,7 +1370,7 @@ export default function Ask({
             <button
               key={c.marker}
               type="button"
-              onClick={() => setViewing(c)}
+              onClick={() => showSource(c)}
               className={
                 "group grid w-full grid-cols-[26px_1fr] gap-x-2 gap-y-0.5 border-b border-border-soft px-4.5 py-3.5 text-left text-[13px] " +
                 (hot === c.marker ? "bg-active" : "hover:bg-active")
