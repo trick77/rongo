@@ -12,7 +12,7 @@ func pathHits(repo string, paths ...string) []Hit {
 	return out
 }
 
-func TestFuseWeightedDiverseTests_dropsATestOutOfTheCut(t *testing.T) {
+func TestFuseWeightedDecayed_dropsATestOutOfTheCut(t *testing.T) {
 	// Given: a test file ranks above a second production file.
 	lanes := []Lane{
 		{Name: "keyword:strict", Hits: pathHits("loom",
@@ -23,7 +23,7 @@ func TestFuseWeightedDiverseTests_dropsATestOutOfTheCut(t *testing.T) {
 	}
 
 	// When: two hits are wanted and the test decay is on.
-	got := FuseWeightedDiverseTests(lanes, 2, DefaultRepoDecay, 0.35)
+	got := FuseWeightedDecayed(lanes, 2, Decays{Repo: DefaultRepoDecay, Test: 0.35})
 
 	// Then: the production file that ranked below the test takes its place.
 	if len(got) != 2 {
@@ -36,7 +36,7 @@ func TestFuseWeightedDiverseTests_dropsATestOutOfTheCut(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverseTests_demotionShowsInTheScore(t *testing.T) {
+func TestFuseWeightedDecayed_demotionShowsInTheScore(t *testing.T) {
 	// Given: one test hit and one production hit, at the same lane rank.
 	lanes := []Lane{
 		{Name: "keyword:strict", Hits: pathHits("loom", "a/thing.go"), Weight: WeightKeywordStrict},
@@ -44,7 +44,7 @@ func TestFuseWeightedDiverseTests_demotionShowsInTheScore(t *testing.T) {
 	}
 
 	// When: fused with the demotion on.
-	got := FuseWeightedDiverseTests(lanes, 2, DefaultRepoDecay, 0.5)
+	got := FuseWeightedDecayed(lanes, 2, Decays{Repo: DefaultRepoDecay, Test: 0.5})
 
 	// Then: the score the caller reads carries the demotion — the routing
 	// floor decides on it, so it cannot be an ordering trick the score hides.
@@ -61,14 +61,14 @@ func TestFuseWeightedDiverseTests_demotionShowsInTheScore(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverseTests_decayOfOneLeavesTheScoresAlone(t *testing.T) {
+func TestFuseWeightedDecayed_decayOfOneLeavesTheScoresAlone(t *testing.T) {
 	// Given: the same mixed lane.
 	lanes := []Lane{
 		{Name: "keyword:strict", Hits: pathHits("loom", "a/thing.go", "a/thing_test.go"), Weight: WeightKeywordStrict},
 	}
 
 	// When: the test decay is switched off.
-	plain := FuseWeightedDiverseTests(lanes, 5, DefaultRepoDecay, 1.0)
+	plain := FuseWeightedDecayed(lanes, 5, Decays{Repo: DefaultRepoDecay, Test: 1.0})
 
 	// Then: nothing moved and nothing was scaled. The knob's off position has
 	// to be the behaviour that shipped.

@@ -82,50 +82,58 @@ func dominates(cs []Candidate, margin float64) bool {
 const candidateFloor = 0.4
 
 // worthOffering drops what the reader should never be asked to choose between:
-// a candidate far behind the leader, and a module that is nothing but test
-// code. The leader itself is always kept — everything scoring badly is not the
-// same as nothing being the best, and a floor that can empty the list would
-// turn a weak answer into no answer at all.
+// a candidate far behind the leader, and a module that is nothing but
+// supporting material — test code, or documentation about the mechanism rather
+// than the mechanism. The leader itself is always kept — everything scoring
+// badly is not the same as nothing being the best, and a floor that can empty
+// the list would turn a weak answer into no answer at all.
 //
 // This decides what may be OFFERED, never what may be read: Gather still
-// starts from every hit (see Pipeline.Run), so a test that is genuinely the
-// answer is still quoted and cited.
+// starts from every hit (see Pipeline.Run), so a test or a README that is
+// genuinely the answer is still quoted and cited.
 func worthOffering(cs []Candidate) []Candidate {
 	if len(cs) == 0 {
 		return cs
 	}
 	lead := cs[0].Score
-	var kept, keptWithTests []Candidate
+	var kept, keptWithSupporting []Candidate
 	for _, c := range cs {
 		if lead > 0 && c.Score < lead*candidateFloor {
 			continue
 		}
-		keptWithTests = append(keptWithTests, c)
-		if !onlyTests(c.Hits) {
+		keptWithSupporting = append(keptWithSupporting, c)
+		if !onlySupporting(c.Hits) {
 			kept = append(kept, c)
 		}
 	}
 	if len(kept) == 0 {
-		// Everything that cleared the floor was test material. That is still
-		// the best the corpus has, and someone who asked how a thing is TESTED
-		// is entitled to it — including the card, when two repositories test
+		// Everything that cleared the floor was test material or
+		// documentation. That is still the best the corpus has, and someone
+		// who asked how a thing is TESTED, or what the README says about it,
+		// is entitled to it — including the card, when two repositories put
 		// the same thing in two places. Returning the leader alone here would
 		// silently answer from one of them: dominates() cannot ask about a
 		// list of one.
-		return keptWithTests
+		return keptWithSupporting
 	}
 	return kept
 }
 
-// onlyTests reports whether every hit that put a candidate on the list is test
-// material. A module that mixes the two stays: dropping it would lose the
-// mechanism in order to keep out its harness.
-func onlyTests(hits []retrieve.Hit) bool {
+// onlySupporting reports whether every hit that put a candidate on the list is
+// supporting material rather than the mechanism: test code or documentation. A
+// module that mixes either with real code stays — dropping it would lose the
+// mechanism in order to keep out its harness or its README.
+//
+// Test and documentation are one predicate rather than two, because
+// worthOffering treats them identically and a second fallback tier would have
+// to answer "is a README a better candidate than a test?", which is not a
+// question the reader is ever asked.
+func onlySupporting(hits []retrieve.Hit) bool {
 	if len(hits) == 0 {
 		return false
 	}
 	for _, h := range hits {
-		if !retrieve.IsTestPath(h.Path) {
+		if !retrieve.IsTestPath(h.Path) && !retrieve.IsDocPath(h.Path) {
 			return false
 		}
 	}

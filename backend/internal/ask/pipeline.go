@@ -137,8 +137,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
-	notice := ScopeNotice(lang, known, unknown)
-	ev.notice(notice)
+	ev.notice(ScopeNotice(lang, scope))
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
@@ -163,19 +162,46 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// subset. The published 0.955 was measured that way; narrowing here would
 	// be an unmeasured regression. Routing decides whether to ask, not what
 	// to read.
+	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, texts, ev)
+	return answer, nil, err
+}
+
+// gatherAndAnswer is the tail both entry points share: expand the hits, settle
+// what the turn has to say about its own footing, and answer under that.
+//
+// It is one function rather than two similar ones because DocsOnly is only
+// knowable after the gather, and Resume gathers too. A flag set in Run alone
+// would be absent from every resumed turn — the clarification's scope is
+// stored before anything has been gathered, so it can only ever say false —
+// and the reader would be told nothing on exactly the turns a card sent them
+// into a single module.
+//
+// terms are the search terms for the "nothing found" answer; a resume has none
+// to report, having searched nothing.
+func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audience Audience, lang Language,
+	hits []retrieve.Hit, scope Scope, terms []string, ev Events) (Answer, error) {
+
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
-		return Answer{}, nil, err
+		return Answer{}, err
 	}
 	if len(sources) == 0 {
-		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil, nil
+		return Answer{Text: NothingFound(lang, terms), Scope: scope}, nil
+	}
+
+	// Re-sent rather than sent once: the scope sentence went out before the
+	// search, because a turn that fails or asks has still told the reader what
+	// it was looking at, and only now is there a second thing to say. A later
+	// notice replaces the earlier one in the UI, so this carries both.
+	if scope.DocsOnly = DocsOnly(sources); scope.DocsOnly {
+		ev.notice(ScopeNotice(lang, scope))
 	}
 
 	ev.status("answering")
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
 	answer.Scope = scope
-	return answer, nil, err
+	return answer, err
 }
 
 // searchScoped runs the search the turn's scope calls for.
@@ -230,14 +256,7 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
-	ev.status("gathering")
-	sources, err := p.gatherer.Gather(ctx, hits)
-	if err != nil {
-		return Answer{}, err
-	}
-
-	ev.status("answering")
-	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, ev.tokens())
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a

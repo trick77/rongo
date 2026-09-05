@@ -69,9 +69,9 @@ type Lane struct {
 // confidence — the one value a caller would reach for to silence a lane must
 // not be the value that makes it shout loudest.
 //
-// The test demotion is included, at DefaultTestDecay: it ships on, so the
-// plainest-named fusion has to be the one the product runs. Pure weighted RRF
-// is FuseWeightedDiverseTests(lanes, k, DefaultRepoDecay, 1.0).
+// The test and documentation demotions are included, at their defaults: they
+// are what ships, so the plainest-named fusion has to be the one the product
+// runs. Pure weighted RRF is FuseWeightedDecayed(lanes, k, Decays{Repo: 1}).
 func FuseWeighted(lanes []Lane, k int) []Hit {
 	return FuseWeightedDiverse(lanes, k, DefaultRepoDecay)
 }
@@ -82,11 +82,11 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 // fusion score. Anything outside the open interval (0,1) is OFF — zero
 // included, so a Retriever built as a struct literal rather than through New
 // falls back to no decay instead of silently running the harshest setting
-// there is. Retriever.TestDecay reads its zero the same way, which means a
-// struct-literal Retriever also runs with the test demotion OFF while
-// retrieve.New — the only constructor the product uses — runs it on. Both
-// knobs default to "do nothing" in the hand-built case; New is where the
-// shipped values live.
+// there is. Retriever.TestDecay and Retriever.DocDecay read their zeros the
+// same way, which means a struct-literal Retriever also runs with the test and
+// documentation demotions OFF while retrieve.New — the only constructor the
+// product uses — runs the shipped values. Every knob defaults to "do nothing"
+// in the hand-built case; New is where the shipped values live.
 //
 // It exists because the binding constraint moved from routing to retrieval.
 // Measured on the mixed corpus, only 7 of 16 ambiguous questions retrieved
@@ -107,21 +107,43 @@ func FuseWeighted(lanes []Lane, k int) []Hit {
 // must not lose eight of them to make room for a repository that has nothing
 // to say.
 func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
-	return FuseWeightedDiverseTests(lanes, k, decay, DefaultTestDecay)
+	return FuseWeightedDecayed(lanes, k, Decays{Repo: decay, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 }
 
-// FuseWeightedDiverseTests is FuseWeightedDiverse with the test demotion made
-// explicit, so the evaluation harness can sweep it the way it sweeps the repo
-// decay. Anything outside the open interval (0,1) is OFF.
+// Decays are the three demotions fusion applies, gathered into one value so
+// the evaluation harness can sweep any of them and so adding a fourth is not a
+// fifth positional argument nobody can read at a call site. Anything outside
+// the open interval (0,1) is OFF for each of them independently — the zero
+// value therefore means "demote nothing", which is what a hand-built
+// Retriever gets.
+type Decays struct {
+	// Repo demotes a repository's repeated hits; see FuseWeightedDiverse.
+	Repo float64
+	// Test cuts a test hit's score; see DefaultTestDecay.
+	Test float64
+	// Doc cuts a documentation hit's score; see DefaultDocDecay.
+	Doc float64
+}
+
+// FuseWeightedDecayed is FuseWeightedDiverse with the test and documentation
+// demotions made explicit, so the evaluation harness can sweep them the way it
+// sweeps the repo decay.
 //
-// Unlike the repo decay, this one is applied to the hit's OWN Score and not
+// Unlike the repo decay, those two are applied to the hit's OWN Score and not
 // only to the ordering key. The repo decay is a question of arrangement — the
-// hit is as good as fusion said, it just steps aside — while a test is
-// genuinely weaker evidence about how a mechanism works than the mechanism is.
-// The routing floor in internal/ask reads this score to decide what may reach
-// the clarification card, so a demotion the score hid would be a demotion that
-// never happened.
-func FuseWeightedDiverseTests(lanes []Lane, k int, decay, testDecay float64) []Hit {
+// hit is as good as fusion said, it just steps aside — while a test and a
+// document are genuinely weaker evidence about how a mechanism works than the
+// mechanism is. The routing floor in internal/ask reads this score to decide
+// what may reach the clarification card, so a demotion the score hid would be
+// a demotion that never happened.
+//
+// A path that is both a test and a document — docs/plans/foo_test.go, or a
+// README under testdata — takes the HARSHER of the two once, never the
+// product. Two weak signals about the same chunk are one reason to stand
+// aside, and multiplying them would push a hit further down than either rule
+// alone ever asked for.
+func FuseWeightedDecayed(lanes []Lane, k int, d Decays) []Hit {
+	decay := d.Repo
 	type agg struct {
 		hit   Hit
 		score float64
@@ -150,13 +172,11 @@ func FuseWeightedDiverseTests(lanes []Lane, k int, decay, testDecay float64) []H
 			}
 		}
 	}
-	// Demote tests BEFORE the sort, so a demoted test loses its rank and its
-	// place in the cut rather than merely being labelled.
-	if testDecay > 0 && testDecay < 1 {
-		for _, a := range byID {
-			if IsTestPath(a.hit.Path) {
-				a.score *= testDecay
-			}
+	// Demote BEFORE the sort, so a demoted hit loses its rank and its place in
+	// the cut rather than merely being labelled.
+	for _, a := range byID {
+		if f := supportingDecay(a.hit.Path, d); f < 1 {
+			a.score *= f
 		}
 	}
 	sort.SliceStable(order, func(i, j int) bool {
@@ -210,6 +230,46 @@ const DefaultRepoDecay = 1.0
 // outrank the mechanism itself. The value is the evaluation harness's to set —
 // see internal/retrieve/eval — not an argument settled here.
 const DefaultTestDecay = 0.35
+
+// DefaultDocDecay is how far a documentation hit's fused score is cut.
+//
+// It ships OFF, the way DefaultRepoDecay does and for the same reason: the
+// value is the evaluation harness's to set — see internal/retrieve/eval,
+// TestEvalMeasureDocSweep — and a ranking constant this product runs on is
+// never settled by argument here. The arm and what it has to show are written
+// down in docs/measurements/2026-09-05-doc-demotion.md; turning this on means
+// running it and pinning the value that document names.
+//
+// What it is for, once it has a value: README.md and AGENTS.md are dense
+// domain vocabulary, which is exactly what a natural-language question matches
+// on in both lanes, so documentation fills the cut that the code should be in.
+// It compounds — a document carries no ctags symbol, so the reference walk in
+// internal/ask, which joins the symbols table, never leaves one. A doc-heavy
+// hit list starves the walk as well as the cut, and the answer prompt's rule
+// that the code decides where a document disagrees cannot fire on a context
+// that holds no code to disagree with.
+//
+// A demotion rather than a filter, for the reason DefaultTestDecay gives and
+// because AGENTS.md forbids the alternative outright: "never a broad doc
+// exclusion". "What does the README say about X" is a real question, and a
+// document that is the only thing matching still wins — it just cannot
+// outrank the code.
+const DefaultDocDecay = 1.0
+
+// supportingDecay is the factor a hit's fused score is multiplied by because
+// of what its path is: supporting material rather than the mechanism. A path
+// that is both a test and a document takes the harsher factor once; see
+// FuseWeightedDecayed. 1 means no demotion.
+func supportingDecay(path string, d Decays) float64 {
+	f := 1.0
+	if d.Test > 0 && d.Test < 1 && IsTestPath(path) {
+		f = d.Test
+	}
+	if d.Doc > 0 && d.Doc < 1 && IsDocPath(path) && d.Doc < f {
+		f = d.Doc
+	}
+	return f
+}
 
 // diversifyByRepo reorders a ranked list so a repository's repeats step aside
 // for another repository's best hit. Nothing is dropped — reordering is not
