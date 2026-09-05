@@ -204,6 +204,10 @@ export default function App() {
   // background goroutine — and neither can push.
   const [threadsVersion, setThreadsVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  // The thread a running turn is being written into. Kept apart from threadId:
+  // the two part company the moment the reader opens another thread while the
+  // answer is still arriving, which they are free to do.
+  const [busyThread, setBusyThread] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
@@ -274,9 +278,11 @@ export default function App() {
       <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[362px_1fr_auto]">
         <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
           {/*
-            Deliberately not disabled={busy}: the rail's rows are, but the way
-            back TO the rail must not be. With the drawer shut and the toggle
-            dead there would be no navigation at all while an answer streams.
+            Deliberately not disabled={busy}: with the drawer shut and the
+            toggle dead there would be no navigation at all while an answer
+            streams — and the rail behind it is fully live now, so the one
+            thing standing between the reader and another thread would be
+            this button.
           */}
           <button
             type="button"
@@ -386,7 +392,10 @@ export default function App() {
                 selectThread(null);
                 setNavOpen(false);
               }}
-              disabled={busy}
+              // Live while an answer streams, like the rows under it. The
+              // question cannot be SENT until the turn finishes, and the
+              // composer says so in words; a dead button here would be the
+              // one place left where the rail refuses without explaining.
               className={railRow + " text-rail hover:bg-rail-hover"}
             >
               <span
@@ -431,6 +440,7 @@ export default function App() {
             }}
             version={threadsVersion}
             busy={busy}
+            busyId={busyThread}
             onList={setThreads}
             onDeleted={(id) => {
               // The thread on screen has just been deleted: close it, so the
@@ -479,7 +489,10 @@ export default function App() {
               threadId={threadId}
               onThread={selectThread}
               onActivity={refreshThreads}
-              onBusy={setBusy}
+              onBusy={(b, id) => {
+                setBusy(b);
+                setBusyThread(b ? id : null);
+              }}
               onUsage={(u) =>
                 // Compared by value: Ask reports on every change of its turn
                 // list, which is once per streamed token, and a fresh object
