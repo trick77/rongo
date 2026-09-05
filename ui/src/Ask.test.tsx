@@ -864,22 +864,28 @@ describe("Ask, the clarification and re-explaining", () => {
     expect(askThese.textContent).toContain("2");
     await user.click(askThese);
 
-    await screen.findByText(
-      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("capped exponential backoff"),
-    );
-    // The panel stays, collapsed to what it narrowed to — the answer only
-    // reads correctly beside the repositories it came from.
-    expect(await screen.findByRole("button", { name: /Narrowed to/ })).toBeTruthy();
-
-    const postBodies = mock.mock.calls
-      .filter((c) => c[1]?.method === "POST")
-      .map((c) => JSON.parse(String(c[1]?.body)));
-    expect(postBodies[1]).toMatchObject({
+    // What this test is actually about, asserted first so a slow render never
+    // reads as a request that was never sent.
+    const posted = () => mock.mock.calls.filter((c) => c[1]?.method === "POST");
+    await waitFor(() => expect(posted()).toHaveLength(2));
+    const body = JSON.parse(String(posted()[1][1]?.body));
+    expect(body).toMatchObject({
       thread_id: 7,
       clarification_message_id: 5,
       repos: ["peeq", "ledger"],
     });
-    expect(postBodies[1].choice).toBeUndefined();
+    expect(body.choice).toBeUndefined();
+
+    // And the answer lands in a turn of its own. The prose is cut into
+    // segments for the streaming fade, so only the paragraph holds it whole.
+    await screen.findByText(
+      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("capped exponential backoff"),
+      {},
+      { timeout: 5000 },
+    );
+    // The panel stays, collapsed to what it narrowed to — the answer only
+    // reads correctly beside the repositories it came from.
+    expect(await screen.findByRole("button", { name: /Narrowed to/ })).toBeTruthy();
   });
 
   it("sends nothing when an answered card is clicked again", async () => {
