@@ -163,6 +163,9 @@ func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, l
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	if f.during != nil {
+		f.during(ctx)
+	}
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}

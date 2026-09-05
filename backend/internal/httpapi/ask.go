@@ -335,14 +335,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
-		// The thread can be deleted between the ownership check above and this
-		// insert, and the row's foreign key is what catches it — which is a
-		// thread that is gone, not a server that is broken. Nothing paid for
-		// has happened yet, so the turn simply does not start.
-		if owns, oerr := s.deps.Threads.Owns(ctx, u.Subject, thread.ID); oerr == nil && !owns {
-			http.Error(w, "no such thread", http.StatusNotFound)
-			return
-		}
 		slog.Error("record question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -842,13 +834,6 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// default -1: this row did not resume a clarification.
 	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
-		// Same as handleAsk: the thread can go while the turn runs, and the
-		// row's foreign key is what catches it. A gone thread is a 404, not a
-		// 500, and there is nothing left to write the re-explain into.
-		if owns, oerr := s.deps.Threads.Owns(ctx, u.Subject, msg.ThreadID); oerr == nil && !owns {
-			http.Error(w, "no such thread", http.StatusNotFound)
-			return
-		}
 		slog.Error("record re-explain question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return

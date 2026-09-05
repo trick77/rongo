@@ -99,8 +99,11 @@ func TestRecordFailed_saysNothingAboutADeletedThread(t *testing.T) {
 	}
 
 	recordFailed(closed, "record answer failed", errors.New("disk is full"))
-	if !strings.Contains(log.String(), "record answer failed") {
-		t.Errorf("log = %q, want the real failure reported", log.String())
+	recordMissed(closed, "record followups failed", errors.New("disk is full"))
+	for _, want := range []string{"record answer failed", "record followups failed"} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log = %q, want %q reported", log.String(), want)
+		}
 	}
 }
 

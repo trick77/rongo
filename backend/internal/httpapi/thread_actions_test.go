@@ -256,6 +256,41 @@ func TestDeleteThread_nothingIsWrittenBackAfterwards(t *testing.T) {
 	}
 }
 
+// TestDeleteThread_stopsAReexplainToo: a re-explain is a paid turn like any
+// other, and the thread it re-answers can go under it the same way.
+func TestDeleteThread_stopsAReexplainToo(t *testing.T) {
+	// Given a re-explain whose thread is deleted while it runs
+	var turnCtx context.Context
+	srv, store, db := newTestServerWithDB(t, withAskerReexplaining())
+	msgID := seedAnsweredMessageWithSources(t, store, db)
+	asker := srv.deps.Ask.(*fakeAsker)
+	asker.during = func(ctx context.Context) {
+		turnCtx = ctx
+		list, _ := store.List(ctx, testSubject)
+		if len(list) != 1 {
+			t.Fatalf("threads = %+v, want the one being re-explained", list)
+		}
+		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", list[0].ID), ""); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete status = %d, want 204", rec.Code)
+		}
+	}
+
+	// When
+	doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
+
+	// Then
+	if turnCtx == nil {
+		t.Fatal("the re-explain never ran")
+	}
+	if !errors.Is(context.Cause(turnCtx), errThreadDeleted) {
+		t.Errorf("cause = %v, want errThreadDeleted", context.Cause(turnCtx))
+	}
+	list, _ := store.List(context.Background(), testSubject)
+	if len(list) != 0 {
+		t.Errorf("threads = %+v, want the list empty", list)
+	}
+}
+
 // TestDeleteThread_someoneElsesTurnIsLeftAlone is the other half: the delete is
 // the ownership check, so a 404 must not reach into a turn it does not own.
 func TestDeleteThread_someoneElsesTurnIsLeftAlone(t *testing.T) {
