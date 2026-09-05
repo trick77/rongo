@@ -71,6 +71,15 @@ type TurnClarification = {
   candidates: ClarifyCandidate[];
 };
 
+/** What a failed turn is asked again with: the endpoint and the body of the
+ * request that failed, kept so a retry re-issues exactly that. Null on a turn
+ * that has nothing to offer — one still running, one that answered, and a
+ * resume, whose card is its own retry. */
+type RetryRequest = {
+  url: string;
+  body: Record<string, unknown>;
+};
+
 type Turn = {
   question: string;
   audience: Audience;
@@ -80,6 +89,10 @@ type Turn = {
   // Every "status" event in order, with its arrival time, for the timeline.
   steps: Step[];
   error: string;
+  // The request this turn was made with, kept so a failure can be asked
+  // again. Set while the turn streams, so it is there whichever way the turn
+  // ends; only a turn that also carries an error ever shows the button.
+  retry: RetryRequest | null;
   done: boolean;
   // The id of the message this turn was recorded as, once known. Reexplain
   // needs it; a turn still in flight has none yet.
@@ -206,6 +219,8 @@ function storedTurn(m: Message): Turn {
     notice: m.notice ?? "",
     steps: [],
     error: m.error ?? "",
+    // Filled in by storedRetries, which needs the turn's neighbours.
+    retry: null,
     done: true,
     messageId: m.id,
     clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
@@ -234,6 +249,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     notice: "",
     steps: [],
     error: "",
+    retry: null,
     done: false,
     messageId: null,
     clarification: null,
@@ -264,6 +280,46 @@ function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
     if (clarId == null) return t;
     const idx = chosenByClarification.get(clarId);
     return idx === undefined ? t : { ...t, chosenIdx: idx };
+  });
+}
+
+/**
+ * Gives every failed turn in a restored thread the request that asks it
+ * again. The record keeps no clarification link on a turn that failed — the
+ * backend writes it only when the answer lands — and no re-explain source
+ * either, so a stored failure is only ever re-run as a fresh question. That is
+ * what a correction is anyway.
+ *
+ * The exception keeps the resume rule holding across a reload: a failed turn
+ * below a card nobody has answered, on the same question, IS that card's
+ * resume. Its retry is the card, which is still open, so it gets no request
+ * and no button.
+ *
+ * The walk back skips the failures in between, because a card can be tried
+ * more than once: pick, fail, pick again, fail again leaves TWO failed turns
+ * under the one still-open card, and reading only the turn directly above
+ * would give the second one a button that posts a fresh question and opens a
+ * second card beside the first.
+ *
+ * The record cannot tell that resume from a reader who ignored the card and
+ * typed the same question again — nothing is stored that separates them — so
+ * this reads both as the resume and leaves them to the card. The rarer case
+ * loses a button and keeps the card and the composer; the other way round
+ * would put two ways of spending the same resume on screen.
+ */
+function storedRetries(turns: Turn[]): Turn[] {
+  return turns.map((t, i) => {
+    if (!t.error) return t;
+    let j = i - 1;
+    while (j >= 0 && turns[j].error && !turns[j].clarification && turns[j].question === t.question) j--;
+    const card = j >= 0 ? turns[j] : null;
+    if (card && card.clarification && card.chosenIdx == null && card.question === t.question) {
+      return t;
+    }
+    return {
+      ...t,
+      retry: { url: "/api/ask", body: { question: t.question, audience: t.audience, language: t.language } },
+    };
   });
 }
 
@@ -534,7 +590,7 @@ export default function Ask({
           onThread(null);
           return;
         }
-        arrive(linkChosenCandidates(list, list.map(storedTurn)));
+        arrive(storedRetries(linkChosenCandidates(list, list.map(storedTurn))));
       } catch {
         // The turns are cleared rather than left standing: the ids have already
         // moved to the new thread, and a visible conversation that belongs to
@@ -605,9 +661,19 @@ export default function Ask({
    * needs that to undo it: a turn that failed left the server's record
    * untouched.
    */
-  async function stream(url: string, body: object): Promise<boolean> {
+  async function stream(url: string, body: Record<string, unknown>, retryable = true): Promise<boolean> {
     markBusy(true);
     let ok = true;
+    // Terminal events, the two ways a turn is meant to end. A stream that
+    // closes without one of them — a proxy FIN, a backend restart mid-answer —
+    // used to leave the turn running forever: the loop below simply exits and
+    // nothing patched the turn, so the trace ticked on with no answer, no
+    // error and no way out.
+    let closed = false;
+    // The request the turn was made with, so a failure can be asked again. A
+    // resume passes retryable false: its card unlocks itself on failure, and a
+    // button beside the error would be a second way to spend the same call.
+    if (retryable) patchLast((t) => ({ ...t, retry: { url, body } }));
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -655,9 +721,11 @@ export default function Ask({
             }));
           } else if (name === "error") {
             ok = false;
+            closed = true;
             patchLast((t) => ({ ...t, error: payload.message, done: true, endedAt: Date.now() }));
           }
           else if (name === "done") {
+            closed = true;
             patchLast((t) => ({
               ...t,
               done: true,
@@ -670,6 +738,12 @@ export default function Ask({
             onActivity();
           }
         });
+      }
+      // The stream ended without saying how. From the reader's side that is
+      // the same thing as losing the connection, so it reads the same.
+      if (!closed) {
+        ok = false;
+        patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
       }
     } catch {
       ok = false;
@@ -727,7 +801,7 @@ export default function Ask({
       language: turn.language,
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
-    });
+    }, false);
     if (!ok) setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
   }
 
@@ -771,6 +845,30 @@ export default function Ask({
       language: turn.language,
       thread_id: threadId.current ?? 0,
     });
+  }
+
+  /**
+   * Asks a failed turn again. Like every other action here it is a NEW turn
+   * appended at the end, never a rewrite: the failed one stays in the thread
+   * with its error and what it cost. The reader starts it; nothing re-runs on
+   * its own.
+   */
+  async function retry(turnIndex: number) {
+    if (busy) return;
+    const turn = turns[turnIndex];
+    const req = turn.retry;
+    if (!req) return;
+
+    retireLoad();
+    setTurns((prev) => [...prev, freshTurn(turn.question, turn.audience, turn.language)]);
+
+    // The thread id is taken now, not from the stored body: the thread may
+    // have been created by the very turn that failed, and a stored turn's
+    // request carries none at all.
+    await stream(
+      req.url,
+      req.url === "/api/ask" ? { ...req.body, thread_id: threadId.current ?? 0 } : req.body,
+    );
   }
 
   async function copy(turnIndex: number) {
@@ -946,10 +1044,28 @@ export default function Ask({
                   </div>
                 )}
 
+                {/* The retry sits beside the error, not in the footer below:
+                    the footer only renders for a turn that has usage, and a
+                    turn whose first call never reached the upstream has none.
+                    It stays for the life of the turn — a second click is a
+                    third turn, which is honest, and a "already retried" flag
+                    would not survive a reload anyway. */}
                 {turn.error && (
-                  <p role="alert" className="mt-3 text-accent-strong">
-                    {turn.error}
-                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <p role="alert" className="m-0 text-accent-strong">
+                      {turn.error}
+                    </p>
+                    {turn.retry && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => retry(i)}
+                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {turn.citations.length > 0 && (
