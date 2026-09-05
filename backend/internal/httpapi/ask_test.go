@@ -258,7 +258,7 @@ func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how is sign-in done?")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how is sign-in done?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -289,7 +289,7 @@ func seedRepoClarification(t *testing.T, store *threads.Store) (msgID, clarID in
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how are token costs calculated in $?")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how are token costs calculated in $?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -335,7 +335,7 @@ func seedAnsweredMessageWithSources(t *testing.T, store *threads.Store, db *sql.
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -357,7 +357,7 @@ func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -380,7 +380,7 @@ func seedAnsweredMessageWithOneVanishedSource(t *testing.T, store *threads.Store
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage")
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := st.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?"); err != nil {
+	if _, err := st.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?", 0); err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
 

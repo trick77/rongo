@@ -68,6 +68,15 @@ type askRequest struct {
 	// and the index of the candidate the reader picked.
 	ClarificationMessageID int64 `json:"clarification_message_id"`
 	Choice                 int   `json:"choice"`
+	// HeadMessageID is the turn this question is another attempt at, sent when
+	// the reader retries one that failed. The question text is the same, so
+	// without it the record would say the question was asked twice. A resume
+	// carries no HeadMessageID: the card names the turn already.
+	//
+	// The id is checked against the thread it claims to join before anything
+	// is written — a browser naming a row is a browser that could graft an
+	// answer under a question nobody asked it for.
+	HeadMessageID int64 `json:"head_message_id"`
 }
 
 // wireCandidate is one entry on the clarification card as the browser sees
@@ -130,6 +139,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// first byte of the SSE stream is written, because after that the status
 	// code is fixed.
 	var resume *threads.Clarification
+	// headID is the turn this attempt joins, 0 when the reader typed a new
+	// question. Set from the card on a resume, from the request on a retry.
+	var headID int64
 	var resumeHits []retrieve.Hit
 	var resumeScope ask.Scope
 	// resumeRepoChoice marks a card whose entries were repositories; resumeRepo
@@ -191,6 +203,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		if ok {
 			resumeScope = m.Scope
+			// The resumed turn is not a second asking of the question: it is
+			// the same one, carried on past the card. It joins the card's
+			// turn, which is the card's own head when the card was itself a
+			// resume.
+			headID = m.Head()
 		}
 		if resumeRepoChoice {
 			// The choice IS the scope now. Unknown carries over untouched: a
@@ -208,13 +225,43 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		resumeHits = hits
 	}
 
+	// A retry names the turn it is another attempt at, and that name is
+	// resolved BEFORE a thread is touched — the same order the clarification
+	// above is validated in, and for the same reason: a refusal must not have
+	// created an empty thread on its way to a 403.
+	var retryHead *threads.Message
+	if resume == nil && req.HeadMessageID != 0 {
+		head, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.HeadMessageID)
+		if err != nil {
+			slog.Error("resolve head message failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		// Refused, not explained — the same rule the clarification check
+		// follows: whether the id exists is not confirmed to someone who does
+		// not own it. A thread_id that disagrees with the head is refused
+		// too rather than quietly preferring one of them.
+		if !ok || (req.ThreadID != 0 && req.ThreadID != head.ThreadID) {
+			http.Error(w, "no such message", http.StatusForbidden)
+			return
+		}
+		retryHead = &head
+		headID = head.Head()
+	}
+
 	var thread threads.Thread
-	if resume != nil {
+	switch {
+	case resume != nil:
 		// A resumed turn continues the thread the clarification was asked
 		// in — the reader is still in the same conversation, just answering
 		// a question rongo asked.
 		thread = threads.Thread{ID: resume.ThreadID}
-	} else {
+	case retryHead != nil:
+		// A retry continues the thread the question was asked in, read off the
+		// turn it retries rather than off the request: the row is what says
+		// where the attempt belongs.
+		thread = threads.Thread{ID: retryHead.ThreadID}
+	default:
 		t, err := s.thread(ctx, u.Subject, req)
 		if errors.Is(err, errNotYours) {
 			http.Error(w, "no such thread", http.StatusForbidden)
@@ -231,6 +278,28 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		thread = t
 	}
 
+	// A retry names the turn it is another attempt at. Validated here, after
+	// the thread is known and before the stream opens: the row must exist, be
+	// the caller's, and live in THIS thread. A head from another thread would
+	// file an answer under a question it does not belong to, and the record is
+	// the one thing in rongo that has to stay honest.
+	if resume == nil && req.HeadMessageID != 0 {
+		head, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.HeadMessageID)
+		if err != nil {
+			slog.Error("resolve head message failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		// Refused, not explained — the same rule the clarification check above
+		// follows: whether the id exists is not confirmed to someone who does
+		// not own it.
+		if !ok || head.ThreadID != thread.ID {
+			http.Error(w, "no such message", http.StatusForbidden)
+			return
+		}
+		headID = head.Head()
+	}
+
 	// Every model call this turn makes carries the thread, so the whole
 	// conversation pins to one upstream node instead of scattering across the
 	// deployment. Attached once here: both the fresh and the resumed path land
@@ -242,7 +311,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
 
-	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question)
+	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
 		slog.Error("record question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -377,7 +446,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				slog.Error("record turn failure failed", "err", ferr)
 			}
 			closeUsage()
-			send("error", map[string]any{"message": turnFailed})
+			// The id goes out with the failure, not only with a done: asking
+			// again is another attempt at THIS question, and the browser can
+			// only say so if it knows which row it is retrying. Without it a
+			// retry writes head 0 and the record claims the question was
+			// typed twice.
+			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
 			return
 		}
 		// Written a second time, over the scope stored before the call: the
@@ -409,7 +483,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		closeUsage()
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
-		send("error", map[string]any{"message": turnFailed})
+		send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
 		return
 	}
 	// Stored whichever way the turn ended, before the ending is sent: a card
@@ -437,7 +511,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				slog.Error("record turn failure failed", "err", ferr)
 			}
 			closeUsage()
-			send("error", map[string]any{"message": turnFailed})
+			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
 			return
 		}
 		closeUsage()
@@ -700,11 +774,13 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A successful re-explain is a NEW turn in the thread, not a rewrite: the
-	// thread is a record, and an earlier answer may already have been
-	// forwarded or pasted into a ticket. from_candidate_idx stays at its
-	// default -1 — this turn did not resume a clarification.
-	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question)
+	// A successful re-explain is a NEW row, not a rewrite: the thread is a
+	// record, and an earlier answer may already have been forwarded or pasted
+	// into a ticket. It is not a new QUESTION, though — the same one is being
+	// answered for the other audience — so the row joins that question's turn
+	// and the page prints the question once. from_candidate_idx stays at its
+	// default -1: this row did not resume a clarification.
+	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
 		slog.Error("record re-explain question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -765,7 +841,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 			slog.Error("record turn failure failed", "err", ferr)
 		}
 		closeUsage()
-		send("error", map[string]any{"message": turnFailed})
+		send("error", map[string]any{"message": turnFailed, "message_id": newMsg.ID})
 		return
 	}
 	if err := s.deps.Threads.Finish(record, newMsg.ID, answer.Text, answer.Citations); err != nil {

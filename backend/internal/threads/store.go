@@ -31,7 +31,10 @@ type Thread struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-// Message is one question and the answer it got.
+// Message is one ANSWER ATTEMPT: a question and what came of it. It is not
+// one question — a resume, a retry and a re-explain each append a row that
+// repeats the question text of the row it continues, and HeadMessageID is
+// what says they are all the same turn.
 type Message struct {
 	ID int64 `json:"id"`
 	// ThreadID is the thread this message belongs to. Re-explaining reads it
@@ -74,8 +77,17 @@ type Message struct {
 	// when it did not resume one. It is what lets a reload mark the right
 	// candidate on the right card: two clarifications can be open in one
 	// thread at once, and position alone cannot tell them apart.
-	FromClarificationID int64     `json:"from_clarification_id"`
-	CreatedAt           time.Time `json:"created_at"`
+	FromClarificationID int64 `json:"from_clarification_id"`
+	// HeadMessageID is the turn this row belongs to: the message that carried
+	// the question a reader typed. 0 when this row IS that message. A resume,
+	// a retry and a re-explain each copy the question text of the row they
+	// continue — the record is append-only — so this link is the only thing
+	// that says the question was asked once. It points at the head, never at
+	// the row one step up, and it is written when the row is inserted rather
+	// than when the answer lands, so a turn that failed still groups under
+	// the question it failed at.
+	HeadMessageID int64     `json:"head_message_id"`
+	CreatedAt     time.Time `json:"created_at"`
 	// Calls is every paid call this turn made, as stored. Tokens only: the
 	// HTTP layer prices them into Usage, because the price table is
 	// configuration the store does not know.
@@ -254,19 +266,24 @@ func (s *Store) Delete(ctx context.Context, subject string, id int64) (bool, err
 // not the first also knows the language it inherits, and no stale tab can send
 // its way past it. The effective language comes back on the Message, so the
 // caller prompts in the language it just stored.
-func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, language, question string) (Message, error) {
+//
+// headID is the turn this question continues — a resume, a retry or a
+// re-explain — or 0 when the reader typed it. It is stored here, at insert
+// time, so a row that never produces an answer is still part of its turn.
+func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (Message, error) {
 	// The ordinal is computed inside the INSERT, not read and then written.
 	// Two tabs submitting on one thread would otherwise compute the same number
 	// and the second would hit UNIQUE (thread_id, ordinal) — a 500 for a thing
 	// people do routinely.
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO messages (thread_id, ordinal, audience, language, question)
+		INSERT INTO messages (thread_id, ordinal, audience, language, question, head_message_id)
 		VALUES (?,
 			(SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?),
 			?,
 			COALESCE((SELECT language FROM messages WHERE thread_id = ? ORDER BY ordinal LIMIT 1), ?),
+			?,
 			?)`,
-		threadID, threadID, audience, threadID, language, question)
+		threadID, threadID, audience, threadID, language, question, headID)
 	if err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
@@ -279,7 +296,17 @@ func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, langu
 	if err := s.db.QueryRowContext(ctx, `SELECT ordinal, language FROM messages WHERE id = ?`, id).Scan(&next, &stored); err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
-	return Message{ID: id, Ordinal: next, Audience: audience, Language: stored, Question: question}, nil
+	return Message{ID: id, Ordinal: next, Audience: audience, Language: stored, Question: question, HeadMessageID: headID}, nil
+}
+
+// Head is the turn this message belongs to: its head, or its own id when it
+// IS the head. One hop is enough by construction — a head is stored as the
+// root of the chain, never as the row one step up — so no read here walks.
+func (m Message) Head() int64 {
+	if m.HeadMessageID != 0 {
+		return m.HeadMessageID
+	}
+	return m.ID
 }
 
 // Finish records the answer and its citations, in one transaction: an answer
@@ -464,10 +491,10 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var scope string
 	var followups string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -493,7 +520,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ?
 		ORDER BY m.ordinal`, threadID, subject)
@@ -509,7 +536,7 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 		var fromClar sql.NullInt64
 		var scope string
 		var followups string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64

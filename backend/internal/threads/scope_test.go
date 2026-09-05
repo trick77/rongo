@@ -12,7 +12,7 @@ func TestScopeSurvivesAReload(t *testing.T) {
 	// covered what it covered, and a resumed turn rebuilds its prompt rules
 	// from this row.
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How do loom and rongo differ?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How do loom and rongo differ?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestScopeOfAnOrdinaryTurnWritesNothing(t *testing.T) {
 	// Most questions name no repository, and a row full of empty JSON would
 	// make the column say something it does not know.
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does indexing work?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does indexing work?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestDocsOnlySurvivesAReloadWithoutANamedRepository(t *testing.T) {
 	// it does have to say — and the reader would see the notice while the turn
 	// streamed and never again after a reload.
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "Which choices are locked?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "Which choices are locked?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestDocsOnlySurvivesAReloadWithoutANamedRepository(t *testing.T) {
 // saying all of them.
 func TestScopeOfAnAllRepositoriesTurnIsWrittenEvenThoughItNamesNone(t *testing.T) {
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "in all repos, how are token costs calculated?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "in all repos, how are token costs calculated?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestScopeOfAnAllRepositoriesTurnIsWrittenEvenThoughItNamesNone(t *testing.T
 // to a permission nobody granted.
 func TestScopeStoredBeforeAllExistedStillReads(t *testing.T) {
 	s, ctx, threadID, db := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "how does peeq sign in?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "how does peeq sign in?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}

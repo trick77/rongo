@@ -291,7 +291,7 @@ func TestDelete_takesTheThreadAndEverythingUnderIt(t *testing.T) {
 	db := threadDB(t)
 	s := NewStore(db)
 	th, _ := s.Create(ctx, "anna", "How does shipping work?")
-	m, err := s.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?")
+	m, err := s.AddQuestion(ctx, th.ID, "ba", "en", "How does shipping work?", 0)
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestFinish_storesTheAnswerWithItsEvidence(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, err := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	m, err := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
@@ -387,8 +387,8 @@ func TestSaveUsage_everyCallOfATurnComesBackWithTheThreadEvenWhenItAskedOrFailed
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	failed, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
-	answered, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How exactly?")
+	failed, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
+	answered, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How exactly?", 0)
 
 	// A turn that failed after its gates ran still paid for the gates.
 	if err := s.Fail(ctx, failed.ID, "The turn failed."); err != nil {
@@ -438,7 +438,7 @@ func TestFail_keepsTheQuestionInTheRecord(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 
 	if err := s.Fail(ctx, m.ID, "the model did not answer"); err != nil {
 		t.Fatalf("Fail: %v", err)
@@ -459,7 +459,7 @@ func TestMessages_anotherUsersThreadIsNotReadable(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?")
+	m, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 	_ = s.Finish(ctx, m.ID, "geheim", nil)
 
 	got, err := s.Messages(ctx, "bruno", th.ID)
@@ -484,9 +484,9 @@ func TestAddQuestion_appendsRatherThanRewrites(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "First question?")
-	first, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "First question?")
+	first, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "First question?", 0)
 	_ = s.Finish(ctx, first.ID, "First answer.", nil)
-	second, err := s.AddQuestion(ctx, th.ID, "dev", "en", "Und als Dev?")
+	second, err := s.AddQuestion(ctx, th.ID, "dev", "en", "Und als Dev?", 0)
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestAddQuestion_appendsRatherThanRewrites(t *testing.T) {
 func TestClarifyStoresTheCardAndServesItBackWithTheThread(t *testing.T) {
 	// Given a question that ended by asking
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "how is sign-in done?")
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "how is sign-in done?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestAClarificationIsAnsweredOnceAndTheCardSaysSo(t *testing.T) {
 	// from_clarification_id, and Clarification reports it so the handler can
 	// refuse a second resume before it costs a model call.
 	s, ctx, threadID, _ := newThreadStore(t)
-	first, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
+	first, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
 	id, err := s.Clarify(ctx, first.ID, twoCandidateClarification())
 	if err != nil {
 		t.Fatalf("clarify: %v", err)
@@ -570,7 +570,7 @@ func TestAClarificationIsAnsweredOnceAndTheCardSaysSo(t *testing.T) {
 		t.Error("a card nobody has answered must not read as answered")
 	}
 
-	a, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
+	a, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
 	if err := s.LinkChoice(ctx, testSubject, a.ID, id, 0); err != nil {
 		t.Fatalf("link choice: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestSourcesComeBackAndAVanishedChunkIsSimplyMissing(t *testing.T) {
 	// Given an answer stored with two sources, one of whose chunks a re-index
 	// then removes
 	s, ctx, threadID, db := newThreadStore(t)
-	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
 	insertChunk(t, db, 1, "peeq", "a.go", "package a")
 	insertChunk(t, db, 2, "peeq", "b.go", "package b")
 	if err := s.SaveSources(ctx, msg.ID, []ask.Source{
@@ -639,7 +639,7 @@ func TestAForeignSubjectGetsNothingFromClarificationCandidateHitsOrSources(t *te
 	// have already done so.
 	const other = "bruno"
 	s, ctx, threadID, db := newThreadStore(t)
-	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage")
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "frage", 0)
 	id, err := s.Clarify(ctx, msg.ID, twoCandidateClarification())
 	if err != nil {
 		t.Fatalf("clarify: %v", err)
@@ -693,12 +693,12 @@ func TestLinkChoiceRefusesToPairAMessageAndAClarificationFromDifferentThreads(t 
 	if err != nil {
 		t.Fatalf("create second thread: %v", err)
 	}
-	msgA, _ := s.AddQuestion(ctx, threadA, "ba", "en", "frage")
+	msgA, _ := s.AddQuestion(ctx, threadA, "ba", "en", "frage", 0)
 	id, err := s.Clarify(ctx, msgA.ID, twoCandidateClarification())
 	if err != nil {
 		t.Fatalf("clarify: %v", err)
 	}
-	msgB, _ := s.AddQuestion(ctx, threadB.ID, "ba", "en", "andere frage")
+	msgB, _ := s.AddQuestion(ctx, threadB.ID, "ba", "en", "andere frage", 0)
 
 	// When: msgB belongs to threadB, id's clarification belongs to threadA
 	err = s.LinkChoice(ctx, testSubject, msgB.ID, id, 0)

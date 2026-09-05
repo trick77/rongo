@@ -100,8 +100,9 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 	}
 
 	// The two columns that carry a resumed turn back to the card it came from,
-	// and the language column 0002 adds on top of the squashed init.
-	for _, col := range []string{"from_clarification_id", "from_candidate_idx", "language"} {
+	// the language column 0002 adds on top of the squashed init, and the head
+	// link 0007 adds to say which turn a row is an attempt at.
+	for _, col := range []string{"from_clarification_id", "from_candidate_idx", "language", "head_message_id"} {
 		var n int
 		if err := db.QueryRow(
 			`SELECT count(*) FROM pragma_table_info('messages') WHERE name=?`, col).Scan(&n); err != nil {

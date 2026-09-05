@@ -9,7 +9,7 @@ func TestAddQuestion_storesTheLanguageWithTheTurn(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	m, err := s.AddQuestion(ctx, th.ID, "ba", "it", "How?")
+	m, err := s.AddQuestion(ctx, th.ID, "ba", "it", "How?", 0)
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
@@ -37,11 +37,11 @@ func TestAddQuestion_pinsTheLanguageToTheThreadsFirstTurn(t *testing.T) {
 	ctx := context.Background()
 	s := NewStore(threadDB(t))
 	th, _ := s.Create(ctx, "anna", "How?")
-	if _, err := s.AddQuestion(ctx, th.ID, "ba", "de", "How?"); err != nil {
+	if _, err := s.AddQuestion(ctx, th.ID, "ba", "de", "How?", 0); err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}
 
-	second, err := s.AddQuestion(ctx, th.ID, "ba", "fr", "And then?")
+	second, err := s.AddQuestion(ctx, th.ID, "ba", "fr", "And then?", 0)
 	if err != nil {
 		t.Fatalf("AddQuestion: %v", err)
 	}

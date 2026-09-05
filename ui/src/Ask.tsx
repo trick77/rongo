@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "./markdown";
 import Clarify, { type ClarifyCandidate } from "./Clarify";
 import Question from "./Question";
@@ -103,6 +103,14 @@ type Turn = {
   // the thread's language — the reader has to be able to pick another one and
   // try again.
   recorded: boolean;
+  // The question this turn is an attempt at: the message id of the turn that
+  // carried it, or null when this turn IS that one. A resume, a retry and a
+  // re-explain all repeat the question text of the turn they continue — the
+  // thread is a record and nothing in it is rewritten — so this link is the
+  // only thing that says the question was asked once, and it is what the view
+  // groups by. Without it the page would print the same question three times
+  // and claim it was typed three times.
+  headId: number | null;
   clarification: TurnClarification | null;
   // What the turn had to say about its own scope - a repository the question
   // named that the index does not carry. Empty on every ordinary turn, and
@@ -200,6 +208,9 @@ type Message = {
   // position, is what tells two clarifications open in the same thread
   // apart.
   from_clarification_id: number;
+  // The turn this row is an attempt at, or 0 when the row IS the turn. Absent
+  // on a row written before the column existed, which stays its own turn.
+  head_message_id?: number;
   created_at?: string;
   // What this answer offered to ask next. Absent on a turn that ended in a
   // card, a failure or a nothing-found, and on every turn older than the
@@ -230,6 +241,7 @@ function storedTurn(m: Message): Turn {
     done: true,
     messageId: m.id,
     recorded: true,
+    headId: m.head_message_id || null,
     clarification: m.clarification ? { messageId: m.id, candidates: m.clarification.candidates } : null,
     chosenIdx: null,
     live: false,
@@ -244,8 +256,13 @@ function storedTurn(m: Message): Turn {
 /**
  * A fresh, in-flight turn — asked, resumed from a candidate, or
  * re-explained. All three start the same way: no answer yet, no steps yet.
+ *
+ * headId is the question this one is another attempt at. Null only when the
+ * reader typed it: a resume, a retry and a re-explain all name the turn they
+ * belong to, because the words are the same and nothing else would tell the
+ * record they are one question.
  */
-function freshTurn(question: string, audience: Audience, language: string): Turn {
+function freshTurn(question: string, audience: Audience, language: string, headId: number | null = null): Turn {
   const now = Date.now();
   return {
     question,
@@ -260,6 +277,7 @@ function freshTurn(question: string, audience: Audience, language: string): Turn
     recorded: false,
     done: false,
     messageId: null,
+    headId,
     clarification: null,
     chosenIdx: null,
     live: true,
@@ -291,42 +309,49 @@ function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
   });
 }
 
+/** headOf is the turn a stored turn belongs to: the question it is an attempt
+ * at, or its own id when it IS that question. Null only while a turn asked in
+ * this session has no id yet. */
+function headOf(t: Turn): number | null {
+  return t.headId ?? t.messageId;
+}
+
 /**
  * Gives every failed turn in a restored thread the request that asks it
- * again. The record keeps no clarification link on a turn that failed — the
- * backend writes it only when the answer lands — and no re-explain source
- * either, so a stored failure is only ever re-run as a fresh question. That is
- * what a correction is anyway.
+ * again, and points that request at the turn it retries so the record keeps
+ * saying the question was asked once.
  *
- * The exception keeps the resume rule holding across a reload: a failed turn
- * below a card nobody has answered, on the same question, IS that card's
- * resume. Its retry is the card, which is still open, so it gets no request
- * and no button.
+ * The card exception keeps the resume rule holding across a reload: a failed
+ * turn belonging to a card nobody has answered IS that card's resume. Its
+ * retry is the card, which is still open, so it gets no request and no button
+ * — two ways of spending the same resume on screen would be one too many.
  *
- * The walk back skips the failures in between, because a card can be tried
- * more than once: pick, fail, pick again, fail again leaves TWO failed turns
- * under the one still-open card, and reading only the turn directly above
- * would give the second one a button that posts a fresh question and opens a
- * second card beside the first.
- *
- * The record cannot tell that resume from a reader who ignored the card and
- * typed the same question again — nothing is stored that separates them — so
- * this reads both as the resume and leaves them to the card. The rarer case
- * loses a button and keeps the card and the composer; the other way round
- * would put two ways of spending the same resume on screen.
+ * This used to walk backwards over neighbouring turns comparing question
+ * text, because nothing stored told a resume apart from a reader who ignored
+ * the card and typed the same words again. head_message_id stores exactly
+ * that, so the guess is gone: the group is asked, not inferred.
  */
 function storedRetries(turns: Turn[]): Turn[] {
-  return turns.map((t, i) => {
+  return turns.map((t) => {
     if (!t.error) return t;
-    let j = i - 1;
-    while (j >= 0 && turns[j].error && !turns[j].clarification && turns[j].question === t.question) j--;
-    const card = j >= 0 ? turns[j] : null;
-    if (card && card.clarification && card.chosenIdx == null && card.question === t.question) {
-      return t;
-    }
+    const head = headOf(t);
+    const openCard = turns.some(
+      (o) => headOf(o) === head && o.clarification && o.chosenIdx == null,
+    );
+    if (openCard) return t;
     return {
       ...t,
-      retry: { url: "/api/ask", body: { question: t.question, audience: t.audience, language: t.language } },
+      retry: {
+        url: "/api/ask",
+        body: {
+          question: t.question,
+          audience: t.audience,
+          language: t.language,
+          // The turn this asks again, so the retry lands in it rather than
+          // filing the same question a second time.
+          head_message_id: head,
+        },
+      },
     };
   });
 }
@@ -366,6 +391,47 @@ function forgeLine(c: Citation): string {
 
 function roleName(a: Audience): string {
   return a === "dev" ? "Developer" : "Analyst";
+}
+
+/**
+ * What one attempt inside a turn is called. Only ever shown for a turn that
+ * took more than one: the label answers "why is there a second block under
+ * the same question", and there is nothing to answer when there is only one.
+ *
+ * The audience rides on the attempt rather than on the turn, because a
+ * re-explain is the same question answered for the other reader — not a new
+ * question, and the eyebrow above already said who asked.
+ */
+function stageLabel(turn: Turn, asked: Turn): string {
+  if (turn.clarification) return "Clarification";
+  if (turn.error) return "Failed";
+  if (turn.audience !== asked.audience) return `Re-explained · ${roleName(turn.audience)}`;
+  return `Answer · ${roleName(turn.audience)}`;
+}
+
+/**
+ * Groups the turns by the question they are attempts at, keeping the order
+ * they were recorded in. One group is one article: the question printed once,
+ * with everything that came of it under it.
+ *
+ * A turn asked in this session has no id until the server answers, so it
+ * keys on its position until then. Nothing can join it before it has one —
+ * the actions that would are all disabled while a turn is in flight.
+ */
+function groupByQuestion(turns: Turn[]): number[][] {
+  const at = new Map<number | string, number>();
+  const out: number[][] = [];
+  turns.forEach((t, i) => {
+    const key = headOf(t) ?? `live-${i}`;
+    const g = at.get(key);
+    if (g === undefined) {
+      at.set(key, out.length);
+      out.push([i]);
+    } else {
+      out[g].push(i);
+    }
+  });
+  return out;
 }
 
 function clock(iso: string): string {
@@ -458,6 +524,18 @@ export default function Ask({
   // The turn whose usage breakdown is open, if any. One at a time: it is a
   // glance at what a turn cost, not a report to keep open.
   const [openUsage, setOpenUsage] = useState<number | null>(null);
+  // The superseded failures the reader has unfolded. A failure stays in the
+  // record and stays on the page, but a turn that went on to answer should
+  // not open with the attempt that broke — so it folds to a line, and the
+  // line says what it is.
+  const [openFailure, setOpenFailure] = useState<Set<number>>(new Set());
+  function toggleFailure(i: number) {
+    setOpenFailure((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(i)) next.add(i);
+      return next;
+    });
+  }
   const threadId = useRef<number | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -739,7 +817,16 @@ export default function Ask({
           } else if (name === "error") {
             ok = false;
             closed = true;
-            patchLast((t) => ({ ...t, error: payload.message, done: true, endedAt: Date.now() }));
+            // The id comes with the failure too, not only with done: asking
+            // again is another attempt at THIS question, and the request can
+            // only say so if the turn knows which row it is.
+            patchLast((t) => ({
+              ...t,
+              error: payload.message,
+              done: true,
+              endedAt: Date.now(),
+              messageId: payload.message_id ?? t.messageId,
+            }));
           }
           else if (name === "done") {
             closed = true;
@@ -830,7 +917,7 @@ export default function Ask({
     retireLoad();
     setTurns((prev) => [
       ...prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
-      freshTurn(turn.question, turn.audience, turn.language),
+      freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
     ]);
 
     const ok = await stream("/api/ask", {
@@ -857,7 +944,7 @@ export default function Ask({
     const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
     retireLoad();
-    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language)]);
+    setTurns((prev) => [...prev, freshTurn(turn.question, nextAudience, turn.language, headOf(turn))]);
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
   }
@@ -898,15 +985,24 @@ export default function Ask({
     const req = turn.retry;
     if (!req) return;
 
+    const head = headOf(turn);
+
     retireLoad();
-    setTurns((prev) => [...prev, freshTurn(turn.question, turn.audience, turn.language)]);
+    setTurns((prev) => [...prev, freshTurn(turn.question, turn.audience, turn.language, head)]);
 
     // The thread id is taken now, not from the stored body: the thread may
     // have been created by the very turn that failed, and a stored turn's
     // request carries none at all.
+    //
+    // The head is taken now too. A turn that failed on a freshly typed
+    // question was sent without one — there was nothing to join yet — and it
+    // only learned its own id when the failure came back. Asking again is
+    // another attempt at that same question, so it says so.
     await stream(
       req.url,
-      req.url === "/api/ask" ? { ...req.body, thread_id: threadId.current ?? 0 } : req.body,
+      req.url === "/api/ask"
+        ? { ...req.body, thread_id: threadId.current ?? 0, head_message_id: head }
+        : req.body,
     );
   }
 
@@ -920,6 +1016,10 @@ export default function Ask({
       // nothing visible; the answer is still on screen to select.
     }
   }
+
+  // One article per question. The list itself stays flat — every action here
+  // addresses a turn by its position in it — and only the rendering groups.
+  const groups = useMemo(() => groupByQuestion(turns), [turns]);
 
   // The Sources pane shows the latest turn that has any: the one the reader
   // is most likely looking at, and the only one whose markers can be pointed
@@ -993,27 +1093,70 @@ export default function Ask({
               </div>
             )}
 
-            {turns.map((turn, i) => (
+            {groups.map((group, g) => {
+              const asked = turns[group[0]];
+              return (
               <article
-                key={i}
+                key={group[0]}
                 className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
               >
                 <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
-                  {roleName(turn.audience)}
+                  {roleName(asked.audience)}
                 </div>
                 {/* The accent is the eyebrow's alone now: the question is what
                     was typed, at whatever length it was typed, and it reads as
-                    the reader's words rather than as a headline. */}
-                <Question text={turn.question} />
+                    the reader's words rather than as a headline.
+
+                    Once, because it was asked once. Everything below is what
+                    came of it — a card, a failure, the answer, the same answer
+                    for the other audience — and each of those is a row in the
+                    record carrying a copy of these words. Printing the copies
+                    would say the reader typed the question again, which they
+                    did not. */}
+                <Question text={asked.question} />
                 <div className="mt-2.5 flex items-center gap-1.5">
-                  {turn.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(turn.askedAt)}</time>}
-                  <span className={pill + " bg-active text-muted"}>Turn {i + 1}</span>
-                  {turn.language !== "en" && (
+                  {asked.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(asked.askedAt)}</time>}
+                  {/* Counted in questions, not in rows: a turn asked twice
+                      because the first attempt broke is still the first turn. */}
+                  <span className={pill + " bg-active text-muted"}>Turn {g + 1}</span>
+                  {asked.language !== "en" && (
                     <span className={pill + " bg-active text-muted"}>
-                      {languages.find((l) => l.code === turn.language)?.name ?? turn.language}
+                      {languages.find((l) => l.code === asked.language)?.name ?? asked.language}
                     </span>
                   )}
                 </div>
+
+                {/* One entry per attempt. A turn answered on the first try has
+                    exactly one and looks as it always did: no rail, no label,
+                    nothing added for a thread that never needed grouping. */}
+                <div className={group.length > 1 ? "mt-3.5 grid gap-5 border-l-2 border-border pl-4" : ""}>
+                {group.map((i, k) => {
+                  const turn = turns[i];
+                  // A failure the reader has already moved past folds to a
+                  // line. The last one in a turn never folds: its Retry button
+                  // is the only way on from there.
+                  const superseded = !!turn.error && k < group.length - 1;
+                  const folded = superseded && !openFailure.has(i);
+                  return (
+                    <div key={i}>
+                {group.length > 1 && (
+                  <div className="flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[.09em] text-faint">
+                    <span className="-ml-[21px] h-1.5 w-1.5 rounded-full bg-muted outline-3 outline-bg" />
+                    {stageLabel(turn, asked)}
+                    {turn.askedAt && <time className="font-mono text-[11px] font-normal normal-case tracking-normal">{clock(turn.askedAt)}</time>}
+                    {superseded && (
+                      <button
+                        type="button"
+                        onClick={() => toggleFailure(i)}
+                        className="font-sans text-[11px] font-normal normal-case tracking-normal text-muted underline decoration-border underline-offset-2 hover:text-ink"
+                      >
+                        {folded ? "Show" : "Hide"}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {!folded && (
+                  <>
 
                 {/* A restored turn is finished by definition and carries no live
                     trace — only a turn asked, resumed or re-explained in THIS
@@ -1254,8 +1397,15 @@ export default function Ask({
                     )}
                   </div>
                 )}
+                  </>
+                )}
+                    </div>
+                  );
+                })}
+                </div>
               </article>
-            ))}
+              );
+            })}
             <div ref={bottom} />
           </div>
         </div>
@@ -1365,7 +1515,9 @@ export default function Ask({
           Sources
           {sourceTurn && (
             <span className="ml-auto font-mono tracking-normal">
-              turn {sourceTurnIndex + 1} · {sourceTurn.citations.length}
+              {/* The turn the reader sees, counted in questions like the pill
+                  on the article — not the row's place in the record. */}
+              turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {sourceTurn.citations.length}
             </span>
           )}
         </header>
