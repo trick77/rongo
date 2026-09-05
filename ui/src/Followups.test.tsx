@@ -99,9 +99,10 @@ describe("follow-up suggestions", () => {
 
     // The reader moves the composer back before clicking the pill. The role
     // still moves; the language does not, because the thread is pinned to the
-    // one its first question was asked in.
+    // one its first question was asked in — and the control that offered it is
+    // gone from the composer once there is nothing left to offer.
     await user.click(screen.getByRole("button", { name: "Analyst" }));
-    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.queryByLabelText("Answer language")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Was passiert beim Neuindexieren?" }));
 
     await waitFor(() => expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2));

@@ -204,6 +204,10 @@ export default function App() {
   // background goroutine — and neither can push.
   const [threadsVersion, setThreadsVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  // The thread a running turn is being written into. Kept apart from threadId:
+  // the two part company the moment the reader opens another thread while the
+  // answer is still arriving, which they are free to do.
+  const [busyThread, setBusyThread] = useState<number | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
@@ -431,6 +435,7 @@ export default function App() {
             }}
             version={threadsVersion}
             busy={busy}
+            busyId={busyThread}
             onList={setThreads}
             onDeleted={(id) => {
               // The thread on screen has just been deleted: close it, so the
@@ -479,7 +484,10 @@ export default function App() {
               threadId={threadId}
               onThread={selectThread}
               onActivity={refreshThreads}
-              onBusy={setBusy}
+              onBusy={(b, id) => {
+                setBusy(b);
+                setBusyThread(b ? id : null);
+              }}
               onUsage={(u) =>
                 // Compared by value: Ask reports on every change of its turn
                 // list, which is once per streamed token, and a fresh object
