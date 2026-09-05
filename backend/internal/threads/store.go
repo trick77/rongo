@@ -243,6 +243,17 @@ func (s *Store) Delete(ctx context.Context, subject string, id int64) (bool, err
 
 // AddQuestion appends a question and returns the message it created. The answer
 // arrives later, through Finish.
+//
+// `language` is what the turn ASKS for; a thread that already has a turn
+// answers in the one it started in. The thread reads as one conversation — its
+// title is written once, in the first turn's language, and follow-up pills,
+// re-explains and resumes all replay the language of the turn they continue —
+// so a mid-thread switch would leave a German answer under an English title
+// beside English suggestions. Pinned here rather than in the handler because
+// this is where the ordinal is decided: the statement that knows the turn is
+// not the first also knows the language it inherits, and no stale tab can send
+// its way past it. The effective language comes back on the Message, so the
+// caller prompts in the language it just stored.
 func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, language, question string) (Message, error) {
 	// The ordinal is computed inside the INSERT, not read and then written.
 	// Two tabs submitting on one thread would otherwise compute the same number
@@ -250,8 +261,12 @@ func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, langu
 	// people do routinely.
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO messages (thread_id, ordinal, audience, language, question)
-		VALUES (?, (SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?), ?, ?, ?)`,
-		threadID, threadID, audience, language, question)
+		VALUES (?,
+			(SELECT COALESCE(MAX(ordinal), -1) + 1 FROM messages WHERE thread_id = ?),
+			?,
+			COALESCE((SELECT language FROM messages WHERE thread_id = ? ORDER BY ordinal LIMIT 1), ?),
+			?)`,
+		threadID, threadID, audience, threadID, language, question)
 	if err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
@@ -260,10 +275,11 @@ func (s *Store) AddQuestion(ctx context.Context, threadID int64, audience, langu
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
 	var next int
-	if err := s.db.QueryRowContext(ctx, `SELECT ordinal FROM messages WHERE id = ?`, id).Scan(&next); err != nil {
+	var stored string
+	if err := s.db.QueryRowContext(ctx, `SELECT ordinal, language FROM messages WHERE id = ?`, id).Scan(&next, &stored); err != nil {
 		return Message{}, fmt.Errorf("add question: %w", err)
 	}
-	return Message{ID: id, Ordinal: next, Audience: audience, Language: language, Question: question}, nil
+	return Message{ID: id, Ordinal: next, Audience: audience, Language: stored, Question: question}, nil
 }
 
 // Finish records the answer and its citations, in one transaction: an answer

@@ -248,6 +248,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	// The record decides the language, not the request: a thread keeps the one
+	// its first turn was asked in, and AddQuestion hands back what it stored.
+	// Read back rather than assumed, so the answer, the notice and the
+	// follow-up pills are written in the language the turn is filed under.
+	lang = ask.ParseLanguage(msg.Language)
 
 	// Headers before the first flush: once anything is written the status code
 	// is fixed, so every failure after this point is an SSE error event, not a
@@ -613,8 +618,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Audience string `json:"audience"`
-		// Language is optional: a re-explain inherits the language of the
-		// turn it re-answers unless the request says otherwise.
+		// Language is optional and only ever a request: the thread answers in
+		// the language its first turn was asked in, so on a thread that has
+		// one — which a re-explain always does — the record wins.
 		Language string `json:"language"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -693,6 +699,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	// The stored language is the thread's, whatever was asked for. Same rule
+	// as /api/ask: the turn is answered in the language it is filed under.
+	lang = ask.ParseLanguage(newMsg.Language)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

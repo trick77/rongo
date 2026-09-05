@@ -1205,6 +1205,66 @@ describe("Ask, the answer language across a reload", () => {
   });
 });
 
+describe("Ask, the language a thread is answered in", () => {
+  // The thread is answered in the language its first question was asked in.
+  // The select stays where it was - it just stops offering a change, because
+  // the title, the follow-up pills and every resumed turn are already written
+  // in that language.
+  it("pins the composer to the first question's language", async () => {
+    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await user.type(screen.getByLabelText("Question"), "Wie?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => {
+      const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
+      expect(select.disabled).toBe(true);
+      expect(select.value).toBe("de");
+    });
+  });
+
+  // A thread opened from the sidebar is answered in ITS language, whatever the
+  // composer happens to remember from the last new thread.
+  it("shows the opened thread's language, not the remembered one", async () => {
+    localStorage.setItem("rongo.language", "en");
+    routedFetch([{ ...storedTurn, language: "fr" }]);
+    render(
+      <StrictMode>
+        <Ask threadId={7} />
+      </StrictMode>,
+    );
+
+    await screen.findByText(/Through a grant/);
+    const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
+    expect(select.value).toBe("fr");
+    expect(select.disabled).toBe(true);
+  });
+
+  // The composer sends the thread's language even when storage remembers
+  // another one: the request must match what the record will file the turn as.
+  it("asks a follow-up in the thread's language", async () => {
+    localStorage.setItem("rongo.language", "en");
+    const mock = routedFetch([{ ...storedTurn, language: "fr" }], [ev("thread", { thread_id: 7 }), ev("done", {})]);
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask threadId={7} />
+      </StrictMode>,
+    );
+    await screen.findByText(/Through a grant/);
+
+    await user.type(screen.getByLabelText("Question"), "Et ensuite?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => {
+      const post = mock.mock.calls.find((c) => c[0] === "/api/ask");
+      expect(JSON.parse(String(post?.[1]?.body)).language).toBe("fr");
+    });
+  });
+});
+
 describe("Ask, the caret of a streaming answer", () => {
   // The caret used to be a sibling element of the markdown, which made it a
   // block of its own: it blinked on the line BELOW the words it belongs to.
