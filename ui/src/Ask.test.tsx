@@ -1133,12 +1133,64 @@ describe("Ask, following the answer", () => {
     await stream.push(ev("token", { text: "One. " }));
     // The wheel turns and the browser moves the view; the scroll event that
     // follows is delivered a beat later, and the next token must not undo it.
-    fireEvent.wheel(view);
+    fireEvent.wheel(view, { deltaY: -300 });
     view.scrollTop = 800;
 
     await stream.push(ev("token", { text: "Two. " }));
     await screen.findByText(/Two/);
     expect(view.scrollTop).toBe(800);
+  });
+
+  // Asking for more of what is already arriving is not leaving: a wheel down
+  // at the foot moves nothing, and a horizontal wheel over a code block moves
+  // the block, not the column.
+  it("keeps following a wheel that asks for what comes next", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    view.scrollTop = 0;
+    fireEvent.wheel(view, { deltaY: 120 });
+    fireEvent.wheel(view, { deltaX: -90, deltaY: 0 });
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(2000);
+  });
+
+  it("keeps following a finger that drags towards the foot", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    view.scrollTop = 0;
+    // The finger travels up the glass, which takes the column downwards.
+    fireEvent.touchStart(view, { touches: [{ clientY: 500 }] });
+    fireEvent.touchMove(view, { touches: [{ clientY: 380 }] });
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(2000);
+  });
+
+  it("stops following a finger that drags back up the thread", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    fireEvent.touchStart(view, { touches: [{ clientY: 300 }] });
+    fireEvent.touchMove(view, { touches: [{ clientY: 460 }] });
+    view.scrollTop = 700;
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(700);
   });
 
   it("stops following when the reader takes hold of the text", async () => {

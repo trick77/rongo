@@ -489,6 +489,27 @@ export default function Ask({
     el.scrollTop = top;
     selfTop.current = el.scrollTop;
   }
+  // Where a touch began, so a drag can be read as a direction. Only a drag
+  // back UP the thread is the reader leaving: a finger travelling up the
+  // glass takes the column towards the foot, which is where the answer is
+  // being written anyway — and at the foot iOS answers a downward pull with
+  // a rubber-band bounce that moves nothing at all.
+  const touchY = useRef(0);
+  function noteTouch(e: React.TouchEvent) {
+    touchY.current = e.touches[0]?.clientY ?? 0;
+  }
+  function touchLeaves(e: React.TouchEvent) {
+    // A few pixels of slack: a finger resting on the glass jitters, and a tap
+    // that happens to wobble is not a scroll.
+    if ((e.touches[0]?.clientY ?? 0) - touchY.current > 4) stopFollowing();
+  }
+  // A wheel only counts upwards. Asking for more of what is arriving — a
+  // nudge down at the foot, the commonest gesture of all — moves nothing and
+  // must not cost the reader the follow, and a horizontal wheel belongs to a
+  // code block inside the answer, not to the column.
+  function wheelLeaves(e: React.WheelEvent) {
+    if (e.deltaY < 0) stopFollowing();
+  }
   // A source opens from the pane beside the thread as well as from the text,
   // and the pane is outside the scrolling column, so its click reaches none of
   // the column's own handlers.
@@ -940,11 +961,13 @@ export default function Ask({
           // delivered a beat later, and by then the next token has already
           // pulled the view back to the foot, so the reader watches their
           // scroll being undone. Wheel and touch are the two ways of moving
-          // the column; a pointer going down in it is a text selection, a
-          // scrollbar drag, or a chip or diagram being opened — all of them
-          // reasons to stop writing under the reader's hands.
-          onWheel={stopFollowing}
-          onTouchMove={stopFollowing}
+          // the column, and only away from the foot counts; a pointer going
+          // down in it is a text selection, a scrollbar drag, or a chip or
+          // diagram being opened — all of them reasons to stop writing under
+          // the reader's hands.
+          onWheel={wheelLeaves}
+          onTouchStart={noteTouch}
+          onTouchMove={touchLeaves}
           onPointerDown={stopFollowing}
           // The net under all of it: find-in-page, a scroll restored by the
           // browser, anything that moves the column without an intent event.
@@ -958,7 +981,11 @@ export default function Ask({
           onScroll={() => {
             const el = view.current;
             if (!el || el.scrollTop === selfTop.current) return;
-            if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) stopFollowing();
+            // A few pixels of foot rather than none: scrollHeight and
+            // clientHeight are whole numbers while scrollTop is snapped to
+            // device pixels, so at a fractional device ratio the true foot
+            // reads a pixel or two short of it.
+            if (el.scrollHeight - el.scrollTop - el.clientHeight > 4) stopFollowing();
           }}
           className="min-h-0 flex-1 overflow-auto"
         >
