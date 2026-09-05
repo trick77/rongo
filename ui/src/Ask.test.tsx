@@ -854,10 +854,15 @@ describe("Ask, the clarification and re-explaining", () => {
 
     const user = await ask("How is retry done?");
     await screen.findByText("That is too broad to ask about.");
+    // Waited for, not assumed: narrowing is refused while a turn is still
+    // streaming, and clicking into that window loses the click in silence.
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Waiting for a choice"));
 
     await user.click(screen.getByRole("button", { name: /peeq/ }));
     await user.click(screen.getByRole("button", { name: /ledger/ }));
-    await user.click(screen.getByRole("button", { name: /^Ask these/ }));
+    const askThese = screen.getByRole("button", { name: /^Ask these/ });
+    expect(askThese.textContent).toContain("2");
+    await user.click(askThese);
 
     await screen.findByText(
       (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("capped exponential backoff"),
