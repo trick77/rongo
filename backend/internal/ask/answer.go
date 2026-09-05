@@ -205,6 +205,11 @@ the control flow so that it can be followed in the code.`
 // but it is JSON: answerCommon's "one marker per bracket" reads as [6][25]
 // applied to an array, which is not JSON at all, so the fence says outright
 // that the rule stops here.
+//
+// The counts below are what reads well, and the renderer no longer enforces
+// them: a spec one actor too wide used to be dropped and shown as its JSON,
+// which is worse than a wide picture in a box that scrolls. They stay strict
+// here because that is what keeps a diagram compact in the first place.
 const answerDiagram = `
 
 At most one diagram, and only where control flow or a call sequence carries

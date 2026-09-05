@@ -68,15 +68,48 @@ describe("parseDiagram", () => {
       '{"type":"flow","nodes":[{"id":"a","label":5}],"edges":[]}',
       '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"v","label":"x"}]}',
       '{"type":"sequence","actors":[{"id":"u","label":"UI"}],"steps":[{"from":"u","to":"u","label":"x","kind":"shout"}]}',
-      JSON.stringify({ type: "flow", nodes: Array.from({ length: 13 }, (_, i) => ({ id: `n${i}`, label: "x" })), edges: [] }),
-      JSON.stringify({ type: "sequence", actors: Array.from({ length: 6 }, (_, i) => ({ id: `a${i}`, label: "x" })), steps: [] }),
+    ];
+    for (const b of bad) expect(parseDiagram(b), b).toBeNull();
+  });
+});
+
+/** The spec a reader was handed as a code block: eight actors, past the five
+ * the prompt asks for, and drawable in every other respect. */
+const wideSequence = `{"type":"sequence","actors":[{"id":"cfg","label":"repos.yaml"},{"id":"startup","label":"Startup"},{"id":"indexer","label":"Indexer"},{"id":"git","label":"git"},{"id":"ctags","label":"universal-ctags"},{"id":"rg","label":"ripgrep"},{"id":"embed","label":"Embedding Service"},{"id":"db","label":"SQLite (FTS5 + vec)"}],"steps":[{"from":"cfg","to":"startup","label":"Load repository list","kind":"call","src":[1,2]},{"from":"startup","to":"indexer","label":"Sync specs and start pipeline","kind":"call","src":[2,11]},{"from":"indexer","to":"git","label":"Clone or fetch repository","kind":"call","src":[3,4]},{"from":"indexer","to":"ctags","label":"Extract symbols from file bodies","kind":"call","src":[6,7]},{"from":"indexer","to":"rg","label":"Keyword indexing of raw text","kind":"call","src":[3,7]},{"from":"indexer","to":"embed","label":"Embed enriched chunk text","kind":"call","src":[3,8]},{"from":"indexer","to":"db","label":"Store files, symbols, chunks, vectors","kind":"return","src":[5,7]}]}`;
+
+describe("a spec past the prompt's size guidance", () => {
+  it("draws the eight-actor sequence rather than showing its JSON", () => {
+    const s = parseDiagram(wideSequence) as SequenceSpec | null;
+    expect(s?.type).toBe("sequence");
+    expect(s!.actors).toHaveLength(8);
+    expect(s!.steps).toHaveLength(7);
+    expect(s!.steps[0].src).toEqual([1, 2]);
+    // Nothing is clipped: the SVG carries no viewBox, so the layout has to be
+    // as wide as the eighth lifeline and the box scrolls it.
+    const l = layoutSequence(s!);
+    expect(l.actors).toHaveLength(8);
+    // 55 is half an actor box: the eighth one's right edge is inside the width.
+    expect(l.width).toBeGreaterThanOrEqual(l.actors[7].x + 55);
+  });
+
+  it("draws a flow past the node guidance, and a sequence past the step guidance", () => {
+    const many = parseDiagram(
+      JSON.stringify({
+        type: "flow",
+        nodes: Array.from({ length: 16 }, (_, i) => ({ id: `n${i}`, label: `n${i}` })),
+        edges: Array.from({ length: 15 }, (_, i) => ({ from: `n${i}`, to: `n${i + 1}` })),
+      }),
+    ) as FlowSpec | null;
+    expect(many?.nodes).toHaveLength(16);
+    expect(layoutFlow(many!).nodes).toHaveLength(16);
+    const long = parseDiagram(
       JSON.stringify({
         type: "sequence",
         actors: [{ id: "u", label: "UI" }],
-        steps: Array.from({ length: 13 }, () => ({ from: "u", to: "u", label: "x" })),
+        steps: Array.from({ length: 16 }, () => ({ from: "u", to: "u", label: "x" })),
       }),
-    ];
-    for (const b of bad) expect(parseDiagram(b), b).toBeNull();
+    ) as SequenceSpec | null;
+    expect(long?.steps).toHaveLength(16);
   });
 });
 
