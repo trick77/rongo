@@ -183,6 +183,24 @@ func TestSettleTitles_endsTheWaitingLeftBehindByACrash(t *testing.T) {
 	}
 }
 
+func TestSettlingATitle_reportsAWriteThatNeverLanded(t *testing.T) {
+	// Both writes are made for their effect on a later read — the header asks
+	// the list, not the writer — so a silent failure would show up as a thread
+	// stuck on "New question" with nothing in the log to say why.
+	ctx := context.Background()
+	db := threadDB(t)
+	s := NewStore(db)
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+	db.Close()
+
+	if err := s.SetTitle(ctx, th.ID, th.Title, ""); err == nil {
+		t.Error("SetTitle reported success on a closed database")
+	}
+	if err := s.SettleTitles(ctx); err == nil {
+		t.Error("SettleTitles reported success on a closed database")
+	}
+}
+
 func TestRename_endsTheWaitingToo(t *testing.T) {
 	// A name the reader typed is a title. The header must show it rather than
 	// hold its place for a model call that will find the row renamed.
