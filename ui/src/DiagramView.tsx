@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DiagramSvg, diagramSize, diagramTitle, type DiagramSpec } from "./diagram";
 import { download, fileName, toSvgFile } from "./diagramExport";
+import { useBackdropDismiss } from "./dismiss";
 import { DownloadIcon } from "./icons";
 import type { MarkerHooks } from "./markdown";
 
@@ -26,6 +27,7 @@ export default function DiagramView({
 }) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  const dismiss = useBackdropDismiss(onClose);
   const body = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   // Fitting is the default on a screen with room for it, and only there.
@@ -114,11 +116,11 @@ export default function DiagramView({
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
-      // The pointer, not the mouse: iOS Safari does not deliver mouse events
-      // to a plain div, and an iPad has no Escape key to fall back on.
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      // A press beside the sheet closes it and does nothing else: see
+      // useBackdropDismiss for why that is the click and not the pointerdown.
+      ref={dismiss.ref}
+      onPointerDown={dismiss.onPointerDown}
+      onPointerUp={dismiss.onPointerUp}
     >
       {/* font-sans explicitly: this is mounted from inside the answer's
           .ui-markdown wrapper, which is serif prose, and the dialog is chrome

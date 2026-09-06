@@ -49,15 +49,39 @@ describe("DiagramView", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("closes when the scrim itself is pressed, not the sheet", () => {
+  it("closes when the scrim itself is clicked, not the sheet", () => {
+    // The click, not the press: the sheet is gone by the time the click is
+    // dispatched, and it would otherwise land on the answer behind it.
     const onClose = vi.fn();
     const { getByRole } = render(<DiagramView spec={seq} hooks={{}} onClose={onClose} />);
     const dialog = getByRole("dialog");
-    fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
-    expect(onClose).not.toHaveBeenCalled();
     const scrim = dialog.parentElement as HTMLElement;
+
+    fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
+    fireEvent.click(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+
     fireEvent(scrim, createEvent.pointerDown(scrim, { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(scrim);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("takes a drag across the edge for a drag, not a cancel", () => {
+    const onClose = vi.fn();
+    const { getByRole } = render(<DiagramView spec={seq} hooks={{}} onClose={onClose} />);
+    const dialog = getByRole("dialog");
+    const scrim = dialog.parentElement as HTMLElement;
+
+    fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
+    fireEvent(scrim, createEvent.pointerUp(scrim, { bubbles: true }));
+    fireEvent.click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent(scrim, createEvent.pointerDown(scrim, { bubbles: true }));
+    fireEvent(dialog, createEvent.pointerUp(dialog, { bubbles: true }));
+    fireEvent.click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("keeps Tab inside, so it cannot reach the chips behind the scrim", () => {
