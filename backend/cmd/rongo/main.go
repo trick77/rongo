@@ -123,6 +123,15 @@ func main() {
 		slog.Error("settle orphaned thread titles", "err", err)
 		os.Exit(1)
 	}
+	// Every thread needs an address before a single request is served: it is
+	// what /thread/… and every /api/threads/… path is written in, and a thread
+	// that predates the column has none. Fatal rather than best-effort — a
+	// thread with an empty public_id is a row the rail can render and nothing
+	// can open.
+	if err := threads.NewStore(db).BackfillPublicIDs(ctx); err != nil {
+		slog.Error("give existing threads an address", "err", err)
+		os.Exit(1)
+	}
 	// The vec0 table's width is fixed when the database is created. Pointing a
 	// differently configured process at an existing file is a loud failure
 	// here rather than a rejected insert on every chunk much later — and, worse,

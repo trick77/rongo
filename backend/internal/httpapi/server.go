@@ -35,6 +35,15 @@ type Threads interface {
 	Message(ctx context.Context, subject string, messageID int64) (threads.Message, bool, error)
 	Messages(ctx context.Context, subject string, threadID int64) ([]threads.Message, error)
 	Owns(ctx context.Context, subject string, threadID int64) (bool, error)
+	// Resolve turns a thread's public address — what stands in every URL — into
+	// the row id everything in here works with. Owner-blind on purpose: the
+	// caller pairs it with an ownership predicate so "not yours" and "gone"
+	// answer alike.
+	Resolve(ctx context.Context, publicID string) (int64, bool, error)
+	// PublicIDFor is the way back, for the turns that reach their thread
+	// through a message: a resume and a retry have a row id and still have to
+	// tell the browser which address the thread lives at.
+	PublicIDFor(ctx context.Context, id int64) (string, error)
 	// ThreadScope is the repositories earlier turns of this thread already
 	// narrowed to, so a follow-up inherits them instead of being asked which
 	// repository was meant.

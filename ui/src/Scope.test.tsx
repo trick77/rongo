@@ -49,7 +49,7 @@ describe("the scope notice", () => {
     // did not ask about.
     const notice = 'No repository called "loom" in the index. Answered for "rongo" alone.';
     streamFrames([
-      ev("thread", { thread_id: 1, title: "t", message_id: 7 }),
+      ev("thread", { thread_id: "1", title: "t", message_id: 7 }),
       ev("notice", { text: notice }),
       ev("status", { step: "searching" }),
       ev("token", { text: "rongo keeps no session [1]." }),
@@ -67,7 +67,7 @@ describe("the scope notice", () => {
 
   it("says nothing on an ordinary turn", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1, title: "t", message_id: 7 }),
+      ev("thread", { thread_id: "1", title: "t", message_id: 7 }),
       ev("status", { step: "searching" }),
       ev("token", { text: "It works like this [1]." }),
       ev("done", { message_id: 7 }),

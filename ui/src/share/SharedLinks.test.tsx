@@ -9,7 +9,7 @@ afterEach(() => vi.unstubAllGlobals());
 const live: Share = {
   token: "kd8Qw1rZ7mB3xN2pLcTvAg",
   path: "/share/kd8Qw1rZ7mB3xN2pLcTvAg",
-  thread_id: 7,
+  thread_id: "7",
   title: "How does routing decide?",
   up_to_message_id: 12,
   turns: 2,
@@ -89,6 +89,6 @@ describe("SharedLinks", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "How does routing decide?" }));
 
-    expect(onOpenThread).toHaveBeenCalledWith(7);
+    expect(onOpenThread).toHaveBeenCalledWith("7");
   });
 });

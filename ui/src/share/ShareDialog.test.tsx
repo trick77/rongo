@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 const live: Share = {
   token: "kd8Qw1rZ7mB3xN2pLcTvAg",
   path: "/share/kd8Qw1rZ7mB3xN2pLcTvAg",
-  thread_id: 7,
+  thread_id: "7",
   title: "How does shipping work?",
   up_to_message_id: 12,
   turns: 2,
@@ -28,7 +28,7 @@ function clipboard() {
 function open(share: Share | null, onChange = vi.fn()) {
   render(
     <ShareDialog
-      threadID={7}
+      threadID="7"
       title="How does shipping work?"
       share={share}
       onCancel={() => {}}

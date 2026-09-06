@@ -9,7 +9,8 @@
 export type Share = {
   token: string;
   path: string;
-  thread_id: number;
+  /** The thread's own address, so the Shared page can open it. */
+  thread_id: string;
   title: string;
   up_to_message_id: number;
   /** Turns the link covers, and turns asked since it was made. */
@@ -32,21 +33,21 @@ async function shareCall(method: string, path: string): Promise<Share | number> 
   return (await res.json()) as Share;
 }
 
-export function createShare(threadID: number) {
+export function createShare(threadID: string) {
   return shareCall("POST", `/api/threads/${threadID}/share`);
 }
 
-export function updateShare(threadID: number) {
+export function updateShare(threadID: string) {
   return shareCall("POST", `/api/threads/${threadID}/share/update`);
 }
 
 /** The live link on a thread, or null when it has none. */
-export async function shareFor(threadID: number): Promise<Share | null> {
+export async function shareFor(threadID: string): Promise<Share | null> {
   const list = await listShares();
   return list.find((s) => s.thread_id === threadID) ?? null;
 }
 
-export async function revokeShare(threadID: number): Promise<boolean> {
+export async function revokeShare(threadID: string): Promise<boolean> {
   const res = await fetch(`/api/threads/${threadID}/share`, { method: "DELETE" });
   // A 404 is a link that is already gone, which is what was asked for.
   return res.ok || res.status === 404;

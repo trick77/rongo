@@ -70,9 +70,10 @@ func TestAsk_aFollowupIsAnsweredInTheThreadsLanguage(t *testing.T) {
 	postAsk(t, deps, `{"question":"How?","audience":"ba","language":"de"}`)
 	list, _ := st.List(context.Background(), testSubject)
 	threadID := list[0].ID
+	threadAddr := list[0].PublicID
 
 	a.gotLang = ""
-	postAsk(t, deps, fmt.Sprintf(`{"question":"And then?","audience":"ba","language":"fr","thread_id":%d}`, threadID))
+	postAsk(t, deps, fmt.Sprintf(`{"question":"And then?","audience":"ba","language":"fr","thread_id":%q}`, threadAddr))
 
 	if a.gotLang != ask.LanguageDE {
 		t.Errorf("language = %q, want de — the thread's language, not the composer's", a.gotLang)
@@ -93,7 +94,7 @@ func TestAsk_theThreadEventCarriesTheLanguageTheRecordTook(t *testing.T) {
 	postAsk(t, deps, `{"question":"Wie?","audience":"ba","language":"de"}`)
 	list, _ := st.List(context.Background(), testSubject)
 
-	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"Und dann?","audience":"ba","language":"fr","thread_id":%d}`, list[0].ID))
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"Und dann?","audience":"ba","language":"fr","thread_id":%q}`, list[0].PublicID))
 	for _, e := range events(rec.Body.String()) {
 		if e[0] == "thread" && !strings.Contains(e[1], `"language":"de"`) {
 			t.Errorf("thread event = %s, want the thread's language on it", e[1])

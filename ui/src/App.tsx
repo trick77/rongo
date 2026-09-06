@@ -186,7 +186,7 @@ export default function App() {
   // The thread a running turn is being written into. Kept apart from threadId:
   // the two part company the moment the reader opens another thread while the
   // answer is still arriving, which they are free to do.
-  const [busyThread, setBusyThread] = useState<number | null>(null);
+  const [busyThread, setBusyThread] = useState<string | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
@@ -203,7 +203,7 @@ export default function App() {
   }, []);
 
   const selectThread = useCallback(
-    (id: number | null, replace = false) =>
+    (id: string | null, replace = false) =>
       go(id === null ? { view: "new" } : { view: "thread", id }, replace),
     [go],
   );

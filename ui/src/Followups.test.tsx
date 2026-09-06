@@ -43,7 +43,7 @@ function streamPerCall(frameSets: string[][]) {
 }
 
 const answered = (followups: string[], text = "Through a grant.") => [
-  ev("thread", { thread_id: 1, title: "x", message_id: 5 }),
+  ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
   ev("token", { text }),
   ev("citations", []),
   ev("followups", followups),
@@ -110,7 +110,7 @@ describe("follow-up suggestions", () => {
     expect(second.question).toBe("Was passiert beim Neuindexieren?");
     expect(second.audience).toBe("dev");
     expect(second.language).toBe("de");
-    expect(second.thread_id).toBe(1);
+    expect(second.thread_id).toBe("1");
   });
 
   it("adds a turn and leaves the answer it came from alone", async () => {
@@ -176,7 +176,7 @@ describe("follow-up suggestions", () => {
 
     render(
       <StrictMode>
-        <Ask threadId={7} />
+        <Ask threadId="7" />
       </StrictMode>,
     );
 

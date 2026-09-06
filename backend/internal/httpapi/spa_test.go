@@ -39,16 +39,45 @@ func TestSPA_servesIndexAtRoot(t *testing.T) {
 }
 
 func TestSPA_fallsBackForClientRoutes(t *testing.T) {
-	// Given: the SPA owns its own routing, so an unknown non-API path must
-	// return index.html rather than 404.
+	// Given: the SPA owns its own routing, so the paths it has a page for must
+	// return index.html rather than 404 — including a thread address, which is
+	// checked by shape here because this handler has no session and no
+	// database, and answering "no such thread" would tell anyone which
+	// addresses are real.
 	srv := NewServer(Deps{})
 
-	req := httptest.NewRequest(http.MethodGet, "/threads/42", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	for _, path := range []string{"/new", "/repos", "/shared", "/thread/v76BBy2b1nMYOFl2Lnm9JQ", "/share/kd8Qw1rZ"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want %d", path, rec.Code, http.StatusOK)
+		}
+	}
+}
+
+// A path the app has no page for is a real 404, not 200 and a shell that
+// quietly renders the unasked question. A soft 404 tells the reader, a crawler
+// and a monitor that the link worked.
+//
+// "/thread/19" is on this list for good: threads were addressed by row number
+// for one release, and those URLs are not redirected — a redirect would keep
+// the counter reachable for ever.
+func TestSPA_aPathTheAppHasNoPageForIsNotFound(t *testing.T) {
+	srv := NewServer(Deps{})
+
+	for _, path := range []string{
+		"/threads/42", "/nope", "/thread/", "/thread/19", "/thread/abc",
+		"/thread/v76BBy2b1nMYOFl2Lnm9JQx", "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want %d", path, rec.Code, http.StatusNotFound)
+		}
 	}
 }
 

@@ -97,15 +97,15 @@ describe("Ask, a thread the reader walked away from", () => {
     const { rerender } = render(<Ask threadId={null} onBusy={onBusy} />);
     await askNew();
 
-    await stream.push(ev("thread", { thread_id: 1 }));
+    await stream.push(ev("thread", { thread_id: "1" }));
     await stream.push(ev("token", { text: "The walker accepts a file, " }));
     await screen.findByText(/The walker accepts a file/);
     // The rail is told WHICH thread is being written, not merely that one is.
-    expect(onBusy).toHaveBeenCalledWith(true, 1);
+    expect(onBusy).toHaveBeenCalledWith(true, "1");
 
     // The reader opens another thread. The record answers for that one; the
     // half-written answer leaves the screen with the thread it belongs to.
-    rerender(<Ask threadId={40} onBusy={onBusy} />);
+    rerender(<Ask threadId="40" onBusy={onBusy} />);
     await screen.findByText(/On the callback that finishes sign-in/);
     expect(screen.queryByText(/The walker accepts/)).toBeNull();
 
@@ -114,7 +114,7 @@ describe("Ask, a thread the reader walked away from", () => {
     await stream.push(ev("token", { text: "then the splitter cuts it." }));
     expect(screen.queryByText(/splitter/)).toBeNull();
 
-    rerender(<Ask threadId={1} onBusy={onBusy} />);
+    rerender(<Ask threadId="1" onBusy={onBusy} />);
     // Both halves: the one they watched arrive and the one that landed while
     // they were reading somewhere else. (Two text nodes — the streamed answer
     // is rendered a segment at a time.)
@@ -131,17 +131,17 @@ describe("Ask, a thread the reader walked away from", () => {
     const stream = liveStream({ 40: other });
     const { rerender } = render(<Ask threadId={null} />);
     await askNew();
-    await stream.push(ev("thread", { thread_id: 1 }));
+    await stream.push(ev("thread", { thread_id: "1" }));
     await stream.push(ev("token", { text: "Chunks reach the embedder." }));
     await screen.findByText(/Chunks reach the embedder/);
 
-    rerender(<Ask threadId={40} />);
+    rerender(<Ask threadId="40" />);
     await screen.findByText(/On the callback that finishes sign-in/);
     await stream.push(ev("citations", []));
     await stream.push(ev("followups", ["What is the size ceiling?"]));
     await stream.push(ev("done", { message_id: 5 }));
 
-    rerender(<Ask threadId={1} />);
+    rerender(<Ask threadId="1" />);
     expect(await screen.findByRole("button", { name: "What is the size ceiling?" })).toBeTruthy();
   });
 
@@ -151,13 +151,13 @@ describe("Ask, a thread the reader walked away from", () => {
     const stream = liveStream({ 40: other });
     const { rerender } = render(<Ask threadId={null} />);
     await askNew();
-    await stream.push(ev("thread", { thread_id: 1 }));
+    await stream.push(ev("thread", { thread_id: "1" }));
     await stream.push(ev("token", { text: "Still writing…" }));
     await screen.findByText(/Still writing/);
     // Not in the thread being written: the running turn is right there.
     expect(screen.queryByText(/Another thread is still being answered/)).toBeNull();
 
-    rerender(<Ask threadId={40} />);
+    rerender(<Ask threadId="40" />);
     await screen.findByText(/On the callback that finishes sign-in/);
     expect(screen.getByText(/Another thread is still being answered/)).toBeTruthy();
 
@@ -174,13 +174,13 @@ describe("Ask, a thread the reader walked away from", () => {
     const { rerender } = render(<Ask threadId={null} onThread={onThread} />);
     await askNew();
 
-    rerender(<Ask threadId={40} onThread={onThread} />);
+    rerender(<Ask threadId="40" onThread={onThread} />);
     await screen.findByText(/On the callback that finishes sign-in/);
 
-    await stream.push(ev("thread", { thread_id: 1 }));
+    await stream.push(ev("thread", { thread_id: "1" }));
     await stream.push(ev("token", { text: "Still writing…" }));
 
-    expect(onThread).not.toHaveBeenCalledWith(1);
+    expect(onThread).not.toHaveBeenCalledWith("1");
     expect(screen.queryByText(/Still writing/)).toBeNull();
     expect(screen.getByText(/On the callback that finishes sign-in/)).toBeTruthy();
 
@@ -199,7 +199,7 @@ describe("Ask, a thread the reader walked away from", () => {
         (c) => String(c[0]) === "/api/ask" && String(c[1]?.body).includes("And then?"),
       );
       expect(post).toBeTruthy();
-      expect(JSON.parse(String(post![1]?.body)).thread_id).toBe(40);
+      expect(JSON.parse(String(post![1]?.body)).thread_id).toBe("40");
     });
   });
 
@@ -263,11 +263,11 @@ describe("Ask, a thread the reader walked away from", () => {
       },
     ];
     const stream = liveStream({ 7: open, 40: answered });
-    const { rerender } = render(<Ask threadId={7} />);
+    const { rerender } = render(<Ask threadId="7" />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /The indexer walk/ }));
 
-    rerender(<Ask threadId={40} />);
+    rerender(<Ask threadId="40" />);
     await screen.findByText(/Chosen: The auth callback/);
 
     // The resume fails while they are elsewhere.
