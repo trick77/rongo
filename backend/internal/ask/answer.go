@@ -405,6 +405,17 @@ func DocsOnly(sources []Source) bool {
 	return true
 }
 
+// docMask says, per source, whether it is documentation. It is what lets the
+// renumberer keep a diagram node from citing prose; the order is the order
+// renderSources numbered, so index i is the prompt's source i+1.
+func docMask(sources []Source) []bool {
+	out := make([]bool, len(sources))
+	for i, s := range sources {
+		out[i] = retrieve.IsDocPath(s.Path)
+	}
+	return out
+}
+
 // scopeNotice is the "one of the repositories you named is not indexed"
 // sentence, in the language the reader asked for. Templated rather than
 // written by a model, exactly like nothingFound: a person reads it, so the
@@ -616,6 +627,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// once the stream ends, cut short or not.
 	var text strings.Builder
 	rn := newRenumberer(len(sources))
+	rn.docs = docMask(sources)
 	emit := func(s string) {
 		if s == "" {
 			return

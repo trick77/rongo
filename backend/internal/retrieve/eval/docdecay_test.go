@@ -22,6 +22,15 @@ const docK = 20
 // TestEvalMeasureDocSweep reports, per documentation decay, the two numbers
 // that decide the constant, which pull in opposite directions:
 //
+// Recall at the routing cut is a membership metric and it cannot see the
+// thing the demotion is mostly for. A README that falls from rank 1 to rank 8
+// leaves recall@20 exactly where it was, while the answer is now written from
+// code and cites code — which is the complaint the constant exists to answer.
+// So the same hit lists are read three ways: recall@20 (does the code reach
+// the routing cut at all), recall@5 and the mean rank of the expected code
+// path (does it reach the top of the material an answer is written from).
+// Same searches, no extra arm; the reading is what was missing.
+//
 //   - code-led recall: on the questions whose answer is in code, does the code
 //     reach the cut? This is what the demotion exists to raise. Prose in domain
 //     vocabulary is what a natural-language question matches, so documentation
@@ -70,16 +79,24 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 
 	t.Logf("code-led=%d doc-led=%d k=%d decays=%v", len(codeLed), len(docLed), docK, docDecays)
 	t.Logf("")
-	t.Logf("%-7s %-20s %s", "decay", "code-led r@20", "doc-led r@20")
+	t.Logf("%-7s %-20s %-20s %-12s %s",
+		"decay", "code-led r@20", "code-led r@5", "code rank", "doc-led r@20")
 
 	for _, decay := range docDecays {
 		r := retrieve.New(db, embedder)
 		r.DocDecay = decay
 
-		var codeHit, docHit int
+		var codeHit, codeTop5, docHit int
+		var codeRankSum, codeRanked int
 		for _, q := range codeLed {
-			if rankOfExpected(docHits(t, ctx, r, expansions, expansionRepos, q), q) > 0 {
+			rank := rankOfExpected(docHits(t, ctx, r, expansions, expansionRepos, q), q)
+			if rank > 0 {
 				codeHit++
+				codeRankSum += rank
+				codeRanked++
+			}
+			if rank > 0 && rank <= 5 {
+				codeTop5++
 			}
 		}
 		for _, q := range docLed {
@@ -88,7 +105,12 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 			}
 		}
 
-		t.Logf("%-7.2f %-20s %s", decay, frac(codeHit, len(codeLed)), frac(docHit, len(docLed)))
+		mean := 0.0
+		if codeRanked > 0 {
+			mean = float64(codeRankSum) / float64(codeRanked)
+		}
+		t.Logf("%-7.2f %-20s %-20s %-12.2f %s",
+			decay, frac(codeHit, len(codeLed)), frac(codeTop5, len(codeLed)), mean, frac(docHit, len(docLed)))
 	}
 }
 

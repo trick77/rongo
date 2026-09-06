@@ -208,3 +208,10 @@ At 28 questions a difference of 0.14 in recall@5 is four questions. The phase-2
 document already recommends growing the set to 80–100 before treating smaller
 differences as real; the comment result is large enough to act on, the module
 result is not close enough for the sample size to matter.
+
+**Revisited 2026-09-06**, on the axis this document named: 65 questions, the
+peeq/rongo/go-sqlite3 corpus, and query expansion in every arm. Comments still
+win, by more than they did here — `docs/measurements/2026-09-06-comments-with-query-expansion.md`.
+Expansion adds guessed code vocabulary to the query; it does not put domain
+words into the corpus for that vocabulary to meet, so the two are complements
+rather than substitutes. `BACKEND_INDEX_COMMENTS` stays `1`.

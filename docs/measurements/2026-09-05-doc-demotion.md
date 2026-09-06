@@ -1,10 +1,9 @@
-# Documentation in the fused list: the mechanism, and the sweep that has to name the constant
+# Documentation in the fused list: the mechanism, and the sweep that named the constant
 
-**Status: the arm is written and the constant ships OFF (`DefaultDocDecay = 1.0`).
-This document records the mechanism, the cohort change that makes the sweep
-readable, and what the run has to show before the value is pinned. It does not
-report numbers — the sweep needs a real embedding endpoint and a full corpus
-index, and has not been run.**
+**Status: run on 2026-09-06 against the pinned corpus (peeq, rongo,
+go-sqlite3 at `pin20260820`), 65 questions. `DefaultDocDecay = 0.7` — the
+harshest decay that leaves doc-led recall whole. The table is at the foot of
+this document.**
 
 ## The problem
 
@@ -22,11 +21,14 @@ produce exactly that context.
    vocabulary, which is what a natural-language question matches on in FTS5 and
    in the vector lane alike. The identifier lane is the one that finds code, and
    it only fires when the reader typed an identifier.
-3. **Nothing ever hops out of a document.** Markdown yields no ctags symbol, so
+3. **Nothing hops INTO a document.** Markdown yields no ctags symbol, so
    a doc chunk falls to a plain ~600-token line window with an empty `Symbol`
    (`internal/indexer/chunk.go`), and the reference walk joins the `symbols`
-   table (`internal/ask/gather.go`). A doc-heavy hit list starves the walk as
-   well as the cut — the two ways an answer reaches code.
+   table (`internal/ask/gather.go`), so no hop can land on one. Out of one is
+   possible — `referenced()` runs `identifiers()` over the hit's own text, and
+   a README naming `NewGrant` reaches the code that declares it — but the walk
+   is seeded by what won fusion, and a doc-heavy hit list still starves it as
+   well as the cut, the two ways an answer reaches code.
 4. **It cannot be trimmed back out.** `Gather` never evicts a search hit by
    budget, by design: an answer cites what it was built on. So a document that
    won fusion is guaranteed a place in the context.
@@ -120,10 +122,51 @@ improved retrieval; it has changed which questions rongo can answer. Record the
 table here, pin `DefaultDocDecay`, and name this file in the constant's comment
 the way `DefaultTestDecay` names its own.
 
-## What ships in the meantime
+## The result, 2026-09-06
 
-The demotion is off, so retrieval is unchanged. What does ship is the half that
-needs no measurement:
+Corpus: peeq, rongo, go-sqlite3 at `pin20260820`, the same index the routing
+and diversity arms read. 65 questions, 62 code-led and 3 doc-led. Expansions
+were already frozen for all 65 by the run recorded in #85, so no re-freeze was
+needed.
+
+| decay | code-led r@20 | code-led r@5 | mean rank of the expected code | doc-led r@20 |
+|---|---|---|---|---|
+| 1.00 | 0.887 (55/62) | 0.823 (51/62) | 2.56 | 1.000 (3/3) |
+| **0.70** | **0.887 (55/62)** | **0.823 (51/62)** | **2.40** | **1.000 (3/3)** |
+| 0.50 | 0.887 (55/62) | 0.823 (51/62) | 2.40 | 0.333 (1/3) |
+| 0.35 | 0.903 (56/62) | 0.823 (51/62) | 2.70 | 0.333 (1/3) |
+| 0.20 | 0.903 (56/62) | 0.823 (51/62) | 2.70 | 0.333 (1/3) |
+
+**0.7 ships.** It is the harshest decay that leaves doc-led recall whole, and
+the only arm that improves anything at no cost: the expected code file sits
+2.40 deep in the fused list instead of 2.56, with recall unchanged at both
+depths.
+
+Two things the run says that the arm as designed could not have.
+
+**Recall at the cut was the wrong reading on its own.** Membership at 20 does
+not move between 1.0 and 0.5 at all, and the complaint the constant exists to
+answer is not membership: a README at rank 1 fills the top of the context and
+is what the answer cites, at rank 8 it is not, and recall@20 is identical
+either way. The sweep now reads the same hit lists three ways — r@20, r@5 and
+the mean rank of the expected code path — and the mean rank is the only column
+that separates 1.0 from 0.7. The phase-2 harness made the same mistake with
+`barred` and the 2026-08-17 document warned about it; it was repeated here.
+
+**The harsh arms are worse, not merely riskier.** 0.35 and 0.2 buy one more
+question at 20 and give back 0.3 of a rank at the top, while taking two of the
+three doc-led questions with them. Pushing prose far enough down lets a
+distant code hit into the cut without putting the right code any nearer the
+front. There is no arm below 0.7 that is only a trade.
+
+**The doc-led axis is three questions.** 3/3 → 1/3 is a cliff between two
+arms, not a curve, so "0.5 is unsafe" rests on two questions. It is the
+strongest statement this cohort can make, and it is the reason the value that
+ships is the mildest one that is measurably not free.
+
+## What ships alongside
+
+Beside the demotion, the half that needed no measurement:
 
 - documentation-only modules no longer reach the clarification card
   (`onlySupporting` in `internal/ask/route.go`, generalised from `onlyTests`),
