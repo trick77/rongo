@@ -225,7 +225,7 @@ export default function Threads({
 
   return (
     <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
+      <div className="thin-scroll min-h-0 flex-1 overflow-auto px-2 pb-4">
         {groups.map((g) => (
           // "Today" is not painted: it always heads the list, and naming the
           // day a thread was asked on is only worth the line once the day is

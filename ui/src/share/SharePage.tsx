@@ -138,15 +138,10 @@ export default function SharePage({ token }: { token: string }) {
             Each strip is the padding on its own side, so text clears the fade
             at rest. */}
         <div className="relative min-h-0 min-w-0">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8"
-          />
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
-          />
-          <div className="h-full overflow-auto">
+          {/* isolate for the same reason the answering column has it: the
+              turn's own positioned pieces are peers of the strips otherwise,
+              and an opaque one punches through. */}
+          <div className="thin-scroll isolate h-full overflow-auto">
             <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
               <ThreadView
                 turns={state.turns}
@@ -157,6 +152,15 @@ export default function SharePage({ token }: { token: string }) {
               />
             </div>
           </div>
+          {/* Both strips after the scroller, tree order deciding the paint. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
+          />
         </div>
         <SourcesPane turns={state.turns} hot={hot} onOpen={setViewing} />
       </div>

@@ -855,19 +855,6 @@ export default function Ask({
     <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
-        {/* ../loom's transcript edges: prose dissolves into the background as
-            it leaves the column rather than being cut off by it. The head is
-            here; the foot's strip rides above the composer, further down.
-            The height tracks the column's top padding at every breakpoint:
-            content has to clear the fade, or the first line sits half dimmed
-            with the column at rest.
-            z-0, not ../loom's z-10: the busybar runs along the same edge at
-            z-1, and an opaque strip over it would swallow the 2px line. A
-            positioned element still paints above the scrolled text. */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
-        />
         <div
           ref={view}
           // The reader's own intent, caught as it happens: a scroll event is
@@ -900,7 +887,11 @@ export default function Ask({
             // reads a pixel or two short of it.
             if (el.scrollHeight - el.scrollTop - el.clientHeight > 4) stopFollowing();
           }}
-          className="min-h-0 flex-1 overflow-auto"
+          // isolate, so the column is one layer rather than a scattering of
+          // them: a turn's own positioned pieces — the question's clip fade,
+          // a diagram card and its z-10 toolbar — would otherwise each be a
+          // peer of the strip below and punch an opaque hole through it.
+          className="thin-scroll isolate min-h-0 flex-1 overflow-auto"
         >
           <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
@@ -960,6 +951,21 @@ export default function Ask({
             <div ref={bottom} />
           </div>
         </div>
+        {/* ../loom's transcript edges: prose dissolves into the background as
+            it leaves the column rather than being cut off by it. This is the
+            head; the foot's strip rides above the composer, just below.
+            AFTER the scroller, not before it: a strip and the column's own
+            positioned pieces sit in the same paint layer, and tree order is
+            what decides between them.
+            The height tracks the column's top padding at every breakpoint —
+            content has to clear the fade, or the first line sits half dimmed
+            with the column at rest.
+            z-0, not ../loom's z-10: the busybar runs along the same edge at
+            z-1, and an opaque strip over it would swallow the 2px line. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
+        />
 
         <form
           onSubmit={submit}

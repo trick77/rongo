@@ -1281,6 +1281,12 @@ describe("Ask, the edges of the reading column", () => {
     // Under the busybar, not over it: an opaque strip at z-10 would swallow
     // the 2px line that runs along the very same edge.
     expect(head.className).toContain("z-0");
+    // Which means tree order is what decides the strip against the column's
+    // own positioned pieces, so the strip comes after the scroller and the
+    // scroller is one isolated layer rather than a scattering of peers.
+    const scroll = container.querySelector(".overflow-auto") as HTMLElement;
+    expect(scroll.className).toContain("isolate");
+    expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // The foot's strip belongs to the composer and sits immediately above it,
     // because the composer is a sibling BELOW the scroller rather than an
