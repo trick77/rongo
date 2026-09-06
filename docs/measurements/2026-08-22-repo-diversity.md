@@ -70,10 +70,12 @@ by 0.6 and the ambiguous side gives its gain straight back. The mechanism is
 doing what it says — pushing a repository's repeats down — and on this
 catalogue the repeats being pushed down are frequently the answer.
 
-> **Superseded 2026-09-06:** the 1 of 5 below is a search-only number. Measured
-> through the pipeline the product runs - frozen expansion, then the symbol walk -
-> composition is **4 of 5**, 9 parts of 10, with zero gather misses and one part
-> never retrieved. See `2026-09-06-composition-parts.md`.
+> **Superseded 2026-09-06:** the 2/10 and 6/10 below are the RAW-question arms.
+> The product expands the question first, and on that arm the same corpus gives
+> **9/10 parts and 4 of 5 questions** - zero gather misses, one part never
+> retrieved. Doc demotion was ruled out as the cause by measuring with it off.
+> The reading beneath, that gathering does not rescue this cohort, does not hold
+> for the arm a reader gets. See `2026-09-06-composition-parts.md`.
 
 Composition sits at 1 of 5 in every arm, untouched by the decay. It is the
 worst number on the page, and gathering does not rescue it either:
