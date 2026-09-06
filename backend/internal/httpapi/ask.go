@@ -67,7 +67,10 @@ const basisGone = "The basis of this answer is no longer indexed."
 var errNotYours = errors.New("thread does not belong to this user")
 
 type askRequest struct {
-	ThreadID int64  `json:"thread_id"`
+	// ThreadID is the thread's public address, empty for a new one — where a
+	// row number and 0 stood before. It is resolved to the internal id once,
+	// at the top of the handler; nothing below this line works in addresses.
+	ThreadID string `json:"thread_id"`
 	Question string `json:"question"`
 	Audience string `json:"audience"`
 	// Language is the language the answer is written in; see ask.ParseLanguage
@@ -155,6 +158,26 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// point and a cancel has to reach them too.
 	ctx, cancelTurn := context.WithCancelCause(r.Context())
 	defer cancelTurn(nil)
+
+	// The request names its thread by address; everything below works in row
+	// ids. Resolved once, here, before anything is validated against it — and
+	// before a thread could be created, so a request naming a thread that is
+	// gone is refused rather than answered into a new one. Empty is a new
+	// thread and resolves to 0, which is what it meant when it was a number.
+	//
+	// Refused as "no such thread" whether the address is unknown or simply
+	// someone else's, the same 403 s.thread answers for a thread that is not
+	// this reader's: the two must not be told apart.
+	reqThreadID, found, err := s.deps.Threads.Resolve(ctx, req.ThreadID)
+	if err != nil {
+		slog.Error("resolve thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if req.ThreadID != "" && !found {
+		http.Error(w, "no such thread", http.StatusForbidden)
+		return
+	}
 
 	// Resuming a clarification is validated in full BEFORE the thread is
 	// touched: an out-of-range choice, a foreign clarification or a card that
@@ -319,7 +342,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// follows: whether the id exists is not confirmed to someone who does
 		// not own it. A thread_id that disagrees with the head is refused
 		// too rather than quietly preferring one of them.
-		if !ok || (req.ThreadID != 0 && req.ThreadID != head.ThreadID) {
+		if !ok || (reqThreadID != 0 && reqThreadID != head.ThreadID) {
 			http.Error(w, "no such message", http.StatusForbidden)
 			return
 		}
@@ -347,7 +370,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// where the attempt belongs.
 		thread = threads.Thread{ID: retryHead.ThreadID}
 	default:
-		t, err := s.thread(ctx, u.Subject, req)
+		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
 		if errors.Is(err, errNotYours) {
 			http.Error(w, "no such thread", http.StatusForbidden)
 			return
@@ -361,8 +384,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		thread = t
-		if req.ThreadID != 0 {
-			if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, req.ThreadID); err != nil {
+		if reqThreadID != 0 {
+			if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
 				slog.Error("read thread scope failed", "err", err)
 			} else {
 				prior.Pin = pin
@@ -370,7 +393,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// The last ANSWERED turn, which is what a follow-up points at:
 			// "kannst du das in einem Diagramm aufzeigen?" names no mechanism
 			// because the reader named it a turn ago.
-			if last, ok, err := s.deps.Threads.LastTurn(ctx, u.Subject, req.ThreadID); err != nil {
+			if last, ok, err := s.deps.Threads.LastTurn(ctx, u.Subject, reqThreadID); err != nil {
 				slog.Error("read last turn failed", "err", err)
 			} else if ok {
 				prior.Question, prior.Answer = last.Question, last.Answer
@@ -382,6 +405,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// conversation pins to one upstream node instead of scattering across the
 	// deployment. Attached once here: both the fresh and the resumed path land
 	// on the same thread value.
+	// A resumed clarification and a retry both reach their thread through a
+	// MESSAGE, so the branches above have a row id and no address. The stream
+	// tells the browser which thread to put in the address bar, so it needs
+	// one either way.
+	if thread.PublicID == "" {
+		publicID, err := s.deps.Threads.PublicIDFor(ctx, thread.ID)
+		if err != nil {
+			slog.Error("read thread address failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		thread.PublicID = publicID
+	}
+
 	ctx = llm.WithThreadID(ctx, thread.ID)
 	// Every paid call this turn makes lands in one meter, the gates included.
 	// Attached after the thread id and before the title goroutine forks off:
@@ -454,7 +491,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// first turn. Sent first thing, so a composer that guessed corrects itself
 	// before the answer starts arriving in a language it did not expect.
 	send("thread", map[string]any{
-		"thread_id":  thread.ID,
+		"thread_id":  thread.PublicID,
 		"title":      thread.Title,
 		"message_id": msg.ID,
 		"language":   string(lang),
@@ -485,7 +522,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				recordMissed(ctx, "settle thread title failed", err)
 			}
 		} else {
-			settled := s.writeTitle(ctx, thread.ID, msg.ID, req.Question, thread.Title, lang, send)
+			settled := s.writeTitle(ctx, thread.ID, msg.ID, thread.PublicID, req.Question, thread.Title, lang, send)
 			defer settled()
 		}
 	}
@@ -753,6 +790,7 @@ func (s *Server) suggestFollowups(
 func (s *Server) writeTitle(
 	ctx context.Context,
 	threadID, messageID int64,
+	threadPublicID string,
 	question, placeholder string,
 	lang ask.Language,
 	send func(string, any),
@@ -804,7 +842,7 @@ func (s *Server) writeTitle(
 			// can have the title now instead of at the end of the turn.
 			// `send` is a no-op once the handler has returned, so a late one
 			// costs nothing and says nothing.
-			send("title", map[string]any{"thread_id": threadID, "title": title})
+			send("title", map[string]any{"thread_id": threadPublicID, "title": title})
 		}
 		if err := s.deps.Threads.SaveUsage(bg, messageID, titleMeter.Calls()); err != nil {
 			recordFailed(ctx, "record title usage failed", err)
@@ -1012,18 +1050,18 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 // thread returns the thread this turn belongs to, creating one when the request
 // names none. An existing thread is checked against its owner: the id comes
 // from the browser, and a thread belongs to the person who asked.
-func (s *Server) thread(ctx context.Context, subject string, req askRequest) (threads.Thread, error) {
-	if req.ThreadID == 0 {
+func (s *Server) thread(ctx context.Context, subject string, threadID int64, req askRequest) (threads.Thread, error) {
+	if threadID == 0 {
 		return s.deps.Threads.Create(ctx, subject, req.Question)
 	}
-	owns, err := s.deps.Threads.Owns(ctx, subject, req.ThreadID)
+	owns, err := s.deps.Threads.Owns(ctx, subject, threadID)
 	if err != nil {
 		return threads.Thread{}, err
 	}
 	if !owns {
 		return threads.Thread{}, errNotYours
 	}
-	return threads.Thread{ID: req.ThreadID}, nil
+	return threads.Thread{ID: threadID, PublicID: req.ThreadID}, nil
 }
 
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
@@ -1047,18 +1085,8 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := auth.UserFrom(r.Context())
+	u, id, ok := s.threadTarget(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		http.Error(w, "malformed thread id", http.StatusBadRequest)
 		return
 	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
@@ -1173,9 +1201,18 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return auth.User{}, 0, false
 	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	// An address that names no thread is a 404 and not a 400: to the reader
+	// there is no difference between a thread that never existed, one that was
+	// deleted, and one that is someone else's, and the handlers below keep it
+	// that way by pairing the id with an ownership predicate.
+	id, ok, err := s.deps.Threads.Resolve(r.Context(), r.PathValue("id"))
 	if err != nil {
-		http.Error(w, "malformed thread id", http.StatusBadRequest)
+		slog.Error("resolve thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return auth.User{}, 0, false
+	}
+	if !ok {
+		http.Error(w, "no such thread", http.StatusNotFound)
 		return auth.User{}, 0, false
 	}
 	return u, id, true

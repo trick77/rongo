@@ -147,7 +147,7 @@ func TestAsk_offersFollowupsBeforeTheTurnEnds(t *testing.T) {
 		t.Error("no status step announced the suggestion call; the reader sees an unexplained pause")
 	}
 	// and they are stored with the turn
-	msgs, err := store.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	msgs, err := store.Messages(context.Background(), testSubject, threadRowOf(t, store, body))
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestAsk_theSuggestionCallIsPartOfWhatTheTurnPaid(t *testing.T) {
 		t.Errorf("the usage event does not carry the suggestion call: %+v", rep.Calls)
 	}
 	// and it is stored, so the number survives the reload the same way
-	msgs, err := store.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	msgs, err := store.Messages(context.Background(), testSubject, threadRowOf(t, store, body))
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestAsk_aSuggesterThatCameBackEmptyCostsNothingButThePills(t *testing.T) {
 	if !strings.Contains(body, "event: done") {
 		t.Errorf("the turn did not end:\n%s", body)
 	}
-	msgs, _ := store.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	msgs, _ := store.Messages(context.Background(), testSubject, threadRowOf(t, store, body))
 	if len(msgs[0].Followups) != 0 {
 		t.Errorf("stored followups = %q, want none", msgs[0].Followups)
 	}
@@ -315,7 +315,7 @@ func TestAsk_theSuggestionsSurviveAReaderWhoLeftMidTurn(t *testing.T) {
 		t.Errorf("the suggester was handed a dead context (%v); the model call would never be made", sp.ctxErr)
 	}
 	// and the questions are on the record, where the next reload finds them
-	msgs, err := store.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	msgs, err := store.Messages(context.Background(), testSubject, threadRowOf(t, store, body))
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}

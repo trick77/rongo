@@ -37,7 +37,7 @@ func shareServer(t *testing.T) (*Server, *threads.Store, *fakeSource) {
 
 // sharedTurn is a thread with one finished, cited turn — the smallest thing
 // worth sharing.
-func sharedTurn(t *testing.T, st *threads.Store, subject string) int64 {
+func sharedTurn(t *testing.T, st *threads.Store, subject string) threads.Thread {
 	t.Helper()
 	ctx := context.Background()
 	th, err := st.Create(ctx, subject, "How does routing decide?")
@@ -53,13 +53,13 @@ func sharedTurn(t *testing.T, st *threads.Store, subject string) int64 {
 	}); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	return th.ID
+	return th
 }
 
 // share makes a link through the HTTP layer, the way the dialog does.
-func share(t *testing.T, srv *Server, threadID int64) threads.Share {
+func share(t *testing.T, srv *Server, threadID string) threads.Share {
 	t.Helper()
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share", threadID), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share", threadID), "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("share status = %d (%s), want 200", rec.Code, rec.Body.String())
 	}
@@ -81,7 +81,7 @@ func getPublic(srv *Server, path string) *httptest.ResponseRecorder {
 func TestPublicShare_readsWithoutASession(t *testing.T) {
 	// Given a shared thread
 	srv, st, _ := shareServer(t)
-	sh := share(t, srv, sharedTurn(t, st, testSubject))
+	sh := share(t, srv, sharedTurn(t, st, testSubject).PublicID)
 
 	// When an anonymous reader opens the link
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
@@ -119,14 +119,14 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	msgs, err := st.Messages(ctx, testSubject, th)
+	msgs, err := st.Messages(ctx, testSubject, th.ID)
 	if err != nil {
 		t.Fatalf("messages: %v", err)
 	}
 	if err := st.SaveFollowups(ctx, msgs[0].ID, []string{"And then?"}); err != nil {
 		t.Fatalf("save followups: %v", err)
 	}
-	sh := share(t, srv, th)
+	sh := share(t, srv, th.PublicID)
 
 	// When
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
@@ -146,8 +146,8 @@ func TestPublicShare_stopsAtTheCeiling(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	sh := share(t, srv, th)
-	later, err := st.AddQuestion(ctx, th, "ba", "en", "And then?", 0)
+	sh := share(t, srv, th.PublicID)
+	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -167,12 +167,12 @@ func TestPublicShare_stopsAtTheCeiling(t *testing.T) {
 func TestPublicShare_unknownRevokedAndDeletedAllAnswerTheSame(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	th := sharedTurn(t, st, testSubject)
-	revoked := share(t, srv, th)
-	if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d/share", th), ""); rec.Code != http.StatusNoContent {
+	revoked := share(t, srv, th.PublicID)
+	if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s/share", th.PublicID), ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("revoke status = %d, want 204", rec.Code)
 	}
-	gone := share(t, srv, sharedTurn(t, st, testSubject))
-	if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", gone.ThreadID), ""); rec.Code != http.StatusNoContent {
+	gone := share(t, srv, sharedTurn(t, st, testSubject).PublicID)
+	if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", gone.ThreadPublicID), ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", rec.Code)
 	}
 
@@ -194,7 +194,7 @@ func TestPublicShare_unknownRevokedAndDeletedAllAnswerTheSame(t *testing.T) {
 func TestPublicShareSource_opensACitedFileAndNothingElse(t *testing.T) {
 	// Given
 	srv, st, src := shareServer(t)
-	sh := share(t, srv, sharedTurn(t, st, testSubject))
+	sh := share(t, srv, sharedTurn(t, st, testSubject).PublicID)
 	q := func(repo, path, sha string) string {
 		return "/api/shares/" + sh.Token + "/source?" +
 			url.Values{"repo": {repo}, "path": {path}, "sha": {sha}}.Encode()
@@ -233,7 +233,7 @@ func TestShare_isRefusedWhileTheTurnIsStillBeingWritten(t *testing.T) {
 	}
 
 	// When
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share", th.ID), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share", th.PublicID), "")
 
 	// Then 409, not 400: the request is fine and will work in a moment.
 	if rec.Code != http.StatusConflict {
@@ -245,7 +245,7 @@ func TestShare_anotherReadersThreadIsNotFound(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	th := sharedTurn(t, st, otherSubject)
 
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share", th), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share", th.PublicID), "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
@@ -257,8 +257,8 @@ func TestShareUpdate_movesTheCeilingAndKeepsTheLink(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	first := share(t, srv, th)
-	later, err := st.AddQuestion(ctx, th, "ba", "en", "And then?", 0)
+	first := share(t, srv, th.PublicID)
+	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestShareUpdate_movesTheCeilingAndKeepsTheLink(t *testing.T) {
 	}
 
 	// When
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share/update", th), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID), "")
 
 	// Then
 	if rec.Code != http.StatusOK {
@@ -287,10 +287,10 @@ func TestShareUpdate_movesTheCeilingAndKeepsTheLink(t *testing.T) {
 
 func TestShares_listsThisReadersLiveLinks(t *testing.T) {
 	srv, st, _ := shareServer(t)
-	sh := share(t, srv, sharedTurn(t, st, testSubject))
+	sh := share(t, srv, sharedTurn(t, st, testSubject).PublicID)
 	// Someone else's link, made directly through the store.
 	other := sharedTurn(t, st, otherSubject)
-	if _, err := st.Share(context.Background(), otherSubject, other); err != nil {
+	if _, err := st.Share(context.Background(), otherSubject, other.ID); err != nil {
 		t.Fatalf("share: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestShares_listsThisReadersLiveLinks(t *testing.T) {
 // every one of them takes its failure branch. Those branches are the whole
 // reason a reader gets a clear error instead of a blank page, and they are the
 // half of each handler no happy-path test ever reaches.
-func brokenShares(t *testing.T) (*Server, int64) {
+func brokenShares(t *testing.T) (*Server, threads.Thread) {
 	t.Helper()
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
@@ -328,16 +328,16 @@ func brokenShares(t *testing.T) (*Server, int64) {
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
-	return srv, th.ID
+	return srv, th
 }
 
 func TestShareRoutes_aBrokenDatabaseIsAnErrorNotAnEmptyAnswer(t *testing.T) {
 	srv, th := brokenShares(t)
 
 	for name, path := range map[string]struct{ method, url string }{
-		"share":  {http.MethodPost, fmt.Sprintf("/api/threads/%d/share", th)},
-		"update": {http.MethodPost, fmt.Sprintf("/api/threads/%d/share/update", th)},
-		"revoke": {http.MethodDelete, fmt.Sprintf("/api/threads/%d/share", th)},
+		"share":  {http.MethodPost, fmt.Sprintf("/api/threads/%s/share", th.PublicID)},
+		"update": {http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID)},
+		"revoke": {http.MethodDelete, fmt.Sprintf("/api/threads/%s/share", th.PublicID)},
 	} {
 		if rec := act(srv, path.method, path.url, ""); rec.Code != http.StatusInternalServerError {
 			t.Errorf("%s: status = %d (%s), want 500", name, rec.Code, rec.Body.String())
@@ -381,13 +381,17 @@ func TestShareRoutes_sayTheFeatureIsOffRatherThanCrash(t *testing.T) {
 	}
 }
 
-func TestShare_malformedThreadIDIsRefusedBeforeTheStore(t *testing.T) {
+// An address that names no thread answers 404, not 400. There is no such thing
+// as a malformed thread id any more — it is 22 opaque characters, and one that
+// resolves to nothing is indistinguishable from one that is someone else's or
+// one that was deleted, which is the whole rule this route follows.
+func TestShare_anAddressThatNamesNoThreadIsNotFound(t *testing.T) {
 	srv, _, _ := shareServer(t)
 
-	rec := act(srv, http.MethodPost, "/api/threads/not-a-number/share", "")
+	rec := act(srv, http.MethodPost, "/api/threads/not-a-real-address/share", "")
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d (%s), want 400", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
 	}
 }
 
@@ -395,7 +399,7 @@ func TestRevokeShare_aThreadWithNoLinkIsNotFound(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	th := sharedTurn(t, st, testSubject)
 
-	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d/share", th), "")
+	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s/share", th.PublicID), "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
@@ -406,7 +410,7 @@ func TestShareUpdate_aThreadWithNoLinkIsNotFound(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	th := sharedTurn(t, st, testSubject)
 
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share/update", th), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID), "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
@@ -417,12 +421,12 @@ func TestShareUpdate_leavesATurnStillBeingWrittenOffTheLink(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	sh := share(t, srv, th)
-	if _, err := st.AddQuestion(ctx, th, "ba", "en", "And then?", 0); err != nil {
+	sh := share(t, srv, th.PublicID)
+	if _, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0); err != nil {
 		t.Fatalf("add question: %v", err)
 	}
 
-	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%d/share/update", th), "")
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID), "")
 
 	// Not refused: the update takes in every turn that has finished, and the
 	// one in flight arrives as "1 newer" the moment it lands.

@@ -23,7 +23,7 @@ export default function ShareDialog({
   onCancel,
   onChange,
 }: {
-  threadID: number;
+  threadID: string;
   title: string;
   /** The link this thread already has, or null. */
   share: Share | null;

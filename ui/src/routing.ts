@@ -12,7 +12,7 @@
  */
 export type Route =
   | { view: "new" }
-  | { view: "thread"; id: number }
+  | { view: "thread"; id: string }
   | { view: "repos" }
   | { view: "shared" }
   /** The public page. Never rendered inside the app — see main.tsx. */
@@ -23,18 +23,18 @@ const threadPrefix = "/thread/";
 
 export function routeFromPath(path: string): Route {
   if (path.startsWith(threadPrefix)) {
-    // Number(), then a finite check: "/thread/abc" is not a thread, and
-    // NaN would be carried all the way to a fetch of /api/threads/NaN.
-    // Digits only, which is what the backend's ParseInt(s, 10, 64) accepts.
-    // Number() is far too willing: "1.5", "1e3", "0x10" and " 7" all come back
-    // as numbers, and the backend then answers 400 — which Ask reads as "not
+    // The exact shape the server mints — 22 URL-safe characters, 128 bits —
+    // and nothing else. Anything that is not one is not a thread, and lands on
+    // the unasked question rather than becoming a fetch of a thread that
+    // cannot exist: a request the backend answers 404, which Ask reads as "not
     // right now" rather than as a dead thread, leaving a blank column and that
     // URL in the bar with no way back but the rail.
+    //
+    // /thread/19 is rejected by this too, which is the point. Threads were
+    // addressed by row number for one release; those URLs are not redirected,
+    // because a redirect would keep the counter reachable for good.
     const raw = decodeURIComponent(path.slice(threadPrefix.length));
-    if (/^\d+$/.test(raw)) {
-      const id = Number(raw);
-      if (id > 0) return { view: "thread", id };
-    }
+    if (/^[A-Za-z0-9_-]{22}$/.test(raw)) return { view: "thread", id: raw };
   }
   if (path.startsWith(sharePrefix)) {
     const token = decodeURIComponent(path.slice(sharePrefix.length));
@@ -55,7 +55,7 @@ export function routeFromLocation(): Route {
 export function pathForRoute(route: Route): string {
   switch (route.view) {
     case "thread":
-      return threadPrefix + route.id;
+      return threadPrefix + encodeURIComponent(route.id);
     case "repos":
       return "/repos";
     case "shared":

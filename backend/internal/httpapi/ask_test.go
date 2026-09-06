@@ -622,7 +622,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 		t.Fatalf("AddQuestion: %v", err)
 	}
 
-	postAsk(t, deps, fmt.Sprintf(`{"thread_id":%d,"question":"And the rest?","audience":"ba"}`, th.ID))
+	postAsk(t, deps, fmt.Sprintf(`{"thread_id":%q,"question":"And the rest?","audience":"ba"}`, th.PublicID))
 
 	list, _ := st.List(ctx, "dev-user")
 	if len(list) != 1 {
@@ -728,7 +728,7 @@ func TestAsk_aFollowUpInheritsWhatTheThreadNarrowedTo(t *testing.T) {
 
 	// When a follow-up names no repository at all.
 	a.gotThread.Pin = nil
-	postAsk(t, deps, `{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":`+itoa(threads[0].ID)+`}`)
+	postAsk(t, deps, fmt.Sprintf(`{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":%q}`, threads[0].PublicID))
 
 	// Then the pipeline is told which repository the thread is about, which is
 	// what keeps the repository card from asking it again — and what the
@@ -774,7 +774,7 @@ func TestAsk_thePinAndTheMemoryComeFromDifferentTurns(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("list threads: %v (%d)", err, len(list))
 	}
-	id := itoa(list[0].ID)
+	id := list[0].PublicID
 	failed, err := st.AddQuestion(context.Background(), list[0].ID, "ba", "en", "Und wie schnell?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
@@ -785,7 +785,7 @@ func TestAsk_thePinAndTheMemoryComeFromDifferentTurns(t *testing.T) {
 
 	// When a third turn asks a follow-up.
 	a.gotThread = ask.Thread{}
-	postAsk(t, deps, `{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":`+id+`}`)
+	postAsk(t, deps, fmt.Sprintf(`{"question":"Kannst du das in einem Diagramm aufzeigen?","audience":"ba","thread_id":%q}`, id))
 
 	// Then both come off the first turn, which is the only one that has them.
 	if len(a.gotThread.Pin) != 1 || a.gotThread.Pin[0] != "rongo" {
@@ -810,7 +810,7 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	rec := postAsk(t, deps, `{"question":"How?","audience":"ba","thread_id":`+itoa(other.ID)+`}`)
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"How?","audience":"ba","thread_id":%q}`, other.PublicID))
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -899,7 +899,7 @@ func TestAsk_theUsageEventCarriesEveryCallOfTheTurnAndTheCallsAreStored(t *testi
 		t.Errorf("cost = %v, want none: no prices are configured", *got.CostUSD)
 	}
 	// And the record holds them, so a reload and the thread total see them.
-	msgs, err := st.Messages(context.Background(), testSubject, threadIDOf(t, body))
+	msgs, err := st.Messages(context.Background(), testSubject, threadRowOf(t, st, body))
 	if err != nil {
 		t.Fatalf("Messages: %v", err)
 	}
@@ -940,7 +940,7 @@ func TestAsk_aTurnThatFailedOrAskedBackStillReportsAndStoresWhatItPaidFor(t *tes
 					t.Errorf("%s event came before usage", tc.ends)
 				}
 			}
-			msgs, err := st.Messages(context.Background(), testSubject, threadIDOf(t, body))
+			msgs, err := st.Messages(context.Background(), testSubject, threadRowOf(t, st, body))
 			if err != nil {
 				t.Fatalf("Messages: %v", err)
 			}
@@ -962,7 +962,7 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 	id := threadIDOf(t, body)
 
 	// When
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/threads/%d", id), nil)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/threads/%s", id), nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -1012,12 +1012,23 @@ func TestAsk_aTurnThatPaidForNothingSendsNoUsage(t *testing.T) {
 }
 
 // threadIDOf reads the thread id off the first event of an SSE body.
-func threadIDOf(t *testing.T, body string) int64 {
+// threadRowOf is threadIDOf followed by the lookup the handlers do: the stream
+// says which ADDRESS the turn landed in, and a store call needs the row.
+func threadRowOf(t *testing.T, st *threads.Store, body string) int64 {
+	t.Helper()
+	id, ok, err := st.Resolve(context.Background(), threadIDOf(t, body))
+	if err != nil || !ok {
+		t.Fatalf("resolve thread: %v (found %v)", err, ok)
+	}
+	return id
+}
+
+func threadIDOf(t *testing.T, body string) string {
 	t.Helper()
 	for _, e := range events(body) {
 		if e[0] == "thread" {
 			var p struct {
-				ThreadID int64 `json:"thread_id"`
+				ThreadID string `json:"thread_id"`
 			}
 			if err := json.Unmarshal([]byte(e[1]), &p); err != nil {
 				t.Fatalf("thread event: %v", err)
@@ -1026,7 +1037,7 @@ func threadIDOf(t *testing.T, body string) int64 {
 		}
 	}
 	t.Fatalf("no thread event in:\n%s", body)
-	return 0
+	return ""
 }
 
 func TestAskStreamsAClarificationAndEndsTheTurn(t *testing.T) {

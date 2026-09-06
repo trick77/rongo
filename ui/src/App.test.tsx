@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import { routeFromPath } from "./routing";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -167,11 +168,11 @@ describe("App", () => {
   // The action used to live inside the thread list, among the past
   // questions, which read as if starting one were already history.
   it("clears the open thread from the rail's New question", async () => {
-    atPath("/thread/7");
+    atPath("/thread/" + addr);
     apiFetch(oneThread, []);
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
-    await screen.findByText("How does shipping work?");
+    await screen.findAllByText("How does shipping work?");
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "New question" }));
@@ -183,7 +184,7 @@ describe("App", () => {
 
   // "Threads /" pointed at nothing you could click once the nav went.
   it("heads the answer with the thread title alone", async () => {
-    atPath("/thread/7");
+    atPath("/thread/" + addr);
     apiFetch(oneThread, []);
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
@@ -192,6 +193,11 @@ describe("App", () => {
     expect(screen.queryByText("Threads")).toBe(null);
   });
 });
+
+/** A real thread address: 22 URL-safe characters, what the store mints. */
+const addr = "v76BBy2b1nMYOFl2Lnm9JQ";
+/** A second one, for the address that leads nowhere. */
+const noSuchAddr = "AAAAAAAAAAAAAAAAAAAAAA";
 
 /** Answers the thread list and one thread's turns separately. */
 function apiFetch(threads: unknown, messages: unknown) {
@@ -204,7 +210,7 @@ function apiFetch(threads: unknown, messages: unknown) {
   return mock;
 }
 
-const oneThread = [{ id: 7, title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" }];
+const oneThread = [{ id: addr, title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" }];
 const oneTurn = [
   {
     id: 1,
@@ -220,7 +226,7 @@ const oneTurn = [
 
 describe("App, the thread in the URL", () => {
   it("opens the thread its address names", async () => {
-    atPath("/thread/7");
+    atPath("/thread/" + addr);
     apiFetch(oneThread, oneTurn);
     render(<StrictMode><App /></StrictMode>);
     expect(await screen.findByText(/Through a job/)).toBeTruthy();
@@ -233,7 +239,7 @@ describe("App, the thread in the URL", () => {
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
     await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
+    await waitFor(() => expect(window.location.pathname).toBe("/thread/" + addr));
   });
 
   it("names the unasked question /new rather than /", async () => {
@@ -249,7 +255,7 @@ describe("App, the thread in the URL", () => {
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
     await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
+    await waitFor(() => expect(window.location.pathname).toBe("/thread/" + addr));
 
     window.history.back();
 
@@ -261,9 +267,9 @@ describe("App, the thread in the URL", () => {
   // is a label for a rail row, never a title, and the header showing it cut it
   // a second time with its own truncate.
   it("holds New question in the header while the title is still coming", async () => {
-    atPath("/thread/7");
+    atPath("/thread/" + addr);
     apiFetch(
-      [{ id: 7, title: "How does shipping work, and what happens when…", title_pending: true, created_at: "2026-08-17T10:00:00Z" }],
+      [{ id: addr, title: "How does shipping work, and what happens when…", title_pending: true, created_at: "2026-08-17T10:00:00Z" }],
       oneTurn,
     );
     render(<StrictMode><App /></StrictMode>);
@@ -277,51 +283,33 @@ describe("App, the thread in the URL", () => {
   });
 
   it("puts the title in the header once it has settled", async () => {
-    atPath("/thread/7");
-    apiFetch([{ id: 7, title: "Shipping, end to end", title_pending: false, created_at: "2026-08-17T10:00:00Z" }], oneTurn);
+    atPath("/thread/" + addr);
+    apiFetch([{ id: addr, title: "Shipping, end to end", title_pending: false, created_at: "2026-08-17T10:00:00Z" }], oneTurn);
     render(<StrictMode><App /></StrictMode>);
 
     // Twice: the rail row and the header.
     await waitFor(() => expect(screen.getAllByText("Shipping, end to end").length).toBe(2));
   });
 
-  // A thread that is not yours, or was purged, comes back as an empty list with
-  // status 200. The address has to fall back with it, or every reload of that
-  // URL opens nothing and says nothing.
-  it("leaves a thread address that leads nowhere", async () => {
-    atPath("/thread/999");
+  // A thread that is not yours, or was purged, comes back as an empty list
+  // with status 200; an address that names none at all comes back 404. Both
+  // say so on the page. Falling back to the composer would be a soft 404: the
+  // reader's link "worked", and the address in the bar would go on lying.
+  it("says so when a thread address leads nowhere, and keeps the address", async () => {
+    atPath("/thread/" + noSuchAddr);
     apiFetch([], []);
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+
+    expect(await screen.findByText(/no longer available/)).toBeTruthy();
+    expect(window.location.pathname).toBe("/thread/" + noSuchAddr);
   });
 
-  it("corrects a dead address instead of stacking history on it", async () => {
-    // Pushed, Back would return to the dead thread, the correction would push
-    // /new again, and Back could never leave the app.
-    apiFetch(oneThread, oneTurn);
-    const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
-    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/thread/7"));
-
-    // The thread turns out to be gone the next time it is read.
-    apiFetch([], []);
-    window.history.back();
-    await waitFor(() => expect(window.location.pathname).toBe("/new"));
-
-    // One press of Back, not a loop: the correction replaced the dead entry.
-    window.history.back();
-    await waitFor(() => expect(window.location.pathname).not.toBe("/thread/7"));
-  });
-
-  it("does not treat a fractional id as a thread", async () => {
-    // The backend answers 400, which Ask reads as "not right now" rather than
-    // as a dead thread — leaving a blank column and that URL in the bar.
-    atPath("/thread/1.5");
-    apiFetch([], []);
-    render(<StrictMode><App /></StrictMode>);
-    await screen.findByRole("heading", { level: 1 });
-    await waitFor(() => expect(window.location.pathname).toBe("/new"));
+  // A shape that is not an address never reaches the app at all: the server
+  // answers 404 for it (see backend/web isRoute), so there is nothing here to
+  // fall back from. What the client still has to answer for is an address of
+  // the right shape that names no thread, which is the test above.
+  it("does not treat a row number as a thread", () => {
+    expect(routeFromPath("/thread/19")).toEqual({ view: "new" });
   });
 });
 

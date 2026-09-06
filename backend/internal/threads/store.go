@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,8 +22,16 @@ import (
 
 // Thread is one conversation.
 type Thread struct {
-	ID    int64  `json:"id"`
-	Title string `json:"title"`
+	// ID is the row number and never leaves the process. It is the foreign key
+	// every message, share and usage row hangs off, and the value the LLM
+	// session cache and the in-flight turn map are keyed by.
+	ID int64 `json:"-"`
+	// PublicID is the thread's address: what stands in /thread/… and on every
+	// /api/threads/… path, and the only thread identifier the browser ever
+	// sees. Serialised as "id" because it IS the id as far as anything outside
+	// this process is concerned.
+	PublicID string `json:"id"`
+	Title    string `json:"title"`
 	// TitlePending is true while the model's title call is still running. The
 	// Title on such a row is the question's first words, which is enough to
 	// tell one sidebar row from another and is not a title: the header says
@@ -44,7 +53,12 @@ type Message struct {
 	// ThreadID is the thread this message belongs to. Re-explaining reads it
 	// off a bare message id to add the new turn to the same thread, the same
 	// way a resumed clarification does.
-	ThreadID int64  `json:"thread_id"`
+	//
+	// Not sent to the browser: the page already knows which thread it is
+	// reading, and a row number on every message would put back the counter
+	// that PublicID exists to keep off the wire — on the public share page
+	// too, which is not even the owner's.
+	ThreadID int64  `json:"-"`
 	Ordinal  int    `json:"ordinal"`
 	Audience string `json:"audience"`
 	// Language is the language the answer was written in, per message like
@@ -183,8 +197,13 @@ func placeholderTitle(question string) string {
 // Create opens a thread for a question.
 func (s *Store) Create(ctx context.Context, subject, question string) (Thread, error) {
 	title := placeholderTitle(question)
+	publicID, err := newToken()
+	if err != nil {
+		return Thread{}, fmt.Errorf("create thread: %w", err)
+	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO threads (user_subject, title) VALUES (?, ?)`, subject, title)
+		`INSERT INTO threads (user_subject, title, public_id) VALUES (?, ?, ?)`,
+		subject, title, publicID)
 	if err != nil {
 		return Thread{}, fmt.Errorf("create thread: %w", err)
 	}
@@ -194,7 +213,7 @@ func (s *Store) Create(ctx context.Context, subject, question string) (Thread, e
 	}
 	// Pending: the row carries the placeholder and the title call has not run
 	// yet. SetTitle settles it whichever way that call ends.
-	return Thread{ID: id, Title: title, TitlePending: true, CreatedAt: time.Now().UTC()}, nil
+	return Thread{ID: id, PublicID: publicID, Title: title, TitlePending: true, CreatedAt: time.Now().UTC()}, nil
 }
 
 // SetTitle replaces the placeholder, but only while the placeholder is still
@@ -487,7 +506,7 @@ func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
 // List returns a user's threads, newest first.
 func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, title, title_settled, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
+		`SELECT id, public_id, title, title_settled, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -497,7 +516,7 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 		var t Thread
 		var created string
 		var settled bool
-		if err := rows.Scan(&t.ID, &t.Title, &settled, &created); err != nil {
+		if err := rows.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created); err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
 		t.TitlePending = !settled
@@ -725,6 +744,84 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// Resolve turns a thread's public id into the row id everything inside this
+// process works with. Reports whether it named a thread at all.
+//
+// It does NOT check the owner, deliberately, and is the same shape as the id
+// parse it replaced: the handlers above it pair it with an ownership predicate
+// so that "not yours" and "gone" stay one 404. Answering "that thread is
+// someone else's" here would make the address a probe.
+func (s *Store) Resolve(ctx context.Context, publicID string) (int64, bool, error) {
+	if publicID == "" {
+		return 0, false, nil
+	}
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM threads WHERE public_id = ?`, publicID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("resolve thread: %w", err)
+	}
+	return id, true, nil
+}
+
+// PublicIDFor is the way back, for the paths that reach a thread through a
+// MESSAGE rather than through its own address: a resumed clarification and a
+// retry both name a message, and the stream still has to tell the browser
+// which thread to put in the address bar.
+func (s *Store) PublicIDFor(ctx context.Context, id int64) (string, error) {
+	var publicID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT public_id FROM threads WHERE id = ?`, id).Scan(&publicID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read thread address: %w", err)
+	}
+	return publicID, nil
+}
+
+// BackfillPublicIDs mints an address for every thread that predates the
+// column, and is called once at boot, right after the migrations. It is in Go
+// rather than in 0010 because SQLite has no base64: a SQL backfill could only
+// write hex, and the whole point is an id shaped like the share token.
+//
+// Idempotent — a second run selects nothing — so a crash halfway leaves the
+// rows it did mint alone and finishes the rest next time.
+func (s *Store) BackfillPublicIDs(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM threads WHERE public_id = ''`)
+	if err != nil {
+		return fmt.Errorf("list threads without an address: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan thread without an address: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		publicID, err := newToken()
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`UPDATE threads SET public_id = ? WHERE id = ?`, publicID, id); err != nil {
+			return fmt.Errorf("give thread %d an address: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // Owns reports whether the thread belongs to this subject.

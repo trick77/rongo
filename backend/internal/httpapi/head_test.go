@@ -44,8 +44,8 @@ func TestAsk_retryJoinsTheTurnItRetries(t *testing.T) {
 	}
 
 	rec := postAsk(t, deps, fmt.Sprintf(
-		`{"thread_id":%d,"question":"frage","audience":"ba","language":"de","head_message_id":%d}`,
-		th.ID, failed.ID))
+		`{"thread_id":%q,"question":"frage","audience":"ba","language":"de","head_message_id":%d}`,
+		th.PublicID, failed.ID))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -101,8 +101,8 @@ func TestAsk_refusesAHeadFromAnotherThread(t *testing.T) {
 	}
 
 	rec := postAsk(t, deps, fmt.Sprintf(
-		`{"thread_id":%d,"question":"frage","audience":"ba","head_message_id":%d}`,
-		mine.ID, elsewhere.ID))
+		`{"thread_id":%q,"question":"frage","audience":"ba","head_message_id":%d}`,
+		mine.PublicID, elsewhere.ID))
 
 	// Refused before the stream opens, so the status code still means
 	// something: after the first SSE byte it is fixed at 200.
@@ -137,7 +137,7 @@ func TestThreadMessagesCarryTheHeadLink(t *testing.T) {
 		t.Fatalf("add re-explain: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/threads/%d", th.ID), nil)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/threads/%s", th.PublicID), nil)
 	rec := httptest.NewRecorder()
 	NewServer(deps).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

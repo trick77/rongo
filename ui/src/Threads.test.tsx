@@ -12,8 +12,8 @@ function threadList(list: unknown, ok = true) {
 afterEach(() => vi.unstubAllGlobals());
 
 const two = [
-  { id: 7, title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" },
-  { id: 3, title: "Where does the token come from?", created_at: "2026-08-16T10:00:00Z" },
+  { id: "7", title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" },
+  { id: "3", title: "Where does the token come from?", created_at: "2026-08-16T10:00:00Z" },
 ];
 
 describe("Threads", () => {
@@ -38,7 +38,7 @@ describe("Threads", () => {
 
   it("marks the open thread", async () => {
     threadList(two);
-    render(<Threads activeId={3} onSelect={() => {}} version={0} />);
+    render(<Threads activeId="3" onSelect={() => {}} version={0} />);
     const active = await screen.findByRole("button", { name: "Where does the token come from?" });
     expect(active.getAttribute("aria-current")).toBe("true");
     expect(
@@ -52,7 +52,7 @@ describe("Threads", () => {
     render(<Threads activeId={null} onSelect={onSelect} version={0} />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Where does the token come from?" }));
-    expect(onSelect).toHaveBeenCalledWith(3);
+    expect(onSelect).toHaveBeenCalledWith("3");
   });
 
   // The model-written title replaces the placeholder in a background goroutine
@@ -82,12 +82,12 @@ describe("Threads", () => {
   it("opens another thread while an answer is streaming", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId={7} onSelect={onSelect} version={0} busy busyId={7} />);
+    render(<Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />);
     const other = await screen.findByRole("button", { name: "Where does the token come from?" });
     expect((other as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
     await user.click(other);
-    expect(onSelect).toHaveBeenCalledWith(3);
+    expect(onSelect).toHaveBeenCalledWith("3");
   });
 
   // With the page nav gone, this row is the only way back to a streaming
@@ -95,12 +95,12 @@ describe("Threads", () => {
   it("keeps the running thread's own row clickable while it streams", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId={7} onSelect={onSelect} version={0} busy busyId={7} />);
+    render(<Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />);
     const own = await screen.findByRole("button", { name: "How does shipping work?" });
     expect((own as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
     await user.click(own);
-    expect(onSelect).toHaveBeenCalledWith(7);
+    expect(onSelect).toHaveBeenCalledWith("7");
   });
 
   // The 28px row is the pitch on every pointer: a touch screen once got 44px,
@@ -138,8 +138,8 @@ describe("Threads", () => {
   describe("day groups", () => {
     const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
     const mixed = [
-      { id: 9, title: "Asked this morning", created_at: days(0) },
-      { id: 4, title: "Asked earlier in the week", created_at: days(3) },
+      { id: "9", title: "Asked this morning", created_at: days(0) },
+      { id: "4", title: "Asked earlier in the week", created_at: days(3) },
     ];
 
     it("carries no heading for today", async () => {
@@ -197,7 +197,7 @@ describe("Threads", () => {
 
       await user.click(screen.getByRole("button", { name: "Where does the token come from?" }));
 
-      expect(onSelect).toHaveBeenCalledWith(3);
+      expect(onSelect).toHaveBeenCalledWith("3");
       expect(screen.queryByRole("menu")).toBeNull();
     });
 
@@ -210,7 +210,7 @@ describe("Threads", () => {
       await openMenu("How does shipping work?");
       expect(screen.getByRole("menu")).toBeTruthy();
 
-      rerender(<Threads activeId={7} onSelect={() => {}} version={0} busy busyId={7} />);
+      rerender(<Threads activeId="7" onSelect={() => {}} version={0} busy busyId="7" />);
 
       expect(screen.queryByRole("menu")).toBeNull();
     });
@@ -220,7 +220,7 @@ describe("Threads", () => {
     // its actions, because nothing is being written into it.
     it("is withheld from the thread being written, and from no other", async () => {
       threadList(two);
-      render(<Threads activeId={7} onSelect={() => {}} version={0} busy busyId={7} />);
+      render(<Threads activeId="7" onSelect={() => {}} version={0} busy busyId="7" />);
       await screen.findByRole("button", { name: "How does shipping work?" });
       expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
       expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
@@ -231,7 +231,7 @@ describe("Threads", () => {
     // written — wherever it sits — does not.
     it("follows the thread being written, not the one on screen", async () => {
       threadList(two);
-      render(<Threads activeId={3} onSelect={() => {}} version={0} busy busyId={7} />);
+      render(<Threads activeId="3" onSelect={() => {}} version={0} busy busyId="7" />);
       await screen.findByRole("button", { name: "How does shipping work?" });
       expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
       expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
@@ -250,7 +250,7 @@ describe("Threads", () => {
       await user.click(screen.getByRole("button", { name: "Delete" }));
 
       expect(fetch).toHaveBeenCalledWith("/api/threads/7", { method: "DELETE" });
-      expect(onDeleted).toHaveBeenCalledWith(7);
+      expect(onDeleted).toHaveBeenCalledWith("7");
       expect(screen.queryByRole("button", { name: "How does shipping work?" })).toBeNull();
     });
 

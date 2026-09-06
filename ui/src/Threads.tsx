@@ -14,7 +14,12 @@ import { shareFor, type Share } from "./share/api";
 const railLabel = "px-1.5 text-xs/4 text-rail-label";
 
 export type Thread = {
-  id: number;
+  /**
+   * The thread's address, not a row number: 22 URL-safe characters, the same
+   * shape as a share token. It is what /thread/… and every /api/threads/…
+   * path is written in.
+   */
+  id: string;
   title: string;
   /**
    * True while the model's title call is still running. The title on such a
@@ -61,9 +66,9 @@ export default function Threads({
   onRenamed = () => {},
   onShared = () => {},
 }: {
-  activeId: number | null;
+  activeId: string | null;
   /** Only ever a real thread: clearing to a new question is the rail's job. */
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
   version: number;
   busy?: boolean;
   /**
@@ -72,11 +77,11 @@ export default function Threads({
    * entirely. Nothing paints it — an answer is asked at the top of the rail
    * and the row is right there — it only says whose actions to withhold.
    */
-  busyId?: number | null;
+  busyId?: string | null;
   /** Reports the loaded list, so the shell can name the open thread. */
   onList?: (list: Thread[]) => void;
   /** A thread is gone. The shell closes it if it was the one on screen. */
-  onDeleted?: (id: number) => void;
+  onDeleted?: (id: string) => void;
   /** A thread has a new title; the shell reloads the list. */
   onRenamed?: () => void;
   /** A link was made or taken back; the row markers are stale. */
@@ -85,7 +90,7 @@ export default function Threads({
   const [threads, setThreads] = useState<Thread[]>([]);
   // Which row's menu is open, and which thread a dialog is asking about.
   // Both are ids rather than objects: the list reloads underneath them.
-  const [openMenu, setOpenMenu] = useState<number | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<Thread | null>(null);
   const [deleting, setDeleting] = useState<Thread | null>(null);
   // The thread whose link is being handed out, and the link it already has.

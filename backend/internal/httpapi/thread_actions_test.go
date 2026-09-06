@@ -49,7 +49,7 @@ func TestDeleteThread_takesItOffTheRail(t *testing.T) {
 	}
 
 	// When
-	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", th.ID), "")
+	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", th.PublicID), "")
 
 	// Then
 	if rec.Code != http.StatusNoContent {
@@ -71,7 +71,7 @@ func TestDeleteThread_anotherReadersThreadIsNotFound(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", th.ID), "")
+	rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", th.PublicID), "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -82,13 +82,16 @@ func TestDeleteThread_anotherReadersThreadIsNotFound(t *testing.T) {
 	}
 }
 
-func TestDeleteThread_aMalformedIDIsRejected(t *testing.T) {
+// 404 and not 400: a thread is named by an opaque address now, so "no such
+// thread" is the only honest answer to one that resolves to nothing — the same
+// answer a thread belonging to someone else gets.
+func TestDeleteThread_anAddressThatNamesNoThreadIsNotFound(t *testing.T) {
 	srv, _ := threadActions(t)
 
 	rec := act(srv, http.MethodDelete, "/api/threads/nope", "")
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
@@ -102,7 +105,7 @@ func TestRenameThread_writesTheTypedTitle(t *testing.T) {
 	}
 
 	// When
-	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%d", th.ID), `{"title":"Sign-in, the whole path"}`)
+	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID), `{"title":"Sign-in, the whole path"}`)
 
 	// Then
 	if rec.Code != http.StatusNoContent {
@@ -120,7 +123,7 @@ func TestRenameThread_refusesAnEmptyTitle(t *testing.T) {
 	th, _ := st.Create(ctx, testSubject, "How is sign-in done?")
 
 	for _, body := range []string{`{"title":"   "}`, `{}`, `not json`} {
-		rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%d", th.ID), body)
+		rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID), body)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("body %q: status = %d, want 400", body, rec.Code)
 		}
@@ -138,7 +141,7 @@ func TestRenameThread_refusesATitleLongerThanTheRailCanHold(t *testing.T) {
 	srv, st := threadActions(t)
 	th, _ := st.Create(ctx, testSubject, "How is sign-in done?")
 
-	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%d", th.ID),
+	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID),
 		`{"title":"`+strings.Repeat("a", 49)+`"}`)
 
 	if rec.Code != http.StatusBadRequest {
@@ -155,7 +158,7 @@ func TestRenameThread_anotherReadersThreadIsNotFound(t *testing.T) {
 	srv, st := threadActions(t)
 	th, _ := st.Create(ctx, otherSubject, "How is sign-in done?")
 
-	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%d", th.ID), `{"title":"Mine now"}`)
+	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID), `{"title":"Mine now"}`)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -193,7 +196,7 @@ func TestDeleteThread_stopsTheAnswerBeingWrittenIntoIt(t *testing.T) {
 		if err != nil || len(list) != 1 {
 			t.Fatalf("List = %+v, %v; want the one thread being answered", list, err)
 		}
-		rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", list[0].ID), "")
+		rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", list[0].PublicID), "")
 		if rec.Code != http.StatusNoContent {
 			t.Fatalf("delete status = %d (%s), want 204", rec.Code, rec.Body.String())
 		}
@@ -237,7 +240,7 @@ func TestDeleteThread_nothingIsWrittenBackAfterwards(t *testing.T) {
 		if len(list) != 1 {
 			t.Fatalf("threads = %+v, want the one being answered", list)
 		}
-		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", list[0].ID), ""); rec.Code != http.StatusNoContent {
+		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", list[0].PublicID), ""); rec.Code != http.StatusNoContent {
 			t.Fatalf("delete status = %d, want 204", rec.Code)
 		}
 	}
@@ -270,7 +273,7 @@ func TestDeleteThread_stopsAReexplainToo(t *testing.T) {
 		if len(list) != 1 {
 			t.Fatalf("threads = %+v, want the one being re-explained", list)
 		}
-		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", list[0].ID), ""); rec.Code != http.StatusNoContent {
+		if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", list[0].PublicID), ""); rec.Code != http.StatusNoContent {
 			t.Fatalf("delete status = %d, want 204", rec.Code)
 		}
 	}
@@ -306,7 +309,7 @@ func TestDeleteThread_someoneElsesTurnIsLeftAlone(t *testing.T) {
 	asker := srv.deps.Ask.(*fakeAsker)
 	asker.during = func(ctx context.Context) {
 		turnCtx = ctx
-		rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%d", other.ID), "")
+		rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s", other.PublicID), "")
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("delete status = %d, want 404", rec.Code)
 		}

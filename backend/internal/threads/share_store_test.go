@@ -307,7 +307,7 @@ func TestShares_listsOnlyLiveLinksAndOnlyThisReadersOwn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shares: %v", err)
 	}
-	if len(list) != 1 || list[0].ThreadID != th {
+	if len(list) != 1 || list[0].threadID != th {
 		t.Fatalf("shares = %+v, want only the live link on thread %d", list, th)
 	}
 	other, err := s.Shares(ctx, "bruno")

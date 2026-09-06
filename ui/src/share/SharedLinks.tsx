@@ -38,11 +38,11 @@ export default function SharedLinks({
 }: {
   /** A link was taken back, so the rail's markers are stale. */
   onChange?: () => void;
-  onOpenThread: (id: number) => void;
+  onOpenThread: (id: string) => void;
 }) {
   const [state, setState] = useState<State>({ s: "loading" });
   const [copied, setCopied] = useState<string | null>(null);
-  const [busy, setBusy] = useState<number | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 

@@ -130,14 +130,14 @@ export default function Ask({
   onUsage = () => {},
 }: {
   /** The thread to show, or null for a fresh one. */
-  threadId?: number | null;
+  threadId?: string | null;
   /** Reports the thread this view is on; null means the id led nowhere. */
-  onThread?: (id: number | null) => void;
+  onThread?: (id: string | null) => void;
   /** Something changed that the thread list should see. */
   onActivity?: () => void;
   /** Reports whether a turn is in flight, so the thread list can lock. */
   /** Whether a turn is running, and the thread it is being written into. */
-  onBusy?: (busy: boolean, threadId: number | null) => void;
+  onBusy?: (busy: boolean, threadId: string | null) => void;
   /** Reports the thread's running total — every turn on screen summed, the
    * ones that asked back or failed included — or null when nothing is
    * known yet. The header shows it next to the title. */
@@ -152,6 +152,11 @@ export default function Ask({
   // tells the empty column to hold the shape of a thread instead of offering
   // the welcome to a reader who has just opened a conversation.
   const [loading, setLoading] = useState(false);
+  // The address in the bar names no thread of this reader's: deleted, never
+  // real, or somebody else's. Said out loud rather than answered with the
+  // welcome — the composer under a dead URL is a soft 404, and it tells the
+  // reader their link worked.
+  const [gone, setGone] = useState(false);
   const [busy, setBusy] = useState(false);
   // The marker under the pointer, reported up by ThreadView so the pane in
   // the column beside it can point back. Everything else the reading half
@@ -162,7 +167,7 @@ export default function Ask({
   // the overlay covers the whole app, and both the text and the pane beside
   // it open one.
   const [viewing, setViewing] = useState<Citation | null>(null);
-  const threadId = useRef<number | null>(openThread);
+  const threadId = useRef<string | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
   // a prop — would re-trigger the loader and replace the half-written answer
@@ -170,7 +175,7 @@ export default function Ask({
   //
   // It starts undefined rather than at openThread: a thread restored from the
   // last session has to be LOADED on the first render, not assumed present.
-  const shown = useRef<number | null | undefined>(undefined);
+  const shown = useRef<string | null | undefined>(undefined);
   // Which load is the current one. StrictMode mounts every effect twice, so a
   // cleanup that cancelled the in-flight request would cancel the ONLY request
   // — the second run sees the id as already shown and starts none. Cancelling
@@ -265,7 +270,7 @@ export default function Ask({
    * A ref, not state: every token patches it, and the arrival has to be there
    * for the next patch in the same tick rather than after a commit.
    */
-  const liveThread = useRef<number | null>(null);
+  const liveThread = useRef<string | null>(null);
   const liveTurns = useRef<Turn[] | null>(null);
 
   /**
@@ -304,7 +309,7 @@ export default function Ask({
   // Announced upwards with the thread it belongs to: the rail withholds that
   // one row's actions, and the composer says an answer is still arriving even
   // when the reader has moved to a thread where nothing is happening.
-  function markBusy(b: boolean, id: number | null = null) {
+  function markBusy(b: boolean, id: string | null = null) {
     setBusy(b);
     onBusy(b, id);
   }
@@ -353,6 +358,7 @@ export default function Ask({
       opened.current = false;
       return;
     }
+    setGone(false);
     setLoading(true);
     // The whole arrival in one commit: the turns, the header's running total
     // and the end of the skeleton. Leaving the total to the effect that
@@ -370,20 +376,25 @@ export default function Ask({
           // 503, 500 and 401 mean "not right now", not "not yours". Treating
           // them as a dead thread would drop the bookmark on a passing blip and
           // the conversation would be gone on the next reload.
-          if (seq === loadSeq.current) arrive([]);
+          //
+          // 404 is the one that does mean gone: an address that resolves to no
+          // thread at all. The server cannot answer that one — the SPA handler
+          // has no session and no database, and a 404 from there would tell
+          // anyone which addresses are real — so this is where it is said.
+          if (seq === loadSeq.current) {
+            arrive([]);
+            if (res.status === 404) setGone(true);
+          }
           return;
         }
         const list = (await res.json()) as Message[];
         if (seq !== loadSeq.current) return;
-        // A thread that is not yours, or no longer exists, comes back as an
-        // empty list with status 200 — the owner check sits inside the query.
-        // Rendering that as an empty thread would keep a dead id around
-        // forever, so it is handed back as "no thread".
+        // A thread that is not this reader's comes back as an empty list with
+        // status 200 — the owner check sits inside the query — and reads the
+        // same way as one that is gone.
         if (!Array.isArray(list) || list.length === 0) {
           arrive([]);
-          shown.current = null;
-          threadId.current = null;
-          onThread(null);
+          setGone(true);
           return;
         }
         arrive(storedRetries(linkChosenCandidates(list, list.map(storedTurn))));
@@ -624,7 +635,7 @@ export default function Ask({
     appendTurn(freshTurn(q, audience, asking));
     setQuestion("");
 
-    await stream("/api/ask", { question: q, audience, language: asking, thread_id: threadId.current ?? 0 });
+    await stream("/api/ask", { question: q, audience, language: asking, thread_id: threadId.current ?? "" });
   }
 
   /**
@@ -654,7 +665,7 @@ export default function Ask({
     // different turn entirely.
     const cardThread = threadId.current;
     const ok = await stream("/api/ask", {
-      thread_id: threadId.current ?? 0,
+      thread_id: threadId.current ?? "",
       question: turn.question,
       audience: turn.audience,
       language: turn.language,
@@ -692,7 +703,7 @@ export default function Ask({
     // The panel belongs to the thread it was asked in, the way a card does.
     const panelThread = threadId.current;
     const ok = await stream("/api/ask", {
-      thread_id: threadId.current ?? 0,
+      thread_id: threadId.current ?? "",
       question: turn.question,
       audience: turn.audience,
       language: turn.language,
@@ -744,7 +755,7 @@ export default function Ask({
       question,
       audience: turn.audience,
       language: turn.language,
-      thread_id: threadId.current ?? 0,
+      thread_id: threadId.current ?? "",
     });
   }
 
@@ -776,7 +787,7 @@ export default function Ask({
     await stream(
       req.url,
       req.url === "/api/ask"
-        ? { ...req.body, thread_id: threadId.current ?? 0, head_message_id: head }
+        ? { ...req.body, thread_id: threadId.current ?? "", head_message_id: head }
         : req.body,
     );
   }
@@ -869,7 +880,18 @@ export default function Ask({
           <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. */}
-            {turns.length === 0 && !loading && (
+            {gone && !loading && (
+              <div className="max-w-[52ch]" role="alert">
+                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
+                  This thread is no longer available.
+                </h2>
+                <p className="mt-3 text-muted">
+                  It was deleted, or the address leads nowhere. Your other threads are in the rail.
+                </p>
+              </div>
+            )}
+
+            {turns.length === 0 && !loading && !gone && (
               <div className="max-w-[52ch]">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
                   {(welcome[asking] ?? welcome.en).title}

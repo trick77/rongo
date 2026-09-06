@@ -2,9 +2,7 @@ package threads
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -28,8 +26,15 @@ type Share struct {
 	// The path, never an absolute URL: the browser puts its own origin in
 	// front. A rongo behind a TLS-terminating proxy only ever sees plain HTTP
 	// and would build the wrong one.
-	Path     string `json:"path"`
-	ThreadID int64  `json:"thread_id"`
+	Path string `json:"path"`
+	// ThreadPublicID is the shared thread's own address, so the Shared page can
+	// link back to it. Not the row number, and not the token either: the token
+	// opens the public page, this opens the owner's thread.
+	ThreadPublicID string `json:"thread_id"`
+	// threadID is the row it all hangs off, unexported: the public read below
+	// needs it to fetch the messages, and nothing outside this package has any
+	// business with a row number.
+	threadID int64
 	Title    string `json:"title"`
 	// The ceiling. Turns above it are on the record but not on the link.
 	UpToMessageID int64     `json:"up_to_message_id"`
@@ -43,17 +48,6 @@ type Share struct {
 // window.location, and backend/web serves index.html for it like any other
 // non-/api path.
 const SharePath = "/share/"
-
-// newShareToken mints 128 bits as 22 URL-safe characters. Never a thread id
-// and never a slug: the URL is the whole authorisation, so it has to be
-// unguessable on its own.
-func newShareToken() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate share token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
 
 // ceilingFor is the newest FINISHED turn of a thread: the id a link freezes
 // at. A turn is finished once it has an answer, an error, or a clarification
@@ -115,7 +109,7 @@ func (s *Store) Share(ctx context.Context, subject string, threadID int64) (Shar
 		return Share{}, ErrNoShare
 	}
 
-	token, err := newShareToken()
+	token, err := newToken()
 	if err != nil {
 		return Share{}, err
 	}
@@ -180,7 +174,7 @@ func (s *Store) RevokeShare(ctx context.Context, subject string, threadID int64)
 // both are shown on every row of the Shared page, and a per-row query there
 // would be one round trip per link.
 const shareColumns = `
-	SELECT sh.token, sh.thread_id, t.title, sh.up_to_message_id, sh.shared_at, sh.updated_at,
+	SELECT sh.token, t.public_id, sh.thread_id, t.title, sh.up_to_message_id, sh.shared_at, sh.updated_at,
 	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id <= sh.up_to_message_id),
 	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id > sh.up_to_message_id)
 	FROM shared_threads sh JOIN threads t ON t.id = sh.thread_id`
@@ -188,7 +182,7 @@ const shareColumns = `
 func scanShare(row interface{ Scan(...any) error }) (Share, error) {
 	var sh Share
 	var sharedAt, updatedAt string
-	if err := row.Scan(&sh.Token, &sh.ThreadID, &sh.Title, &sh.UpToMessageID,
+	if err := row.Scan(&sh.Token, &sh.ThreadPublicID, &sh.threadID, &sh.Title, &sh.UpToMessageID,
 		&sharedAt, &updatedAt, &sh.Turns, &sh.Newer); err != nil {
 		return Share{}, err
 	}
@@ -273,7 +267,7 @@ func (s *Store) SharedThread(ctx context.Context, token string) (Share, []Messag
 	if err != nil {
 		return Share{}, nil, fmt.Errorf("read share: %w", err)
 	}
-	msgs, err := s.messages(ctx, anySubject, sh.ThreadID, sh.UpToMessageID)
+	msgs, err := s.messages(ctx, anySubject, sh.threadID, sh.UpToMessageID)
 	if err != nil {
 		return Share{}, nil, err
 	}

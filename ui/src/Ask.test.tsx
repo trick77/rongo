@@ -82,7 +82,7 @@ describe("Ask", () => {
 
   it("shows the answer as it arrives, not only at the end", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1, title: "x" }),
+      ev("thread", { thread_id: "1", title: "x" }),
       ev("token", { text: "Shipping " }),
       ev("token", { text: "runs through a job [1]." }),
       ev("citations", [
@@ -102,8 +102,8 @@ describe("Ask", () => {
   // until the next reload.
   it("refreshes the list the moment the title lands, not at the end of the turn", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
-      ev("title", { thread_id: 1, title: "Shipping, end to end" }),
+      ev("thread", { thread_id: "1" }),
+      ev("title", { thread_id: "1", title: "Shipping, end to end" }),
       ev("token", { text: "Still writing…" }),
     ]);
     const onActivity = vi.fn();
@@ -118,7 +118,7 @@ describe("Ask", () => {
   });
 
   it("shows the running step while nothing is finished", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("status", { step: "gathering" })]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("status", { step: "gathering" })]);
 
     await ask("How?");
 
@@ -129,7 +129,7 @@ describe("Ask", () => {
 
   it("lists the sources with their branch - without it a forge link leads nowhere", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "So ist es [1]." }),
       ev("citations", [
         {
@@ -157,7 +157,7 @@ describe("Ask", () => {
 
   it("opens the cited file, at the cited commit, when a source is clicked", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "So [1]." }),
       ev("citations", [
         { marker: 1, repo: "peeq", branch: "master", path: "internal/a.go", start_line: 2, end_line: 3, sha: "0123abcdef" },
@@ -192,7 +192,7 @@ describe("Ask", () => {
   });
 
   it("shows an error as an error, not as an empty answer", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("error", { message: "The turn failed." })]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("error", { message: "The turn failed." })]);
 
     await ask("How?");
 
@@ -202,7 +202,7 @@ describe("Ask", () => {
   });
 
   it("sends the chosen role along", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.click(screen.getByRole("button", { name: "Developer" }));
@@ -216,7 +216,7 @@ describe("Ask", () => {
   });
 
   it("sends the chosen answer language along", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.selectOptions(screen.getByLabelText("Answer language"), "de");
@@ -230,7 +230,7 @@ describe("Ask", () => {
   });
 
   it("asks on Enter and keeps Shift+Enter for a new line", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.type(screen.getByLabelText("Question"), "First line{Shift>}{Enter}{/Shift}second");
@@ -244,17 +244,17 @@ describe("Ask", () => {
   it("appends the second question to the same thread", async () => {
     // The thread is a record: a follow-up continues it rather than starting a
     // second conversation about the same subject.
-    streamFrames([ev("thread", { thread_id: 42 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "42" }), ev("done", {})]);
     const user = await ask("First question?");
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
-    streamFrames([ev("thread", { thread_id: 42 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "42" }), ev("done", {})]);
     await user.type(screen.getByLabelText("Question"), "And then?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await waitFor(() => {
       const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
-      expect(body.thread_id).toBe(42);
+      expect(body.thread_id).toBe("42");
     });
   });
 });
@@ -319,7 +319,7 @@ describe("Ask, a stored thread", () => {
 
   it("restores an old turn including its sources from the record", async () => {
     routedFetch([storedTurn]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
     expect(screen.getByText(/How does an Apple TV get at the file/)).toBeTruthy();
@@ -343,7 +343,7 @@ describe("Ask, a stored thread", () => {
       value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
     });
     routedFetch([{ ...storedTurn, answer: "Through a grant [1].\n\n```diagram\n" + spec + "\n```" }]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     fireEvent.click(await screen.findByText("Copy as Markdown"));
     await screen.findByText("Copied");
@@ -364,7 +364,7 @@ describe("Ask, a stored thread", () => {
       value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
     });
     routedFetch([storedTurn]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Copy the question" }));
     await screen.findByRole("button", { name: "Question copied" });
@@ -383,7 +383,7 @@ describe("Ask, a stored thread", () => {
       citations: [{ ...storedTurn.citations[0], path: "backend/internal/httpapi/token.go" }],
     };
     routedFetch([storedTurn, newer]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
     await screen.findByText(/From the header/);
 
     const fetchMock = vi.fn(async () => ({
@@ -405,7 +405,7 @@ describe("Ask, a stored thread", () => {
 
   it("restores the role the question was answered in", async () => {
     routedFetch([storedTurn]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
     // The eyebrow over the question, not the composer's toggle button.
     await screen.findByText(/Through a grant/);
     expect(screen.getAllByText("Developer").some((el) => el.tagName !== "BUTTON")).toBe(true);
@@ -413,12 +413,24 @@ describe("Ask, a stored thread", () => {
 
   // Messages() puts the subject inside the WHERE clause and returns an empty
   // list for a thread that is not yours or no longer exists — 200, not 403.
-  // Waiting for an error status would leave a dead id in localStorage forever.
-  it("hands back a dead thread id instead of showing an empty thread", async () => {
+  // It is said on the page rather than swapped for the composer: the address
+  // in the bar is one the reader followed, and answering it with "ask me
+  // something" is a soft 404 that tells them their link worked.
+  it("says a thread is gone instead of showing an empty one", async () => {
     routedFetch([]);
-    const onThread = vi.fn();
-    strict(<Ask threadId={999} onThread={onThread} />);
-    await waitFor(() => expect(onThread).toHaveBeenCalledWith(null));
+    strict(<Ask threadId="999" onThread={() => {}} />);
+    expect(await screen.findByText(/no longer available/)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /New question/ })).toBeNull();
+  });
+
+  // An address of the right shape that names no thread at all: the SPA handler
+  // cannot answer that one — no session, no database, and a 404 there would
+  // tell anyone which addresses are real — so the API does, and this is where
+  // it is read.
+  it("says the same for an address the API answers 404", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404, json: async () => null })));
+    strict(<Ask threadId="AAAAAAAAAAAAAAAAAAAAAA" onThread={() => {}} />);
+    expect(await screen.findByText(/no longer available/)).toBeTruthy();
   });
 
   it("does not reload its own running thread mid-stream", async () => {
@@ -427,7 +439,7 @@ describe("Ask, a stored thread", () => {
     // stored record, which does not have it yet.
     const mock = routedFetch(
       [storedTurn],
-      [ev("thread", { thread_id: 42 }), ev("token", { text: "Shipping runs." }), ev("done", {})],
+      [ev("thread", { thread_id: "42" }), ev("token", { text: "Shipping runs." }), ev("done", {})],
     );
     const user = userEvent.setup();
     const { rerender } = render(<Ask threadId={null} onThread={() => {}} />);
@@ -435,7 +447,7 @@ describe("Ask, a stored thread", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/Shipping runs/);
 
-    rerender(<Ask threadId={42} onThread={() => {}} />);
+    rerender(<Ask threadId="42" onThread={() => {}} />);
     await waitFor(() =>
       expect(mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/")).length).toBe(0),
     );
@@ -481,7 +493,7 @@ describe("Ask, a stored thread", () => {
     // Pick a thread, then «New question» before the answer is there. The
     // arriving answer belongs to a thread that is no longer open.
     const { release } = slowThreadFetch([storedTurn]);
-    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    const { rerender } = render(<Ask threadId="7" onThread={() => {}} />);
     rerender(<Ask threadId={null} onThread={() => {}} />);
     // Released and then flushed: a plain waitFor can poll before the resolved
     // promise's continuation has run and pass on a component that is about to
@@ -509,11 +521,11 @@ describe("Ask, a stored thread", () => {
       }),
     );
 
-    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    const { rerender } = render(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
 
     hold = new Promise<void>((r) => (release = r));
-    rerender(<Ask threadId={8} onThread={() => {}} />);
+    rerender(<Ask threadId="8" onThread={() => {}} />);
 
     expect(screen.queryByText(/Through a grant/)).toBeNull();
     // A shape in its place, and not the welcome: nobody who has just opened a
@@ -531,12 +543,12 @@ describe("Ask, a stored thread", () => {
     // is already sent when the record arrives. Without a guard the running turn
     // is dropped and the remaining tokens land in a finished, stored answer.
     const { release } = slowThreadFetch([storedTurn], [
-      ev("thread", { thread_id: 7 }),
+      ev("thread", { thread_id: "7" }),
       ev("token", { text: "The new answer." }),
       ev("done", {}),
     ]);
     const user = userEvent.setup();
-    render(<Ask threadId={7} onThread={() => {}} />);
+    render(<Ask threadId="7" onThread={() => {}} />);
     await user.type(screen.getByLabelText("Question"), "And now?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/The new answer/);
@@ -558,7 +570,7 @@ describe("Ask, a stored thread", () => {
     // list means the thread is not yours or is gone.
     const { release } = slowThreadFetch(null, [], 503);
     const onThread = vi.fn();
-    render(<Ask threadId={7} onThread={onThread} />);
+    render(<Ask threadId="7" onThread={onThread} />);
     release();
     await act(async () => {});
     expect(onThread).not.toHaveBeenCalledWith(null);
@@ -568,7 +580,7 @@ describe("Ask, a stored thread", () => {
     // Switch from thread 7 to 8 while the network drops. If thread 7 stays on
     // screen, the next question silently goes into thread 8.
     routedFetch([storedTurn]);
-    const { rerender } = render(<Ask threadId={7} onThread={() => {}} />);
+    const { rerender } = render(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
 
     vi.stubGlobal(
@@ -577,12 +589,12 @@ describe("Ask, a stored thread", () => {
         throw new Error("offline");
       }),
     );
-    rerender(<Ask threadId={8} onThread={() => {}} />);
+    rerender(<Ask threadId="8" onThread={() => {}} />);
     await waitFor(() => expect(screen.queryByText(/Through a grant/)).toBeNull());
   });
 
   it("reports the thread upwards as soon as it exists, and when the turn is done", async () => {
-    routedFetch([], [ev("thread", { thread_id: 42 }), ev("token", { text: "So." }), ev("done", {})]);
+    routedFetch([], [ev("thread", { thread_id: "42" }), ev("token", { text: "So." }), ev("done", {})]);
     const onActivity = vi.fn();
     const user = userEvent.setup();
     render(<Ask threadId={null} onActivity={onActivity} />);
@@ -676,7 +688,7 @@ describe("Ask, what a turn cost", () => {
 
   it("shows the turn's tokens and opens the per-call breakdown on the pill", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "The answer." }),
       ev("citations", []),
       ev("usage", usage),
@@ -702,7 +714,7 @@ describe("Ask, what a turn cost", () => {
 
   it("shows money once the server prices the calls", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "The answer." }),
       ev("usage", { ...usage, cost_usd: 0.0081 }),
       ev("done", { message_id: 1 }),
@@ -716,7 +728,7 @@ describe("Ask, what a turn cost", () => {
 
   it("keeps the pill on a turn that asked back or failed - the gates were paid for", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("usage", { ...usage, calls: usage.calls.slice(0, 2), total_tokens: 452 }),
       ev("error", { message: "The turn failed." }),
     ]);
@@ -732,7 +744,7 @@ describe("Ask, what a turn cost", () => {
   it("reports the thread's running total upwards, every turn summed", async () => {
     const onUsage = vi.fn();
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "The answer." }),
       ev("usage", { ...usage, cost_usd: 0.01 }),
       ev("done", { message_id: 1 }),
@@ -750,7 +762,7 @@ describe("Ask, what a turn cost", () => {
 
     // A second turn adds to it.
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "More." }),
       ev("usage", { ...usage, cost_usd: 0.02 }),
       ev("done", { message_id: 2 }),
@@ -765,7 +777,7 @@ describe("Ask, what a turn cost", () => {
     routedFetch([{ ...storedTurn, usage: { ...usage, cost_usd: 0.005 } }]);
     render(
       <StrictMode>
-        <Ask threadId={7} onUsage={onUsage} />
+        <Ask threadId="7" onUsage={onUsage} />
       </StrictMode>,
     );
 
@@ -797,7 +809,7 @@ describe("Ask, the clarification and re-explaining", () => {
   it("renders the card on a clarification and ends the turn's trace in the waiting state", async () => {
     queuedPostFetch([
       [
-        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("thread", { thread_id: "1", message_id: 5 }),
         ev("status", { step: "understanding" }),
         ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
         ev("done", { message_id: 5 }),
@@ -817,12 +829,12 @@ describe("Ask, the clarification and re-explaining", () => {
   it("sends the choice when a candidate is picked and streams the answer into a new turn", async () => {
     const mock = queuedPostFetch([
       [
-        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("thread", { thread_id: "7", message_id: 5 }),
         ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
         ev("done", { message_id: 5 }),
       ],
       [
-        ev("thread", { thread_id: 7, message_id: 6 }),
+        ev("thread", { thread_id: "7", message_id: 6 }),
         ev("token", { text: "Sign-in runs through the login service." }),
         ev("done", { message_id: 6 }),
       ],
@@ -846,7 +858,7 @@ describe("Ask, the clarification and re-explaining", () => {
       .filter((c) => c[1]?.method === "POST")
       .map((c) => JSON.parse(String(c[1]?.body)));
     expect(postBodies[1]).toMatchObject({
-      thread_id: 7,
+      thread_id: "7",
       clarification_message_id: 5,
       choice: 0,
     });
@@ -856,7 +868,7 @@ describe("Ask, the clarification and re-explaining", () => {
   it("renders the narrowing panel, not a card, when the question was too broad", async () => {
     queuedPostFetch([
       [
-        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("thread", { thread_id: "1", message_id: 5 }),
         ev("clarification", {
           message_id: 5,
           too_broad: true,
@@ -886,12 +898,12 @@ describe("Ask, the clarification and re-explaining", () => {
     const mock = postFetchByRequest((body) =>
       body.clarification_message_id
         ? [
-            ev("thread", { thread_id: 7, message_id: 6 }),
+            ev("thread", { thread_id: "7", message_id: 6 }),
             ev("token", { text: "Both retry with capped exponential backoff." }),
             ev("done", { message_id: 6 }),
           ]
         : [
-            ev("thread", { thread_id: 7, message_id: 5 }),
+            ev("thread", { thread_id: "7", message_id: 5 }),
             ev("clarification", {
               message_id: 5,
               too_broad: true,
@@ -923,7 +935,7 @@ describe("Ask, the clarification and re-explaining", () => {
     await waitFor(() => expect(posted()).toHaveLength(2));
     const body = JSON.parse(String(posted()[1][1]?.body));
     expect(body).toMatchObject({
-      thread_id: 7,
+      thread_id: "7",
       clarification_message_id: 5,
       repos: ["peeq", "ledger"],
     });
@@ -946,12 +958,12 @@ describe("Ask, the clarification and re-explaining", () => {
     // question already decided, and the backend refuses it with 409 anyway.
     const mock = queuedPostFetch([
       [
-        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("thread", { thread_id: "7", message_id: 5 }),
         ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
         ev("done", { message_id: 5 }),
       ],
       [
-        ev("thread", { thread_id: 7, message_id: 6 }),
+        ev("thread", { thread_id: "7", message_id: 6 }),
         ev("token", { text: "Sign-in runs through the login service." }),
         ev("done", { message_id: 6 }),
       ],
@@ -977,11 +989,11 @@ describe("Ask, the clarification and re-explaining", () => {
     // strand the reader with no way to retry.
     queuedPostFetch([
       [
-        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("thread", { thread_id: "7", message_id: 5 }),
         ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
         ev("done", { message_id: 5 }),
       ],
-      [ev("thread", { thread_id: 7, message_id: 6 }), ev("error", { message: "The turn failed." })],
+      [ev("thread", { thread_id: "7", message_id: 6 }), ev("error", { message: "The turn failed." })],
     ]);
 
     const user = await ask("How is sign-in done?");
@@ -998,7 +1010,7 @@ describe("Ask, the clarification and re-explaining", () => {
     // happened.
     const encoder = new TextEncoder();
     const frames = [
-      ev("thread", { thread_id: 7, message_id: 5 }),
+      ev("thread", { thread_id: "7", message_id: 5 }),
       ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
       ev("done", { message_id: 5 }),
     ];
@@ -1063,7 +1075,7 @@ describe("Ask, the clarification and re-explaining", () => {
     // GET /api/threads/{id} carries the clarification; without this a reload
     // shows a turn that looks stuck forever.
     routedFetch([clarifyingMessage, resumedMessage]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
@@ -1122,7 +1134,7 @@ describe("Ask, the clarification and re-explaining", () => {
       created_at: "2026-08-17T10:02:00Z",
     };
     routedFetch([c1, c2, r1]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     // c1's card is collapsed and marked with the choice r1 recorded.
     expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
@@ -1136,11 +1148,11 @@ describe("Ask, the clarification and re-explaining", () => {
     // is a turn the reader walked away from, and its tokens deliberately stop
     // repainting the conversation in front of them.
     const mock = routedFetch([storedTurn], [
-      ev("thread", { thread_id: 7, message_id: 20 }),
+      ev("thread", { thread_id: "7", message_id: 20 }),
       ev("token", { text: "An answer for the BA." }),
       ev("done", { message_id: 20 }),
     ]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
@@ -1393,7 +1405,7 @@ describe("Ask, following the answer", () => {
     const view = scroller(container);
     view.scrollTop = 1500;
 
-    rerender(<Ask threadId={7} onThread={() => {}} />);
+    rerender(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
 
     expect(view.scrollTop).toBe(0);
@@ -1403,7 +1415,7 @@ describe("Ask, following the answer", () => {
     const stream = pushableStream([storedTurn]);
     const { container, rerender } = render(<Ask threadId={null} onThread={() => {}} />);
     const view = scroller(container);
-    rerender(<Ask threadId={7} onThread={() => {}} />);
+    rerender(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
     expect(view.scrollTop).toBe(0);
 
@@ -1431,7 +1443,7 @@ describe("Ask, following the answer", () => {
     routedFetch([storedTurn]);
     const { container } = render(
       <StrictMode>
-        <Ask threadId={7} />
+        <Ask threadId="7" />
       </StrictMode>,
     );
     await screen.findByText(/Through a grant/);
@@ -1478,7 +1490,7 @@ describe("Ask, the language a thread is answered in", () => {
   // control goes. What it used to say is said where it belongs: on the turn's
   // own pill, beside the answer written in that language.
   it("takes the language control away once the thread has one", async () => {
-    streamFrames([ev("thread", { thread_id: 1 }), ev("done", {})]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.selectOptions(screen.getByLabelText("Answer language"), "de");
@@ -1496,7 +1508,7 @@ describe("Ask, the language a thread is answered in", () => {
     routedFetch([{ ...storedTurn, language: "fr" }]);
     render(
       <StrictMode>
-        <Ask threadId={7} />
+        <Ask threadId="7" />
       </StrictMode>,
     );
 
@@ -1509,11 +1521,11 @@ describe("Ask, the language a thread is answered in", () => {
   // another one: the request must match what the record will file the turn as.
   it("asks a follow-up in the thread's language", async () => {
     localStorage.setItem("rongo.language", "en");
-    const mock = routedFetch([{ ...storedTurn, language: "fr" }], [ev("thread", { thread_id: 7 }), ev("done", {})]);
+    const mock = routedFetch([{ ...storedTurn, language: "fr" }], [ev("thread", { thread_id: "7" }), ev("done", {})]);
     const user = userEvent.setup();
     render(
       <StrictMode>
-        <Ask threadId={7} />
+        <Ask threadId="7" />
       </StrictMode>,
     );
     await screen.findByText(/Through a grant/);
@@ -1534,7 +1546,7 @@ describe("Ask, a language the record decided", () => {
   // thread's. The stream says which one it took, and the turn - with it the
   // pill it carries - follows the record rather than the guess.
   it("follows the language the stream reports", async () => {
-    streamFrames([ev("thread", { thread_id: 3, message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
+    streamFrames([ev("thread", { thread_id: "3", message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.type(screen.getByLabelText("Question"), "How?");
@@ -1580,7 +1592,7 @@ describe("Ask, the caret of a streaming answer", () => {
     );
     await user.type(screen.getByLabelText("Question"), "How does indexing work?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
-    await stream.push(ev("thread", { thread_id: 1, message_id: 2 }));
+    await stream.push(ev("thread", { thread_id: "1", message_id: 2 }));
     await stream.push(ev("token", { text: "Indexing walks the repo." }));
 
     const para = await screen.findByText(
@@ -1594,7 +1606,7 @@ describe("Ask, the caret of a streaming answer", () => {
 
   it("drops the streaming mark once the answer is done", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1, message_id: 2 }),
+      ev("thread", { thread_id: "1", message_id: 2 }),
       ev("token", { text: "Indexing walks the repo." }),
       ev("done", { message_id: 2 }),
     ]);
@@ -1656,11 +1668,11 @@ describe("Ask, retrying a failed turn", () => {
   it("asks again as a new turn, leaving the failed one in the record", async () => {
     const mock = queuedPostFetch([
       [
-        ev("thread", { thread_id: 1, message_id: 5 }),
+        ev("thread", { thread_id: "1", message_id: 5 }),
         ev("error", { message: "The turn failed.", message_id: 5 }),
       ],
       [
-        ev("thread", { thread_id: 1, message_id: 6 }),
+        ev("thread", { thread_id: "1", message_id: 6 }),
         ev("token", { text: "The answer." }),
         ev("done", { message_id: 6 }),
       ],
@@ -1685,7 +1697,7 @@ describe("Ask, retrying a failed turn", () => {
       question: "How?",
       audience: "ba",
       language: "en",
-      thread_id: 1,
+      thread_id: "1",
       head_message_id: 5,
     });
   });
@@ -1715,7 +1727,7 @@ describe("Ask, retrying a failed turn", () => {
     // A proxy FIN or a backend restart mid-answer closes the stream cleanly.
     // Without a terminal event the turn used to tick forever with no error
     // and no way out.
-    streamFrames([ev("thread", { thread_id: 1 }), ev("status", { step: "answering" })]);
+    streamFrames([ev("thread", { thread_id: "1" }), ev("status", { step: "answering" })]);
 
     await ask("How?");
 
@@ -1727,7 +1739,7 @@ describe("Ask, retrying a failed turn", () => {
 
   it("offers no retry on a turn that answered", async () => {
     streamFrames([
-      ev("thread", { thread_id: 1 }),
+      ev("thread", { thread_id: "1" }),
       ev("token", { text: "The answer." }),
       ev("done", { message_id: 1 }),
     ]);
@@ -1755,9 +1767,9 @@ describe("Ask, retrying a failed turn", () => {
     };
     const mock = routedFetch(
       [failed],
-      [ev("thread", { thread_id: 7, message_id: 10 }), ev("done", { message_id: 10 })],
+      [ev("thread", { thread_id: "7", message_id: 10 }), ev("done", { message_id: 10 })],
     );
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Retry" }));
@@ -1769,7 +1781,7 @@ describe("Ask, retrying a failed turn", () => {
         question: "How does the grant work?",
         audience: "dev",
         language: "en",
-        thread_id: 7,
+        thread_id: "7",
         head_message_id: 9,
       });
     });
@@ -1778,7 +1790,7 @@ describe("Ask, retrying a failed turn", () => {
   it("leaves a failed resume to its card, live", async () => {
     queuedPostFetch([
       [
-        ev("thread", { thread_id: 7, message_id: 5 }),
+        ev("thread", { thread_id: "7", message_id: 5 }),
         ev("clarification", {
           message_id: 5,
           candidates: [
@@ -1788,7 +1800,7 @@ describe("Ask, retrying a failed turn", () => {
         }),
         ev("done", { message_id: 5 }),
       ],
-      [ev("thread", { thread_id: 7, message_id: 6 }), ev("error", { message: "The turn failed." })],
+      [ev("thread", { thread_id: "7", message_id: 6 }), ev("error", { message: "The turn failed." })],
     ]);
 
     const user = await ask("How is sign-in done?");
@@ -1846,7 +1858,7 @@ describe("Ask, retrying a failed turn", () => {
       created_at: "2026-08-17T10:01:00Z",
     };
     routedFetch([card, failedResume]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -1861,16 +1873,16 @@ describe("Ask, retrying a failed turn", () => {
     // code than the reader was shown.
     const mock = queuedPostFetch(
       [
-        [ev("thread", { thread_id: 7, message_id: 20 }), ev("error", { message: "The turn failed." })],
+        [ev("thread", { thread_id: "7", message_id: 20 }), ev("error", { message: "The turn failed." })],
         [
-          ev("thread", { thread_id: 7, message_id: 21 }),
+          ev("thread", { thread_id: "7", message_id: 21 }),
           ev("token", { text: "An answer for the BA." }),
           ev("done", { message_id: 21 }),
         ],
       ],
       [storedTurn],
     );
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
@@ -1926,7 +1938,7 @@ describe("Ask, retrying a failed turn", () => {
       created_at: at,
     });
     routedFetch([card, failedResume(11, "2026-08-17T10:01:00Z"), failedResume(12, "2026-08-17T10:02:00Z")]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     // Both failures are in the record and both are on the page — the newest
     // in full, the one the reader already moved past folded to a line.
@@ -2002,7 +2014,7 @@ describe("Ask, one question and its attempts", () => {
 
   it("prints the question once, however many attempts it took", async () => {
     routedFetch([card, resumed, reexplained]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     await screen.findByText(/Reines RAG/);
     expect(screen.getAllByText(question).length).toBe(1);
@@ -2014,7 +2026,7 @@ describe("Ask, one question and its attempts", () => {
 
   it("keeps every attempt on the page, each saying what it is", async () => {
     routedFetch([card, resumed, reexplained]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     // Nothing is dropped: the card, the answer and the same answer for the
     // other audience are all there, under the one question.
@@ -2027,7 +2039,7 @@ describe("Ask, one question and its attempts", () => {
 
   it("gives a turn answered on the first try no stage labels at all", async () => {
     routedFetch([storedTurn]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     await screen.findByText(/Through a grant/);
     expect(screen.getAllByRole("article").length).toBe(1);
@@ -2038,14 +2050,14 @@ describe("Ask, one question and its attempts", () => {
     const mock = queuedPostFetch(
       [
         [
-          ev("thread", { thread_id: 7, message_id: 21 }),
+          ev("thread", { thread_id: "7", message_id: 21 }),
           ev("token", { text: "An answer for the BA." }),
           ev("done", { message_id: 21 }),
         ],
       ],
       [storedTurn],
     );
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
@@ -2104,7 +2116,7 @@ describe("Ask, turns written before the head link existed", () => {
       created_at: "2026-08-17T10:01:00Z",
     };
     routedFetch([card, legacyFailedResume]);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
@@ -2161,7 +2173,7 @@ describe("Ask, turns written before the head link existed", () => {
       },
     ];
     routedFetch(rows);
-    strict(<Ask threadId={7} />);
+    strict(<Ask threadId="7" />);
 
     await screen.findByText(/And in types again/);
     expect(screen.getAllByRole("article").length).toBe(1);
