@@ -112,6 +112,26 @@ describe("SharePage", () => {
     expect(document.head.querySelector('meta[name="robots"]')).toBeNull();
   });
 
+  it("fades the thread column at both edges, having no composer to fade into", async () => {
+    shared({ title: "How routing decides", messages: [turn] });
+    const { container } = render(<SharePage token="tok" />);
+    await screen.findByText(/It is a ladder/);
+
+    // Two strips over one scroller: nothing else paints an edge on this page,
+    // so the foot needs its own as much as the head does.
+    const scroller = container.querySelector(".overflow-auto") as HTMLElement;
+    const fades = Array.from(scroller.parentElement!.children).filter((el) =>
+      el.className.includes("bg-gradient-to-"),
+    );
+    expect(fades.map((el) => el.getAttribute("aria-hidden"))).toEqual(["true", "true"]);
+    expect(fades[0].className).toContain("top-0");
+    expect(fades[0].className).toContain("bg-gradient-to-b");
+    expect(fades[1].className).toContain("bottom-0");
+    expect(fades[1].className).toContain("bg-gradient-to-t");
+    // A strip the reader can click is a strip that eats a citation chip.
+    for (const el of fades) expect(el.className).toContain("pointer-events-none");
+  });
+
   it("draws an unanswered card as a record, not as a question", async () => {
     shared({
       title: "Where does the retry budget live?",

@@ -855,6 +855,19 @@ export default function Ask({
     <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
+        {/* ../loom's transcript edges: prose dissolves into the background as
+            it leaves the column rather than being cut off by it. The head is
+            here; the foot's strip rides above the composer, further down.
+            The height tracks the column's top padding at every breakpoint:
+            content has to clear the fade, or the first line sits half dimmed
+            with the column at rest.
+            z-0, not ../loom's z-10: the busybar runs along the same edge at
+            z-1, and an opaque strip over it would swallow the 2px line. A
+            positioned element still paints above the scrolled text. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
+        />
         <div
           ref={view}
           // The reader's own intent, caught as it happens: a scroll event is
@@ -950,8 +963,21 @@ export default function Ask({
 
         <form
           onSubmit={submit}
-          className="max-w-[900px] bg-[linear-gradient(to_bottom,transparent,var(--color-bg)_30%)] px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+          className="relative max-w-[900px] bg-bg px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
         >
+          {/* The foot of the column, ../loom's way round: the composer is
+              opaque and the fade is a strip immediately above it, so prose
+              dissolves as it reaches the composer instead of being cut by it.
+              The gradient that used to sit on the form itself could not do
+              this — the form is a flex sibling BELOW the scroller, not over
+              it, so its transparent-to-bg ramp painted bg on bg and faded
+              nothing.
+              h-8 against the column's pb-8, so the last line clears the strip
+              once the reader is at the foot. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-full z-0 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
+          />
           {/* The question gets the whole width; the controls sit under it in
               their own row, so a long question and its settings never fight
               for the same line. */}

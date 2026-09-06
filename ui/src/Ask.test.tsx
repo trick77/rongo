@@ -1270,6 +1270,28 @@ async function askInto(container: HTMLElement) {
   return container;
 }
 
+describe("Ask, the edges of the reading column", () => {
+  it("fades the head against the column and the foot against the composer", () => {
+    const { container } = render(<Ask />);
+
+    const head = container.querySelector(".bg-gradient-to-b") as HTMLElement;
+    expect(head.getAttribute("aria-hidden")).toBe("true");
+    expect(head.className).toContain("top-0");
+    expect(head.className).toContain("pointer-events-none");
+    // Under the busybar, not over it: an opaque strip at z-10 would swallow
+    // the 2px line that runs along the very same edge.
+    expect(head.className).toContain("z-0");
+
+    // The foot's strip belongs to the composer and sits immediately above it,
+    // because the composer is a sibling BELOW the scroller rather than an
+    // overlay on it — a gradient on the form itself fades nothing.
+    const foot = container.querySelector(".bg-gradient-to-t") as HTMLElement;
+    expect(foot.getAttribute("aria-hidden")).toBe("true");
+    expect(foot.className).toContain("bottom-full");
+    expect(foot.closest("form")).toBeTruthy();
+  });
+});
+
 describe("Ask, following the answer", () => {
   it("scrolls the arriving answer into view", async () => {
     const stream = pushableStream();
