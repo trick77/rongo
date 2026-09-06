@@ -329,3 +329,121 @@ func TestReplaceFile_rejectsAVectorCountMismatch(t *testing.T) {
 		t.Fatal("ReplaceFile() err = nil, want a rejection of the count mismatch")
 	}
 }
+
+// storedSymbols reads back what ReplaceFile recorded, as "name:kind" pairs.
+func storedSymbols(t *testing.T, db *sql.DB, lang string, syms []symbols.Symbol) []string {
+	t.Helper()
+	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A."+lang, "abc123", lang, 64,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, syms)
+	if err != nil {
+		t.Fatalf("ReplaceFile() err = %v, want nil", err)
+	}
+	rows, err := db.Query(`
+		SELECT s.name, s.kind FROM symbols s
+		JOIN files f ON f.id = s.file_id
+		WHERE f.path = ? ORDER BY s.name`, "src/A."+lang)
+	if err != nil {
+		t.Fatalf("select symbols: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name, kind string
+		if err := rows.Scan(&name, &kind); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, name+":"+kind)
+	}
+	return got
+}
+
+func TestReplaceFile_recordsGoDefinitionsOnly(t *testing.T) {
+	// A struct field named like a function is what made the reference walk
+	// resolve a behavioural question onto a struct declaration. Go const and
+	// var stay: they name a real definition, and following one reaches the
+	// prompt text or the table it holds.
+	// Given
+	db := writeDB(t)
+	syms := []symbols.Symbol{
+		{Name: "candidates", Kind: "func", Line: 39},
+		{Name: "ladder", Kind: "struct", Line: 599},
+		{Name: "named", Kind: "member", Line: 604, Scope: "ask.ladder"},
+		{Name: "gateTemperature", Kind: "const", Line: 41},
+		{Name: "ask", Kind: "package", Line: 1},
+	}
+
+	// When
+	got := storedSymbols(t, db, "go", syms)
+
+	// Then
+	want := []string{"candidates:func", "gateTemperature:const", "ladder:struct"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("symbols = %v, want %v", got, want)
+	}
+}
+
+func TestReplaceFile_keepsKindsThatOnlyLookLikeGoNoise(t *testing.T) {
+	// The denylist is per language because a ctags kind name is not portable:
+	// "member" is a struct field in Go but a METHOD in Python, and "constant"
+	// is a const value in Go but an arrow function in TypeScript. A global set
+	// would silently drop every method of those languages from the walk.
+	// Given
+	db := writeDB(t)
+
+	// When
+	py := storedSymbols(t, db, "py", []symbols.Symbol{
+		{Name: "Foo", Kind: "class", Line: 1},
+		{Name: "method_a", Kind: "member", Line: 2, Scope: "Foo"},
+	})
+	ts := storedSymbols(t, db, "ts", []symbols.Symbol{
+		{Name: "arrow", Kind: "constant", Line: 1},
+		{Name: "Alias", Kind: "alias", Line: 3},
+	})
+
+	// Then
+	if want := "Foo:class method_a:member"; strings.Join(py, " ") != want {
+		t.Errorf("python symbols = %v, want %v", py, want)
+	}
+	if want := "Alias:alias arrow:constant"; strings.Join(ts, " ") != want {
+		t.Errorf("typescript symbols = %v, want %v", ts, want)
+	}
+}
+
+func TestReplaceFile_recordsNoSymbolsForDataFiles(t *testing.T) {
+	// ctags reports every key and array index of a JSON file as a symbol. One
+	// eval fixture defined "candidates" sixty-five times that way, and those
+	// chunks spent the walk's whole token budget.
+	// Given
+	db := writeDB(t)
+	syms := []symbols.Symbol{
+		{Name: "0", Kind: "object", Line: 2},
+		{Name: "candidates", Kind: "string", Line: 3},
+		{Name: "strict", Kind: "boolean", Line: 4},
+	}
+
+	// When
+	got := storedSymbols(t, db, "json", syms)
+
+	// Then
+	if len(got) != 0 {
+		t.Errorf("symbols = %v, want none", got)
+	}
+}
+
+func TestReplaceFile_keepsSqlTablesButNotColumns(t *testing.T) {
+	// Given
+	db := writeDB(t)
+	syms := []symbols.Symbol{
+		{Name: "clarifications", Kind: "table", Line: 201},
+		{Name: "reason", Kind: "field", Line: 244, Scope: "clarifications"},
+		{Name: "idx_files_repo", Kind: "index", Line: 66},
+	}
+
+	// When
+	got := storedSymbols(t, db, "sql", syms)
+
+	// Then
+	if want := "clarifications:table"; strings.Join(got, " ") != want {
+		t.Errorf("symbols = %v, want %v", got, want)
+	}
+}

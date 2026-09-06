@@ -9,6 +9,50 @@ import (
 	"github.com/trick77/rongo/internal/symbols"
 )
 
+// dataLanguages are the file types where ctags reports the CONTENT as symbols:
+// every key, every value and every array index. None of it defines a name, and
+// a fixture that lists sixty-five questions ends up defining "candidates"
+// sixty-five times — which the reference walk then follows, spending a token
+// budget it stops on rather than trims, so every name after them goes
+// unfollowed.
+var dataLanguages = map[string]bool{"json": true, "yaml": true, "xml": true}
+
+// nonDefinitionKinds are the ctags kinds to skip, per language.
+//
+// A denylist rather than a list of kinds worth keeping, because a ctags kind
+// name means different things in different parsers, and a global set of
+// "definition kinds" is therefore not expressible:
+//
+//	member    a struct field in Go, a METHOD in Python
+//	constant  a const value in Go, an arrow function in TypeScript
+//
+// Getting that wrong does not fail, it silently removes every method of a
+// language from the walk. So a language nobody has looked at keeps every kind
+// and behaves exactly as it did before, and each entry below is a parser whose
+// output was read.
+//
+// Note what is NOT here: Go const and var. They name a real definition, and
+// following one reaches the prompt text or the table it holds. Only the kinds
+// that define nothing followable are listed.
+var nonDefinitionKinds = map[string]map[string]bool{
+	// A struct field named `named` is not a definition of anything, but the
+	// walk resolved it and cited the enclosing struct for behaviour the struct
+	// does not perform. `package` matches every file that declares it.
+	"go": {"member": true, "package": true},
+	// A column and an index are parts of a table, and the table is already
+	// followable under its own kind.
+	"sql": {"field": true, "index": true},
+}
+
+// isDefinition reports whether a ctags record names something the reference
+// walk should be able to reach.
+func isDefinition(lang, kind string) bool {
+	if dataLanguages[lang] {
+		return false
+	}
+	return !nonDefinitionKinds[lang][kind]
+}
+
 // Writer stores one file's index entry: its row in files, its symbols, and its
 // chunks across the three tables retrieval reads.
 //
@@ -89,7 +133,13 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 			return fmt.Errorf("index %s/%s chunk %d keywords: %w", repo, path, c.Ordinal, err)
 		}
 	}
+	// Only definitions are recorded. The reference walk in internal/ask reads
+	// this table as "where is this name DEFINED", and storing every ctags
+	// record made that false. See isDefinition.
 	for _, s := range syms {
+		if !isDefinition(lang, s.Kind) {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO symbols (file_id, name, kind, line, scope) VALUES (?,?,?,?,?)`,
 			fileID, s.Name, s.Kind, s.Line, s.Scope); err != nil {
