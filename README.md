@@ -1,4 +1,4 @@
-![rongo](rongo-wide.png)
+![Rongo](rongo-wide.jpg)
 
 Ask questions about your codebases and get answers with sources.
 

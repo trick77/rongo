@@ -43,7 +43,7 @@ func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path,
 		// The detail (unknown repository, path gone at that commit, no checkout)
 		// is for the log. The reader learns that rongo cannot show the file.
 		slog.Info("source not found", "repo", repo, "path", path, "sha", sha, "err", err)
-		http.Error(w, "This file is not in rongo's checkout at the cited commit.", http.StatusNotFound)
+		http.Error(w, "This file is not in Rongo's checkout at the cited commit.", http.StatusNotFound)
 		return
 	case errors.Is(err, sourceview.ErrBinary):
 		http.Error(w, "This is a binary file; there are no lines to show.", http.StatusUnsupportedMediaType)

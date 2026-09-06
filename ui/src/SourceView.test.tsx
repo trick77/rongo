@@ -59,12 +59,12 @@ describe("SourceView", () => {
   });
 
   it("shows the server's reason when the file cannot be shown", async () => {
-    serve(404, "This file is not in rongo's checkout at the cited commit.");
+    serve(404, "This file is not in Rongo's checkout at the cited commit.");
 
     render(<SourceView source={source} onClose={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("not in rongo's checkout");
+      expect(screen.getByRole("alert").textContent).toContain("not in Rongo's checkout");
     });
   });
 

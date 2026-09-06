@@ -146,7 +146,7 @@ describe("Ask", () => {
 
     await ask("How?");
 
-    const evidence = await screen.findByText(/How does rongo know this/);
+    const evidence = await screen.findByText(/How does Rongo know this/);
     expect(evidence).toBeTruthy();
     const turn = evidence.closest("article")!;
     expect(turn.textContent).toContain("release-2024.3");
@@ -165,7 +165,7 @@ describe("Ask", () => {
       ev("done", {}),
     ]);
     const user = await ask("How?");
-    await screen.findByText(/How does rongo know this/);
+    await screen.findByText(/How does Rongo know this/);
 
     // From here on fetch serves the file, not the stream.
     const fetchMock = vi.fn(async () => ({

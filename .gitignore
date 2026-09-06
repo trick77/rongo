@@ -81,7 +81,7 @@ docs/plans/
 /*.png
 /*.jpg
 /*.jpeg
-!/rongo-wide.png
+!/rongo-wide.jpg
 
 # ---------- OS & editors ----------
 .DS_Store

@@ -59,6 +59,9 @@
   /* Answer prose only. Brighter than ink-dim because the serif at weight 360
      sets lighter than the sans does — loom's value, for the same reason. */
   --color-ink-prose: #f3f0e8;
+  /* ../loom's wordmark value: warmer than ink, so the word sits as a mark
+     rather than as the brightest text on the page. */
+  --color-wordmark: #f4f0e8;
   --color-muted: #9c9a92;
   --color-faint: #6f6d66;
   --color-accent: #c6613f;

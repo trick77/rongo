@@ -6,7 +6,6 @@ import Threads, { type Thread } from "./Threads";
 import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
 import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
-import logo from "./assets/rongo-wide.png";
 
 type Page = "ask" | "repos" | "shared";
 
@@ -307,18 +306,13 @@ export default function App() {
           >
             <Icon name="sidebar" size="21px" />
           </button>
-          <span
-            aria-hidden="true"
-            className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity [@media(max-height:500px)]:h-[24px] [@media(max-height:500px)]:w-[24px]"
-            style={{ backgroundImage: `url(${logo})` }}
-          />
           {/*
             sr-only, never hidden: the wordmark is out of sight on a phone
             because the thread title needs the width, but the h1 is how a
             reader — and every test here — tells "signed in" from "not yet".
           */}
-          <h1 className="sr-only font-serif text-[21px] font-semibold tracking-tight text-accent-strong sm:not-sr-only">
-            rongo
+          <h1 className="sr-only font-serif text-[21px] leading-7 font-medium text-wordmark sm:not-sr-only">
+            Rongo
           </h1>
         </div>
         {/* Baseline, not centre: the usage in small mono sits on the same
@@ -444,7 +438,7 @@ export default function App() {
               Repos
             </button>
             {/* The audit view for the links this reader has handed out. Under
-                Repos rather than in a settings modal rongo does not have: a
+                Repos rather than in a settings modal Rongo does not have: a
                 live link is a place, and it has to be somewhere you can go. */}
             <button
               type="button"
