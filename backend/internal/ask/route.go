@@ -159,6 +159,14 @@ func SpansRepos(all []Candidate, namedRepos int) bool {
 	return namedRepos == 0 && distinctRepos(all) >= 2
 }
 
+// DecideWhySpans is DecideWhy with the repository rung supplied instead of
+// derived from the candidate list. Exported for the sweep that has to ask
+// whether that rung should fire on repository span at all — see decideWhy.
+// Production has no reason to call it: Route's own spans value is SpansRepos'.
+func DecideWhySpans(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
+	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, spans)
+}
+
 // RepoCandidates is the repository-grained regrouping Route asks Related
 // about once SpansRepos is true. Exported for the same reason: the harness
 // must query the same set, or it measures a manifest edge the product sees and
@@ -586,6 +594,24 @@ const (
 // "judge": both rungs said their piece, and the second one is what changed the
 // outcome.
 func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) (bool, string) {
+	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose,
+		SpansRepos(all, namedRepos))
+}
+
+// decideWhy is DecideWhy with the repository rung handed in rather than
+// recomputed. Only the eval harness needs the parameter, and it needs it for
+// one reason: whether that rung should fire on repository span alone is an
+// open question, and a sweep cannot ask it while the answer is welded into the
+// ladder's body. 2026-09-06 attributed 16 of the ladder's 18 wrong decisions
+// to this one rung (docs/measurements/2026-09-06-routing-rerun.md), so it is
+// the rung most likely to change, and the measurement that would change it has
+// to be able to try the alternatives.
+//
+// Production never passes anything but SpansRepos' answer. If a sweep ever
+// lands a different condition, it belongs in SpansRepos — one implementation,
+// so route() and the harness cannot drift apart about which turns are
+// spanning.
+func decideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
 	if namedRepos >= 1 {
 		return false, rungNamedRepos
 	}
@@ -603,7 +629,7 @@ func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos
 	if related {
 		return false, rungRepoDeps
 	}
-	if namedRepos == 0 && distinctRepos(all) >= 2 {
+	if spans {
 		return true, rungRepository
 	}
 	if Dominates(all, margin) {
@@ -755,7 +781,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// the candidates span more than one. It is the only reason Related is
 	// worth paying for on an otherwise dominant turn, so it is computed before
 	// the margin short-circuit rather than after it.
-	spans := len(namedRepos) == 0 && distinctRepos(ranked.All) >= 2
+	spans := SpansRepos(ranked.All, len(namedRepos))
 	l.spans = spans
 	if !spans && Dominates(ranked.All, r.margin) {
 		// The fast path is unchanged: hits inside one repository with a clear

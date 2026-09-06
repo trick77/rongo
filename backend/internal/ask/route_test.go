@@ -815,6 +815,52 @@ func TestDecideWhyNamesTheRungThatSettledIt(t *testing.T) {
 	}
 }
 
+// TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse pins the hook the
+// repository-rung sweep decides through. DecideWhy derives the rung from the
+// candidate list; DecideWhySpans takes it, so a measurement can ask what the
+// ladder would do if that rung fired differently — or not at all — without a
+// second copy of the ladder's order to drift out of step.
+//
+// Both directions matter. Forcing it false must fall through to the rungs below
+// rather than answer, and forcing it true must not override the rungs ABOVE it:
+// a named repository and the too-broad cut still win, or a sweep could measure a
+// card the product would never raise.
+func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
+	// Two repositories, leader not dominant: the rung fires today.
+	spread := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "rongo", Score: 0.49}}
+
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, true); !ask || rung != rungRepository {
+		t.Errorf("spans=true gave (%v, %q), want an ask on %q", ask, rung, rungRepository)
+	}
+	// spans=false hands the turn to the rungs below, and with no dominant
+	// leader and no judgement that is an answer on the judge's rung — NOT a
+	// card, and not the repository rung under another name.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, false); ask || rung != rungJudge {
+		t.Errorf("spans=false gave (%v, %q), want no ask on %q", ask, rung, rungJudge)
+	}
+	// The judge still decides once it has spoken.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, true, 0, false, true, false); !ask || rung != rungJudge {
+		t.Errorf("spans=false with a judgement gave (%v, %q), want an ask on %q", ask, rung, rungJudge)
+	}
+	// A named repository outranks the parameter: the reader already answered
+	// the only question a card could put to them.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 1, false, true, true); ask || rung != rungNamedRepos {
+		t.Errorf("a named repository with spans=true gave (%v, %q), want no ask on %q", ask, rung, rungNamedRepos)
+	}
+
+	// And DecideWhy is exactly DecideWhySpans with SpansRepos' answer, so the
+	// two cannot disagree about a turn the product actually runs.
+	for _, namedRepos := range []int{0, 1} {
+		wantAsk, wantRung := DecideWhy(spread, 0.25, false, false, namedRepos, false, true)
+		gotAsk, gotRung := DecideWhySpans(spread, 0.25, false, false, namedRepos, false, true,
+			SpansRepos(spread, namedRepos))
+		if wantAsk != gotAsk || wantRung != gotRung {
+			t.Errorf("namedRepos=%d: DecideWhy gave (%v, %q), DecideWhySpans gave (%v, %q)",
+				namedRepos, wantAsk, wantRung, gotAsk, gotRung)
+		}
+	}
+}
+
 func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 	dominant := []Candidate{{Score: 0.60}, {Score: 0.20}} // ratio 0.667
 	tight := []Candidate{{Score: 0.51}, {Score: 0.49}}    // ratio 0.039
