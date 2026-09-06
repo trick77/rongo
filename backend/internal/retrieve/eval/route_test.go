@@ -210,10 +210,6 @@ type routingRow struct {
 
 func (r routingRow) correct() bool { return r.got == r.want }
 
-// reportRouting prints one arm's accuracy, overall and split by resolution —
-// the split matters because the two ways to be WRONG are opposite mistakes:
-// asking about a unique/composition/comparison question annoys the reader,
-// answering an ambiguous one silently guesses.
 // composeCosts are the prices this harness puts on a wrongly composed answer,
 // with a needless card fixed at 1. They are a SWEEP and not a constant on
 // purpose: nobody can defend a single number here, but the ranking of the
@@ -255,6 +251,11 @@ func reportRoutingCost(t *testing.T, cards, missed, ambigN int) {
 	}
 }
 
+// reportRouting prints one arm's accuracy, overall and split by resolution —
+// the split matters because the two ways to be WRONG are opposite mistakes:
+// asking about a unique/composition/comparison question annoys the reader,
+// answering an ambiguous one silently guesses. reportRoutingCost then prices
+// that difference, which the accuracy line deliberately does not.
 func reportRouting(t *testing.T, label string, rows []routingRow) {
 	t.Helper()
 	var correct, ambigCorrect, ambigN, otherCorrect, otherN int

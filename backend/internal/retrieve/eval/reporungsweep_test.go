@@ -194,19 +194,20 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 				cards++
 			}
 		}
-		// cost at W=2, and the exchange rate at which this setting overtakes
-		// never asking. Accuracy alone ranks a router that never asks above
-		// this ladder, which is why it is not the number to tune against.
-		crossover := "never"
-		if d := wantAsk - missed; d > 0 {
-			crossover = fmt.Sprintf("%.2f", float64(cards)/float64(d))
-		}
-		t.Logf("%-16s %-14s %-14s cards=%-3d missed=%-3d W2=%-5.1f beats-never>%-6s repository=%d repo_deps=%d judge=%d margin=%d",
+		// too_broad stays in the breakdown even though it is unreachable on a
+		// three-repository corpus: it is reachable the moment a fourth is
+		// indexed, and a rung missing from this line would take its wrong
+		// decisions with it while they still counted in cards, so the columns
+		// would quietly stop adding up.
+		t.Logf("%-16s %-14s %-14s repository=%d repo_deps=%d judge=%d margin=%d too_broad=%d",
 			label,
 			fraction(correct, len(turns)),
 			fraction(ambigOK, wantAsk),
-			cards, missed, float64(cards)+2*float64(missed), crossover,
-			byRung["repository"], byRung["repo_deps"], byRung["judge"], byRung["margin"])
+			byRung["repository"], byRung["repo_deps"], byRung["judge"], byRung["margin"], byRung["too_broad"])
+		// The same pricing the routing arm prints, from the same helper: a
+		// second copy of the crossover formula is how the two arms would come
+		// to disagree about what a setting costs.
+		reportRoutingCost(t, cards, missed, wantAsk)
 	}
 
 	t.Logf("questions=%d margin=%.2f judge calls=%d", len(turns), margin, judgeCalls)
