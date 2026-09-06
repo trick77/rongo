@@ -1278,14 +1278,14 @@ describe("Ask, the edges of the reading column", () => {
     expect(head.getAttribute("aria-hidden")).toBe("true");
     expect(head.className).toContain("top-0");
     expect(head.className).toContain("pointer-events-none");
-    // Under the busybar, not over it: an opaque strip at z-10 would swallow
-    // the 2px line that runs along the very same edge.
-    expect(head.className).toContain("z-0");
-    // Which means tree order is what decides the strip against the column's
-    // own positioned pieces, so the strip comes after the scroller and the
-    // scroller is one isolated layer rather than a scattering of peers.
+    // z-10 ties with the diagram card's toolbar inside the column, and a tie
+    // is settled by tree order — so the strip has to come AFTER the scroller.
+    // The scroller itself must NOT isolate: the full-screen diagram view is
+    // rendered from inside a card in it, and a stacking context here would
+    // trap that overlay under the composer.
+    expect(head.className).toContain("z-10");
     const scroll = container.querySelector(".overflow-auto") as HTMLElement;
-    expect(scroll.className).toContain("isolate");
+    expect(scroll.className).not.toContain("isolate");
     expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     // The foot's strip belongs to the composer and sits immediately above it,

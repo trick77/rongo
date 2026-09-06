@@ -130,9 +130,9 @@ describe("SharePage", () => {
     expect(fades[1].className).toContain("bg-gradient-to-t");
     // A strip the reader can click is a strip that eats a citation chip.
     for (const el of fades) expect(el.className).toContain("pointer-events-none");
-    // Both after the scroller, which is a layer of its own: at z-0 it is tree
-    // order that decides a strip against a turn's own positioned pieces.
-    expect(scroller.className).toContain("isolate");
+    // Both after the scroller: at z-10 a strip ties with the diagram card's
+    // toolbar inside the column, and a tie is settled by tree order.
+    expect(scroller.className).not.toContain("isolate");
     for (const el of fades)
       expect(scroller.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

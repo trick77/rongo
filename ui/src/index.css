@@ -328,7 +328,9 @@ body {
   background-size: 35% 100%;
   background-repeat: no-repeat;
   animation: slide 1.3s ease-in-out infinite;
-  z-index: 1;
+  /* Above the head fade, which runs along this very same edge at z-10: the
+     bar is 2px, and the strip's opaque end would swallow it whole. */
+  z-index: 20;
 }
 
 /* The caret of a streaming answer, drawn at the end of its last block so it

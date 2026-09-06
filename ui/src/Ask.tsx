@@ -887,11 +887,10 @@ export default function Ask({
             // reads a pixel or two short of it.
             if (el.scrollHeight - el.scrollTop - el.clientHeight > 4) stopFollowing();
           }}
-          // isolate, so the column is one layer rather than a scattering of
-          // them: a turn's own positioned pieces — the question's clip fade,
-          // a diagram card and its z-10 toolbar — would otherwise each be a
-          // peer of the strip below and punch an opaque hole through it.
-          className="thin-scroll isolate min-h-0 flex-1 overflow-auto"
+          // No stacking context on the scroller, deliberately: the full-screen
+          // diagram view is rendered from inside a card in this column, and
+          // isolating the column would trap that overlay under the composer.
+          className="thin-scroll min-h-0 flex-1 overflow-auto"
         >
           <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
@@ -954,17 +953,14 @@ export default function Ask({
         {/* ../loom's transcript edges: prose dissolves into the background as
             it leaves the column rather than being cut off by it. This is the
             head; the foot's strip rides above the composer, just below.
-            AFTER the scroller, not before it: a strip and the column's own
-            positioned pieces sit in the same paint layer, and tree order is
-            what decides between them.
+            AFTER the scroller, not before it: at z-10 the strip ties with the
+            diagram card's own toolbar, and a tie is settled by tree order.
             The height tracks the column's top padding at every breakpoint —
             content has to clear the fade, or the first line sits half dimmed
-            with the column at rest.
-            z-0, not ../loom's z-10: the busybar runs along the same edge at
-            z-1, and an opaque strip over it would swallow the 2px line. */}
+            with the column at rest. */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 z-0 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
         />
 
         <form
@@ -982,7 +978,7 @@ export default function Ask({
               once the reader is at the foot. */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-full z-0 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
+            className="pointer-events-none absolute inset-x-0 bottom-full z-10 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
           />
           {/* The question gets the whole width; the controls sit under it in
               their own row, so a long question and its settings never fight
