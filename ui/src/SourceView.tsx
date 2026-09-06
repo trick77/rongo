@@ -138,6 +138,7 @@ export default function SourceView({
       // useBackdropDismiss for why that is the click and not the pointerdown.
       ref={dismiss.ref}
       onPointerDown={dismiss.onPointerDown}
+      onPointerUp={dismiss.onPointerUp}
     >
       <div
         role="dialog"

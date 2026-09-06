@@ -120,6 +120,7 @@ export default function DiagramView({
       // useBackdropDismiss for why that is the click and not the pointerdown.
       ref={dismiss.ref}
       onPointerDown={dismiss.onPointerDown}
+      onPointerUp={dismiss.onPointerUp}
     >
       {/* font-sans explicitly: this is mounted from inside the answer's
           .ui-markdown wrapper, which is serif prose, and the dialog is chrome

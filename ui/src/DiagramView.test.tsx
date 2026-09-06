@@ -67,13 +67,19 @@ describe("DiagramView", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("takes a drag off the sheet for a drag, not a cancel", () => {
+  it("takes a drag across the edge for a drag, not a cancel", () => {
     const onClose = vi.fn();
     const { getByRole } = render(<DiagramView spec={seq} hooks={{}} onClose={onClose} />);
     const dialog = getByRole("dialog");
     const scrim = dialog.parentElement as HTMLElement;
 
     fireEvent(dialog, createEvent.pointerDown(dialog, { bubbles: true }));
+    fireEvent(scrim, createEvent.pointerUp(scrim, { bubbles: true }));
+    fireEvent.click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent(scrim, createEvent.pointerDown(scrim, { bubbles: true }));
+    fireEvent(dialog, createEvent.pointerUp(dialog, { bubbles: true }));
     fireEvent.click(scrim);
     expect(onClose).not.toHaveBeenCalled();
   });

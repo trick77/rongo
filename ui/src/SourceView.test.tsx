@@ -113,8 +113,10 @@ describe("SourceView", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("takes a drag out of the dialog for a drag, not a cancel", async () => {
-    // Selecting a line of code and letting go over the scrim.
+  it("takes a drag across the edge for a drag, not a cancel", async () => {
+    // Selecting a line of code and letting go over the scrim, and the same
+    // gesture the other way round. The click of either lands on the scrim,
+    // because that is what the press and the release have in common.
     serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
     const onClose = vi.fn();
 
@@ -123,6 +125,12 @@ describe("SourceView", () => {
     const scrim = dialog.parentElement!;
 
     fireEvent.pointerDown(dialog);
+    fireEvent.pointerUp(scrim);
+    fireEvent.click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(scrim);
+    fireEvent.pointerUp(dialog);
     fireEvent.click(scrim);
     expect(onClose).not.toHaveBeenCalled();
   });
