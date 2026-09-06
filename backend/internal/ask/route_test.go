@@ -685,9 +685,9 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
 	// Matches what is deployed. The judge is a one-word decision, which is the
 	// bar for the cheap lane, and the exception that bought it on Pro is gone:
-	// re-measured 2026-09-06 the two deployments decide all 65 catalogue
-	// questions identically, and the judge is not where routing goes wrong.
-	// See Router.judgeDeployment.
+	// re-measured 2026-09-06 and run twice, the two deployments land within one
+	// question of each other in both directions, and the judge is not where
+	// routing goes wrong. See Router.judgeDeployment.
 	c, models := testLLMWithModel(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"compose"}`
@@ -847,6 +847,21 @@ func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
 	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 1, false, true, true); ask || rung != rungNamedRepos {
 		t.Errorf("a named repository with spans=true gave (%v, %q), want no ask on %q", ask, rung, rungNamedRepos)
 	}
+	// So does the too-broad cut, and it is the one a sweep could most easily
+	// measure wrong: past maxRepoCandidates there is no card left to raise, so
+	// a setting that forces the rung on must still get the too-broad card and
+	// not a repository card the product would never show.
+	var wide []Candidate
+	for _, repo := range []string{"a", "b", "c", "d", "e"} {
+		wide = append(wide, Candidate{Repo: repo, Score: 0.5})
+	}
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, true); !ask || rung != rungTooBroad {
+		t.Errorf("five repositories with spans=true gave (%v, %q), want an ask on %q", ask, rung, rungTooBroad)
+	}
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, false); !ask || rung != rungTooBroad {
+		t.Errorf("five repositories with spans=false gave (%v, %q), want an ask on %q — the cut is above the rung",
+			ask, rung, rungTooBroad)
+	}
 
 	// And DecideWhy is exactly DecideWhySpans with SpansRepos' answer, so the
 	// two cannot disagree about a turn the product actually runs.
@@ -928,9 +943,10 @@ func TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
 // it decides whether the reader gets an answer or a question back, which is
 // what bought it the expensive lane on the loom corpus. Re-measured
 // 2026-09-06 on the pinned catalogue and run twice, the two deployments land
-// within one question of each other in both directions, and the judge owns 0
-// to 1 of the wrong decisions against the repository rung's 16 — so the
-// exception is gone and both calls sit where the bar puts them. The override
+// within one question of each other in both directions — never further apart
+// than the judge's own re-roll — and the judge owns 0 to 1 of the wrong
+// decisions against the repository rung's 16, so the exception is gone and
+// both calls sit where the bar puts them. The override
 // still has to reach the judge and nothing else — that is what keeps the
 // comparison runnable the next time somebody wants to reopen it.
 func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {

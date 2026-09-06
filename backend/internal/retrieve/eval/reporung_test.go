@@ -20,8 +20,14 @@ import (
 // repository. Whatever separates the 16 wrong cards from the 14 right ones is
 // therefore something this dump has to find, not something to guess at.
 //
-// It calls no model. Rank is pure over the hits, so the only cost is the
-// embeddings the frozen expansions need.
+// It calls no model. Rank is pure over the hits and Related is a manifest
+// query, so the only cost is the embeddings the frozen expansions need.
+//
+// Related is not optional here even though it costs a query: the ladder checks
+// the manifest edge BEFORE the repository rung (see DecideWhy), so a spanning
+// turn whose repositories are related never reaches the rung at all. Counting
+// every spanning turn as a card the rung raised mixes those in and measures a
+// population the rung does not decide.
 func TestEvalMeasureRepoRungShape(t *testing.T) {
 	requireEval(t)
 	dim := embedDim(t)
@@ -53,6 +59,11 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 		ratio    float64 // second repository's best, as a share of the leader
 		secHits  int     // hits behind the second repository's best candidate
 		dominant bool
+		related  bool
+		// decides is whether the repository rung is what settles this turn:
+		// spanning, not already composed by the manifest edge, and inside the
+		// cap that would make it a too-broad card instead.
+		decides bool
 	}
 
 	var rows []row
@@ -88,6 +99,13 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 			leadRepo: ranked.All[0].Repo,
 			dominant: ask.Dominates(ranked.All, margin),
 		}
+		if rw.spans {
+			rw.related, err = router.Related(ctx, ask.RepoCandidates(ranked.All))
+			if err != nil {
+				t.Fatalf("related %q: %v", q.Text, err)
+			}
+			rw.decides = !rw.related && len(perRepo) <= ask.MaxRepoCandidates
+		}
 		if len(perRepo) >= 2 {
 			rw.second = perRepo[1].Score
 			rw.secRepo = perRepo[1].Repo
@@ -99,23 +117,30 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 		rows = append(rows, rw)
 	}
 
-	// Spanning turns only: those are the ones the rung decides.
+	// The turns the rung actually decides — spanning, and not settled above it
+	// by the manifest edge or the too-broad cut.
 	var spanning []row
+	var spansButComposed int
 	for _, rw := range rows {
-		if rw.spans {
+		switch {
+		case rw.decides:
 			spanning = append(spanning, rw)
+		case rw.spans:
+			spansButComposed++
 		}
 	}
 	sort.SliceStable(spanning, func(i, j int) bool { return spanning[i].ratio < spanning[j].ratio })
 
-	t.Logf("spanning turns=%d of %d unnamed questions", len(spanning), len(rows))
+	t.Logf("turns the repository rung decides=%d of %d unnamed questions (%d span but are settled above it)",
+		len(spanning), len(rows), spansButComposed)
 	t.Logf("")
-	t.Logf("%-6s %-6s %-6s %-6s %-7s %-7s %-7s %-5s %-12s %s",
-		"want", "repos", "cands", "domin", "lead", "second", "ratio", "sHits", "resolution", "question")
+	t.Logf("%-6s %-6s %-6s %-6s %-7s %-7s %-5s %-11s %-11s %-12s %s",
+		"want", "repos", "cands", "domin", "ratio", "second", "sHits", "leadRepo", "secRepo",
+		"resolution", "question")
 	for _, rw := range spanning {
-		t.Logf("%-6v %-6d %-6d %-6v %-7.3f %-7.3f %-7.3f %-5d %-12s %s",
-			rw.want, rw.repos, rw.cands, rw.dominant, rw.lead, rw.second, rw.ratio, rw.secHits,
-			rw.q.Resolution, short(rw.q.Text))
+		t.Logf("%-6v %-6d %-6d %-6v %-7.3f %-7.3f %-5d %-11s %-11s %-12s %s",
+			rw.want, rw.repos, rw.cands, rw.dominant, rw.ratio, rw.second, rw.secHits,
+			rw.leadRepo, rw.secRepo, rw.q.Resolution, short(rw.q.Text))
 	}
 
 	// The separation question. A turn that fails the bar does NOT become an
@@ -123,6 +148,15 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 	// failing that, to the judge — which was 0-for-wrong on this corpus. So
 	// every sweep reports where the dropped turns land, and "net" is an upper
 	// bound that only holds if the judge keeps behaving.
+	baseCards := len(spanning)
+	baseRight := 0
+	for _, rw := range spanning {
+		if rw.want {
+			baseRight++
+		}
+	}
+	baseWrong := baseCards - baseRight
+
 	report := func(label string, keep func(row) bool) {
 		kept, right, lostAmbig, toAnswer, toJudge := 0, 0, 0, 0, 0
 		for _, rw := range spanning {
@@ -143,9 +177,12 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 			}
 		}
 		wrong := kept - right
+		// Against the baseline this run measured, never a constant: on another
+		// question set or after a corpus move a hardcoded pair reports a
+		// difference from a population that is not there any more.
 		t.Logf("%-22s %-6d %-7d %-7d %-9d %-8d %-8d %+d",
 			label, kept, right, wrong, lostAmbig, toAnswer, toJudge,
-			(30-wrong)-(16-right))
+			(baseWrong-wrong)-(baseRight-right))
 	}
 
 	t.Logf("")

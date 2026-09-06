@@ -163,10 +163,21 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 		for _, tn := range turns {
 			live := spans(tn)
 			related := tn.relatedCapped
-			if live {
+			judged := judgedBy(tn)
+			switch {
+			case live:
 				related = tn.relatedSpanning
+			case ask.Dominates(tn.all, margin):
+				// Route short-circuits a dominant, non-spanning turn before it
+				// pays for the manifest or the judge, and passes false for
+				// both (route.go). Feeding the values this arm happens to have
+				// would not change the decision — the margin settles it either
+				// way — but it would file a wrong no-ask under repo_deps
+				// instead of margin, and the rung breakdown is the whole point
+				// of this table.
+				related, judged = false, false
 			}
-			got, rung := ask.DecideWhySpans(tn.all, margin, related, judgedBy(tn), tn.named, false, true, live)
+			got, rung := ask.DecideWhySpans(tn.all, margin, related, judged, tn.named, false, true, live)
 			if got == tn.want {
 				correct++
 				if tn.want {

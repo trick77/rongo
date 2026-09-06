@@ -251,6 +251,12 @@ const maxCandidates = 5
 // them, so the card still never shows more than five buttons.
 const maxRepoCandidates = 4
 
+// MaxRepoCandidates is maxRepoCandidates for the eval harness, which has to
+// know where the too-broad cut sits: past it a spanning turn is settled above
+// the repository rung, so counting it among the rung's cards measures a
+// population the rung never decided.
+const MaxRepoCandidates = maxRepoCandidates
+
 // routeMaxTokens caps the judgement, nameMaxTokens the per-candidate naming.
 // Both replies are short structured objects; a longer one means the model
 // started explaining itself to nobody.
