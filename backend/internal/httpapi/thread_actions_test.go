@@ -61,6 +61,29 @@ func TestDeleteThread_takesItOffTheRail(t *testing.T) {
 	}
 }
 
+// Reading is held to the same rule as deleting: an address that names no
+// thread and one that names someone else's must answer alike, or the one route
+// that reads a thread becomes the oracle every other one refuses to be.
+func TestThread_anotherReadersThreadIsNotFound(t *testing.T) {
+	ctx := context.Background()
+	srv, st := threadActions(t)
+	th, err := st.Create(ctx, otherSubject, "How is sign-in done?")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	theirs := act(srv, http.MethodGet, fmt.Sprintf("/api/threads/%s", th.PublicID), "")
+	nobodys := act(srv, http.MethodGet, "/api/threads/AAAAAAAAAAAAAAAAAAAAAA", "")
+
+	if theirs.Code != http.StatusNotFound {
+		t.Errorf("another reader's thread = %d (%s), want 404", theirs.Code, theirs.Body.String())
+	}
+	if nobodys.Code != theirs.Code {
+		t.Errorf("an unknown address = %d, another reader's = %d; they must not be told apart",
+			nobodys.Code, theirs.Code)
+	}
+}
+
 func TestDeleteThread_anotherReadersThreadIsNotFound(t *testing.T) {
 	// Someone else's thread reads exactly like one that never existed: the
 	// answer must not tell a caller which threads are out there.

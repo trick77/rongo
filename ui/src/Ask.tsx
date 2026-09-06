@@ -323,6 +323,7 @@ export default function Ask({
     const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
+    setGone(false);
     // The total in the header belongs to the old thread until the new one has
     // loaded. The per-turn state that is also an index into the thread being
     // left — the open breakdown, the unfolded failure — is ThreadView's, and
@@ -358,12 +359,23 @@ export default function Ask({
       opened.current = false;
       return;
     }
-    setGone(false);
     setLoading(true);
     // The whole arrival in one commit: the turns, the header's running total
     // and the end of the skeleton. Leaving the total to the effect that
     // watches `turns` painted the thread first and the total a frame later,
     // which is the last of the steps a reader could see.
+    // The address named no thread of this reader's. The panel goes up and the
+    // id is dropped: the composer under it is still live, and a question typed
+    // there opens a new thread rather than posting an address the server
+    // refuses — which came back as "the server answered with 403" and a Retry
+    // that resent the same dead id.
+    //
+    // The address itself stays in the bar. Correcting it to /new would be a
+    // soft 404: the reader's link would have "worked".
+    const closed = () => {
+      setGone(true);
+      threadId.current = null;
+    };
     const arrive = (next: Turn[]) => {
       setTurns(next);
       setLoading(false);
@@ -383,7 +395,7 @@ export default function Ask({
           // anyone which addresses are real — so this is where it is said.
           if (seq === loadSeq.current) {
             arrive([]);
-            if (res.status === 404) setGone(true);
+            if (res.status === 404) closed();
           }
           return;
         }
@@ -394,7 +406,7 @@ export default function Ask({
         // same way as one that is gone.
         if (!Array.isArray(list) || list.length === 0) {
           arrive([]);
-          setGone(true);
+          closed();
           return;
         }
         arrive(storedRetries(linkChosenCandidates(list, list.map(storedTurn))));

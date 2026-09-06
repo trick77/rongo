@@ -817,6 +817,26 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 	}
 }
 
+// An address that names no thread at all is refused the same way one belonging
+// to someone else is, and BEFORE a thread could be created: answered into a
+// new thread instead, a stale tab would quietly start a second conversation.
+func TestAsk_anAddressThatNamesNoThreadIsRefused(t *testing.T) {
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"x"}})
+
+	rec := postAsk(t, deps, `{"question":"How?","audience":"ba","thread_id":"AAAAAAAAAAAAAAAAAAAAAA"}`)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil {
+		t.Fatalf("list threads: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("threads = %+v, want none — the refusal created one on its way out", list)
+	}
+}
+
 func TestAsk_anEmptyQuestionIsRejectedBeforeAnythingIsRecorded(t *testing.T) {
 	deps, st := askDeps(t, &fakeAsker{tokens: []string{"x"}})
 

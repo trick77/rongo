@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"context"
 	"regexp"
 	"testing"
 )
@@ -131,5 +132,35 @@ func TestBackfillPublicIDs_givesEveryOlderThreadAnAddressAndRunsTwiceSafely(t *t
 		if again[i].PublicID != list[i].PublicID {
 			t.Errorf("second run changed thread %d's address: %q -> %q", again[i].ID, list[i].PublicID, again[i].PublicID)
 		}
+	}
+}
+
+// A database that cannot be read is an ERROR on every one of these, never a
+// quiet "no such thread": the handler above turns the first into a 500 and the
+// second into a 404, and a locked database answering 404 would tell a reader
+// their thread is gone.
+func TestPublicID_aShutDatabaseIsAnErrorNotASilentMiss(t *testing.T) {
+	s, ctx, th, db := newThreadStore(t)
+	list, _ := s.List(ctx, testSubject)
+	addr := list[0].PublicID
+	// A thread still waiting for its address, so the backfill has work to find.
+	if _, err := db.ExecContext(ctx, `UPDATE threads SET public_id = '' WHERE id = ?`, th); err != nil {
+		t.Fatalf("clear address: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	if _, _, err := s.Resolve(context.Background(), addr); err == nil {
+		t.Error("resolve on a shut database reported no thread instead of failing")
+	}
+	if _, err := s.PublicIDFor(context.Background(), th); err == nil {
+		t.Error("public id for on a shut database reported no address instead of failing")
+	}
+	if err := s.BackfillPublicIDs(context.Background()); err == nil {
+		t.Error("backfill on a shut database reported success")
+	}
+	if _, err := s.Create(context.Background(), testSubject, "frage"); err == nil {
+		t.Error("create on a shut database reported success")
 	}
 }

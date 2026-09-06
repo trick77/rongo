@@ -794,34 +794,29 @@ func (s *Store) PublicIDFor(ctx context.Context, id int64) (string, error) {
 // Idempotent — a second run selects nothing — so a crash halfway leaves the
 // rows it did mint alone and finishes the rest next time.
 func (s *Store) BackfillPublicIDs(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM threads WHERE public_id = ''`)
-	if err != nil {
-		return fmt.Errorf("list threads without an address: %w", err)
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan thread without an address: %w", err)
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range ids {
+	// One row per statement, picked by the statement itself, rather than a
+	// cursor read into a slice and updated afterwards: each address has to be
+	// minted in Go anyway, so a list bought nothing but a second failure mode.
+	// It ends when nothing is left to name.
+	for {
 		publicID, err := newToken()
 		if err != nil {
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx,
-			`UPDATE threads SET public_id = ? WHERE id = ?`, publicID, id); err != nil {
-			return fmt.Errorf("give thread %d an address: %w", id, err)
+		res, err := s.db.ExecContext(ctx,
+			`UPDATE threads SET public_id = ?
+			 WHERE id = (SELECT id FROM threads WHERE public_id = '' LIMIT 1)`, publicID)
+		if err != nil {
+			return fmt.Errorf("give a thread its address: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("give a thread its address: %w", err)
+		}
+		if n == 0 {
+			return nil
 		}
 	}
-	return nil
 }
 
 // Owns reports whether the thread belongs to this subject.

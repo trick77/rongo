@@ -338,6 +338,10 @@ func TestShareRoutes_aBrokenDatabaseIsAnErrorNotAnEmptyAnswer(t *testing.T) {
 		"share":  {http.MethodPost, fmt.Sprintf("/api/threads/%s/share", th.PublicID)},
 		"update": {http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID)},
 		"revoke": {http.MethodDelete, fmt.Sprintf("/api/threads/%s/share", th.PublicID)},
+		// The rail's own routes resolve the address through the same lookup,
+		// so a broken database must not read there as "no such thread".
+		"read":   {http.MethodGet, fmt.Sprintf("/api/threads/%s", th.PublicID)},
+		"delete": {http.MethodDelete, fmt.Sprintf("/api/threads/%s", th.PublicID)},
 	} {
 		if rec := act(srv, path.method, path.url, ""); rec.Code != http.StatusInternalServerError {
 			t.Errorf("%s: status = %d (%s), want 500", name, rec.Code, rec.Body.String())

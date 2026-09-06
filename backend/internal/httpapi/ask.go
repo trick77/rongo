@@ -1089,6 +1089,21 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Owns before Messages, unlike the routes below, which carry the owner
+	// inside their own statement. Messages answers an empty list for a thread
+	// that is not this reader's, and an empty list is a 200 — so without this
+	// the one route that reads a thread would tell "no such address" and
+	// "exists, but not yours" apart, while every other one answers 404 to both.
+	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
+	if err != nil {
+		slog.Error("check thread owner failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !owns {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
 	if err != nil {
 		slog.Error("read thread failed", "err", err)

@@ -433,6 +433,35 @@ describe("Ask, a stored thread", () => {
     expect(await screen.findByText(/no longer available/)).toBeTruthy();
   });
 
+  // The composer under the panel is still live. A question typed there opens a
+  // NEW thread: sent with the dead address it comes back 403, and the Retry on
+  // that failure resends the same dead address for ever.
+  it("asks into a new thread from a thread that is gone", async () => {
+    const mock = routedFetch([], [ev("thread", { thread_id: "42" }), ev("done", {})]);
+    strict(<Ask threadId="999" onThread={() => {}} />);
+    await screen.findByText(/no longer available/);
+
+    await userEvent.type(screen.getByRole("textbox"), "How does shipping work?");
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    const post = mock.mock.calls.find((c) => String(c[0]) === "/api/ask");
+    await waitFor(() => expect(post).toBeTruthy());
+    expect(JSON.parse(String(post![1]?.body)).thread_id).toBe("");
+  });
+
+  // Leaving for the unasked question has to take the panel with it, or it
+  // stands over the welcome — and then over the next answer, because the
+  // thread event makes the effect return before anything clears it.
+  it("takes the panel away when the reader leaves for a new question", async () => {
+    routedFetch([]);
+    const { rerender } = render(<Ask threadId="999" onThread={() => {}} />);
+    await screen.findByText(/no longer available/);
+
+    rerender(<Ask threadId={null} onThread={() => {}} />);
+
+    await waitFor(() => expect(screen.queryByText(/no longer available/)).toBeNull());
+  });
+
   it("does not reload its own running thread mid-stream", async () => {
     // The stream's thread event reports the id back upwards; if that round trip
     // re-triggered the loader, the half-written answer would be replaced by the
