@@ -40,10 +40,22 @@ type renumberer struct {
 	// inDiagram says the open fence is a diagram, the one block whose
 	// numbers are claims rather than code.
 	inDiagram bool
+	// docs says, per prompt source number - 1, whether that source is
+	// documentation, so a diagram node can be kept from citing one. Empty
+	// means nothing is: a renumberer that was never told what its sources
+	// are does not guess, and the tests that construct one with a count
+	// alone renumber exactly as they did before.
+	docs []bool
 }
 
 func newRenumberer(sources int) *renumberer {
 	return &renumberer{n: sources, dense: map[int]int{}}
+}
+
+// isDoc reports whether the prompt's source n is documentation. Out of range
+// is false: an invented number is not a document, it is not a source at all.
+func (r *renumberer) isDoc(n int) bool {
+	return n >= 1 && n <= len(r.docs) && r.docs[n-1]
 }
 
 // A complete marker at the start of the text, or the start of one. The
@@ -574,10 +586,47 @@ func (r *renumberer) rewriteChain(chain string) string {
 	return b.String()
 }
 
+// dropDocs removes the markers of a node's src that rest on documentation.
+//
+// A node is a place in the mechanism and a document is not one, so a chip
+// opening a README under a step of the control flow says the step was read
+// there. No citation is better than that one: the node is still drawn, it
+// just carries nothing to open. Prose is untouched — a claim resting on a
+// document is made in a sentence, where answerCommon has the model say so.
+//
+// Filtered BEFORE markerRun assigns reader numbers, which is what keeps the
+// rest of the answer's numbering intact: a source takes its number on first
+// use, so a document dropped here still gets one where the prose cites it,
+// and one cited nowhere else simply never becomes a citation.
+//
+// Everything that is not a known document survives, an invented number
+// included: it is never a citation, and the UI drops it to plain text.
+func (r *renumberer) dropDocs(group string) string {
+	if len(r.docs) == 0 {
+		return group
+	}
+	kept := make([]string, 0, 4)
+	for _, num := range numberRe.FindAllString(group, -1) {
+		if n, err := strconv.Atoi(num); err == nil && r.isDoc(n) {
+			continue
+		}
+		kept = append(kept, num)
+	}
+	return strings.Join(kept, ",")
+}
+
 // rewriteArray writes a diagram node's src back sorted, as the one array the
 // browser parses. Its chips are the chips of the prose, so they are ordered
 // the same way.
+//
+// The documents go first, above the markerRun branch rather than inside it:
+// a src mixing one with an invented number takes the fallback, and a filter
+// living in the sorted path alone would leave that chip standing.
 func (r *renumberer) rewriteArray(group string) string {
+	group = r.dropDocs(group)
+	if strings.TrimSpace(group) == "" {
+		return "[]"
+	}
 	dense, ok := r.markerRun(group)
 	if !ok {
 		return r.rewrite(group)

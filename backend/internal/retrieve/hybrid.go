@@ -233,14 +233,17 @@ const DefaultTestDecay = 0.35
 
 // DefaultDocDecay is how far a documentation hit's fused score is cut.
 //
-// It ships OFF, the way DefaultRepoDecay does and for the same reason: the
-// value is the evaluation harness's to set — see internal/retrieve/eval,
-// TestEvalMeasureDocSweep — and a ranking constant this product runs on is
-// never settled by argument here. The arm and what it has to show are written
-// down in docs/measurements/2026-09-05-doc-demotion.md; turning this on means
-// running it and pinning the value that document names.
+// 0.7 is what the sweep named: the harshest decay that leaves doc-led recall
+// whole, and the mildest one that buys the whole of what the demotion has to
+// give. It is the value the harness measured, not one argued for here — see
+// internal/retrieve/eval, TestEvalMeasureDocSweep, and the table in
+// docs/measurements/2026-09-05-doc-demotion.md. Over the questions every arm
+// ranks, the expected code moves from 2.56 to 2.40 at 0.7 and no further at
+// 0.5, 0.35 or 0.2 — while at 0.5 two of the three doc-led questions leave
+// the cut, which is a filter by another name. Everything below 0.7 is cost
+// without gain.
 //
-// What it is for, once it has a value: README.md and AGENTS.md are dense
+// What it is for: README.md and AGENTS.md are dense
 // domain vocabulary, which is exactly what a natural-language question matches
 // on in both lanes, so documentation fills the cut that the code should be in.
 // It compounds — a document carries no ctags symbol, so the reference walk in
@@ -254,7 +257,7 @@ const DefaultTestDecay = 0.35
 // exclusion". "What does the README say about X" is a real question, and a
 // document that is the only thing matching still wins — it just cannot
 // outrank the code.
-const DefaultDocDecay = 1.0
+const DefaultDocDecay = 0.7
 
 // supportingDecay is the factor a hit's fused score is multiplied by because
 // of what its path is: supporting material rather than the mechanism. A path
