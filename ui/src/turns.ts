@@ -190,12 +190,34 @@ export type Message = {
   // Absent for a turn with nothing on record: older than the usage table,
   // or one that paid for nothing.
   usage?: Usage | null;
+  // The activity timeline this turn was watched through, as the server timed
+  // it. Absent on a turn that announced nothing, on every turn older than the
+  // column, and on a shared thread, which carries no machinery.
+  steps?: StoredTrace | null;
+};
+
+/**
+ * A turn's timeline as it comes back out of the record: the instants, in epoch
+ * milliseconds, exactly as the browser holds them for a live turn. The turn's
+ * own start and close are stored beside the steps rather than taken from the
+ * first and last of them - the turn begins before it announces anything and
+ * closes after the last step, and the total on the closing row is the span the
+ * reader was actually shown.
+ */
+export type StoredTrace = {
+  started_at: number;
+  ended_at: number;
+  steps: Step[];
 };
 
 /**
  * A stored turn renders exactly as it was answered — including the failure,
- * which stays in the record. It is finished by definition, so it carries no
- * live trace.
+ * which stays in the record, and including the timeline it was watched
+ * through: the trace is part of what the reader saw, and a card whose ochre
+ * "your move" row vanished on a reload while the card itself came back was
+ * the record contradicting itself.
+ *
+ * A turn written before the timeline was stored has none, and shows none.
  */
 export function storedTurn(m: Message): Turn {
   return {
@@ -205,7 +227,7 @@ export function storedTurn(m: Message): Turn {
     text: m.answer ?? "",
     citations: m.citations ?? [],
     notice: m.notice ?? "",
-    steps: [],
+    steps: m.steps?.steps ?? [],
     error: m.error ?? "",
     // Filled in by storedRetries, which needs the turn's neighbours.
     retry: null,
@@ -223,8 +245,8 @@ export function storedTurn(m: Message): Turn {
     chosenIdx: null,
     narrowedTo: null,
     live: false,
-    startedAt: 0,
-    endedAt: 0,
+    startedAt: m.steps?.started_at ?? 0,
+    endedAt: m.steps?.ended_at ?? 0,
     usage: m.usage ?? null,
     askedAt: m.created_at ?? "",
     followups: m.followups ?? [],

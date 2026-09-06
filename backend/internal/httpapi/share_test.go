@@ -14,6 +14,7 @@ import (
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/timeline"
 )
 
 // shareServer wires a dev-auth server over a real thread store and a fake
@@ -115,7 +116,8 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 }
 
 func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
-	// Given a shared turn that paid for calls and offered follow-ups
+	// Given a shared turn that paid for calls, offered follow-ups and was
+	// watched through a timeline
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
@@ -126,6 +128,11 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	if err := st.SaveFollowups(ctx, msgs[0].ID, []string{"And then?"}); err != nil {
 		t.Fatalf("save followups: %v", err)
 	}
+	if err := st.SaveSteps(ctx, msgs[0].ID, timeline.Trace{
+		StartedAt: 1, EndedAt: 3, Steps: []timeline.Step{{Step: "gathering", At: 2}},
+	}); err != nil {
+		t.Fatalf("save steps: %v", err)
+	}
 	sh := share(t, srv, th.PublicID)
 
 	// When
@@ -134,7 +141,9 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	// Then nothing about what the turn cost, and nothing to ask next: there is
 	// no composer on that page to ask it with.
 	body := rec.Body.String()
-	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`} {
+	// The timeline goes with them: how long each step took and what the
+	// pipeline is made of is the same class of thing as what the turn cost.
+	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("the public payload carries %s:\n%s", leak, body)
 		}

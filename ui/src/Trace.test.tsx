@@ -63,6 +63,26 @@ describe("Trace", () => {
     expect(container.querySelector(".trace-steps")?.getAttribute("aria-hidden")).toBeNull();
   });
 
+  it("comes back rolled up when it mounts on a turn that already closed", () => {
+    // A superseded attempt reopened with Show, and a turn read out of the
+    // record, both mount finished. There is no transition left to wait for, so
+    // starting open would leave them expanded for good.
+    const { container } = strict(
+      <Trace steps={steps} state="failed" startedAt={t0} endedAt={t0 + 2300} />,
+    );
+
+    expect(container.querySelector(".trace-steps-open")).toBeNull();
+    expect(screen.getByText("The turn failed")).toBeTruthy();
+  });
+
+  it("says how the turn closed, not what the toggle does", () => {
+    // The closing label is the button's name: the live region announces "Done"
+    // or the ochre "your move", never "Show the steps".
+    strict(<Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />);
+
+    expect(screen.getByRole("button").textContent).toContain("Waiting for a choice");
+  });
+
   it("does not shut a trace the reader opened, on a later state change", () => {
     // The roll-up fires on the running -> closed transition, once. A clarification
     // being answered is not a second excuse to close what the reader opened.

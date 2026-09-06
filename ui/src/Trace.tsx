@@ -75,7 +75,10 @@ export default function Trace({
 }) {
   // A running step's duration ticks; once the turn has closed nothing moves.
   const [now, setNow] = useState(() => Date.now());
-  const [open, setOpen] = useState(true);
+  // Open only while the turn is still running. A trace that mounts already
+  // closed has no roll-up to wait for: a superseded attempt reopened with Show
+  // remounts finished, and so does a turn read back out of the record.
+  const [open, setOpen] = useState(state === "running");
   // On the transition, never on every render: a reader who opened a finished
   // trace keeps it open, and a later state change (waiting -> decided) does not
   // shut it under them. Same ref pattern as Clarify and Narrow.
@@ -134,7 +137,6 @@ export default function Trace({
             <button
               type="button"
               aria-expanded={open}
-              aria-label={open ? "Hide the steps" : "Show the steps"}
               onClick={() => setOpen((v) => !v)}
               className="flex items-center gap-1.5 text-left"
             >

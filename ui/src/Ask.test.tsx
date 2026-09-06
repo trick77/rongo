@@ -324,9 +324,37 @@ describe("Ask, a stored thread", () => {
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
     expect(screen.getByText(/How does an Apple TV get at the file/)).toBeTruthy();
     expect(screen.getByText(/store\.go:3-40/).closest("article")).toBeTruthy();
-    // A restored turn is finished. A status line would claim something is
-    // still running.
+    // A turn written before timelines were stored has none, and draws none:
+    // an empty frame under an old answer would be a claim about a turn nobody
+    // watched.
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("brings the timeline back with the turn, rolled up onto its closing row", async () => {
+    // The trace is part of the record the reader saw. Losing it on the way out
+    // of the thread made the thread say less about the turn than the turn did.
+    routedFetch([
+      {
+        ...storedTurn,
+        steps: {
+          started_at: 1_700_000_000_000,
+          ended_at: 1_700_000_003_400,
+          steps: [
+            { step: "understanding", at: 1_700_000_000_100 },
+            { step: "writing", at: 1_700_000_001_900 },
+          ],
+        },
+      },
+    ]);
+    strict(<Ask threadId="7" />);
+
+    expect(await screen.findByText(/Through a grant/)).toBeTruthy();
+    const trace = screen.getByRole("status");
+    expect(trace.textContent).toContain("Understanding the question");
+    // The turn's own span, not the gap between its first and last step.
+    expect(trace.textContent).toContain("3.4s");
+    // Finished when it mounts, so it comes back closed rather than expanded.
+    expect(trace.querySelector(".trace-steps-open")).toBeNull();
   });
 
   it("copies a diagram as mermaid, not as the fence rongo writes it in", async () => {
@@ -1108,8 +1136,30 @@ describe("Ask, the clarification and re-explaining", () => {
 
     expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
-    // A restored turn carries no live trace.
+    // This fixture predates stored timelines, so there is none to draw.
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("brings a stored card's ochre waiting row back with the card", async () => {
+    // The card survived a reload and the row that said "your move" did not, so
+    // the record contradicted itself: a question still open, with nothing
+    // saying anyone was being waited on.
+    routedFetch([
+      {
+        ...clarifyingMessage,
+        steps: {
+          started_at: 1_700_000_000_000,
+          ended_at: 1_700_000_002_000,
+          steps: [{ step: "routing", at: 1_700_000_000_500 }],
+        },
+      },
+    ]);
+    strict(<Ask threadId="7" />);
+
+    expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
+    const trace = screen.getByRole("status");
+    expect(trace.textContent).toContain("Waiting for a choice");
+    expect(trace.querySelector(".node-ochre")).toBeTruthy();
   });
 
   it("marks the right card with two clarifications open, even when the OLDER one is resolved last", async () => {
