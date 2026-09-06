@@ -304,12 +304,14 @@ func TestEvalMeasureRouting(t *testing.T) {
 	margin := routeMargin(t)
 	mo := moduleOpts(t)
 
-	// Pro is what NewRouter builds now — phase 4c moved the judge there, see
-	// the comment on Router.judgeDeployment. The cheap lane is the one that
-	// has to be asked for explicitly, and it is still measured every run: the
-	// spec's obligation is to keep comparing them, not to have compared them
-	// once.
-	pro := ask.NewRouter(client, db, margin, mo)
+	// ShortGate is what NewRouter builds now — 2026-09-06 measured the two
+	// deployments deciding every question identically and moved the judge back
+	// to the cheap lane, see the comment on Router.judgeDeployment. BOTH arms
+	// name their deployment rather than letting one of them inherit the
+	// default: an arm labelled "Pro" that silently follows NewRouter would
+	// compare the default against itself the next time the default moves, and
+	// report it as agreement.
+	pro := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.Pro())
 	shortGate := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.ShortGate())
 
 	t.Logf("questions=%d margin=%.2f", len(questions), margin)
@@ -335,10 +337,10 @@ func TestEvalMeasureRouting(t *testing.T) {
 }
 
 // TestEvalMeasureRoutingMarginSweep reports routing accuracy at every margin
-// in routeMargins, over all 61 questions, on the judge production actually
-// runs — Pro since phase 4c. The chosen constant comes out of this table; the
-// table does not assume it. Sweeping the other deployment would tune a
-// threshold against a router nobody serves.
+// in routeMargins, over all 65 questions, on the judge production actually
+// runs — the cheap lane since 2026-09-06. The chosen constant comes out of
+// this table; the table does not assume it. Sweeping the other deployment
+// would tune a threshold against a router nobody serves.
 //
 // Rank, Related and Judge each run AT MOST ONCE per question and are reused
 // across every margin via ask.Decide — the sweep does not re-pay for the

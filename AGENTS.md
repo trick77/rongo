@@ -22,7 +22,8 @@
 ## Models
 - Two MiMo deployments, hardcoded in `internal/llm/client.go`, never env vars.
 - **Pro** where a human reads: the answer.
-- **Pro also for the routing judge** — the one exception, measured: Pro 48/61+50/61 vs non-Pro 42/61+43/61, residual 1–2 (`docs/measurements/2026-08-19-candidates.md`). One word, but it decides answer-vs-question. Don't "restore" it to non-Pro.
+- **Routing judge runs non-Pro**, and it took two measurements. Loom corpus: Pro 48/61+50/61 vs non-Pro 42/61+43/61 (`2026-08-19-candidates.md`) bought it the expensive lane. Pinned 2026-08-20 corpus, 65 questions, current ladder, run twice: ShortGate 47/65 both times, Pro 47/65 then 46/65 — within one question, both directions (`2026-09-06-routing-rerun.md`). The judge owns 0–1 wrong decisions; 16 are the repository rung's, 2 repo_deps'. Don't move it back without a corpus and a number.
+- **Pinned temperature narrows the judge's re-roll, it does not remove it.** Two pinned runs of the same arm still differed by one question. Any lane comparison needs at least two runs before a one-question gap means anything.
 - **non-Pro + `ShortGate`** for the rest: understand, candidate naming, relevance while gathering, thread title, follow-up sufficiency check. Bar is "output is an id or a label", not "doesn't think".
 - Both deployments reason. Never justify the non-Pro lane as "the model that can't think". `WithoutThinking`, `ShortGate` and `WithTemperature` are separate switches; don't couple them.
 - **Pin `WithTemperature(gateTemperature)` on every call returning an id, label or decision.** Unpinned, the judge re-rolled 3 of 61 questions per run — wider than the deployment gap it was compared against. Answer call stays unpinned; a person reads it.

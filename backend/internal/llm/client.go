@@ -150,6 +150,17 @@ func ShortGate() Option {
 	return func(o *callOptions) { o.model = ShortGateDeployment }
 }
 
+// Pro routes this call to the Pro deployment, which is also what a call that
+// names no deployment gets (see resolve). It exists so a caller can say Pro
+// rather than say nothing: "the default" and "Pro on purpose" read the same in
+// code and mean different things to whoever changes the default next. The eval
+// harness needs the deliberate form, because it measures the two lanes against
+// each other and a lane selected by omission silently follows the default it
+// is supposed to be compared with.
+func Pro() Option {
+	return func(o *callOptions) { o.model = ProDeployment }
+}
+
 // WithoutThinking disables MiMo's native reasoning for this call. It does not
 // change the deployment: a Pro call can be asked not to think, and a short-gate
 // call can be asked to.
