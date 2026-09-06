@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import Trace, { stepLabel } from "./Trace";
 
 const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
@@ -12,14 +12,99 @@ const steps = [
 ];
 
 describe("Trace", () => {
-  it("shows every step as a node on one continuous line, without anything to open", () => {
-    // Progress is watched, not opened: the reader twice rejected a trace that
-    // hid its steps behind a disclosure.
-    strict(<Trace steps={steps} state="running" startedAt={t0} />);
+  it("shows every step as a node on one continuous line, with nothing to shut", () => {
+    // Progress is watched, never shut: while the turn runs there is no toggle on
+    // screen at all, because the reader twice rejected a trace that hid live steps.
+    const { container } = strict(<Trace steps={steps} state="running" startedAt={t0} />);
 
     expect(screen.getByText("Understanding the question")).toBeTruthy();
     expect(screen.getByText("Reading the code")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
+    expect(container.querySelector(".trace-steps-open")).toBeTruthy();
+  });
+
+  it("rolls the steps up behind the closing row once the turn ends", () => {
+    const { container, rerender } = render(
+      <StrictMode>
+        <Trace steps={steps} state="running" startedAt={t0} />
+      </StrictMode>,
+    );
+    expect(container.querySelector(".trace-steps-open")).toBeTruthy();
+
+    rerender(
+      <StrictMode>
+        <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />
+      </StrictMode>,
+    );
+
+    // The closing row stays: it is the row the reader is looking at, and the
+    // toggle. The steps behind it are collapsed, not unmounted.
+    expect(screen.getByText("Done")).toBeTruthy();
+    expect(container.querySelector(".trace-steps-open")).toBeNull();
+    expect(container.querySelector(".trace-steps")?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens again on the chevron", () => {
+    const { container, rerender } = render(
+      <StrictMode>
+        <Trace steps={steps} state="running" startedAt={t0} />
+      </StrictMode>,
+    );
+    rerender(
+      <StrictMode>
+        <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />
+      </StrictMode>,
+    );
+
+    fireEvent.click(screen.getByRole("button"));
+
+    expect(container.querySelector(".trace-steps-open")).toBeTruthy();
+    expect(container.querySelector(".trace-steps")?.getAttribute("aria-hidden")).toBeNull();
+  });
+
+  it("comes back rolled up when it mounts on a turn that already closed", () => {
+    // A superseded attempt reopened with Show, and a turn read out of the
+    // record, both mount finished. There is no transition left to wait for, so
+    // starting open would leave them expanded for good.
+    const { container } = strict(
+      <Trace steps={steps} state="failed" startedAt={t0} endedAt={t0 + 2300} />,
+    );
+
+    expect(container.querySelector(".trace-steps-open")).toBeNull();
+    expect(screen.getByText("The turn failed")).toBeTruthy();
+  });
+
+  it("says how the turn closed, not what the toggle does", () => {
+    // The closing label is the button's name: the live region announces "Done"
+    // or the ochre "your move", never "Show the steps".
+    strict(<Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />);
+
+    expect(screen.getByRole("button").textContent).toContain("Waiting for a choice");
+  });
+
+  it("does not shut a trace the reader opened, on a later state change", () => {
+    // The roll-up fires on the running -> closed transition, once. A clarification
+    // being answered is not a second excuse to close what the reader opened.
+    const { container, rerender } = render(
+      <StrictMode>
+        <Trace steps={steps} state="running" startedAt={t0} />
+      </StrictMode>,
+    );
+    rerender(
+      <StrictMode>
+        <Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />
+      </StrictMode>,
+    );
+    fireEvent.click(screen.getByRole("button"));
+
+    rerender(
+      <StrictMode>
+        <Trace steps={steps} state="decided" startedAt={t0} endedAt={t0 + 2300} />
+      </StrictMode>,
+    );
+
+    expect(container.querySelector(".trace-steps-open")).toBeTruthy();
   });
 
   it("marks the running step, and only that one, as the current node", () => {
@@ -79,6 +164,19 @@ describe("Trace", () => {
 
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("announces nothing for a turn read back out of the record", () => {
+    // A record is not something happening. A thread of ten stored turns would
+    // otherwise be ten live regions announcing themselves as the page loads.
+    const { container } = strict(
+      <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} live={false} />,
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(container.querySelector(".trace")?.getAttribute("aria-live")).toBeNull();
+    // Still there to read, still rolled up on its closing row.
+    expect(screen.getByText("Done")).toBeTruthy();
   });
 
   it("shows a step the backend has no label for as it came", () => {

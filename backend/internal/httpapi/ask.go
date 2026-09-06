@@ -17,6 +17,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -425,6 +426,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// the title gets a meter of its own below.
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
+	// And every step it announces lands in one recorder, so the trace the
+	// reader watched is still there when they come back to the thread.
+	steps := timeline.New()
+	ctx = timeline.With(ctx, steps)
 
 	// Any call still in flight when the delete lands mints the thread's session
 	// id again on its way out — the suggester's, the title's — and puts back
@@ -528,18 +533,23 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	events := ask.Events{
-		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
+		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
 	}
 
-	// closeUsage stores what the turn paid for and tells the browser, on
-	// EVERY exit: answered, asked back, found nothing, failed. The gates ran
-	// either way. Sent before the event that ends the turn, so the browser
-	// has the number whichever way the turn closed. A turn that paid for
-	// nothing (the first call never reached the upstream) sends nothing,
-	// the same as the stored record shows for it after a reload.
-	closeUsage := func() {
+	// closeRecord stores what the turn paid for and how it was watched, and
+	// tells the browser the first of those, on EVERY exit: answered, asked
+	// back, found nothing, failed. The gates ran either way. Sent before the
+	// event that ends the turn, so the browser has the number whichever way
+	// the turn closed. A turn that paid for nothing (the first call never
+	// reached the upstream) sends nothing, the same as the stored record
+	// shows for it after a reload. The timeline is stored on the same terms
+	// and never sent: the browser has been drawing it live all along.
+	closeRecord := func() {
+		if err := s.deps.Threads.SaveSteps(record, msg.ID, steps.Close()); err != nil {
+			recordFailed(ctx, "record steps failed", err)
+		}
 		calls := meter.Calls()
 		if len(calls) == 0 {
 			return
@@ -574,7 +584,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 				recordFailed(ctx, "record turn failure failed", ferr)
 			}
-			closeUsage()
+			closeRecord()
 			// The id goes out with the failure, not only with a done: asking
 			// again is another attempt at THIS question, and the browser can
 			// only say so if it knows which row it is retrying. Without it a
@@ -606,7 +616,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
 			recordFailed(ctx, "link choice failed", err)
 		}
-		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeUsage)
+		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeRecord)
 		return
 	}
 
@@ -616,7 +626,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 			recordFailed(ctx, "record turn failure failed", ferr)
 		}
-		closeUsage()
+		closeRecord()
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
 		send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
@@ -646,11 +656,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
 				recordFailed(ctx, "record turn failure failed", ferr)
 			}
-			closeUsage()
+			closeRecord()
 			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
 			return
 		}
-		closeUsage()
+		closeRecord()
 		send("clarification", map[string]any{"message_id": msg.ID, "too_broad": clar.TooBroad,
 			"candidates": wireCandidates(clar.Candidates)})
 		send("done", map[string]any{"message_id": msg.ID})
@@ -663,7 +673,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
 		recordFailed(ctx, "record sources failed", err)
 	}
-	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeUsage)
+	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeRecord)
 }
 
 const (
@@ -715,11 +725,11 @@ func (s *Server) finishTurn(
 	scope ask.Scope,
 	lang ask.Language,
 	send func(string, any),
-	closeUsage func(),
+	closeRecord func(),
 ) {
 	send("citations", answer.Citations)
 	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
-	closeUsage()
+	closeRecord()
 	// Language again, for the re-explain path: it opens no thread event, and
 	// its turn is filed in the thread's language whatever it asked for.
 	send("done", map[string]any{"message_id": messageID, "language": string(lang)})
@@ -753,6 +763,7 @@ func (s *Server) suggestFollowups(
 	if s.deps.Suggester == nil || len(answer.Sources) == 0 || threadWasDeleted(ctx) {
 		return
 	}
+	timeline.Record(ctx, "suggesting")
 	send("status", map[string]any{"step": "suggesting"})
 	// record, not ctx: a reader who closes the tab, reloads, or loses the
 	// connection between the last word and this call cancelled the request,
@@ -926,6 +937,8 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	defer s.turns.add(msg.ThreadID, cancelTurn)()
 	meter := usage.New()
 	ctx = usage.WithMeter(ctx, meter)
+	steps := timeline.New()
+	ctx = timeline.With(ctx, steps)
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)
@@ -1011,12 +1024,15 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, ask.Events{
-		OnStatus: func(step string) { send("status", map[string]any{"step": step}) },
+		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
 	// The same rule as handleAsk: what the turn paid for is stored and
 	// reported however it ended.
-	closeUsage := func() {
+	closeRecord := func() {
+		if err := s.deps.Threads.SaveSteps(record, newMsg.ID, steps.Close()); err != nil {
+			recordFailed(ctx, "record steps failed", err)
+		}
 		calls := meter.Calls()
 		if len(calls) == 0 {
 			return
@@ -1031,7 +1047,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		if ferr := s.deps.Threads.Fail(record, newMsg.ID, turnFailed); ferr != nil {
 			recordFailed(ctx, "record turn failure failed", ferr)
 		}
-		closeUsage()
+		closeRecord()
 		send("error", map[string]any{"message": turnFailed, "message_id": newMsg.ID})
 		return
 	}
@@ -1044,7 +1060,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
 		recordFailed(ctx, "record sources failed", err)
 	}
-	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeUsage)
+	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeRecord)
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

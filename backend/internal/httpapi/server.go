@@ -11,6 +11,7 @@ import (
 	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
 )
@@ -64,6 +65,9 @@ type Threads interface {
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
 	// SaveFollowups records what the finished answer offered to ask next.
 	SaveFollowups(ctx context.Context, messageID int64, questions []string) error
+	// SaveSteps records the activity timeline one turn was watched through,
+	// however it ended.
+	SaveSteps(ctx context.Context, messageID int64, tr timeline.Trace) error
 
 	// Sharing. Share/RaiseShare/RevokeShare/ShareFor/Shares/SharedIDs all take
 	// a subject: a link is made, moved and taken back by the thread's owner.

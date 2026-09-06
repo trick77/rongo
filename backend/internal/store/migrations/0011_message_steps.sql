@@ -1,0 +1,13 @@
+-- steps is the activity timeline the reader watched while this turn ran:
+-- {"started_at":…,"ended_at":…,"steps":[{"step":"understanding","at":…}]} as
+-- JSON, epoch milliseconds, or '' for a turn that announced nothing and for
+-- every turn written before this column existed.
+--
+-- Stored rather than left in the browser: the trace is part of the record the
+-- reader saw, and without it a thread reopened a minute later loses the ochre
+-- "your move" row of an unanswered card while the card itself comes back.
+--
+-- Instants, not durations. What took how long is arithmetic the browser
+-- already does for a live turn, and raw instants keep the partial timeline of
+-- a turn that broke readable.
+ALTER TABLE messages ADD COLUMN steps TEXT NOT NULL DEFAULT '';

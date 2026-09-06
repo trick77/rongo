@@ -283,11 +283,15 @@ export default function ThreadView({
                 {!folded && (
                   <>
 
-                {/* A restored turn is finished by definition and carries no live
-                    trace — only a turn asked, resumed or re-explained in THIS
-                    session does. */}
-                {turn.live && (
-                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} />
+                {/* Not on `live` alone: a turn read back out of the record has
+                    a timeline too, and it is the same timeline. A live turn
+                    still draws one before its first step arrives — that empty
+                    frame is the turn starting — while a stored turn with no
+                    steps, which is every turn older than the column, draws
+                    nothing. `live` keeps its own meaning below, where it
+                    decides whether the answer fades in as it arrives. */}
+                {(turn.live || turn.steps.length > 0) && (
+                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} live={turn.live} />
                 )}
 
                 {/* Above the answer, and not ochre: ochre means "your move",

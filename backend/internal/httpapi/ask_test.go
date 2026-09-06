@@ -87,6 +87,12 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}
+	// Announced before the turn can end, the way the real pipeline does: a
+	// turn that fails or asks back has still been watched, and the timeline it
+	// was watched through is the part worth keeping.
+	if ev.OnStatus != nil {
+		ev.OnStatus("verstehen")
+	}
 	if f.err != nil {
 		return ask.Answer{}, nil, f.err
 	}
@@ -95,9 +101,6 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 	}
 	if f.clarification != nil {
 		return ask.Answer{}, f.clarification, nil
-	}
-	if ev.OnStatus != nil {
-		ev.OnStatus("verstehen")
 	}
 	var text string
 	for _, tok := range f.tokens {
@@ -925,6 +928,48 @@ func TestAsk_theUsageEventCarriesEveryCallOfTheTurnAndTheCallsAreStored(t *testi
 	}
 	if len(msgs) != 1 || len(msgs[0].Calls) != 2 {
 		t.Fatalf("stored calls = %+v, want 2", msgs)
+	}
+}
+
+func TestAsk_storesTheTimelineTheTurnWasWatchedThroughHoweverItEnded(t *testing.T) {
+	// The trace is part of the record the reader saw. A thread reopened a
+	// minute later used to lose it entirely - and with it, on a card, the
+	// ochre row saying someone was still being waited on, while the card
+	// itself came back.
+	cases := []struct {
+		name  string
+		shape func(*fakeAsker)
+	}{
+		{"answered", func(f *fakeAsker) { f.tokens = []string{"The ", "answer."} }},
+		{"failed", func(f *fakeAsker) { f.err = errors.New("upstream down") }},
+		{"asked back", withAskerAsking()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given
+			srv, st := newTestServerWithStore(t, tc.shape)
+
+			// When
+			body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
+
+			// Then
+			msgs, err := st.Messages(context.Background(), testSubject, threadRowOf(t, st, body))
+			if err != nil {
+				t.Fatalf("Messages: %v", err)
+			}
+			tr := msgs[0].Steps
+			if tr == nil {
+				t.Fatalf("Steps = nil, want the timeline of a turn that %s", tc.name)
+			}
+			if len(tr.Steps) == 0 || tr.Steps[0].Step != "verstehen" {
+				t.Errorf("Steps = %+v, want the announced step", tr.Steps)
+			}
+			// The turn's own span, so the closing row totals what the reader
+			// was shown rather than the gap between two steps.
+			if tr.StartedAt > tr.Steps[0].At || tr.EndedAt < tr.Steps[0].At {
+				t.Errorf("span %d..%d does not contain %+v", tr.StartedAt, tr.EndedAt, tr.Steps)
+			}
+		})
 	}
 }
 

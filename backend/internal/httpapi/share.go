@@ -149,6 +149,10 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	for i := range msgs {
 		msgs[i].Followups = nil
 		msgs[i].Usage = nil
+		// The timeline goes with the usage: how long each step took and what
+		// the pipeline is made of is the same class of thing as what the turn
+		// cost, and a link's audience was sent an answer, not a machine room.
+		msgs[i].Steps = nil
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(publicShare{

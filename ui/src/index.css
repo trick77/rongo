@@ -249,16 +249,18 @@ body {
 }
 
 /* ---- the activity timeline (Trace.tsx) ----
-   One grid, so the node column, the label and the duration line up across
-   rows; the connecting line runs behind the nodes. Always expanded: it is how
-   progress is seen, and it grows as the steps arrive. */
-.steps {
-  display: grid;
-  grid-template-columns: 22px 1fr auto;
-  column-gap: 12px;
+   One grid per block, so the node column, the label and the duration line up
+   across rows; the connecting line runs behind the nodes, on the wrapper rather
+   than on either grid, so it reaches from the first node to the closing one and
+   collapses to nothing when only the closing row is left.
+
+   Expanded while the turn runs - that is how progress is seen, and it grows as
+   the steps arrive - then the steps roll up behind the closing row, which is the
+   toggle. */
+.trace {
   position: relative;
 }
-.steps::before {
+.trace::before {
   content: "";
   position: absolute;
   left: 10px;
@@ -267,8 +269,42 @@ body {
   width: 1px;
   background: var(--color-border);
 }
+/* The 0fr -> 1fr grid row is the one way to animate to a height nobody measured. */
+.trace-steps {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s ease;
+}
+.trace-steps-open {
+  grid-template-rows: 1fr;
+}
+.trace-steps-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.32s ease;
+}
+.trace-steps-open .trace-steps-inner {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .trace-steps,
+  .trace-steps-inner {
+    transition: none;
+  }
+}
+.steps {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  column-gap: 12px;
+}
 .steps > li {
   display: contents;
+}
+/* Right-aligned, so the steps grid and the closing row's own grid - which size
+   their duration columns independently - still end on the same edge. */
+.steps > li > time {
+  justify-self: end;
 }
 .node {
   position: relative;

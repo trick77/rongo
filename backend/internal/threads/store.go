@@ -17,6 +17,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -118,6 +119,11 @@ type Message struct {
 	// Usage is what the browser sees: the calls, their sum, and the cost
 	// when prices are configured. Filled by the HTTP layer, never here.
 	Usage *usage.Report `json:"usage,omitempty"`
+	// Steps is the activity timeline this turn was watched through. Absent
+	// for a turn that announced nothing and for every turn written before the
+	// column existed; the page simply shows no trace for those, as it did for
+	// all of them before this was stored. A shared link never carries it.
+	Steps *timeline.Trace `json:"steps,omitempty"`
 }
 
 // Clarification is the card a turn ended with: what rongo understood, and
@@ -428,6 +434,41 @@ func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string)
 	return nil
 }
 
+// SaveSteps records the activity timeline the reader watched this turn
+// through. Written on every exit — answered, asked back, found nothing,
+// failed — because the trace of a turn that broke is the part worth keeping.
+// A turn that announced nothing writes nothing, and a failure here is never a
+// turn failure: the caller logs it and carries on, as it does for the usage.
+func (s *Store) SaveSteps(ctx context.Context, messageID int64, tr timeline.Trace) error {
+	if len(tr.Steps) == 0 {
+		return nil
+	}
+	blob, err := json.Marshal(tr)
+	if err != nil {
+		return fmt.Errorf("encode steps: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET steps = ? WHERE id = ?`, string(blob), messageID); err != nil {
+		return fmt.Errorf("store steps: %w", err)
+	}
+	return nil
+}
+
+// scanSteps decodes a stored steps column, on the same terms as scanScope:
+// unreadable JSON costs the trace, never the message.
+func scanSteps(blob string) *timeline.Trace {
+	if blob == "" {
+		return nil
+	}
+	var tr timeline.Trace
+	if err := json.Unmarshal([]byte(blob), &tr); err != nil {
+		return nil
+	}
+	if len(tr.Steps) == 0 {
+		return nil
+	}
+	return &tr
+}
+
 // scanFollowups decodes a stored followups column, on the same terms as
 // scanScope: unreadable JSON costs the pills, never the message.
 func scanFollowups(blob string) []string {
@@ -676,7 +717,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
 		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling)
@@ -692,12 +733,14 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		var fromClar sql.NullInt64
 		var scope string
 		var followups string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
+		var steps string
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64
 		m.Scope = scanScope(scope)
 		m.Followups = scanFollowups(followups)
+		m.Steps = scanSteps(steps)
 		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 		m.NarrowedTo = narrowedTo(m)
 		m.ThreadID = threadID

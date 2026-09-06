@@ -9,11 +9,17 @@
 /**
  * Chevron, rotating 90 degrees on open. No triangle, no plus/minus, and the
  * same glyph in both states — only the rotation changes (AGENTS.md).
+ *
+ * It rotates TOWARDS what it opened. Everywhere in the app that is downwards,
+ * because the panel is under the control; the activity trace is the one place
+ * where the control is under its content (the closing row is the last row of
+ * the timeline), and there a down chevron would point at the answer instead of
+ * at the steps it just revealed. `up` turns it the other way.
  */
-export function Chevron({ open = false }: { open?: boolean }) {
+export function Chevron({ open = false, up = false }: { open?: boolean; up?: boolean }) {
   return (
     <svg
-      className={"chev inline-block h-3 w-3 transition-transform " + (open ? "rotate-90" : "")}
+      className={"chev inline-block h-3 w-3 transition-transform " + (open ? (up ? "-rotate-90" : "rotate-90") : "")}
       viewBox="0 0 12 12"
       aria-hidden="true"
     >
