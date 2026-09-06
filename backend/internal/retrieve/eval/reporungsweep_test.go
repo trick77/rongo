@@ -158,7 +158,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	}
 
 	report := func(label string, spans func(repoRungTurn) bool, judgedBy func(repoRungTurn) bool) {
-		var correct, ambigOK int
+		var correct, ambigOK, cards, missed int
 		byRung := map[string]int{}
 		for _, tn := range turns {
 			live := spans(tn)
@@ -186,12 +186,28 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 				continue
 			}
 			byRung[rung]++
+			// The two ways to be wrong, priced apart below: a card nobody
+			// needed, and an answer composed across genuine alternatives.
+			if tn.want {
+				missed++
+			} else {
+				cards++
+			}
 		}
+		// too_broad stays in the breakdown even though it is unreachable on a
+		// three-repository corpus: it is reachable the moment a fourth is
+		// indexed, and a rung missing from this line would take its wrong
+		// decisions with it while they still counted in cards, so the columns
+		// would quietly stop adding up.
 		t.Logf("%-16s %-14s %-14s repository=%d repo_deps=%d judge=%d margin=%d too_broad=%d",
 			label,
 			fraction(correct, len(turns)),
 			fraction(ambigOK, wantAsk),
 			byRung["repository"], byRung["repo_deps"], byRung["judge"], byRung["margin"], byRung["too_broad"])
+		// The same pricing the routing arm prints, from the same helper: a
+		// second copy of the crossover formula is how the two arms would come
+		// to disagree about what a setting costs.
+		reportRoutingCost(t, cards, missed, wantAsk)
 	}
 
 	t.Logf("questions=%d margin=%.2f judge calls=%d", len(turns), margin, judgeCalls)

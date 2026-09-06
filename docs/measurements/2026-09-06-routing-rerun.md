@@ -270,6 +270,12 @@ Same discipline applies here.
   cannot tell a deterministic card apart from a judgement. It is what turned
   "routing is wrong 18 times" into "one rule is wrong 16 times".
 
+> **Superseded in part, 2026-09-06:** the overall-accuracy readings below price a
+> needless card and a wrongly composed answer the same, which the product's own
+> judge prompt denies. Priced apart, the ladder beats the never-ask baseline for
+> any exchange rate above 1.14. See `2026-09-06-routing-cost-metric.md`. The rung
+> attribution and the deployment comparison are unaffected.
+
 ## Addendum, same day: a second run weakens "identical" to "within one"
 
 The arm was run again while moving the judge to the cheap lane, on the same

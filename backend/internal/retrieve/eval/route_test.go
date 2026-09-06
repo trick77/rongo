@@ -2,9 +2,11 @@ package eval
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,10 +210,52 @@ type routingRow struct {
 
 func (r routingRow) correct() bool { return r.got == r.want }
 
+// composeCosts are the prices this harness puts on a wrongly composed answer,
+// with a needless card fixed at 1. They are a SWEEP and not a constant on
+// purpose: nobody can defend a single number here, but the ranking of the
+// settings turns out not to need one — see the crossover line below.
+var composeCosts = []float64{1, 1.5, 2, 3}
+
+// reportRoutingCost prices the two ways routing can be wrong apart, which the
+// accuracy above does not.
+//
+// Accuracy counts a needless card and a wrongly composed answer as one error
+// each. The product says they are not the same thing, in the judge's own
+// prompt: "a follow-up question costs one click, an answer composed across
+// independent mechanisms is simply wrong" (ask/route.go, judgeSystem). An
+// unweighted aggregate therefore rewards silence — 49 of the 65 questions want
+// no card, so a router that never asks scores 0.754 while being useless — and
+// every threshold tuned against it is pulled toward asking less.
+//
+// So: cost = (needless cards) + W * (missed ambiguities), swept over W, plus
+// the W at which this setting overtakes never-asking. A setting whose crossover
+// is below 1 is better than silence even under the metric that flatters
+// silence; one at 1.14 needs a reader to think a wrong compose is 14% worse
+// than a wasted click.
+func reportRoutingCost(t *testing.T, cards, missed, ambigN int) {
+	t.Helper()
+	var b strings.Builder
+	fmt.Fprintf(&b, "  cost: %d needless card(s), %d missed ambiguit(y|ies) →", cards, missed)
+	for _, w := range composeCosts {
+		fmt.Fprintf(&b, "  W=%.1f: %.1f", w, float64(cards)+w*float64(missed))
+	}
+	t.Log(b.String())
+
+	// Never asking costs every ambiguous question and no cards, so it is
+	// ambigN*W. This setting overtakes it where cards + W*missed = W*ambigN.
+	if d := ambigN - missed; d > 0 {
+		t.Logf("  beats never-ask once a wrong compose costs more than %.2f needless cards",
+			float64(cards)/float64(d))
+	} else {
+		t.Logf("  never beats never-ask: it misses as many ambiguous questions and pays cards on top")
+	}
+}
+
 // reportRouting prints one arm's accuracy, overall and split by resolution —
 // the split matters because the two ways to be WRONG are opposite mistakes:
 // asking about a unique/composition/comparison question annoys the reader,
-// answering an ambiguous one silently guesses.
+// answering an ambiguous one silently guesses. reportRoutingCost then prices
+// that difference, which the accuracy line deliberately does not.
 func reportRouting(t *testing.T, label string, rows []routingRow) {
 	t.Helper()
 	var correct, ambigCorrect, ambigN, otherCorrect, otherN int
@@ -242,6 +286,7 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 		t.Logf("  unique+composition+comparison (Ask=false) = %.3f (%d/%d)",
 			float64(otherCorrect)/float64(otherN), otherCorrect, otherN)
 	}
+	reportRoutingCost(t, otherN-otherCorrect, ambigN-ambigCorrect, ambigN)
 
 	sorted := append([]routingRow(nil), rows...)
 	sort.SliceStable(sorted, func(i, j int) bool {
