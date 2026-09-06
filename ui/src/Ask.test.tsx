@@ -1270,6 +1270,34 @@ async function askInto(container: HTMLElement) {
   return container;
 }
 
+describe("Ask, the edges of the reading column", () => {
+  it("fades the head against the column and the foot against the composer", () => {
+    const { container } = render(<Ask />);
+
+    const head = container.querySelector(".bg-gradient-to-b") as HTMLElement;
+    expect(head.getAttribute("aria-hidden")).toBe("true");
+    expect(head.className).toContain("top-0");
+    expect(head.className).toContain("pointer-events-none");
+    // z-10 ties with the diagram card's toolbar inside the column, and a tie
+    // is settled by tree order — so the strip has to come AFTER the scroller.
+    // The scroller itself must NOT isolate: the full-screen diagram view is
+    // rendered from inside a card in it, and a stacking context here would
+    // trap that overlay under the composer.
+    expect(head.className).toContain("z-10");
+    const scroll = container.querySelector(".overflow-auto") as HTMLElement;
+    expect(scroll.className).not.toContain("isolate");
+    expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // The foot's strip belongs to the composer and sits immediately above it,
+    // because the composer is a sibling BELOW the scroller rather than an
+    // overlay on it — a gradient on the form itself fades nothing.
+    const foot = container.querySelector(".bg-gradient-to-t") as HTMLElement;
+    expect(foot.getAttribute("aria-hidden")).toBe("true");
+    expect(foot.className).toContain("bottom-full");
+    expect(foot.closest("form")).toBeTruthy();
+  });
+});
+
 describe("Ask, following the answer", () => {
   it("scrolls the arriving answer into view", async () => {
     const stream = pushableStream();

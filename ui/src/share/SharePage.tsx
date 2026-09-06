@@ -132,16 +132,33 @@ export default function SharePage({ token }: { token: string }) {
       </header>
 
       <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
-        <div className="min-h-0 min-w-0 overflow-auto">
-          <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
-            <ThreadView
-              turns={state.turns}
-              actions={null}
-              onOpenSource={setViewing}
-              onHot={setHot}
-              threadKey={token}
-            />
+        {/* The same edges the answering column has, and both of them here:
+            there is no composer under a share, so the foot runs into the
+            window rather than into a gradient someone else already paints.
+            Each strip is the padding on its own side, so text clears the fade
+            at rest. */}
+        <div className="relative min-h-0 min-w-0">
+          <div className="thin-scroll h-full overflow-auto">
+            <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
+              <ThreadView
+                turns={state.turns}
+                actions={null}
+                onOpenSource={setViewing}
+                onHot={setHot}
+                threadKey={token}
+              />
+            </div>
           </div>
+          {/* Both strips AFTER the scroller: at z-10 they tie with the diagram
+              toolbar inside it, and a tie is settled by tree order. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
+          />
         </div>
         <SourcesPane turns={state.turns} hot={hot} onOpen={setViewing} />
       </div>
