@@ -682,12 +682,12 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &models
 }
 
-func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
+func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
 	// Matches what is deployed. The judge is a one-word decision, which is the
-	// bar for the cheap lane — but phase 4c measured the two, pinned and twice,
-	// and Pro decides six to seven of the 61 catalogue questions better. That
-	// word is the difference between an answer and a question back, so it is
-	// bought on the expensive queue; see Router.judgeDeployment.
+	// bar for the cheap lane, and the exception that bought it on Pro is gone:
+	// re-measured 2026-09-06 and run twice, the two deployments land within one
+	// question of each other in both directions, and the judge is not where
+	// routing goes wrong. See Router.judgeDeployment.
 	c, models := testLLMWithModel(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
 			return `{"decision":"compose"}`
@@ -703,14 +703,14 @@ func TestRouteJudgeDefaultsToTheProDeployment(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ProDeployment {
-		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ProDeployment)
+	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
+		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ShortGateDeployment)
 	}
 }
 
 func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
-	// The eval harness needs the judge on the cheap lane to keep measuring it
-	// against the deployed one; WithJudgeDeployment(llm.ShortGate()) is how it
+	// The eval harness needs the judge on the expensive lane to keep measuring
+	// it against the deployed one; WithJudgeDeployment(llm.Pro()) is how it
 	// asks for that. The override reaches the judge and nothing else.
 	c, models := testLLMWithModel(t, func(prompt string) string {
 		if strings.Contains(prompt, judgeMarker) {
@@ -718,7 +718,7 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 		}
 		return `{"title":"T","summary":"S"}`
 	})
-	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(llm.ShortGate())
+	r := newTestRouter(t, c, testDBWithDeps(t, nil)).WithJudgeDeployment(llm.Pro())
 
 	got, err := r.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
@@ -730,8 +730,8 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	if !got.Ask {
 		t.Fatal("the judge said ask")
 	}
-	if len(*models) == 0 || (*models)[0] != llm.ShortGateDeployment {
-		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ShortGateDeployment)
+	if len(*models) == 0 || (*models)[0] != llm.ProDeployment {
+		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ProDeployment)
 	}
 }
 
@@ -747,7 +747,7 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 		return `{"title":"T","summary":"S"}`
 	})
 	base := newTestRouter(t, c, testDBWithDeps(t, nil))
-	_ = base.WithJudgeDeployment(llm.ShortGate()) // a second Router, deliberately discarded here
+	_ = base.WithJudgeDeployment(llm.Pro()) // a second Router, deliberately discarded here
 
 	if _, err := base.Route(context.Background(), "frage", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "a/x.go", Score: 0.50},
@@ -756,9 +756,9 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ProDeployment {
+	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
 		t.Errorf("the original Router ran the judge on %v, want it still on %q — WithJudgeDeployment must not mutate it",
-			*models, llm.ProDeployment)
+			*models, llm.ShortGateDeployment)
 	}
 }
 
@@ -812,6 +812,67 @@ func TestDecideWhyNamesTheRungThatSettledIt(t *testing.T) {
 				t.Errorf("Decide = %v, DecideWhy = %v — the wrapper drifted", got, ask)
 			}
 		})
+	}
+}
+
+// TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse pins the hook the
+// repository-rung sweep decides through. DecideWhy derives the rung from the
+// candidate list; DecideWhySpans takes it, so a measurement can ask what the
+// ladder would do if that rung fired differently — or not at all — without a
+// second copy of the ladder's order to drift out of step.
+//
+// Both directions matter. Forcing it false must fall through to the rungs below
+// rather than answer, and forcing it true must not override the rungs ABOVE it:
+// a named repository and the too-broad cut still win, or a sweep could measure a
+// card the product would never raise.
+func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
+	// Two repositories, leader not dominant: the rung fires today.
+	spread := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "rongo", Score: 0.49}}
+
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, true); !ask || rung != rungRepository {
+		t.Errorf("spans=true gave (%v, %q), want an ask on %q", ask, rung, rungRepository)
+	}
+	// spans=false hands the turn to the rungs below, and with no dominant
+	// leader and no judgement that is an answer on the judge's rung — NOT a
+	// card, and not the repository rung under another name.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, false); ask || rung != rungJudge {
+		t.Errorf("spans=false gave (%v, %q), want no ask on %q", ask, rung, rungJudge)
+	}
+	// The judge still decides once it has spoken.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, true, 0, false, true, false); !ask || rung != rungJudge {
+		t.Errorf("spans=false with a judgement gave (%v, %q), want an ask on %q", ask, rung, rungJudge)
+	}
+	// A named repository outranks the parameter: the reader already answered
+	// the only question a card could put to them.
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 1, false, true, true); ask || rung != rungNamedRepos {
+		t.Errorf("a named repository with spans=true gave (%v, %q), want no ask on %q", ask, rung, rungNamedRepos)
+	}
+	// So does the too-broad cut, and it is the one a sweep could most easily
+	// measure wrong: past maxRepoCandidates there is no card left to raise, so
+	// a setting that forces the rung on must still get the too-broad card and
+	// not a repository card the product would never show.
+	var wide []Candidate
+	for _, repo := range []string{"a", "b", "c", "d", "e"} {
+		wide = append(wide, Candidate{Repo: repo, Score: 0.5})
+	}
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, true); !ask || rung != rungTooBroad {
+		t.Errorf("five repositories with spans=true gave (%v, %q), want an ask on %q", ask, rung, rungTooBroad)
+	}
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, false); !ask || rung != rungTooBroad {
+		t.Errorf("five repositories with spans=false gave (%v, %q), want an ask on %q — the cut is above the rung",
+			ask, rung, rungTooBroad)
+	}
+
+	// And DecideWhy is exactly DecideWhySpans with SpansRepos' answer, so the
+	// two cannot disagree about a turn the product actually runs.
+	for _, namedRepos := range []int{0, 1} {
+		wantAsk, wantRung := DecideWhy(spread, 0.25, false, false, namedRepos, false, true)
+		gotAsk, gotRung := DecideWhySpans(spread, 0.25, false, false, namedRepos, false, true,
+			SpansRepos(spread, namedRepos))
+		if wantAsk != gotAsk || wantRung != gotRung {
+			t.Errorf("namedRepos=%d: DecideWhy gave (%v, %q), DecideWhySpans gave (%v, %q)",
+				namedRepos, wantAsk, wantRung, gotAsk, gotRung)
+		}
 	}
 }
 
@@ -877,14 +938,18 @@ func TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
 	}
 }
 
-// TestTheJudgeRunsOnProAndNamingDoesNot pins phase 4c's one exception to
-// "Pro only where a human reads". The judge's output is a single word, but it
-// decides whether the reader gets an answer or a question back, and pinned
-// measurements put Pro six to seven questions ahead of the cheap lane over
-// the 61-question catalogue against a residual spread of one to two. The
-// naming calls stay on ShortGate: a wrong title costs a worse card, not a
-// wrong turn.
-func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
+// TestBothRoutingCallsRunOnTheCheapLane pins the end of phase 4c's exception
+// to "Pro only where a human reads". The judge's output is a single word and
+// it decides whether the reader gets an answer or a question back, which is
+// what bought it the expensive lane on the loom corpus. Re-measured
+// 2026-09-06 on the pinned catalogue and run twice, the two deployments land
+// within one question of each other in both directions — never further apart
+// than the judge's own re-roll — and the judge owns 0 to 1 of the wrong
+// decisions against the repository rung's 16, so the exception is gone and
+// both calls sit where the bar puts them. The override
+// still has to reach the judge and nothing else — that is what keeps the
+// comparison runnable the next time somebody wants to reopen it.
+func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {
 	var mu sync.Mutex
 	models := map[string]string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -924,24 +989,24 @@ func TestTheJudgeRunsOnProAndNamingDoesNot(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if models["judge"] != llm.ProDeployment {
-		t.Errorf("judge ran on %q, want the Pro deployment", models["judge"])
+	if models["judge"] != llm.ShortGateDeployment {
+		t.Errorf("judge ran on %q, want the short-gate deployment", models["judge"])
 	}
 	if models["name"] != llm.ShortGateDeployment {
 		t.Errorf("naming ran on %q, want the short-gate deployment — a title is not worth the expensive queue", models["name"])
 	}
 
-	// And the cheap lane is still reachable, because the harness has to keep
-	// measuring the comparison the spec asks for.
-	cheap := r.WithJudgeDeployment(llm.ShortGate())
-	if _, err := cheap.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
+	// And the expensive lane is still reachable, because the harness has to
+	// keep measuring the comparison the spec asks for.
+	expensive := r.WithJudgeDeployment(llm.Pro())
+	if _, err := expensive.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
 	}, nil, false); err != nil {
-		t.Fatalf("route on the cheap lane: %v", err)
+		t.Fatalf("route on the expensive lane: %v", err)
 	}
-	if models["judge"] != llm.ShortGateDeployment {
-		t.Errorf("overridden judge ran on %q, want the short-gate deployment", models["judge"])
+	if models["judge"] != llm.ProDeployment {
+		t.Errorf("overridden judge ran on %q, want the Pro deployment", models["judge"])
 	}
 }
 

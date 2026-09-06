@@ -159,6 +159,14 @@ func SpansRepos(all []Candidate, namedRepos int) bool {
 	return namedRepos == 0 && distinctRepos(all) >= 2
 }
 
+// DecideWhySpans is DecideWhy with the repository rung supplied instead of
+// derived from the candidate list. Exported for the sweep that has to ask
+// whether that rung should fire on repository span at all — see decideWhy.
+// Production has no reason to call it: Route's own spans value is SpansRepos'.
+func DecideWhySpans(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
+	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, spans)
+}
+
 // RepoCandidates is the repository-grained regrouping Route asks Related
 // about once SpansRepos is true. Exported for the same reason: the harness
 // must query the same set, or it measures a manifest edge the product sees and
@@ -242,6 +250,12 @@ const maxCandidates = 5
 // less than maxCandidates: the "all repositories" entry is appended after
 // them, so the card still never shows more than five buttons.
 const maxRepoCandidates = 4
+
+// MaxRepoCandidates is maxRepoCandidates for the eval harness, which has to
+// know where the too-broad cut sits: past it a spanning turn is settled above
+// the repository rung, so counting it among the rung's cards measures a
+// population the rung never decided.
+const MaxRepoCandidates = maxRepoCandidates
 
 // routeMaxTokens caps the judgement, nameMaxTokens the per-candidate naming.
 // Both replies are short structured objects; a longer one means the model
@@ -357,34 +371,49 @@ type Router struct {
 	clusterOpts modules.Opts
 	// judgeDeployment selects which MiMo deployment decides ask-vs-compose.
 	//
-	// Production runs on Pro — the ONE exception to "Pro only where a human
-	// reads", and it is written down because it overturns a measurement
-	// rather than ignoring one. Phase 4b measured the two deployments a
-	// question apart and wrote non-Pro in on that basis. Phase 4c found the
-	// reason: no call carried a temperature, so both arms were re-rolling by
-	// about three questions per run and the difference was inside the noise.
-	// Pinned (see gateTemperature) and run twice, Pro routes 48/61 and 50/61
-	// against non-Pro's 42/61 and 43/61 — six to seven questions, against a
-	// residual spread of one to two.
+	// It runs on the cheap lane, which is where the bar puts it — the output
+	// is one word — and it took two measurements to get back here.
 	//
-	// The bar for the cheap lane is "the output is an id or a label", and the
-	// judge's output is one word. That word is the difference between the
-	// reader getting an answer and getting a question back, which is why this
-	// one is bought on the expensive queue and understanding, naming and the
-	// thread title still are not. WithJudgeDeployment overrides it so the
-	// eval harness can keep measuring the choice.
+	// Phase 4b measured the deployments a question apart and wrote non-Pro in.
+	// Phase 4c found that number was noise: no call carried a temperature, so
+	// both arms re-rolled about three of 61 questions per run. Pinned and run
+	// twice, Pro routed 48/61 and 50/61 against non-Pro's 42/61 and 43/61, and
+	// the judge moved to Pro as the one exception to "Pro only where a human
+	// reads". That was the loom corpus, and it is gone.
+	//
+	// Re-measured 2026-09-06 on the pinned 2026-08-20 corpus, over 65
+	// questions and this ladder, and run twice. First run: the two
+	// deployments decide EVERY question identically, 47/65 each, a
+	// per-question diff of the two arms that is empty. Second run: ShortGate
+	// 47/65 again, Pro 46/65, the single difference being one unique question
+	// Pro carded and ShortGate answered. So the lanes are within a question of
+	// each other, in both directions, and pinning the temperature does not
+	// make this call fully reproducible — it only made it reproducible enough
+	// that a six-question gap could be told from noise.
+	//
+	// The rung breakdown says why the deployment stopped mattering: 16 wrong
+	// decisions come from the repository rung and 2 from repo_deps, against 0
+	// or 1 from the judge. Paying Pro to be no more right, on the call that is
+	// not where routing goes wrong, is not an exception worth keeping.
+	// See docs/measurements/2026-09-06-routing-rerun.md.
+	//
+	// WithJudgeDeployment overrides it so the eval harness can keep measuring
+	// the choice — which is the obligation that turned the first number over,
+	// and then the second.
 	judgeDeployment llm.Option
 }
 
-// NewRouter builds a Router. The judge runs on Pro, matching what is
-// deployed; see WithJudgeDeployment to change that for a measurement.
+// NewRouter builds a Router. The judge runs on the cheap lane, matching what
+// is deployed; see WithJudgeDeployment to change that for a measurement.
 func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Router {
-	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: nil}
+	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: llm.ShortGate()}
 }
 
 // WithJudgeDeployment returns a COPY of the Router with the ask-vs-compose
-// judge's deployment overridden — pass llm.ShortGate() for the cheap lane,
-// nil for the client's default, which is Pro.
+// judge's deployment overridden — pass llm.Pro() for the expensive lane,
+// llm.ShortGate() for the cheap one. nil means "name no deployment", which
+// leaves the client's own default, Pro; prefer llm.Pro() to say so, because a
+// lane chosen by omission follows whatever the default becomes next.
 // It does not mutate the receiver: nothing in the product may change the
 // shared, production Router's deployment by accident, so selecting a
 // different judge deployment means deliberately building a second Router
@@ -571,6 +600,24 @@ const (
 // "judge": both rungs said their piece, and the second one is what changed the
 // outcome.
 func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) (bool, string) {
+	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose,
+		SpansRepos(all, namedRepos))
+}
+
+// decideWhy is DecideWhy with the repository rung handed in rather than
+// recomputed. Only the eval harness needs the parameter, and it needs it for
+// one reason: whether that rung should fire on repository span alone is an
+// open question, and a sweep cannot ask it while the answer is welded into the
+// ladder's body. 2026-09-06 attributed 16 of the ladder's 18 wrong decisions
+// to this one rung (docs/measurements/2026-09-06-routing-rerun.md), so it is
+// the rung most likely to change, and the measurement that would change it has
+// to be able to try the alternatives.
+//
+// Production never passes anything but SpansRepos' answer. If a sweep ever
+// lands a different condition, it belongs in SpansRepos — one implementation,
+// so route() and the harness cannot drift apart about which turns are
+// spanning.
+func decideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
 	if namedRepos >= 1 {
 		return false, rungNamedRepos
 	}
@@ -588,7 +635,7 @@ func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos
 	if related {
 		return false, rungRepoDeps
 	}
-	if namedRepos == 0 && distinctRepos(all) >= 2 {
+	if spans {
 		return true, rungRepository
 	}
 	if Dominates(all, margin) {
@@ -740,7 +787,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// the candidates span more than one. It is the only reason Related is
 	// worth paying for on an otherwise dominant turn, so it is computed before
 	// the margin short-circuit rather than after it.
-	spans := len(namedRepos) == 0 && distinctRepos(ranked.All) >= 2
+	spans := SpansRepos(ranked.All, len(namedRepos))
 	l.spans = spans
 	if !spans && Dominates(ranked.All, r.margin) {
 		// The fast path is unchanged: hits inside one repository with a clear

@@ -270,6 +270,35 @@ Same discipline applies here.
   cannot tell a deterministic card apart from a judgement. It is what turned
   "routing is wrong 18 times" into "one rule is wrong 16 times".
 
+## Addendum, same day: a second run weakens "identical" to "within one"
+
+The arm was run again while moving the judge to the cheap lane, on the same
+pinned corpus and the same frozen expansions.
+
+| run | judge on ShortGate | judge on Pro |
+|---|---|---|
+| first | 0.723 (47/65) | 0.723 (47/65), per-question diff empty |
+| second | 0.723 (47/65) | **0.708 (46/65)**, 1 wrong via `judge` |
+
+The single difference is one `unique` question - "How does the download queue
+tell that nobody is waiting for a job?" - which Pro carded and ShortGate
+answered. The rung breakdown is otherwise unchanged in both runs: 16 wrong via
+`repository`, 2 via `repo_deps`.
+
+So the correct claim is **within one question of each other, in both
+directions**, not "identical". The conclusion is unaffected and if anything
+firmer - Pro is not more right, and this run it was one question less so - but
+the stronger wording above belongs to the first run only.
+
+The second finding is the more useful one: **`gateTemperature` narrows the
+judge's re-roll, it does not remove it.** Phase 4c pinned the temperature
+because two unpinned runs differed by three of 61 questions, which was wider
+than the deployment gap being published. Pinned, two runs differ by one. That
+is enough to tell a six-question gap from noise, which is what phase 4c needed,
+and it is *not* enough to read a one-question gap as a result. Any future lane
+or prompt comparison needs at least two runs before a single question means
+anything.
+
 ## Caveats
 
 - The Analyst role gate is still unmeasured. Every number here passes

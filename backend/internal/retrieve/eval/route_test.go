@@ -275,11 +275,13 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 	}
 }
 
-// TestEvalMeasureRouting measures the routing decision against Pro, over all
-// 61 questions, before non-Pro (ShortGate) is written into config.go
-// permanently — the phase 4b spec makes this comparison mandatory: "the
-// hit rate of routing is measured against Pro before non-Pro is written in
-// there. Asserting it is not enough."
+// TestEvalMeasureRouting measures the routing decision on both judge
+// deployments, over all 65 questions. The comparison is standing work, not a
+// one-off: phase 4b made it mandatory before non-Pro could be written in,
+// phase 4c overturned its result, and 2026-09-06 overturned that one and moved
+// the judge back to the cheap lane. Whichever lane NewRouter builds, this arm
+// keeps measuring the other — which is why both arms name their deployment
+// rather than letting one inherit the default.
 //
 // Both arms share one Rank per question (no margin dependency, no database
 // or model call) and call Related/Judge only when the ladder would actually
@@ -304,12 +306,14 @@ func TestEvalMeasureRouting(t *testing.T) {
 	margin := routeMargin(t)
 	mo := moduleOpts(t)
 
-	// Pro is what NewRouter builds now — phase 4c moved the judge there, see
-	// the comment on Router.judgeDeployment. The cheap lane is the one that
-	// has to be asked for explicitly, and it is still measured every run: the
-	// spec's obligation is to keep comparing them, not to have compared them
-	// once.
-	pro := ask.NewRouter(client, db, margin, mo)
+	// ShortGate is what NewRouter builds now — 2026-09-06 measured the two
+	// deployments deciding every question identically and moved the judge back
+	// to the cheap lane, see the comment on Router.judgeDeployment. BOTH arms
+	// name their deployment rather than letting one of them inherit the
+	// default: an arm labelled "Pro" that silently follows NewRouter would
+	// compare the default against itself the next time the default moves, and
+	// report it as agreement.
+	pro := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.Pro())
 	shortGate := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.ShortGate())
 
 	t.Logf("questions=%d margin=%.2f", len(questions), margin)
@@ -335,10 +339,10 @@ func TestEvalMeasureRouting(t *testing.T) {
 }
 
 // TestEvalMeasureRoutingMarginSweep reports routing accuracy at every margin
-// in routeMargins, over all 61 questions, on the judge production actually
-// runs — Pro since phase 4c. The chosen constant comes out of this table; the
-// table does not assume it. Sweeping the other deployment would tune a
-// threshold against a router nobody serves.
+// in routeMargins, over all 65 questions, on the judge production actually
+// runs — the cheap lane since 2026-09-06. The chosen constant comes out of
+// this table; the table does not assume it. Sweeping the other deployment
+// would tune a threshold against a router nobody serves.
 //
 // Rank, Related and Judge each run AT MOST ONCE per question and are reused
 // across every margin via ask.Decide — the sweep does not re-pay for the
