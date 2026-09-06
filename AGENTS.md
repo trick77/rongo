@@ -79,8 +79,8 @@ Rules, not description. The code is truth — how a rule is implemented is disco
 - **A path the app has no page for is a REAL 404**, never 200 and a shell that renders the unasked question. A thread address is checked there by SHAPE and never for existence — that handler has no session and no database, and answering would say which addresses are real.
 
 ## UI
-- Expandable → chevron, rotates 90° on open. No triangle, plus/minus or glyph swap.
-- Activity trace is a timeline, **one per turn**, **never collapsible**: it grows live with the time each step took. Progress is watched, not opened.
+- Expandable → chevron, rotates 90° on open, **towards what it opened**: down for a panel under its control, up for the trace, whose toggle is the last row under its own steps. No triangle, plus/minus or glyph swap.
+- Activity trace is a timeline, **one per turn**: it grows live with the time each step took, and **while the turn runs it is expanded with no toggle on screen** - progress is watched, never shut. Once the turn closes the steps roll up behind the closing row, which carries the node, the total and the chevron; re-opening sticks, because the roll-up fires once, on the running -> closed transition.
 - Ochre means "your move" — a waiting clarification, not the Done check. Once decided it loses the colour.
 - **A streaming answer follows the view until the reader takes it**, and only the next turn re-arms; being back at the foot does not. Watch intent events (wheel, touchmove, pointerdown, a source opened), never the scroll event alone — a scroll lands after the next token has already pulled the view back, and markdown resolving shortens the column, so the browser's clamp is not the reader.
 - Warm Editorial dark; same `@theme` and fonts as ../loom and ../peeq. Reference: `docs/plans/rongo-ui-mock.html`.
