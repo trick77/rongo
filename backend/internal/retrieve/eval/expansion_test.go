@@ -123,7 +123,13 @@ func TestExpandQuestions(t *testing.T) {
 	var out []expansion
 	var failed []string
 	var kept []string
+	var frozen []string
 	for _, q := range loadQuestions(t) {
+		if old, ok := previous[q.Text]; ok && expandOnlyMissing() {
+			out = append(out, old)
+			frozen = append(frozen, q.Text)
+			continue
+		}
 		var texts []string
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
@@ -160,6 +166,10 @@ func TestExpandQuestions(t *testing.T) {
 	if err := os.WriteFile(expansionsFile, body, 0o644); err != nil {
 		t.Fatalf("write %s: %v", expansionsFile, err)
 	}
+	if len(frozen) > 0 {
+		t.Logf("BACKEND_EVAL_EXPAND=missing: %d question(s) kept their frozen expansion untouched, %d expanded",
+			len(frozen), len(out)-len(frozen))
+	}
 	if len(kept) > 0 {
 		t.Logf("%d question(s) kept their previously frozen expansion: %v", len(kept), kept)
 	}
@@ -175,6 +185,24 @@ func TestExpandQuestions(t *testing.T) {
 // before it counts as missing.
 const expandAttempts = 3
 
+// expandOnlyMissing reports whether this run keeps every expansion that is
+// already frozen and calls the model only for the questions that have none.
+//
+// A full sweep stays the default, because that is what the arm has always
+// done. The mode exists because a full sweep quietly costs the thing freezing
+// is for: the model is not deterministic, so re-running the sweep to add ONE
+// new question rewrites the other sixty, and every number measured afterwards
+// mixes whatever changed in the product with a changed query. When the
+// question set has grown and the point of the run is to compare against an
+// older table, "missing" is what keeps that older table a valid baseline —
+// the same reason the corpus is pinned to a commit rather than re-cloned.
+//
+// It is deliberately not the default: a question whose wording changed keeps
+// its stale expansion under this setting, and only a full sweep notices.
+func expandOnlyMissing() bool {
+	return os.Getenv("BACKEND_EVAL_EXPAND") == "missing"
+}
+
 // refreshTexts writes a fresh expansion into an existing record, keeping every
 // other frozen field. Building a new record from the texts alone is the whole
 // point of this being a function: Repos is frozen by a separate arm and a
@@ -184,6 +212,30 @@ func refreshTexts(prev expansion, question string, texts []string) expansion {
 	prev.Question = question
 	prev.Texts = texts
 	return prev
+}
+
+// TestExpandOnlyMissingIsOptInAndExact runs WITHOUT an endpoint. The gate
+// decides whether a run costs comparability with every table measured before
+// it, so "unset" and "anything else" must both mean the full sweep the arm has
+// always done — a typo that silently froze the whole file would be invisible
+// in the output and only show up as numbers that stopped moving.
+func TestExpandOnlyMissingIsOptInAndExact(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"missing", true},
+		{"Missing", false},
+		{"all", false},
+		{"1", false},
+		{"true", false},
+	} {
+		t.Setenv("BACKEND_EVAL_EXPAND", tc.value)
+		if got := expandOnlyMissing(); got != tc.want {
+			t.Errorf("expandOnlyMissing() with BACKEND_EVAL_EXPAND=%q = %v, want %v", tc.value, got, tc.want)
+		}
+	}
 }
 
 // TestRefreshTextsKeepsTheFrozenRepoRestriction runs WITHOUT an endpoint. The

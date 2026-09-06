@@ -499,5 +499,45 @@
       "query expansion from domain language to identifiers understanding step bridging vocabulary",
       "search query terminology mapping domain implementation identifier"
     ]
+  },
+  {
+    "question": "How do peeq and rongo each space their background loops apart?",
+    "texts": [
+      "How do peeq and rongo each space their background loops apart?",
+      "background loop spacing in peeq background loop timing in rongo interval between background loops in peeq and rongo",
+      "peeq rongo backgroundLoop loopInterval timer dispatchQueue asyncAfter sleep"
+    ]
+  },
+  {
+    "question": "How does peeq open its SQLite database compared to rongo?",
+    "texts": [
+      "How does peeq open its SQLite database compared to rongo?",
+      "peeq SQLite database opening method rongo SQLite database opening method comparison of SQLite database initialization",
+      "peeq rongo SQLite open database connection initialization"
+    ]
+  },
+  {
+    "question": "Which technical choices in rongo are locked and must not be changed without agreement?",
+    "texts": [
+      "Which technical choices in rongo are locked and must not be changed without agreement?",
+      "locked technical choices in rongo unchangeable technical decisions in rongo technical constraints in rongo requiring agreement",
+      "rongo technical choices locked agreement constraints decisions"
+    ]
+  },
+  {
+    "question": "What has to be installed on the machine before rongo's development environment will start?",
+    "texts": [
+      "What has to be installed on the machine before rongo's development environment will start?",
+      "prerequisites for rongo development environment required software for rongo dev setup dependencies to install before rongo dev environment",
+      "rongo development environment setup install dependencies prerequisites"
+    ]
+  },
+  {
+    "question": "Which attribute key does peeq use when it logs an error?",
+    "texts": [
+      "Which attribute key does peeq use when it logs an error?",
+      "attribute key for error logging in peeq error log attribute key used by peeq peeq error logging attribute key",
+      "peeq error log attribute key logging errorLog"
+    ]
   }
 ]

@@ -198,6 +198,12 @@ type routingRow struct {
 	q    Question
 	want bool
 	got  bool
+	// rung is the ladder step that settled this question, as DecideWhy names
+	// it. Production logs it per turn for exactly this reason (route.go's
+	// ladder line): an aggregate says how often routing was wrong, and only
+	// the rung says which rule to go and fix. Without it a run cannot tell a
+	// deterministic repository card apart from a judgement the model made.
+	rung string
 }
 
 func (r routingRow) correct() bool { return r.got == r.want }
@@ -246,9 +252,26 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 		}
 		return sorted[i].q.Text < sorted[j].q.Text
 	})
-	t.Logf("%-5s %-5s %-5s %-12s %s", "want", "got", "ok", "resolution", "question")
+	// Which rung settled the questions this arm got WRONG. The aggregate says
+	// how much routing costs; this says which rule to change to get it back.
+	byRung := map[string]int{}
+	for _, row := range rows {
+		if !row.correct() {
+			byRung[row.rung]++
+		}
+	}
+	rungs := make([]string, 0, len(byRung))
+	for rung := range byRung {
+		rungs = append(rungs, rung)
+	}
+	sort.SliceStable(rungs, func(i, j int) bool { return byRung[rungs[i]] > byRung[rungs[j]] })
+	for _, rung := range rungs {
+		t.Logf("  wrong via rung %-12s = %d", rung, byRung[rung])
+	}
+
+	t.Logf("%-5s %-5s %-5s %-12s %-12s %s", "want", "got", "ok", "rung", "resolution", "question")
 	for _, row := range sorted {
-		t.Logf("%-5v %-5v %-5v %-12s %s", row.want, row.got, row.correct(), row.q.Resolution, short(row.q.Text))
+		t.Logf("%-5v %-5v %-5v %-12s %-12s %s", row.want, row.got, row.correct(), row.rung, row.q.Resolution, short(row.q.Text))
 	}
 }
 
@@ -297,10 +320,12 @@ func TestEvalMeasureRouting(t *testing.T) {
 		want := resolutionExpectsAsk(q.Resolution)
 
 		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin}, len(named))
-		shortRows = append(shortRows, routingRow{q: q, want: want, got: ask.Decide(sAll, margin, sRelated, sJudged, len(named), false, true)})
+		sGot, sRung := ask.DecideWhy(sAll, margin, sRelated, sJudged, len(named), false, true)
+		shortRows = append(shortRows, routingRow{q: q, want: want, got: sGot, rung: sRung})
 
 		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin}, len(named))
-		proRows = append(proRows, routingRow{q: q, want: want, got: ask.Decide(pAll, margin, pRelated, pJudged, len(named), false, true)})
+		pGot, pRung := ask.DecideWhy(pAll, margin, pRelated, pJudged, len(named), false, true)
+		proRows = append(proRows, routingRow{q: q, want: want, got: pGot, rung: pRung})
 	}
 
 	t.Logf("")
