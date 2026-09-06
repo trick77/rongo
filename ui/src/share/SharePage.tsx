@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import SourceView, { type SourceRef } from "../SourceView";
 import ThreadView, { SourcesPane } from "../ThreadView";
 import { linkChosenCandidates, storedRetries, storedTurn, type Message, type Turn } from "../turns";
-import logo from "../assets/rongo-wide.png";
 
 /**
  * A shared thread, as someone without a rongo account sees it.
@@ -81,18 +80,13 @@ export default function SharePage({ token }: { token: string }) {
   // The tab is named after the thread, so a reader with several links open can
   // tell them apart.
   useEffect(() => {
-    if (state.s === "ready" && state.title) document.title = `${state.title} · rongo`;
+    if (state.s === "ready" && state.title) document.title = `${state.title} · Rongo`;
   }, [state]);
 
   if (state.s !== "ready") {
     return (
       <div className="grid h-dvh place-items-center px-6 text-center">
         <div className="max-w-[44ch]">
-          <span
-            aria-hidden="true"
-            className="mx-auto mb-5 block h-[38px] w-[38px] rounded-lg bg-accent-fill bg-[length:auto_30px] bg-[4px_center] bg-no-repeat bg-blend-luminosity"
-            style={{ backgroundImage: `url(${logo})` }}
-          />
           {state.s === "loading" && <p className="text-muted">Opening the thread …</p>}
           {state.s === "gone" && (
             <>
@@ -121,13 +115,8 @@ export default function SharePage({ token }: { token: string }) {
     <div className="grid h-dvh grid-rows-[56px_1fr] [@media(max-height:500px)]:grid-rows-[44px_1fr]">
       <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel">
         <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
-          <span
-            aria-hidden="true"
-            className="h-[30px] w-[30px] shrink-0 rounded-lg bg-accent-fill bg-[length:auto_24px] bg-[3px_center] bg-no-repeat bg-blend-luminosity"
-            style={{ backgroundImage: `url(${logo})` }}
-          />
-          <span className="sr-only font-serif text-[21px] font-semibold tracking-tight text-accent-strong sm:not-sr-only">
-            rongo
+          <span className="sr-only font-serif text-[21px] leading-7 font-medium text-wordmark sm:not-sr-only">
+            Rongo
           </span>
         </div>
         <div className="flex min-w-0 items-baseline gap-2.5 px-2 lg:px-6">

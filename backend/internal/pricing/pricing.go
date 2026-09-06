@@ -133,7 +133,7 @@ func Resolve(reg Registry, embedBaseURL, embedModel string) (usage.Prices, []str
 		price(embedBaseURL, embedModel)
 	}
 	if len(warnings) > 0 {
-		return usage.Prices{}, append(warnings, "showing tokens only: every model rongo calls must be priced, or none is")
+		return usage.Prices{}, append(warnings, "showing tokens only: every model Rongo calls must be priced, or none is")
 	}
 	return prices, nil
 }

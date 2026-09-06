@@ -40,7 +40,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
     title: "Ask about the code.",
     placeholder: "Ask about the code…",
     body:
-      "rongo searches the indexed repositories, asks back when a question fits more than one " +
+      "Rongo searches the indexed repositories, asks back when a question fits more than one " +
       "mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the " +
       "mechanism in domain terms, a Developer gets types, functions and files.",
   },
@@ -48,7 +48,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
     title: "Frag den Code.",
     placeholder: "Frag den Code …",
     body:
-      "rongo durchsucht die indexierten Repositories, fragt nach, wenn eine Frage auf mehr als einen " +
+      "Rongo durchsucht die indexierten Repositories, fragt nach, wenn eine Frage auf mehr als einen " +
       "Mechanismus passt, und antwortet mit Quellen für jede Aussage. Wähl eine Rolle: Ein Analyst " +
       "bekommt den Mechanismus in Fachbegriffen, ein Developer Typen, Funktionen und Dateien.",
   },
@@ -56,7 +56,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
     title: "Interrogez le code.",
     placeholder: "Interrogez le code …",
     body:
-      "rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
+      "Rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
       "plus d'un mécanisme, et répond avec des sources pour chaque affirmation. Choisissez un rôle : " +
       "un Analyst reçoit le mécanisme dans les termes du métier, un Developer les types, les " +
       "fonctions et les fichiers.",
@@ -65,7 +65,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
     title: "Chiedi al codice.",
     placeholder: "Chiedi al codice …",
     body:
-      "rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
+      "Rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
       "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analyst " +
       "riceve il meccanismo nei termini del dominio, un Developer tipi, funzioni e file.",
   },

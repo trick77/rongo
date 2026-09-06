@@ -390,7 +390,7 @@ export default function ThreadView({
                 {turn.citations.length > 0 && (
                   <details className="mt-4 text-sm">
                     <summary className="flex cursor-pointer list-none items-center gap-2 text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
-                      <Chevron /> How does rongo know this?{" "}
+                      <Chevron /> How does Rongo know this?{" "}
                       <span className="text-faint">{turn.citations.length} sources</span>
                     </summary>
                     <ul className="mt-2 space-y-1">

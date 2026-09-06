@@ -47,10 +47,10 @@ async function renderSignedIn() {
 }
 
 describe("App", () => {
-  it("renders the heading with text rongo", async () => {
+  it("renders the heading with text Rongo", async () => {
     await renderSignedIn();
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading.textContent).toBe("rongo");
+    expect(heading.textContent).toBe("Rongo");
   });
 
   it("sends an expired login to the provider instead of showing the app", async () => {
@@ -415,7 +415,7 @@ describe("App, the rail on a phone", () => {
   it("keeps the wordmark readable to a screen reader when it is out of sight", async () => {
     await renderSignedIn();
     const h1 = screen.getByRole("heading", { level: 1 });
-    expect(h1.textContent).toBe("rongo");
+    expect(h1.textContent).toBe("Rongo");
     expect(h1.className).toContain("sr-only");
     expect(h1.className).toContain("sm:not-sr-only");
   });
