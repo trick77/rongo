@@ -158,7 +158,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	}
 
 	report := func(label string, spans func(repoRungTurn) bool, judgedBy func(repoRungTurn) bool) {
-		var correct, ambigOK int
+		var correct, ambigOK, cards, missed int
 		byRung := map[string]int{}
 		for _, tn := range turns {
 			live := spans(tn)
@@ -186,12 +186,27 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 				continue
 			}
 			byRung[rung]++
+			// The two ways to be wrong, priced apart below: a card nobody
+			// needed, and an answer composed across genuine alternatives.
+			if tn.want {
+				missed++
+			} else {
+				cards++
+			}
 		}
-		t.Logf("%-16s %-14s %-14s repository=%d repo_deps=%d judge=%d margin=%d too_broad=%d",
+		// cost at W=2, and the exchange rate at which this setting overtakes
+		// never asking. Accuracy alone ranks a router that never asks above
+		// this ladder, which is why it is not the number to tune against.
+		crossover := "never"
+		if d := wantAsk - missed; d > 0 {
+			crossover = fmt.Sprintf("%.2f", float64(cards)/float64(d))
+		}
+		t.Logf("%-16s %-14s %-14s cards=%-3d missed=%-3d W2=%-5.1f beats-never>%-6s repository=%d repo_deps=%d judge=%d margin=%d",
 			label,
 			fraction(correct, len(turns)),
 			fraction(ambigOK, wantAsk),
-			byRung["repository"], byRung["repo_deps"], byRung["judge"], byRung["margin"], byRung["too_broad"])
+			cards, missed, float64(cards)+2*float64(missed), crossover,
+			byRung["repository"], byRung["repo_deps"], byRung["judge"], byRung["margin"])
 	}
 
 	t.Logf("questions=%d margin=%.2f judge calls=%d", len(turns), margin, judgeCalls)
