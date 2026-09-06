@@ -93,18 +93,38 @@ describe("SourceView", () => {
   });
 
   it("closes on a tap beside the dialog, not on one inside it", async () => {
-    // An iPad has no Escape key, and iOS Safari does not deliver mouse
-    // events to a plain div: the backdrop listens for the pointer itself.
+    // On the click, not on the press: closing on the pointerdown would take
+    // the overlay away before the click, which then lands on the citation row
+    // under the scrim and opens the viewer again.
     serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
     const onClose = vi.fn();
 
     render(<SourceView source={source} onClose={onClose} />);
     const dialog = screen.getByRole("dialog");
+    const scrim = dialog.parentElement!;
 
     fireEvent.pointerDown(dialog);
+    fireEvent.click(dialog);
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.pointerDown(dialog.parentElement!);
+
+    fireEvent.pointerDown(scrim);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(scrim);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes a drag out of the dialog for a drag, not a cancel", async () => {
+    // Selecting a line of code and letting go over the scrim.
+    serve(200, { content: "x\n", sha: "0123abcdef", branch: "master" });
+    const onClose = vi.fn();
+
+    render(<SourceView source={source} onClose={onClose} />);
+    const dialog = screen.getByRole("dialog");
+    const scrim = dialog.parentElement!;
+
+    fireEvent.pointerDown(dialog);
+    fireEvent.click(scrim);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("closes on Escape and on the close button", async () => {

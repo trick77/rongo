@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBackdropDismiss } from "./dismiss";
 import { highlightLines, languageForPath } from "./highlight";
 
 /** What a source row knows about the file it points at. The commit is
@@ -46,6 +47,7 @@ export default function SourceView({
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
+  const dismiss = useBackdropDismiss(onClose);
 
   // Focus moves into the dialog on open and back to where it was on close,
   // so a keyboard reader does not land at the top of the page afterwards.
@@ -132,11 +134,10 @@ export default function SourceView({
       // Edge to edge on a phone: 24px of scrim on each side buys nothing when
       // the code inside is already scrolling sideways.
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
-      // The pointer, not the mouse: iOS Safari does not deliver mouse events
-      // to a plain div, and an iPad has no Escape key to fall back on.
-      onPointerDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      // A press beside the dialog closes it and does nothing else: see
+      // useBackdropDismiss for why that is the click and not the pointerdown.
+      ref={dismiss.ref}
+      onPointerDown={dismiss.onPointerDown}
     >
       <div
         role="dialog"
