@@ -89,7 +89,14 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 			return fmt.Errorf("index %s/%s chunk %d keywords: %w", repo, path, c.Ordinal, err)
 		}
 	}
+	// Only definitions are recorded. The reference walk in internal/ask reads
+	// this table as "where is this name DEFINED", and storing every ctags
+	// record made that false: it also held struct fields, locals, and every
+	// key and array index of every JSON file. See definitionKinds.
 	for _, s := range syms {
+		if !definitionKinds[s.Kind] {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO symbols (file_id, name, kind, line, scope) VALUES (?,?,?,?,?)`,
 			fileID, s.Name, s.Kind, s.Line, s.Scope); err != nil {

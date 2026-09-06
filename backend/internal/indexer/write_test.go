@@ -329,3 +329,52 @@ func TestReplaceFile_rejectsAVectorCountMismatch(t *testing.T) {
 		t.Fatal("ReplaceFile() err = nil, want a rejection of the count mismatch")
 	}
 }
+
+func TestReplaceFile_recordsDefinitionsOnly(t *testing.T) {
+	// The reference walk in internal/ask reads this table as "where is this
+	// name DEFINED". A struct field named like a function, and a JSON array
+	// element named "0", are what made it resolve a behavioural question onto
+	// a struct declaration.
+	// Given
+	db := writeDB(t)
+	testee := NewWriter(db)
+	syms := []symbols.Symbol{
+		{Name: "candidates", Kind: "func", Line: 39},
+		{Name: "ladder", Kind: "struct", Line: 599},
+		{Name: "candidates", Kind: "member", Line: 601, Scope: "ask.ladder"},
+		{Name: "gateTemperature", Kind: "const", Line: 41},
+		{Name: "now", Kind: "constant", Line: 234},
+		{Name: "total", Kind: "variable", Line: 17},
+		{Name: "0", Kind: "object", Line: 2},
+		{Name: "question", Kind: "string", Line: 3},
+		{Name: "clarifications", Kind: "table", Line: 201},
+		{Name: "Citation", Kind: "alias", Line: 12},
+		{Name: "ask", Kind: "package", Line: 1},
+	}
+
+	// When
+	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java", 64,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, syms)
+
+	// Then
+	if err != nil {
+		t.Fatalf("ReplaceFile() err = %v, want nil", err)
+	}
+	rows, err := db.Query(`SELECT name, kind FROM symbols ORDER BY name`)
+	if err != nil {
+		t.Fatalf("select symbols: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name, kind string
+		if err := rows.Scan(&name, &kind); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, name+":"+kind)
+	}
+	want := []string{"Citation:alias", "candidates:func", "clarifications:table", "ladder:struct"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("symbols = %v, want %v", got, want)
+	}
+}

@@ -83,6 +83,44 @@ var structuralKinds = map[string]bool{
 	"object": true, "singletonMethod": true, "macro": true,
 }
 
+// definitionKinds are the ctags kinds worth recording in the symbols table,
+// which is what the answer's reference walk follows to reach a name's
+// definition. It is structuralKinds plus two kinds that define a name without
+// ever anchoring a chunk: a SQL table, and a TypeScript type alias.
+//
+// The two sets differ on purpose. structuralKinds answers "may a chunk start
+// here", definitionKinds answers "is this a definition worth following". Every
+// other ctags kind is excluded, and the exclusions are the point:
+//
+//   - members, fields, constants and variables. A struct field named `named`
+//     and a local named `now` are not definitions of anything, but the walk
+//     resolved them and cited the enclosing struct for behaviour the struct
+//     does not perform. This is the same exclusion structuralKinds already
+//     makes for anchoring, and the two tables disagreeing was the bug.
+//   - JSON and config kinds — string, array, boolean, and "object". ctags
+//     reports every key and every array index of a .json file as a symbol, so
+//     a fixture file with sixty-five questions defined the name "candidates"
+//     sixty-five times. Not by outranking the function of that name — the
+//     ordering still put it first — but by spending the walk's token budget,
+//     which it stops on rather than trims, so every name after them was never
+//     followed at all. "object" is
+//     the one kind subtracted from structuralKinds rather than simply absent
+//     from it: it stays an anchor, because dropping it would recut every JSON
+//     file in the index, but a JSON object named "0" defines nothing.
+//   - package. Following `ask` or `main` reaches every file that names them.
+//
+// TypeScript arrow helpers do NOT need "constant" here: ctags reports
+// `const f = () => {}` as kind function, and only genuine const values as
+// constant.
+var definitionKinds = func() map[string]bool {
+	out := map[string]bool{"table": true, "alias": true}
+	for k := range structuralKinds {
+		out[k] = true
+	}
+	delete(out, "object")
+	return out
+}()
+
 // commentPrefixes are the line-comment openers rongo recognises when pulling a
 // doc comment into its symbol's chunk. It is deliberately a small, syntax-blind
 // set rather than a per-language grammar: a wrong guess costs a comment line
