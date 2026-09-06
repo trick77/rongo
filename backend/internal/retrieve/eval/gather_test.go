@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -31,18 +32,27 @@ func gatherOpts(t *testing.T) ask.GatherOptions {
 // the gathered set, or -1. Hop 0 means the search already had it; anything
 // higher means the reference walk reached it.
 func hopOfCandidate(sources []ask.Source, c Candidate) int {
-	best := -1
+	hop, _ := hopAndPathOfCandidate(sources, c)
+	return hop
+}
+
+// hopAndPathOfCandidate is hopOfCandidate plus WHICH of the candidate's paths
+// answered. A candidate may list several (go-sqlite3's driver half is
+// ["driver/driver.go", "conn.go"]), and reporting the first while the hop
+// describes another names a file that never arrived.
+func hopAndPathOfCandidate(sources []ask.Source, c Candidate) (int, string) {
+	best, path := -1, ""
 	for _, s := range sources {
 		if s.Repo != c.Repo {
 			continue
 		}
 		for _, want := range c.Paths {
 			if s.Path == want && (best < 0 || s.Hop < best) {
-				best = s.Hop
+				best, path = s.Hop, s.Path
 			}
 		}
 	}
-	return best
+	return best, path
 }
 
 // gatherArm is one configuration of the pipeline's first three steps.
@@ -52,13 +62,21 @@ type gatherArm struct {
 	// running pipeline always does; the existing harnesses never do.
 	expanded bool
 	hops     int
+	// docDecay overrides the retriever's default. 0 means "leave it alone".
+	// The arm that sets it to 1.0 turns doc demotion OFF, which is what
+	// retrieval did before #87 defaulted it on — the only way to tell a
+	// gathering result that changed because the CODE changed from one that
+	// changed because the measurement did.
+	docDecay float64
 }
 
 // gatherOutcome is one question under one arm.
 type gatherOutcome struct {
 	q       Question
-	rank    int   // rank of the first candidate in the SEARCH result
-	hops    []int // per candidate, the hop it was gathered at, or -1
+	rank    int      // rank of the first candidate in the SEARCH result
+	hops    []int    // per candidate, the hop it was gathered at, or -1
+	ranks   []int    // per candidate, its own rank in the SEARCH result, or 0
+	paths   []string // per candidate, WHICH of its paths arrived, or ""
 	sources int
 }
 
@@ -124,12 +142,18 @@ func TestEvalMeasureGathered(t *testing.T) {
 		{name: "raw, 0 hops", expanded: false, hops: 0},
 		{name: "raw + walk", expanded: false, hops: opts.MaxHops},
 		{name: "expanded + walk", expanded: true, hops: opts.MaxHops},
+		{name: "expanded + walk, no doc decay", expanded: true, hops: opts.MaxHops, docDecay: 1.0},
 	}
 
 	t.Logf("questions=%d max_hops=%d token_budget=%d", len(questions), opts.MaxHops, opts.TokenBudget)
 
 	results := map[string][]gatherOutcome{}
 	for _, arm := range arms {
+		if arm.docDecay > 0 {
+			r.DocDecay = arm.docDecay
+		} else {
+			r.DocDecay = retrieve.DefaultDocDecay
+		}
 		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget})
 		var out []gatherOutcome
 		for _, q := range questions {
@@ -150,11 +174,20 @@ func TestEvalMeasureGathered(t *testing.T) {
 				t.Fatalf("%s: gather %q: %v", arm.name, q.Text, err)
 			}
 			hops := make([]int, 0, len(q.Candidates))
+			ranks := make([]int, 0, len(q.Candidates))
+			paths := make([]string, 0, len(q.Candidates))
 			for _, c := range q.Candidates {
-				hops = append(hops, hopOfCandidate(sources, c))
+				hop, path := hopAndPathOfCandidate(sources, c)
+				hops = append(hops, hop)
+				paths = append(paths, path)
+				// The candidate's own rank in the SEARCH hits, beside the hop
+				// it reached the sources at. One number cannot tell a part
+				// retrieval never found from one it found and the walk did not
+				// need; two can.
+				ranks = append(ranks, rankOfCandidate(hits, c))
 			}
 			out = append(out, gatherOutcome{
-				q: q, rank: rankOfExpected(hits, q), hops: hops, sources: len(sources),
+				q: q, rank: rankOfExpected(hits, q), hops: hops, ranks: ranks, paths: paths, sources: len(sources),
 			})
 		}
 		results[arm.name] = out
@@ -162,6 +195,80 @@ func TestEvalMeasureGathered(t *testing.T) {
 	}
 
 	reportWalkGains(t, results["expanded + walk"])
+	reportCompositionParts(t, results["expanded + walk"])
+}
+
+// reportCompositionParts answers the one question the aggregate cannot: when a
+// composition question does not get all its parts, was the missing part never
+// RETRIEVED, or was it retrieved and the walk simply did not need to reach it?
+//
+// The two have nothing in common as defects. A part that never appears in the
+// search result is a retrieval problem, and the only cohort in this catalogue
+// where a wider search or a second query could still recover something
+// (2026-09-06-routing-cost-metric.md closed the others: gathering on answered
+// questions is 1.000). A part that ranks inside the hits but never
+// reaches the sources is a gathering problem, and the hop budget or the
+// eviction rule owns it.
+//
+// Per part: its rank in the search hits, and the hop it was gathered at.
+//
+//	rank 0, hop -1   never retrieved, never walked to — a SEARCH miss
+//	rank n, hop -1   retrieved and then lost — a GATHER miss
+//	rank n, hop 0    arrived as a search hit
+//	rank 0, hop >0   the walk rescued it
+func reportCompositionParts(t *testing.T, out []gatherOutcome) {
+	t.Helper()
+	var searchMiss, gatherMiss, viaSearch, viaWalk int
+
+	t.Logf("")
+	t.Logf("=== composition, part by part (expanded + walk) ===")
+	t.Logf("%-6s %-6s %-9s %-11s %s", "rank", "hop", "verdict", "repo", "path")
+	for _, o := range out {
+		if o.q.Resolution != ResolutionComposition {
+			continue
+		}
+		t.Logf("· %s", short(o.q.Text))
+		for i, c := range o.q.Candidates {
+			rank, hop := 0, -1
+			if i < len(o.ranks) {
+				rank = o.ranks[i]
+			}
+			if i < len(o.hops) {
+				hop = o.hops[i]
+			}
+			verdict := ""
+			switch {
+			case hop < 0 && rank == 0:
+				verdict = "SEARCH"
+				searchMiss++
+			case hop < 0:
+				verdict = "GATHER"
+				gatherMiss++
+			case hop == 0:
+				verdict = "search"
+				viaSearch++
+			default:
+				verdict = "walk"
+				viaWalk++
+			}
+			// The path that actually arrived. When none did, name every path
+			// the candidate offered rather than just the first — which of them
+			// was wanted is exactly what a miss leaves open.
+			path := ""
+			if i < len(o.paths) {
+				path = o.paths[i]
+			}
+			if path == "" {
+				path = strings.Join(c.Paths, " | ")
+			}
+			t.Logf("  %-6d %-6d %-9s %-11s %s", rank, hop, verdict, c.Repo, path)
+		}
+	}
+
+	t.Logf("")
+	t.Logf("parts arrived: %d by search, %d by the walk", viaSearch, viaWalk)
+	t.Logf("parts missing: %d never retrieved (SEARCH), %d retrieved but not gathered (GATHER)",
+		searchMiss, gatherMiss)
 }
 
 // reportArm prints one arm's cohort metrics.
