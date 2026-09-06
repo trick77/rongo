@@ -291,7 +291,7 @@ export default function ThreadView({
                     nothing. `live` keeps its own meaning below, where it
                     decides whether the answer fades in as it arrives. */}
                 {(turn.live || turn.steps.length > 0) && (
-                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} />
+                  <Trace steps={turn.steps} state={traceState(turn)} startedAt={turn.startedAt} endedAt={turn.endedAt} live={turn.live} />
                 )}
 
                 {/* Above the answer, and not ochre: ochre means "your move",

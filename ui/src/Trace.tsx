@@ -57,14 +57,18 @@ function seconds(ms: number): string {
  * has opened it nothing closes it behind their back - the roll-up fires on the
  * running -> closed transition, once.
  *
- * `role="status"` and `aria-live="polite"` so progress is read out as it
- * happens.
+ * `role="status"` and `aria-live="polite"` while the turn is this session's, so
+ * progress is read out as it happens and the row it closes on is announced. A
+ * turn read back out of the record gets neither: nothing there is happening,
+ * and a thread of ten stored turns would be ten live regions announcing
+ * themselves as the page loads.
  */
 export default function Trace({
   steps,
   state,
   startedAt,
   endedAt = null,
+  live = true,
 }: {
   steps: Step[];
   state: TraceState;
@@ -72,6 +76,9 @@ export default function Trace({
   startedAt: number;
   /** When the turn closed, or null while it runs. */
   endedAt?: number | null;
+  /** Whether this turn is one THIS session watched, rather than a record of
+   * one. Only a turn being watched is announced. */
+  live?: boolean;
 }) {
   // A running step's duration ticks; once the turn has closed nothing moves.
   const [now, setNow] = useState(() => Date.now());
@@ -106,7 +113,7 @@ export default function Trace({
             : null;
 
   return (
-    <div role="status" aria-live="polite" className="trace mt-4">
+    <div role={live ? "status" : undefined} aria-live={live ? "polite" : undefined} className="trace mt-4">
       <div
         className={"trace-steps" + (open ? " trace-steps-open" : "")}
         aria-hidden={open ? undefined : true}

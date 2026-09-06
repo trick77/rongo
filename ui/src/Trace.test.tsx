@@ -166,6 +166,19 @@ describe("Trace", () => {
     expect(status.getAttribute("aria-live")).toBe("polite");
   });
 
+  it("announces nothing for a turn read back out of the record", () => {
+    // A record is not something happening. A thread of ten stored turns would
+    // otherwise be ten live regions announcing themselves as the page loads.
+    const { container } = strict(
+      <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} live={false} />,
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(container.querySelector(".trace")?.getAttribute("aria-live")).toBeNull();
+    // Still there to read, still rolled up on its closing row.
+    expect(screen.getByText("Done")).toBeTruthy();
+  });
+
   it("shows a step the backend has no label for as it came", () => {
     expect(stepLabel("answering")).toBe("Thinking about the answer");
     expect(stepLabel("writing")).toBe("Writing the answer");

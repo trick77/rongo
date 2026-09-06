@@ -349,7 +349,10 @@ describe("Ask, a stored thread", () => {
     strict(<Ask threadId="7" />);
 
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
-    const trace = screen.getByRole("status");
+    // Queried by class, not by role: a record announces nothing, so a stored
+    // trace is deliberately not a live region.
+    const trace = document.querySelector(".trace")!;
+    expect(trace.getAttribute("role")).toBeNull();
     expect(trace.textContent).toContain("Understanding the question");
     // The turn's own span, not the gap between its first and last step.
     expect(trace.textContent).toContain("3.4s");
@@ -1157,7 +1160,7 @@ describe("Ask, the clarification and re-explaining", () => {
     strict(<Ask threadId="7" />);
 
     expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
-    const trace = screen.getByRole("status");
+    const trace = document.querySelector(".trace")!;
     expect(trace.textContent).toContain("Waiting for a choice");
     expect(trace.querySelector(".node-ochre")).toBeTruthy();
   });
