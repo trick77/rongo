@@ -25,8 +25,16 @@ type repoRungTurn struct {
 	relatedCapped   bool
 	judged          bool
 	judgeRan        bool
-	ratio           float64 // second repository's best, as a share of the leader
-	spansNow        bool
+	// judgedRepos is the judge's answer on the REPOSITORY-grained list, which
+	// is what a defer would actually pass it. The two are different questions
+	// and the first sweep only asked the first one: the judge's prompt prints
+	// "Repository X, module Y" per candidate, so on the capped module list the
+	// top rows can name the same repository twice and the cross-repository
+	// ambiguity never reaches the model at all.
+	judgedRepos   bool
+	judgeReposRan bool
+	ratio         float64 // second repository's best, as a share of the leader
+	spansNow      bool
 }
 
 // TestEvalMeasureRepoRungSweep asks what the repository rung should do, over
@@ -114,6 +122,17 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 				tn.judgeRan = true
 				judgeCalls++
 			}
+			// The same question asked the way a defer would ask it: one
+			// candidate per repository. Only spanning turns have a second
+			// repository to show, so only they are worth the call.
+			if tn.spansNow {
+				tn.judgedRepos, err = router.Judge(ctx, q.Text, ask.RepoCandidates(ranked.All))
+				if err != nil {
+					t.Fatalf("judge over repositories %q: %v", q.Text, err)
+				}
+				tn.judgeReposRan = true
+				judgeCalls++
+			}
 		}
 		turns = append(turns, tn)
 	}
@@ -125,7 +144,20 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 		}
 	}
 
-	report := func(label string, spans func(repoRungTurn) bool) {
+	// judgedBy selects which of the two judgements a setting reads. Every bar
+	// setting reads the module-grained one, because a turn that fails the bar
+	// reaches the judge exactly as Route reaches it today. Only a defer gets to
+	// ask the other question, and only on a turn that has a second repository
+	// to show.
+	onCapped := func(tn repoRungTurn) bool { return tn.judged }
+	onRepos := func(tn repoRungTurn) bool {
+		if tn.judgeReposRan {
+			return tn.judgedRepos
+		}
+		return tn.judged
+	}
+
+	report := func(label string, spans func(repoRungTurn) bool, judgedBy func(repoRungTurn) bool) {
 		var correct, ambigOK int
 		byRung := map[string]int{}
 		for _, tn := range turns {
@@ -134,7 +166,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 			if live {
 				related = tn.relatedSpanning
 			}
-			got, rung := ask.DecideWhySpans(tn.all, margin, related, tn.judged, tn.named, false, true, live)
+			got, rung := ask.DecideWhySpans(tn.all, margin, related, judgedBy(tn), tn.named, false, true, live)
 			if got == tn.want {
 				correct++
 				if tn.want {
@@ -155,12 +187,13 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	t.Logf("never ask = %s", fraction(len(turns)-wantAsk, len(turns)))
 	t.Logf("")
 	t.Logf("%-16s %-14s %-14s %s", "setting", "overall", "ambiguous", "wrong by rung")
-	report("baseline", func(tn repoRungTurn) bool { return tn.spansNow })
+	report("baseline", func(tn repoRungTurn) bool { return tn.spansNow }, onCapped)
 	for _, bar := range []float64{0.50, 0.60, 0.70, 0.80, 0.85} {
 		b := bar
-		report(fmt.Sprintf("bar >= %.2f", b), func(tn repoRungTurn) bool { return tn.spansNow && tn.ratio >= b })
+		report(fmt.Sprintf("bar >= %.2f", b), func(tn repoRungTurn) bool { return tn.spansNow && tn.ratio >= b }, onCapped)
 	}
-	report("defer to judge", func(repoRungTurn) bool { return false })
+	report("defer, modules", func(repoRungTurn) bool { return false }, onCapped)
+	report("defer, repos", func(repoRungTurn) bool { return false }, onRepos)
 }
 
 // secondRepoShare is the best candidate from the SECOND repository as a share
