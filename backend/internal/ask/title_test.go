@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -17,6 +18,9 @@ type titleUpstream struct {
 	mu      sync.Mutex
 	calls   int
 	replies []titleReply
+	// prompts is every attempt's messages joined, so a test can see what the
+	// retry actually asked for.
+	prompts []string
 }
 
 type titleReply struct {
@@ -26,9 +30,10 @@ type titleReply struct {
 
 // next hands out the reply scripted for this attempt. A script that runs out
 // keeps failing: the cap, not the fake, is what must end the loop.
-func (u *titleUpstream) next() titleReply {
+func (u *titleUpstream) next(prompt string) titleReply {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.prompts = append(u.prompts, prompt)
 	r := titleReply{status: http.StatusInternalServerError}
 	if u.calls < len(u.replies) {
 		r = u.replies[u.calls]
@@ -43,11 +48,28 @@ func (u *titleUpstream) count() int {
 	return u.calls
 }
 
+func (u *titleUpstream) prompt(attempt int) string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if attempt >= len(u.prompts) {
+		return ""
+	}
+	return u.prompts[attempt]
+}
+
 func titleLLM(t *testing.T, replies ...titleReply) (*llm.Client, *titleUpstream) {
 	t.Helper()
 	up := &titleUpstream{replies: replies}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reply := up.next()
+		var req struct {
+			Messages []llm.Message `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		var prompt strings.Builder
+		for _, m := range req.Messages {
+			prompt.WriteString(m.Content + "\n")
+		}
+		reply := up.next(prompt.String())
 		if reply.status != http.StatusOK {
 			w.WriteHeader(reply.status)
 			return
@@ -72,6 +94,10 @@ func TestTitle_aFailedCallIsRetried(t *testing.T) {
 	if up.count() != 2 {
 		t.Fatalf("calls = %d, want 2", up.count())
 	}
+	// Nothing came back to correct, so the retry asks the same thing again.
+	if strings.Contains(up.prompt(1), "That was not a title") {
+		t.Errorf("a call that failed on the wire was retried with the nudge:\n%s", up.prompt(1))
+	}
 }
 
 func TestTitle_aReplyThatIsNotATitleIsRetried(t *testing.T) {
@@ -84,6 +110,15 @@ func TestTitle_aReplyThatIsNotATitleIsRetried(t *testing.T) {
 	}
 	if up.count() != 2 {
 		t.Fatalf("calls = %d, want 2", up.count())
+	}
+	// The call is pinned to temperature 0 and to one upstream node, so a retry
+	// that repeats itself word for word gets the same paragraph back. The
+	// second attempt has to say what was wrong with the first.
+	if strings.Contains(up.prompt(0), "That was not a title") {
+		t.Errorf("the first attempt already carries the nudge:\n%s", up.prompt(0))
+	}
+	if !strings.Contains(up.prompt(1), "That was not a title") {
+		t.Errorf("the retry repeats the first attempt instead of correcting it:\n%s", up.prompt(1))
 	}
 }
 

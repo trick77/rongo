@@ -630,11 +630,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	// titleCallTimeout bounds the title call itself. The answer's own budget
-	// is fifteen minutes, which is the right order for an answer and absurd
-	// for a six-word label: a stalled title would hold a goroutine, a meter
-	// and a row's pending flag for a quarter of an hour.
-	titleCallTimeout = 30 * time.Second
+	// titleCallTimeout bounds the whole naming attempt, retries included. The
+	// answer's own budget is fifteen minutes, which is the right order for an
+	// answer and absurd for a six-word label: a stalled title would hold a
+	// goroutine, a meter and a row's pending flag for a quarter of an hour.
+	// It is the ceiling over ask.Title's own per-attempt bound, so it has to
+	// leave room for every attempt — cut below that and the last one is killed
+	// mid-call for no reason. Nothing waits on it: the reader has their answer
+	// and the stream closed after titleStreamGrace long before this is
+	// reached; a title landing late arrives on the next list fetch.
+	titleCallTimeout = 90 * time.Second
 	// titleStreamGrace is how long the finished turn holds its stream open
 	// for a title still in flight. A title is started with the turn and takes
 	// a second or two, so on a real answer it has landed long before this is
