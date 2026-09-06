@@ -234,11 +234,14 @@ const DefaultTestDecay = 0.35
 // DefaultDocDecay is how far a documentation hit's fused score is cut.
 //
 // 0.7 is what the sweep named: the harshest decay that leaves doc-led recall
-// whole. It is the value the harness measured, not one argued for here — see
+// whole, and the mildest one that buys the whole of what the demotion has to
+// give. It is the value the harness measured, not one argued for here — see
 // internal/retrieve/eval, TestEvalMeasureDocSweep, and the table in
-// docs/measurements/2026-09-05-doc-demotion.md. At 0.5 two of the three
-// doc-led questions leave the cut, which is a filter by another name; below
-// that the mean rank of the expected code gets worse, not better.
+// docs/measurements/2026-09-05-doc-demotion.md. Over the questions every arm
+// ranks, the expected code moves from 2.56 to 2.40 at 0.7 and no further at
+// 0.5, 0.35 or 0.2 — while at 0.5 two of the three doc-led questions leave
+// the cut, which is a filter by another name. Everything below 0.7 is cost
+// without gain.
 //
 // What it is for: README.md and AGENTS.md are dense
 // domain vocabulary, which is exactly what a natural-language question matches

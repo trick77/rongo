@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"os"
+	"sort"
 	"testing"
 
 	"github.com/trick77/rongo/internal/embed"
@@ -79,21 +80,28 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 
 	t.Logf("code-led=%d doc-led=%d k=%d decays=%v", len(codeLed), len(docLed), docK, docDecays)
 	t.Logf("")
-	t.Logf("%-7s %-20s %-20s %-12s %s",
-		"decay", "code-led r@20", "code-led r@5", "code rank", "doc-led r@20")
+	t.Logf("%-7s %-20s %-20s %s",
+		"decay", "code-led r@20", "code-led r@5", "doc-led r@20")
 
-	for _, decay := range docDecays {
+	// Ranks are kept per arm and the mean is taken afterwards, over the
+	// questions EVERY arm ranks. Averaging each arm's own found set compares
+	// two different question sets: an arm that admits one more question at
+	// rank 19 reports a worse mean while every hit it shares with the
+	// previous arm sits exactly where it did, which reads as a degradation
+	// that did not happen.
+	ranks := make([]map[string]int, len(docDecays))
+
+	for i, decay := range docDecays {
 		r := retrieve.New(db, embedder)
 		r.DocDecay = decay
+		ranks[i] = map[string]int{}
 
 		var codeHit, codeTop5, docHit int
-		var codeRankSum, codeRanked int
 		for _, q := range codeLed {
 			rank := rankOfExpected(docHits(t, ctx, r, expansions, expansionRepos, q), q)
 			if rank > 0 {
 				codeHit++
-				codeRankSum += rank
-				codeRanked++
+				ranks[i][q.Text] = rank
 			}
 			if rank > 0 && rank <= 5 {
 				codeTop5++
@@ -105,12 +113,39 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 			}
 		}
 
-		mean := 0.0
-		if codeRanked > 0 {
-			mean = float64(codeRankSum) / float64(codeRanked)
+		t.Logf("%-7.2f %-20s %-20s %s",
+			decay, frac(codeHit, len(codeLed)), frac(codeTop5, len(codeLed)), frac(docHit, len(docLed)))
+	}
+
+	// The common set: the questions every arm ranks, so the means below are
+	// the same questions moving, not different ones being counted.
+	var common []string
+	for text := range ranks[0] {
+		in := true
+		for _, m := range ranks[1:] {
+			if _, ok := m[text]; !ok {
+				in = false
+				break
+			}
 		}
-		t.Logf("%-7.2f %-20s %-20s %-12.2f %s",
-			decay, frac(codeHit, len(codeLed)), frac(codeTop5, len(codeLed)), mean, frac(docHit, len(docLed)))
+		if in {
+			common = append(common, text)
+		}
+	}
+	sort.Strings(common)
+
+	t.Logf("")
+	t.Logf("mean rank of the expected code over the %d questions every arm ranks", len(common))
+	for i, decay := range docDecays {
+		sum := 0
+		for _, text := range common {
+			sum += ranks[i][text]
+		}
+		mean := 0.0
+		if len(common) > 0 {
+			mean = float64(sum) / float64(len(common))
+		}
+		t.Logf("%-7.2f %.2f", decay, mean)
 	}
 }
 
