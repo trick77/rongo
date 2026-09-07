@@ -167,7 +167,7 @@ func newHarnessFiles(t *testing.T, files map[string]string, symbolExtractor func
 	}
 	spec := repos.Spec{Name: "shop", CloneURL: src, Branch: "main", Enabled: true}
 	state := NewStateStore(db)
-	if err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
+	if _, err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 	gitc := gitrepo.New(gitBin, t.TempDir())

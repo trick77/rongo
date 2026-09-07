@@ -54,6 +54,18 @@ func Load(path string) ([]Spec, error) {
 	if err := yaml.Unmarshal(body, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+	// A list that names nothing is refused rather than returned empty, and this
+	// is the floor under the purge: a repository absent from the list loses its
+	// index and its checkout, so "the file parsed and mentions no repository"
+	// would wipe the whole corpus. The ways to reach that state are not exotic —
+	// a truncated file after a botched deploy, or `repos:` typed for
+	// `repositories:`, which yaml.v3 accepts and silently reads as no entries.
+	// Refusing here puts the caller on its "list unavailable" path, which leaves
+	// everything exactly as it was and says so.
+	if len(f.Repositories) == 0 {
+		return nil, fmt.Errorf(
+			"%s names no repository: expected a `repositories:` list with at least one entry", path)
+	}
 
 	seen := make(map[string]bool, len(f.Repositories))
 	specs := make([]Spec, 0, len(f.Repositories))

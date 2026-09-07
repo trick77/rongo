@@ -69,7 +69,8 @@ Rules, not description. The code is truth — how a rule is implemented is disco
 - **Never default a branch to `master`** — an omitted branch resolves the remote's default. The corpus is mixed: peeq/loom/rongo are `master`, `ncruces/go-sqlite3` and `asg017/sqlite-vec` are `main`.
 - **One branch per entry**, named (`shop-backend@release-2024.3`), so no two cards can differ only by branch.
 - **A configured branch vanishing upstream is a loud error on the Repos page**, never a silent stop — otherwise the index freezes while looking healthy.
-- **A repo dropping out of `repos.yaml` is deactivated, not deleted.** Its index survives until an explicit purge; a typo must not destroy hours of indexing.
+- **A repo dropping out of `repos.yaml` is purged** — row, files, chunks, both mirrors, checkout. `enabled: false` parks one instead. Purging by hand needs `purgeContent`'s per-file order: the FK cascade misses `chunks_vec`/`chunks_fts`. Floor under it: `repos.Load` REFUSES a list naming no repository, so a truncated file or `repos:` typed for `repositories:` cannot wipe the corpus.
+- **The checkout's `origin` is the identity, the directory name is only a label.** A `clone_url` that no longer matches the checkout resets the repo and re-clones, or one repo's code answers under another's name.
 
 ### Sharing and routes
 - **A share link exposes ONE thread, frozen where it was shared.** Turns asked afterwards stay invisible until the owner raises the ceiling, so a link never grows behind their back. The ceiling is the newest FINISHED turn, never the newest row — otherwise a turn still streaming, or a row orphaned by a crash, could lock a thread out of sharing.

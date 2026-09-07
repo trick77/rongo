@@ -30,7 +30,7 @@ func TestSyncSpecs_insertsAndUpdates(t *testing.T) {
 	ctx := context.Background()
 
 	// When
-	err := s.SyncSpecs(ctx, []repos.Spec{
+	_, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true},
 	})
 
@@ -58,7 +58,7 @@ func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
 	ctx := context.Background()
 	s := NewStateStore(newDB(t))
 	spec := repos.Spec{Name: "peeq", CloneURL: "file:///x", Enabled: true}
-	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 	if err := s.SetBranch(ctx, "peeq", "master"); err != nil {
@@ -66,7 +66,7 @@ func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
 	}
 
 	// When: the same list is read again, unchanged.
-	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 
@@ -80,19 +80,81 @@ func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_dropsAResolvedBranchWhenTheCloneURLChanges(t *testing.T) {
+	// A branch resolved from one remote means nothing on another. Keeping it
+	// across a corrected clone_url is not a stale label: the poller skips
+	// DefaultBranch whenever the column is non-empty, so an entry switched to a
+	// repository whose default is `main` would ask for `master` on every cycle,
+	// report "configured branch not found" forever, and never re-resolve.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///old", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+	if err := s.SetBranch(ctx, "peeq", "master"); err != nil {
+		t.Fatalf("SetBranch: %v", err)
+	}
+
+	// When: the entry now points somewhere else, still naming no branch.
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///new", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// Then
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 || all[0].Branch != "" {
+		t.Fatalf("branch = %q, want it cleared so the new remote's default is resolved", all[0].Branch)
+	}
+}
+
+func TestSyncSpecs_aNamedBranchSurvivesACloneURLChange(t *testing.T) {
+	// The clause above must not reach a branch the YAML actually names: that one
+	// is the operator's instruction, not a value resolved from the old remote.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///old", Branch: "release-2024.3", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// When
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///new", Branch: "release-2024.3", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// Then
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 1 || all[0].Branch != "release-2024.3" {
+		t.Fatalf("branch = %q, want the branch the YAML names", all[0].Branch)
+	}
+}
+
 func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
 	// The other half: naming a branch in the YAML overrides whatever was
 	// resolved earlier, or a corrected entry would never take effect.
 	ctx := context.Background()
 	s := NewStateStore(newDB(t))
-	if err := s.SyncSpecs(ctx, []repos.Spec{{Name: "shop", CloneURL: "file:///x", Enabled: true}}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{{Name: "shop", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 	if err := s.SetBranch(ctx, "shop", "master"); err != nil {
 		t.Fatalf("SetBranch: %v", err)
 	}
 
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "shop", CloneURL: "file:///x", Branch: "release-2024.3", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
@@ -104,80 +166,124 @@ func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
 	}
 }
 
-func TestSyncSpecs_deactivatesRatherThanDeletes(t *testing.T) {
-	// Given: peeq was indexed, then dropped out of repos.yaml. Its index must
-	// survive — a typo in the YAML must not destroy hours of indexing.
-	db := newDB(t)
+// purgeDB is newDB at the write tests' embedding dimension, so a purge test can
+// put real chunks — and therefore real vec0 and fts5 rows — into the tables it
+// then expects to be empty.
+func purgeDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "purge.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.Migrate(db, writeDim); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
+	// Given: two indexed repositories, one of which is about to be dropped from
+	// repos.yaml.
+	db := purgeDB(t)
 	s := NewStateStore(db)
+	w := NewWriter(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true},
+		{Name: "shop", CloneURL: "/tmp/shop", Branch: "master", Enabled: true},
 	}); err != nil {
 		t.Fatalf("first SyncSpecs() err = %v", err)
 	}
-	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 10, Chunks: 100}); err != nil {
+	for _, repo := range []string{"peeq", "shop"} {
+		if err := w.ReplaceFile(ctx, repo, "src/A.java", "sha", "java", 10,
+			sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+			t.Fatalf("ReplaceFile(%s) err = %v", repo, err)
+		}
+	}
+	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {
 		t.Fatalf("MarkIndexed() err = %v", err)
 	}
 
 	// When: the list no longer mentions peeq.
-	if err := s.SyncSpecs(ctx, nil); err != nil {
+	purged, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop", CloneURL: "/tmp/shop", Branch: "master", Enabled: true},
+	})
+	if err != nil {
 		t.Fatalf("second SyncSpecs() err = %v", err)
 	}
 
-	// Then: it leaves the active set ...
+	// Then: it is reported as purged, so the caller can remove its checkout ...
+	if len(purged) != 1 || purged[0] != "peeq" {
+		t.Errorf("purged = %v, want [peeq]", purged)
+	}
+	// ... its row is gone, not merely deactivated ...
+	if n := countOf(t, db, `SELECT COUNT(*) FROM repo_state WHERE name = 'peeq'`); n != 0 {
+		t.Errorf("repo_state rows for peeq = %d, want 0", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM files WHERE repo = 'peeq'`); n != 0 {
+		t.Errorf("files for peeq = %d, want 0", n)
+	}
+	// ... and BOTH mirrors went with it. Counting chunks alone would pass on the
+	// bug this ordering exists to prevent: the FK cascade reaches chunks and
+	// nothing else, and an orphaned vector goes on being returned by the
+	// semantic lane for code that is no longer indexed.
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks`); n != 2 {
+		t.Errorf("chunks = %d, want the 2 belonging to shop", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_vec`); n != 2 {
+		t.Errorf("chunks_vec = %d, want 2 — the purge left orphaned vectors behind", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_fts`); n != 2 {
+		t.Errorf("chunks_fts = %d, want 2 — the purge left orphaned fts rows behind", n)
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM symbols`); n != 0 {
+		t.Errorf("symbols = %d, want 0", n)
+	}
+
+	// And: the repository that stayed in the list is untouched.
 	active, err := s.Active(ctx)
 	if err != nil {
 		t.Fatalf("Active() err = %v", err)
 	}
-	if len(active) != 0 {
-		t.Errorf("Active() = %+v, want empty after the repo left repos.yaml", active)
-	}
-	// ... but its row and its recorded work are still there.
-	var enabled, chunkCount int
-	if err := db.QueryRow(
-		`SELECT enabled, chunk_count FROM repo_state WHERE name = ?`, "peeq",
-	).Scan(&enabled, &chunkCount); err != nil {
-		t.Fatalf("row missing entirely, want it deactivated not deleted: %v", err)
-	}
-	if enabled != 0 {
-		t.Errorf("enabled = %d, want 0", enabled)
-	}
-	if chunkCount != 100 {
-		t.Errorf("chunk_count = %d, want the recorded 100 to survive", chunkCount)
+	if len(active) != 1 || active[0].Name != "shop" {
+		t.Errorf("Active() = %+v, want shop alone", active)
 	}
 }
 
-func TestSyncSpecs_reenablesAReturningRepoWithoutLosingItsIndex(t *testing.T) {
-	// Given: a repo removed from the list, then put back — the ordinary shape of
-	// fixing a typo.
+func TestSyncSpecs_aReAddedRepoIndexesFromScratch(t *testing.T) {
+	// Given: a repo removed from the list, then put back — which is now a purge
+	// followed by a fresh entry, not a reactivation.
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true}
-	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 10, Chunks: 100}); err != nil {
 		t.Fatalf("MarkIndexed() err = %v", err)
 	}
-	if err := s.SyncSpecs(ctx, nil); err != nil {
+	if _, err := s.SyncSpecs(ctx, nil); err != nil {
 		t.Fatalf("SyncSpecs(nil) err = %v", err)
 	}
 
 	// When
-	if err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("re-adding SyncSpecs() err = %v", err)
 	}
 
-	// Then: it is active again AND still knows the commit it had indexed, so
-	// the next poll is an incremental diff rather than a full re-index.
+	// Then: it is active again and knows no commit, so the next poll indexes it
+	// in full. Resuming from the old last_sha would diff against a commit whose
+	// chunks are no longer in the database, and every file that did not change
+	// since would stay missing.
 	active, _ := s.Active(ctx)
 	if len(active) != 1 {
 		t.Fatalf("Active() = %+v, want the repo back", active)
 	}
-	if active[0].LastSHA != "abc123" {
-		t.Errorf("LastSHA = %q, want %q — a re-added repo must not re-index from scratch",
-			active[0].LastSHA, "abc123")
+	if active[0].LastSHA != "" {
+		t.Errorf("LastSHA = %q, want empty — a purged repo has nothing to resume from",
+			active[0].LastSHA)
 	}
 }
 
@@ -188,7 +294,7 @@ func TestSyncSpecs_respectsAnExplicitlyDisabledEntry(t *testing.T) {
 	ctx := context.Background()
 
 	// When
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "legacy", CloneURL: "/tmp/legacy", Enabled: false},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -207,7 +313,7 @@ func TestSetCounts_touchesOnlyTheTotals(t *testing.T) {
 	// not pose as a poll: the SHA and the error both stay.
 	ctx := context.Background()
 	s := NewStateStore(newDB(t))
-	if err := s.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true}}); err != nil {
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true}}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 10, Chunks: 100}); err != nil {
@@ -247,7 +353,7 @@ func TestMarkError_isVisibleAndClearedByASuccess(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "release-2024.3", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -280,7 +386,7 @@ func TestSetBranch_recordsTheResolvedBranch(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "go-sqlite3", CloneURL: "/tmp/x", Branch: "", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -308,7 +414,7 @@ func TestPollRepo_readsTheTokenByItsEnvironmentVariableName(t *testing.T) {
 		Name: "private", CloneURL: "https://forge.invalid/a.git",
 		Branch: "main", TokenEnv: "BACKEND_FORGE_TOKEN", Enabled: true,
 	}
-	if err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
+	if _, err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 
@@ -348,7 +454,7 @@ func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 	state := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "shop", CloneURL: "https://forge.invalid/a.git", Branch: "main", Enabled: true}
-	if err := state.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
 	if err := state.MarkError(ctx, "shop", "dial tcp: i/o timeout"); err != nil {
@@ -370,5 +476,151 @@ func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 	}
 	if all[0].LastRunAt.IsZero() {
 		t.Error("LastRunAt was not refreshed")
+	}
+}
+
+// seedPurgeable builds a database holding one repository with real chunks in
+// both mirrors, ready to be purged.
+func seedPurgeable(t *testing.T, name string) (*sql.DB, *StateStore) {
+	t.Helper()
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: name, CloneURL: "/tmp/" + name, Branch: "master", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, name, "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	return db, s
+}
+
+// TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway covers the error
+// paths of the purge, one sabotaged table at a time.
+//
+// They are worth pinning rather than trusting: a purge that gives up silently
+// midway is the one outcome worse than not purging at all. It leaves rows in one
+// mirror and not the other, and rowid == chunks.id then resolves a surviving
+// vector against whatever chunk is written next. Every case below must come back
+// as an error, so the caller records it and the next boot tries again.
+func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a closed database", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		db.Close()
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the transaction failure")
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the transaction failure")
+		}
+	})
+
+	t.Run("the repository table is unreadable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the failure to list repositories")
+		}
+	})
+
+	t.Run("the vector mirror is unreachable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE chunks_vec`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the mirror failure surfaced")
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the mirror failure surfaced")
+		}
+	})
+
+	t.Run("the keyword mirror is unreachable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE chunks_fts`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the mirror failure surfaced")
+		}
+	})
+
+	t.Run("the row a reset has to keep is gone", func(t *testing.T) {
+		// The content clears, and only the UPDATE that puts the repository back
+		// at "nothing indexed yet" fails. A reset reporting success here would
+		// leave last_sha pointing at a commit whose chunks no longer exist.
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the failure to record the reset")
+		}
+	})
+}
+
+func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
+	// Given: a repository whose checkout turned out to point at a different
+	// remote. The entry is still in repos.yaml and has to survive; everything
+	// built out of the wrong code has to go.
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true}
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, "peeq", "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {
+		t.Fatalf("MarkIndexed() err = %v", err)
+	}
+	if err := s.MarkError(ctx, "peeq", "an older failure"); err != nil {
+		t.Fatalf("MarkError() err = %v", err)
+	}
+
+	// When
+	if err := s.ResetRepo(ctx, "peeq"); err != nil {
+		t.Fatalf("ResetRepo() err = %v", err)
+	}
+
+	// Then: the row is still there and still active ...
+	active, err := s.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active() err = %v", err)
+	}
+	if len(active) != 1 || active[0].Name != "peeq" {
+		t.Fatalf("Active() = %+v, want peeq kept", active)
+	}
+	// ... with nothing left to resume from, so the next poll indexes in full.
+	if active[0].LastSHA != "" {
+		t.Errorf("LastSHA = %q, want empty", active[0].LastSHA)
+	}
+	if active[0].LastError != "" {
+		t.Errorf("LastError = %q, want cleared — it describes code that is gone", active[0].LastError)
+	}
+	if active[0].Files != 0 || active[0].Chunks != 0 {
+		t.Errorf("counts = %d files / %d chunks, want 0/0", active[0].Files, active[0].Chunks)
+	}
+	// ... and the content is gone from all four tables, mirrors included.
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM files`,
+		`SELECT COUNT(*) FROM chunks`,
+		`SELECT COUNT(*) FROM chunks_vec`,
+		`SELECT COUNT(*) FROM chunks_fts`,
+	} {
+		if n := countOf(t, db, q); n != 0 {
+			t.Errorf("%s = %d, want 0", q, n)
+		}
 	}
 }

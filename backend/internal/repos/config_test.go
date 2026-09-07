@@ -175,3 +175,23 @@ func TestLoad_missingFileIsAnError(t *testing.T) {
 		t.Fatal("Load() err = nil, want an error naming the missing file")
 	}
 }
+
+func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
+	// This is the floor under the purge: a repository absent from the list loses
+	// its index and its checkout, so a file that parses to no entries would wipe
+	// the corpus on the next boot. An error puts the caller on its "list
+	// unavailable" path instead, which changes nothing.
+	//
+	// Both shapes reach it without anything looking wrong: a truncated file, and
+	// `repos:` typed for `repositories:` — yaml.v3 ignores the unknown key and
+	// reports no error at all.
+	for _, body := range []string{
+		"",
+		"repositories:\n",
+		"repos:\n  - name: shop\n    clone_url: https://forge.example.invalid/acme/shop.git\n",
+	} {
+		if _, err := Load(writeYAML(t, body)); err == nil {
+			t.Errorf("Load(%q) err = nil, want a refusal of a list naming no repository", body)
+		}
+	}
+}

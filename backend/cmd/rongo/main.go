@@ -150,22 +150,38 @@ func main() {
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
 
+	// Built before the list is synced: a repository that left the list is purged
+	// from the database, and its checkout has to go with it.
+	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
+
 	// The repository list is loaded on a best-effort basis. A missing or broken
 	// repos.yaml must NOT stop the server: the operator needs the Repos page to
 	// come up and tell them what is wrong with the file. Refusing to boot would
 	// hide the diagnosis behind the very thing that failed.
+	//
+	// A file that cannot be READ is therefore not the same as an empty one: the
+	// sync below never runs, so nothing is purged. Only a list that parses and
+	// no longer names a repository removes it.
 	state := indexer.NewStateStore(db)
 	if specs, err := repos.Load(cfg.ReposFile); err != nil {
 		slog.Warn("repository list unavailable; indexing is idle until it is fixed",
 			"path", cfg.ReposFile, "err", err)
-	} else if err := state.SyncSpecs(ctx, specs); err != nil {
+	} else if purged, err := state.SyncSpecs(ctx, specs); err != nil {
 		slog.Error("recording the repository list failed", "err", err)
 		os.Exit(1)
 	} else {
+		for _, name := range purged {
+			slog.Info("repository left the list; index purged", "repo", name)
+			// Not fatal. The index is already gone, which is what governs the
+			// answers; a checkout left behind is disk, and exiting here would
+			// turn a stale directory into a server that will not boot.
+			if err := gitClient.RemoveCheckout(name); err != nil {
+				slog.Error("removing the purged checkout failed", "repo", name, "err", err)
+			}
+		}
 		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
 	}
 
-	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
 	pipeline := indexer.New(indexer.Deps{
 		DB:      db,
 		Git:     gitClient,

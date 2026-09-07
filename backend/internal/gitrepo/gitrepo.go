@@ -69,6 +69,50 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	return nil
 }
 
+// OriginURL reports which remote a checkout was actually made from.
+//
+// It exists because EnsureCloned answers "is there a directory here", not "is
+// it the right repository". A checkout is named after the YAML entry, so an
+// entry whose clone_url is corrected — or whose name is reused for a different
+// repository — kept serving the old code under the new name, with every
+// citation labelled with a repository the lines never came from.
+//
+// A missing checkout is not an error and not a mismatch: it returns "" so the
+// caller reads it as "nothing to compare, clone it".
+//
+// The comparison this feeds is an exact string match against clone_url, which
+// EnsureCloned guarantees is what origin holds — it overwrites the tokened URL
+// git persists. A cosmetic edit (a trailing .git, http to https) therefore reads
+// as a mismatch and costs a re-index. That is the safe direction to be wrong in.
+func (c *Client) OriginURL(ctx context.Context, spec repos.Spec) (string, error) {
+	dir := c.Dir(spec)
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return "", nil
+	}
+	out, err := c.run(ctx, dir, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RemoveCheckout deletes a repository's checkout.
+//
+// name is re-validated even though repos.Load already did: that call validates
+// what came out of the YAML, and this one is reached with a name read back out
+// of the database. The operation is an os.RemoveAll, so it checks rather than
+// trusts — the cost of being wrong here is deleting outside the repository root.
+func (c *Client) RemoveCheckout(name string) error {
+	if name == "" || name == "." || name == ".." ||
+		strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return fmt.Errorf("refusing to remove checkout %q: not a single path segment", name)
+	}
+	if err := os.RemoveAll(filepath.Join(c.root, name)); err != nil {
+		return fmt.Errorf("remove checkout %s: %w", name, err)
+	}
+	return nil
+}
+
 // DefaultBranch asks the remote which branch it considers default. Never assume
 // master: this corpus mixes master and main, and the repositories on main are
 // exactly the third-party ones the cross-repo logic needs.

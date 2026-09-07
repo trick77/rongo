@@ -20,10 +20,17 @@ CREATE TABLE sessions (
 CREATE INDEX idx_sessions_user ON sessions(user_id);
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 
--- repo_state: one row per repository rongo knows about. Rows survive a repo
--- leaving repos.yaml (enabled = 0) rather than being deleted: a typo in the
--- YAML must not destroy hours of indexing. Only an explicit admin purge removes
--- the index.
+-- repo_state: one row per repository rongo knows about. A repository that
+-- leaves repos.yaml has its row deleted, taking files and repo_deps with it
+-- through the cascade — the YAML is the list of what rongo holds, not merely of
+-- what it refreshes.
+--
+-- The cascade is NOT the whole deletion. chunks_vec (vec0) and chunks_fts (fts5)
+-- can take part in neither a cascade nor a trigger, so the purge in
+-- indexer.purgeContent has to clear them per file BEFORE the rows above go.
+--
+-- enabled is what a repository set `enabled: false` in the YAML gets: still
+-- listed, still indexed on disk, not polled.
 CREATE TABLE repo_state (
     name        TEXT PRIMARY KEY,
     clone_url   TEXT NOT NULL,

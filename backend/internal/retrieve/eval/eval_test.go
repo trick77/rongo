@@ -175,7 +175,7 @@ func TestEvalIndex(t *testing.T) {
 		t.Fatalf("load the repository list: %v", err)
 	}
 	state := indexer.NewStateStore(db)
-	if err := state.SyncSpecs(ctx, specs); err != nil {
+	if _, err := state.SyncSpecs(ctx, specs); err != nil {
 		t.Fatalf("record the repository list: %v", err)
 	}
 

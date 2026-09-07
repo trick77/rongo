@@ -403,3 +403,95 @@ func TestHeadSHA_aBrokenCheckoutIsNotReportedAsAMissingBranch(t *testing.T) {
 		t.Errorf("HeadSHA() err = %v, want the real error rather than ErrBranchGone", err)
 	}
 }
+
+func TestOriginURL_reportsTheRemoteTheCheckoutCameFrom(t *testing.T) {
+	// Given: a checkout cloned from one remote, and an entry of the same name
+	// now naming a different one — the shape of a corrected clone_url, and the
+	// shape of a checkout serving one repository under another's name.
+	src := fixtureRepo(t)
+	other := fixtureRepo(t)
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+
+	// When
+	got, err := c.OriginURL(context.Background(), repos.Spec{Name: "fixture", CloneURL: other, Enabled: true})
+
+	// Then: it answers with what is on disk, not with what was asked for.
+	if err != nil {
+		t.Fatalf("OriginURL() err = %v", err)
+	}
+	if got != src {
+		t.Errorf("OriginURL() = %q, want %q", got, src)
+	}
+}
+
+func TestOriginURL_isEmptyWhenThereIsNoCheckout(t *testing.T) {
+	// A repository that has never been cloned is not a mismatch, and reporting
+	// an error here would turn every first poll into a recorded failure.
+	c := newClient(t)
+
+	// When
+	got, err := c.OriginURL(context.Background(), repos.Spec{Name: "absent", CloneURL: "/tmp/x", Enabled: true})
+
+	// Then
+	if err != nil {
+		t.Fatalf("OriginURL() err = %v", err)
+	}
+	if got != "" {
+		t.Errorf("OriginURL() = %q, want empty", got)
+	}
+}
+
+func TestOriginURL_reportsAnUnreadableCheckoutRatherThanNoRemote(t *testing.T) {
+	// A directory with a .git in it that git cannot read is NOT the same as an
+	// absent checkout. Returning "" here would read as "nothing to compare",
+	// the caller would leave the directory in place, and whatever is indexed
+	// under that name would go on being served.
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: "/tmp/x", Enabled: true}
+	if err := os.MkdirAll(filepath.Join(c.Dir(spec), ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	got, err := c.OriginURL(context.Background(), spec)
+
+	// Then
+	if err == nil {
+		t.Fatalf("OriginURL() = %q, err = nil; want the git failure", got)
+	}
+}
+
+func TestRemoveCheckout_deletesTheDirectory(t *testing.T) {
+	// Given
+	src := fixtureRepo(t)
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+
+	// When
+	if err := c.RemoveCheckout("fixture"); err != nil {
+		t.Fatalf("RemoveCheckout() err = %v", err)
+	}
+
+	// Then
+	if _, err := os.Stat(c.Dir(spec)); !os.IsNotExist(err) {
+		t.Errorf("checkout still present, stat err = %v", err)
+	}
+}
+
+func TestRemoveCheckout_refusesANameThatWouldLeaveTheRoot(t *testing.T) {
+	// The name comes back out of the database rather than from repos.Load, and
+	// the operation is an os.RemoveAll: it re-validates rather than trusts.
+	c := newClient(t)
+	for _, name := range []string{"", ".", "..", "../escape", "a/b"} {
+		if err := c.RemoveCheckout(name); err == nil {
+			t.Errorf("RemoveCheckout(%q) err = nil, want a refusal", name)
+		}
+	}
+}
