@@ -190,8 +190,8 @@ export default function RepoList() {
                 </td>
                 <td className="whitespace-nowrap px-3.5 py-3 font-mono">{r.branch}</td>
                 <td className="px-3.5 py-3">
-                  {/* Disabled and error are independent facts: a deactivated
-                      repo keeps its last error, and both are said. */}
+                  {/* Disabled and error are independent facts: a repo the YAML
+                      disabled keeps its last error, and both are said. */}
                   <span className="flex flex-wrap gap-1">
                     {st === "ok" && (
                       <span className="rounded-full bg-accent-dim px-2.5 py-0.5 text-xs font-medium text-accent-strong">Indexed</span>

@@ -46,7 +46,7 @@ func TestRepoStatus_countsModulesFromTheIndex(t *testing.T) {
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
-	if err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
@@ -77,7 +77,7 @@ func TestRepoStatus_theClusteringConstantsActuallyReachTheCount(t *testing.T) {
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
-	if err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
@@ -98,17 +98,44 @@ func TestRepoStatus_theClusteringConstantsActuallyReachTheCount(t *testing.T) {
 	}
 }
 
-func TestRepoStatus_deactivatedRepositoriesKeepTheirIndexAndTheirRow(t *testing.T) {
-	// Given: peeq indexed, then dropped from repos.yaml.
+func TestRepoStatus_aRepositoryThatLeftTheListIsGoneFromThePage(t *testing.T) {
+	// Given: peeq indexed, then dropped from repos.yaml — which purges it.
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
-	if err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
-	if err := state.SyncSpecs(ctx, nil); err != nil {
+	if _, err := state.SyncSpecs(ctx, nil); err != nil {
 		t.Fatalf("resync without peeq: %v", err)
+	}
+
+	// When
+	got, err := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100}).RepoStatus(ctx)
+	if err != nil {
+		t.Fatalf("RepoStatus: %v", err)
+	}
+
+	// Then: the page shows what rongo holds, and it no longer holds peeq.
+	if len(got) != 0 {
+		t.Fatalf("got %+v, want nothing — the repository was purged, not deactivated", got)
+	}
+}
+
+func TestRepoStatus_anExplicitlyDisabledRepositoryKeepsItsIndexAndItsRow(t *testing.T) {
+	// Given: peeq indexed, then marked `enabled: false` in the YAML. That is a
+	// repository being left alone, not one being retired: it stays listed with
+	// everything it has.
+	db := statusDB(t)
+	state := indexer.NewStateStore(db)
+	ctx := context.Background()
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: false}}); err != nil {
+		t.Fatalf("resync with peeq disabled: %v", err)
 	}
 
 	// When
@@ -119,12 +146,12 @@ func TestRepoStatus_deactivatedRepositoriesKeepTheirIndexAndTheirRow(t *testing.
 
 	// Then
 	if len(got) != 1 {
-		t.Fatalf("got %d repositories, want the deactivated one kept", len(got))
+		t.Fatalf("got %d repositories, want the disabled one kept", len(got))
 	}
 	if got[0].Enabled {
 		t.Error("Enabled = true, want false")
 	}
 	if got[0].Modules != 1 {
-		t.Errorf("Modules = %d, want 1 — the index survives deactivation", got[0].Modules)
+		t.Errorf("Modules = %d, want 1 — the index survives being disabled", got[0].Modules)
 	}
 }

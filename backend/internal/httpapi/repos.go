@@ -21,9 +21,10 @@ type RepoStatus struct {
 	Files     int
 	Chunks    int
 	Modules   int
-	// Enabled is false for a repository that left repos.yaml. Its index
-	// survives until an explicit purge, and it stays on the page: a typo in the
-	// YAML must not make a repository look like it never existed.
+	// Enabled is false for a repository the YAML declares with `enabled: false`.
+	// It keeps its index and its row here — it is a repository being left alone,
+	// not one being retired. A repository REMOVED from repos.yaml is purged and
+	// no longer appears on this page at all.
 	Enabled bool
 	// LastError carries the failure of the last run verbatim — a branch that
 	// vanished upstream above all. A silent stop leaves the index frozen at

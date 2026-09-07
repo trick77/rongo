@@ -138,8 +138,8 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
         if (!res.ok) return;
         const repos = (await res.json()) as Repo[];
         if (cancelled || !Array.isArray(repos) || repos.length === 0) return;
-        // Only repos still being indexed count: a deactivated one keeps its
-        // last error in the record, but nobody is going to fix it here.
+        // Only repos still being indexed count: one disabled in the YAML keeps
+        // its last error in the record, but nobody is going to fix it here.
         const live = repos.filter((r) => r.enabled);
         setStatus({ ok: live.every((r) => !r.last_error), last: lastRunAt(live) });
       } catch {
@@ -546,8 +546,8 @@ export default function App() {
                 </h2>
                 <p className="mt-1 mb-6 text-[14.5px] text-muted">
                   Read-only. The repository list is maintained in <code className="font-mono">repos.yaml</code>,
-                  and credentials never live in it. A repo that drops out of the file is deactivated, never
-                  deleted.
+                  and credentials never live in it. A repo that drops out of the file is removed here too,
+                  index and checkout with it.
                 </p>
                 <RepoList />
               </div>

@@ -45,23 +45,43 @@ func NewStateStore(db *sql.DB) *StateStore {
 }
 
 // SyncSpecs reconciles the database with the repository list. An entry present
-// in the list is inserted or updated; an entry ABSENT from the list is
-// deactivated, never deleted — its index survives until an explicit purge,
-// because a typo in the YAML must not destroy hours of indexing.
+// in the list is inserted or updated; an entry ABSENT from the list is PURGED —
+// its row, its files, its symbols and its chunks in all three tables. It returns
+// the names it purged, so the caller can remove their checkouts too.
 //
-// last_sha is deliberately left untouched, so a repository removed and then
-// re-added resumes with an incremental diff instead of re-indexing from
-// scratch.
-func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) error {
+// Removing an entry from the YAML is therefore how rongo is made to forget a
+// repository. That reverses the earlier behaviour, which only set enabled = 0:
+// nothing filters retrieval on that column, so a "deactivated" repository went
+// on answering questions out of an index the Repos page said was retired, and
+// the explicit purge the comments promised was never implemented. The cost of
+// the reversal is that a mistyped name: re-indexes instead of resuming — cheap,
+// because embed_cache is keyed on content hash and not on the repository.
+func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `UPDATE repo_state SET enabled = 0`); err != nil {
-		return fmt.Errorf("deactivate all: %w", err)
+	listed := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		listed[spec.Name] = true
 	}
+	known, err := namesTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	var purged []string
+	for _, name := range known {
+		if listed[name] {
+			continue
+		}
+		if err := purgeRepoTx(ctx, tx, name); err != nil {
+			return nil, err
+		}
+		purged = append(purged, name)
+	}
+
 	for _, spec := range specs {
 		enabled := 0
 		if spec.Enabled {
@@ -79,15 +99,132 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) error {
 				-- URL without it may 404 off the default branch. A branch named
 				-- in the YAML still wins, or a corrected entry would never take
 				-- effect.
-				branch    = CASE WHEN excluded.branch <> '' THEN excluded.branch ELSE repo_state.branch END,
+				--
+				-- Unless the clone_url changed: then the recorded branch was
+				-- resolved from a DIFFERENT remote and means nothing here. It is
+				-- dropped so the next poll resolves it afresh — the corpus mixes
+				-- master and main, and keeping "master" across a switch to a
+				-- repository whose default is main leaves the entry reporting
+				-- "configured branch not found" on every cycle, forever, with
+				-- nothing that would ever re-resolve it. This is the only place
+				-- that can tell the two apart: a YAML that names a branch is
+				-- handled by the clause above, so what is being dropped here is
+				-- always a resolved value.
+				branch    = CASE
+					WHEN excluded.branch <> '' THEN excluded.branch
+					WHEN repo_state.clone_url <> excluded.clone_url THEN ''
+					ELSE repo_state.branch END,
 				enabled   = excluded.enabled,
 				token_env = excluded.token_env`,
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv,
 		); err != nil {
-			return fmt.Errorf("upsert %s: %w", spec.Name, err)
+			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return purged, nil
+}
+
+// ResetRepo drops a repository's indexed content but KEEPS its row, so the next
+// poll indexes it from scratch. It is what a checkout pointing at the wrong
+// remote needs: the entry is still in the YAML and has to survive, only what was
+// built out of the wrong code has to go.
+//
+// last_sha goes with it, and that is the point: leaving it would send the next
+// poll into an incremental diff against a commit belonging to another
+// repository. last_error goes too — a reset is a fresh start, and the previous
+// repository's failure describes code that is no longer here.
+func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := purgeContent(ctx, tx, name); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE repo_state
+		SET last_sha = '', last_error = '', file_count = 0, chunk_count = 0
+		WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("reset %s: %w", name, err)
+	}
 	return tx.Commit()
+}
+
+// namesTx lists every repository the database knows about, inside a transaction.
+func namesTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM repo_state ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+// purgeRepoTx is purgeContent plus the repo_state row itself, which takes
+// repo_deps with it through the cascade.
+func purgeRepoTx(ctx context.Context, tx *sql.Tx, name string) error {
+	if err := purgeContent(ctx, tx, name); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM repo_state WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("purge %s: %w", name, err)
+	}
+	return nil
+}
+
+// purgeContent removes every file the index holds for one repository.
+//
+// The rows go one file at a time, each preceded by clearFileContent, and NOT as
+// a single "DELETE FROM files WHERE repo = ?". The FK cascade reaches chunks,
+// but chunks_vec (vec0) and chunks_fts (fts5) can take part in neither a
+// cascade nor a trigger, so a bulk delete would leave both mirrors holding rows
+// whose chunks are gone. An orphaned vector is not inert: the semantic lane
+// keeps returning it, and rowid == chunks.id then resolves it against whatever
+// chunk is written next.
+func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM files WHERE repo = ?`, name)
+	if err != nil {
+		return fmt.Errorf("purge %s: %w", name, err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	// Closed explicitly rather than deferred: the deletes below run on the same
+	// connection as this query, and sqlite will not write while a statement on
+	// it is still open.
+	rows.Close()
+
+	for _, id := range ids {
+		if err := clearFileContent(ctx, tx, id); err != nil {
+			return fmt.Errorf("purge %s: %w", name, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("purge %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // Active lists the repositories currently in the list and enabled.

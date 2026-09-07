@@ -86,7 +86,7 @@ func TestPollOnce_fullIndexOnFirstSight(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -114,7 +114,7 @@ func TestPollOnce_skipsWhenHeadIsUnchanged(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -145,7 +145,7 @@ func TestPollOnce_incrementalIndexPassesOnlyChangedPaths(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -180,7 +180,7 @@ func TestPollOnce_resolvesAnOmittedBranchAndRecordsIt(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -211,7 +211,7 @@ func TestPollOnce_recordsAVanishedBranchAndKeepsGoing(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "aaa-broken", CloneURL: src, Branch: "release-2024.3", Enabled: true},
 		{Name: "zzz-healthy", CloneURL: other, Branch: "main", Enabled: true},
 	}); err != nil {
@@ -253,7 +253,7 @@ func TestPollOnce_doesNotAdvanceTheShaWhenIndexingFails(t *testing.T) {
 	db := newDB(t)
 	s := NewStateStore(db)
 	ctx := context.Background()
-	if err := s.SyncSpecs(ctx, []repos.Spec{
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -302,7 +302,7 @@ func TestRun_pollsOnTheFirstDelayNotTheInterval(t *testing.T) {
 	// Given an immediate first delay and an interval far longer than this test
 	src := fixtureRemote(t)
 	s := NewStateStore(newDB(t))
-	if err := s.SyncSpecs(context.Background(), []repos.Spec{
+	if _, err := s.SyncSpecs(context.Background(), []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
@@ -344,4 +344,157 @@ func TestRun_pollsOnTheFirstDelayNotTheInterval(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestPollOnce_reClonesWhenTheCheckoutPointsAtAnotherRemote(t *testing.T) {
+	// Given: a repository indexed from one remote, whose entry is then corrected
+	// to point at a different one under the SAME name. This is how a checkout
+	// came to serve one repository's code under another's name: the directory is
+	// named after the entry, and until this check nothing compared the two.
+	first := fixtureRemote(t)
+	second := fixtureRemote(t)
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: first, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+	// The recording index writes nothing, so the content of that first run is
+	// seeded here — it is what has to be gone afterwards.
+	if err := NewWriter(db).ReplaceFile(ctx, "fixture", "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+
+	// When: the entry now names the other remote.
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: second, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("second SyncSpecs() err = %v", err)
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+
+	// Then: the checkout came from the new remote ...
+	origin, err := p.git.OriginURL(ctx, repos.Spec{Name: "fixture", CloneURL: second, Enabled: true})
+	if err != nil {
+		t.Fatalf("OriginURL() err = %v", err)
+	}
+	if origin != second {
+		t.Errorf("origin = %q, want the corrected %q", origin, second)
+	}
+	// ... it was indexed in full rather than diffed against a commit belonging
+	// to the previous repository ...
+	if len(rec.calls) != 2 {
+		t.Fatalf("index called %d times, want 2", len(rec.calls))
+	}
+	if rec.calls[1].Paths != nil {
+		t.Errorf("Paths = %v, want nil — a re-clone is a full index", rec.calls[1].Paths)
+	}
+	// ... and nothing built from the old remote survived, mirrors included.
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM files`,
+		`SELECT COUNT(*) FROM chunks`,
+		`SELECT COUNT(*) FROM chunks_vec`,
+		`SELECT COUNT(*) FROM chunks_fts`,
+	} {
+		if n := countOf(t, db, q); n != 0 {
+			t.Errorf("%s = %d, want 0", q, n)
+		}
+	}
+}
+
+func TestPollOnce_reResolvesTheBranchAfterARemoteChange(t *testing.T) {
+	// Given: an entry naming no branch, indexed from a remote whose default is
+	// main, then corrected to one whose default is master. The corpus mixes the
+	// two, so this is the ordinary case rather than a contrived one — and if the
+	// resolved main were carried over, HeadSHA would report the branch gone on
+	// every cycle with nothing left to re-resolve it.
+	first := fixtureRemote(t)
+	second := t.TempDir()
+	gitRun(t, second, "init", "-q", "-b", "master")
+	writeAndCommit(t, second, "b.txt", "second\n", "second")
+
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: first, Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+
+	// When
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: second, Enabled: true},
+	}); err != nil {
+		t.Fatalf("second SyncSpecs() err = %v", err)
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+
+	// Then: the branch is the new remote's default, and the repository indexed
+	// rather than stalling on a branch that does not exist there.
+	active, err := s.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active() err = %v", err)
+	}
+	if len(active) != 1 || active[0].Branch != "master" {
+		t.Fatalf("branch = %q, want master resolved from the new remote", active[0].Branch)
+	}
+	if active[0].LastError != "" {
+		t.Errorf("LastError = %q, want none", active[0].LastError)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("index called %d times, want 2", len(rec.calls))
+	}
+}
+
+func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
+	// The check must not fire on the ordinary case: the URL is unchanged, so the
+	// second poll finds nothing new and the index is not thrown away.
+	src := fixtureRemote(t)
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, "fixture", "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+
+	// When
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+
+	// Then
+	if len(rec.calls) != 1 {
+		t.Errorf("index called %d times, want 1 — the second poll re-indexed a checkout that was correct", len(rec.calls))
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks`); n != 2 {
+		t.Errorf("chunks = %d, want the 2 that were there", n)
+	}
 }

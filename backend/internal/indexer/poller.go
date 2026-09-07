@@ -138,6 +138,36 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	// anonymously while repos.yaml looked correctly configured.
 	token := p.tokens(st.TokenEnv)
 
+	// A checkout is named after its YAML entry, and until this check nothing
+	// ever asked whether the directory of that name actually holds the
+	// repository the entry points at. It did not always: an entry whose
+	// clone_url was corrected kept its old clone, and every answer built from it
+	// cited one repository's code under the other's name. The URL is the
+	// identity; the name is only a label.
+	//
+	// The index built from the old remote goes with the checkout. Keeping it
+	// would leave the corpus holding two repositories under one name until every
+	// stale path happened to be overwritten, which for a file the new repository
+	// does not have is never.
+	origin, err := p.git.OriginURL(ctx, spec)
+	if err != nil {
+		return err
+	}
+	if origin != "" && origin != spec.CloneURL {
+		p.log.Info("checkout points at a different remote; re-cloning",
+			"repo", st.Name, "checkout_origin", origin, "configured", spec.CloneURL)
+		if err := p.state.ResetRepo(ctx, st.Name); err != nil {
+			return err
+		}
+		if err := p.git.RemoveCheckout(st.Name); err != nil {
+			return err
+		}
+		// The reset cleared last_sha in the database; this copy is what the rest
+		// of the run reads, and a stale value here would send it into an
+		// incremental diff against a commit from the previous repository.
+		st.LastSHA = ""
+	}
+
 	if err := p.git.EnsureCloned(ctx, spec, token); err != nil {
 		return err
 	}
