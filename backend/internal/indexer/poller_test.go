@@ -464,6 +464,45 @@ func TestPollOnce_reResolvesTheBranchAfterARemoteChange(t *testing.T) {
 	}
 }
 
+func TestPollOnce_recordsAnUnreadableCheckoutInsteadOfIndexingIt(t *testing.T) {
+	// A checkout git cannot read cannot be compared against the entry's URL, so
+	// the identity of what is on disk is unknown. The poll fails loudly and the
+	// Repos page says so; indexing it anyway would file whatever is there under
+	// this entry's name.
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	dir := p.git.Dir(repos.Spec{Name: "fixture"})
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("PollOnce() err = %v, want the failure recorded per repository", err)
+	}
+
+	// Then
+	if len(rec.calls) != 0 {
+		t.Errorf("index called %d times, want none", len(rec.calls))
+	}
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All() err = %v", err)
+	}
+	if len(all) != 1 || all[0].LastError == "" {
+		t.Errorf("LastError = %q, want the git failure on the Repos page", all[0].LastError)
+	}
+}
+
 func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
 	// The check must not fire on the ordinary case: the URL is unchanged, so the
 	// second poll finds nothing new and the index is not thrown away.

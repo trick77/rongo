@@ -445,6 +445,26 @@ func TestOriginURL_isEmptyWhenThereIsNoCheckout(t *testing.T) {
 	}
 }
 
+func TestOriginURL_reportsAnUnreadableCheckoutRatherThanNoRemote(t *testing.T) {
+	// A directory with a .git in it that git cannot read is NOT the same as an
+	// absent checkout. Returning "" here would read as "nothing to compare",
+	// the caller would leave the directory in place, and whatever is indexed
+	// under that name would go on being served.
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: "/tmp/x", Enabled: true}
+	if err := os.MkdirAll(filepath.Join(c.Dir(spec), ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	got, err := c.OriginURL(context.Background(), spec)
+
+	// Then
+	if err == nil {
+		t.Fatalf("OriginURL() = %q, err = nil; want the git failure", got)
+	}
+}
+
 func TestRemoveCheckout_deletesTheDirectory(t *testing.T) {
 	// Given
 	src := fixtureRepo(t)

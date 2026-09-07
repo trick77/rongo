@@ -479,6 +479,94 @@ func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 	}
 }
 
+// seedPurgeable builds a database holding one repository with real chunks in
+// both mirrors, ready to be purged.
+func seedPurgeable(t *testing.T, name string) (*sql.DB, *StateStore) {
+	t.Helper()
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: name, CloneURL: "/tmp/" + name, Branch: "master", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, name, "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	return db, s
+}
+
+// TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway covers the error
+// paths of the purge, one sabotaged table at a time.
+//
+// They are worth pinning rather than trusting: a purge that gives up silently
+// midway is the one outcome worse than not purging at all. It leaves rows in one
+// mirror and not the other, and rowid == chunks.id then resolves a surviving
+// vector against whatever chunk is written next. Every case below must come back
+// as an error, so the caller records it and the next boot tries again.
+func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a closed database", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		db.Close()
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the transaction failure")
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the transaction failure")
+		}
+	})
+
+	t.Run("the repository table is unreadable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the failure to list repositories")
+		}
+	})
+
+	t.Run("the vector mirror is unreachable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE chunks_vec`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if _, err := s.SyncSpecs(ctx, nil); err == nil {
+			t.Error("SyncSpecs() err = nil, want the mirror failure surfaced")
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the mirror failure surfaced")
+		}
+	})
+
+	t.Run("the keyword mirror is unreachable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE chunks_fts`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the mirror failure surfaced")
+		}
+	})
+
+	t.Run("the row a reset has to keep is gone", func(t *testing.T) {
+		// The content clears, and only the UPDATE that puts the repository back
+		// at "nothing indexed yet" fails. A reset reporting success here would
+		// leave last_sha pointing at a commit whose chunks no longer exist.
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the failure to record the reset")
+		}
+	})
+}
+
 func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 	// Given: a repository whose checkout turned out to point at a different
 	// remote. The entry is still in repos.yaml and has to survive; everything

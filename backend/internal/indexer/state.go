@@ -194,35 +194,21 @@ func purgeRepoTx(ctx context.Context, tx *sql.Tx, name string) error {
 // keeps returning it, and rowid == chunks.id then resolves it against whatever
 // chunk is written next.
 func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM files WHERE repo = ?`, name)
-	if err != nil {
+	// The mirrors go FIRST and by hand. Deleting the files rows cascades to
+	// chunks and symbols, but a cascade cannot reach chunks_vec (vec0) or
+	// chunks_fts (fts5) — neither can take part in one, or in a trigger. Letting
+	// the cascade fire first would strand both, and an orphaned vector is not
+	// inert: the semantic lane keeps returning it, and rowid == chunks.id then
+	// resolves it against whatever chunk is written next.
+	for _, mirror := range []string{"chunks_vec", "chunks_fts"} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+mirror+` WHERE rowid IN (
+			SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?)`,
+			name); err != nil {
+			return fmt.Errorf("purge %s from %s: %w", name, mirror, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE repo = ?`, name); err != nil {
 		return fmt.Errorf("purge %s: %w", name, err)
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	// Closed explicitly rather than deferred: the deletes below run on the same
-	// connection as this query, and sqlite will not write while a statement on
-	// it is still open.
-	rows.Close()
-
-	for _, id := range ids {
-		if err := clearFileContent(ctx, tx, id); err != nil {
-			return fmt.Errorf("purge %s: %w", name, err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("purge %s: %w", name, err)
-		}
 	}
 	return nil
 }
