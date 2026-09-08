@@ -210,6 +210,25 @@ differ and where they agree, and attribute every claim to the repository it
 came from. Do not answer for one and leave the others out; do not merge them
 into a single mechanism they do not share. Repository names stay as they are.`
 
+// answerCompareProjects is answerCompare for a turn comparing PRODUCTS rather
+// than bare repositories. Separate text rather than a shared template with the
+// noun substituted: these are the rules a wrong answer comes from, and a
+// sentence assembled from fragments is the one kind nobody proof-reads.
+//
+// It says a project may span several repositories, because the sources will
+// carry repository names the question never used, and "attribute every claim to
+// the repository it came from" alone would read as an instruction to compare
+// those instead of the products the reader asked about.
+const answerCompareProjects = `
+
+The question names these projects: %s. Each is a separate product with its own
+implementation and all of them are in the sources. A project may span several
+repositories: treat everything from one project as one system. Cover every
+project, say plainly where they differ and where they agree, and attribute every
+claim to the project it came from as well as to the source it rests on. Do not
+answer for one and leave the others out; do not merge them into a single
+mechanism they do not share. Names stay as they are.`
+
 // answerMissingRepo is added when the question named a repository the index
 // does not carry. Without it the model is handed "how do loom and rongo
 // differ" plus rongo-only sources, and writes loom's side from its own
@@ -231,7 +250,7 @@ code - not a guess, not a comparison, not "presumably".`
 // without.
 const answerAllDenied = `
 
-The question asks about every repository. Only %s is in front of you, and this
+The question asks about every project. Only %s is in front of you, and this
 thread covers nothing else. Say in one sentence that the answer is for those
 alone and that a new thread can answer across the whole corpus, then answer for
 them. Make no claim of any kind about any other repository - not a guess, not a
@@ -500,20 +519,20 @@ func docMask(sources []Source) []bool {
 //
 // Two format arguments: the missing names, then the ones actually searched.
 var scopeNotice = map[Language]string{
-	LanguageEN: "No repository called %s in the index. Answered for %s alone.",
-	LanguageDE: "Kein Repository namens %s im Index. Nur %s beantwortet.",
-	LanguageFR: "Aucun dépôt nommé %s dans l'index. Réponse portant sur %s uniquement.",
-	LanguageIT: "Nessun repository di nome %s nell'indice. Risposta solo su %s.",
+	LanguageEN: "No project called %s in the index. Answered for %s alone.",
+	LanguageDE: "Kein Projekt namens %s im Index. Nur %s beantwortet.",
+	LanguageFR: "Aucun projet nommé %s dans l'index. Réponse portant sur %s uniquement.",
+	LanguageIT: "Nessun progetto di nome %s nell'indice. Risposta solo su %s.",
 }
 
 // scopeNoticeWhole is the same sentence when the question named nothing the
 // index carries: there is no narrowed scope to name, so the turn searched
 // everything.
 var scopeNoticeWhole = map[Language]string{
-	LanguageEN: "No repository called %s in the index. Searched all indexed repositories.",
-	LanguageDE: "Kein Repository namens %s im Index. Alle indexierten Repositories durchsucht.",
-	LanguageFR: "Aucun dépôt nommé %s dans l'index. Recherche sur tous les dépôts indexés.",
-	LanguageIT: "Nessun repository di nome %s nell'indice. Cercato in tutti i repository indicizzati.",
+	LanguageEN: "No project called %s in the index. Searched every indexed project.",
+	LanguageDE: "Kein Projekt namens %s im Index. Alle indexierten Projekte durchsucht.",
+	LanguageFR: "Aucun projet nommé %s dans l'index. Recherche sur tous les projets indexés.",
+	LanguageIT: "Nessun progetto di nome %s nell'indice. Cercato in tutti i progetti indicizzati.",
 }
 
 // outsideNotice is the "this thread is narrowed, and the repository you just
@@ -539,10 +558,10 @@ var outsideNotice = map[Language]string{
 //
 // One format argument: the repositories the thread carries.
 var allDeniedNotice = map[Language]string{
-	LanguageEN: "This thread is narrowed to %s. It cannot answer across every repository. Open a new thread for that.",
-	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Repositories hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
-	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des dépôts. Ouvrez un nouveau fil pour cela.",
-	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i repository. Apri un nuovo thread per quello.",
+	LanguageEN: "This thread is narrowed to %s. It cannot answer across every project. Open a new thread for that.",
+	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Projekte hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
+	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des projets. Ouvrez un nouveau fil pour cela.",
+	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i progetti. Apri un nuovo thread per quello.",
 }
 
 // docsOnlyNotice is the "this answer stood on documentation alone" sentence.
@@ -600,17 +619,17 @@ func ScopeNotice(lang Language, sc Scope) string {
 // model, exactly like scopeNotice and nothingFound — the text is already
 // known, and a person reads it, so the answer language applies.
 var allReposTitle = map[Language]string{
-	LanguageEN: "All repositories",
-	LanguageDE: "Alle Repositories",
-	LanguageFR: "Tous les dépôts",
-	LanguageIT: "Tutti i repository",
+	LanguageEN: "All projects",
+	LanguageDE: "Alle Projekte",
+	LanguageFR: "Tous les projets",
+	LanguageIT: "Tutti i progetti",
 }
 
 var allReposSummary = map[Language]string{
-	LanguageEN: "Answer across every indexed repository.",
-	LanguageDE: "Über alle indexierten Repositories hinweg antworten.",
-	LanguageFR: "Répondre sur l'ensemble des dépôts indexés.",
-	LanguageIT: "Rispondere su tutti i repository indicizzati.",
+	LanguageEN: "Answer across every indexed project.",
+	LanguageDE: "Über alle indexierten Projekte hinweg antworten.",
+	LanguageFR: "Répondre sur l'ensemble des projets indexés.",
+	LanguageIT: "Rispondere su tutti i progetti indicizzati.",
 }
 
 // AllReposChoice is the title and summary of a repository card's last entry,
@@ -754,7 +773,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if len(scope.Projects) == 1 {
 		// Nothing: one product, answered as one mechanism.
 	} else if len(scope.Projects) >= 2 {
-		system += fmt.Sprintf(answerCompare, strings.Join(scope.Projects, ", "))
+		system += fmt.Sprintf(answerCompareProjects, strings.Join(scope.Projects, ", "))
 	} else if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
 		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
 	}

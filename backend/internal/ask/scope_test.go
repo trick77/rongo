@@ -79,8 +79,15 @@ func TestTwoProjectsStillCompare_AndByProjectName(t *testing.T) {
 		t.Fatalf("Answer: %v", err)
 	}
 
-	if !strings.Contains(*prompt, "The question names these repositories") {
+	if !strings.Contains(*prompt, "The question names these projects") {
 		t.Fatalf("two projects must still be compared:\n%s", *prompt)
+	}
+	// And under the rule written for products: a project may span several
+	// repositories, and the sources carry repository names the question never
+	// used, so "attribute every claim to the repository" alone would have the
+	// model compare those instead of the products the reader asked about.
+	if !strings.Contains(*prompt, "may span several") {
+		t.Errorf("a project comparison needs its own rule, not the repository one:\n%s", *prompt)
 	}
 	if !strings.Contains(*prompt, "shop, legacy-crm") {
 		t.Errorf("the comparison must name the projects, not their members:\n%s", *prompt)
@@ -379,7 +386,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	// Everything a person reads follows ask.Language. The notice is read by a
 	// person, and it is templated rather than written by a model.
 	de := ScopeNotice(LanguageDE, Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}})
-	if !strings.Contains(de, "Kein Repository") {
+	if !strings.Contains(de, "Kein Projekt") {
 		t.Errorf("German notice = %q", de)
 	}
 	if strings.Contains(de, "ß") {
@@ -387,7 +394,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	}
 	// An unknown language falls back to English rather than to an empty
 	// string: a missing notice is worse than an English one.
-	if got := ScopeNotice(Language("xx"), Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}}); !strings.Contains(got, "No repository") {
+	if got := ScopeNotice(Language("xx"), Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}}); !strings.Contains(got, "No project") {
 		t.Errorf("fallback notice = %q", got)
 	}
 	// Nothing missing, nothing said.
@@ -396,7 +403,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	}
 	// Nothing named that the index knows: the turn searched everything, and
 	// saying "answered for  alone" would name nothing at all.
-	if got := ScopeNotice(LanguageEN, Scope{Unknown: []string{"loom"}}); !strings.Contains(got, "all indexed repositories") {
+	if got := ScopeNotice(LanguageEN, Scope{Unknown: []string{"loom"}}); !strings.Contains(got, "every indexed project") {
 		t.Errorf("notice = %q, want it to say the whole corpus was searched", got)
 	}
 }

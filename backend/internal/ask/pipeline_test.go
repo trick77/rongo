@@ -607,7 +607,7 @@ func TestRunSaysSoWhenAPinnedThreadCannotAnswerAcrossTheCorpus(t *testing.T) {
 		t.Error("a pinned thread must not record permission to answer across the corpus")
 	}
 	joined := strings.Join(notices, " ")
-	if !strings.Contains(joined, "every repository") || !strings.Contains(joined, "new thread") {
+	if !strings.Contains(joined, "every project") || !strings.Contains(joined, "new thread") {
 		t.Errorf("notice = %q, want the reader told what they are not getting and how to get it", joined)
 	}
 }
