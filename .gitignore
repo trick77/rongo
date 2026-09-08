@@ -76,12 +76,13 @@ docs/plans/
 # ---------- Stray images at the repo root ----------
 # Verification screenshots land here during UI work. They are throwaway
 # evidence and may show a logged-in session or proprietary source code on
-# screen — an unlucky `git add -A` must not commit one. The wordmark is the
-# one image that genuinely belongs at the root.
+# screen — an unlucky `git add -A` must not commit one. The wordmark and the
+# README screenshot are the two images that genuinely belong at the root.
 /*.png
 /*.jpg
 /*.jpeg
 !/rongo-wide.jpg
+!/rongo-app.png
 
 # ---------- OS & editors ----------
 .DS_Store
