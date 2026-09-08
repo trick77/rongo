@@ -14,7 +14,15 @@ RUN go mod download
 COPY backend/ ./
 # The SPA lands in the embed directory before the Go build reads it.
 COPY --from=ui /backend/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/rongo ./cmd/rongo
+# The release passes the tag it is about to create. It cannot be read out of git
+# here: the tag is written only after the image push succeeds, so a describe
+# inside the build would name the previous release.
+# Declared last on purpose: it changes on every release, and an ARG above the
+# module download puts it in that layer's environment.
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build \
+      -ldflags="-s -w -X github.com/trick77/rongo/internal/version.Version=${VERSION}" \
+      -o /out/rongo ./cmd/rongo
 
 # --- Stage 3: runtime -------------------------------------------------------
 # Deliberately NOT distroless: rongo shells out to git, ripgrep and

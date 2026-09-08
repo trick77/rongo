@@ -9,7 +9,7 @@ import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing
 
 type Page = "ask" | "repos" | "shared";
 
-type Me = { subject: string; email: string; is_admin: boolean };
+type Me = { subject: string; email: string; is_admin: boolean; version: string };
 
 /**
  * The session gate. /api/me is the one request the app makes before it renders
@@ -72,7 +72,8 @@ function useSession(): Session {
         // A network error is not a signed-out session. Redirecting here would
         // bounce the user to the provider every time the connection drops, so
         // the app renders and its panels report their own failures.
-        if (!cancelled) setSession({ state: "in", me: { subject: "", email: "", is_admin: false } });
+        if (!cancelled)
+          setSession({ state: "in", me: { subject: "", email: "", is_admin: false, version: "" } });
         return;
       }
       if (cancelled) return;
@@ -517,6 +518,7 @@ export default function App() {
           <div hidden={page !== "ask"} className="h-full">
             <Ask
               threadId={threadId}
+              version={session.me.version}
               // Null from Ask is never a reader's choice: it is the thread
               // turning out to be deleted or not theirs. Correct the address
               // rather than push a second entry over the dead one.

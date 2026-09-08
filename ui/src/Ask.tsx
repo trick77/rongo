@@ -128,6 +128,7 @@ export default function Ask({
   onActivity = () => {},
   onBusy = () => {},
   onUsage = () => {},
+  version = "",
 }: {
   /** The thread to show, or null for a fresh one. */
   threadId?: string | null;
@@ -142,6 +143,10 @@ export default function Ask({
    * ones that asked back or failed included — or null when nothing is
    * known yet. The header shows it next to the title. */
   onUsage?: (total: { tokens: number; cost: number | null } | null) => void;
+  /** The build answering, from /api/me. Empty or "dev" when the binary was
+   * built without a version stamped into it, and then the footer says only
+   * that Rongo can be wrong. */
+  version?: string;
 }) {
   const [question, setQuestion] = useState("");
   const [audience, setAudience] = useState<Audience>("ba");
@@ -992,9 +997,16 @@ export default function Ask({
           className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
         />
 
+        {/* w-full is not redundant beside max-w: the form is a flex item of the
+            column above, and a flex item with an auto cross-axis margin loses
+            align-items: stretch. Without it mx-auto shrink-wraps the form to
+            its controls and the composer comes out a third of the column wide.
+            ../loom writes the same three classes together (ThreadPanel.tsx).
+            pb-3 matches the footer's mt-3 below, so the line under the composer
+            sits with the same gap above it as below it. */}
         <form
           onSubmit={submit}
-          className="relative mx-auto max-w-[900px] bg-bg px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+          className="relative mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
         >
           {/* The foot of the column, ../loom's way round: the composer is
               opaque and the fade is a strip immediately above it, so prose
@@ -1042,7 +1054,12 @@ export default function Ask({
                     aria-pressed={audience === role}
                     onClick={() => setAudience(role)}
                     className={
-                      "rounded-full px-3 py-1 text-xs font-medium " +
+                      // pointer-coarse:text-base for the same reason the select
+                      // beside it carries one — not to stop a zoom, a button
+                      // never triggers that, but so the two pills stay the same
+                      // control on a touch screen instead of matching only on a
+                      // desktop.
+                      "rounded-full px-3 py-1 text-xs font-medium pointer-coarse:text-base " +
                       (audience === role ? "bg-accent-fill text-ink" : "text-muted hover:text-ink")
                     }
                   >
@@ -1056,8 +1073,14 @@ export default function Ask({
                   control that refused every hand laid on it. The turn's own
                   pill above the answer already says which language the thread
                   is in, and it says it where the answer is. */}
+              {/* Its box is the Role toggle's, off the same rule: the same
+                  border and radius, p-0.5 on the pill, py-1 text-xs on the
+                  control inside it. It used to carry a fixed h-9 sm:h-8 and
+                  stood taller than its neighbour at every width. Height is
+                  content-driven now, so the two agree wherever the text does —
+                  the pointer-coarse size included. */}
               {!threadLanguage && (
-                <label className="relative inline-flex h-9 items-center rounded-full border border-border bg-bg pr-2.5 pl-3 text-xs text-muted hover:border-elevated-border hover:text-ink sm:h-8">
+                <label className="relative inline-flex items-center rounded-full border border-border bg-bg p-0.5 text-xs text-muted hover:border-elevated-border hover:text-ink">
                   <span className="sr-only">Answer language</span>
                   <select
                     aria-label="Answer language"
@@ -1066,7 +1089,7 @@ export default function Ask({
                       setLanguage(e.target.value);
                       rememberLanguage(e.target.value);
                     }}
-                    className="lang-select cursor-pointer border-0 bg-transparent pr-4 text-inherit outline-none pointer-coarse:text-base"
+                    className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none pointer-coarse:text-base"
                   >
                     {languages.map((l) => (
                       <option key={l.code} value={l.code}>
@@ -1104,6 +1127,18 @@ export default function Ask({
               </p>
             )}
           </div>
+          {/* Under the composer, the way ../loom carries its own caveat. The
+              gap above it is the form's pb-3 and the gap below it is this
+              mt-3, so the line sits centred between the composer and the foot
+              of the window. Dropped where the window is short: the form
+              already halves its padding there, and this is the first thing
+              that can go. The version says which build answered, and it is
+              omitted rather than shown as "dev" when the binary was not
+              stamped — see App's Me. */}
+          <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
+            Rongo can be wrong.
+            {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
+          </p>
         </form>
       </div>
 
