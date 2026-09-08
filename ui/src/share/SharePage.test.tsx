@@ -83,6 +83,9 @@ describe("SharePage", () => {
     render(<SharePage token="tok" />);
     await screen.findByText(/It is a ladder/);
 
+    // The fixture is an Analyst turn, so the pane starts shut on a share
+    // exactly as it does in the app. The chip under the answer is the way in.
+    fireEvent.click(await screen.findByRole("button", { name: /Sources/ }));
     fireEvent.click(await screen.findByText("route.go"));
 
     await waitFor(() =>

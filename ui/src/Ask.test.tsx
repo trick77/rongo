@@ -55,6 +55,14 @@ async function ask(text: string) {
   return user;
 }
 
+// The pane is shut on an Analyst turn, and `ask` asks as an Analyst — that is
+// the default the composer opens with. A test that wants the pane says so, by
+// pressing the same chip the reader presses.
+async function openSources(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: /Sources/ }));
+  return screen.getByRole("complementary", { name: "Sources" });
+}
+
 describe("Ask", () => {
   it("greets in the answer language", async () => {
     // The select says Deutsch and the page still says "Ask about the code."
@@ -144,7 +152,7 @@ describe("Ask", () => {
       ev("done", {}),
     ]);
 
-    await ask("How?");
+    const user = await ask("How?");
 
     const evidence = await screen.findByText(/How does Rongo know this/);
     expect(evidence).toBeTruthy();
@@ -152,7 +160,7 @@ describe("Ask", () => {
     expect(turn.textContent).toContain("release-2024.3");
     expect(turn.textContent).toContain("store.go:3-40");
     // The Sources pane lists the same file, so a reader keeps it in view.
-    expect(screen.getByRole("complementary", { name: "Sources" }).textContent).toContain("store.go");
+    expect((await openSources(user)).textContent).toContain("store.go");
   });
 
   it("opens the cited file, at the cited commit, when a source is clicked", async () => {
@@ -176,8 +184,9 @@ describe("Ask", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const pane = screen.getByRole("complementary", { name: "Sources" });
-    await user.click(pane.querySelector("button")!);
+    const pane = await openSources(user);
+    // By name, not the first button in the pane — that one is the close ×.
+    await user.click(within(pane).getByRole("button", { name: /a\.go/ }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("a.go");
@@ -256,6 +265,95 @@ describe("Ask", () => {
       const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
       expect(body.thread_id).toBe("42");
     });
+  });
+});
+
+describe("Ask, the Sources pane", () => {
+  // One citation is all any of these need: what is under test is whether the
+  // pane is on screen, never what it holds.
+  const cited = [
+    { marker: 1, repo: "peeq", branch: "master", path: "internal/a.go", start_line: 2, end_line: 3, sha: "0123abcdef" },
+  ];
+  const answered = () => [ev("thread", { thread_id: "1" }), ev("token", { text: "So [1]." }), ev("citations", cited), ev("done", {})];
+
+  const pane = () => screen.queryByRole("complementary", { name: "Sources" });
+  const chip = () => screen.queryByRole("button", { name: /Sources/ });
+
+  it("stays shut on an Analyst answer, and the chip says how many there are", async () => {
+    streamFrames(answered());
+    await ask("How?");
+    await screen.findByText(/How does Rongo know this/);
+
+    // The Analyst was given an explanation with no paths in it on purpose;
+    // the file list is not what that reader came for.
+    expect(pane()).toBeNull();
+    expect(chip()!.textContent).toContain("1");
+    expect(chip()!.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("opens on a Developer answer, unasked", async () => {
+    streamFrames(answered());
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask />
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole("button", { name: "Developer" }));
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await screen.findByText(/How does Rongo know this/);
+    expect(pane()).toBeTruthy();
+    expect(chip()!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("closes on the × and comes back on the chip", async () => {
+    streamFrames(answered());
+    const user = await ask("How?");
+    await screen.findByText(/How does Rongo know this/);
+
+    await user.click(chip()!);
+    expect(pane()).toBeTruthy();
+
+    await user.click(within(pane()!).getByRole("button", { name: "Close" }));
+    expect(pane()).toBeNull();
+
+    await user.click(chip()!);
+    expect(pane()).toBeTruthy();
+  });
+
+  it("the chip is on the turn the pane shows, and on no other", async () => {
+    streamFrames(answered());
+    const user = await ask("How?");
+    await screen.findByText(/How does Rongo know this/);
+
+    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", cited), ev("done", {})]);
+    await user.type(screen.getByLabelText("Question"), "And then?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByText(/And so/);
+
+    // Both turns cite, but the pane only ever lists the newer one — a chip on
+    // the older answer would open somebody else's sources.
+    expect(screen.getAllByText(/How does Rongo know this/)).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /Sources/ })).toHaveLength(1);
+  });
+
+  it("the reader's choice outlives a follow-up", async () => {
+    streamFrames(answered());
+    const user = await ask("How?");
+    await screen.findByText(/How does Rongo know this/);
+    await user.click(chip()!);
+    expect(pane()).toBeTruthy();
+
+    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", cited), ev("done", {})]);
+    await user.type(screen.getByLabelText("Question"), "And then?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByText(/And so/);
+
+    // Still open, though the new turn is an Analyst turn too: once the reader
+    // has said, the audience stops deciding.
+    expect(pane()).toBeTruthy();
   });
 });
 
@@ -1316,8 +1414,9 @@ function scroller(container: HTMLElement, height = 2000) {
   return el;
 }
 
-async function askInto(container: HTMLElement) {
+async function askInto(container: HTMLElement, role: "Analyst" | "Developer" = "Analyst") {
   const user = userEvent.setup();
+  if (role !== "Analyst") await user.click(screen.getByRole("button", { name: role }));
   await user.type(screen.getByLabelText("Question"), "How?");
   await user.click(screen.getByRole("button", { name: "Ask" }));
   return container;
@@ -1475,7 +1574,11 @@ describe("Ask, following the answer", () => {
   it("stops following when a source is opened from the Sources pane", async () => {
     const stream = pushableStream();
     const { container } = render(<Ask />);
-    await askInto(container);
+    // Asked as a Developer, so the pane is open of its own accord: the chip
+    // that would open it sits INSIDE the scrolling column, and pressing it
+    // would stop the follow by itself — the test would pass without ever
+    // touching the pane.
+    await askInto(container, "Developer");
     const view = scroller(container);
 
     await stream.push(ev("token", { text: "One. " }));

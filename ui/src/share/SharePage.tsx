@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import SourceView, { type SourceRef } from "../SourceView";
-import ThreadView, { SourcesPane } from "../ThreadView";
+import ThreadView, { SourcesPane, sourceTurnOf } from "../ThreadView";
 import { linkChosenCandidates, storedRetries, storedTurn, type Message, type Turn } from "../turns";
 
 /**
@@ -27,6 +27,12 @@ export default function SharePage({ token }: { token: string }) {
   const [state, setState] = useState<State>({ s: "loading" });
   const [hot, setHot] = useState<number | null>(null);
   const [viewing, setViewing] = useState<SourceRef | null>(null);
+  // The same rule the answering page follows: untouched, the pane answers to
+  // the audience of the turn it would show, and the reader's own click wins
+  // from then on. A share is one thread and never changes, so nothing resets
+  // it. The audience is on the wire — handlePublicShare drops the follow-ups,
+  // the usage and the timeline, and nothing else.
+  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
 
   // Belt and braces with the X-Robots-Tag the two public endpoints set: a
   // crawler that reaches the page rather than the API sees this one. Removed
@@ -108,6 +114,8 @@ export default function SharePage({ token }: { token: string }) {
     );
   }
 
+  const showSources = sourcesOpen ?? state.turns[sourceTurnOf(state.turns)]?.audience === "dev";
+
   return (
     // The app's own shell: a 56px header over the thread, and the Sources
     // column where there is room for it. The chrome stays English — the
@@ -131,7 +139,12 @@ export default function SharePage({ token }: { token: string }) {
         </div>
       </header>
 
-      <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
+      <div
+        className={
+          "grid min-h-0 grid-cols-1" +
+          (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "")
+        }
+      >
         {/* The same edges the answering column has, and both of them here:
             there is no composer under a share, so the foot runs into the
             window rather than into a gradient someone else already paints.
@@ -139,12 +152,14 @@ export default function SharePage({ token }: { token: string }) {
             at rest. */}
         <div className="relative min-h-0 min-w-0">
           <div className="thin-scroll h-full overflow-auto">
-            <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
+            <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
               <ThreadView
                 turns={state.turns}
                 actions={null}
                 onOpenSource={setViewing}
                 onHot={setHot}
+                sourcesOpen={showSources}
+                onToggleSources={() => setSourcesOpen(!showSources)}
                 threadKey={token}
               />
             </div>
@@ -160,7 +175,14 @@ export default function SharePage({ token }: { token: string }) {
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
           />
         </div>
-        <SourcesPane turns={state.turns} hot={hot} onOpen={setViewing} />
+        {showSources && (
+          <SourcesPane
+            turns={state.turns}
+            hot={hot}
+            onOpen={setViewing}
+            onClose={() => setSourcesOpen(false)}
+          />
+        )}
       </div>
 
       {/* The share's own endpoint, never /api/source: that one takes any
