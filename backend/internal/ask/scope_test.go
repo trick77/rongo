@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -56,7 +57,7 @@ func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// When the question named two indexed repositories.
 	// Then no rung below can reach: the reader asked about both, and a card
 	// would ask them to answer a question they already answered.
-	if Decide(tight, 0.25, false, true, 2, false, true) {
+	if Decide(tight, 0.25, false, true, 2, false, true, projects.Map{}) {
 		t.Error("a question naming two repositories must be answered, not asked about")
 	}
 	// One named repository is the same thing said from the other side: the
@@ -64,12 +65,12 @@ func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// modules — composed, never put back to them as a question. This is the
 	// rung a follow-up rides on too, because a pinned thread arrives here as
 	// one named repository.
-	if Decide(tight, 0.25, false, true, 1, false, true) {
+	if Decide(tight, 0.25, false, true, 1, false, true, projects.Map{}) {
 		t.Error("a question naming one repository must be answered, not asked about")
 	}
 	// Naming none leaves the ladder alone: the judge's card is still real for
 	// the first turn of a thread.
-	if !Decide(tight, 0.25, false, true, 0, false, true) {
+	if !Decide(tight, 0.25, false, true, 0, false, true, projects.Map{}) {
 		t.Error("no named repository must leave the ladder alone")
 	}
 }

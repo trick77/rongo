@@ -9,6 +9,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -92,7 +93,7 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 		rw := row{
 			q:        q,
 			want:     resolutionExpectsAsk(q.Resolution),
-			spans:    ask.SpansRepos(ranked.All, len(named)),
+			spans:    ask.SpansRepos(ranked.All, len(named), projects.Map{}),
 			repos:    len(perRepo),
 			cands:    len(ranked.All),
 			lead:     ranked.All[0].Score,

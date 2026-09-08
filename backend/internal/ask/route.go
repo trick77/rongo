@@ -13,6 +13,7 @@ import (
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
 )
@@ -33,6 +34,13 @@ type Candidate struct {
 	// and phase 3 measured that doing so makes the ranking worse.
 	Score float64
 	Hits  []retrieve.Hit
+	// Members are the repositories a PROJECT candidate folds, sorted. Empty on
+	// a module candidate, and a project of one carries its single repository.
+	//
+	// It is stored with the card and read back on resume rather than looked up
+	// again: a project that gains a member between the card being drawn and the
+	// reader choosing must not widen the answer they asked for.
+	Members []string
 }
 
 // candidates groups hits into the units routing reasons about, best first.
@@ -141,7 +149,11 @@ func onlySupporting(hits []retrieve.Hit) bool {
 	return true
 }
 
-// distinctRepos counts the repositories the candidates come from.
+// distinctRepos counts the repositories the candidates come from. Nothing in
+// the ladder decides on it any more — that is distinctProjects' job — but the
+// route log still reports it beside the project count, because "four
+// repositories, one project" and "four repositories, four projects" are the two
+// cases a surprising card has to be told apart by.
 func distinctRepos(cs []Candidate) int {
 	seen := map[string]bool{}
 	for _, c := range cs {
@@ -150,21 +162,39 @@ func distinctRepos(cs []Candidate) int {
 	return len(seen)
 }
 
+// distinctProjects counts the PROJECTS the candidates come from. Three
+// repositories of one product are one thing to choose between, not three.
+//
+// The zero projects.Map answers every repository with its own name, so with no
+// project declared this is exactly the repository count it replaced — which is
+// what lets the eval, whose corpus is one project per repository, prove the
+// change did not leak.
+func distinctProjects(cs []Candidate, pm projects.Map) int {
+	repos := make([]string, 0, len(cs))
+	for _, c := range cs {
+		repos = append(repos, c.Repo)
+	}
+	return pm.Distinct(repos)
+}
+
 // SpansRepos reports whether the repository rung is live: the question named
-// no repository, and the candidates come from more than one. Exported for the
-// eval harness, which has to pay for Related on exactly the turns Route pays
-// for it on — its own bookkeeping is keyed off the margin, and this rung is
-// not.
-func SpansRepos(all []Candidate, namedRepos int) bool {
-	return namedRepos == 0 && distinctRepos(all) >= 2
+// no repository, and the candidates come from more than one PROJECT. Exported
+// for the eval harness, which has to pay for Related on exactly the turns Route
+// pays for it on — its own bookkeeping is keyed off the margin, and this rung
+// is not.
+//
+// A backend and its UI no longer span. That is the point: they are one product,
+// so asking which was meant makes the reader pick half an answer.
+func SpansRepos(all []Candidate, namedRepos int, pm projects.Map) bool {
+	return namedRepos == 0 && distinctProjects(all, pm) >= 2
 }
 
 // DecideWhySpans is DecideWhy with the repository rung supplied instead of
 // derived from the candidate list. Exported for the sweep that has to ask
 // whether that rung should fire on repository span at all — see decideWhy.
 // Production has no reason to call it: Route's own spans value is SpansRepos'.
-func DecideWhySpans(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
-	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, spans)
+func DecideWhySpans(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool, pm projects.Map) (bool, string) {
+	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, spans, pm)
 }
 
 // RepoCandidates is the repository-grained regrouping Route asks Related
@@ -209,6 +239,52 @@ func repoCandidates(cs []Candidate) []Candidate {
 		}
 	}
 	for i := range out {
+		hits := out[i].Hits
+		sort.SliceStable(hits, func(a, b int) bool { return hits[a].Score > hits[b].Score })
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	return out
+}
+
+// projectCandidates folds the repository-grained regrouping by project, for the
+// card that asks WHICH PRODUCT was meant.
+//
+// It is a SECOND fold rather than a change to repoCandidates, and the
+// separation is load-bearing. Route hands repoCandidates' output to Related,
+// and anyDependency passes each candidate's Repo straight to
+// repodeps.DependsOn, which joins repo_deps WHERE repo = ?. A project name has
+// no rows in that table, so folding one step earlier would lose every go.mod
+// edge for repositories belonging to a multi-repo project — and no measurement
+// would catch it, because the eval corpus is one project per repository, where
+// the two names are the same string.
+//
+// Repo carries the project name and Members the repositories folded into it,
+// which is what a resumed turn searches. Branch is left empty for a project of
+// more than one: a product spanning repositories has no single branch, and
+// printing one member's would label it with half its truth. A project of one
+// keeps its branch, because there is exactly one and nothing is hidden.
+func projectCandidates(cs []Candidate, pm projects.Map) []Candidate {
+	index := map[string]int{}
+	var out []Candidate
+	for _, c := range cs {
+		name := pm.Of(c.Repo)
+		i, ok := index[name]
+		if !ok {
+			out = append(out, Candidate{Repo: name, Branch: c.Branch})
+			i = len(out) - 1
+			index[name] = i
+		}
+		out[i].Members = append(out[i].Members, c.Repo)
+		out[i].Hits = append(out[i].Hits, c.Hits...)
+		if c.Score > out[i].Score {
+			out[i].Score = c.Score
+		}
+	}
+	for i := range out {
+		if len(out[i].Members) > 1 {
+			out[i].Branch = ""
+		}
+		sort.Strings(out[i].Members)
 		hits := out[i].Hits
 		sort.SliceStable(hits, func(a, b int) bool { return hits[a].Score > hits[b].Score })
 	}
@@ -487,6 +563,21 @@ func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 	return r.anyDependency(ctx, cs)
 }
 
+// Projects reads the declared grouping for this turn. Deliberately not cached,
+// for repodeps.DependsOn's reason: it is a handful of rows read once per turn,
+// and a project renamed in repos.yaml takes effect on the next question rather
+// than the next restart.
+//
+// A Router with no database — the pure-function tests build one — gets the zero
+// Map, which answers every repository with its own name. That is the behaviour
+// rongo had before projects existed, so nothing degrades into a nameless group.
+func (r *Router) Projects(ctx context.Context) (projects.Map, error) {
+	if r.db == nil {
+		return projects.Map{}, nil
+	}
+	return projects.Load(ctx, r.db)
+}
+
 // Judge asks the model whether cs are independent alternatives or parts of one
 // mechanism — the rung that decides whether the CODE is ambiguous. Exported so
 // the eval harness can call it once per question and reuse the answer across
@@ -571,8 +662,8 @@ func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate)
 // Refusing it would put the Analyst back on exactly the cross-repository
 // answer this rung exists to stop, which is the opposite of what the gate is
 // for.
-func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) bool {
-	ask, _ := DecideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose)
+func Decide(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool, pm projects.Map) bool {
+	ask, _ := DecideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, pm)
 	return ask
 }
 
@@ -599,9 +690,9 @@ const (
 // A card the judge asked for and the role gate then refused reports "role", not
 // "judge": both rungs said their piece, and the second one is what changed the
 // outcome.
-func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool) (bool, string) {
+func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose bool, pm projects.Map) (bool, string) {
 	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose,
-		SpansRepos(all, namedRepos))
+		SpansRepos(all, namedRepos, pm), pm)
 }
 
 // decideWhy is DecideWhy with the repository rung handed in rather than
@@ -617,7 +708,7 @@ func DecideWhy(all []Candidate, margin float64, related, judged bool, namedRepos
 // lands a different condition, it belongs in SpansRepos — one implementation,
 // so route() and the harness cannot drift apart about which turns are
 // spanning.
-func decideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool) (bool, string) {
+func decideWhy(all []Candidate, margin float64, related, judged bool, namedRepos int, allRepos, roleCanChoose, spans bool, pm projects.Map) (bool, string) {
 	if namedRepos >= 1 {
 		return false, rungNamedRepos
 	}
@@ -629,7 +720,7 @@ func decideWhy(all []Candidate, margin float64, related, judged bool, namedRepos
 	// question to the reader that hides most of its own answer. Composing
 	// instead is no better: one dependency among twenty repositories would
 	// spread searchK over twenty of them and answer from none.
-	if namedRepos == 0 && distinctRepos(all) > maxRepoCandidates {
+	if namedRepos == 0 && distinctProjects(all, pm) > maxRepoCandidates {
 		return true, rungTooBroad
 	}
 	if related {
@@ -774,12 +865,19 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Decision{}, l, err
 	}
+	// The grouping every rung below counts by. Read before the named-repository
+	// short-circuit so one turn asks for it once, and cheap enough to pay for
+	// on the fast path: a handful of rows, no model call.
+	pm, err := r.Projects(ctx)
+	if err != nil {
+		return Decision{}, l, err
+	}
 	l.rank(ranked, namedRepos, allRepos, r.margin)
 	// Named a repository, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
 	// can change the outcome and none is worth a query or a model call.
 	if len(namedRepos) >= 1 || allRepos {
-		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true, pm)
 		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
 
@@ -787,12 +885,12 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// the candidates span more than one. It is the only reason Related is
 	// worth paying for on an otherwise dominant turn, so it is computed before
 	// the margin short-circuit rather than after it.
-	spans := SpansRepos(ranked.All, len(namedRepos))
+	spans := SpansRepos(ranked.All, len(namedRepos), pm)
 	l.spans = spans
 	if !spans && Dominates(ranked.All, r.margin) {
 		// The fast path is unchanged: hits inside one repository with a clear
 		// leader still reach an answer without a query or a model call.
-		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true, pm)
 		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
 
@@ -802,9 +900,9 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// also why repoCandidates' refusal to cap no longer has to protect the
 	// manifest check from a hidden fifth repository — with more than four
 	// there is no card left to protect.
-	if spans && distinctRepos(ranked.All) > maxRepoCandidates {
-		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true)
-		return Decision{Ask: true, TooBroad: true, Candidates: repoCandidates(ranked.All)}, l, nil
+	if spans && distinctProjects(ranked.All, pm) > maxRepoCandidates {
+		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true, pm)
+		return Decision{Ask: true, TooBroad: true, Candidates: projectCandidates(repoCandidates(ranked.All), pm)}, l, nil
 	}
 
 	// Over EVERY repository when the repository rung is live, not over the
@@ -842,7 +940,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 
 	// Nothing below can turn a "no" into a card, so a decision already made
 	// pays for neither naming nor the role gate.
-	ask, rung := DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, true)
+	ask, rung := DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, true, pm)
 	l.rung = rung
 	if !ask {
 		return Decision{Ask: false, Candidates: cs}, l, nil
@@ -851,7 +949,10 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// A repository card is settled: the rung is deterministic, and the role
 	// gate does not apply to it (see Decide). Name the repositories and ask.
 	if spans {
-		named, allNamed, err := r.name(ctx, question, audience, lang, capRepoCandidates(repos))
+		// projectCandidates AFTER Related has seen the repository-grained list:
+		// anyDependency joins repo_deps on a repository name, and a project
+		// name has no rows there.
+		named, allNamed, err := r.name(ctx, question, audience, lang, capRepoCandidates(projectCandidates(repos, pm)))
 		if err != nil {
 			return Decision{}, l, err
 		}
@@ -885,7 +986,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 		}
 	}
 	l.roleCanChoose = roleCanChoose
-	ask, rung = DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, roleCanChoose)
+	ask, rung = DecideWhy(ranked.All, r.margin, related, judged, len(namedRepos), allRepos, roleCanChoose, pm)
 	l.rung = rung
 	if !ask {
 		// The turn goes on to answer, and gathering starts from ALL hits, not
