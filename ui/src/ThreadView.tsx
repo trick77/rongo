@@ -64,6 +64,16 @@ export type ThreadViewProps = {
    * reads the hot marker through this. */
   onHot?: (marker: number | null) => void;
   /**
+   * Whether the sources pane is on screen, and the way to turn it round. Both
+   * are the caller's: the pane is a cell of ITS grid, while the chip that
+   * opens it is a row inside a turn, so the page is the only thing that sees
+   * both ends. Left out — the share page before it grew one, a test — the
+   * chip is not rendered at all and the disclosure under the answer is the
+   * only way to the sources, which is what happens below `xl` anyway.
+   */
+  sourcesOpen?: boolean;
+  onToggleSources?: () => void;
+  /**
    * Which thread these turns are. Everything this view remembers is an INDEX
    * into them, and the same index in the next thread is a different turn — so
    * a change here drops the lot rather than opening a breakdown nobody
@@ -79,12 +89,31 @@ export function sourceTurnOf(turns: Turn[]): number {
   return -1;
 }
 
+/**
+ * The turn whose audience decides whether the pane is open: the newest citing
+ * turn, or the one still being written if there is one.
+ *
+ * The running turn has to count. Citations arrive after the last token, so a
+ * fresh Developer question would leave this at the PREVIOUS turn — an Analyst
+ * one, most likely — for the whole stream, and the pane would snap in on the
+ * final frame, narrowing the column the reader is mid-sentence in. Opening it
+ * at the start costs an empty pane saying what will appear there, which is
+ * what that empty state is for.
+ */
+export function paneAudienceTurn(turns: Turn[]): Turn | undefined {
+  const last = turns[turns.length - 1];
+  if (last && !last.done) return last;
+  return turns[sourceTurnOf(turns)];
+}
+
 export default function ThreadView({
   turns,
   busy = false,
   actions = null,
   onOpenSource,
   onHot,
+  sourcesOpen = false,
+  onToggleSources,
   threadKey = null,
 }: ThreadViewProps) {
   const [copied, setCopied] = useState<number | null>(null);
@@ -414,6 +443,31 @@ export default function ThreadView({
                   </details>
                 )}
 
+                {/* The way into the pane, on the one turn the pane can
+                    actually show. It lists the newest citing turn and nothing
+                    else, so a chip on an older answer would open a list of a
+                    later answer's files — the reader clicks "6 sources" and
+                    gets somebody else's six.
+
+                    Only from `xl`, where the pane exists at all. Narrower than
+                    that the disclosure above is the sources, as it has always
+                    been. No aria-controls: the pane is unmounted while shut,
+                    and the attribute would name an element that is not
+                    there. */}
+                {onToggleSources && turn.citations.length > 0 && i === sourceTurnIndex && (
+                  <div className="mt-4 hidden xl:block">
+                    <button
+                      type="button"
+                      aria-expanded={sourcesOpen}
+                      onClick={onToggleSources}
+                      className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
+                    >
+                      <span className="font-mono text-xs text-accent-strong">{turn.citations.length}</span>
+                      Sources
+                    </button>
+                  </div>
+                )}
+
                 {/* What to ask next, under the answer that prompted it and
                     above the actions on it. Only on the newest turn: an older
                     answer's offers are spent, and a card or a failed turn
@@ -560,10 +614,14 @@ export function SourcesPane({
   turns,
   hot,
   onOpen,
+  onClose,
 }: {
   turns: Turn[];
   hot: number | null;
   onOpen: (c: Citation) => void;
+  /** Shuts the pane. The caller owns whether it is on screen — this only says
+   * that the reader asked for it to go. */
+  onClose?: () => void;
 }) {
   const sourceTurnIndex = sourceTurnOf(turns);
   const sourceTurn = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
@@ -578,6 +636,23 @@ export function SourcesPane({
                 on the article — not the row's place in the record. */}
             turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {sourceTurn.citations.length}
           </span>
+        )}
+        {/* The same close the source viewer and the diagram draw: a × at the
+            end of the header. ml-auto only when the count is not there to
+            carry it — with both holding it, flexbox splits the free space and
+            the count drifts away from the button. */}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className={
+              "-my-1 grid h-8 w-8 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink" +
+              (sourceTurn ? " -mr-1" : " -mr-1 ml-auto")
+            }
+          >
+            ×
+          </button>
         )}
       </header>
       <div className="thin-scroll min-h-0 flex-1 overflow-auto">

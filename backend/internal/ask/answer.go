@@ -287,6 +287,40 @@ where they carry the explanation. A fenced code block carries its language tag
 (` + "```go" + `, ` + "```typescript" + `), never a bare ` + "```" + `. Describe
 the control flow so that it can be followed in the code.`
 
+// answerShape follows the audience block for BOTH audiences, which is why it
+// is its own constant rather than a paragraph in each of them.
+//
+// It exists because neither audience block said anything about shape. They
+// ask for three to five paragraphs and for the control flow to be followable,
+// and the model does the safe thing with that: undifferentiated prose, with
+// the sentence that actually answers the question somewhere in the middle of
+// the first one. The renderer has carried headings, lists and bold since it
+// was written (index.css) and nothing was ever emitted into them.
+//
+// The lead sentence is the half that matters. It also makes understand.go's
+// answerRecall = 1200 more true than it was: that constant is justified by
+// "the opening carries the subject", and now it does by instruction.
+//
+// The list rule is fenced on both sides on purpose. "Structure it" alone comes
+// back as an answer bulleted into fragments, which is a different way of being
+// unreadable - so the permission names what a list is FOR (a set the code
+// really has) and says twice what it is not for.
+//
+// No headings: they were mocked up and deliberately left out. A short answer
+// wearing three ### headings looks over-built, and that judgement is one the
+// model gets wrong more often than it gets the list wrong. If dev answers
+// still read long with this in, headings are the next thing to try.
+const answerShape = `
+
+Open with ONE sentence that answers the question, then explain. A reader who
+stops after that sentence has the answer; a reader who goes on gets why.
+
+Where the mechanism really is a set - branches, options, ordered steps,
+conditions - carry it as a short list instead of a paragraph. Prose that is
+prose stays prose: never split a single line of reasoning into bullets, and
+never use a list where two sentences would do. Markers sit on the list item
+that makes the claim, exactly as they do in running text.`
+
 // answerDiagram follows the audience block, so "the audience rules above"
 // are the ones the model just read: a Developer diagram names functions and
 // files, an Analyst diagram speaks the domain. The fence is named literally,
@@ -606,6 +640,10 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	} else {
 		system += answerBA
 	}
+	// Directly after the audience block and before everything conditional: the
+	// shape rules are about the whole answer, so they must not read as though
+	// they applied only to the last special case that happened to be appended.
+	system += answerShape
 	// After the audience block, so "cover every one of them" is read against
 	// the shape the audience block just set rather than before it.
 	//

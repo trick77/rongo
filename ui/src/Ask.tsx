@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import ThreadView, { SourcesPane } from "./ThreadView";
+import ThreadView, { SourcesPane, paneAudienceTurn } from "./ThreadView";
 import SourceView from "./SourceView";
 import { Chevron } from "./icons";
 import {
@@ -167,6 +167,13 @@ export default function Ask({
   // the overlay covers the whole app, and both the text and the pane beside
   // it open one.
   const [viewing, setViewing] = useState<Citation | null>(null);
+  // Whether the reader has said anything about the sources pane, and what.
+  // null is "has not said", and only then does the audience of the turn the
+  // pane is showing decide: a Developer wants the files beside the answer,
+  // an Analyst was given an explanation with no paths in it on purpose and
+  // the list is noise. A click on the × or on the chip settles it for the
+  // rest of the thread; opening another thread asks the question again.
+  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
   const threadId = useRef<string | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -329,6 +336,10 @@ export default function Ask({
     // left — the open breakdown, the unfolded failure — is ThreadView's, and
     // it drops with the turns it belonged to.
     onUsage(null);
+    // And the pane goes back to answering to the audience rather than to the
+    // last thread's reader: a × pressed on one conversation is not a standing
+    // instruction about the next one.
+    setSourcesOpen(null);
     // The thread being written comes back from the parked copy, never from the
     // server: the record has no answer on it yet — the row is only finished
     // when the turn is — so a fetch would replace a half-written answer with
@@ -847,12 +858,23 @@ export default function Ask({
     [turns],
   );
 
+  // Untouched, the pane follows the turn it would be showing: open for a
+  // Developer, shut for an Analyst. A re-explain therefore opens or closes it
+  // by itself when the new answer arrives — which is still the reader's own
+  // click, one step removed.
+  const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
+
   return (
-    // The Sources pane takes a fixed column only when there is room for it;
-    // below that (every iPad in portrait, the 11" in landscape) the thread
-    // has the width, the chips in the text open the sources, and the
-    // per-answer details block still lists them.
-    <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]">
+    // The Sources pane takes a fixed column only when it is open AND there is
+    // room for it; below that (every iPad in portrait, the 11" in landscape)
+    // the thread has the width, the chips in the text open the sources, and
+    // the per-answer details block still lists them.
+    <div
+      className={
+        "grid h-full min-h-0 grid-cols-1" +
+        (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "")
+      }
+    >
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
         <div
@@ -892,9 +914,14 @@ export default function Ask({
           // isolating the column would trap that overlay under the composer.
           className="thin-scroll min-h-0 flex-1 overflow-auto"
         >
-          <div className="max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
+          <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
-                heading starts, both pages' first line on the same rule. */}
+                heading starts, both pages' first line on the same rule. That
+                rule is now a shared cap and a shared centring rather than a
+                shared left edge — every page is 900px wide and centred, so
+                the two first lines land on the same x whatever the window is
+                doing. Change the cap here and change it on Repositories and
+                Shared in the same edit, or the rule quietly stops holding. */}
             {gone && !loading && (
               <div className="max-w-[52ch]" role="alert">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
@@ -945,6 +972,8 @@ export default function Ask({
               actions={actions}
               onOpenSource={showSource}
               onHot={setHot}
+              sourcesOpen={showSources}
+              onToggleSources={() => setSourcesOpen(!showSources)}
               threadKey={openThread}
             />
             <div ref={bottom} />
@@ -965,7 +994,7 @@ export default function Ask({
 
         <form
           onSubmit={submit}
-          className="relative max-w-[900px] bg-bg px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+          className="relative mx-auto max-w-[900px] bg-bg px-4 pt-3 pb-4 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
         >
           {/* The foot of the column, ../loom's way round: the composer is
               opaque and the fade is a strip immediately above it, so prose
@@ -1078,7 +1107,9 @@ export default function Ask({
         </form>
       </div>
 
-      <SourcesPane turns={turns} hot={hot} onOpen={showSource} />
+      {showSources && (
+        <SourcesPane turns={turns} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
+      )}
 
       {viewing && <SourceView source={viewing} onClose={() => setViewing(null)} />}
     </div>

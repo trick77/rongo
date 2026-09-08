@@ -323,6 +323,38 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	if strings.Index(*promptBA, "Audience: business analyst") > strings.Index(*promptBA, "```diagram") {
 		t.Error("the diagram rule comes before the audience block it refers to")
 	}
+	// The shape rules are about the whole answer, so BOTH audiences get them,
+	// and they sit between the audience block and everything conditional: put
+	// last, they would read as rules about whichever special case happened to
+	// be appended.
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		if !strings.Contains(p, "Open with ONE sentence that answers the question") {
+			t.Errorf("the %s prompt does not ask for the answer first", name)
+		}
+		if !strings.Contains(p, "never use a list where two sentences would do") {
+			t.Errorf("the %s prompt permits a list without fencing it", name)
+		}
+		audience := "Audience: business analyst"
+		if name == "DEV" {
+			audience = "Audience: developer"
+		}
+		if strings.Index(p, "Open with ONE sentence") < strings.Index(p, audience) {
+			t.Errorf("the %s shape rules come before the audience block", name)
+		}
+		if strings.Index(p, "Open with ONE sentence") > strings.Index(p, "```diagram") {
+			t.Errorf("the %s shape rules come after the conditional blocks", name)
+		}
+	}
+	// Deliberately no headings: a short answer wearing three of them looks
+	// over-built, and that is a judgement the model gets wrong more often than
+	// it gets the list wrong. answerLanguage names headings for a different
+	// reason — whatever the answer uses is written in the reader's language —
+	// so what is asserted here is that nothing asks for one to be emitted.
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		if strings.Contains(p, "###") {
+			t.Errorf("the %s prompt asks for headings; they were left out on purpose", name)
+		}
+	}
 }
 
 func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {
