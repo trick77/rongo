@@ -344,6 +344,7 @@ export default function ThreadView({
                       repos={turn.clarification.candidates.map((c) => ({
                         repo: c.repo,
                         branch: c.branch,
+                        members: c.members,
                       }))}
                       narrowedTo={turn.narrowedTo}
                       onAsk={(repos) => narrowTo(i, repos)}

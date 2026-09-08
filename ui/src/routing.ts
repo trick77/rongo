@@ -13,7 +13,7 @@
 export type Route =
   | { view: "new" }
   | { view: "thread"; id: string }
-  | { view: "repos" }
+  | { view: "projects" }
   | { view: "shared" }
   /** The public page. Never rendered inside the app — see main.tsx. */
   | { view: "share"; token: string };
@@ -40,7 +40,7 @@ export function routeFromPath(path: string): Route {
     const token = decodeURIComponent(path.slice(sharePrefix.length));
     if (token !== "") return { view: "share", token };
   }
-  if (path === "/repos") return { view: "repos" };
+  if (path === "/projects") return { view: "projects" };
   if (path === "/shared") return { view: "shared" };
   return { view: "new" };
 }
@@ -56,8 +56,8 @@ export function pathForRoute(route: Route): string {
   switch (route.view) {
     case "thread":
       return threadPrefix + encodeURIComponent(route.id);
-    case "repos":
-      return "/repos";
+    case "projects":
+      return "/projects";
     case "shared":
       return "/shared";
     case "share":

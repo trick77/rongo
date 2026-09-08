@@ -15,13 +15,13 @@ const repos = [
 ];
 
 describe("Narrow", () => {
-  it("names every repository that matched, not just the ones a card would fit", () => {
+  it("names every project that matched, not just the ones a card would fit", () => {
     strict(<Narrow repos={repos} onAsk={() => {}} />);
 
     for (const r of repos) {
       expect(screen.getByRole("button", { name: new RegExp(r.repo) })).toBeTruthy();
     }
-    expect(screen.getByText(/5 repositories/)).toBeTruthy();
+    expect(screen.getByText(/5 projects/)).toBeTruthy();
   });
 
   it("offers no way to answer across all of them", () => {
