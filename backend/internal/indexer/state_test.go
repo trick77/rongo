@@ -342,6 +342,44 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	}
 }
 
+func TestActive_dropsAnEdgeToADisabledSibling(t *testing.T) {
+	// The edge is still declared, and All still reports it. Active is what the
+	// page and the prompt are built from, and neither carries the disabled
+	// repository, so an arrow to it would point at nothing.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop-backend", CloneURL: "file:///b", Enabled: false, Project: "shop", Kind: "backend"},
+		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
+			Kind: "ui", Uses: []string{"shop-backend"}},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// When
+	active, err := s.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active() err = %v", err)
+	}
+
+	// Then
+	if len(active) != 1 || active[0].Name != "shop-ui" {
+		t.Fatalf("Active() = %+v, want only shop-ui", active)
+	}
+	if got := active[0].Uses; len(got) != 0 {
+		t.Errorf("shop-ui.Uses = %v, want empty while shop-backend is disabled", got)
+	}
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All() err = %v", err)
+	}
+	for _, r := range all {
+		if r.Name == "shop-ui" && (len(r.Uses) != 1 || r.Uses[0] != "shop-backend") {
+			t.Errorf("All() shop-ui.Uses = %v, want the edge still declared", r.Uses)
+		}
+	}
+}
+
 func TestSyncSpecs_replacesUsesRatherThanAppending(t *testing.T) {
 	// A repository that drops an edge must stop declaring it, or the Projects
 	// page keeps drawing an arrow that no longer exists — the same reason

@@ -754,6 +754,7 @@ type ladder struct {
 	candidates     int
 	capped         int
 	repos          int
+	projects       int
 	named          int
 	allRepos       bool
 	spans          bool
@@ -772,10 +773,11 @@ type ladder struct {
 // rank records what the grouping rung produced. The two scores are logged raw
 // beside the margin: "dominates false" says the leader was not far enough
 // ahead, and only the numbers say by how little.
-func (l *ladder) rank(rk Ranked, namedRepos []string, allRepos bool, margin float64) {
+func (l *ladder) rank(rk Ranked, namedRepos []string, allRepos bool, margin float64, pm projects.Map) {
 	l.candidates = len(rk.All)
 	l.capped = len(rk.Capped)
 	l.repos = distinctRepos(rk.All)
+	l.projects = distinctProjects(rk.All, pm)
 	l.named = len(namedRepos)
 	l.allRepos = allRepos
 	if len(rk.All) > 0 {
@@ -809,6 +811,7 @@ func (l ladder) log(ctx context.Context, margin float64, ask bool) {
 		"candidates", l.candidates,
 		"capped", l.capped,
 		"repos", l.repos,
+		"projects", l.projects,
 		"named", l.named,
 		"all_repos", l.allRepos,
 		"spans", l.spans,
@@ -872,7 +875,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Decision{}, l, err
 	}
-	l.rank(ranked, namedRepos, allRepos, r.margin)
+	l.rank(ranked, namedRepos, allRepos, r.margin, pm)
 	// Named a repository, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
 	// can change the outcome and none is worth a query or a model call.
