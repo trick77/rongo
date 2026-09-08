@@ -8,13 +8,19 @@ RUN npm run build
 
 # --- Stage 2: build the binary ---------------------------------------------
 FROM golang:1.26-alpine AS build
+# The release passes the tag it is about to create. It cannot be read out of git
+# here: the tag is written only after the image push succeeds, so a describe
+# inside the build would name the previous release.
+ARG VERSION=dev
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
 # The SPA lands in the embed directory before the Go build reads it.
 COPY --from=ui /backend/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/rongo ./cmd/rongo
+RUN CGO_ENABLED=0 go build \
+      -ldflags="-s -w -X github.com/trick77/rongo/internal/version.Version=${VERSION}" \
+      -o /out/rongo ./cmd/rongo
 
 # --- Stage 3: runtime -------------------------------------------------------
 # Deliberately NOT distroless: rongo shells out to git, ripgrep and

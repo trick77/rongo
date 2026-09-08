@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/rongo/internal/version"
 	"github.com/trick77/rongo/web"
 )
 
@@ -221,9 +222,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// The version rides on the session request rather than an endpoint of its
+	// own: it is chrome the UI wants before its first render, and this is the
+	// one call it already makes there.
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"subject":  u.Subject,
 		"email":    u.Email,
 		"is_admin": u.IsAdmin,
+		"version":  version.Version,
 	})
 }

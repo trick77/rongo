@@ -89,6 +89,10 @@ jobs:
           file: ./backend/Containerfile
           push: true
           platforms: linux/amd64
+          # Stamped into the binary and shown in the UI's footer. Passed in
+          # because the tag below does not exist yet at build time.
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}
             ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.major }}.${{ steps.ver.outputs.minor }}

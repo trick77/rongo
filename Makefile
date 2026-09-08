@@ -1,5 +1,10 @@
 .PHONY: build test coverage backend-coverage fe-build fe-test fe-coverage run dev tidy
 
+# Stamped into the binary and shown in the composer's footer. "dev" is the
+# honest answer for a local build, and the UI drops the version sentence for
+# it; a release passes the tag it is about to create (release.yaml).
+VERSION ?= dev
+
 tidy:
 	cd backend && go mod tidy
 
@@ -47,7 +52,9 @@ fe-build:
 	cd ui && npm ci && npm run build
 
 build: fe-build
-	cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../bin/rongo ./cmd/rongo
+	cd backend && CGO_ENABLED=0 go build \
+		-ldflags="-s -w -X github.com/trick77/rongo/internal/version.Version=$(VERSION)" \
+		-o ../bin/rongo ./cmd/rongo
 
 run:
 	cd backend && go run ./cmd/rongo

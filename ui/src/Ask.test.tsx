@@ -2419,3 +2419,58 @@ describe("Ask, turns written before the head link existed", () => {
     expect(screen.getByText("Re-explained · Analyst")).toBeTruthy();
   });
 });
+
+describe("the composer's own box", () => {
+  const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
+
+  // The regression this keeps out: the form is a flex item, and a flex item
+  // with an auto cross-axis margin loses align-items: stretch, so mx-auto
+  // without w-full shrink-wraps the composer to the width of its controls.
+  it("fills the column it is centred in", () => {
+    const { container } = strict(<Ask />);
+
+    const form = container.querySelector("form");
+    expect(form?.className).toContain("mx-auto");
+    expect(form?.className).toContain("w-full");
+    expect(form?.className).toContain("max-w-[900px]");
+  });
+
+  it("says which build answered, under the composer", () => {
+    strict(<Ask version="0.0.77" />);
+
+    expect(screen.getByText(/Rongo can be wrong\. You're talking to Rongo v0\.0\.77\./)).toBeTruthy();
+  });
+
+  // An unstamped binary, and the session App fabricates when /api/me cannot be
+  // reached: the caveat still stands, the version does not.
+  it.each(["", "dev"])("drops the version sentence for %o", (version) => {
+    strict(<Ask version={version} />);
+
+    expect(screen.getByText("Rongo can be wrong.")).toBeTruthy();
+    expect(screen.queryByText(/You're talking to/)).toBeNull();
+  });
+
+  // Role and language sit on one row and have to read as one control drawn
+  // twice: the same pill box, the same type, the same touch-screen size.
+  it("draws the language pill as the role toggle's twin", () => {
+    const { container } = strict(<Ask />);
+
+    const role = container.querySelector("fieldset");
+    const language = screen.getByText("Answer language").closest("label");
+    const select = screen.getByLabelText("Answer language");
+    for (const cls of ["rounded-full", "border", "border-border", "bg-bg", "p-0.5"]) {
+      expect(role?.className).toContain(cls);
+      expect(language?.className).toContain(cls);
+    }
+    // No fixed height on the pill: both are sized by the text inside them, so
+    // they agree at every breakpoint and on a touch screen.
+    expect(language?.className).not.toContain("h-9");
+    expect(language?.className).not.toContain("h-8");
+    for (const cls of ["py-1", "font-medium", "pointer-coarse:text-base"]) {
+      expect(role?.querySelector("button")?.className).toContain(cls);
+      expect(select.className).toContain(cls);
+    }
+    expect(role?.querySelector("button")?.className).toContain("text-xs");
+    expect(language?.className).toContain("text-xs");
+  });
+});
