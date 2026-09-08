@@ -152,19 +152,37 @@ func trimAll(in []string) []string {
 // validateProjects enforces the three rules that need the whole list.
 func validateProjects(specs []Spec) error {
 	project := make(map[string]string, len(specs)) // repository -> its project
+	size := make(map[string]int, len(specs))       // project -> how many repositories
 	for _, s := range specs {
 		project[s.Name] = s.Project
+		size[s.Project]++
 	}
 
 	// A project name shares one namespace with repository names, because a card
 	// button carries one of each. Naming a project after a repository that is
 	// NOT its member makes that button mean two things. Naming it after its own
 	// only member is the ordinary single-repository setup and is fine.
+	//
+	// Its own member is NOT enough once the project has a second one. The name
+	// then resolves to both the repository and the whole product, so naming the
+	// repository expands the search to its siblings: a thread that widens,
+	// which is the one thing the funnel forbids. Rejected here rather than
+	// disambiguated later, because there is no signal that could disambiguate
+	// it — the reader typed one word for two things.
 	for _, s := range specs {
-		if p, ok := project[s.Project]; ok && p != s.Project {
+		p, ok := project[s.Project]
+		if !ok {
+			continue
+		}
+		if p != s.Project {
 			return fmt.Errorf(
 				"%s: project %q is also the name of a repository that is not in it — project and repository names share one namespace",
 				s.Name, s.Project)
+		}
+		if size[s.Project] > 1 {
+			return fmt.Errorf(
+				"%s: project %q is also the name of one of its own repositories and has %d of them — that name would mean both, and naming the repository would widen the search to its siblings",
+				s.Name, s.Project, size[s.Project])
 		}
 	}
 

@@ -724,6 +724,29 @@ func TestReexplainAnswersFromStoredSourcesWithoutSearchingOrGathering(t *testing
 	}
 }
 
+// TestReexplainRebuildsTheProjectStructure: Scope.Structure is never
+// persisted, so a re-explain that did not rebuild it would answer the same
+// question from the same sources with the structure block gone — present when
+// the reader first asked, missing the moment they flip the answer to another
+// audience.
+func TestReexplainRebuildsTheProjectStructure(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	p := NewPipeline(c, &fakeSearch{},
+		NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}),
+		&fakeRouter{projects: shopMap(t)})
+
+	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
+		[]Source{{ChunkID: 1, Repo: "shop-ui", Path: "a.ts", Text: "export {}", StartLine: 1, EndLine: 1}},
+		Scope{Known: []string{"shop-backend", "shop-events", "shop-ui"}}, Events{})
+	if err != nil {
+		t.Fatalf("reexplain: %v", err)
+	}
+
+	if !strings.Contains(*prompt, `Project "shop" is one product`) {
+		t.Errorf("a re-explained turn must carry the structure block too:\n%s", *prompt)
+	}
+}
+
 func TestReexplainRefusesWhenNothingIsLeftToAnswerFrom(t *testing.T) {
 	// A re-index can remove a chunk. Answering the same question from
 	// different code would be a silent substitution — exactly what the

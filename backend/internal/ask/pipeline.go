@@ -345,9 +345,21 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 	}
 	scope.Projects = pm.Covered(scope.Known)
 	var ps []projects.Project
+	accounted := map[string]bool{}
 	for _, name := range scope.Projects {
-		if pr, ok := pm.Project(name); ok {
-			ps = append(ps, pr)
+		pr, ok := pm.Project(name)
+		if !ok {
+			continue
+		}
+		ps = append(ps, pr)
+		for _, m := range pr.Members {
+			accounted[m.Name] = true
+		}
+	}
+	scope.Loose = nil
+	for _, r := range scope.Known {
+		if !accounted[r] {
+			scope.Loose = append(scope.Loose, r)
 		}
 	}
 	scope.Structure = StructureBlock(ps)
@@ -548,5 +560,10 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	}
 
 	ev.status("answering")
+	// Rebuilt here too. Structure is never persisted, so a re-explain that
+	// skipped this would answer the same question from the same sources with
+	// the project structure missing — the two-backends disambiguation present
+	// in the first answer and gone from the second.
+	scope = p.describeProjects(ctx, scope)
 	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
 }

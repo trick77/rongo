@@ -468,6 +468,20 @@ type Scope struct {
 	// project asked about that repository, so a partial cover counts for
 	// nothing and the turn behaves exactly as it did before projects existed.
 	Projects []string `json:"projects,omitempty"`
+	// Loose are the repositories in Known that no fully covered project
+	// accounts for: a second product the reader named only part of.
+	//
+	// It is what keeps the project rule from swallowing a real comparison.
+	// "How does shop differ from loom-core" covers shop whole and loom not at
+	// all, so Projects holds one name while the sources in front of the model
+	// come from two products. Answered as one product it would be answered as
+	// one mechanism, with nothing telling the model to cover both sides or to
+	// say which claim came from which. With anything loose the turn falls back
+	// to the repository-grained comparison it had before projects existed.
+	//
+	// Derived per turn like Structure, and never persisted for the same
+	// reason: it is a fact about the current repos.yaml, not about the turn.
+	Loose []string `json:"-"`
 	// Structure is the project structure block for the answer prompt: which
 	// repository plays which part, and which calls which.
 	//
@@ -770,12 +784,24 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// more projects still compare, and the rule names those rather than the
 	// repositories underneath, because products are what the reader asked
 	// about.
-	if len(scope.Projects) == 1 {
+	//
+	// Both project branches need Known to hold nothing BUT those projects.
+	// One project covered whole beside half of another is two products in
+	// front of the model, and naming only the covered one would tell it to
+	// cover a set smaller than what it was given.
+	switch {
+	case len(scope.Loose) > 0:
+		if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+			system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+		}
+	case len(scope.Projects) == 1:
 		// Nothing: one product, answered as one mechanism.
-	} else if len(scope.Projects) >= 2 {
+	case len(scope.Projects) >= 2:
 		system += fmt.Sprintf(answerCompareProjects, strings.Join(scope.Projects, ", "))
-	} else if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
-		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+	default:
+		if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+			system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+		}
 	}
 	// What each repository in the project is for, and which calls which. Only
 	// the turn's own projects reach it, so a pin that excludes a repository

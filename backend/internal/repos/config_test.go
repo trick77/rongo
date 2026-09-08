@@ -313,6 +313,30 @@ repositories:
 	}
 }
 
+func TestLoad_rejectsAProjectNamedAfterOneOfSeveralMembers(t *testing.T) {
+	// Given: "shop" is both a repository and the product holding it. Naming the
+	// repository would expand the search to shop-ui, so a thread that named the
+	// narrower thing would widen — the one move the funnel forbids. A project of
+	// one keeps the same name legitimately, which is why the count decides.
+	path := writeYAML(t, `
+repositories:
+  - name: shop
+    clone_url: https://forge.example.invalid/acme/shop.git
+    project: shop
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: shop
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for a multi-repository project named after one of its own")
+	}
+}
+
 func TestLoad_rejectsUsesOutsideTheProject(t *testing.T) {
 	// Given: uses is an edge inside one product. Coupling across products is
 	// repo_deps' business, read from a manifest rather than declared by hand.

@@ -68,6 +68,30 @@ func TestOneProjectIsNotAComparisonOfItsOwnRepositories(t *testing.T) {
 	}
 }
 
+// TestAProjectBesideALooseRepositoryIsStillAComparison: covering one product
+// whole does not make the turn one product. "How does shop differ from
+// loom-core" puts sources from two products in front of the model, and
+// answering it as one mechanism drops the instruction to cover both sides.
+func TestAProjectBesideALooseRepositoryIsStillAComparison(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does shop differ from rongo?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Loose: []string{"rongo"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	// Repository-grained, not project-grained: the loose half is a repository,
+	// and naming only the covered project would tell the model to cover a set
+	// smaller than what it was given.
+	if !strings.Contains(*prompt, "The question names these repositories") {
+		t.Errorf("a half-covered second product must still compare:\n%s", *prompt)
+	}
+	if strings.Contains(*prompt, "The question names these projects") {
+		t.Errorf("only one project is covered whole, so the project rule must not fire:\n%s", *prompt)
+	}
+}
+
 func TestTwoProjectsStillCompare_AndByProjectName(t *testing.T) {
 	// Two products named is still a comparison, and the reader asked about
 	// products: the rule names those rather than the repositories underneath.
