@@ -139,6 +139,12 @@ func NewAnswerer(c *llm.Client) *Answerer {
 // answerCommon takes the language name as its one format argument. Only the
 // answer is written in that language: source paths, symbols and the markers
 // are quoted as they are.
+//
+// The last rule is there because "every statement carries its marker" has a
+// reading that turns on itself: an off-corpus question is refused, the refusal
+// says the sources are about something else, and that claim rests on all of
+// them. One turn came back with every one of its 58 gathered sources in a
+// single bracket run.
 const answerCommon = `You explain code. Write the answer in %s.
 
 You are given numbered sources. The rules, without exception:
@@ -160,7 +166,11 @@ You are given numbered sources. The rules, without exception:
   sources.
 - Only use markers that exist. An invented number is worse than no marker.
 - One marker per bracket: a claim resting on two sources reads [1][2], never
-  [1, 2].`
+  [1, 2].
+- A statement about the sources as a whole - what they cover, what they are
+  silent about, that a topic is absent from them - is not a claim any one
+  passage makes. It carries no marker, or at most three that stand as
+  examples. Never enumerate the sources to prove they are unrelated.`
 
 // answerLanguage closes the system prompt. Identifiers stay as they are: a
 // translated function name is a name that does not exist.

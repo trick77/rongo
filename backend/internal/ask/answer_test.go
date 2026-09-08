@@ -368,3 +368,64 @@ func TestAnswer_aCutAnswerWithNoTextIsStillAnError(t *testing.T) {
 		t.Fatalf("err = %v, want the length failure surfaced", err)
 	}
 }
+
+func TestAnswer_theCorpusWideMarkerRuleReachesBothPrompts(t *testing.T) {
+	// An off-corpus question ("should I buy shares?") is refused correctly, and
+	// the refusal's one claim is about the source set as a whole. Read against
+	// "every statement carries its marker" alone, that claim wants every marker
+	// there is: one turn came back with all 58 gathered sources enumerated in a
+	// single bracket run. The rule that a claim about the sources is not a
+	// claim any passage makes is what stops it, and it belongs to both roles.
+	cBA, promptBA, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	cDev, promptDev, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(cDev).Answer(context.Background(), "How?", AudienceDev, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		if !strings.Contains(p, "about the sources as a whole") {
+			t.Errorf("the %s prompt never says a claim about the source set is not a passage's claim", name)
+		}
+		if !strings.Contains(p, "Never enumerate the sources to prove they are unrelated") {
+			t.Errorf("the %s prompt does not forbid enumerating the sources", name)
+		}
+	}
+}
+
+func TestAnswer_aRefusalThatEnumeratesEveryMarkerIsStillResolved(t *testing.T) {
+	// The rule above is a prompt change, and a prompt is a request. A model
+	// that ignores it and enumerates the corpus anyway must still produce a
+	// correct record: every marker resolves, in first-use order, with nothing
+	// invented and nothing dropped. This is the guard, not an assertion that
+	// the model obeys.
+	sources := make([]Source, 58)
+	for i := range sources {
+		sources[i] = Source{
+			ChunkID: int64(i + 1), Repo: "netra", Branch: "master",
+			Path:      fmt.Sprintf("internal/hub/read/file%d.go", i+1),
+			StartLine: 1, EndLine: 10, Text: "package read", Reason: "hit",
+		}
+	}
+	var run strings.Builder
+	for i := 1; i <= len(sources); i++ {
+		fmt.Fprintf(&run, "[%d]", i)
+	}
+	c, _, _ := streamUpstream(t, "There is no information about shares here", run.String(), ".")
+
+	got, err := NewAnswerer(c).Answer(context.Background(), "Should I buy shares?", AudienceBA, LanguageEN, sources, Scope{}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if len(got.Citations) != len(sources) {
+		t.Fatalf("citations = %d, want all %d markers resolved", len(got.Citations), len(sources))
+	}
+	for i, cit := range got.Citations {
+		if cit.Marker != i+1 || cit.Path != sources[i].Path {
+			t.Fatalf("citation %d = %+v, want marker %d on %s", i, cit, i+1, sources[i].Path)
+		}
+	}
+}
