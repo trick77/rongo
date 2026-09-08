@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Chevron } from "./icons";
 
-/** One repository the question matched, as the SSE event and the stored
- * thread both send it. The panel has no titles and no summaries: nothing was
- * named by a model, because the names were already known. */
+/** One project the question matched, as the SSE event and the stored thread
+ * both send it. The panel has no titles and no summaries: nothing was named by
+ * a model, because the names were already known. */
 export type NarrowRepo = {
   repo: string;
   branch: string;
+  /** The repositories behind a project of more than one, so the pill can say
+   * what picking it will search. Absent on a project of one, whose single
+   * repository is already the name on the pill. */
+  members?: string[];
 };
 
 /** How many repositories the reader may take at once. The same number the
@@ -96,11 +100,11 @@ export default function Narrow({
       {open && (
         <div className="px-4 pb-4">
           <p className="m-0 mb-3 max-w-[70ch] text-sm text-muted">
-            <span className="font-medium text-ink-dim">{repos.length} repositories</span> match this
+            <span className="font-medium text-ink-dim">{repos.length} projects</span> match this
             question about equally well.{" "}
             {readOnly
               ? "The question was too broad to answer from any one of them."
-              : `Pick the ones you meant — at most ${maxPicked} — or ask again with a repository name in your question.`}
+              : `Pick the ones you meant — at most ${maxPicked} — or ask again with a project name in your question.`}
           </p>
           <ul className="m-0 mb-3 flex list-none flex-wrap gap-2 p-0">
             {repos.map((r) => {
@@ -125,7 +129,11 @@ export default function Narrow({
                     }
                   >
                     <span>{r.repo}</span>
-                    <span className="text-faint">{r.branch}</span>
+                    {r.members && r.members.length > 1 ? (
+                      <span className="font-sans text-faint">{r.members.length} repos</span>
+                    ) : (
+                      <span className="text-faint">{r.branch}</span>
+                    )}
                   </button>
                 </li>
               );

@@ -32,6 +32,14 @@ type RepoState struct {
 	LastRunAt time.Time
 	Files     int
 	Chunks    int
+	// Project, Kind, Description and Uses come from repos.yaml, not from the
+	// checkout: they say which product this repository belongs to and what part
+	// it plays in it. Nothing here is derived from code, and none of it is ever
+	// embedded, indexed or cited.
+	Project     string
+	Kind        string
+	Description string
+	Uses        []string
 }
 
 // StateStore reads and writes repo_state.
@@ -88,8 +96,8 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]strin
 			enabled = 1
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, project, kind, description)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				clone_url = excluded.clone_url,
 				-- An omitted branch: means "the remote's default", which is
@@ -115,10 +123,33 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]strin
 					WHEN repo_state.clone_url <> excluded.clone_url THEN ''
 					ELSE repo_state.branch END,
 				enabled   = excluded.enabled,
-				token_env = excluded.token_env`,
+				token_env = excluded.token_env,
+				-- Structure is copied over unconditionally, and deliberately
+				-- NOT next to the branch rule above: it is written by hand in
+				-- repos.yaml and never resolved from a remote, so there is no
+				-- recorded value an empty YAML field could wipe. Editing any of
+				-- it leaves last_sha and the checkout alone — a structure edit
+				-- says what a repository is for, not what is in it.
+				project     = excluded.project,
+				kind        = excluded.kind,
+				description = excluded.description`,
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv,
+			spec.Project, spec.Kind, spec.Description,
 		); err != nil {
 			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
+		}
+
+		// Replace rather than insert, for repodeps.Sync's reason: a repository
+		// that drops an edge must stop declaring it, or the Projects page goes
+		// on drawing an arrow that no longer exists.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM repo_uses WHERE repo = ?`, spec.Name); err != nil {
+			return nil, fmt.Errorf("clear repo_uses for %s: %w", spec.Name, err)
+		}
+		for _, u := range spec.Uses {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT OR IGNORE INTO repo_uses (repo, uses) VALUES (?, ?)`, spec.Name, u); err != nil {
+				return nil, fmt.Errorf("insert repo_uses for %s: %w", spec.Name, err)
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -215,40 +246,23 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 
 // Active lists the repositories currently in the list and enabled.
 func (s *StateStore) Active(ctx context.Context) ([]RepoState, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       file_count, chunk_count, token_env
-		FROM repo_state WHERE enabled = 1 ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []RepoState
-	for rows.Next() {
-		var r RepoState
-		var enabled int
-		var lastRun string
-		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
-			&r.LastError, &lastRun, &r.Files, &r.Chunks, &r.TokenEnv); err != nil {
-			return nil, err
-		}
-		r.Enabled = enabled == 1
-		if lastRun != "" {
-			r.LastRunAt, _ = time.Parse(time.RFC3339, lastRun)
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return s.states(ctx, `WHERE enabled = 1`)
 }
 
 // All lists every repository, active or not, for the Repos status page. A
 // deactivated repository still has an index and still deserves to be visible.
 func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
+	return s.states(ctx, "")
+}
+
+// states is Active and All less their one differing word. They read the same
+// nine columns plus the structure and attach the same edges, and keeping two
+// copies of that is how one of them ends up a column behind the other.
+func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       file_count, chunk_count, token_env
-		FROM repo_state ORDER BY name`)
+		       file_count, chunk_count, token_env, project, kind, description
+		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +274,8 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 		var enabled int
 		var lastRun string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
-			&r.LastError, &lastRun, &r.Files, &r.Chunks, &r.TokenEnv); err != nil {
+			&r.LastError, &lastRun, &r.Files, &r.Chunks, &r.TokenEnv,
+			&r.Project, &r.Kind, &r.Description); err != nil {
 			return nil, err
 		}
 		r.Enabled = enabled == 1
@@ -269,7 +284,48 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.attachUses(ctx, out)
+}
+
+// attachUses reads every edge in one query and hands each repository its own.
+// One query rather than one per repository: repo_uses holds a handful of rows
+// for a handful of repositories, and Active is called on every poll.
+//
+// Edges are read for the WHOLE table even when the caller asked only for the
+// enabled repositories, then dropped for anything not in the result. A disabled
+// sibling is still a declared edge, but it is not on the page or in the prompt,
+// so pointing at it would draw an arrow to nothing.
+func (s *StateStore) attachUses(ctx context.Context, states []RepoState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	at := make(map[string]int, len(states))
+	for i, r := range states {
+		at[r.Name] = i
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT repo, uses FROM repo_uses ORDER BY repo, uses`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var repo, uses string
+		if err := rows.Scan(&repo, &uses); err != nil {
+			return err
+		}
+		i, ok := at[repo]
+		if !ok {
+			continue
+		}
+		if _, ok := at[uses]; !ok {
+			continue
+		}
+		states[i].Uses = append(states[i].Uses, uses)
+	}
+	return rows.Err()
 }
 
 // MarkIndexed records a successful run and clears any previous error, so a

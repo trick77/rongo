@@ -1,0 +1,14 @@
+-- What a project entry on a card actually offered: the repositories folded
+-- into it, as a JSON array.
+--
+-- Stored rather than looked up again when the reader chooses. A project can
+-- gain a member in repos.yaml between the card being drawn and the button being
+-- pressed, and re-resolving would then answer from a repository the card never
+-- offered — widening the reader's own choice behind their back, which is the
+-- substitution the whole resume path exists to prevent.
+--
+-- Empty on a module entry, and empty on any card stored before this shipped. A
+-- failed turn leaves its card open for a retry, so such a card can still be
+-- resumed after a deploy: an empty value means the single repository in `repo`,
+-- which is exactly what it meant when it was drawn.
+ALTER TABLE clarification_candidates ADD COLUMN members TEXT NOT NULL DEFAULT '';

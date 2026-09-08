@@ -2,6 +2,7 @@ package retrieve
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 )
 
@@ -150,5 +151,114 @@ func TestResolveReposOnNoNamesIsNoRestriction(t *testing.T) {
 	}
 	if len(known) != 0 || len(unknown) != 0 {
 		t.Errorf("known = %v, unknown = %v, want both empty", known, unknown)
+	}
+}
+
+// addMember inserts a repository that belongs to a project.
+func addMember(t *testing.T, db *sql.DB, name, project string) {
+	t.Helper()
+	if _, err := db.Exec(
+		`INSERT INTO repo_state (name, clone_url, branch, project) VALUES (?,?,?,?)`,
+		name, "file:///"+name, "master", project); err != nil {
+		t.Fatalf("insert %s: %v", name, err)
+	}
+}
+
+func TestResolveReposExpandsAProjectNameToItsMembers(t *testing.T) {
+	// "How does checkout work in Shop?" — the reader named the product, which
+	// is the name an Analyst actually knows. It resolves to every repository
+	// the product is made of.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	addMember(t, db, "shop-ui", "shop")
+	addMember(t, db, "legacy-crm", "legacy-crm")
+	r := New(db, nil)
+
+	known, unknown, err := r.ResolveRepos(context.Background(), []string{"shop"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 2 || !contains(known, "shop-backend") || !contains(known, "shop-ui") {
+		t.Errorf("known = %v, want both of shop's repositories", known)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want empty — shop is a project the index carries", unknown)
+	}
+}
+
+func TestResolveReposReadsAProjectNameOutOfTheQuestion(t *testing.T) {
+	// The guess is allowed to miss, and the reader's own words are the
+	// narrowest signal there is — the same union knownRepos already applies to
+	// repository names.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	addMember(t, db, "shop-ui", "shop")
+	r := New(db, nil)
+
+	known, _, err := r.ResolveRepos(context.Background(), nil, "wie funktioniert der Checkout im shop?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 2 {
+		t.Errorf("known = %v, want the project's repositories", known)
+	}
+}
+
+func TestResolveReposKeepsNamingAMemberNarrow(t *testing.T) {
+	// A project is the default unit, not a floor. Someone who names one
+	// repository asked about that repository, and a follow-up inside a
+	// project-pinned thread has to be able to narrow — a thread narrows, never
+	// widens.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	addMember(t, db, "shop-ui", "shop")
+	r := New(db, nil)
+
+	known, _, err := r.ResolveRepos(context.Background(), []string{"shop-ui"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 1 || known[0] != "shop-ui" {
+		t.Errorf("known = %v, want shop-ui alone", known)
+	}
+}
+
+func TestResolveReposReportsAProjectTheIndexDoesNotCarry(t *testing.T) {
+	// Said out loud, the same way an unknown repository is: dropped from the
+	// search, named in the notice, and the prompt forbidden to claim anything
+	// about it.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(), []string{"warehouse"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "warehouse" {
+		t.Errorf("unknown = %v, want the project nothing carries", unknown)
+	}
+}
+
+func TestResolveReposDoesNotReadACommonWordProjectOutOfAQuestion(t *testing.T) {
+	// commonWords exists so a repository called "backend" does not narrow every
+	// question that says the word. A project named one of them is guess-only
+	// for exactly the same reason, and the guard is the same guard.
+	db := testDB(t)
+	addMember(t, db, "svc-a", "backend")
+	addMember(t, db, "svc-b", "backend")
+	r := New(db, nil)
+
+	known, _, err := r.ResolveRepos(context.Background(), nil, "how does the backend read its config?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 0 {
+		t.Errorf("known = %v, want no restriction: 'backend' is a common word, not a narrowing", known)
 	}
 }

@@ -7,7 +7,7 @@ import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
 import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
 
-type Page = "ask" | "repos" | "shared";
+type Page = "ask" | "projects" | "shared";
 
 type Me = { subject: string; email: string; is_admin: boolean; version: string };
 
@@ -176,7 +176,7 @@ export default function App() {
   // phone left the thread 90px. Not a route: it is not somewhere you are, and
   // Back must close a thread rather than a drawer.
   const [navOpen, setNavOpen] = useState(false);
-  const page: Page = route.view === "repos" || route.view === "shared" ? route.view : "ask";
+  const page: Page = route.view === "projects" || route.view === "shared" ? route.view : "ask";
   const threadId = route.view === "thread" ? route.id : null;
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
@@ -346,9 +346,9 @@ export default function App() {
                 </span>
               )}
             </>
-          ) : page === "repos" ? (
+          ) : page === "projects" ? (
             <>
-              <span className="font-serif text-[19px] font-medium text-accent-strong">Repos</span>
+              <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
               <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
             </>
           ) : (
@@ -422,12 +422,12 @@ export default function App() {
             </button>
             <button
               type="button"
-              aria-current={page === "repos" ? "page" : undefined}
+              aria-current={page === "projects" ? "page" : undefined}
               onClick={() => {
-                go({ view: "repos" });
+                go({ view: "projects" });
                 setNavOpen(false);
               }}
-              className={railRow + " " + (page === "repos" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+              className={railRow + " " + (page === "projects" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
             >
               {/* The same 20px slot as the plus disc above. The Icon glyph is
                   text, so its box is whatever advance width the font gives it
@@ -436,7 +436,7 @@ export default function App() {
               <span className="grid h-5 w-5 shrink-0 place-items-center">
                 <Icon name="code" size="21px" className="text-ink-dim" />
               </span>
-              Repos
+              Projects
             </button>
             {/* The audit view for the links this reader has handed out. Under
                 Repos rather than in a settings modal Rongo does not have: a
@@ -538,18 +538,18 @@ export default function App() {
               }
             />
           </div>
-          {page === "repos" && (
+          {page === "projects" && (
             <div className="h-full overflow-auto">
               <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
                 {/* leading-tight like Ask's welcome heading: without it the
                     taller line box puts this title 3px below the other page's. */}
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  Repositories
+                  Projects
                 </h2>
                 <p className="mt-1 mb-6 text-[14.5px] text-muted">
-                  Read-only. The repository list is maintained in <code className="font-mono">repos.yaml</code>,
-                  and credentials never live in it. A repo that drops out of the file is removed here too,
-                  index and checkout with it.
+                  Read-only. A project is one product and the repositories it is built from; the list is
+                  maintained in <code className="font-mono">repos.yaml</code>, and credentials never live
+                  in it. A repo that drops out of the file is removed here too, index and checkout with it.
                 </p>
                 <RepoList />
               </div>

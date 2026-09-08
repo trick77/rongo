@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -93,7 +94,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 			t.Fatalf("rank %q: %v", q.Text, err)
 		}
 		tn := repoRungTurn{q: q, want: resolutionExpectsAsk(q.Resolution), all: ranked.All, named: len(named)}
-		tn.spansNow = ask.SpansRepos(ranked.All, len(named))
+		tn.spansNow = ask.SpansRepos(ranked.All, len(named), projects.Map{})
 		tn.ratio = secondRepoShare(ranked.All)
 
 		// A question that named its repository is settled above every rung
@@ -177,7 +178,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 				// of this table.
 				related, judged = false, false
 			}
-			got, rung := ask.DecideWhySpans(tn.all, margin, related, judged, tn.named, false, true, live)
+			got, rung := ask.DecideWhySpans(tn.all, margin, related, judged, tn.named, false, true, live, projects.Map{})
 			if got == tn.want {
 				correct++
 				if tn.want {

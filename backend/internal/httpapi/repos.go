@@ -30,11 +30,27 @@ type RepoStatus struct {
 	// vanished upstream above all. A silent stop leaves the index frozen at
 	// months-old code while the page looks healthy.
 	LastError string
+	// Project is the product this repository belongs to, and the unit the page
+	// groups by. Kind, Description and Uses are what it declares about its part
+	// in that product: all four come from repos.yaml, none from the code.
+	Project     string
+	Kind        string
+	Description string
+	Uses        []string
 }
 
 // RepoStatusSource reports the state of every repository rongo knows about.
 type RepoStatusSource interface {
 	RepoStatus(ctx context.Context) ([]RepoStatus, error)
+}
+
+// uses never encodes null: the browser reads it as a list to draw arrows from,
+// and a null there is one more thing every caller has to guard.
+func uses(u []string) []string {
+	if u == nil {
+		return []string{}
+	}
+	return u
 }
 
 func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +84,10 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"modules":     st.Modules,
 			"enabled":     st.Enabled,
 			"last_error":  st.LastError,
+			"project":     st.Project,
+			"kind":        st.Kind,
+			"description": st.Description,
+			"uses":        uses(st.Uses),
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

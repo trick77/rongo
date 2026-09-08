@@ -10,6 +10,10 @@ export type ClarifyCandidate = {
   summary: string;
   repo: string;
   branch: string;
+  /** The repositories behind a project entry, so the reader can see what
+   * choosing it will search. Absent on a module entry and on a project of one,
+   * whose single repository is the name already shown. */
+  members?: string[];
 };
 
 /**

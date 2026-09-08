@@ -143,7 +143,7 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
   });
 
-  it("keeps the running thread when switching to Repos", async () => {
+  it("keeps the running thread when switching to Projects", async () => {
     // Unmounting Ask would drop the answer on screen while the stream keeps
     // writing into a dead component. The stored record only catches up once the
     // turn is finished, so a stream interrupted this way is lost for good.
@@ -151,7 +151,7 @@ describe("App", () => {
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Question"), "A question that has to stay put");
 
-    const repos = screen.getByRole("button", { name: "Repos" });
+    const repos = screen.getByRole("button", { name: "Projects" });
     await user.click(repos);
     expect(repos.getAttribute("aria-current")).toBe("page");
     // With the page nav gone, the rail is the way back: New question here,
@@ -359,7 +359,7 @@ describe("App, the rail on a phone", () => {
 
   // A rail parked off-screen still takes tab stops and still reads to a
   // screen reader: tabbing past the toggle on a phone walked invisibly
-  // through New question, every thread row and Repos. invisible takes it out
+  // through New question, every thread row and Projects. invisible takes it out
   // of both, and lg:visible puts it back where the rail is the layout.
   it("keeps the closed rail out of the tab order and the a11y tree", async () => {
     await renderSignedIn();
@@ -388,12 +388,12 @@ describe("App, the rail on a phone", () => {
     expect(rail().className).toContain("-translate-x-full");
   });
 
-  it("closes on Repos", async () => {
+  it("closes on Projects", async () => {
     await renderSignedIn();
     const user = await openDrawer();
-    await user.click(screen.getByRole("button", { name: "Repos" }));
+    await user.click(screen.getByRole("button", { name: "Projects" }));
     expect(rail().className).toContain("-translate-x-full");
-    await screen.findByRole("heading", { name: "Repositories" });
+    await screen.findByRole("heading", { name: "Projects" });
   });
 
   // The rail rows are disabled mid-turn; the way back to the rail must not be.

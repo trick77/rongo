@@ -11,7 +11,7 @@ describe("routeFromPath", () => {
   });
 
   it("reads the two pages and the share link", () => {
-    expect(routeFromPath("/repos")).toEqual({ view: "repos" });
+    expect(routeFromPath("/projects")).toEqual({ view: "projects" });
     expect(routeFromPath("/shared")).toEqual({ view: "shared" });
     expect(routeFromPath("/share/kd8Qw1rZ")).toEqual({ view: "share", token: "kd8Qw1rZ" });
   });
@@ -40,7 +40,7 @@ describe("routeFromPath", () => {
     for (const route of [
       { view: "new" },
       { view: "thread", id: address },
-      { view: "repos" },
+      { view: "projects" },
       { view: "shared" },
       { view: "share", token: "kd8Qw1rZ" },
     ] as const) {

@@ -1618,3 +1618,47 @@ func TestAsk_theTooBroadPanelIsNotResumableAsACard(t *testing.T) {
 		t.Error("a panel with nothing picked must not reach the pipeline")
 	}
 }
+
+// TestChoosingAProjectSearchesTheMembersTheCardOffered: a card entry is a
+// project, and what it searches is the member list stored WITH it. A fresh
+// lookup would widen the answer whenever a repository joined the project
+// between the card being drawn and the reader choosing it, which is the one
+// thing a thread must never do.
+func TestChoosingAProjectSearchesTheMembersTheCardOffered(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "how does checkout work in $?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "how does checkout work in $?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := store.Clarify(ctx, msg.ID, ask.Clarification{
+		Understanding: ask.Understanding{CodeTerms: []string{"checkout"}},
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master", Title: "Token cost per turn", Summary: "s1"},
+			{Repo: "shop", Title: "Checkout", Summary: "s2", Members: []string{"shop-backend", "shop-ui"}},
+		},
+	}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how does checkout work in $?","clarification_message_id":%d,"choice":1}`, msg.ID))
+
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("a chosen project must produce an answer:\n%s", body)
+	}
+	if len(asker.resumedRepos) != 2 || asker.resumedRepos[0] != "shop-backend" || asker.resumedRepos[1] != "shop-ui" {
+		t.Errorf("resumed over %v, want the two repositories the card offered", asker.resumedRepos)
+	}
+	// The pin is repository names throughout, so the thread's ceiling is the
+	// stored members and not the project name, which no f.repo ever equals.
+	if len(asker.gotScope.Known) != 2 || asker.gotScope.Known[0] != "shop-backend" {
+		t.Errorf("scope.Known = %v, want the stored members", asker.gotScope.Known)
+	}
+}

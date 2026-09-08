@@ -137,14 +137,26 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 	if len(want) == 0 {
 		return known, nil, nil
 	}
-	indexed, err := r.allRepos(ctx)
+	// Both halves of the addressable namespace: a reader may name a repository
+	// or the project it belongs to, and neither is a name the index lacks.
+	repos, project, err := r.reposAndProjects(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	indexed := repos
+	for p := range project {
+		indexed = append(indexed, p)
 	}
 
 	resolved := map[string]bool{}
 	for _, n := range known {
 		resolved[foldRepo(n)] = true
+	}
+	// A project resolves through its MEMBERS, so its own name never appears in
+	// known. Without this line a turn that searched "shop" correctly would
+	// carry a notice saying the index has no repository called shop.
+	for p := range project {
+		resolved[foldRepo(p)] = true
 	}
 	// Walked over want, not over the index: the guess's order is the order the
 	// question used, and a repeated guess must not become two notices.
@@ -164,28 +176,6 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 		unknown = append(unknown, n)
 	}
 	return known, unknown, nil
-}
-
-// allRepos is every repository the index carries. The table has one row per
-// configured repository, so this is a handful of names.
-func (r *Retriever) allRepos(ctx context.Context) ([]string, error) {
-	rows, err := r.store.db.QueryContext(ctx, `SELECT name FROM repo_state`)
-	if err != nil {
-		return nil, fmt.Errorf("read the indexed repositories: %w", err)
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("read the indexed repositories: %w", err)
-		}
-		out = append(out, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read the indexed repositories: %w", err)
-	}
-	return out, nil
 }
 
 // foldRepo normalises a name for comparison: lower case (the column is a TEXT
@@ -275,34 +265,78 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 	if len(want) == 0 && strings.TrimSpace(question) == "" {
 		return nil, nil
 	}
-	rows, err := r.store.db.QueryContext(ctx, `SELECT name FROM repo_state`)
+	known, project, err := r.reposAndProjects(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("resolve repository restriction: %w", err)
-	}
-	defer rows.Close()
-	var known []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("resolve repository restriction: %w", err)
-		}
-		known = append(known, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("resolve repository restriction: %w", err)
+		return nil, err
 	}
 
 	guessed := map[string]bool{}
 	for _, w := range want {
 		guessed[w] = true
 	}
-	var out []string
+
+	// A PROJECT name matched by the same two tests expands to its members.
+	// This is what lets an Analyst narrow at all: they know the product, not
+	// the repositories it is built from. The guards are unchanged — a project
+	// called "backend" or "core" is guess-only, exactly as a repository of that
+	// name already is, because commonWords does not care which of the two a
+	// word happens to be.
+	//
+	// Naming a MEMBER still narrows to that member: the expansion adds to the
+	// restriction, and a question naming only shop-ui never mentions "shop" as
+	// a whole word, so nothing widens it back out.
+	wanted := map[string]bool{}
 	for _, name := range known {
 		if guessed[name] || mentions(question, name) {
+			wanted[name] = true
+		}
+	}
+	for name, members := range project {
+		if guessed[name] || mentions(question, name) {
+			for _, m := range members {
+				wanted[m] = true
+			}
+		}
+	}
+
+	var out []string
+	for _, name := range known {
+		if wanted[name] {
 			out = append(out, name)
 		}
 	}
 	return out, nil
+}
+
+// reposAndProjects reads the repository names and the projects they group into.
+// A project of one is still a project: it is listed, and its own name resolves
+// to its single member, which is the same answer the repository name gives.
+func (r *Retriever) reposAndProjects(ctx context.Context) ([]string, map[string][]string, error) {
+	rows, err := r.store.db.QueryContext(ctx, `SELECT name, project FROM repo_state ORDER BY name`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
+	}
+	defer rows.Close()
+	var known []string
+	project := map[string][]string{}
+	for rows.Next() {
+		var name, p string
+		if err := rows.Scan(&name, &p); err != nil {
+			return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
+		}
+		known = append(known, name)
+		// An empty project can only come from a row written before projects
+		// shipped; repos.Load refuses an entry without one. Grouping those
+		// under "" would make one nameless product of every such repository.
+		if p == "" {
+			p = name
+		}
+		project[p] = append(project[p], name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
+	}
+	return known, project, nil
 }
 
 // minMentionLen is how short a repository name may be and still be read out of

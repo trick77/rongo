@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -34,6 +35,11 @@ type Searcher interface {
 // *Router — so the pipeline can be tested without a database or a model.
 type Routes interface {
 	Route(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error)
+	// Projects is the declared grouping, read fresh per turn. It sits on this
+	// interface rather than on a second dependency because the router already
+	// owns the database handle the pipeline would otherwise need for nothing
+	// else.
+	Projects(ctx context.Context) (projects.Map, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -313,6 +319,53 @@ func intersect(named, pin []string) []string {
 	return out
 }
 
+// describeProjects fills in the two project fields of a scope: which projects
+// this turn covers whole, and the structure block describing them.
+//
+// Only a NARROWED scope gets them. A corpus-wide turn leaves Known empty, and
+// filling Projects with every project would hand the answer prompt the
+// comparison rule on an ordinary question — "cover every one of them, say
+// plainly where they differ" about a corpus the reader never asked to compare.
+// The cost is that a corpus-wide question about a single-project corpus gets no
+// structure block; the block describes the scope a turn is confined to, and
+// that turn is confined to nothing.
+//
+// A failure here is logged and swallowed. The grouping decides how well an
+// answer is phrased, not whether it is correct, and losing a whole turn because
+// repo_uses could not be read would be the worse trade.
+func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
+	if len(scope.Known) == 0 {
+		return scope
+	}
+	pm, err := p.router.Projects(ctx)
+	if err != nil {
+		slog.Warn("projects unavailable, answering without the structure block",
+			"thread", llm.ThreadID(ctx), "err", err)
+		return scope
+	}
+	scope.Projects = pm.Covered(scope.Known)
+	var ps []projects.Project
+	accounted := map[string]bool{}
+	for _, name := range scope.Projects {
+		pr, ok := pm.Project(name)
+		if !ok {
+			continue
+		}
+		ps = append(ps, pr)
+		for _, m := range pr.Members {
+			accounted[m.Name] = true
+		}
+	}
+	scope.Loose = nil
+	for _, r := range scope.Known {
+		if !accounted[r] {
+			scope.Loose = append(scope.Loose, r)
+		}
+	}
+	scope.Structure = StructureBlock(ps)
+	return scope
+}
+
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
 // what the turn has to say about its own footing, and answer under that.
 //
@@ -327,6 +380,8 @@ func intersect(named, pin []string) []string {
 // to report, having searched nothing.
 func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audience Audience, lang Language,
 	hits []retrieve.Hit, scope Scope, terms []string, followingUp string, ev Events) (Answer, error) {
+
+	scope = p.describeProjects(ctx, scope)
 
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
@@ -475,6 +530,8 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		}
 	}
 
+	scope = p.describeProjects(ctx, scope)
+
 	ev.status("gathering")
 	sources, err := p.gatherer.Gather(ctx, hits)
 	if err != nil {
@@ -503,5 +560,10 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	}
 
 	ev.status("answering")
+	// Rebuilt here too. Structure is never persisted, so a re-explain that
+	// skipped this would answer the same question from the same sources with
+	// the project structure missing — the two-backends disambiguation present
+	// in the first answer and gone from the second.
+	scope = p.describeProjects(ctx, scope)
 	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
 }

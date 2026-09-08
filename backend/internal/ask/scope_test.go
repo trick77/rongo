@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -48,6 +49,151 @@ func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	}
 }
 
+// TestOneProjectIsNotAComparisonOfItsOwnRepositories is the collision this
+// change had to resolve. len(Known) >= 2 has always meant "comparison", and a
+// project expands to its members — so without Scope.Projects, every question
+// about a product would be answered as a comparison of its own backend against
+// its own UI, told to "say plainly where they differ".
+func TestOneProjectIsNotAComparisonOfItsOwnRepositories(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if strings.Contains(*prompt, "The question names these repositories") {
+		t.Errorf("one project is one product, not a comparison of its halves:\n%s", *prompt)
+	}
+}
+
+// TestAProjectBesideALooseRepositoryIsStillAComparison: covering one product
+// whole does not make the turn one product. "How does shop differ from
+// loom-core" puts sources from two products in front of the model, and
+// answering it as one mechanism drops the instruction to cover both sides.
+func TestAProjectBesideALooseRepositoryIsStillAComparison(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does shop differ from rongo?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Loose: []string{"rongo"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	// Repository-grained, not project-grained: the loose half is a repository,
+	// and naming only the covered project would tell the model to cover a set
+	// smaller than what it was given.
+	if !strings.Contains(*prompt, "The question names these repositories") {
+		t.Errorf("a half-covered second product must still compare:\n%s", *prompt)
+	}
+	if strings.Contains(*prompt, "The question names these projects") {
+		t.Errorf("only one project is covered whole, so the project rule must not fire:\n%s", *prompt)
+	}
+}
+
+func TestTwoProjectsStillCompare_AndByProjectName(t *testing.T) {
+	// Two products named is still a comparison, and the reader asked about
+	// products: the rule names those rather than the repositories underneath.
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How do shop and legacy-crm differ?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop", "legacy-crm"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "The question names these projects") {
+		t.Fatalf("two projects must still be compared:\n%s", *prompt)
+	}
+	// And under the rule written for products: a project may span several
+	// repositories, and the sources carry repository names the question never
+	// used, so "attribute every claim to the repository" alone would have the
+	// model compare those instead of the products the reader asked about.
+	if !strings.Contains(*prompt, "may span several") {
+		t.Errorf("a project comparison needs its own rule, not the repository one:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "shop, legacy-crm") {
+		t.Errorf("the comparison must name the projects, not their members:\n%s", *prompt)
+	}
+}
+
+func TestNoProjectsMeansTodaysComparison(t *testing.T) {
+	// Nothing declared: the rule fires on the covered repositories exactly as
+	// it did before projects existed. This is the eval's guarantee in one test.
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "peeq, rongo") {
+		t.Errorf("with no project declared the rule still names the repositories:\n%s", *prompt)
+	}
+}
+
+func TestTheStructureBlockReachesThePromptAndIsMarkedConfiguration(t *testing.T) {
+	// The whole reason kind, description and uses exist: with two backends in
+	// one project, only the declared edge says which one the storefront calls.
+	c, prompt, _ := streamUpstream(t, "x")
+	block := StructureBlock([]projects.Project{{
+		Name: "shop",
+		Members: []projects.Repo{
+			{Name: "shop-admin-backend", Kind: "backend", Description: "Internal admin API."},
+			{Name: "shop-backend", Kind: "backend", Description: "Storefront API and checkout."},
+			{Name: "shop-ui", Kind: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
+		},
+	}})
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Structure: block}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "shop-ui uses shop-backend") {
+		t.Errorf("the declared edge must reach the model:\n%s", *prompt)
+	}
+	// The negative half is the disambiguating one: two repositories say
+	// "backend", and only this sentence keeps the admin API out of the answer.
+	if !strings.Contains(*prompt, "shop-admin-backend") {
+		t.Errorf("the members nothing calls must be named too:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "configuration, not code") {
+		t.Errorf("the block must say it is configuration and must not be cited:\n%s", *prompt)
+	}
+}
+
+func TestStructureBlockSaysNothingAboutABareProjectOfOne(t *testing.T) {
+	// rongo's own shape: one repository, no kind, no description, no edges.
+	// Absence takes no marker — there is nothing to tell the model.
+	if got := StructureBlock([]projects.Project{{
+		Name:    "rongo",
+		Members: []projects.Repo{{Name: "rongo"}},
+	}}); got != "" {
+		t.Errorf("StructureBlock = %q, want empty for a project with nothing declared", got)
+	}
+}
+
+func TestStructureBlockOmitsTheConnectionsSectionWhenThereAreNoEdges(t *testing.T) {
+	// Three repositories and no declared edge: "nothing uses any of them" is
+	// noise, and the useful fact is only that they are one product.
+	got := StructureBlock([]projects.Project{{
+		Name: "shop",
+		Members: []projects.Repo{
+			{Name: "a", Kind: "backend"}, {Name: "b", Kind: "ui"}, {Name: "c", Kind: "consumer"},
+		},
+	}})
+
+	if got == "" {
+		t.Fatal("a multi-repository project still tells the model its members are one product")
+	}
+	if strings.Contains(got, "Declared connections") {
+		t.Errorf("no edges means no connections section:\n%s", got)
+	}
+}
+
 func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// Given two candidates too close for the margin, which every later rung
 	// would turn into a card.
@@ -56,7 +202,7 @@ func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// When the question named two indexed repositories.
 	// Then no rung below can reach: the reader asked about both, and a card
 	// would ask them to answer a question they already answered.
-	if Decide(tight, 0.25, false, true, 2, false, true) {
+	if Decide(tight, 0.25, false, true, 2, false, true, projects.Map{}) {
 		t.Error("a question naming two repositories must be answered, not asked about")
 	}
 	// One named repository is the same thing said from the other side: the
@@ -64,12 +210,12 @@ func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// modules — composed, never put back to them as a question. This is the
 	// rung a follow-up rides on too, because a pinned thread arrives here as
 	// one named repository.
-	if Decide(tight, 0.25, false, true, 1, false, true) {
+	if Decide(tight, 0.25, false, true, 1, false, true, projects.Map{}) {
 		t.Error("a question naming one repository must be answered, not asked about")
 	}
 	// Naming none leaves the ladder alone: the judge's card is still real for
 	// the first turn of a thread.
-	if !Decide(tight, 0.25, false, true, 0, false, true) {
+	if !Decide(tight, 0.25, false, true, 0, false, true, projects.Map{}) {
 		t.Error("no named repository must leave the ladder alone")
 	}
 }
@@ -264,7 +410,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	// Everything a person reads follows ask.Language. The notice is read by a
 	// person, and it is templated rather than written by a model.
 	de := ScopeNotice(LanguageDE, Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}})
-	if !strings.Contains(de, "Kein Repository") {
+	if !strings.Contains(de, "Kein Projekt") {
 		t.Errorf("German notice = %q", de)
 	}
 	if strings.Contains(de, "ß") {
@@ -272,7 +418,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	}
 	// An unknown language falls back to English rather than to an empty
 	// string: a missing notice is worse than an English one.
-	if got := ScopeNotice(Language("xx"), Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}}); !strings.Contains(got, "No repository") {
+	if got := ScopeNotice(Language("xx"), Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}}); !strings.Contains(got, "No project") {
 		t.Errorf("fallback notice = %q", got)
 	}
 	// Nothing missing, nothing said.
@@ -281,7 +427,7 @@ func TestScopeNoticeFollowsTheAnswerLanguage(t *testing.T) {
 	}
 	// Nothing named that the index knows: the turn searched everything, and
 	// saying "answered for  alone" would name nothing at all.
-	if got := ScopeNotice(LanguageEN, Scope{Unknown: []string{"loom"}}); !strings.Contains(got, "all indexed repositories") {
+	if got := ScopeNotice(LanguageEN, Scope{Unknown: []string{"loom"}}); !strings.Contains(got, "every indexed project") {
 		t.Errorf("notice = %q, want it to say the whole corpus was searched", got)
 	}
 }

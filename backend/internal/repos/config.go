@@ -27,6 +27,25 @@ type Spec struct {
 	TokenEnv string
 	// Enabled defaults to true; set it false to stop indexing without deleting.
 	Enabled bool
+	// Project names the product this repository is part of, and is REQUIRED.
+	// It is the unit a reader is asked to choose between, so a repository that
+	// stands alone is a project of one, conventionally named after itself.
+	Project string
+	// Kind is a free-form token for the part this repository plays — backend,
+	// ui, consumer, contract. Deliberately not an enum: a closed vocabulary
+	// rejects a real corpus the first time it needs a word not on the list, and
+	// nothing branches on this deterministically. It reaches the answer prompt,
+	// where a model reads "consumer" perfectly well.
+	Kind string
+	// Description is one human-written sentence saying what this repository
+	// does. It is what separates a Kafka receiver from a second HTTP backend,
+	// which Kind alone cannot. Never embedded, never indexed, never cited.
+	Description string
+	// Uses names sibling repositories INSIDE the same project that this one
+	// depends on — declared by the consumer, the same direction as go.mod's
+	// require. Coupling across projects is repo_deps' business, read from a
+	// manifest rather than declared by hand.
+	Uses []string
 }
 
 type file struct {
@@ -36,11 +55,15 @@ type file struct {
 // rawSpec exists so Enabled can default to true. A plain bool would default to
 // false and silently disable every entry that omits the field.
 type rawSpec struct {
-	Name     string `yaml:"name"`
-	CloneURL string `yaml:"clone_url"`
-	Branch   string `yaml:"branch"`
-	TokenEnv string `yaml:"token_env"`
-	Enabled  *bool  `yaml:"enabled"`
+	Name        string   `yaml:"name"`
+	CloneURL    string   `yaml:"clone_url"`
+	Branch      string   `yaml:"branch"`
+	TokenEnv    string   `yaml:"token_env"`
+	Enabled     *bool    `yaml:"enabled"`
+	Project     string   `yaml:"project"`
+	Kind        string   `yaml:"kind"`
+	Description string   `yaml:"description"`
+	Uses        []string `yaml:"uses"`
 }
 
 // Load reads and validates the repository list, returning the first problem it
@@ -82,19 +105,121 @@ func Load(path string) ([]Spec, error) {
 			return nil, err
 		}
 
+		if strings.TrimSpace(r.Project) == "" {
+			return nil, fmt.Errorf(
+				"%s: project is required — rongo searches a project, and a repository that stands alone is a project of one named after itself",
+				r.Name)
+		}
+
 		enabled := true
 		if r.Enabled != nil {
 			enabled = *r.Enabled
 		}
 		specs = append(specs, Spec{
-			Name:     r.Name,
-			CloneURL: strings.TrimSpace(r.CloneURL),
-			Branch:   strings.TrimSpace(r.Branch),
-			TokenEnv: strings.TrimSpace(r.TokenEnv),
-			Enabled:  enabled,
+			Name:        r.Name,
+			CloneURL:    strings.TrimSpace(r.CloneURL),
+			Branch:      strings.TrimSpace(r.Branch),
+			TokenEnv:    strings.TrimSpace(r.TokenEnv),
+			Enabled:     enabled,
+			Project:     strings.TrimSpace(r.Project),
+			Kind:        strings.TrimSpace(r.Kind),
+			Description: strings.TrimSpace(r.Description),
+			Uses:        trimAll(r.Uses),
 		})
 	}
+
+	// Cross-entry checks come after every entry is read: each one needs the
+	// whole list, and a uses edge cannot be judged against repositories the
+	// loop has not reached yet.
+	if err := validateProjects(specs); err != nil {
+		return nil, err
+	}
 	return specs, nil
+}
+
+// trimAll copies a YAML string list with each entry trimmed, dropping empties.
+// nil in, nil out: an absent `uses` and an empty one mean the same thing.
+func trimAll(in []string) []string {
+	var out []string
+	for _, s := range in {
+		if t := strings.TrimSpace(s); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// validateProjects enforces the three rules that need the whole list.
+func validateProjects(specs []Spec) error {
+	project := make(map[string]string, len(specs)) // repository -> its project
+	size := make(map[string]int, len(specs))       // project -> how many repositories
+	for _, s := range specs {
+		project[s.Name] = s.Project
+		size[s.Project]++
+	}
+
+	// A project name shares one namespace with repository names, because a card
+	// button carries one of each. Naming a project after a repository that is
+	// NOT its member makes that button mean two things. Naming it after its own
+	// only member is the ordinary single-repository setup and is fine.
+	//
+	// Its own member is NOT enough once the project has a second one. The name
+	// then resolves to both the repository and the whole product, so naming the
+	// repository expands the search to its siblings: a thread that widens,
+	// which is the one thing the funnel forbids. Rejected here rather than
+	// disambiguated later, because there is no signal that could disambiguate
+	// it — the reader typed one word for two things.
+	for _, s := range specs {
+		p, ok := project[s.Project]
+		if !ok {
+			continue
+		}
+		if p != s.Project {
+			return fmt.Errorf(
+				"%s: project %q is also the name of a repository that is not in it — project and repository names share one namespace",
+				s.Name, s.Project)
+		}
+		if size[s.Project] > 1 {
+			return fmt.Errorf(
+				"%s: project %q is also the name of one of its own repositories and has %d of them — that name would mean both, and naming the repository would widen the search to its siblings",
+				s.Name, s.Project, size[s.Project])
+		}
+	}
+
+	// A uses edge stays inside one product: the target must exist, sit in the
+	// same project, and not be the entry itself. A cycle between siblings is
+	// allowed — two backends calling each other is real, and layoutFlow removes
+	// back edges by DFS before it ranks.
+	for _, s := range specs {
+		for _, u := range s.Uses {
+			switch {
+			case u == s.Name:
+				return fmt.Errorf("%s: uses names itself", s.Name)
+			case project[u] == "":
+				return fmt.Errorf("%s: uses names %q, which is not a repository in this file", s.Name, u)
+			case project[u] != s.Project:
+				return fmt.Errorf(
+					"%s: uses names %q, which is in project %q not %q — coupling across projects is read from a manifest, never declared here",
+					s.Name, u, project[u], s.Project)
+			}
+		}
+	}
+
+	// Two branches of one repository inside one project would search the same
+	// file at two commits and answer as one product. AGENTS.md already forbids
+	// two cards differing only by branch; this is the same rule one level up.
+	type pair struct{ project, cloneURL string }
+	first := make(map[pair]string, len(specs))
+	for _, s := range specs {
+		k := pair{s.Project, s.CloneURL}
+		if other, ok := first[k]; ok {
+			return fmt.Errorf(
+				"%s and %s are the same clone_url in project %q — a project cannot hold two branches of one repository",
+				other, s.Name, s.Project)
+		}
+		first[k] = s.Name
+	}
+	return nil
 }
 
 // validateName keeps the name usable as a single directory segment under the

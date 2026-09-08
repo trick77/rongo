@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -209,6 +210,25 @@ differ and where they agree, and attribute every claim to the repository it
 came from. Do not answer for one and leave the others out; do not merge them
 into a single mechanism they do not share. Repository names stay as they are.`
 
+// answerCompareProjects is answerCompare for a turn comparing PRODUCTS rather
+// than bare repositories. Separate text rather than a shared template with the
+// noun substituted: these are the rules a wrong answer comes from, and a
+// sentence assembled from fragments is the one kind nobody proof-reads.
+//
+// It says a project may span several repositories, because the sources will
+// carry repository names the question never used, and "attribute every claim to
+// the repository it came from" alone would read as an instruction to compare
+// those instead of the products the reader asked about.
+const answerCompareProjects = `
+
+The question names these projects: %s. Each is a separate product with its own
+implementation and all of them are in the sources. A project may span several
+repositories: treat everything from one project as one system. Cover every
+project, say plainly where they differ and where they agree, and attribute every
+claim to the project it came from as well as to the source it rests on. Do not
+answer for one and leave the others out; do not merge them into a single
+mechanism they do not share. Names stay as they are.`
+
 // answerMissingRepo is added when the question named a repository the index
 // does not carry. Without it the model is handed "how do loom and rongo
 // differ" plus rongo-only sources, and writes loom's side from its own
@@ -230,7 +250,7 @@ code - not a guess, not a comparison, not "presumably".`
 // without.
 const answerAllDenied = `
 
-The question asks about every repository. Only %s is in front of you, and this
+The question asks about every project. Only %s is in front of you, and this
 thread covers nothing else. Say in one sentence that the answer is for those
 alone and that a new thread can answer across the whole corpus, then answer for
 them. Make no claim of any kind about any other repository - not a guess, not a
@@ -436,6 +456,41 @@ type Scope struct {
 	// The column is a JSON blob, so an older row simply decodes to false and
 	// no migration is needed.
 	DocsOnly bool `json:"docs_only,omitempty"`
+	// Projects are the projects Known covers ENTIRELY, sorted.
+	//
+	// It exists because len(Known) >= 2 has always meant "comparison", in three
+	// independent places, and a project expands to its members. Without this a
+	// question about one product would be answered as a comparison of its own
+	// backend against its own UI, under a prompt rule telling the model to say
+	// plainly where they differ.
+	//
+	// Entirely is the point. A reader who named one repository of a three-repo
+	// project asked about that repository, so a partial cover counts for
+	// nothing and the turn behaves exactly as it did before projects existed.
+	Projects []string `json:"projects,omitempty"`
+	// Loose are the repositories in Known that no fully covered project
+	// accounts for: a second product the reader named only part of.
+	//
+	// It is what keeps the project rule from swallowing a real comparison.
+	// "How does shop differ from loom-core" covers shop whole and loom not at
+	// all, so Projects holds one name while the sources in front of the model
+	// come from two products. Answered as one product it would be answered as
+	// one mechanism, with nothing telling the model to cover both sides or to
+	// say which claim came from which. With anything loose the turn falls back
+	// to the repository-grained comparison it had before projects existed.
+	//
+	// Derived per turn like Structure, and never persisted for the same
+	// reason: it is a fact about the current repos.yaml, not about the turn.
+	Loose []string `json:"-"`
+	// Structure is the project structure block for the answer prompt: which
+	// repository plays which part, and which calls which.
+	//
+	// Not persisted, and derived per turn from the live repos.yaml — the same
+	// choice Message.Notice makes and for the same reason. A re-explained turn
+	// therefore describes the structure as it is now rather than as it was,
+	// which is what a re-index does to sources too, and better than a second
+	// stored blob that can rot.
+	Structure string `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -478,20 +533,20 @@ func docMask(sources []Source) []bool {
 //
 // Two format arguments: the missing names, then the ones actually searched.
 var scopeNotice = map[Language]string{
-	LanguageEN: "No repository called %s in the index. Answered for %s alone.",
-	LanguageDE: "Kein Repository namens %s im Index. Nur %s beantwortet.",
-	LanguageFR: "Aucun dépôt nommé %s dans l'index. Réponse portant sur %s uniquement.",
-	LanguageIT: "Nessun repository di nome %s nell'indice. Risposta solo su %s.",
+	LanguageEN: "No project called %s in the index. Answered for %s alone.",
+	LanguageDE: "Kein Projekt namens %s im Index. Nur %s beantwortet.",
+	LanguageFR: "Aucun projet nommé %s dans l'index. Réponse portant sur %s uniquement.",
+	LanguageIT: "Nessun progetto di nome %s nell'indice. Risposta solo su %s.",
 }
 
 // scopeNoticeWhole is the same sentence when the question named nothing the
 // index carries: there is no narrowed scope to name, so the turn searched
 // everything.
 var scopeNoticeWhole = map[Language]string{
-	LanguageEN: "No repository called %s in the index. Searched all indexed repositories.",
-	LanguageDE: "Kein Repository namens %s im Index. Alle indexierten Repositories durchsucht.",
-	LanguageFR: "Aucun dépôt nommé %s dans l'index. Recherche sur tous les dépôts indexés.",
-	LanguageIT: "Nessun repository di nome %s nell'indice. Cercato in tutti i repository indicizzati.",
+	LanguageEN: "No project called %s in the index. Searched every indexed project.",
+	LanguageDE: "Kein Projekt namens %s im Index. Alle indexierten Projekte durchsucht.",
+	LanguageFR: "Aucun projet nommé %s dans l'index. Recherche sur tous les projets indexés.",
+	LanguageIT: "Nessun progetto di nome %s nell'indice. Cercato in tutti i progetti indicizzati.",
 }
 
 // outsideNotice is the "this thread is narrowed, and the repository you just
@@ -517,10 +572,10 @@ var outsideNotice = map[Language]string{
 //
 // One format argument: the repositories the thread carries.
 var allDeniedNotice = map[Language]string{
-	LanguageEN: "This thread is narrowed to %s. It cannot answer across every repository. Open a new thread for that.",
-	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Repositories hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
-	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des dépôts. Ouvrez un nouveau fil pour cela.",
-	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i repository. Apri un nuovo thread per quello.",
+	LanguageEN: "This thread is narrowed to %s. It cannot answer across every project. Open a new thread for that.",
+	LanguageDE: "Dieser Thread ist auf %s eingegrenzt. Über alle Projekte hinweg kann er nicht antworten. Dafür einen neuen Thread öffnen.",
+	LanguageFR: "Ce fil est restreint à %s. Il ne peut pas répondre sur l'ensemble des projets. Ouvrez un nouveau fil pour cela.",
+	LanguageIT: "Questo thread è ristretto a %s. Non può rispondere su tutti i progetti. Apri un nuovo thread per quello.",
 }
 
 // docsOnlyNotice is the "this answer stood on documentation alone" sentence.
@@ -578,17 +633,17 @@ func ScopeNotice(lang Language, sc Scope) string {
 // model, exactly like scopeNotice and nothingFound — the text is already
 // known, and a person reads it, so the answer language applies.
 var allReposTitle = map[Language]string{
-	LanguageEN: "All repositories",
-	LanguageDE: "Alle Repositories",
-	LanguageFR: "Tous les dépôts",
-	LanguageIT: "Tutti i repository",
+	LanguageEN: "All projects",
+	LanguageDE: "Alle Projekte",
+	LanguageFR: "Tous les projets",
+	LanguageIT: "Tutti i progetti",
 }
 
 var allReposSummary = map[Language]string{
-	LanguageEN: "Answer across every indexed repository.",
-	LanguageDE: "Über alle indexierten Repositories hinweg antworten.",
-	LanguageFR: "Répondre sur l'ensemble des dépôts indexés.",
-	LanguageIT: "Rispondere su tutti i repository indicizzati.",
+	LanguageEN: "Answer across every indexed project.",
+	LanguageDE: "Über alle indexierten Projekte hinweg antworten.",
+	LanguageFR: "Répondre sur l'ensemble des projets indexés.",
+	LanguageIT: "Rispondere su tutti i progetti indicizzati.",
 }
 
 // AllReposChoice is the title and summary of a repository card's last entry,
@@ -615,6 +670,76 @@ func coveredRepos(known []string, sources []Source) []string {
 		}
 	}
 	return out
+}
+
+// StructureBlock renders what a project is made of, for the answer prompt.
+//
+// Templated from repos.yaml, never written by a model, and never a source. It
+// is the same class of input as a manifest: it decides what the model is told
+// about the shape of the code, not what the answer may claim to have read. The
+// closing sentence is the rule that keeps it that way, in the shape the docs
+// rule and the unindexed-repository rule already use.
+//
+// It exists for one case above all: a project with two backends, where "kind:
+// backend" is true of both and only the declared edge says which one the
+// storefront calls. The NEGATIVE half carries as much as the positive — a model
+// reading a fetch() in the UI beside two plausible APIs will otherwise pick one.
+//
+// A project with nothing declared and one member produces nothing at all.
+// Absence takes no marker, and "rongo is one product in 1 repository" tells the
+// model something it can already see in every citation.
+func StructureBlock(ps []projects.Project) string {
+	var b strings.Builder
+	for _, p := range ps {
+		var edges []string
+		var unreached []string
+		reached := map[string]bool{}
+		declared := len(p.Members) > 1
+		for _, m := range p.Members {
+			if m.Kind != "" || m.Description != "" {
+				declared = true
+			}
+			for _, u := range m.Uses {
+				edges = append(edges, m.Name+" uses "+u+".")
+				reached[u] = true
+			}
+		}
+		if !declared {
+			continue
+		}
+		fmt.Fprintf(&b, "\n\nProject %q is one product in %d repositories.\n\n", p.Name, len(p.Members))
+		for _, m := range p.Members {
+			fmt.Fprintf(&b, "  %s", m.Name)
+			if m.Kind != "" {
+				fmt.Fprintf(&b, " (%s)", m.Kind)
+			}
+			if m.Description != "" {
+				fmt.Fprintf(&b, " — %s", m.Description)
+			}
+			b.WriteString("\n")
+		}
+		// Only when there is an edge to contrast with. With no edges at all,
+		// "nothing uses any of them" is noise, and the useful fact — that these
+		// repositories are one product — has already been said.
+		if len(edges) > 0 {
+			b.WriteString("\nDeclared connections inside the project:\n")
+			for _, e := range edges {
+				fmt.Fprintf(&b, "  %s\n", e)
+			}
+			for _, m := range p.Members {
+				if !reached[m.Name] {
+					unreached = append(unreached, m.Name)
+				}
+			}
+			if len(unreached) > 0 {
+				fmt.Fprintf(&b, "Nothing in this project uses %s. They are reached from outside it, "+
+					"so do not connect them to the others yourself.\n", strings.Join(unreached, ", "))
+			}
+		}
+		b.WriteString("\nThis is configuration, not code. It says which repository plays which part " +
+			"and which calls which. Never present it as something you read in the sources, and never cite it.")
+	}
+	return b.String()
 }
 
 // Answer writes the answer for one turn, streaming it token by token.
@@ -652,9 +777,36 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// and still return nothing for this question. Telling the model to cover
 	// it anyway is an instruction to invent, which is the one thing the rest
 	// of this prompt exists to prevent.
-	if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
-		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+	//
+	// A turn covering ONE project whole is not a comparison, whatever its
+	// repository count: a backend and its UI are one product, and telling the
+	// model to say where they differ would answer the wrong question. Two or
+	// more projects still compare, and the rule names those rather than the
+	// repositories underneath, because products are what the reader asked
+	// about.
+	//
+	// Both project branches need Known to hold nothing BUT those projects.
+	// One project covered whole beside half of another is two products in
+	// front of the model, and naming only the covered one would tell it to
+	// cover a set smaller than what it was given.
+	switch {
+	case len(scope.Loose) > 0:
+		if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+			system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+		}
+	case len(scope.Projects) == 1:
+		// Nothing: one product, answered as one mechanism.
+	case len(scope.Projects) >= 2:
+		system += fmt.Sprintf(answerCompareProjects, strings.Join(scope.Projects, ", "))
+	default:
+		if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+			system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
+		}
 	}
+	// What each repository in the project is for, and which calls which. Only
+	// the turn's own projects reach it, so a pin that excludes a repository
+	// never has it described anyway.
+	system += scope.Structure
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}

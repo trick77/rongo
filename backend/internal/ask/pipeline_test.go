@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -108,12 +109,23 @@ type fakeRouter struct {
 	// all is the understanding's "the reader asked for every repository"
 	// signal, for the same reason.
 	all bool
+	// projects is the declared grouping this turn sees. The zero Map is
+	// "nothing declared", which is what almost every test here wants.
+	projects    projects.Map
+	projectsErr error
 }
 
 func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
 	f.named = namedRepos
 	f.all = allRepos
 	return f.d, f.err
+}
+
+// Projects returns whatever the test declared, and the zero Map by default —
+// which answers every repository with its own name, so a test that says nothing
+// about projects gets the behaviour rongo had before they existed.
+func (f *fakeRouter) Projects(context.Context) (projects.Map, error) {
+	return f.projects, f.projectsErr
 }
 
 // pipelineFakes is what newTestPipeline wires by default; an option overrides
@@ -595,7 +607,7 @@ func TestRunSaysSoWhenAPinnedThreadCannotAnswerAcrossTheCorpus(t *testing.T) {
 		t.Error("a pinned thread must not record permission to answer across the corpus")
 	}
 	joined := strings.Join(notices, " ")
-	if !strings.Contains(joined, "every repository") || !strings.Contains(joined, "new thread") {
+	if !strings.Contains(joined, "every project") || !strings.Contains(joined, "new thread") {
 		t.Errorf("notice = %q, want the reader told what they are not getting and how to get it", joined)
 	}
 }
@@ -709,6 +721,29 @@ func TestReexplainAnswersFromStoredSourcesWithoutSearchingOrGathering(t *testing
 	}
 	if answer.Text == "" {
 		t.Error("want an answer")
+	}
+}
+
+// TestReexplainRebuildsTheProjectStructure: Scope.Structure is never
+// persisted, so a re-explain that did not rebuild it would answer the same
+// question from the same sources with the structure block gone — present when
+// the reader first asked, missing the moment they flip the answer to another
+// audience.
+func TestReexplainRebuildsTheProjectStructure(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	p := NewPipeline(c, &fakeSearch{},
+		NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}),
+		&fakeRouter{projects: shopMap(t)})
+
+	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
+		[]Source{{ChunkID: 1, Repo: "shop-ui", Path: "a.ts", Text: "export {}", StartLine: 1, EndLine: 1}},
+		Scope{Known: []string{"shop-backend", "shop-events", "shop-ui"}}, Events{})
+	if err != nil {
+		t.Fatalf("reexplain: %v", err)
+	}
+
+	if !strings.Contains(*prompt, `Project "shop" is one product`) {
+		t.Errorf("a re-explained turn must carry the structure block too:\n%s", *prompt)
 	}
 }
 

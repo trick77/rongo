@@ -16,6 +16,7 @@ import (
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
@@ -550,6 +551,163 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 	}
 }
 
+// shopMap is one product in three repositories beside a standalone one, the
+// corpus the project rung exists for. Built through projects.Load's own reader
+// so the tests cannot drift from what production sees.
+func shopMap(t *testing.T) projects.Map {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
+	if err != nil {
+		t.Fatalf("Open() err = %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := store.Migrate(db, 1536); err != nil {
+		t.Fatalf("Migrate() err = %v", err)
+	}
+	for _, r := range [][2]string{
+		{"shop-ui", "shop"}, {"shop-backend", "shop"}, {"shop-events", "shop"},
+		{"legacy-crm", "legacy-crm"},
+	} {
+		if _, err := db.Exec(
+			`INSERT INTO repo_state (name, clone_url, project) VALUES (?, ?, ?)`,
+			r[0], "https://example.invalid/"+r[0]+".git", r[1]); err != nil {
+			t.Fatalf("seed %s: %v", r[0], err)
+		}
+	}
+	m, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load() err = %v", err)
+	}
+	return m
+}
+
+// TestProjectCandidatesFoldOneProductIntoOneButton is the change in one test:
+// three repositories of one product are one thing to choose between, and the
+// button carries a product name rather than a repository name — the only kind
+// of option AGENTS.md says an Analyst can always tell apart.
+func TestProjectCandidatesFoldOneProductIntoOneButton(t *testing.T) {
+	pm := shopMap(t)
+	repos := repoCandidates([]Candidate{
+		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}}},
+		{Repo: "legacy-crm", ModuleKey: "crm", Score: 0.55, Hits: []retrieve.Hit{{ChunkID: 2, Score: 0.55}}},
+		{Repo: "shop-ui", ModuleKey: "cart", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 3, Score: 0.50}}},
+	})
+
+	got := projectCandidates(repos, pm)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates, want one per project", len(got))
+	}
+	if got[0].Repo != "shop" || got[0].Score != 0.60 {
+		t.Errorf("leader = %q at %v, want shop at its best member's score", got[0].Repo, got[0].Score)
+	}
+	if len(got[0].Members) != 2 || got[0].Members[0] != "shop-backend" || got[0].Members[1] != "shop-ui" {
+		t.Errorf("shop members = %v, want the two that had hits, sorted", got[0].Members)
+	}
+	// A project spanning repositories has no single branch, and printing one
+	// member's would label the product with half its truth.
+	if got[0].Branch != "" {
+		t.Errorf("Branch = %q, want empty for a multi-member project", got[0].Branch)
+	}
+	// A project of one is still a project, and it keeps its branch: there is
+	// exactly one, so nothing is being hidden.
+	if got[1].Repo != "legacy-crm" || len(got[1].Members) != 1 {
+		t.Errorf("second = %+v, want legacy-crm as a project of one", got[1])
+	}
+	var ids []int64
+	for _, h := range got[0].Hits {
+		ids = append(ids, h.ChunkID)
+	}
+	if fmt.Sprint(ids) != "[1 3]" {
+		t.Errorf("shop's hits are %v, want both members' hits best first", ids)
+	}
+}
+
+// TestRepoCandidatesStayRepositoryGrainedForTheManifestCheck is the regression
+// test for the one way this change could break routing silently.
+//
+// anyDependency hands a candidate's Repo straight to repodeps.DependsOn, which
+// joins repo_deps WHERE repo = ?. A project name has no rows there, so folding
+// inside repoCandidates would lose every go.mod edge for repositories that
+// belong to a multi-repo project — and no measurement would catch it, because
+// the eval corpus is one project per repository, where the two names are the
+// same string.
+func TestRepoCandidatesStayRepositoryGrainedForTheManifestCheck(t *testing.T) {
+	cs := []Candidate{
+		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60},
+		{Repo: "shop-ui", ModuleKey: "cart", Score: 0.50},
+	}
+
+	for _, c := range repoCandidates(cs) {
+		if c.Repo == "shop" {
+			t.Fatal("repoCandidates folded by project — Related would ask repo_deps about a project name and never find an edge")
+		}
+	}
+}
+
+// TestSpansProjectsIsFalseInsideOneProduct is the reason the whole change
+// exists: a question spanning a backend and its UI is not a choice between
+// products, so no card is put to the reader.
+func TestSpansProjectsIsFalseInsideOneProduct(t *testing.T) {
+	pm := shopMap(t)
+	inside := []Candidate{
+		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60},
+		{Repo: "shop-ui", ModuleKey: "cart", Score: 0.50},
+	}
+	across := []Candidate{
+		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60},
+		{Repo: "legacy-crm", ModuleKey: "crm", Score: 0.50},
+	}
+
+	if SpansRepos(inside, 0, pm) {
+		t.Error("a backend and its UI span one product — that is composition, not a card")
+	}
+	if !SpansRepos(across, 0, pm) {
+		t.Error("two products still span, and still get a card")
+	}
+}
+
+// TestTooBroadCountsProjectsNotRepositories: past four candidates a card would
+// show four and never mention the rest, so the turn refuses. Counting projects
+// means six repositories of two products are two buttons, not six, and a turn
+// thrown out today reaches a card.
+func TestTooBroadCountsProjectsNotRepositories(t *testing.T) {
+	pm := shopMap(t)
+	var cs []Candidate
+	for _, r := range []string{"shop-ui", "shop-backend", "shop-events", "legacy-crm"} {
+		cs = append(cs, Candidate{Repo: r, ModuleKey: "m", Score: 0.50})
+	}
+
+	ask, rung := DecideWhy(cs, 0.25, false, false, 0, false, true, pm)
+
+	if !ask || rung != rungRepository {
+		t.Errorf("ask=%v rung=%q, want a project card: four repositories are two products", ask, rung)
+	}
+}
+
+// TestTheZeroMapIsTodaysBehaviour is the guarantee the eval rests on. With no
+// project declared, a project is a repository, every rung sees the same strings
+// it saw before, and every deterministic setting must reproduce to the
+// question. The zero Map is what the harness passes.
+func TestTheZeroMapIsTodaysBehaviour(t *testing.T) {
+	var none projects.Map
+	spread := []Candidate{
+		{Repo: "peeq", ModuleKey: "a", Score: 0.60},
+		{Repo: "loom", ModuleKey: "b", Score: 0.55},
+	}
+
+	if !SpansRepos(spread, 0, none) {
+		t.Error("two repositories with no project declared still span")
+	}
+	if got := projectCandidates(repoCandidates(spread), none); len(got) != 2 ||
+		got[0].Repo != "peeq" || got[1].Repo != "loom" {
+		t.Errorf("projectCandidates = %+v, want the repositories unchanged", got)
+	}
+	if ask, rung := DecideWhy(spread, 0.25, false, false, 0, false, true, none); !ask || rung != rungRepository {
+		t.Errorf("ask=%v rung=%q, want the repository card exactly as before", ask, rung)
+	}
+}
+
 // TestASinglePairDoesNotCompoundFiveRepositories pins where the manifest edge
 // stops carrying: anyDependency says yes on ONE joined pair, and one pair out
 // of five is not the same claim as "these five are one system". Below five the
@@ -800,7 +958,7 @@ func TestDecideWhyNamesTheRungThatSettledIt(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose)
+			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose, projects.Map{})
 			if ask != tc.wantAsk {
 				t.Errorf("ask = %v, want %v", ask, tc.wantAsk)
 			}
@@ -808,7 +966,7 @@ func TestDecideWhyNamesTheRungThatSettledIt(t *testing.T) {
 				t.Errorf("rung = %q, want %q", rung, tc.wantRung)
 			}
 			// Decide is a wrapper now; it must keep answering the same thing.
-			if got := Decide(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose); got != ask {
+			if got := Decide(tc.cs, 0.25, tc.related, tc.judged, tc.namedRepos, tc.allRepos, tc.roleCanChoose, projects.Map{}); got != ask {
 				t.Errorf("Decide = %v, DecideWhy = %v — the wrapper drifted", got, ask)
 			}
 		})
@@ -829,22 +987,22 @@ func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
 	// Two repositories, leader not dominant: the rung fires today.
 	spread := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "rongo", Score: 0.49}}
 
-	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, true); !ask || rung != rungRepository {
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, true, projects.Map{}); !ask || rung != rungRepository {
 		t.Errorf("spans=true gave (%v, %q), want an ask on %q", ask, rung, rungRepository)
 	}
 	// spans=false hands the turn to the rungs below, and with no dominant
 	// leader and no judgement that is an answer on the judge's rung — NOT a
 	// card, and not the repository rung under another name.
-	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, false); ask || rung != rungJudge {
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 0, false, true, false, projects.Map{}); ask || rung != rungJudge {
 		t.Errorf("spans=false gave (%v, %q), want no ask on %q", ask, rung, rungJudge)
 	}
 	// The judge still decides once it has spoken.
-	if ask, rung := DecideWhySpans(spread, 0.25, false, true, 0, false, true, false); !ask || rung != rungJudge {
+	if ask, rung := DecideWhySpans(spread, 0.25, false, true, 0, false, true, false, projects.Map{}); !ask || rung != rungJudge {
 		t.Errorf("spans=false with a judgement gave (%v, %q), want an ask on %q", ask, rung, rungJudge)
 	}
 	// A named repository outranks the parameter: the reader already answered
 	// the only question a card could put to them.
-	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 1, false, true, true); ask || rung != rungNamedRepos {
+	if ask, rung := DecideWhySpans(spread, 0.25, false, false, 1, false, true, true, projects.Map{}); ask || rung != rungNamedRepos {
 		t.Errorf("a named repository with spans=true gave (%v, %q), want no ask on %q", ask, rung, rungNamedRepos)
 	}
 	// So does the too-broad cut, and it is the one a sweep could most easily
@@ -855,10 +1013,10 @@ func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
 	for _, repo := range []string{"a", "b", "c", "d", "e"} {
 		wide = append(wide, Candidate{Repo: repo, Score: 0.5})
 	}
-	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, true); !ask || rung != rungTooBroad {
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, true, projects.Map{}); !ask || rung != rungTooBroad {
 		t.Errorf("five repositories with spans=true gave (%v, %q), want an ask on %q", ask, rung, rungTooBroad)
 	}
-	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, false); !ask || rung != rungTooBroad {
+	if ask, rung := DecideWhySpans(wide, 0.25, false, false, 0, false, true, false, projects.Map{}); !ask || rung != rungTooBroad {
 		t.Errorf("five repositories with spans=false gave (%v, %q), want an ask on %q — the cut is above the rung",
 			ask, rung, rungTooBroad)
 	}
@@ -866,9 +1024,9 @@ func TestDecideWhySpansOverridesTheRepositoryRungAndNothingElse(t *testing.T) {
 	// And DecideWhy is exactly DecideWhySpans with SpansRepos' answer, so the
 	// two cannot disagree about a turn the product actually runs.
 	for _, namedRepos := range []int{0, 1} {
-		wantAsk, wantRung := DecideWhy(spread, 0.25, false, false, namedRepos, false, true)
+		wantAsk, wantRung := DecideWhy(spread, 0.25, false, false, namedRepos, false, true, projects.Map{})
 		gotAsk, gotRung := DecideWhySpans(spread, 0.25, false, false, namedRepos, false, true,
-			SpansRepos(spread, namedRepos))
+			SpansRepos(spread, namedRepos, projects.Map{}), projects.Map{})
 		if wantAsk != gotAsk || wantRung != gotRung {
 			t.Errorf("namedRepos=%d: DecideWhy gave (%v, %q), DecideWhySpans gave (%v, %q)",
 				namedRepos, wantAsk, wantRung, gotAsk, gotRung)
@@ -882,24 +1040,24 @@ func TestDecideIsTheLadderRouteItselfRuns(t *testing.T) {
 
 	// The margin dominates: no rung below it is consulted at all, so whatever
 	// related and judged would have said must not be read.
-	if Decide(dominant, 0.25, true, true, 0, false, true) {
+	if Decide(dominant, 0.25, true, true, 0, false, true, projects.Map{}) {
 		t.Error("a dominant pair answers without asking, whatever the later rungs would have said")
 	}
 	// A manifest dependency short-circuits the judge.
-	if Decide(tight, 0.25, true, true, 0, false, true) {
+	if Decide(tight, 0.25, true, true, 0, false, true, projects.Map{}) {
 		t.Error("a manifest dependency is composition; the judge must not override it")
 	}
 	// Past both, the judge decides — and is never defaulted.
-	if !Decide(tight, 0.25, false, true, 0, false, true) {
+	if !Decide(tight, 0.25, false, true, 0, false, true, projects.Map{}) {
 		t.Error("the judge said ask")
 	}
-	if Decide(tight, 0.25, false, false, 0, false, true) {
+	if Decide(tight, 0.25, false, false, 0, false, true, projects.Map{}) {
 		t.Error("the judge said compose")
 	}
 	// Last rung: the judge found the code ambiguous, but the reader's role
 	// cannot resolve it, so the turn answers instead of asking a question
 	// nobody can answer.
-	if Decide(tight, 0.25, false, true, 0, false, false) {
+	if Decide(tight, 0.25, false, true, 0, false, false, projects.Map{}) {
 		t.Error("a card the role cannot answer is not asked")
 	}
 }
@@ -914,26 +1072,26 @@ func TestDecideAsksWhichRepositoryWhenTheQuestionNamedNone(t *testing.T) {
 	// exists for: a leader says which MODULE scored best, never which product
 	// the reader meant.
 	spread := []Candidate{{Repo: "peeq", Score: 0.60}, {Repo: "loom", Score: 0.20}}
-	if !Decide(spread, 0.25, false, false, 0, false, true) {
+	if !Decide(spread, 0.25, false, false, 0, false, true, projects.Map{}) {
 		t.Error("candidates in two repositories with none named are a card, whatever the margin says")
 	}
-	if Decide(spread, 0.25, false, false, 0, true, true) {
+	if Decide(spread, 0.25, false, false, 0, true, true, projects.Map{}) {
 		t.Error("a reader who asked for all repositories has already answered the card")
 	}
-	if Decide(spread, 0.25, true, false, 0, false, true) {
+	if Decide(spread, 0.25, true, false, 0, false, true, projects.Map{}) {
 		t.Error("repositories joined by a manifest dependency are composition, not a choice")
 	}
-	if Decide(spread, 0.25, false, true, 1, false, true) {
+	if Decide(spread, 0.25, false, true, 1, false, true, projects.Map{}) {
 		t.Error("a question that named the repository must not be asked which repository it meant")
 	}
 
 	// One repository, two modules: the rung does not fire, and the ladder
 	// below it decides exactly as before.
 	oneRepo := []Candidate{{Repo: "peeq", Score: 0.51}, {Repo: "peeq", Score: 0.49}}
-	if Decide(oneRepo, 0.25, false, false, 0, false, true) {
+	if Decide(oneRepo, 0.25, false, false, 0, false, true, projects.Map{}) {
 		t.Error("a single repository is not a choice between repositories; the judge decides")
 	}
-	if !Decide(oneRepo, 0.25, false, true, 0, false, true) {
+	if !Decide(oneRepo, 0.25, false, true, 0, false, true, projects.Map{}) {
 		t.Error("within one repository the judge still decides")
 	}
 }
@@ -1117,7 +1275,7 @@ func TestDecideWhyAsksToNarrowWhenMoreRepositoriesMatchThanACardCanShow(t *testi
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, false, tc.namedRepos, false, true)
+			ask, rung := DecideWhy(tc.cs, 0.25, tc.related, false, tc.namedRepos, false, true, projects.Map{})
 			if ask != tc.wantAsk {
 				t.Errorf("ask = %v, want %v", ask, tc.wantAsk)
 			}

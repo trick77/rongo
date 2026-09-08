@@ -75,8 +75,8 @@ func TestScopeNoticeSaysBothThingsWhenBothApply(t *testing.T) {
 	// from documentation. Neither sentence may swallow the other, and scope
 	// comes first: which repositories were searched, then what was found.
 	got := ScopeNotice(LanguageEN, Scope{Known: []string{"rongo"}, Unknown: []string{"loom"}, DocsOnly: true})
-	if !strings.Contains(got, "No repository called loom") {
-		t.Errorf("notice = %q, want the missing repository named", got)
+	if !strings.Contains(got, "No project called loom") {
+		t.Errorf("notice = %q, want the missing project named", got)
 	}
 	if !strings.Contains(got, "documentation alone") {
 		t.Errorf("notice = %q, want the documentation-only sentence", got)
