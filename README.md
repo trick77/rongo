@@ -28,21 +28,13 @@ question spans more of the estate than one answer can carry, it asks which
 repositories to narrow to.
 
 **Your language.** A thread is answered in the language its first question was
-asked in. German is Swiss German.
+asked in.
 
 **A link to send on.** Any thread can be shared as a read-only page, frozen where
 you shared it, and revoked later.
 
 Developers can switch a thread to the Developer voice, which explains how the code
 does it and shows the code inline.
-
-## What it will not do
-
-The index holds the code and docs as written, never summaries of them. Where docs
-and code disagree, the answer says so and sides with the code. If the trail leads
-into code that is not indexed, Rongo says the call and the configuration are
-visible but the internals are not. If nothing matched, it says so and names the
-terms it tried, rather than assembling an answer out of whatever was nearby.
 
 ## How it works
 
