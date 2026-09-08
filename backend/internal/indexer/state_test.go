@@ -307,6 +307,113 @@ func TestSyncSpecs_respectsAnExplicitlyDisabledEntry(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
+	// Given: one product in two repositories, the UI declaring the edge.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+
+	// When
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop-backend", CloneURL: "file:///b", Enabled: true, Project: "shop",
+			Kind: "backend", Description: "Storefront API and checkout."},
+		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
+			Kind: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// Then
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatalf("All() err = %v", err)
+	}
+	by := map[string]RepoState{}
+	for _, r := range all {
+		by[r.Name] = r
+	}
+	if got := by["shop-ui"]; got.Project != "shop" || got.Kind != "ui" || got.Description != "Storefront, React." {
+		t.Errorf("shop-ui = %+v, want project shop, kind ui and its description", got)
+	}
+	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
+		t.Errorf("shop-ui.Uses = %v, want [shop-backend]", got)
+	}
+	if got := by["shop-backend"].Uses; len(got) != 0 {
+		t.Errorf("shop-backend.Uses = %v, want empty", got)
+	}
+}
+
+func TestSyncSpecs_replacesUsesRatherThanAppending(t *testing.T) {
+	// A repository that drops an edge must stop declaring it, or the Projects
+	// page keeps drawing an arrow that no longer exists — the same reason
+	// repodeps.Sync deletes before it inserts.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	first := []repos.Spec{
+		{Name: "a", CloneURL: "file:///a", Enabled: true, Project: "p"},
+		{Name: "b", CloneURL: "file:///b", Enabled: true, Project: "p", Uses: []string{"a"}},
+	}
+	if _, err := s.SyncSpecs(ctx, first); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// When: b stops using a.
+	second := []repos.Spec{
+		{Name: "a", CloneURL: "file:///a", Enabled: true, Project: "p"},
+		{Name: "b", CloneURL: "file:///b", Enabled: true, Project: "p"},
+	}
+	if _, err := s.SyncSpecs(ctx, second); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// Then
+	all, _ := s.All(ctx)
+	for _, r := range all {
+		if len(r.Uses) != 0 {
+			t.Errorf("%s.Uses = %v, want empty after the edge was removed", r.Name, r.Uses)
+		}
+	}
+}
+
+func TestSyncSpecs_aStructureEditIsNotAReIndex(t *testing.T) {
+	// Renaming a project, or writing a description, changes what the reader and
+	// the model are told about a repository. It changes nothing about its code,
+	// so it must not reset the SHA and send the next poll into a full re-index.
+	// The reset trigger is clone_url, and only clone_url.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true, Project: "peeq"},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 10, Chunks: 100}); err != nil {
+		t.Fatalf("MarkIndexed() err = %v", err)
+	}
+
+	// When: the structure is edited, the remote is not.
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true,
+			Project: "search-suite", Kind: "backend", Description: "Retrieval service."},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// Then
+	all, _ := s.All(ctx)
+	if len(all) != 1 {
+		t.Fatalf("All() = %+v, want one entry", all)
+	}
+	if all[0].LastSHA != "abc123" {
+		t.Errorf("LastSHA = %q, want abc123 kept — a structure edit is not a re-index", all[0].LastSHA)
+	}
+	if all[0].Branch != "master" {
+		t.Errorf("Branch = %q, want master kept", all[0].Branch)
+	}
+	if all[0].Project != "search-suite" || all[0].Kind != "backend" {
+		t.Errorf("structure = %q/%q, want the edit to have landed", all[0].Project, all[0].Kind)
+	}
+}
+
 func TestSetCounts_touchesOnlyTheTotals(t *testing.T) {
 	// Given: an indexed repository that later recorded an error. The startup
 	// sweep refreshes the totals after removing excluded content, and it must

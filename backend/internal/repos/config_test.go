@@ -3,6 +3,7 @@ package repos
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,8 +24,10 @@ repositories:
     clone_url: https://forge.example.invalid/acme/shop-backend.git
     branch: master
     token_env: BACKEND_FORGE_TOKEN
+    project: shop
   - name: commons-mail
     clone_url: https://forge.example.invalid/acme/commons-mail.git
+    project: commons-mail
 `)
 
 	// When
@@ -125,6 +128,7 @@ func TestLoad_acceptsScpStyleSSHRemote(t *testing.T) {
 repositories:
   - name: shop-backend
     clone_url: "git@github.com:acme/repo.git"
+    project: shop
 `)
 
 	specs, err := Load(path)
@@ -193,5 +197,210 @@ func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
 		if _, err := Load(writeYAML(t, body)); err == nil {
 			t.Errorf("Load(%q) err = nil, want a refusal of a list naming no repository", body)
 		}
+	}
+}
+
+func TestLoad_readsProjectStructure(t *testing.T) {
+	// Given: one product in three repositories, with the wiring declared.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: shop
+    kind: ui
+    description: Customer-facing storefront, React.
+    uses: [shop-backend]
+  - name: shop-backend
+    clone_url: https://forge.example.invalid/acme/shop-backend.git
+    project: shop
+    kind: backend
+    description: Storefront API and checkout.
+  - name: shop-events
+    clone_url: https://forge.example.invalid/acme/shop-events.git
+    project: shop
+    kind: consumer
+`)
+
+	// When
+	specs, err := Load(path)
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if specs[0].Project != "shop" || specs[0].Kind != "ui" {
+		t.Errorf("specs[0] project/kind = %q/%q, want shop/ui", specs[0].Project, specs[0].Kind)
+	}
+	if specs[0].Description != "Customer-facing storefront, React." {
+		t.Errorf("specs[0].Description = %q", specs[0].Description)
+	}
+	if len(specs[0].Uses) != 1 || specs[0].Uses[0] != "shop-backend" {
+		t.Errorf("specs[0].Uses = %v, want [shop-backend]", specs[0].Uses)
+	}
+	// kind and description are optional, and so is uses: a consumer reached
+	// from a queue declares no sibling at all.
+	if len(specs[2].Uses) != 0 {
+		t.Errorf("specs[2].Uses = %v, want empty", specs[2].Uses)
+	}
+	if specs[1].Description != "Storefront API and checkout." {
+		t.Errorf("specs[1].Description = %q", specs[1].Description)
+	}
+}
+
+func TestLoad_requiresProject(t *testing.T) {
+	// Given: rongo searches a project, so every repository belongs to one. A
+	// project of one is named after its own repository; there is no implicit
+	// case left to guess at.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: https://forge.example.invalid/acme/shop-backend.git
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for a missing project")
+	}
+	if !strings.Contains(err.Error(), "project") {
+		t.Errorf("Load() err = %v, want it to name the missing field", err)
+	}
+}
+
+func TestLoad_allowsProjectNamedAfterItsOnlyMember(t *testing.T) {
+	// Given: the ordinary single-repository setup, and rongo's own.
+	path := writeYAML(t, `
+repositories:
+  - name: rongo
+    clone_url: https://github.com/trick77/rongo.git
+    project: rongo
+`)
+
+	// When
+	specs, err := Load(path)
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil: a project of one is named after its member", err)
+	}
+	if specs[0].Project != "rongo" {
+		t.Errorf("specs[0].Project = %q, want rongo", specs[0].Project)
+	}
+}
+
+func TestLoad_rejectsProjectNamedAfterAnotherRepository(t *testing.T) {
+	// Given: project and repository names share one namespace, because a card
+	// button carries one of each. A project named after a repository that is
+	// not its member makes that button mean two things.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: legacy-crm
+  - name: legacy-crm
+    clone_url: https://forge.example.invalid/acme/legacy-crm.git
+    project: legacy-crm-suite
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for a project colliding with another repository's name")
+	}
+}
+
+func TestLoad_rejectsUsesOutsideTheProject(t *testing.T) {
+	// Given: uses is an edge inside one product. Coupling across products is
+	// repo_deps' business, read from a manifest rather than declared by hand.
+	cases := map[string]string{
+		"unknown repository": `
+repositories:
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: shop
+    uses: [nowhere]
+`,
+		"another project": `
+repositories:
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: shop
+    uses: [legacy-crm]
+  - name: legacy-crm
+    clone_url: https://forge.example.invalid/acme/legacy-crm.git
+    project: legacy-crm
+`,
+		"itself": `
+repositories:
+  - name: shop-ui
+    clone_url: https://forge.example.invalid/acme/shop-ui.git
+    project: shop
+    uses: [shop-ui]
+`,
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			// When
+			_, err := Load(writeYAML(t, body))
+
+			// Then
+			if err == nil {
+				t.Fatalf("Load() err = nil, want a refusal for a uses entry naming %s", name)
+			}
+		})
+	}
+}
+
+func TestLoad_allowsUsesCycleInsideAProject(t *testing.T) {
+	// Given: two backends calling each other is real, and layoutFlow removes
+	// back edges by DFS, so a cycle is drawable rather than fatal.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-orders
+    clone_url: https://forge.example.invalid/acme/shop-orders.git
+    project: shop
+    uses: [shop-billing]
+  - name: shop-billing
+    clone_url: https://forge.example.invalid/acme/shop-billing.git
+    project: shop
+    uses: [shop-orders]
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil: a cycle between siblings is allowed", err)
+	}
+}
+
+func TestLoad_rejectsTwoBranchesOfOneRepositoryInAProject(t *testing.T) {
+	// Given: a project holding two branches of one repository would search the
+	// same file at two commits and answer as one product. AGENTS.md already
+	// forbids two cards differing only by branch.
+	path := writeYAML(t, `
+repositories:
+  - name: shop-backend
+    clone_url: https://forge.example.invalid/acme/shop-backend.git
+    project: shop
+    branch: master
+  - name: shop-backend-release
+    clone_url: https://forge.example.invalid/acme/shop-backend.git
+    project: shop
+    branch: release-2024.3
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for one clone_url twice in a project")
 	}
 }
