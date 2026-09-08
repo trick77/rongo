@@ -89,6 +89,23 @@ export function sourceTurnOf(turns: Turn[]): number {
   return -1;
 }
 
+/**
+ * The turn whose audience decides whether the pane is open: the newest citing
+ * turn, or the one still being written if there is one.
+ *
+ * The running turn has to count. Citations arrive after the last token, so a
+ * fresh Developer question would leave this at the PREVIOUS turn — an Analyst
+ * one, most likely — for the whole stream, and the pane would snap in on the
+ * final frame, narrowing the column the reader is mid-sentence in. Opening it
+ * at the start costs an empty pane saying what will appear there, which is
+ * what that empty state is for.
+ */
+export function paneAudienceTurn(turns: Turn[]): Turn | undefined {
+  const last = turns[turns.length - 1];
+  if (last && !last.done) return last;
+  return turns[sourceTurnOf(turns)];
+}
+
 export default function ThreadView({
   turns,
   busy = false,
@@ -126,11 +143,6 @@ export default function ThreadView({
     setOpenFailure(new Set());
     setCopied(null);
   }, [threadKey]);
-
-  // The turn the pane is showing, so the chip can be put on that one and no
-  // other. Same helper the caller uses to decide what the pane holds — one
-  // answer to the question, read from one place.
-  const sourceTurn = sourceTurnOf(turns);
 
   const setHot = (marker: number | null) => onHot?.(marker);
   const showSource = onOpenSource;
@@ -442,12 +454,11 @@ export default function ThreadView({
                     been. No aria-controls: the pane is unmounted while shut,
                     and the attribute would name an element that is not
                     there. */}
-                {onToggleSources && turn.citations.length > 0 && i === sourceTurn && (
+                {onToggleSources && turn.citations.length > 0 && i === sourceTurnIndex && (
                   <div className="mt-4 hidden xl:block">
                     <button
                       type="button"
                       aria-expanded={sourcesOpen}
-                      aria-haspopup="true"
                       onClick={onToggleSources}
                       className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
                     >

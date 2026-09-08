@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import ThreadView, { SourcesPane, sourceTurnOf } from "./ThreadView";
+import ThreadView, { SourcesPane, paneAudienceTurn } from "./ThreadView";
 import SourceView from "./SourceView";
 import { Chevron } from "./icons";
 import {
@@ -860,9 +860,9 @@ export default function Ask({
 
   // Untouched, the pane follows the turn it would be showing: open for a
   // Developer, shut for an Analyst. A re-explain therefore opens or closes it
-  // by itself when the new answer's citations land — which is still the
-  // reader's own click, one step removed.
-  const showSources = sourcesOpen ?? turns[sourceTurnOf(turns)]?.audience === "dev";
+  // by itself when the new answer arrives — which is still the reader's own
+  // click, one step removed.
+  const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
 
   return (
     // The Sources pane takes a fixed column only when it is open AND there is

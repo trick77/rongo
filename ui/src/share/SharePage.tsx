@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import SourceView, { type SourceRef } from "../SourceView";
-import ThreadView, { SourcesPane, sourceTurnOf } from "../ThreadView";
+import ThreadView, { SourcesPane, paneAudienceTurn } from "../ThreadView";
 import { linkChosenCandidates, storedRetries, storedTurn, type Message, type Turn } from "../turns";
 
 /**
@@ -114,7 +114,7 @@ export default function SharePage({ token }: { token: string }) {
     );
   }
 
-  const showSources = sourcesOpen ?? state.turns[sourceTurnOf(state.turns)]?.audience === "dev";
+  const showSources = sourcesOpen ?? paneAudienceTurn(state.turns)?.audience === "dev";
 
   return (
     // The app's own shell: a 56px header over the thread, and the Sources

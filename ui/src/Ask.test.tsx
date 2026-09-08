@@ -339,6 +339,30 @@ describe("Ask, the Sources pane", () => {
     expect(screen.getAllByRole("button", { name: /Sources/ })).toHaveLength(1);
   });
 
+  it("opens while a Developer answer is still being written, not after it", async () => {
+    // Citations arrive after the last token. Deciding on the newest CITING
+    // turn alone would leave the pane shut for the whole stream and snap it in
+    // on the final frame, narrowing the column mid-sentence.
+    const stream = pushableStream();
+    const user = userEvent.setup();
+    render(<Ask />);
+    await user.click(screen.getByRole("button", { name: "Developer" }));
+    await user.type(screen.getByLabelText("Question"), "How?");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await stream.push(ev("thread", { thread_id: "1" }));
+    await stream.push(ev("token", { text: "Half an answer" }));
+    await screen.findByText(/Half an answer/);
+
+    // Open already, with nothing in it yet but the line saying what will be.
+    expect(pane()).toBeTruthy();
+    expect(pane()!.textContent).toContain("appear here");
+
+    await stream.push(ev("citations", cited));
+    await stream.push(ev("done", {}));
+    await waitFor(() => expect(pane()!.textContent).toContain("a.go"));
+  });
+
   it("the reader's choice outlives a follow-up", async () => {
     streamFrames(answered());
     const user = await ask("How?");
