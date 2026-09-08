@@ -376,6 +376,8 @@ func TestAnswer_theCorpusWideMarkerRuleReachesBothPrompts(t *testing.T) {
 	// there is: one turn came back with all 58 gathered sources enumerated in a
 	// single bracket run. The rule that a claim about the sources is not a
 	// claim any passage makes is what stops it, and it belongs to both roles.
+	// Its absence half has to be the strict one: three chips under a refusal
+	// open three files that say nothing about what was asked.
 	cBA, promptBA, _ := streamUpstream(t, "x")
 	if _, err := NewAnswerer(cBA).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
 		t.Fatalf("Answer: %v", err)
@@ -389,8 +391,14 @@ func TestAnswer_theCorpusWideMarkerRuleReachesBothPrompts(t *testing.T) {
 		if !strings.Contains(p, "about the sources as a whole") {
 			t.Errorf("the %s prompt never says a claim about the source set is not a passage's claim", name)
 		}
-		if !strings.Contains(p, "Never enumerate the sources to prove they are unrelated") {
+		if !strings.Contains(p, "never enumerate the sources") {
 			t.Errorf("the %s prompt does not forbid enumerating the sources", name)
+		}
+		if !strings.Contains(p, "carries no marker at all") {
+			t.Errorf("the %s prompt lets a claim about absence keep a few markers as examples", name)
+		}
+		if !strings.Contains(p, "never cite a few of them as examples of the silence") {
+			t.Errorf("the %s prompt does not close the examples-of-silence reading", name)
 		}
 	}
 }

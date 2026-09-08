@@ -140,11 +140,16 @@ func NewAnswerer(c *llm.Client) *Answerer {
 // answer is written in that language: source paths, symbols and the markers
 // are quoted as they are.
 //
-// The last rule is there because "every statement carries its marker" has a
-// reading that turns on itself: an off-corpus question is refused, the refusal
-// says the sources are about something else, and that claim rests on all of
-// them. One turn came back with every one of its 58 gathered sources in a
-// single bracket run.
+// The rule about a statement made about the sources as a whole is there
+// because "every statement carries its marker" has a reading that turns on
+// itself: an off-corpus question is refused, the refusal says the sources are
+// about something else, and that claim rests on all of them. One turn came
+// back with every one of its 58 gathered sources in a single bracket run.
+//
+// Absence takes no marker at all, and that half is the strict one: a refusal
+// citing three sources as examples hands the reader three chips that open
+// files saying nothing about what was asked, which is the click the citation
+// rules exist to prevent. Examples are for a positive characterisation.
 const answerCommon = `You explain code. Write the answer in %s.
 
 You are given numbered sources. The rules, without exception:
@@ -167,10 +172,11 @@ You are given numbered sources. The rules, without exception:
 - Only use markers that exist. An invented number is worse than no marker.
 - One marker per bracket: a claim resting on two sources reads [1][2], never
   [1, 2].
-- A statement about the sources as a whole - what they cover, what they are
-  silent about, that a topic is absent from them - is not a claim any one
-  passage makes. It carries no marker, or at most three that stand as
-  examples. Never enumerate the sources to prove they are unrelated.`
+- A statement about the sources as a whole is not a claim any one passage
+  makes. That they are silent on a topic, or that it is absent from them,
+  carries no marker at all: never enumerate the sources to prove they are
+  unrelated, and never cite a few of them as examples of the silence either.
+  A statement about what they do cover may name at most three as examples.`
 
 // answerLanguage closes the system prompt. Identifiers stay as they are: a
 // translated function name is a name that does not exist.
