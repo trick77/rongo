@@ -4,11 +4,14 @@ Turns a codebase into something the rest of the company can ask. Plain-language
 questions, answers in domain terms, flowcharts and sequence diagrams where the
 process is the point.
 
-Rongo clones the repositories you list, indexes them, and answers questions about
-them in a browser. No checkout, no terminal, no coding agent: the people who have
-to know what the software does ask in their own words, and the answer comes back
-in theirs. The name comes from Rongorongo, the Easter Island script that nobody
-has deciphered.
+Rongo is a web app. It runs on a server, clones the repositories you list,
+indexes them, and answers questions about them in a browser. No install, no
+checkout, no terminal, no coding agent: the people who have to know what the
+software does ask in their own words, and the answer comes back in theirs. The
+name comes from Rongorongo, the Easter Island script that nobody has deciphered.
+
+![A question answered in the Analyst voice, with the flowchart it produced and
+the places the answer was read from](rongo-app.png)
 
 ## What a reader gets
 
@@ -48,6 +51,9 @@ Repositories are listed in `repos.yaml`; credentials never are, they come from
 `BACKEND_*` environment variables, one per forge host.
 
 ## Running it
+
+This part is for whoever sets it up. Everybody else gets a link and their usual
+company login.
 
 `make dev` runs it locally with hot reload. Needs Go, Node.js, `git`, `rg` and
 universal-ctags (the BSD ctags macOS ships doesn't work and Rongo says so at
