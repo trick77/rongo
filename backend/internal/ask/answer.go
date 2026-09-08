@@ -139,6 +139,12 @@ func NewAnswerer(c *llm.Client) *Answerer {
 // answerCommon takes the language name as its one format argument. Only the
 // answer is written in that language: source paths, symbols and the markers
 // are quoted as they are.
+//
+// The last rule is there because "every statement carries its marker" has a
+// reading that turns on itself: an off-corpus question is refused, the refusal
+// says the sources are about something else, and that claim rests on all of
+// them. One turn came back with every one of its 58 gathered sources in a
+// single bracket run.
 const answerCommon = `You explain code. Write the answer in %s.
 
 You are given numbered sources. The rules, without exception:
