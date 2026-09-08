@@ -164,6 +164,10 @@ type Candidate struct {
 	ModuleKey string `json:"module_key"`
 	Title     string `json:"title"`
 	Summary   string `json:"summary"`
+	// Members are the repositories a PROJECT entry offered, as the card drew
+	// them. Empty on a module entry, and on a card stored before projects
+	// shipped — which then means the single repository in Repo.
+	Members []string `json:"members,omitempty"`
 }
 
 // Store reads and writes threads.
@@ -904,10 +908,18 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 		if err != nil {
 			return 0, fmt.Errorf("marshal candidate %d hits: %w", idx, err)
 		}
+		members := ""
+		if len(cand.Members) > 0 {
+			b, err := json.Marshal(cand.Members)
+			if err != nil {
+				return 0, fmt.Errorf("marshal candidate %d members: %w", idx, err)
+			}
+			members = string(b)
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO clarification_candidates (clarification_id, idx, repo, branch, module_key, title, summary, hits)
-			VALUES (?,?,?,?,?,?,?,?)`,
-			id, idx, cand.Repo, cand.Branch, cand.ModuleKey, cand.Title, cand.Summary, string(hits)); err != nil {
+			INSERT INTO clarification_candidates (clarification_id, idx, repo, branch, module_key, title, summary, hits, members)
+			VALUES (?,?,?,?,?,?,?,?,?)`,
+			id, idx, cand.Repo, cand.Branch, cand.ModuleKey, cand.Title, cand.Summary, string(hits), members); err != nil {
 			return 0, fmt.Errorf("store candidate %d: %w", idx, err)
 		}
 	}
@@ -954,7 +966,7 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 	// hits is deliberately not selected here: it is large JSON, never sent to
 	// the browser, and only the resumed turn reads it, via CandidateHits.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT idx, repo, branch, module_key, title, summary
+		SELECT idx, repo, branch, module_key, title, summary, members
 		FROM clarification_candidates WHERE clarification_id = ? ORDER BY idx`, c.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read candidates: %w", err)
@@ -963,8 +975,15 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 	c.Candidates = []Candidate{}
 	for rows.Next() {
 		var cand Candidate
-		if err := rows.Scan(&cand.Idx, &cand.Repo, &cand.Branch, &cand.ModuleKey, &cand.Title, &cand.Summary); err != nil {
+		var members string
+		if err := rows.Scan(&cand.Idx, &cand.Repo, &cand.Branch, &cand.ModuleKey,
+			&cand.Title, &cand.Summary, &members); err != nil {
 			return nil, fmt.Errorf("scan candidate: %w", err)
+		}
+		if members != "" {
+			if err := json.Unmarshal([]byte(members), &cand.Members); err != nil {
+				return nil, fmt.Errorf("unmarshal candidate members: %w", err)
+			}
 		}
 		c.Candidates = append(c.Candidates, cand)
 	}

@@ -109,14 +109,42 @@ type wireCandidate struct {
 	Summary string `json:"summary"`
 	Repo    string `json:"repo"`
 	Branch  string `json:"branch"`
+	// Members are the repositories behind a project entry, so the card can say
+	// what choosing it will search. Absent on a module entry and on a project
+	// of one, where the entry already names its only repository.
+	Members []string `json:"members,omitempty"`
 }
 
 func wireCandidates(cands []ask.Candidate) []wireCandidate {
 	out := make([]wireCandidate, len(cands))
 	for i, c := range cands {
 		out[i] = wireCandidate{Idx: i, Title: c.Title, Summary: c.Summary, Repo: c.Repo, Branch: c.Branch}
+		if len(c.Members) > 1 {
+			out[i].Members = c.Members
+		}
 	}
 	return out
+}
+
+// candidateRepos is what one card entry searches when it is chosen: the
+// repositories a project entry folded, or the single repository it named.
+//
+// Read from the RECORD, never resolved again. A project can gain a member in
+// repos.yaml between the card being drawn and the button being pressed, and
+// re-resolving would answer from a repository the card never offered — widening
+// the reader's own choice behind their back.
+//
+// An empty Members with a non-empty Repo is a card stored before projects
+// shipped, or a project of one. Both mean the same thing, and both are what
+// that entry meant when it was drawn.
+func candidateRepos(c threads.Candidate) []string {
+	if len(c.Members) > 0 {
+		return c.Members
+	}
+	if c.Repo != "" {
+		return []string{c.Repo}
+	}
+	return nil
 }
 
 // handleAsk answers a question over SSE.
@@ -276,16 +304,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// existed resuming exactly as it did.
 		if narrowing {
 			// The panel stores no hits to replay and offers no module: every
-			// entry is a repository, and the resumed turn searches the picked
-			// ones at full depth.
+			// entry is a project, and the resumed turn searches the picked
+			// ones at full depth — every repository of each.
 			resumeRepoChoice = true
-			resumeRepos = narrowed
+			for _, cand := range c.Candidates {
+				for _, picked := range narrowed {
+					if cand.Repo == picked {
+						resumeRepos = append(resumeRepos, candidateRepos(cand)...)
+					}
+				}
+			}
 		} else {
 			chosen := c.Candidates[req.Choice]
 			resumeRepoChoice = chosen.ModuleKey == ""
-			if chosen.Repo != "" {
-				resumeRepos = []string{chosen.Repo}
-			}
+			resumeRepos = candidateRepos(chosen)
 		}
 		var hits []retrieve.Hit
 		if !resumeRepoChoice {
