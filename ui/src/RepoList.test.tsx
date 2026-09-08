@@ -108,7 +108,7 @@ describe("RepoList", () => {
     await screen.findByRole("heading", { name: "peeq" });
 
     const table = screen.getByRole("table");
-    expect(table.className).toContain("min-w-[760px]");
+    expect(table.className).toContain("min-w-[720px]");
     expect(table.parentElement!.className).toContain("overflow-x-auto");
     // The pinned column carries the error stripe, so an error stays in sight
     // however far the row is scrolled.
@@ -163,6 +163,10 @@ describe("wiringSpec", () => {
     // Nothing uses shop-ui, so it is where the picture starts.
     expect(spec.nodes.find((n) => n.id === "shop-ui")!.kind).toBe("start");
     expect(spec.nodes.find((n) => n.id === "shop-backend")!.kind).toBe("step");
+    // Only what an edge touches. A member nothing connects to would be a box
+    // floating beside the graph and named in the line beneath it — the same
+    // fact twice, once as a picture that says nothing.
+    expect(spec.nodes.map((n) => n.id).sort()).toEqual(["shop-backend", "shop-ui"]);
     // Configuration is not code, so no node cites anything. AGENTS.md: a node
     // cites code or nothing, and is still drawn with no sources.
     expect(spec.nodes.every((n) => n.src.length === 0)).toBe(true);

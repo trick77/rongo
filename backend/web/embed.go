@@ -49,7 +49,7 @@ func HasBuiltIndex() bool {
 // API and says so itself.
 func isRoute(path string) bool {
 	switch path {
-	case "/", "/new", "/repos", "/shared":
+	case "/", "/new", "/projects", "/shared":
 		return true
 	}
 	if rest, ok := strings.CutPrefix(path, "/share/"); ok {

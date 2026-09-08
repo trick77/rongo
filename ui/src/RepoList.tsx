@@ -70,14 +70,21 @@ export function wiringSpec(p: Project): FlowSpec | null {
   );
   if (edges.length === 0) return null;
   const reached = new Set(edges.map((e) => e.to));
+  // Only the repositories an edge actually touches. A member nothing connects
+  // to would otherwise be drawn as a box floating beside the graph AND named
+  // in the line beneath it — the same fact twice, once as a picture that says
+  // nothing. It belongs in the list alone.
+  const touched = new Set(edges.flatMap((e) => [e.from, e.to]));
   return {
     type: "flow",
-    nodes: p.repos.map((r) => ({
-      id: r.name,
-      label: r.kind ? `${r.name} · ${r.kind}` : r.name,
-      kind: reached.has(r.name) ? "step" : "start",
-      src: [],
-    })),
+    nodes: p.repos
+      .filter((r) => touched.has(r.name))
+      .map((r) => ({
+        id: r.name,
+        label: r.kind ? `${r.name} · ${r.kind}` : r.name,
+        kind: reached.has(r.name) ? "step" : "start",
+        src: [],
+      })),
     edges,
   };
 }
@@ -286,7 +293,7 @@ function ProjectPanel({ project }: { project: Project }) {
       )}
 
       <div className="overflow-x-auto overscroll-x-contain">
-        <table className="w-full min-w-[760px] border-separate border-spacing-0 text-sm">
+        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="bg-bg">
               <th className={th + " sticky left-0 z-10 border-b border-border bg-bg"}>Repository</th>
@@ -313,15 +320,18 @@ function ProjectPanel({ project }: { project: Project }) {
                 >
                   {/* The explicit background is what a sticky cell needs, or the
                       scrolled columns show through it. */}
+                  {/* A width, or the description in this cell squeezes the
+                      column until the repository name itself wraps mid-word —
+                      and the name is the one thing every row is identified by. */}
                   <td
                     className={
-                      "sticky left-0 z-10 bg-panel px-3.5 py-3 " +
+                      "sticky left-0 z-10 w-[17rem] bg-panel px-3.5 py-3 " +
                       (r.last_error ? "shadow-[inset_3px_0_0_var(--color-danger)]" : "")
                     }
                   >
-                    <span className="font-mono font-medium">{r.name}</span>
+                    <span className="font-mono font-medium whitespace-nowrap">{r.name}</span>
                     {r.description && (
-                      <div className="mt-0.5 max-w-[28rem] text-[12.5px] text-muted">
+                      <div className="mt-0.5 text-[12.5px] text-muted">
                         {r.description}
                       </div>
                     )}
