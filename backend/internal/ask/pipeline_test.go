@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -108,12 +109,23 @@ type fakeRouter struct {
 	// all is the understanding's "the reader asked for every repository"
 	// signal, for the same reason.
 	all bool
+	// projects is the declared grouping this turn sees. The zero Map is
+	// "nothing declared", which is what almost every test here wants.
+	projects    projects.Map
+	projectsErr error
 }
 
 func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
 	f.named = namedRepos
 	f.all = allRepos
 	return f.d, f.err
+}
+
+// Projects returns whatever the test declared, and the zero Map by default —
+// which answers every repository with its own name, so a test that says nothing
+// about projects gets the behaviour rongo had before they existed.
+func (f *fakeRouter) Projects(context.Context) (projects.Map, error) {
+	return f.projects, f.projectsErr
 }
 
 // pipelineFakes is what newTestPipeline wires by default; an option overrides

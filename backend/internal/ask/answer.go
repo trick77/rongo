@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -436,6 +437,27 @@ type Scope struct {
 	// The column is a JSON blob, so an older row simply decodes to false and
 	// no migration is needed.
 	DocsOnly bool `json:"docs_only,omitempty"`
+	// Projects are the projects Known covers ENTIRELY, sorted.
+	//
+	// It exists because len(Known) >= 2 has always meant "comparison", in three
+	// independent places, and a project expands to its members. Without this a
+	// question about one product would be answered as a comparison of its own
+	// backend against its own UI, under a prompt rule telling the model to say
+	// plainly where they differ.
+	//
+	// Entirely is the point. A reader who named one repository of a three-repo
+	// project asked about that repository, so a partial cover counts for
+	// nothing and the turn behaves exactly as it did before projects existed.
+	Projects []string `json:"projects,omitempty"`
+	// Structure is the project structure block for the answer prompt: which
+	// repository plays which part, and which calls which.
+	//
+	// Not persisted, and derived per turn from the live repos.yaml — the same
+	// choice Message.Notice makes and for the same reason. A re-explained turn
+	// therefore describes the structure as it is now rather than as it was,
+	// which is what a re-index does to sources too, and better than a second
+	// stored blob that can rot.
+	Structure string `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -617,6 +639,76 @@ func coveredRepos(known []string, sources []Source) []string {
 	return out
 }
 
+// StructureBlock renders what a project is made of, for the answer prompt.
+//
+// Templated from repos.yaml, never written by a model, and never a source. It
+// is the same class of input as a manifest: it decides what the model is told
+// about the shape of the code, not what the answer may claim to have read. The
+// closing sentence is the rule that keeps it that way, in the shape the docs
+// rule and the unindexed-repository rule already use.
+//
+// It exists for one case above all: a project with two backends, where "kind:
+// backend" is true of both and only the declared edge says which one the
+// storefront calls. The NEGATIVE half carries as much as the positive — a model
+// reading a fetch() in the UI beside two plausible APIs will otherwise pick one.
+//
+// A project with nothing declared and one member produces nothing at all.
+// Absence takes no marker, and "rongo is one product in 1 repository" tells the
+// model something it can already see in every citation.
+func StructureBlock(ps []projects.Project) string {
+	var b strings.Builder
+	for _, p := range ps {
+		var edges []string
+		var unreached []string
+		reached := map[string]bool{}
+		declared := len(p.Members) > 1
+		for _, m := range p.Members {
+			if m.Kind != "" || m.Description != "" {
+				declared = true
+			}
+			for _, u := range m.Uses {
+				edges = append(edges, m.Name+" uses "+u+".")
+				reached[u] = true
+			}
+		}
+		if !declared {
+			continue
+		}
+		fmt.Fprintf(&b, "\n\nProject %q is one product in %d repositories.\n\n", p.Name, len(p.Members))
+		for _, m := range p.Members {
+			fmt.Fprintf(&b, "  %s", m.Name)
+			if m.Kind != "" {
+				fmt.Fprintf(&b, " (%s)", m.Kind)
+			}
+			if m.Description != "" {
+				fmt.Fprintf(&b, " — %s", m.Description)
+			}
+			b.WriteString("\n")
+		}
+		// Only when there is an edge to contrast with. With no edges at all,
+		// "nothing uses any of them" is noise, and the useful fact — that these
+		// repositories are one product — has already been said.
+		if len(edges) > 0 {
+			b.WriteString("\nDeclared connections inside the project:\n")
+			for _, e := range edges {
+				fmt.Fprintf(&b, "  %s\n", e)
+			}
+			for _, m := range p.Members {
+				if !reached[m.Name] {
+					unreached = append(unreached, m.Name)
+				}
+			}
+			if len(unreached) > 0 {
+				fmt.Fprintf(&b, "Nothing in this project uses %s. They are reached from outside it, "+
+					"so do not connect them to the others yourself.\n", strings.Join(unreached, ", "))
+			}
+		}
+		b.WriteString("\nThis is configuration, not code. It says which repository plays which part " +
+			"and which calls which. Never present it as something you read in the sources, and never cite it.")
+	}
+	return b.String()
+}
+
 // Answer writes the answer for one turn, streaming it token by token.
 //
 // With nothing gathered it returns the "nothing found" answer WITHOUT calling
@@ -652,9 +744,24 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// and still return nothing for this question. Telling the model to cover
 	// it anyway is an instruction to invent, which is the one thing the rest
 	// of this prompt exists to prevent.
-	if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
+	//
+	// A turn covering ONE project whole is not a comparison, whatever its
+	// repository count: a backend and its UI are one product, and telling the
+	// model to say where they differ would answer the wrong question. Two or
+	// more projects still compare, and the rule names those rather than the
+	// repositories underneath, because products are what the reader asked
+	// about.
+	if len(scope.Projects) == 1 {
+		// Nothing: one product, answered as one mechanism.
+	} else if len(scope.Projects) >= 2 {
+		system += fmt.Sprintf(answerCompare, strings.Join(scope.Projects, ", "))
+	} else if covered := coveredRepos(scope.Known, sources); len(covered) >= 2 {
 		system += fmt.Sprintf(answerCompare, strings.Join(covered, ", "))
 	}
+	// What each repository in the project is for, and which calls which. Only
+	// the turn's own projects reach it, so a pin that excludes a repository
+	// never has it described anyway.
+	system += scope.Structure
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}

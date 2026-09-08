@@ -49,6 +49,120 @@ func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	}
 }
 
+// TestOneProjectIsNotAComparisonOfItsOwnRepositories is the collision this
+// change had to resolve. len(Known) >= 2 has always meant "comparison", and a
+// project expands to its members — so without Scope.Projects, every question
+// about a product would be answered as a comparison of its own backend against
+// its own UI, told to "say plainly where they differ".
+func TestOneProjectIsNotAComparisonOfItsOwnRepositories(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if strings.Contains(*prompt, "The question names these repositories") {
+		t.Errorf("one project is one product, not a comparison of its halves:\n%s", *prompt)
+	}
+}
+
+func TestTwoProjectsStillCompare_AndByProjectName(t *testing.T) {
+	// Two products named is still a comparison, and the reader asked about
+	// products: the rule names those rather than the repositories underneath.
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How do shop and legacy-crm differ?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop", "legacy-crm"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "The question names these repositories") {
+		t.Fatalf("two projects must still be compared:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "shop, legacy-crm") {
+		t.Errorf("the comparison must name the projects, not their members:\n%s", *prompt)
+	}
+}
+
+func TestNoProjectsMeansTodaysComparison(t *testing.T) {
+	// Nothing declared: the rule fires on the covered repositories exactly as
+	// it did before projects existed. This is the eval's guarantee in one test.
+	c, prompt, _ := streamUpstream(t, "x")
+	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "peeq, rongo") {
+		t.Errorf("with no project declared the rule still names the repositories:\n%s", *prompt)
+	}
+}
+
+func TestTheStructureBlockReachesThePromptAndIsMarkedConfiguration(t *testing.T) {
+	// The whole reason kind, description and uses exist: with two backends in
+	// one project, only the declared edge says which one the storefront calls.
+	c, prompt, _ := streamUpstream(t, "x")
+	block := StructureBlock([]projects.Project{{
+		Name: "shop",
+		Members: []projects.Repo{
+			{Name: "shop-admin-backend", Kind: "backend", Description: "Internal admin API."},
+			{Name: "shop-backend", Kind: "backend", Description: "Storefront API and checkout."},
+			{Name: "shop-ui", Kind: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
+		},
+	}})
+	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
+		bothReposSources(),
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Structure: block}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "shop-ui uses shop-backend") {
+		t.Errorf("the declared edge must reach the model:\n%s", *prompt)
+	}
+	// The negative half is the disambiguating one: two repositories say
+	// "backend", and only this sentence keeps the admin API out of the answer.
+	if !strings.Contains(*prompt, "shop-admin-backend") {
+		t.Errorf("the members nothing calls must be named too:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "configuration, not code") {
+		t.Errorf("the block must say it is configuration and must not be cited:\n%s", *prompt)
+	}
+}
+
+func TestStructureBlockSaysNothingAboutABareProjectOfOne(t *testing.T) {
+	// rongo's own shape: one repository, no kind, no description, no edges.
+	// Absence takes no marker — there is nothing to tell the model.
+	if got := StructureBlock([]projects.Project{{
+		Name:    "rongo",
+		Members: []projects.Repo{{Name: "rongo"}},
+	}}); got != "" {
+		t.Errorf("StructureBlock = %q, want empty for a project with nothing declared", got)
+	}
+}
+
+func TestStructureBlockOmitsTheConnectionsSectionWhenThereAreNoEdges(t *testing.T) {
+	// Three repositories and no declared edge: "nothing uses any of them" is
+	// noise, and the useful fact is only that they are one product.
+	got := StructureBlock([]projects.Project{{
+		Name: "shop",
+		Members: []projects.Repo{
+			{Name: "a", Kind: "backend"}, {Name: "b", Kind: "ui"}, {Name: "c", Kind: "consumer"},
+		},
+	}})
+
+	if got == "" {
+		t.Fatal("a multi-repository project still tells the model its members are one product")
+	}
+	if strings.Contains(got, "Declared connections") {
+		t.Errorf("no edges means no connections section:\n%s", got)
+	}
+}
+
 func TestDecideDoesNotAskWhenTheQuestionNamedARepository(t *testing.T) {
 	// Given two candidates too close for the margin, which every later rung
 	// would turn into a card.
