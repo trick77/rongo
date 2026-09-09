@@ -1,7 +1,15 @@
-# The repositories rongo indexes. Copy to conf/repos.yaml.
+# The projects rongo indexes, and the repositories each is built from. Copy to
+# conf/repos.yaml.
 #
 # As shipped this file works unchanged: rongo is public, so the one active
 # entry needs no token and indexes on the first start. Add your own below.
+#
+# A PROJECT is the unit rongo searches and the unit a reader is asked to choose
+# between, because a product often lives in several repositories - a backend, a
+# UI, a queue consumer - and asking which of those was meant makes someone pick
+# half an answer. A repository that stands alone is a project of one, named
+# after itself. The project holds its repositories, so the grouping is written
+# once and a repository cannot end up in two products.
 #
 # Credentials NEVER belong in this file — it ends up in a repository or a ticket
 # sooner or later. Name the environment variable with token_env instead, and put
@@ -11,79 +19,99 @@
 # with `git ls-remote --symref origin HEAD`. That is not necessarily master:
 # this corpus mixes master and main.
 #
-# project is REQUIRED. It is the unit rongo searches and the unit a reader is
-# asked to choose between, because a product often lives in several
-# repositories - a backend, a UI, a queue consumer - and asking which of those
-# was meant makes someone pick half an answer. A repository that stands alone is
-# a project of one, named after itself.
-#
 # kind, description and uses are optional, and they matter as soon as a project
 # holds more than one repository: with two backends, "kind: backend" is true of
 # both and only the declared edge says which one the storefront calls. All three
 # are written by hand here and never inferred - a manifest cannot see across a
 # Go backend and a TypeScript UI, and guessing from names is not a fact.
-repositories:
+projects:
   # rongo indexes itself. It replaced loom on 2026-08-20: loom was peeq's
   # wholesale twin, rongo overlaps peeq only where it has to — retrieval,
   # storage, auth, scheduling — which is enough for a real ambiguous cohort
   # and gives the corpus a repository whose questions can be verified against
   # code that is right here.
-  # Deliberately the remote, not a local checkout. Cloning a local path takes
-  # that checkout's own branch ref, which lags whatever has been merged — the
-  # first attempt indexed rongo at 4 files because the local master was months
-  # behind origin/master. A local clone_url indexes the working copy's opinion,
-  # not the published code. It also does not exist inside the container.
   - name: rongo
-    clone_url: https://github.com/trick77/rongo.git
-    project: rongo
-    # branch omitted on purpose: resolved from the remote
+    repositories:
+      # Deliberately the remote, not a local checkout. Cloning a local path
+      # takes that checkout's own branch ref, which lags whatever has been
+      # merged — the first attempt indexed rongo at 4 files because the local
+      # master was months behind origin/master. A local clone_url indexes the
+      # working copy's opinion, not the published code. It also does not exist
+      # inside the container.
+      - name: rongo
+        clone_url: https://github.com/trick77/rongo.git
+        # branch omitted on purpose: resolved from the remote
 
   # A dependency peeq genuinely declares in go.mod, so cross-repo composition is
-  # exercised against real data rather than a fixture.
+  # exercised against real data rather than a fixture. Coupling ACROSS projects
+  # is read from the manifest and never declared here; uses is for siblings.
   #- name: go-sqlite3
-  #  clone_url: https://github.com/ncruces/go-sqlite3.git
-  #  project: go-sqlite3
+  #  repositories:
+  #    - name: go-sqlite3
+  #      clone_url: https://github.com/ncruces/go-sqlite3.git
 
   # A private repository: the token lives in the environment under the name
   # given here, never in this file.
   #- name: peeq
-  #  clone_url: https://github.com/trick77/peeq.git
-  #  project: peeq
-  #  token_env: BACKEND_FORGE_TOKEN_GITHUB
+  #  repositories:
+  #    - name: peeq
+  #      clone_url: https://github.com/trick77/peeq.git
+  #      token_env: BACKEND_FORGE_TOKEN_GITHUB
 
   # Deliberately NOT listed, so the "the boundary is named" invariant is
   # exercised in daily use and not only in tests:
   #   asg017/sqlite-vec
 
-  # An entry kept for the record but not indexed:
+  # A project kept for the record but not indexed. enabled belongs to the
+  # repository, not the project: parking one half of a product is normal.
   #- name: legacy-crm
-  #  clone_url: https://forge.example.invalid/acme/legacy-crm.git
-  #  project: legacy-crm
-  #  token_env: BACKEND_FORGE_TOKEN
-  #  enabled: false
+  #  repositories:
+  #    - name: legacy-crm
+  #      clone_url: https://forge.example.invalid/acme/legacy-crm.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      enabled: false
 
-  # A product in several repositories, which is what project is for. The UI
-  # declares the backend it calls; nothing in the project calls the admin API or
-  # the queue consumer, and that absence is the fact that keeps an answer about
-  # the storefront from attributing a call to the wrong backend.
-  #- name: shop-ui
-  #  clone_url: https://forge.example.invalid/acme/shop-ui.git
-  #  project: shop
-  #  kind: ui
-  #  description: Customer-facing storefront, React.
-  #  uses: [shop-backend]
-  #- name: shop-backend
-  #  clone_url: https://forge.example.invalid/acme/shop-backend.git
-  #  project: shop
-  #  kind: backend
-  #  description: Storefront API and checkout.
-  #- name: shop-admin-backend
-  #  clone_url: https://forge.example.invalid/acme/shop-admin-backend.git
-  #  project: shop
-  #  kind: backend
-  #  description: Internal admin API. Not called by shop-ui.
-  #- name: shop-events
-  #  clone_url: https://forge.example.invalid/acme/shop-events.git
-  #  project: shop
-  #  kind: consumer
-  #  description: Kafka consumer, ingests order events into the shop DB.
+  # One product in six repositories, using every feature at once. Read the uses
+  # edges as arrows: the storefront calls two services, both of which are built
+  # against one contract, so the contract is reached by two paths and drawn once
+  # on the Projects page. Nothing declares an edge to the admin API or the queue
+  # consumer — that absence is a fact, not an oversight, and it is what keeps an
+  # answer about the storefront from attributing a call to the wrong backend.
+  #
+  #   shop-ui ─┬─> shop-backend ─┬─> shop-contract
+  #            └─> shop-search ──┘
+  #   shop-admin-backend, shop-events: reached from outside the project
+  #- name: shop
+  #  repositories:
+  #    - name: shop-ui
+  #      clone_url: https://forge.example.invalid/acme/shop-ui.git
+  #      branch: main
+  #      kind: ui
+  #      description: Customer-facing storefront, React.
+  #      uses: [shop-backend, shop-search]
+  #    - name: shop-backend
+  #      clone_url: https://forge.example.invalid/acme/shop-backend.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      kind: backend
+  #      description: Storefront API and checkout.
+  #      uses: [shop-contract]
+  #    - name: shop-search
+  #      clone_url: https://forge.example.invalid/acme/shop-search.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      kind: service
+  #      description: Product search over the catalogue.
+  #      uses: [shop-contract]
+  #    - name: shop-contract
+  #      clone_url: https://forge.example.invalid/acme/shop-contract.git
+  #      kind: contract
+  #      description: OpenAPI spec and the clients generated from it.
+  #    - name: shop-admin-backend
+  #      clone_url: https://forge.example.invalid/acme/shop-admin-backend.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      kind: backend
+  #      description: Internal admin API. Not called by shop-ui.
+  #    - name: shop-events
+  #      clone_url: https://forge.example.invalid/acme/shop-events.git
+  #      kind: consumer
+  #      description: Kafka consumer, ingests order events into the shop DB.
+  #      enabled: false

@@ -19,15 +19,17 @@ func writeYAML(t *testing.T, body string) string {
 func TestLoad_readsEntries(t *testing.T) {
 	// Given
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: https://forge.example.invalid/acme/shop-backend.git
-    branch: master
-    token_env: BACKEND_FORGE_TOKEN
-    project: shop
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+        branch: master
+        token_env: BACKEND_FORGE_TOKEN
   - name: commons-mail
-    clone_url: https://forge.example.invalid/acme/commons-mail.git
-    project: commons-mail
+    repositories:
+      - name: commons-mail
+        clone_url: https://forge.example.invalid/acme/commons-mail.git
 `)
 
 	// When
@@ -53,13 +55,44 @@ repositories:
 	}
 }
 
+// TestLoad_takesTheProjectFromTheBlock: nothing past Load knows the file is
+// nested — every entry comes back carrying the name of the block it sat in, so
+// the indexer, the store and the router go on seeing a flat list.
+func TestLoad_takesTheProjectFromTheBlock(t *testing.T) {
+	// Given
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+`)
+
+	// When
+	specs, err := Load(path)
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	for _, s := range specs {
+		if s.Project != "shop" {
+			t.Errorf("%s.Project = %q, want shop from the enclosing block", s.Name, s.Project)
+		}
+	}
+}
+
 func TestLoad_rejectsInlineSecret(t *testing.T) {
 	// Given: token_env exists precisely so the secret is NOT in this file, which
 	// ends up in a repository or a ticket sooner or later.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: https://user:ghp_realtokenvalue@forge.example.invalid/acme/shop.git
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://user:ghp_realtokenvalue@forge.example.invalid/acme/shop.git
 `)
 
 	// When
@@ -75,9 +108,11 @@ func TestLoad_rejectsInlineSecretWithoutScheme(t *testing.T) {
 	// Given: a "https://" prefix is easy to forget when pasting a basic-auth
 	// snippet, and the URL still parses "successfully" as opaque without it.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: "user:pass@github.com/acme/shop.git"
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "user:pass@github.com/acme/shop.git"
 `)
 
 	_, err := Load(path)
@@ -91,9 +126,11 @@ func TestLoad_rejectsOAuth2StyleTokenWithoutScheme(t *testing.T) {
 	// Given: the "oauth2:TOKEN@host" form forges commonly hand out for
 	// clone-with-token snippets, pasted without "https://".
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: "oauth2:ghp_realtoken@github.com:acme/shop.git"
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "oauth2:ghp_realtoken@github.com:acme/shop.git"
 `)
 
 	_, err := Load(path)
@@ -108,9 +145,11 @@ func TestLoad_rejectsBareTokenAsScpUser(t *testing.T) {
 	// token — token@host is what's left after someone drops the password
 	// separator by hand.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: "ghp_realtoken@github.com:acme/shop.git"
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "ghp_realtoken@github.com:acme/shop.git"
 `)
 
 	_, err := Load(path)
@@ -125,10 +164,11 @@ func TestLoad_acceptsScpStyleSSHRemote(t *testing.T) {
 	// stay accepted — over-rejecting pushes people back toward embedding
 	// tokens in https URLs instead.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: "git@github.com:acme/repo.git"
-    project: shop
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "git@github.com:acme/repo.git"
 `)
 
 	specs, err := Load(path)
@@ -142,12 +182,19 @@ repositories:
 }
 
 func TestLoad_rejectsDuplicateNames(t *testing.T) {
+	// Across projects, not only inside one: the name is a directory under
+	// BACKEND_REPO_ROOT and the repository half of every citation, both of
+	// which are corpus-wide.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: https://example.invalid/a.git
-  - name: shop-backend
-    clone_url: https://example.invalid/b.git
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://example.invalid/a.git
+  - name: legacy-crm
+    repositories:
+      - name: shop-backend
+        clone_url: https://example.invalid/b.git
 `)
 
 	_, err := Load(path)
@@ -160,9 +207,11 @@ repositories:
 func TestLoad_rejectsUnsafeName(t *testing.T) {
 	// Given: the name becomes a directory under BACKEND_REPO_ROOT.
 	path := writeYAML(t, `
-repositories:
-  - name: ../escape
-    clone_url: https://example.invalid/a.git
+projects:
+  - name: shop
+    repositories:
+      - name: ../escape
+        clone_url: https://example.invalid/a.git
 `)
 
 	_, err := Load(path)
@@ -186,13 +235,16 @@ func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
 	// the corpus on the next boot. An error puts the caller on its "list
 	// unavailable" path instead, which changes nothing.
 	//
-	// Both shapes reach it without anything looking wrong: a truncated file, and
-	// `repos:` typed for `repositories:` — yaml.v3 ignores the unknown key and
-	// reports no error at all.
+	// Three shapes reach it without anything looking wrong: a truncated file,
+	// `repos:` typed for `projects:`, and the flat `repositories:` this file
+	// used before projects nested — yaml.v3 ignores an unknown top-level key and
+	// reports no error at all, so the old shape must land here rather than load
+	// as an empty corpus.
 	for _, body := range []string{
 		"",
-		"repositories:\n",
-		"repos:\n  - name: shop\n    clone_url: https://forge.example.invalid/acme/shop.git\n",
+		"projects:\n",
+		"repos:\n  - name: shop\n    repositories:\n      - name: shop\n        clone_url: https://forge.example.invalid/acme/shop.git\n",
+		"repositories:\n  - name: shop\n    clone_url: https://forge.example.invalid/acme/shop.git\n    project: shop\n",
 	} {
 		if _, err := Load(writeYAML(t, body)); err == nil {
 			t.Errorf("Load(%q) err = nil, want a refusal of a list naming no repository", body)
@@ -200,25 +252,80 @@ func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
 	}
 }
 
+func TestLoad_rejectsAProjectWithNoName(t *testing.T) {
+	// The block IS the project name, so a nameless one leaves its repositories
+	// in a product nobody can name or choose.
+	path := writeYAML(t, `
+projects:
+  - repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for a project with no name")
+	}
+}
+
+func TestLoad_rejectsAnEmptyProject(t *testing.T) {
+	// A product with nothing in it is almost always a half-finished edit, and
+	// the alternative is a name the card could offer with nothing behind it.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories: []
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for a project naming no repository")
+	}
+}
+
+func TestLoad_rejectsTheSameProjectInTwoBlocks(t *testing.T) {
+	// Two blocks of one name is the flat shape sneaking back in: the grouping
+	// would have to be reassembled by folding, which is the thing nesting exists
+	// to make unnecessary.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal for one project split over two blocks")
+	}
+}
+
 func TestLoad_readsProjectStructure(t *testing.T) {
 	// Given: one product in three repositories, with the wiring declared.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: shop
-    kind: ui
-    description: Customer-facing storefront, React.
-    uses: [shop-backend]
-  - name: shop-backend
-    clone_url: https://forge.example.invalid/acme/shop-backend.git
-    project: shop
-    kind: backend
-    description: Storefront API and checkout.
-  - name: shop-events
-    clone_url: https://forge.example.invalid/acme/shop-events.git
-    project: shop
-    kind: consumer
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        kind: ui
+        description: Customer-facing storefront, React.
+        uses: [shop-backend]
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+        kind: backend
+        description: Storefront API and checkout.
+      - name: shop-events
+        clone_url: https://forge.example.invalid/acme/shop-events.git
+        kind: consumer
 `)
 
 	// When
@@ -247,35 +354,14 @@ repositories:
 	}
 }
 
-func TestLoad_requiresProject(t *testing.T) {
-	// Given: rongo searches a project, so every repository belongs to one. A
-	// project of one is named after its own repository; there is no implicit
-	// case left to guess at.
-	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: https://forge.example.invalid/acme/shop-backend.git
-`)
-
-	// When
-	_, err := Load(path)
-
-	// Then
-	if err == nil {
-		t.Fatal("Load() err = nil, want a refusal for a missing project")
-	}
-	if !strings.Contains(err.Error(), "project") {
-		t.Errorf("Load() err = %v, want it to name the missing field", err)
-	}
-}
-
 func TestLoad_allowsProjectNamedAfterItsOnlyMember(t *testing.T) {
 	// Given: the ordinary single-repository setup, and rongo's own.
 	path := writeYAML(t, `
-repositories:
+projects:
   - name: rongo
-    clone_url: https://github.com/trick77/rongo.git
-    project: rongo
+    repositories:
+      - name: rongo
+        clone_url: https://github.com/trick77/rongo.git
 `)
 
 	// When
@@ -295,13 +381,15 @@ func TestLoad_rejectsProjectNamedAfterAnotherRepository(t *testing.T) {
 	// button carries one of each. A project named after a repository that is
 	// not its member makes that button mean two things.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: legacy-crm
+projects:
   - name: legacy-crm
-    clone_url: https://forge.example.invalid/acme/legacy-crm.git
-    project: legacy-crm-suite
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+  - name: legacy-crm-suite
+    repositories:
+      - name: legacy-crm
+        clone_url: https://forge.example.invalid/acme/legacy-crm.git
 `)
 
 	// When
@@ -319,13 +407,13 @@ func TestLoad_rejectsAProjectNamedAfterOneOfSeveralMembers(t *testing.T) {
 	// narrower thing would widen — the one move the funnel forbids. A project of
 	// one keeps the same name legitimately, which is why the count decides.
 	path := writeYAML(t, `
-repositories:
+projects:
   - name: shop
-    clone_url: https://forge.example.invalid/acme/shop.git
-    project: shop
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: shop
+    repositories:
+      - name: shop
+        clone_url: https://forge.example.invalid/acme/shop.git
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
 `)
 
 	// When
@@ -340,30 +428,36 @@ repositories:
 func TestLoad_rejectsUsesOutsideTheProject(t *testing.T) {
 	// Given: uses is an edge inside one product. Coupling across products is
 	// repo_deps' business, read from a manifest rather than declared by hand.
+	// Nesting makes the second case the only one worth writing down, but all
+	// three still have to be refused rather than dropped.
 	cases := map[string]string{
 		"unknown repository": `
-repositories:
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: shop
-    uses: [nowhere]
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        uses: [nowhere]
 `,
 		"another project": `
-repositories:
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: shop
-    uses: [legacy-crm]
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        uses: [legacy-crm]
   - name: legacy-crm
-    clone_url: https://forge.example.invalid/acme/legacy-crm.git
-    project: legacy-crm
+    repositories:
+      - name: legacy-crm
+        clone_url: https://forge.example.invalid/acme/legacy-crm.git
 `,
 		"itself": `
-repositories:
-  - name: shop-ui
-    clone_url: https://forge.example.invalid/acme/shop-ui.git
-    project: shop
-    uses: [shop-ui]
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        uses: [shop-ui]
 `,
 	}
 
@@ -384,15 +478,15 @@ func TestLoad_allowsUsesCycleInsideAProject(t *testing.T) {
 	// Given: two backends calling each other is real, and layoutFlow removes
 	// back edges by DFS, so a cycle is drawable rather than fatal.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-orders
-    clone_url: https://forge.example.invalid/acme/shop-orders.git
-    project: shop
-    uses: [shop-billing]
-  - name: shop-billing
-    clone_url: https://forge.example.invalid/acme/shop-billing.git
-    project: shop
-    uses: [shop-orders]
+projects:
+  - name: shop
+    repositories:
+      - name: shop-orders
+        clone_url: https://forge.example.invalid/acme/shop-orders.git
+        uses: [shop-billing]
+      - name: shop-billing
+        clone_url: https://forge.example.invalid/acme/shop-billing.git
+        uses: [shop-orders]
 `)
 
 	// When
@@ -409,15 +503,15 @@ func TestLoad_rejectsTwoBranchesOfOneRepositoryInAProject(t *testing.T) {
 	// same file at two commits and answer as one product. AGENTS.md already
 	// forbids two cards differing only by branch.
 	path := writeYAML(t, `
-repositories:
-  - name: shop-backend
-    clone_url: https://forge.example.invalid/acme/shop-backend.git
-    project: shop
-    branch: master
-  - name: shop-backend-release
-    clone_url: https://forge.example.invalid/acme/shop-backend.git
-    project: shop
-    branch: release-2024.3
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+        branch: master
+      - name: shop-backend-release
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+        branch: release-2024.3
 `)
 
 	// When
@@ -426,5 +520,21 @@ repositories:
 	// Then
 	if err == nil {
 		t.Fatal("Load() err = nil, want a refusal for one clone_url twice in a project")
+	}
+}
+
+// TestLoad_theExampleFileLoads keeps repos.example.yaml honest: it is the only
+// documentation of the shape anyone reads, and a stale one sends every new
+// operator to an error the file itself taught them to write.
+func TestLoad_theExampleFileLoads(t *testing.T) {
+	specs, err := Load("../../../repos.example.yaml")
+	if err != nil {
+		t.Fatalf("Load(repos.example.yaml) err = %v, want nil", err)
+	}
+	if len(specs) == 0 {
+		t.Fatal("the example file must ship at least one active entry")
+	}
+	if !strings.HasPrefix(specs[0].CloneURL, "https://") {
+		t.Errorf("specs[0].CloneURL = %q, want the public remote", specs[0].CloneURL)
 	}
 }
