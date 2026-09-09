@@ -47,8 +47,9 @@ checkouts from git. Chat goes to an OpenAI-compatible endpoint serving the MiMo
 deployments named in `backend/internal/llm/client.go`, embeddings to any
 OpenAI-compatible `/embeddings` endpoint.
 
-Repositories are listed in `repos.yaml`; credentials never are, they come from
-`BACKEND_*` environment variables, one per forge host.
+Projects are listed in `repos.yaml`, each holding the repositories it is built
+from; credentials never are, they come from `BACKEND_*` environment variables,
+one per forge host.
 
 ## Running it
 

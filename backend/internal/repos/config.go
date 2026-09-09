@@ -5,7 +5,10 @@
 package repos
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -27,9 +30,11 @@ type Spec struct {
 	TokenEnv string
 	// Enabled defaults to true; set it false to stop indexing without deleting.
 	Enabled bool
-	// Project names the product this repository is part of, and is REQUIRED.
-	// It is the unit a reader is asked to choose between, so a repository that
-	// stands alone is a project of one, conventionally named after itself.
+	// Project names the product this repository is part of. It is not written
+	// on the entry: it is the name of the block the entry sits in, copied down
+	// here so everything past Load stays a flat list of repositories. It is the
+	// unit a reader is asked to choose between, so a repository that stands
+	// alone is a project of one, conventionally named after itself.
 	Project string
 	// Kind is a free-form token for the part this repository plays — backend,
 	// ui, consumer, contract. Deliberately not an enum: a closed vocabulary
@@ -49,6 +54,15 @@ type Spec struct {
 }
 
 type file struct {
+	Projects []rawProject `yaml:"projects"`
+}
+
+// rawProject is one product and the repositories it is built from. The project
+// CONTAINS its repositories rather than each repository naming its project:
+// that is how a reader thinks about it, it states the grouping once instead of
+// once per entry, and a repository cannot end up in two projects at all.
+type rawProject struct {
+	Name         string    `yaml:"name"`
 	Repositories []rawSpec `yaml:"repositories"`
 }
 
@@ -60,7 +74,6 @@ type rawSpec struct {
 	Branch      string   `yaml:"branch"`
 	TokenEnv    string   `yaml:"token_env"`
 	Enabled     *bool    `yaml:"enabled"`
-	Project     string   `yaml:"project"`
 	Kind        string   `yaml:"kind"`
 	Description string   `yaml:"description"`
 	Uses        []string `yaml:"uses"`
@@ -73,59 +86,95 @@ func Load(path string) ([]Spec, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read repository list %s: %w", path, err)
 	}
+	// The old shape is looked for FIRST, and leniently, so it is named as what
+	// it is. A half-migrated file usually still carries `project:` on the
+	// entries that were not moved, and the strict decode below would report
+	// those instead — true, but it sends the reader to the wrong line.
+	var old struct {
+		Repositories []struct{} `yaml:"repositories"`
+	}
+	if err := yaml.Unmarshal(body, &old); err == nil && len(old.Repositories) > 0 {
+		return nil, fmt.Errorf(
+			"%s has a top-level `repositories:` list, which is the old flat shape — nest those entries under a `projects:` block, because entries left outside one are not loaded and everything they name would be purged",
+			path)
+	}
+
 	var f file
-	if err := yaml.Unmarshal(body, &f); err != nil {
+	// KnownFields, not Unmarshal: an unknown key is a typo, and every typo in
+	// this file is a repository that silently is not what it says. A `project:`
+	// left on a nested entry after the migration is exactly that — it reads as
+	// declared and does nothing.
+	dec := yaml.NewDecoder(bytes.NewReader(body))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	// A list that names nothing is refused rather than returned empty, and this
 	// is the floor under the purge: a repository absent from the list loses its
 	// index and its checkout, so "the file parsed and mentions no repository"
-	// would wipe the whole corpus. The ways to reach that state are not exotic —
-	// a truncated file after a botched deploy, or `repos:` typed for
-	// `repositories:`, which yaml.v3 accepts and silently reads as no entries.
-	// Refusing here puts the caller on its "list unavailable" path, which leaves
-	// everything exactly as it was and says so.
-	if len(f.Repositories) == 0 {
+	// would wipe the whole corpus. The way to reach that state is not exotic: a
+	// truncated file after a botched deploy. Refusing here puts the caller on
+	// its "list unavailable" path, which leaves everything exactly as it was
+	// and says so. The two other shapes that used to land here — a mistyped
+	// top-level key and the old flat list — are refused above, by name.
+	if len(f.Projects) == 0 {
 		return nil, fmt.Errorf(
-			"%s names no repository: expected a `repositories:` list with at least one entry", path)
+			"%s names no project: expected a `projects:` list, each with a `repositories:` list of at least one entry", path)
 	}
 
-	seen := make(map[string]bool, len(f.Repositories))
-	specs := make([]Spec, 0, len(f.Repositories))
-	for i, r := range f.Repositories {
-		if err := validateName(r.Name); err != nil {
-			return nil, fmt.Errorf("entry %d: %w", i, err)
+	seen := map[string]bool{} // repository names, across every project
+	seenProject := map[string]bool{}
+	var specs []Spec
+	for i, p := range f.Projects {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			return nil, fmt.Errorf("project %d: name is required", i)
 		}
-		if seen[r.Name] {
-			return nil, fmt.Errorf("duplicate repository name %q", r.Name)
+		// Two blocks of one name is the flat shape sneaking back in: the
+		// grouping would have to be reassembled by folding, which is the thing
+		// nesting exists to make unnecessary. One block per product, whole.
+		if seenProject[name] {
+			return nil, fmt.Errorf("duplicate project name %q — a project is one block holding all of its repositories", name)
 		}
-		seen[r.Name] = true
+		seenProject[name] = true
+		// An empty block is a product rongo cannot search and a name the card
+		// could still offer. Almost always a half-finished edit.
+		if len(p.Repositories) == 0 {
+			return nil, fmt.Errorf("project %q names no repository", name)
+		}
 
-		if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
-			return nil, err
-		}
+		for j, r := range p.Repositories {
+			if err := validateName(r.Name); err != nil {
+				return nil, fmt.Errorf("project %q, entry %d: %w", name, j, err)
+			}
+			// Across every project, not just this one: the name is a directory
+			// under BACKEND_REPO_ROOT and a citation's repository, both of
+			// which are corpus-wide.
+			if seen[r.Name] {
+				return nil, fmt.Errorf("duplicate repository name %q", r.Name)
+			}
+			seen[r.Name] = true
 
-		if strings.TrimSpace(r.Project) == "" {
-			return nil, fmt.Errorf(
-				"%s: project is required — rongo searches a project, and a repository that stands alone is a project of one named after itself",
-				r.Name)
-		}
+			if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
+				return nil, err
+			}
 
-		enabled := true
-		if r.Enabled != nil {
-			enabled = *r.Enabled
+			enabled := true
+			if r.Enabled != nil {
+				enabled = *r.Enabled
+			}
+			specs = append(specs, Spec{
+				Name:        r.Name,
+				CloneURL:    strings.TrimSpace(r.CloneURL),
+				Branch:      strings.TrimSpace(r.Branch),
+				TokenEnv:    strings.TrimSpace(r.TokenEnv),
+				Enabled:     enabled,
+				Project:     name,
+				Kind:        strings.TrimSpace(r.Kind),
+				Description: strings.TrimSpace(r.Description),
+				Uses:        trimAll(r.Uses),
+			})
 		}
-		specs = append(specs, Spec{
-			Name:        r.Name,
-			CloneURL:    strings.TrimSpace(r.CloneURL),
-			Branch:      strings.TrimSpace(r.Branch),
-			TokenEnv:    strings.TrimSpace(r.TokenEnv),
-			Enabled:     enabled,
-			Project:     strings.TrimSpace(r.Project),
-			Kind:        strings.TrimSpace(r.Kind),
-			Description: strings.TrimSpace(r.Description),
-			Uses:        trimAll(r.Uses),
-		})
 	}
 
 	// Cross-entry checks come after every entry is read: each one needs the
