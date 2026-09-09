@@ -131,6 +131,9 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 	if rec.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q, want noindex", rec.Header().Get("X-Robots-Tag"))
 	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store: a cache in front would serve a revoked thread", rec.Header().Get("Cache-Control"))
+	}
 }
 
 func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
@@ -164,6 +167,17 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
+	// And a third turn that ended in a card: the card is on the link, and it
+	// is the one place a thread row number could ride the public payload.
+	asked, err := st.AddQuestion(ctx, th.ID, "ba", "en", "Which one?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := st.Clarify(ctx, asked.ID, ask.Clarification{Candidates: []ask.Candidate{
+		{Repo: "rongo", Branch: "master", ModuleKey: "a", Title: "A", Summary: "the a"},
+	}}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
 	sh := share(t, srv, th.PublicID)
 
 	// When
@@ -190,7 +204,12 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	// ... and nothing per turn: no breakdown, no model name, no follow-ups (there
 	// is no composer on that page to ask them with), no timeline.
 	body := rec.Body.String()
-	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `mimo-v2.5`, `"route"`} {
+	if !strings.Contains(body, `"clarification"`) {
+		t.Fatalf("the card is not on the link:\n%s", body)
+	}
+	// And thread_id, the row number the card used to carry: the same counter
+	// Message.ThreadID and the thread's public_id exist to keep off the wire.
+	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `mimo-v2.5`, `"route"`, `"thread_id"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("the public payload carries %s:\n%s", leak, body)
 		}
