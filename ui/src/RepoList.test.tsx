@@ -26,7 +26,7 @@ const peeq = {
   enabled: true,
   last_error: "",
   project: "peeq",
-  kind: "",
+  part: "",
   description: "",
   uses: [] as string[],
 };
@@ -132,10 +132,10 @@ describe("RepoList", () => {
 /** shop is one product in four repositories: a storefront UI calling one of two
  * backends, and a queue consumer nothing in the project reaches. */
 const shop = [
-  { ...peeq, name: "shop-ui", project: "shop", kind: "ui", description: "Storefront, React.", uses: ["shop-backend"] },
-  { ...peeq, name: "shop-backend", project: "shop", kind: "backend", description: "Checkout." },
-  { ...peeq, name: "shop-admin-backend", project: "shop", kind: "backend", description: "Admin API." },
-  { ...peeq, name: "shop-events", project: "shop", kind: "consumer", description: "Kafka consumer." },
+  { ...peeq, name: "shop-ui", project: "shop", part: "ui", description: "Storefront, React.", uses: ["shop-backend"] },
+  { ...peeq, name: "shop-backend", project: "shop", part: "backend", description: "Checkout." },
+  { ...peeq, name: "shop-admin-backend", project: "shop", part: "backend", description: "Admin API." },
+  { ...peeq, name: "shop-events", project: "shop", part: "consumer", description: "Kafka consumer." },
 ];
 
 describe("project grouping", () => {
@@ -170,6 +170,18 @@ describe("wiringSpec", () => {
     // Configuration is not code, so no node cites anything. AGENTS.md: a node
     // cites code or nothing, and is still drawn with no sources.
     expect(spec.nodes.every((n) => n.src.length === 0)).toBe(true);
+  });
+
+  it("labels a node with its part, and with the bare name when it has none", () => {
+    // The part is what tells two backends apart in the picture. Without one the
+    // separator would dangle after the name.
+    const spec = wiringSpec({
+      name: "shop",
+      repos: [shop[0], { ...shop[1], part: "" }],
+    })!;
+
+    expect(spec.nodes.find((n) => n.id === "shop-ui")!.label).toBe("shop-ui · ui");
+    expect(spec.nodes.find((n) => n.id === "shop-backend")!.label).toBe("shop-backend");
   });
 
   it("draws nothing for a project with no declared edge", () => {
@@ -217,6 +229,43 @@ describe("the Projects page", () => {
     expect(screen.getByText(/No declared connection/)).toBeTruthy();
     // One table, four rows: the project is one panel, not four.
     expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
+  it("gives the description the whole table width, not the name column", async () => {
+    // In the 17rem name column a real description wrapped to six lines and grew
+    // the row with it, while every other cell stayed one line tall. Its own row
+    // spanning every column is one line at the same size.
+    respondWith(200, [{ ...peeq, description: "Turns a codebase into something the company can ask." }]);
+
+    render(<RepoList />);
+
+    const cell = (await screen.findByText(/Turns a codebase/)).closest("td")!;
+    expect(cell.getAttribute("colspan")).toBe("8");
+    // And it is no longer inside the cell that carries the repository name.
+    expect(cell.textContent).not.toContain("peeq");
+  });
+
+  it("dims a disabled repository's description with the row it belongs to", async () => {
+    // The two rows are one entry, so a repository parked in repos.yaml must not
+    // have half of itself in full contrast.
+    respondWith(200, [{ ...peeq, enabled: false, description: "Parked, kept for the record." }]);
+
+    render(<RepoList />);
+
+    const row = (await screen.findByText(/Parked, kept/)).closest("tr")!;
+    expect(row.className).toContain("text-faint");
+  });
+
+  it("adds no row at all when there is no description", async () => {
+    // Absence takes no marker: an empty row would be a blank line under every
+    // repository nobody has written a sentence for yet.
+    respondWith(200, [peeq]);
+
+    render(<RepoList />);
+
+    await screen.findByRole("heading", { name: "peeq" });
+    // One row of repository, plus the header row.
+    expect(screen.getAllByRole("row")).toHaveLength(2);
   });
 
   it("gives a project of one a heading and a row and no picture", async () => {

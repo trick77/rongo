@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { DiagramSvg, type FlowSpec } from "./diagram";
 
 /** One row of GET /api/repos. */
@@ -15,8 +15,9 @@ export type Repo = {
   /** The product this repository belongs to. A repository standing alone is a
    * project of one named after itself, so this is never empty in practice. */
   project: string;
-  /** What part it plays, free-form: backend, ui, consumer, contract. */
-  kind: string;
+  /** What part it plays, free-form: backend, ui, consumer, contract. Named for
+   * this table's own column header — repos.yaml calls the field `part` too. */
+  part: string;
   /** One sentence saying what it does. */
   description: string;
   /** The siblings it depends on, inside the same project. */
@@ -81,7 +82,9 @@ export function wiringSpec(p: Project): FlowSpec | null {
       .filter((r) => touched.has(r.name))
       .map((r) => ({
         id: r.name,
-        label: r.kind ? `${r.name} · ${r.kind}` : r.name,
+        label: r.part ? `${r.name} · ${r.part}` : r.name,
+        // A diagram node's own kind, unrelated to the repository's part: it
+        // says whether layoutFlow draws a pill or a box.
         kind: reached.has(r.name) ? "step" : "start",
         src: [],
       })),
@@ -310,11 +313,15 @@ function ProjectPanel({ project }: { project: Project }) {
             {project.repos.map((r) => {
               const st = rowState(r);
               return (
+                <Fragment key={r.name}>
                 <tr
-                  key={r.name}
                   data-state={st}
                   className={
-                    "align-top [&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0 " +
+                    // The bottom border moves to the description row when there
+                    // is one, so a repository and its sentence close as a single
+                    // box rather than reading as two entries.
+                    "align-top [&>td]:border-border-soft " +
+                    (r.description ? "" : "[&>td]:border-b last:[&>td]:border-b-0 ") +
                     (r.enabled ? "" : "text-faint")
                   }
                 >
@@ -330,19 +337,14 @@ function ProjectPanel({ project }: { project: Project }) {
                     }
                   >
                     <span className="font-mono font-medium whitespace-nowrap">{r.name}</span>
-                    {r.description && (
-                      <div className="mt-0.5 text-[12.5px] text-muted">
-                        {r.description}
-                      </div>
-                    )}
                     {r.last_error && (
                       <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>
                     )}
                   </td>
                   <td className="px-3.5 py-3">
-                    {r.kind ? (
+                    {r.part ? (
                       <span className="rounded-full bg-active px-2.5 py-0.5 font-mono text-[11px] text-ink-dim">
-                        {r.kind}
+                        {r.part}
                       </span>
                     ) : (
                       <span className="text-faint">—</span>
@@ -384,6 +386,28 @@ function ProjectPanel({ project }: { project: Project }) {
                     {r.modules}
                   </td>
                 </tr>
+                {/* The description gets the whole table width instead of the
+                    17rem name column, where 180 characters wrapped to six lines
+                    and grew the row while every other cell stayed one line
+                    tall. No description, no row: absence takes no marker. */}
+                {r.description && (
+                  <tr
+                    data-state={st}
+                    className={
+                      "[&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0 " +
+                      (r.enabled ? "" : "text-faint")
+                    }
+                  >
+                    {/* Capped: the row has the whole table to spend, and a
+                        sentence run across a wide monitor is one long measure
+                        nobody reads to the end of. The cell still spans every
+                        column so the text starts at the repository name. */}
+                    <td colSpan={8} className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted">
+                      <div className="max-w-[64rem]">{r.description}</div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>

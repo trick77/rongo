@@ -680,7 +680,7 @@ func coveredRepos(known []string, sources []Source) []string {
 // closing sentence is the rule that keeps it that way, in the shape the docs
 // rule and the unindexed-repository rule already use.
 //
-// It exists for one case above all: a project with two backends, where "kind:
+// It exists for one case above all: a project with two backends, where "part:
 // backend" is true of both and only the declared edge says which one the
 // storefront calls. The NEGATIVE half carries as much as the positive — a model
 // reading a fetch() in the UI beside two plausible APIs will otherwise pick one.
@@ -696,7 +696,7 @@ func StructureBlock(ps []projects.Project) string {
 		reached := map[string]bool{}
 		declared := len(p.Members) > 1
 		for _, m := range p.Members {
-			if m.Kind != "" || m.Description != "" {
+			if m.Part != "" || m.Description != "" {
 				declared = true
 			}
 			for _, u := range m.Uses {
@@ -710,8 +710,8 @@ func StructureBlock(ps []projects.Project) string {
 		fmt.Fprintf(&b, "\n\nProject %q is one product in %d repositories.\n\n", p.Name, len(p.Members))
 		for _, m := range p.Members {
 			fmt.Fprintf(&b, "  %s", m.Name)
-			if m.Kind != "" {
-				fmt.Fprintf(&b, " (%s)", m.Kind)
+			if m.Part != "" {
+				fmt.Fprintf(&b, " (%s)", m.Part)
 			}
 			if m.Description != "" {
 				fmt.Fprintf(&b, " — %s", m.Description)

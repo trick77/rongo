@@ -287,6 +287,27 @@ repositories:
 	}
 }
 
+func TestLoad_rejectsTheOldKindKey(t *testing.T) {
+	// part: used to be kind:, and there is no compatibility path on purpose. A
+	// silently ignored kind: would leave the part empty everywhere it matters —
+	// the Projects page column and the structure block that tells two backends
+	// apart — while the file looks like it says otherwise.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        kind: ui
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of the old kind: key")
+	}
+}
+
 func TestLoad_rejectsAStrayProjectKeyOnAnEntry(t *testing.T) {
 	// The other half of the same migration: project: left on a nested entry
 	// reads as declared and does nothing at all. An unknown key in this file is
@@ -371,16 +392,16 @@ projects:
     repositories:
       - name: shop-ui
         clone_url: https://forge.example.invalid/acme/shop-ui.git
-        kind: ui
+        part: ui
         description: Customer-facing storefront, React.
         uses: [shop-backend]
       - name: shop-backend
         clone_url: https://forge.example.invalid/acme/shop-backend.git
-        kind: backend
+        part: backend
         description: Storefront API and checkout.
       - name: shop-events
         clone_url: https://forge.example.invalid/acme/shop-events.git
-        kind: consumer
+        part: consumer
 `)
 
 	// When
@@ -390,8 +411,8 @@ projects:
 	if err != nil {
 		t.Fatalf("Load() err = %v, want nil", err)
 	}
-	if specs[0].Project != "shop" || specs[0].Kind != "ui" {
-		t.Errorf("specs[0] project/kind = %q/%q, want shop/ui", specs[0].Project, specs[0].Kind)
+	if specs[0].Project != "shop" || specs[0].Part != "ui" {
+		t.Errorf("specs[0] project/part = %q/%q, want shop/ui", specs[0].Project, specs[0].Part)
 	}
 	if specs[0].Description != "Customer-facing storefront, React." {
 		t.Errorf("specs[0].Description = %q", specs[0].Description)
@@ -399,7 +420,7 @@ projects:
 	if len(specs[0].Uses) != 1 || specs[0].Uses[0] != "shop-backend" {
 		t.Errorf("specs[0].Uses = %v, want [shop-backend]", specs[0].Uses)
 	}
-	// kind and description are optional, and so is uses: a consumer reached
+	// part and description are optional, and so is uses: a consumer reached
 	// from a queue declares no sibling at all.
 	if len(specs[2].Uses) != 0 {
 		t.Errorf("specs[2].Uses = %v, want empty", specs[2].Uses)

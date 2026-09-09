@@ -24,7 +24,7 @@ func seed(t *testing.T, rows [][4]string, edges [][2]string) *sql.DB {
 	}
 	for _, r := range rows {
 		if _, err := db.Exec(
-			`INSERT INTO repo_state (name, clone_url, project, kind, description)
+			`INSERT INTO repo_state (name, clone_url, project, part, description)
 			 VALUES (?, ?, ?, ?, ?)`,
 			r[0], "https://example.invalid/"+r[0]+".git", r[1], r[2], r[3]); err != nil {
 			t.Fatalf("seed repo_state(%s): %v", r[0], err)
@@ -95,7 +95,7 @@ func TestOf_anUnknownRepositoryIsItsOwnProject(t *testing.T) {
 	}
 }
 
-func TestLoad_carriesKindDescriptionAndEdges(t *testing.T) {
+func TestLoad_carriesPartDescriptionAndEdges(t *testing.T) {
 	// The structure block and the Projects page both read this.
 	m, _ := Load(context.Background(), shopDB(t))
 
@@ -107,8 +107,8 @@ func TestLoad_carriesKindDescriptionAndEdges(t *testing.T) {
 	for _, r := range p.Members {
 		by[r.Name] = r
 	}
-	if by["shop-ui"].Kind != "ui" || by["shop-ui"].Description != "Customer-facing storefront, React." {
-		t.Errorf("shop-ui = %+v, want its kind and description", by["shop-ui"])
+	if by["shop-ui"].Part != "ui" || by["shop-ui"].Description != "Customer-facing storefront, React." {
+		t.Errorf("shop-ui = %+v, want its part and description", by["shop-ui"])
 	}
 	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
 		t.Errorf("shop-ui.Uses = %v, want [shop-backend]", got)

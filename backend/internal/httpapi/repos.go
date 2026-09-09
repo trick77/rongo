@@ -31,10 +31,10 @@ type RepoStatus struct {
 	// months-old code while the page looks healthy.
 	LastError string
 	// Project is the product this repository belongs to, and the unit the page
-	// groups by. Kind, Description and Uses are what it declares about its part
+	// groups by. Part, Description and Uses are what it declares about its part
 	// in that product: all four come from repos.yaml, none from the code.
 	Project     string
-	Kind        string
+	Part        string
 	Description string
 	Uses        []string
 }
@@ -85,7 +85,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"enabled":     st.Enabled,
 			"last_error":  st.LastError,
 			"project":     st.Project,
-			"kind":        st.Kind,
+			"part":        st.Part,
 			"description": st.Description,
 			"uses":        uses(st.Uses),
 		})

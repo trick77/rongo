@@ -32,12 +32,12 @@ type RepoState struct {
 	LastRunAt time.Time
 	Files     int
 	Chunks    int
-	// Project, Kind, Description and Uses come from repos.yaml, not from the
+	// Project, Part, Description and Uses come from repos.yaml, not from the
 	// checkout: they say which product this repository belongs to and what part
 	// it plays in it. Nothing here is derived from code, and none of it is ever
 	// embedded, indexed or cited.
 	Project     string
-	Kind        string
+	Part        string
 	Description string
 	Uses        []string
 }
@@ -96,7 +96,7 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]strin
 			enabled = 1
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, project, kind, description)
+			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, project, part, description)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				clone_url = excluded.clone_url,
@@ -131,10 +131,10 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]strin
 				-- it leaves last_sha and the checkout alone — a structure edit
 				-- says what a repository is for, not what is in it.
 				project     = excluded.project,
-				kind        = excluded.kind,
+				part        = excluded.part,
 				description = excluded.description`,
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv,
-			spec.Project, spec.Kind, spec.Description,
+			spec.Project, spec.Part, spec.Description,
 		); err != nil {
 			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
 		}
@@ -261,7 +261,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       file_count, chunk_count, token_env, project, kind, description
+		       file_count, chunk_count, token_env, project, part, description
 		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -275,7 +275,7 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 		var lastRun string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
 			&r.LastError, &lastRun, &r.Files, &r.Chunks, &r.TokenEnv,
-			&r.Project, &r.Kind, &r.Description); err != nil {
+			&r.Project, &r.Part, &r.Description); err != nil {
 			return nil, err
 		}
 		r.Enabled = enabled == 1

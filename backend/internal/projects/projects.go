@@ -22,8 +22,8 @@ import (
 // Repo is one member of a project.
 type Repo struct {
 	Name string
-	// Kind is the free-form part it plays — backend, ui, consumer, contract.
-	Kind string
+	// Part is the free-form part it plays — backend, ui, consumer, contract.
+	Part string
 	// Description is one human sentence saying what it does.
 	Description string
 	// Uses names the siblings it depends on, sorted.
@@ -53,7 +53,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	m := Map{of: map[string]string{}, projects: map[string]Project{}}
 
 	rows, err := db.QueryContext(ctx,
-		`SELECT name, project, kind, description FROM repo_state ORDER BY name`)
+		`SELECT name, project, part, description FROM repo_state ORDER BY name`)
 	if err != nil {
 		return Map{}, err
 	}
@@ -61,8 +61,8 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 
 	members := map[string][]Repo{}
 	for rows.Next() {
-		var name, project, kind, description string
-		if err := rows.Scan(&name, &project, &kind, &description); err != nil {
+		var name, project, part, description string
+		if err := rows.Scan(&name, &project, &part, &description); err != nil {
 			return Map{}, err
 		}
 		// An empty project can only come from a row written before this
@@ -73,7 +73,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 			project = name
 		}
 		m.of[name] = project
-		members[project] = append(members[project], Repo{Name: name, Kind: kind, Description: description})
+		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description})
 	}
 	if err := rows.Err(); err != nil {
 		return Map{}, err
