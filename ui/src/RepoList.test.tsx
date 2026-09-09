@@ -172,6 +172,18 @@ describe("wiringSpec", () => {
     expect(spec.nodes.every((n) => n.src.length === 0)).toBe(true);
   });
 
+  it("labels a node with its part, and with the bare name when it has none", () => {
+    // The part is what tells two backends apart in the picture. Without one the
+    // separator would dangle after the name.
+    const spec = wiringSpec({
+      name: "shop",
+      repos: [shop[0], { ...shop[1], part: "" }],
+    })!;
+
+    expect(spec.nodes.find((n) => n.id === "shop-ui")!.label).toBe("shop-ui · ui");
+    expect(spec.nodes.find((n) => n.id === "shop-backend")!.label).toBe("shop-backend");
+  });
+
   it("draws nothing for a project with no declared edge", () => {
     // A project of one has no wiring, and a picture of unconnected boxes says
     // less than the table under it.
@@ -231,6 +243,17 @@ describe("the Projects page", () => {
     expect(cell.getAttribute("colspan")).toBe("8");
     // And it is no longer inside the cell that carries the repository name.
     expect(cell.textContent).not.toContain("peeq");
+  });
+
+  it("dims a disabled repository's description with the row it belongs to", async () => {
+    // The two rows are one entry, so a repository parked in repos.yaml must not
+    // have half of itself in full contrast.
+    respondWith(200, [{ ...peeq, enabled: false, description: "Parked, kept for the record." }]);
+
+    render(<RepoList />);
+
+    const row = (await screen.findByText(/Parked, kept/)).closest("tr")!;
+    expect(row.className).toContain("text-faint");
   });
 
   it("adds no row at all when there is no description", async () => {
