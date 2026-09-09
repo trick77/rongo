@@ -19,8 +19,8 @@
 # with `git ls-remote --symref origin HEAD`. That is not necessarily master:
 # this corpus mixes master and main.
 #
-# kind, description and uses are optional, and they matter as soon as a project
-# holds more than one repository: with two backends, "kind: backend" is true of
+# part, description and uses are optional, and they matter as soon as a project
+# holds more than one repository: with two backends, "part: backend" is true of
 # both and only the declared edge says which one the storefront calls. All three
 # are written by hand here and never inferred - a manifest cannot see across a
 # Go backend and a TypeScript UI, and guessing from names is not a fact.
@@ -86,32 +86,32 @@ projects:
   #    - name: shop-ui
   #      clone_url: https://forge.example.invalid/acme/shop-ui.git
   #      branch: main
-  #      kind: ui
+  #      part: ui
   #      description: Customer-facing storefront, React.
   #      uses: [shop-backend, shop-search]
   #    - name: shop-backend
   #      clone_url: https://forge.example.invalid/acme/shop-backend.git
   #      token_env: BACKEND_FORGE_TOKEN
-  #      kind: backend
+  #      part: backend
   #      description: Storefront API and checkout.
   #      uses: [shop-contract]
   #    - name: shop-search
   #      clone_url: https://forge.example.invalid/acme/shop-search.git
   #      token_env: BACKEND_FORGE_TOKEN
-  #      kind: service
+  #      part: service
   #      description: Product search over the catalogue.
   #      uses: [shop-contract]
   #    - name: shop-contract
   #      clone_url: https://forge.example.invalid/acme/shop-contract.git
-  #      kind: contract
+  #      part: contract
   #      description: OpenAPI spec and the clients generated from it.
   #    - name: shop-admin-backend
   #      clone_url: https://forge.example.invalid/acme/shop-admin-backend.git
   #      token_env: BACKEND_FORGE_TOKEN
-  #      kind: backend
+  #      part: backend
   #      description: Internal admin API. Not called by shop-ui.
   #    - name: shop-events
   #      clone_url: https://forge.example.invalid/acme/shop-events.git
-  #      kind: consumer
+  #      part: consumer
   #      description: Kafka consumer, ingests order events into the shop DB.
   #      enabled: false

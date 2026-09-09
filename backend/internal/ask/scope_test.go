@@ -140,9 +140,9 @@ func TestTheStructureBlockReachesThePromptAndIsMarkedConfiguration(t *testing.T)
 	block := StructureBlock([]projects.Project{{
 		Name: "shop",
 		Members: []projects.Repo{
-			{Name: "shop-admin-backend", Kind: "backend", Description: "Internal admin API."},
-			{Name: "shop-backend", Kind: "backend", Description: "Storefront API and checkout."},
-			{Name: "shop-ui", Kind: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
+			{Name: "shop-admin-backend", Part: "backend", Description: "Internal admin API."},
+			{Name: "shop-backend", Part: "backend", Description: "Storefront API and checkout."},
+			{Name: "shop-ui", Part: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
 		},
 	}})
 	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
@@ -182,7 +182,7 @@ func TestStructureBlockOmitsTheConnectionsSectionWhenThereAreNoEdges(t *testing.
 	got := StructureBlock([]projects.Project{{
 		Name: "shop",
 		Members: []projects.Repo{
-			{Name: "a", Kind: "backend"}, {Name: "b", Kind: "ui"}, {Name: "c", Kind: "consumer"},
+			{Name: "a", Part: "backend"}, {Name: "b", Part: "ui"}, {Name: "c", Part: "consumer"},
 		},
 	}})
 

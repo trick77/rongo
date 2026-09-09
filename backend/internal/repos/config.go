@@ -36,15 +36,19 @@ type Spec struct {
 	// unit a reader is asked to choose between, so a repository that stands
 	// alone is a project of one, conventionally named after itself.
 	Project string
-	// Kind is a free-form token for the part this repository plays — backend,
+	// Part is a free-form token for the part this repository plays — backend,
 	// ui, consumer, contract. Deliberately not an enum: a closed vocabulary
 	// rejects a real corpus the first time it needs a word not on the list, and
 	// nothing branches on this deterministically. It reaches the answer prompt,
 	// where a model reads "consumer" perfectly well.
-	Kind string
+	//
+	// Named for what the Projects page has always called this column. It was
+	// `kind` in the YAML alone, which meant a reader comparing the page against
+	// the file had to know the two words were one field.
+	Part string
 	// Description is one human-written sentence saying what this repository
 	// does. It is what separates a Kafka receiver from a second HTTP backend,
-	// which Kind alone cannot. Never embedded, never indexed, never cited.
+	// which Part alone cannot. Never embedded, never indexed, never cited.
 	Description string
 	// Uses names sibling repositories INSIDE the same project that this one
 	// depends on — declared by the consumer, the same direction as go.mod's
@@ -74,7 +78,7 @@ type rawSpec struct {
 	Branch      string   `yaml:"branch"`
 	TokenEnv    string   `yaml:"token_env"`
 	Enabled     *bool    `yaml:"enabled"`
-	Kind        string   `yaml:"kind"`
+	Part        string   `yaml:"part"`
 	Description string   `yaml:"description"`
 	Uses        []string `yaml:"uses"`
 }
@@ -170,7 +174,7 @@ func Load(path string) ([]Spec, error) {
 				TokenEnv:    strings.TrimSpace(r.TokenEnv),
 				Enabled:     enabled,
 				Project:     name,
-				Kind:        strings.TrimSpace(r.Kind),
+				Part:        strings.TrimSpace(r.Part),
 				Description: strings.TrimSpace(r.Description),
 				Uses:        trimAll(r.Uses),
 			})

@@ -26,7 +26,7 @@ const peeq = {
   enabled: true,
   last_error: "",
   project: "peeq",
-  kind: "",
+  part: "",
   description: "",
   uses: [] as string[],
 };
@@ -132,10 +132,10 @@ describe("RepoList", () => {
 /** shop is one product in four repositories: a storefront UI calling one of two
  * backends, and a queue consumer nothing in the project reaches. */
 const shop = [
-  { ...peeq, name: "shop-ui", project: "shop", kind: "ui", description: "Storefront, React.", uses: ["shop-backend"] },
-  { ...peeq, name: "shop-backend", project: "shop", kind: "backend", description: "Checkout." },
-  { ...peeq, name: "shop-admin-backend", project: "shop", kind: "backend", description: "Admin API." },
-  { ...peeq, name: "shop-events", project: "shop", kind: "consumer", description: "Kafka consumer." },
+  { ...peeq, name: "shop-ui", project: "shop", part: "ui", description: "Storefront, React.", uses: ["shop-backend"] },
+  { ...peeq, name: "shop-backend", project: "shop", part: "backend", description: "Checkout." },
+  { ...peeq, name: "shop-admin-backend", project: "shop", part: "backend", description: "Admin API." },
+  { ...peeq, name: "shop-events", project: "shop", part: "consumer", description: "Kafka consumer." },
 ];
 
 describe("project grouping", () => {
@@ -217,6 +217,32 @@ describe("the Projects page", () => {
     expect(screen.getByText(/No declared connection/)).toBeTruthy();
     // One table, four rows: the project is one panel, not four.
     expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
+  it("gives the description the whole table width, not the name column", async () => {
+    // In the 17rem name column a real description wrapped to six lines and grew
+    // the row with it, while every other cell stayed one line tall. Its own row
+    // spanning every column is one line at the same size.
+    respondWith(200, [{ ...peeq, description: "Turns a codebase into something the company can ask." }]);
+
+    render(<RepoList />);
+
+    const cell = (await screen.findByText(/Turns a codebase/)).closest("td")!;
+    expect(cell.getAttribute("colspan")).toBe("8");
+    // And it is no longer inside the cell that carries the repository name.
+    expect(cell.textContent).not.toContain("peeq");
+  });
+
+  it("adds no row at all when there is no description", async () => {
+    // Absence takes no marker: an empty row would be a blank line under every
+    // repository nobody has written a sentence for yet.
+    respondWith(200, [peeq]);
+
+    render(<RepoList />);
+
+    await screen.findByRole("heading", { name: "peeq" });
+    // One row of repository, plus the header row.
+    expect(screen.getAllByRole("row")).toHaveLength(2);
   });
 
   it("gives a project of one a heading and a row and no picture", async () => {

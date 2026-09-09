@@ -315,9 +315,9 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	// When
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "shop-backend", CloneURL: "file:///b", Enabled: true, Project: "shop",
-			Kind: "backend", Description: "Storefront API and checkout."},
+			Part: "backend", Description: "Storefront API and checkout."},
 		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
-			Kind: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
+			Part: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
@@ -331,7 +331,7 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	for _, r := range all {
 		by[r.Name] = r
 	}
-	if got := by["shop-ui"]; got.Project != "shop" || got.Kind != "ui" || got.Description != "Storefront, React." {
+	if got := by["shop-ui"]; got.Project != "shop" || got.Part != "ui" || got.Description != "Storefront, React." {
 		t.Errorf("shop-ui = %+v, want project shop, kind ui and its description", got)
 	}
 	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
@@ -349,9 +349,9 @@ func TestActive_dropsAnEdgeToADisabledSibling(t *testing.T) {
 	ctx := context.Background()
 	s := NewStateStore(newDB(t))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
-		{Name: "shop-backend", CloneURL: "file:///b", Enabled: false, Project: "shop", Kind: "backend"},
+		{Name: "shop-backend", CloneURL: "file:///b", Enabled: false, Project: "shop", Part: "backend"},
 		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
-			Kind: "ui", Uses: []string{"shop-backend"}},
+			Part: "ui", Uses: []string{"shop-backend"}},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
@@ -431,7 +431,7 @@ func TestSyncSpecs_aStructureEditIsNotAReIndex(t *testing.T) {
 	// When: the structure is edited, the remote is not.
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true,
-			Project: "search-suite", Kind: "backend", Description: "Retrieval service."},
+			Project: "search-suite", Part: "backend", Description: "Retrieval service."},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
@@ -447,8 +447,8 @@ func TestSyncSpecs_aStructureEditIsNotAReIndex(t *testing.T) {
 	if all[0].Branch != "master" {
 		t.Errorf("Branch = %q, want master kept", all[0].Branch)
 	}
-	if all[0].Project != "search-suite" || all[0].Kind != "backend" {
-		t.Errorf("structure = %q/%q, want the edit to have landed", all[0].Project, all[0].Kind)
+	if all[0].Project != "search-suite" || all[0].Part != "backend" {
+		t.Errorf("structure = %q/%q, want the edit to have landed", all[0].Project, all[0].Part)
 	}
 }
 
