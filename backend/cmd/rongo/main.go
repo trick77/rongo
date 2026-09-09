@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -154,18 +155,44 @@ func main() {
 	// from the database, and its checkout has to go with it.
 	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
 
-	// The repository list is loaded on a best-effort basis. A missing or broken
-	// repos.yaml must NOT stop the server: the operator needs the Repos page to
-	// come up and tell them what is wrong with the file. Refusing to boot would
-	// hide the diagnosis behind the very thing that failed.
+	// An INVALID repos.yaml stops the server. A MISSING one does not.
 	//
-	// A file that cannot be READ is therefore not the same as an empty one: the
-	// sync below never runs, so nothing is purged. Only a list that parses and
-	// no longer names a repository removes it.
+	// The two used to be one case, and both only warned. That is a worse trade
+	// than it looks, and it cost an evening to learn: a file that fails to parse
+	// leaves the previous list in the database untouched, so rongo comes up
+	// serving a complete, confident, arbitrarily stale corpus while indexing
+	// sits idle. Nothing in the UI says the configuration was refused — the
+	// Repos page cannot report a file it never loaded, it can only show what the
+	// database still holds, which is the LAST good file. The symptom reaching
+	// the operator was a `uses` arrow pointing the wrong way, nine hours after a
+	// stray character on line one had frozen everything.
+	//
+	// So: a file that is present and wrong is an operator mistake that has to be
+	// fixed now, and refusing to boot is the only signal that cannot be missed.
+	// Under compose this restarts in a loop, which is loud, which is the point.
+	//
+	// A file that is ABSENT is a different fact — a first run before conf/ has
+	// been populated, or a mount that is not there yet. rongo comes up, because
+	// an existing index still answers questions and taking the server down over
+	// a mount that has not appeared yet would be the worse trade. But it does
+	// NOT poll: the poller reads state.Active() out of the DATABASE, so with a
+	// populated one it would happily go on fetching the PREVIOUS list, refreshing
+	// last_run_at, and reporting "Index current" for a configuration nobody can
+	// see — the exact deception this whole change exists to remove, just reached
+	// by the other door. Not polling is what makes "indexing is idle" true, and
+	// a frozen last_run_at is then the honest signal on the Repos page.
+	//
+	// listLoaded gates that below. It is the single fact the rest of the boot
+	// needs: whether what is in the database came from the file on disk.
 	state := indexer.NewStateStore(db)
-	if specs, err := repos.Load(cfg.ReposFile); err != nil {
-		slog.Warn("repository list unavailable; indexing is idle until it is fixed",
+	listLoaded := false
+	if specs, err := repos.Load(cfg.ReposFile); errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("no repository list; not indexing, and answers come from whatever was indexed before",
+			"path", cfg.ReposFile)
+	} else if err != nil {
+		slog.Error("repository list is invalid; refusing to start rather than run on a stale one",
 			"path", cfg.ReposFile, "err", err)
+		os.Exit(1)
 	} else if purged, err := state.SyncSpecs(ctx, specs); err != nil {
 		slog.Error("recording the repository list failed", "err", err)
 		os.Exit(1)
@@ -190,8 +217,21 @@ func main() {
 				slog.Error("removing the purged checkout failed", "repo", p.Name, "err", err)
 			}
 		}
-		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
+		listLoaded = true
 	}
+
+	// OUTSIDE the branch above, deliberately: every boot says what it holds,
+	// including the one where the file was missing. That boot is exactly the one
+	// where the question matters most — the database may carry a whole corpus
+	// nobody just configured, and a silent start would leave the operator with
+	// no way to tell an empty rongo from one serving a list that is no longer
+	// on disk.
+	//
+	// Read back from the DATABASE, not from specs: the YAML says what was asked
+	// for, this says what rongo actually holds — the resolved branch, the commit
+	// it last indexed, how much of it, whether the last run failed, and the
+	// declared uses edges.
+	indexer.LogInventory(ctx, state, slog.Default(), cfg.ReposFile, listLoaded)
 
 	pipeline := indexer.New(indexer.Deps{
 		DB:      db,
@@ -227,7 +267,20 @@ func main() {
 	pollCtx, stopPolling := context.WithCancel(ctx)
 	defer stopPolling()
 	var workers sync.WaitGroup
-	if cfg.IndexEnabled {
+	switch {
+	case cfg.IndexEnabled && !listLoaded:
+		// No list on disk, but possibly a whole corpus in the database. The
+		// poller reads state.Active() from that database, so starting it here
+		// would fetch and re-index the PREVIOUS list, refresh every
+		// last_run_at, and leave the Repos page reporting "Index current" for a
+		// configuration that exists nowhere — which is the deception this
+		// change exists to remove, reached by the other door. The index stays
+		// and still answers; it simply stops moving, and a frozen last_run_at
+		// is the honest signal.
+		slog.Warn("not indexing: no repository list on disk",
+			"path", cfg.ReposFile,
+			"fix", "provide the file and restart; the existing index still answers until then")
+	case cfg.IndexEnabled:
 		// The exclusion list is read at start, and nothing else revisits files
 		// an earlier run already embedded: an incremental run touches only
 		// changed paths, and the poller idles while HEAD is unchanged. So the
@@ -241,7 +294,7 @@ func main() {
 			sweepExcluded(pollCtx, state, pipeline)
 			poller.Run(pollCtx)
 		}()
-	} else {
+	default:
 		slog.Warn("indexing is disabled; no repository will be fetched or embedded",
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
