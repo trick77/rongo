@@ -135,7 +135,11 @@ type Clarification struct {
 	// ThreadID is the thread the clarifying message belongs to. A resumed turn
 	// continues THIS thread rather than opening a new one — the reader is
 	// still in the same conversation, just answering a question rongo asked.
-	ThreadID int64 `json:"thread_id"`
+	//
+	// Not sent to the browser, for the reason Message.ThreadID is not: it is a
+	// row number, and the card rides the public share payload, where it would
+	// tell an anonymous reader how many threads exist on the box.
+	ThreadID int64 `json:"-"`
 	// Understanding is provenance: it is stored so a resumed turn can say what
 	// the first one searched for, and so a stored card can be read back years
 	// later. It is not sent to the browser — nothing there ever read it, and
