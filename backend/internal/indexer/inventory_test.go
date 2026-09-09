@@ -188,6 +188,29 @@ func TestSummarise_usesTheProjectsPageFallback(t *testing.T) {
 	}
 }
 
+// TestInventory_reportsTheCountsWorthNoticing: the other half of the rule
+// below. Omitted at zero, stated otherwise — a corpus with parked entries,
+// snapshots or a failing repository says so on the summary line, because those
+// are the three facts that change what a reader should expect from it.
+func TestInventory_reportsTheCountsWorthNoticing(t *testing.T) {
+	// Given
+	inv := Inventory{Projects: 3, Repos: 6, Enabled: 4, Indexed: 3,
+		Parked: 2, Snapshots: 2, Failing: 1}
+
+	// When
+	got := attrMap(t, inv.Attrs())
+
+	// Then
+	for key, want := range map[string]any{
+		"projects": 3, "repositories": 6, "enabled": 4, "indexed": 3,
+		"parked": 2, "snapshots": 2, "failing": 1,
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %v, want %v", key, got[key], want)
+		}
+	}
+}
+
 // TestInventoryAttrs_quietWhenThereIsNothingToReport: parked, snapshots and
 // failing are omitted at zero, so an ordinary corpus does not carry three zeros
 // on every boot and a non-zero one is worth noticing.

@@ -1,6 +1,8 @@
 package indexer
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -67,6 +69,37 @@ func InventoryAttrs(st RepoState) []any {
 		attrs = append(attrs, "uses", strings.Join(st.Uses, ","))
 	}
 	return attrs
+}
+
+// LogInventory writes what rongo actually holds: one line per repository, then
+// one summary line.
+//
+// It lives here rather than in main so it can be tested — nothing verified that
+// a boot announced its corpus at all, and the boot where that matters most is
+// the one where the repository list did NOT load, which is precisely the path a
+// main-only implementation gets wrong quietly.
+//
+// fromFile says whether what follows came from the list on disk. False means the
+// database is describing a configuration that is no longer anywhere, which is a
+// different sentence and gets one.
+func LogInventory(ctx context.Context, s *StateStore, log *slog.Logger, path string, fromFile bool) {
+	if log == nil {
+		log = slog.Default()
+	}
+	states, err := s.All(ctx)
+	if err != nil {
+		log.Warn("repository inventory unavailable", "err", err)
+		return
+	}
+	for _, st := range states {
+		log.Info("repository configured", InventoryAttrs(st)...)
+	}
+	msg := "repository list loaded"
+	if !fromFile {
+		msg = "serving a corpus no repository list describes"
+	}
+	log.Info(msg, append([]any{"path", path, "from_file", fromFile},
+		Summarise(states).Attrs()...)...)
 }
 
 // Inventory counts a corpus for the one summary line that follows the per-

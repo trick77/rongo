@@ -231,19 +231,7 @@ func main() {
 	// for, this says what rongo actually holds — the resolved branch, the commit
 	// it last indexed, how much of it, whether the last run failed, and the
 	// declared uses edges.
-	if states, err := state.All(ctx); err != nil {
-		slog.Warn("repository inventory unavailable", "err", err)
-	} else {
-		for _, st := range states {
-			slog.Info("repository configured", indexer.InventoryAttrs(st)...)
-		}
-		msg := "repository list loaded"
-		if !listLoaded {
-			msg = "serving a corpus no repository list describes"
-		}
-		slog.Info(msg, append([]any{"path", cfg.ReposFile, "from_file", listLoaded},
-			indexer.Summarise(states).Attrs()...)...)
-	}
+	indexer.LogInventory(ctx, state, slog.Default(), cfg.ReposFile, listLoaded)
 
 	pipeline := indexer.New(indexer.Deps{
 		DB:      db,
