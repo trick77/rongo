@@ -12,9 +12,11 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
+	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
 )
 
@@ -56,6 +58,21 @@ func sharedTurn(t *testing.T, st *threads.Store, subject string) threads.Thread 
 		t.Fatalf("finish: %v", err)
 	}
 	return th
+}
+
+// laterTurn asks and answers a second question on a thread: the turn a link
+// made before it must not show.
+func laterTurn(t *testing.T, st *threads.Store, threadID int64) threads.Message {
+	t.Helper()
+	ctx := context.Background()
+	later, err := st.AddQuestion(ctx, threadID, "ba", "en", "And then?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	return later
 }
 
 // share makes a link through the HTTP layer, the way the dialog does.
@@ -119,15 +136,22 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 	}
 }
 
-func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
-	// Given a shared turn that paid for calls, offered follow-ups and was
-	// watched through a timeline
+func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
+	// Given a priced server and a shared thread of two turns that paid for
+	// calls, offered follow-ups and were watched through a timeline
 	srv, st, _ := shareServer(t)
+	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
 	msgs, err := st.Messages(ctx, testSubject, th.ID)
 	if err != nil {
 		t.Fatalf("messages: %v", err)
+	}
+	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
+		{Step: "route", Model: "mimo-v2.5", Prompt: 100, Completion: 10},
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 1000, Completion: 100},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
 	}
 	if err := st.SaveFollowups(ctx, msgs[0].ID, []string{"And then?"}); err != nil {
 		t.Fatalf("save followups: %v", err)
@@ -137,7 +161,13 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save steps: %v", err)
 	}
-	// And a second turn that ended in a card: the card is on the link, and it
+	later := laterTurn(t, st, th.ID)
+	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 2000, Completion: 200},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	// And a third turn that ended in a card: the card is on the link, and it
 	// is the one place a thread row number could ride the public payload.
 	asked, err := st.AddQuestion(ctx, th.ID, "ba", "en", "Which one?", 0)
 	if err != nil {
@@ -153,19 +183,83 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	// When
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
 
-	// Then nothing about what the turn cost, and nothing to ask next: there is
-	// no composer on that page to ask it with.
+	// Then the thread's total is on the page, priced from the table ...
+	var got struct {
+		TotalTokens *int     `json:"total_tokens"`
+		CostUSD     *float64 `json:"cost_usd"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.TotalTokens == nil || *got.TotalTokens != 3410 {
+		t.Errorf("total_tokens = %v, want 3410", got.TotalTokens)
+	}
+	// (100+1000+2000)*1 + (10+100+200)*2 = 3720 per million
+	if got.CostUSD == nil {
+		t.Error("cost_usd missing on a priced thread")
+	} else if d := *got.CostUSD - 0.00372; d > 1e-9 || d < -1e-9 {
+		t.Errorf("cost_usd = %v, want 0.00372", *got.CostUSD)
+	}
+
+	// ... and nothing per turn: no breakdown, no model name, no follow-ups (there
+	// is no composer on that page to ask them with), no timeline.
 	body := rec.Body.String()
 	if !strings.Contains(body, `"clarification"`) {
 		t.Fatalf("the card is not on the link:\n%s", body)
 	}
-	// The timeline goes with them: how long each step took and what the
-	// pipeline is made of is the same class of thing as what the turn cost.
 	// And thread_id, the row number the card used to carry: the same counter
 	// Message.ThreadID and the thread's public_id exist to keep off the wire.
-	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `"thread_id"`} {
+	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `mimo-v2.5`, `"route"`, `"thread_id"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("the public payload carries %s:\n%s", leak, body)
+		}
+	}
+}
+
+func TestPublicShare_carriesTokensOnlyWhenNothingIsPriced(t *testing.T) {
+	// Given a server without a price table and a turn that paid for a call
+	srv, st, _ := shareServer(t)
+	ctx := context.Background()
+	th := sharedTurn(t, st, testSubject)
+	msgs, err := st.Messages(ctx, testSubject, th.ID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 500, Completion: 50},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	sh := share(t, srv, th.PublicID)
+
+	// When
+	rec := getPublic(srv, "/api/shares/"+sh.Token)
+
+	// Then the tokens are there and the cost is absent, not zero
+	body := rec.Body.String()
+	if !strings.Contains(body, `"total_tokens":550`) {
+		t.Errorf("total_tokens missing:\n%s", body)
+	}
+	if strings.Contains(body, `"cost_usd"`) {
+		t.Errorf("an unpriced thread carries a cost:\n%s", body)
+	}
+}
+
+func TestPublicShare_carriesNoTotalWhenNothingWasPaidFor(t *testing.T) {
+	// Given a shared turn with no usage rows
+	srv, st, _ := shareServer(t)
+	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
+	th := sharedTurn(t, st, testSubject)
+	sh := share(t, srv, th.PublicID)
+
+	// When
+	rec := getPublic(srv, "/api/shares/"+sh.Token)
+
+	// Then neither key is on the page: no usage, rather than a zero
+	body := rec.Body.String()
+	for _, key := range []string{`"total_tokens"`, `"cost_usd"`} {
+		if strings.Contains(body, key) {
+			t.Errorf("a thread that paid for nothing carries %s:\n%s", key, body)
 		}
 	}
 }
@@ -175,21 +269,33 @@ func TestPublicShare_stopsAtTheCeiling(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	sh := share(t, srv, th.PublicID)
-	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
+	msgs, err := st.Messages(ctx, testSubject, th.ID)
 	if err != nil {
-		t.Fatalf("add question: %v", err)
+		t.Fatalf("messages: %v", err)
 	}
-	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
-		t.Fatalf("finish: %v", err)
+	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 300, Completion: 30},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	sh := share(t, srv, th.PublicID)
+	later := laterTurn(t, st, th.ID)
+	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 5000, Completion: 500},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
 	}
 
 	// When
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
 
-	// Then
-	if strings.Contains(rec.Body.String(), "Then this.") {
+	// Then neither the turn nor what it cost is on the link
+	body := rec.Body.String()
+	if strings.Contains(body, "Then this.") {
 		t.Error("a turn asked after the link was made is on it")
+	}
+	if !strings.Contains(body, `"total_tokens":330`) {
+		t.Errorf("the total counts spend above the ceiling:\n%s", body)
 	}
 }
 
@@ -360,16 +466,9 @@ func TestShare_anotherReadersThreadIsNotFound(t *testing.T) {
 func TestShareUpdate_movesTheCeilingAndKeepsTheLink(t *testing.T) {
 	// Given a link the thread has moved on from
 	srv, st, _ := shareServer(t)
-	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
 	first := share(t, srv, th.PublicID)
-	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
+	laterTurn(t, st, th.ID)
 
 	// When
 	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID), "")

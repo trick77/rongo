@@ -78,6 +78,35 @@ describe("SharePage", () => {
     expect(screen.queryByText(/\$0\.004/)).toBeNull();
   });
 
+  it("shows the thread's total tokens and cost in the header", async () => {
+    // The one figure the server does send: the whole thread, priced once.
+    shared({ title: "How routing decides", messages: [turn], total_tokens: 3410, cost_usd: 0.00372 });
+    render(<SharePage token="tok" />);
+    await screen.findByText(/It is a ladder/);
+
+    const badge = screen.getByLabelText("Thread usage");
+    expect(badge.textContent).toContain("3,410 tok");
+    expect(badge.textContent).toContain("$0.004");
+  });
+
+  it("shows tokens only when the server sends no cost", async () => {
+    shared({ title: "How routing decides", messages: [turn], total_tokens: 550 });
+    render(<SharePage token="tok" />);
+    await screen.findByText(/It is a ladder/);
+
+    const badge = screen.getByLabelText("Thread usage");
+    expect(badge.textContent).toContain("550 tok");
+    expect(badge.textContent).not.toContain("$");
+  });
+
+  it("shows no usage when the thread paid for nothing", async () => {
+    shared({ title: "How routing decides", messages: [turn] });
+    render(<SharePage token="tok" />);
+    await screen.findByText(/It is a ladder/);
+
+    expect(screen.queryByLabelText("Thread usage")).toBeNull();
+  });
+
   it("opens a citation through the share's own endpoint, never /api/source", async () => {
     const mock = shared({ title: "How routing decides", messages: [turn] });
     render(<SharePage token="tok" />);

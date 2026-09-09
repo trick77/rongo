@@ -15,6 +15,7 @@ import {
   type Audience,
   type Citation,
   type Message,
+  type ThreadTotal,
   type Turn,
   type Usage,
 } from "./turns";
@@ -142,7 +143,7 @@ export default function Ask({
   /** Reports the thread's running total — every turn on screen summed, the
    * ones that asked back or failed included — or null when nothing is
    * known yet. The header shows it next to the title. */
-  onUsage?: (total: { tokens: number; cost: number | null } | null) => void;
+  onUsage?: (total: ThreadTotal | null) => void;
   /** The build answering, from /api/me. Empty or "dev" when the binary was
    * built without a version stamped into it, and then the footer says only
    * that Rongo can make mistakes. */
