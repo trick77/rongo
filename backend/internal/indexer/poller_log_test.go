@@ -116,10 +116,98 @@ func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 			t.Errorf("%s = %v, want %q", key, got, want)
 		}
 	}
-	for _, key := range []string{"sha", "files", "chunks", "took"} {
+	for _, key := range []string{"sha", "total_files", "total_chunks", "took"} {
 		if _, found := attr(rec, key); !found {
 			t.Errorf("'repository indexed' carries no %s", key)
 		}
+	}
+	// A full run indexed everything, so a `changed` count would read as a diff
+	// size that does not exist.
+	if _, found := attr(rec, "changed"); found {
+		t.Error("'repository indexed' carries changed on a full run")
+	}
+}
+
+// TestPollOnce_durationsAreReadable: the production handler is
+// slog.NewJSONHandler, which encodes a time.Duration as integer nanoseconds —
+// `"took":1900000000`. Rounding a Duration and logging it was therefore a no-op
+// nobody could see. The value has to be rendered before it is logged.
+func TestPollOnce_durationsAreReadable(t *testing.T) {
+	// Given
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
+	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+
+	// When
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("PollOnce() err = %v", err)
+	}
+
+	// Then: a string with a unit on it, not a bare count of nanoseconds
+	rec, ok := cap.find("poll cycle finished")
+	if !ok {
+		t.Fatalf("no 'poll cycle finished' line; logged %v", cap.messages())
+	}
+	got, found := attr(rec, "took")
+	if !found {
+		t.Fatal("'poll cycle finished' carries no took")
+	}
+	if got.Kind() != slog.KindString {
+		t.Fatalf("took is a %v, want a string — the JSON handler renders a Duration as nanoseconds", got.Kind())
+	}
+	if !strings.ContainsAny(got.String(), "smµn") {
+		t.Errorf("took = %q, want a unit a person reads", got.String())
+	}
+}
+
+// TestPollOnce_incrementalRunSaysHowMuchChanged: the counts on the line are
+// whole-repo totals, so `mode=incremental total_files=5000` needs `changed`
+// beside it or it reads as five thousand files touched when one was.
+func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
+	// Given
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	// A big repository, so the two numbers cannot be confused for each other:
+	// IndexRepo returns whole-repo totals, which is exactly why reading them as
+	// the size of the run is wrong.
+	index := func(context.Context, RepoState, string, []string) (Counts, error) {
+		return Counts{Files: 5000, Chunks: 40000}, nil
+	}
+	p, root, cap := loggingPoller(t, s, index)
+	extract(t, root, "acme-core", map[string]string{
+		"a.go": "package a\n", "b.go": "package b\n", "c.go": "package c\n",
+	})
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+
+	// When: one file of three changes
+	cap.records = nil
+	extract(t, root, "acme-core", map[string]string{"b.go": "package b // v2\n"})
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+
+	// Then: one path changed, five thousand held. Both stated, neither able to
+	// pass for the other.
+	rec, ok := cap.find("repository indexed")
+	if !ok {
+		t.Fatalf("no 'repository indexed' line; logged %v", cap.messages())
+	}
+	if got, _ := attr(rec, "changed"); got.Int64() != 1 {
+		t.Errorf("changed = %v, want 1", got)
+	}
+	if got, _ := attr(rec, "total_files"); got.Int64() != 5000 {
+		t.Errorf("total_files = %v, want the whole repository's 5000", got)
 	}
 }
 

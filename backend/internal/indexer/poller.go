@@ -90,7 +90,10 @@ func (p *Poller) Run(ctx context.Context) {
 	// happening" is indistinguishable from a broken indexer, which is exactly
 	// how a fresh deployment reads while it waits.
 	delay := sched.Jittered(p.firstDelay)
-	p.log.Info("indexing scheduled", "first_poll_in", delay.Round(time.Second), "interval", p.interval)
+	// .String() for took()'s reason: the JSON handler renders a Duration as
+	// integer nanoseconds, so this line read "first_poll_in":30000000000.
+	p.log.Info("indexing scheduled",
+		"first_poll_in", delay.Round(time.Second).String(), "interval", p.interval.String())
 	for {
 		if !sched.Sleep(ctx, delay) {
 			return
@@ -136,13 +139,23 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 			if markErr := p.state.MarkError(ctx, st.Name, err.Error()); markErr != nil {
 				p.log.Error("recording the failure failed too", "repo", st.Name, "err", markErr)
 			}
-		case res.Changed:
+		case res.Indexed:
 			indexed++
 			// Info, because this is the event somebody is looking for when they
 			// ask whether a push has landed in the answers yet.
-			p.log.Info("repository indexed", "repo", st.Name, "mode", res.Mode(),
-				"sha", gitrepo.ShortSHA(res.SHA), "files", res.Counts.Files,
-				"chunks", res.Counts.Chunks, "took", took(repoStart))
+			//
+			// total_ prefixes, and `changed` beside them on an incremental run:
+			// the counts are what the repository HOLDS, and reading them as the
+			// size of the run is the obvious mistake to make when `mode` sits
+			// on the same line.
+			attrs := []any{"repo", st.Name, "mode", res.Mode(),
+				"sha", gitrepo.ShortSHA(res.SHA)}
+			if !res.Full {
+				attrs = append(attrs, "changed", res.Changed)
+			}
+			attrs = append(attrs, "total_files", res.Counts.Files,
+				"total_chunks", res.Counts.Chunks, "took", took(repoStart))
+			p.log.Info("repository indexed", attrs...)
 		default:
 			unchanged++
 			// Debug: at a thirty-minute interval this is most lines most of the
@@ -163,11 +176,18 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 // count it. The poller itself decides nothing from this — it exists to make the
 // cycle legible.
 type pollResult struct {
-	// Changed is false when the commit was already indexed.
-	Changed bool
+	// Indexed is false when the commit was already indexed and nothing ran.
+	Indexed bool
 	// Full is true for an index of every path, as opposed to a diff.
-	Full   bool
-	SHA    string
+	Full bool
+	// Changed is how many paths the diff named. Zero for a full run, which
+	// indexed everything rather than nothing.
+	Changed int
+	SHA     string
+	// Counts is what the repository holds AFTER the run — whole-repo totals
+	// from Indexer.totals, not the size of this run. The log line names them
+	// total_files/total_chunks for that reason: `mode=incremental files=5000`
+	// reads as five thousand files touched, when one was.
 	Counts Counts
 }
 
@@ -180,15 +200,21 @@ func (r pollResult) Mode() string {
 	return "incremental"
 }
 
-// took rounds a duration to something a person reads at a glance. Milliseconds
-// below a second, because a clone is seconds and a no-op poll is milliseconds
-// and both belong on the same line.
-func took(start time.Time) time.Duration {
+// took rounds a duration to something a person reads at a glance, and returns
+// it as a STRING.
+//
+// The string is not cosmetic. Production installs slog.NewJSONHandler, which
+// encodes a time.Duration as integer nanoseconds — `"took":1900000000` — so
+// returning a Duration made the rounding below invisible and put a number
+// nobody reads in seconds on every line. Rendering here is what makes it
+// "1.9s". Milliseconds below a second, because a clone is seconds and a no-op
+// poll is milliseconds and both belong on the same line.
+func took(start time.Time) string {
 	d := time.Since(start)
 	if d < time.Second {
-		return d.Round(time.Millisecond)
+		return d.Round(time.Millisecond).String()
 	}
-	return d.Round(100 * time.Millisecond)
+	return d.Round(100 * time.Millisecond).String()
 }
 
 func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error) {
@@ -307,7 +333,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		return pollResult{}, err
 	}
 
-	res := pollResult{Changed: true, Full: paths == nil, SHA: head, Counts: counts}
+	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: head, Counts: counts}
 	return res, p.state.MarkIndexed(ctx, st.Name, head, counts)
 }
 
@@ -377,6 +403,6 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 		// permanently un-indexed while looking healthy.
 		return pollResult{}, err
 	}
-	res := pollResult{Changed: true, Full: paths == nil, SHA: sha, Counts: counts}
+	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts}
 	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
 }
