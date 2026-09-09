@@ -54,6 +54,7 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			Chunks:    st.Chunks,
 			Modules:   len(mods),
 			Enabled:   st.Enabled,
+			Snapshot:  st.Snapshot(),
 			LastError: st.LastError,
 			// A row written before projects shipped has no project; it stands
 			// as one of its own, the same fallback projects.Load applies.

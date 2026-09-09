@@ -69,6 +69,148 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	return nil
 }
 
+// SnapshotBranch is the ref a snapshot's commits sit on, and the branch label
+// its citations carry. Named rather than defaulted: `git init` would pick master
+// or main from the machine's own configuration, and that value travels with
+// every citation. There is no upstream branch to be faithful to, so the honest
+// label is what this is.
+const SnapshotBranch = "snapshot"
+
+// EnsureSnapshot makes a hand-extracted source drop citable, and reports the
+// commit to index.
+//
+// A drop is an archive: files, no .git, no remote, no history. Everything past
+// here reads code as `git show <sha>:<path>` and every citation carries a sha,
+// so the directory needs one commit before it is a repository rongo can answer
+// from. This makes that commit, and on a later call makes another only if the
+// files changed — extracting a newer archive over the drop therefore costs an
+// incremental index, and leaving it alone costs nothing at all.
+//
+// It never fetches and never resolves a default branch, because there is no
+// remote to ask. A drop stays exactly as it was extracted until it is extracted
+// again, which is the whole point of indexing one.
+func (c *Client) EnsureSnapshot(ctx context.Context, spec repos.Spec) (string, error) {
+	dir := c.Dir(spec)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// Not wrapped as "stat failed": the ordinary cause is an operator who
+		// has not extracted the archive yet, and this reaches the Repos page
+		// verbatim. A silent empty index would look healthy instead.
+		return "", fmt.Errorf(
+			"snapshot %s: %s does not exist — extract the source archive there, with the archive's own top-level folder unpacked away",
+			spec.Name, dir)
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf(
+			"snapshot %s: %s is empty — extract the source archive there, with the archive's own top-level folder unpacked away",
+			spec.Name, dir)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		if err := c.assertSnapshotCheckout(ctx, spec, dir); err != nil {
+			return "", err
+		}
+	} else if _, err := c.snapshotRun(ctx, dir, "init", "-q", "-b", SnapshotBranch); err != nil {
+		return "", err
+	}
+
+	if _, err := c.snapshotRun(ctx, dir, "add", "-A"); err != nil {
+		return "", err
+	}
+	// Commit only when the staged tree differs from HEAD. An unchanged drop must
+	// return the SAME sha, or every poll would write an empty commit and the
+	// poller would re-index a repository nobody touched. --quiet exits 1 for
+	// "there is a difference", which is not an error here.
+	changed, err := c.snapshotDiffers(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	if changed {
+		if _, err := c.snapshotRun(ctx, dir,
+			"-c", "user.name=rongo", "-c", "user.email=rongo@localhost",
+			"commit", "-q", "-m", "snapshot"); err != nil {
+			return "", err
+		}
+	}
+
+	out, err := c.snapshotRun(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// assertSnapshotCheckout refuses a directory holding a clone.
+//
+// Flipping an entry from a clone_url to snapshot: true leaves the old checkout
+// in place. Committing into it would add a commit to a real repository, label
+// its branch "snapshot" on the Repos page and leave origin pointing at a remote
+// nothing fetches any more — a checkout the page describes wrongly in every
+// column. The operator removes it; rongo will not decide that for them.
+func (c *Client) assertSnapshotCheckout(ctx context.Context, spec repos.Spec, dir string) error {
+	if out, err := c.snapshotRun(ctx, dir, "remote"); err == nil && strings.TrimSpace(out) != "" {
+		return fmt.Errorf(
+			"snapshot %s: %s holds a clone with remote %q, not an extracted archive — remove the directory before indexing it as a snapshot",
+			spec.Name, dir, strings.Fields(out)[0])
+	}
+	out, err := c.snapshotRun(ctx, dir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		// A detached HEAD has no symbolic ref. That is not a snapshot either:
+		// its commits could not be committed onto a branch.
+		return fmt.Errorf(
+			"snapshot %s: %s holds a git repository with a detached HEAD, not an extracted archive — remove the directory before indexing it as a snapshot",
+			spec.Name, dir)
+	}
+	if branch := strings.TrimSpace(out); branch != SnapshotBranch {
+		return fmt.Errorf(
+			"snapshot %s: %s holds a git repository on branch %q, not an extracted archive — remove the directory before indexing it as a snapshot",
+			spec.Name, dir, branch)
+	}
+	return nil
+}
+
+// snapshotDiffers reports whether the staged tree differs from HEAD. An unborn
+// HEAD — the first commit — counts as a difference: there is nothing to compare
+// against and everything to record.
+func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) {
+	if _, err := c.snapshotRun(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return true, nil
+	}
+	_, err := c.snapshotRun(ctx, dir, "diff", "--cached", "--quiet")
+	if err == nil {
+		return false, nil
+	}
+	// --quiet exits 1 for "differences found" and says nothing on stderr;
+	// anything else is a real failure and must not read as "there are changes".
+	if strings.Contains(err.Error(), "exit status 1") {
+		return true, nil
+	}
+	return false, err
+}
+
+// HasCommit reports whether a sha is in the checkout's object store.
+//
+// A remote repository never needs this: a fetch only adds objects, so a
+// recorded last_sha is always still there. A snapshot can lose one — deleting
+// the drop and extracting a newer archive gives it a fresh `git init` and an
+// empty object store, after which diffing against the recorded commit fails
+// with "bad object" on every cycle and the entry never recovers. The caller
+// asks first and re-indexes in full instead.
+func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) bool {
+	_, err := c.snapshotRun(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
+	return err == nil
+}
+
+// snapshotRun is run() with safe.directory set for the drop.
+//
+// The container runs as uid 1000 and an extracted archive belongs to whoever
+// unpacked it, so git 2.35.2+ refuses every command in it with "dubious
+// ownership". The repository root is rongo's own directory either way; this
+// says so rather than asking the operator to chown a tree they maintain.
+func (c *Client) snapshotRun(ctx context.Context, dir string, args ...string) (string, error) {
+	return c.run(ctx, dir, append([]string{"-c", "safe.directory=" + dir}, args...)...)
+}
+
 // OriginURL reports which remote a checkout was actually made from.
 //
 // It exists because EnsureCloned answers "is there a directory here", not "is

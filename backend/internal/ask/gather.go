@@ -180,7 +180,11 @@ SELECT DISTINCT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c
 FROM symbols s
 JOIN selective sel ON sel.name = s.name
 JOIN files f  ON f.id = s.file_id
-JOIN repo_state r ON r.name = f.repo
+-- enabled = 1: a parked repository is not a hop target. AGENTS.md already
+-- requires the target to be indexed before crossing a boundary, and a
+-- repository the reader cannot see on the Repos page is not one to pull code
+-- out of on rongo's own initiative.
+JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 JOIN chunks c ON c.file_id = f.id AND s.line BETWEEN c.start_line AND c.end_line
 WHERE NOT (f.repo = ? AND f.path = ?)
   AND (f.repo = ? OR s.name NOT IN (SELECT name FROM home))
