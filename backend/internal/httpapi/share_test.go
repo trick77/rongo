@@ -156,12 +156,12 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	// Then nothing about what the turn cost, and nothing to ask next: there is
 	// no composer on that page to ask it with.
 	body := rec.Body.String()
-	// The timeline goes with them: how long each step took and what the
-	// pipeline is made of is the same class of thing as what the turn cost.
 	if !strings.Contains(body, `"clarification"`) {
 		t.Fatalf("the card is not on the link:\n%s", body)
 	}
-	// thread_id is the row number the card used to carry: the same counter
+	// The timeline goes with them: how long each step took and what the
+	// pipeline is made of is the same class of thing as what the turn cost.
+	// And thread_id, the row number the card used to carry: the same counter
 	// Message.ThreadID and the thread's public_id exist to keep off the wire.
 	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `"thread_id"`} {
 		if strings.Contains(body, leak) {
