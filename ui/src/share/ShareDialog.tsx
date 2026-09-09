@@ -158,7 +158,7 @@ export default function ShareDialog({
 
       <p className="mt-3 text-xs/5 text-faint">
         The answers, the sources they cite and the files behind them are readable without signing in.
-        Token usage and costs are not shared.
+        The thread's total token count and cost are shared; the per-turn breakdown is not.
       </p>
 
       <div className="mt-4 flex items-center justify-end gap-2">

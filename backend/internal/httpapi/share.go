@@ -9,6 +9,7 @@ import (
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/rongo/internal/usage"
 )
 
 // Sharing: a thread readable by anyone holding the link.
@@ -24,11 +25,18 @@ import (
 // token covers, and refuse anything outside it.
 
 // publicShare is what an anonymous reader gets: the thread as a record, and
-// nothing about what it cost.
+// one figure for what the whole of it cost. The total is two flat fields
+// rather than a usage.Report, because a Report carries the per-call breakdown
+// and the model names, and neither is the reader's business. Both are absent
+// when the thread paid for nothing (no usage, not a zero); the cost alone is
+// absent when no price table is loaded (tokens only, the same rule as the
+// owner's view).
 type publicShare struct {
-	Title    string            `json:"title"`
-	SharedAt string            `json:"shared_at"`
-	Messages []threads.Message `json:"messages"`
+	Title       string            `json:"title"`
+	SharedAt    string            `json:"shared_at"`
+	Messages    []threads.Message `json:"messages"`
+	TotalTokens *int              `json:"total_tokens,omitempty"`
+	CostUSD     *float64          `json:"cost_usd,omitempty"`
 }
 
 // noindex marks a public response as something no crawler should keep. Set
@@ -128,11 +136,12 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 
 // handlePublicShare serves a shared thread to anyone holding the link.
 //
-// What it does NOT do is as much of the point as what it does: no pricing pass
-// runs over the turns, so no token count, cost or model name leaves the
-// process, and the follow-ups an answer offered are dropped because there is
-// nothing here to ask them with. Calls and Scope are already `json:"-"` on the
-// message itself.
+// What it does NOT do is as much of the point as what it does: the pricing
+// pass runs once over the thread as a whole, so the reader gets one token
+// count and one cost, and no per-turn figure or model name leaves the process.
+// The follow-ups an answer offered are dropped because there is nothing here
+// to ask them with. Calls and Scope are already `json:"-"` on the message
+// itself.
 func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	noindex(w)
 	if s.deps.Threads == nil {
@@ -147,20 +156,33 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
+	// Every call the shared turns paid for, in one list: the ceiling is
+	// already applied, so summing what arrived is the total the link covers.
+	// Priced from the current table, never a stored figure, as the owner's
+	// read does.
+	var calls []usage.Call
 	for i := range msgs {
+		calls = append(calls, msgs[i].Calls...)
 		msgs[i].Followups = nil
 		msgs[i].Usage = nil
-		// The timeline goes with the usage: how long each step took and what
-		// the pipeline is made of is the same class of thing as what the turn
-		// cost, and a link's audience was sent an answer, not a machine room.
+		// The timeline goes with the per-turn usage: how long each step took
+		// and what the pipeline is made of is the same class of thing as what
+		// one turn cost, and a link's audience was sent an answer, not a
+		// machine room.
 		msgs[i].Steps = nil
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(publicShare{
+	out := publicShare{
 		Title:    sh.Title,
 		SharedAt: sh.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		Messages: msgs,
-	})
+	}
+	if len(calls) > 0 {
+		report := s.deps.Prices.Prices().Report(calls)
+		out.TotalTokens = &report.Total
+		out.CostUSD = report.CostUSD
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // shareTitle is what the SPA shell puts in a link preview's og:title, so a

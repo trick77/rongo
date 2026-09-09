@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 
 import SourceView, { type SourceRef } from "../SourceView";
 import ThreadView, { SourcesPane, paneAudienceTurn } from "../ThreadView";
-import { linkChosenCandidates, storedRetries, storedTurn, type Message, type Turn } from "../turns";
+import {
+  linkChosenCandidates,
+  money,
+  storedRetries,
+  storedTurn,
+  tokens,
+  type Message,
+  type Turn,
+} from "../turns";
 
 /**
  * A shared thread, as someone without a rongo account sees it.
@@ -13,15 +21,19 @@ import { linkChosenCandidates, storedRetries, storedTurn, type Message, type Tur
  *
  * It is the record and nothing else. No rail, no composer, no account row, and
  * ThreadView is handed no actions — so there is no Retry, no Explain as, no
- * Copy as Markdown, no follow-up chip, and no usage or cost anywhere. The
+ * Copy as Markdown, no follow-up chip, and no per-turn usage or cost. The
  * server does not send those last two either; this is the second half of the
- * same rule, not the whole of it.
+ * same rule, not the whole of it. What the thread cost as a whole is the one
+ * figure that does arrive, and it sits in the header as it does in the app.
  */
 type State =
   | { s: "loading" }
   | { s: "gone" }
   | { s: "failed" }
-  | { s: "ready"; title: string; turns: Turn[] };
+  | { s: "ready"; title: string; turns: Turn[]; usage: ThreadTotal | null };
+
+/** The whole thread's figure: tokens always, cost only when the server priced it. */
+type ThreadTotal = { tokens: number; cost: number | null };
 
 export default function SharePage({ token }: { token: string }) {
   const [state, setState] = useState<State>({ s: "loading" });
@@ -31,7 +43,7 @@ export default function SharePage({ token }: { token: string }) {
   // the audience of the turn it would show, and the reader's own click wins
   // from then on. A share is one thread and never changes, so nothing resets
   // it. The audience is on the wire — handlePublicShare drops the follow-ups,
-  // the usage and the timeline, and nothing else.
+  // the per-turn usage and the timeline, and nothing else.
   const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
 
   // Belt and braces with the X-Robots-Tag the two public endpoints set: a
@@ -63,7 +75,12 @@ export default function SharePage({ token }: { token: string }) {
           setState({ s: "failed" });
           return;
         }
-        const body = (await res.json()) as { title: string; messages: Message[] };
+        const body = (await res.json()) as {
+          title: string;
+          messages: Message[];
+          total_tokens?: number;
+          cost_usd?: number;
+        };
         if (cancelled) return;
         const list = body.messages ?? [];
         setState({
@@ -73,6 +90,9 @@ export default function SharePage({ token }: { token: string }) {
           // and re-explains fold under the question they belong to, and a
           // card shows which candidate was chosen.
           turns: storedRetries(linkChosenCandidates(list, list.map(storedTurn))),
+          // No total means the thread paid for nothing: show nothing, not a
+          // zero. A total without a cost means no price table is loaded.
+          usage: body.total_tokens == null ? null : { tokens: body.total_tokens, cost: body.cost_usd ?? null },
         });
       } catch {
         if (!cancelled) setState({ s: "failed" });
@@ -129,6 +149,24 @@ export default function SharePage({ token }: { token: string }) {
         </div>
         <div className="flex min-w-0 items-baseline gap-2.5 px-2 lg:px-6">
           <h1 className="truncate font-serif text-[19px] font-medium text-accent-strong">{state.title}</h1>
+          {state.usage && (
+            <span
+              aria-label="Thread usage"
+              // The app's own badge, in the app's own place. Out of sight
+              // below sm for the same reason: it does not fit 360px beside
+              // a serif title, and here there is no per-turn block to fall
+              // back on, so a phone reader simply goes without.
+              className="ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block"
+            >
+              thread <span className="text-muted">{tokens(state.usage.tokens)}</span>
+              {state.usage.cost != null && (
+                <>
+                  <span className="mx-1.5 opacity-50">·</span>
+                  <span className="text-muted">{money(state.usage.cost)}</span>
+                </>
+              )}
+            </span>
+          )}
         </div>
         {/* Says what this page is, and by saying "read-only" says why there is
             nothing on it to press. */}
