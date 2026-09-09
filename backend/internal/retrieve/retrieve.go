@@ -173,6 +173,11 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 			// A mishearing. Dropped in silence, exactly as before.
 			continue
 		}
+		if segmentOfAnyRepo(folded, indexed) && !namesAsWholeWord(question, n) {
+			// The model split an indexed name and named the half. Dropped in
+			// silence: the reader never wrote it.
+			continue
+		}
 		unknown = append(unknown, n)
 	}
 	return known, unknown, nil
@@ -209,6 +214,106 @@ func nearAnyRepo(folded string, indexed []string) bool {
 		}
 	}
 	return false
+}
+
+// segmentOfAnyRepo reports whether a folded guess is one "-" or "_" separated
+// segment of an indexed name - "transmission" out of "transmission-ui".
+//
+// That shape is not a mishearing, it is a reading: the model is told to name
+// the repositories a question names, is shown no list of the ones that exist,
+// and takes a hyphenated name apart the way a person would, into a UI and the
+// daemon it must be a UI for. The half it invents resembles nothing in the
+// index by edit distance, so nearAnyRepo lets it through, and the reader is
+// told their index is missing a repository they never mentioned.
+//
+// Same four-rune floor as nearAnyRepo, for the same reason: a segment shorter
+// than that ("ui", "api") is too weak a coincidence to suppress on.
+func segmentOfAnyRepo(folded string, indexed []string) bool {
+	if len([]rune(folded)) < 4 {
+		return false
+	}
+	for _, n := range indexed {
+		segs := strings.FieldsFunc(foldRepo(n), func(r rune) bool {
+			return r == '-' || r == '_'
+		})
+		if len(segs) < 2 {
+			// A name with no separator has no half to take. Comparing it here
+			// would only repeat what nearAnyRepo already decided.
+			continue
+		}
+		for _, seg := range segs {
+			// Folded on both sides. foldRepo drops a trailing "s" from the
+			// whole name, which is not the same as dropping it from a segment:
+			// "tools-media" keeps its s and "media-tools" loses it, and an
+			// unfolded comparison would suppress the guess in one order and
+			// report it in the other.
+			if foldRepo(seg) == folded {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// namesAsWholeWord reports whether the QUESTION carries the name on its own,
+// rather than inside a longer one. It is the second half of the segment rule,
+// and the half that keeps it honest: a reader who really did write
+// "how does transmission-ui talk to transmission?" is asking about two
+// systems, one of which is genuinely not indexed, and must still be told so.
+//
+// Its boundaries are not mentions': "-" and "_" count as word runes here, so
+// "transmission-ui" does NOT carry the word transmission. mentions needs the
+// opposite - a question spelling a longer name still narrows to the indexed
+// repository inside it - which is why this is a separate test rather than a
+// second caller of that one.
+//
+// The name is tested BOTH as the guess spells it and folded, because folding
+// takes a trailing "s" off: a reader asking "how does media-tools differ from
+// tools?" wrote "tools", the folded guess is "tool", and searching for that
+// alone finds an occurrence whose own s is a word rune - so the question that
+// names the missing repository outright would read as never naming it.
+func namesAsWholeWord(question, name string) bool {
+	q := strings.ToLower(question)
+	for _, form := range spellings(name) {
+		if carriesWholeWord(q, form) {
+			return true
+		}
+	}
+	return false
+}
+
+// spellings is the guess as the reader may have typed it and as foldRepo
+// compares it, without a duplicate when the two agree.
+func spellings(name string) []string {
+	var out []string
+	raw := strings.ToLower(strings.TrimSpace(name))
+	if i := strings.LastIndexByte(raw, '/'); i >= 0 {
+		raw = raw[i+1:]
+	}
+	if raw != "" {
+		out = append(out, raw)
+	}
+	if folded := foldRepo(name); folded != "" && folded != raw {
+		out = append(out, folded)
+	}
+	return out
+}
+
+// carriesWholeWord reports whether the lower-cased question holds name with a
+// nameRune on neither side.
+func carriesWholeWord(q, name string) bool {
+	for i := 0; ; {
+		j := strings.Index(q[i:], name)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		end := start + len(name)
+		if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
+			return true
+		}
+		i = start + 1
+	}
 }
 
 // withinOneEdit reports whether a and b differ by at most one insertion,
@@ -378,7 +483,7 @@ func mentions(question, repo string) bool {
 		}
 		start := i + j
 		end := start + len(name)
-		if !wordBefore(q, start) && !wordAfter(q, end) {
+		if !wordBefore(q, start, wordRune) && !wordAfter(q, end, wordRune) {
 			return true
 		}
 		i = start + 1
@@ -389,18 +494,26 @@ func mentions(question, repo string) bool {
 // The questions are German: "loomähnlich" must not name loom, and an ASCII
 // test would read the leading byte of "ä" as a boundary and narrow the whole
 // search to loom.
-func wordBefore(s string, i int) bool {
+// The predicate is a parameter because the two callers disagree about the
+// hyphen: mentions reads it as a boundary, namesAsWholeWord does not.
+func wordBefore(s string, i int, is func(rune) bool) bool {
 	r, n := utf8.DecodeLastRuneInString(s[:i])
-	return n > 0 && wordRune(r)
+	return n > 0 && is(r)
 }
 
-func wordAfter(s string, i int) bool {
+func wordAfter(s string, i int, is func(rune) bool) bool {
 	r, n := utf8.DecodeRuneInString(s[i:])
-	return n > 0 && wordRune(r)
+	return n > 0 && is(r)
 }
 
 func wordRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// nameRune is wordRune plus the hyphen: the runes a repository name is spelled
+// from, so a name embedded in a longer one is not read as a mention of it.
+func nameRune(r rune) bool {
+	return r == '-' || wordRune(r)
 }
 
 // searchTexts is Search over SEVERAL phrasings of one question.

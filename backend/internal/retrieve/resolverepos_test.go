@@ -262,3 +262,109 @@ func TestResolveReposDoesNotReadACommonWordProjectOutOfAQuestion(t *testing.T) {
 		t.Errorf("known = %v, want no restriction: 'backend' is a common word, not a narrowing", known)
 	}
 }
+
+func TestResolveReposDoesNotReportHalfOfAHyphenatedNameAsMissing(t *testing.T) {
+	// Given the index carrying transmission-ui and nothing called
+	// transmission, and a question that only ever wrote the full name.
+	db := testDB(t)
+	addMember(t, db, "transmission-ui", "transmission-ui")
+	r := New(db, nil)
+
+	// When the understanding takes the name apart the way a person would: a
+	// UI, and the daemon it must be a UI for. Only the first half was typed.
+	known, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"transmission-ui", "transmission"}, "what does transmission-ui do?")
+
+	// Then nothing is claimed about the half the model invented. Saying "no
+	// project called transmission is in the index" answers a question the
+	// reader did not ask and states a fact they cannot check.
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want nothing claimed about a name the question never wrote", unknown)
+	}
+	if len(known) != 1 || known[0] != "transmission-ui" {
+		t.Errorf("known = %v, want transmission-ui alone", known)
+	}
+}
+
+func TestResolveReposStillReportsAHyphenSegmentTheQuestionNames(t *testing.T) {
+	// The other half of the same rule. Here the reader really did name two
+	// systems, and one of them is genuinely not indexed - which is the case
+	// the notice exists for.
+	db := testDB(t)
+	addMember(t, db, "transmission-ui", "transmission-ui")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"transmission-ui", "transmission"},
+		"how does transmission-ui talk to transmission?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "transmission" {
+		t.Errorf("unknown = %v, want the repository the reader named and the index lacks", unknown)
+	}
+}
+
+func TestResolveReposStillReportsAPluralSegmentTheQuestionNames(t *testing.T) {
+	// foldRepo takes a trailing "s" off, so the folded guess is "tool" while
+	// the reader typed "tools". Testing only the folded spelling finds an
+	// occurrence whose own s is a word rune, and the question that names the
+	// missing repository outright would read as never naming it.
+	db := testDB(t)
+	addMember(t, db, "media-tools", "media-tools")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"media-tools", "tools"},
+		"how does media-tools differ from tools?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "tools" {
+		t.Errorf("unknown = %v, want the repository the reader named and the index lacks", unknown)
+	}
+}
+
+func TestResolveReposDropsAHyphenSegmentWhicheverHalfCarriesThePlural(t *testing.T) {
+	// The mirror of the transmission case: foldRepo strips the s from
+	// "media-tools" and not from "tools-media", so the halves have to be
+	// folded one by one or the same invented name is suppressed in one order
+	// and reported in the other.
+	db := testDB(t)
+	addMember(t, db, "tools-media", "tools-media")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"tools-media", "tools"}, "what does tools-media do?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want nothing claimed about a name the question never wrote", unknown)
+	}
+}
+
+func TestResolveReposStillReportsANameThatIsNoSegment(t *testing.T) {
+	// A follow-up carries its subject from the previous turn, so the guess
+	// names a repository the current question does not spell. That name is
+	// still reported: it resembles nothing indexed and is nobody's misreading
+	// of a hyphen.
+	db := testDB(t)
+	addRepo(t, db, "peeq", "master")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(), []string{"loom"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "loom" {
+		t.Errorf("unknown = %v, want the missing repository named", unknown)
+	}
+}
