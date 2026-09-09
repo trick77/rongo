@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -154,18 +155,35 @@ func main() {
 	// from the database, and its checkout has to go with it.
 	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
 
-	// The repository list is loaded on a best-effort basis. A missing or broken
-	// repos.yaml must NOT stop the server: the operator needs the Repos page to
-	// come up and tell them what is wrong with the file. Refusing to boot would
-	// hide the diagnosis behind the very thing that failed.
+	// An INVALID repos.yaml stops the server. A MISSING one does not.
 	//
-	// A file that cannot be READ is therefore not the same as an empty one: the
-	// sync below never runs, so nothing is purged. Only a list that parses and
-	// no longer names a repository removes it.
+	// The two used to be one case, and both only warned. That is a worse trade
+	// than it looks, and it cost an evening to learn: a file that fails to parse
+	// leaves the previous list in the database untouched, so rongo comes up
+	// serving a complete, confident, arbitrarily stale corpus while indexing
+	// sits idle. Nothing in the UI says the configuration was refused — the
+	// Repos page cannot report a file it never loaded, it can only show what the
+	// database still holds, which is the LAST good file. The symptom reaching
+	// the operator was a `uses` arrow pointing the wrong way, nine hours after a
+	// stray character on line one had frozen everything.
+	//
+	// So: a file that is present and wrong is an operator mistake that has to be
+	// fixed now, and refusing to boot is the only signal that cannot be missed.
+	// Under compose this restarts in a loop, which is loud, which is the point.
+	//
+	// A file that is ABSENT is a different fact — a first run before conf/ has
+	// been populated, or a mount that is not there yet. Nothing is stale,
+	// because nothing was ever loaded; rongo comes up, indexes nothing, and the
+	// Repos page says so. That case is documented in compose.yaml's first-run
+	// notes and stays as it was.
 	state := indexer.NewStateStore(db)
-	if specs, err := repos.Load(cfg.ReposFile); err != nil {
-		slog.Warn("repository list unavailable; indexing is idle until it is fixed",
+	if specs, err := repos.Load(cfg.ReposFile); errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("no repository list; indexing is idle until one is provided",
+			"path", cfg.ReposFile)
+	} else if err != nil {
+		slog.Error("repository list is invalid; refusing to start rather than run on a stale one",
 			"path", cfg.ReposFile, "err", err)
+		os.Exit(1)
 	} else if purged, err := state.SyncSpecs(ctx, specs); err != nil {
 		slog.Error("recording the repository list failed", "err", err)
 		os.Exit(1)
@@ -190,7 +208,21 @@ func main() {
 				slog.Error("removing the purged checkout failed", "repo", p.Name, "err", err)
 			}
 		}
-		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))
+		// The inventory is read back from the DATABASE, not from specs: the YAML
+		// says what was asked for, and this says what rongo actually holds —
+		// the resolved branch, the commit it last indexed, how much of it, and
+		// whether the last run failed. Those are the facts every "why can't it
+		// find anything in X" conversation needs, and they used to require
+		// reading the file and the database by hand on somebody else's machine.
+		if states, err := state.All(ctx); err != nil {
+			slog.Warn("repository inventory unavailable", "err", err)
+		} else {
+			for _, st := range states {
+				slog.Info("repository configured", indexer.InventoryAttrs(st)...)
+			}
+			slog.Info("repository list loaded",
+				append([]any{"path", cfg.ReposFile}, indexer.Summarise(states).Attrs()...)...)
+		}
 	}
 
 	pipeline := indexer.New(indexer.Deps{

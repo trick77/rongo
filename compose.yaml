@@ -17,6 +17,14 @@
 #    never belong in it (see the file). Without it rongo comes up and the
 #    Repos page says what is missing.
 #
+#    An INVALID conf/repos.yaml is different: rongo refuses to start, and with
+#    `restart: unless-stopped` below the container then restarts in a loop until
+#    the file is fixed. That is deliberate. A file that fails to parse leaves the
+#    PREVIOUS list in the database, so a server that came up anyway would serve a
+#    complete, confident, arbitrarily stale corpus with nothing in the UI saying
+#    the configuration was refused. `docker compose logs rongo` carries the parse
+#    error with the offending line.
+#
 #      mkdir -p conf && cp repos.example.yaml conf/repos.yaml
 #
 # 3. Copy .env.example to .env and set at least:

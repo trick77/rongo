@@ -174,3 +174,24 @@ func TestRepos_aFailingSourceIsAnErrorNotAnEmptyList(t *testing.T) {
 		t.Error("empty error body")
 	}
 }
+
+// TestRepos_isNeverCached: the endpoint carried no cache directives, so a
+// browser was free to serve its own copy heuristically — and did. After an
+// operator corrected repos.yaml and restarted, the page went on drawing the
+// previous configuration's `uses` arrows, which reads as rongo ignoring the
+// file rather than as the browser ignoring the server. A status page that can
+// be served stale is a status page that lies.
+func TestRepos_isNeverCached(t *testing.T) {
+	// Given
+	deps := Deps{Auth: devAuth(t), Repos: fakeRepos{out: []RepoStatus{{
+		Name: "peeq", Branch: "master", Enabled: true,
+	}}}}
+
+	// When
+	rec := getRepos(t, deps)
+
+	// Then
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want %q", got, "no-store")
+	}
+}

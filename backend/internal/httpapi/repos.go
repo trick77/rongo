@@ -96,6 +96,14 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"uses":        uses(st.Uses),
 		})
 	}
+	// no-store, because this is a STATUS page and a cached status page lies.
+	// The endpoint carried no cache directives at all, so a browser was free to
+	// serve its own copy heuristically — and it did: after an operator fixed
+	// repos.yaml and restarted, the page went on drawing the previous
+	// configuration's `uses` arrows, which reads as rongo ignoring the file
+	// rather than as the browser ignoring the server. Everything here changes
+	// on a restart or a poll, so none of it is worth caching for any interval.
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }

@@ -113,21 +113,85 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A cycle used to be entirely silent unless something broke, so "the index
+	// is stale" and "the poller stopped running" produced identical logs —
+	// which is to say no logs. The pair of lines around the loop is what makes
+	// a healthy run visible, and the counts are what make an unhealthy one
+	// obvious without reading every repository's line.
+	started := time.Now()
+	p.log.Info("poll cycle started", "repositories", len(active))
+
+	var indexed, unchanged, failed int
 	for _, st := range active {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := p.pollRepo(ctx, st); err != nil {
-			p.log.Warn("repository poll failed", "repo", st.Name, "err", err)
+		repoStart := time.Now()
+		res, err := p.pollRepo(ctx, st)
+		switch {
+		case err != nil:
+			failed++
+			p.log.Warn("repository poll failed", "repo", st.Name,
+				"took", took(repoStart), "err", err)
 			if markErr := p.state.MarkError(ctx, st.Name, err.Error()); markErr != nil {
 				p.log.Error("recording the failure failed too", "repo", st.Name, "err", markErr)
 			}
+		case res.Changed:
+			indexed++
+			// Info, because this is the event somebody is looking for when they
+			// ask whether a push has landed in the answers yet.
+			p.log.Info("repository indexed", "repo", st.Name, "mode", res.Mode(),
+				"sha", gitrepo.ShortSHA(res.SHA), "files", res.Counts.Files,
+				"chunks", res.Counts.Chunks, "took", took(repoStart))
+		default:
+			unchanged++
+			// Debug: at a thirty-minute interval this is most lines most of the
+			// time, and the cycle summary already carries the count. Raising
+			// BACKEND_LOG_LEVEL to debug is what "which repository did nothing"
+			// is for.
+			p.log.Debug("repository unchanged", "repo", st.Name,
+				"sha", gitrepo.ShortSHA(res.SHA), "took", took(repoStart))
 		}
 	}
+
+	p.log.Info("poll cycle finished", "checked", len(active), "indexed", indexed,
+		"unchanged", unchanged, "failed", failed, "took", took(started))
 	return nil
 }
 
-func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
+// pollResult is what one repository's cycle did, so the caller can log and
+// count it. The poller itself decides nothing from this — it exists to make the
+// cycle legible.
+type pollResult struct {
+	// Changed is false when the commit was already indexed.
+	Changed bool
+	// Full is true for an index of every path, as opposed to a diff.
+	Full   bool
+	SHA    string
+	Counts Counts
+}
+
+// Mode names what an index run did, for the log line. "full" and "incremental"
+// are the words the pipeline itself uses for nil versus non-nil paths.
+func (r pollResult) Mode() string {
+	if r.Full {
+		return "full"
+	}
+	return "incremental"
+}
+
+// took rounds a duration to something a person reads at a glance. Milliseconds
+// below a second, because a clone is seconds and a no-op poll is milliseconds
+// and both belong on the same line.
+func took(start time.Time) time.Duration {
+	d := time.Since(start)
+	if d < time.Second {
+		return d.Round(time.Millisecond)
+	}
+	return d.Round(100 * time.Millisecond)
+}
+
+func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error) {
 	// A snapshot has no remote, so every step below — the origin check, the
 	// clone, the default branch, the fetch — is asking a question of something
 	// that is not there. It takes its own path rather than growing four
@@ -159,16 +223,16 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	// does not have is never.
 	origin, err := p.git.OriginURL(ctx, spec)
 	if err != nil {
-		return err
+		return pollResult{}, err
 	}
 	if origin != "" && origin != spec.CloneURL {
 		p.log.Info("checkout points at a different remote; re-cloning",
 			"repo", st.Name, "checkout_origin", origin, "configured", spec.CloneURL)
 		if err := p.state.ResetRepo(ctx, st.Name); err != nil {
-			return err
+			return pollResult{}, err
 		}
 		if err := p.git.RemoveCheckout(st.Name); err != nil {
-			return err
+			return pollResult{}, err
 		}
 		// The reset cleared last_sha in the database; this copy is what the rest
 		// of the run reads, and a stale value here would send it into an
@@ -177,7 +241,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	}
 
 	if err := p.git.EnsureCloned(ctx, spec, token); err != nil {
-		return err
+		return pollResult{}, err
 	}
 
 	// An omitted branch is resolved from the remote and written back, so the
@@ -186,18 +250,19 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	if branch == "" {
 		resolved, err := p.git.DefaultBranch(ctx, spec, token)
 		if err != nil {
-			return err
+			return pollResult{}, err
 		}
 		branch = resolved
 		spec.Branch = resolved
 		if err := p.state.SetBranch(ctx, st.Name, resolved); err != nil {
-			return err
+			return pollResult{}, err
 		}
 		st.Branch = resolved
+		p.log.Info("branch resolved from the remote", "repo", st.Name, "branch", resolved)
 	}
 
 	if err := p.git.Fetch(ctx, spec, token); err != nil {
-		return err
+		return pollResult{}, err
 	}
 
 	head, err := p.git.HeadSHA(ctx, spec, branch)
@@ -206,9 +271,9 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 		// and the Repos page shows it. A silent stop here would freeze the
 		// index while every status looked healthy.
 		if errors.Is(err, gitrepo.ErrBranchGone) {
-			return err
+			return pollResult{}, err
 		}
-		return err
+		return pollResult{}, err
 	}
 
 	if head == st.LastSHA {
@@ -216,7 +281,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 		// earlier network failure has to go. Returning early without clearing
 		// it left a healthy repository showing a permanent error until someone
 		// happened to push to it.
-		return p.state.MarkChecked(ctx, st.Name)
+		return pollResult{SHA: head}, p.state.MarkChecked(ctx, st.Name)
 	}
 
 	var paths []string
@@ -226,9 +291,12 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 		// in the same object store.
 		changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, head)
 		if err != nil {
-			return err
+			return pollResult{}, err
 		}
 		paths = changed
+		p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
+			"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(head),
+			"paths", len(changed))
 	}
 
 	counts, err := p.index(ctx, st, head, paths)
@@ -236,10 +304,11 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 		// Deliberately do NOT advance last_sha here. Recording the new SHA
 		// after a failed index would make the next run see "unchanged" and
 		// leave the repository permanently un-indexed while looking healthy.
-		return err
+		return pollResult{}, err
 	}
 
-	return p.state.MarkIndexed(ctx, st.Name, head, counts)
+	res := pollResult{Changed: true, Full: paths == nil, SHA: head, Counts: counts}
+	return res, p.state.MarkIndexed(ctx, st.Name, head, counts)
 }
 
 // pollSnapshot is pollRepo for a hand-extracted source drop: the same shape
@@ -250,12 +319,12 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 // changed anything". For a drop nobody touched it changes nothing, which is why
 // a snapshot costs one `git add` per cycle and never re-indexes — the one-off
 // behaviour is the ordinary path here, not a special case.
-func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
+func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, error) {
 	spec := repos.Spec{Name: st.Name, Snapshot: true, Enabled: true}
 
 	sha, err := p.git.EnsureSnapshot(ctx, spec)
 	if err != nil {
-		return err
+		return pollResult{}, err
 	}
 
 	// Written back so the Repos page and every citation carry a branch that is
@@ -263,7 +332,7 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
 	// the column is what sourceview and the citation renderer read.
 	if st.Branch != gitrepo.SnapshotBranch {
 		if err := p.state.SetBranch(ctx, st.Name, gitrepo.SnapshotBranch); err != nil {
-			return err
+			return pollResult{}, err
 		}
 		st.Branch = gitrepo.SnapshotBranch
 	}
@@ -272,7 +341,7 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
 		// Unchanged, and the poll SUCCEEDED — clearing a last_error left by an
 		// earlier missing directory is part of that. For a snapshot this is the
 		// steady state, not the exception.
-		return p.state.MarkChecked(ctx, st.Name)
+		return pollResult{SHA: sha}, p.state.MarkChecked(ctx, st.Name)
 	}
 
 	var paths []string
@@ -280,9 +349,12 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
 		if p.git.HasCommit(ctx, spec, st.LastSHA) {
 			changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, sha)
 			if err != nil {
-				return err
+				return pollResult{}, err
 			}
 			paths = changed
+			p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
+				"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(sha),
+				"paths", len(changed))
 		} else {
 			// The drop was deleted and re-extracted, so `git init` built a new
 			// object store and the recorded commit is not in it. Diffing against
@@ -292,7 +364,7 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
 			p.log.Info("snapshot was replaced; re-indexing in full",
 				"repo", st.Name, "indexed_sha", st.LastSHA)
 			if err := p.state.ResetRepo(ctx, st.Name); err != nil {
-				return err
+				return pollResult{}, err
 			}
 			st.LastSHA = ""
 		}
@@ -303,7 +375,8 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
 		// Same reason as pollRepo: recording the sha after a failed index would
 		// make the next cycle see "unchanged" and leave the repository
 		// permanently un-indexed while looking healthy.
-		return err
+		return pollResult{}, err
 	}
-	return p.state.MarkIndexed(ctx, st.Name, sha, counts)
+	res := pollResult{Changed: true, Full: paths == nil, SHA: sha, Counts: counts}
+	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
 }

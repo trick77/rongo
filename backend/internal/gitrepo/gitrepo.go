@@ -398,7 +398,7 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("read %s at %s: %w: %s", path, shortSHA(sha), err,
+		return nil, fmt.Errorf("read %s at %s: %w: %s", path, ShortSHA(sha), err,
 			redact(stderr.String()))
 	}
 	return stdout.Bytes(), nil
@@ -417,16 +417,16 @@ func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", 0, fmt.Errorf("stat %s at %s: %w: %s", path, shortSHA(sha), err, redact(stderr.String()))
+		return "", 0, fmt.Errorf("stat %s at %s: %w: %s", path, ShortSHA(sha), err, redact(stderr.String()))
 	}
 	// "<oid> <type> <size>" for an object, "<name> missing" otherwise.
 	fields := strings.Fields(stdout.String())
 	if len(fields) != 3 {
-		return "", 0, fmt.Errorf("stat %s at %s: %s", path, shortSHA(sha), strings.TrimSpace(stdout.String()))
+		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(stdout.String()))
 	}
 	n, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil {
-		return "", 0, fmt.Errorf("stat %s at %s: size %q: %w", path, shortSHA(sha), fields[2], err)
+		return "", 0, fmt.Errorf("stat %s at %s: size %q: %w", path, ShortSHA(sha), fields[2], err)
 	}
 	return fields[1], n, nil
 }
@@ -521,7 +521,11 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
-func shortSHA(sha string) string {
+// ShortSHA is the seven-character form used in errors and log lines. Exported
+// so the indexer's log lines abbreviate a commit the same way this package's
+// errors do; a sha that reads differently in two places is one more thing to
+// reconcile while debugging.
+func ShortSHA(sha string) string {
 	if len(sha) > 7 {
 		return sha[:7]
 	}
