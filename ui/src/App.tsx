@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import Ask, { money } from "./Ask";
+import Ask from "./Ask";
+import ThreadUsageBadge from "./ThreadUsageBadge";
+import type { ThreadTotal } from "./turns";
 import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
@@ -190,7 +192,7 @@ export default function App() {
   const [threads, setThreads] = useState<Thread[]>([]);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
-  const [usageTotal, setUsageTotal] = useState<{ tokens: number; cost: number | null } | null>(null);
+  const [usageTotal, setUsageTotal] = useState<ThreadTotal | null>(null);
   const session = useSession();
   const index = useIndexStatus(session.state === "in", threadsVersion);
 
@@ -327,24 +329,7 @@ export default function App() {
               <span className="truncate font-serif text-[19px] font-medium text-accent-strong">
                 {openTitle ?? "New question"}
               </span>
-              {total && (
-                <span
-                  aria-label="Thread usage"
-                  // Out of sight below sm: the running total beside a serif
-                  // title does not fit 360px, and the same figure sits in
-                  // every turn's own usage block.
-                  className="ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block"
-                >
-                  thread{" "}
-                  <span className="text-muted">{total.tokens.toLocaleString("en-GB")} tok</span>
-                  {total.cost != null && (
-                    <>
-                      <span className="mx-1.5 opacity-50">·</span>
-                      <span className="text-muted">{money(total.cost)}</span>
-                    </>
-                  )}
-                </span>
-              )}
+              {total && <ThreadUsageBadge total={total} />}
             </>
           ) : page === "projects" ? (
             <>

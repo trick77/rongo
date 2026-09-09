@@ -140,9 +140,12 @@ export function money(usd: number): string {
   return "$" + (usd >= 1 ? usd.toFixed(2) : usd.toFixed(3));
 }
 
+/** A whole thread's figure: tokens always, cost only when something was priced. */
+export type ThreadTotal = { tokens: number; cost: number | null };
+
 /** threadUsage sums every turn that has usage. Cost is a number only when
  * some turn carried one, so a thread on an unpriced server shows no money. */
-export function threadUsage(turns: Turn[]): { tokens: number; cost: number | null } | null {
+export function threadUsage(turns: Turn[]): ThreadTotal | null {
   let total = 0;
   let cost: number | null = null;
   let any = false;

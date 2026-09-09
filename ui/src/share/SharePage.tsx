@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 
 import SourceView, { type SourceRef } from "../SourceView";
 import ThreadView, { SourcesPane, paneAudienceTurn } from "../ThreadView";
+import ThreadUsageBadge from "../ThreadUsageBadge";
 import {
   linkChosenCandidates,
-  money,
   storedRetries,
   storedTurn,
-  tokens,
   type Message,
+  type ThreadTotal,
   type Turn,
 } from "../turns";
 
@@ -31,9 +31,6 @@ type State =
   | { s: "gone" }
   | { s: "failed" }
   | { s: "ready"; title: string; turns: Turn[]; usage: ThreadTotal | null };
-
-/** The whole thread's figure: tokens always, cost only when the server priced it. */
-type ThreadTotal = { tokens: number; cost: number | null };
 
 export default function SharePage({ token }: { token: string }) {
   const [state, setState] = useState<State>({ s: "loading" });
@@ -149,24 +146,8 @@ export default function SharePage({ token }: { token: string }) {
         </div>
         <div className="flex min-w-0 items-baseline gap-2.5 px-2 lg:px-6">
           <h1 className="truncate font-serif text-[19px] font-medium text-accent-strong">{state.title}</h1>
-          {state.usage && (
-            <span
-              aria-label="Thread usage"
-              // The app's own badge, in the app's own place. Out of sight
-              // below sm for the same reason: it does not fit 360px beside
-              // a serif title, and here there is no per-turn block to fall
-              // back on, so a phone reader simply goes without.
-              className="ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block"
-            >
-              thread <span className="text-muted">{tokens(state.usage.tokens)}</span>
-              {state.usage.cost != null && (
-                <>
-                  <span className="mx-1.5 opacity-50">·</span>
-                  <span className="text-muted">{money(state.usage.cost)}</span>
-                </>
-              )}
-            </span>
-          )}
+          {/* The app's own badge, in the app's own place. */}
+          {state.usage && <ThreadUsageBadge total={state.usage} />}
         </div>
         {/* Says what this page is, and by saying "read-only" says why there is
             nothing on it to press. */}

@@ -60,6 +60,21 @@ func sharedTurn(t *testing.T, st *threads.Store, subject string) threads.Thread 
 	return th
 }
 
+// laterTurn asks and answers a second question on a thread: the turn a link
+// made before it must not show.
+func laterTurn(t *testing.T, st *threads.Store, threadID int64) threads.Message {
+	t.Helper()
+	ctx := context.Background()
+	later, err := st.AddQuestion(ctx, threadID, "ba", "en", "And then?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	return later
+}
+
 // share makes a link through the HTTP layer, the way the dialog does.
 func share(t *testing.T, srv *Server, threadID string) threads.Share {
 	t.Helper()
@@ -143,13 +158,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save steps: %v", err)
 	}
-	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
+	later := laterTurn(t, st, th.ID)
 	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
 		{Step: "answer", Model: "mimo-v2.5", Prompt: 2000, Completion: 200},
 	}); err != nil {
@@ -241,21 +250,33 @@ func TestPublicShare_stopsAtTheCeiling(t *testing.T) {
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
-	sh := share(t, srv, th.PublicID)
-	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
+	msgs, err := st.Messages(ctx, testSubject, th.ID)
 	if err != nil {
-		t.Fatalf("add question: %v", err)
+		t.Fatalf("messages: %v", err)
 	}
-	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
-		t.Fatalf("finish: %v", err)
+	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 300, Completion: 30},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	sh := share(t, srv, th.PublicID)
+	later := laterTurn(t, st, th.ID)
+	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 5000, Completion: 500},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
 	}
 
 	// When
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
 
-	// Then
-	if strings.Contains(rec.Body.String(), "Then this.") {
+	// Then neither the turn nor what it cost is on the link
+	body := rec.Body.String()
+	if strings.Contains(body, "Then this.") {
 		t.Error("a turn asked after the link was made is on it")
+	}
+	if !strings.Contains(body, `"total_tokens":330`) {
+		t.Errorf("the total counts spend above the ceiling:\n%s", body)
 	}
 }
 
@@ -426,16 +447,9 @@ func TestShare_anotherReadersThreadIsNotFound(t *testing.T) {
 func TestShareUpdate_movesTheCeilingAndKeepsTheLink(t *testing.T) {
 	// Given a link the thread has moved on from
 	srv, st, _ := shareServer(t)
-	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
 	first := share(t, srv, th.PublicID)
-	later, err := st.AddQuestion(ctx, th.ID, "ba", "en", "And then?", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := st.Finish(ctx, later.ID, "Then this.", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
+	laterTurn(t, st, th.ID)
 
 	// When
 	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/share/update", th.PublicID), "")
