@@ -1107,6 +1107,12 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (s
 		FROM message_sources ms
 		JOIN chunks c ON c.id = ms.chunk_id
 		JOIN files f ON f.id = c.file_id
+		-- Deliberately NOT filtered on r.enabled, unlike every retrieval and
+		-- routing query. This is the RECORD: a turn answered before its
+		-- repository was parked cites it, and a thread is never rewritten. An
+		-- enabled clause here would empty the sources of answers that were
+		-- correct when they were given, which is the opposite of what parking
+		-- means — it stops NEW answers, it does not revise old ones.
 		JOIN repo_state r ON r.name = f.repo
 		JOIN messages m ON m.id = ms.message_id
 		JOIN threads t ON t.id = m.thread_id

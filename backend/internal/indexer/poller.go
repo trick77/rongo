@@ -128,6 +128,14 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 }
 
 func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
+	// A snapshot has no remote, so every step below — the origin check, the
+	// clone, the default branch, the fetch — is asking a question of something
+	// that is not there. It takes its own path rather than growing four
+	// conditions into this one.
+	if st.Snapshot() {
+		return p.pollSnapshot(ctx, st)
+	}
+
 	spec := repos.Spec{
 		Name: st.Name, CloneURL: st.CloneURL, Branch: st.Branch,
 		TokenEnv: st.TokenEnv, Enabled: true,
@@ -232,4 +240,70 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) error {
 	}
 
 	return p.state.MarkIndexed(ctx, st.Name, head, counts)
+}
+
+// pollSnapshot is pollRepo for a hand-extracted source drop: the same shape
+// with the remote taken out.
+//
+// There is nothing to clone, nothing to fetch and no remote to name a default
+// branch, so the cycle is "commit whatever is on disk, then index it if that
+// changed anything". For a drop nobody touched it changes nothing, which is why
+// a snapshot costs one `git add` per cycle and never re-indexes — the one-off
+// behaviour is the ordinary path here, not a special case.
+func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) error {
+	spec := repos.Spec{Name: st.Name, Snapshot: true, Enabled: true}
+
+	sha, err := p.git.EnsureSnapshot(ctx, spec)
+	if err != nil {
+		return err
+	}
+
+	// Written back so the Repos page and every citation carry a branch that is
+	// true of the checkout. It is a constant, but it still has to be recorded:
+	// the column is what sourceview and the citation renderer read.
+	if st.Branch != gitrepo.SnapshotBranch {
+		if err := p.state.SetBranch(ctx, st.Name, gitrepo.SnapshotBranch); err != nil {
+			return err
+		}
+		st.Branch = gitrepo.SnapshotBranch
+	}
+
+	if sha == st.LastSHA {
+		// Unchanged, and the poll SUCCEEDED — clearing a last_error left by an
+		// earlier missing directory is part of that. For a snapshot this is the
+		// steady state, not the exception.
+		return p.state.MarkChecked(ctx, st.Name)
+	}
+
+	var paths []string
+	if st.LastSHA != "" {
+		if p.git.HasCommit(ctx, spec, st.LastSHA) {
+			changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, sha)
+			if err != nil {
+				return err
+			}
+			paths = changed
+		} else {
+			// The drop was deleted and re-extracted, so `git init` built a new
+			// object store and the recorded commit is not in it. Diffing against
+			// it would fail with "bad object" on this and every later cycle,
+			// leaving the entry in a permanent error while the files sit there
+			// perfectly readable. Drop the index and read the new tree whole.
+			p.log.Info("snapshot was replaced; re-indexing in full",
+				"repo", st.Name, "indexed_sha", st.LastSHA)
+			if err := p.state.ResetRepo(ctx, st.Name); err != nil {
+				return err
+			}
+			st.LastSHA = ""
+		}
+	}
+
+	counts, err := p.index(ctx, st, sha, paths)
+	if err != nil {
+		// Same reason as pollRepo: recording the sha after a failed index would
+		// make the next cycle see "unchanged" and leave the repository
+		// permanently un-indexed while looking healthy.
+		return err
+	}
+	return p.state.MarkIndexed(ctx, st.Name, sha, counts)
 }

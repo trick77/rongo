@@ -24,6 +24,7 @@ const peeq = {
   chunks: 3120,
   modules: 34,
   enabled: true,
+  snapshot: false,
   last_error: "",
   project: "peeq",
   part: "",
@@ -68,14 +69,18 @@ describe("RepoList", () => {
     expect(row.getAttribute("data-state")).toBe("error");
   });
 
-  it("marks a disabled repository instead of hiding it", async () => {
-    respondWith(200, [peeq, { ...peeq, name: "legacy-crm", enabled: false }]);
+  it("hides a disabled repository and accounts for it in one line", async () => {
+    // It used to take a row of its own carrying a "Disabled" chip. A parked
+    // repository now leaves the page entirely — it is not polled, not
+    // retrieved and not offered on a card, so a row for it was a product the
+    // page listed and nothing else would ever mention again.
+    respondWith(200, [peeq, { ...peeq, name: "legacy-crm", project: "legacy-crm", enabled: false }]);
 
     render(<RepoList />);
 
-    const row = await screen.findByRole("row", { name: /legacy-crm/ });
-    expect(row.getAttribute("data-state")).toBe("disabled");
-    expect(row.textContent).toContain("Disabled");
+    await screen.findByRole("heading", { name: "peeq" });
+    expect(screen.queryByRole("row", { name: /legacy-crm/ })).toBeNull();
+    expect(screen.getByText(/1 repository is disabled and not shown/)).toBeTruthy();
   });
 
   it("tells 'nothing indexed yet' apart from an error", async () => {
@@ -245,15 +250,48 @@ describe("the Projects page", () => {
     expect(cell.textContent).not.toContain("peeq");
   });
 
-  it("dims a disabled repository's description with the row it belongs to", async () => {
-    // The two rows are one entry, so a repository parked in repos.yaml must not
-    // have half of itself in full contrast.
-    respondWith(200, [{ ...peeq, enabled: false, description: "Parked, kept for the record." }]);
+  it("takes a disabled repository's description off the page with its row", async () => {
+    // The two rows are one entry. The description used to be dimmed alongside
+    // its row; now neither is drawn at all, so half an entry cannot be left
+    // behind.
+    respondWith(200, [
+      { ...peeq, name: "shop", project: "shop" },
+      {
+        ...peeq,
+        name: "legacy-crm",
+        project: "legacy-crm",
+        enabled: false,
+        description: "Parked, kept for the record.",
+      },
+    ]);
 
     render(<RepoList />);
 
-    const row = (await screen.findByText(/Parked, kept/)).closest("tr")!;
-    expect(row.className).toContain("text-faint");
+    await screen.findByRole("heading", { name: "shop" });
+    expect(screen.queryByText(/Parked, kept/)).toBeNull();
+  });
+
+  it("marks a snapshot, and says so beside Indexed rather than instead of it", async () => {
+    // A snapshot's commit never moves on its own, so a correct one-off index
+    // looks exactly like a poller that stopped. The word is the difference.
+    respondWith(200, [
+      { ...peeq, name: "acme-core", project: "acme", snapshot: true, branch: "snapshot" },
+    ]);
+
+    render(<RepoList />);
+
+    const row = (await screen.findByText("acme-core")).closest("tr")!;
+    expect(within(row).getByText("Snapshot")).toBeTruthy();
+    expect(within(row).getByText("Indexed")).toBeTruthy();
+  });
+
+  it("draws no snapshot chip for a cloned repository", async () => {
+    respondWith(200, [{ ...peeq, name: "acme-core", project: "acme" }]);
+
+    render(<RepoList />);
+
+    await screen.findByText("acme-core");
+    expect(screen.queryByText("Snapshot")).toBeNull();
   });
 
   it("adds no row at all when there is no description", async () => {

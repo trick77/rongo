@@ -49,10 +49,19 @@ const vecKMax = 4096
 // whichever lane produced it.
 const hitColumns = `c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line, f.sha`
 
+// The repo_state join carries enabled = 1: a repository parked with
+// `enabled: false` in the YAML keeps its index and its checkout, but it answers
+// nothing. Before this the flag stopped the poller and nothing else, so a
+// "parked" repository went on being retrieved and cited out of an index the
+// Repos page said was retired.
+//
+// For the KEYWORD lane this predicate is a pre-filter by construction — FTS5 is
+// not a top-k operator, so the join runs before ORDER BY … LIMIT. The vector
+// lane cannot use it that way; see SearchVector.
 const hitJoins = `
 	JOIN chunks c ON c.id = %s.rowid
 	JOIN files f ON f.id = c.file_id
-	JOIN repo_state r ON r.name = f.repo`
+	JOIN repo_state r ON r.name = f.repo AND r.enabled = 1`
 
 // Store runs the two retrieval lanes against the database.
 type Store struct {
@@ -92,11 +101,23 @@ func (s *Store) SearchVector(ctx context.Context, vec []float32, k int, maxDista
 		FROM chunks_vec v` + fmt.Sprintf(hitJoins, "v") + `
 		WHERE v.embedding MATCH ? AND k = ?`
 	args := []any{store.VecLiteral(vec), k}
+	// Both restrictions ride in the SAME rowid subquery, and neither may be
+	// moved into hitJoins. chunks_vec is a top-k operator: MATCH … AND k = ?
+	// hands back k rows and every predicate outside it runs AFTER. A parked
+	// repository holding the nearest k chunks would therefore win all k slots
+	// and then be discarded, leaving a live repository with a small slice of the
+	// corpus returning nothing — the same failure the repository restriction was
+	// moved here to avoid. The enabled clause is unconditional; the repo list
+	// only narrows it further.
+	inner += "\n\t\tAND v.rowid IN (SELECT c2.id FROM chunks c2" +
+		" JOIN files f2 ON f2.id = c2.file_id" +
+		" JOIN repo_state r2 ON r2.name = f2.repo" +
+		" WHERE r2.enabled = 1"
 	if len(repos) > 0 {
-		inner += "\n\t\tAND v.rowid IN (SELECT c2.id FROM chunks c2 JOIN files f2 ON f2.id = c2.file_id" +
-			" WHERE f2.repo IN (" + placeholders(len(repos)) + "))"
+		inner += " AND f2.repo IN (" + placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
+	inner += ")"
 	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ? ORDER BY distance`
 	args = append(args, maxDistance, maxDistance)
 

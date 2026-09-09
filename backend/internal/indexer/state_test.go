@@ -214,8 +214,11 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	}
 
 	// Then: it is reported as purged, so the caller can remove its checkout ...
-	if len(purged) != 1 || purged[0] != "peeq" {
+	if len(purged) != 1 || purged[0].Name != "peeq" {
 		t.Errorf("purged = %v, want [peeq]", purged)
+	}
+	if purged[0].Snapshot {
+		t.Error("purged[0].Snapshot = true, want false — peeq is a clone, so its checkout goes too")
 	}
 	// ... its row is gone, not merely deactivated ...
 	if n := countOf(t, db, `SELECT COUNT(*) FROM repo_state WHERE name = 'peeq'`); n != 0 {

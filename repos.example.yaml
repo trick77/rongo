@@ -19,6 +19,16 @@
 # with `git ls-remote --symref origin HEAD`. That is not necessarily master:
 # this corpus mixes master and main.
 #
+# snapshot: true is for source that arrives as an ARCHIVE rather than a remote —
+# a vendor drop, a released tarball, anything with no git repository behind it.
+# There is nothing to clone, so clone_url, branch and token_env are all refused
+# on such an entry. Instead you extract the archive into the repository root
+# yourself, and rongo commits what it finds there once so every citation still
+# carries a real sha. See the acme-core block below for what that involves.
+#
+# Use it only when there is genuinely no remote. Where one exists it is always
+# the better source — see the rongo entry, which is deliberately the remote.
+#
 # part, description and uses are optional, and they matter as soon as a project
 # holds more than one repository: with two backends, "part: backend" is true of
 # both and only the declared edge says which one the storefront calls. All three
@@ -42,6 +52,30 @@ projects:
         clone_url: https://github.com/trick77/rongo.git
         # branch omitted on purpose: resolved from the remote
 
+  # A source archive with no remote behind it at all. rongo does not clone this:
+  # you extract it yourself into BACKEND_REPO_ROOT/acme-core — ./repos/acme-core
+  # in the compose stack — and rongo makes one commit out of what is there, on a
+  # branch called "snapshot", which is what its citations then carry.
+  #
+  # Three things go wrong if they are skipped:
+  #   - Unpack the archive's own top-level folder AWAY. The manifest has to land
+  #     at repos/acme-core/go.mod, not repos/acme-core/acme-core-4.2/go.mod, or
+  #     nothing reads it as a project.
+  #   - The directory must be writable by the container's uid (1000), because
+  #     `git init` creates .git inside it.
+  #   - To refresh, DELETE the directory and extract the new archive. Extracting
+  #     over the old one leaves files the new release dropped sitting in both the
+  #     tree and the index. Either way rongo works out what changed by itself.
+  #
+  # It is never fetched and never polled for changes, so it costs nothing until
+  # it is extracted again. That is the point of indexing one.
+  #- name: acme-core
+  #  repositories:
+  #    - name: acme-core
+  #      snapshot: true
+  #      part: backend
+  #      description: Vendor drop, release 4.2. Source archive, no remote.
+
   # A dependency peeq genuinely declares in go.mod, so cross-repo composition is
   # exercised against real data rather than a fixture. Coupling ACROSS projects
   # is read from the manifest and never declared here; uses is for siblings.
@@ -62,9 +96,21 @@ projects:
   # exercised in daily use and not only in tests:
   #   asg017/sqlite-vec
 
-  # A project kept for the record but not indexed. enabled belongs to the
-  # repository, not the project: parking one half of a product is normal.
+  # A project kept for the record but not indexed. enabled sits on BOTH levels:
+  # on the project it parks the whole product in one edit, on a repository it
+  # parks one member, because parking one half of a product is normal. A
+  # project's false wins over a member's true — a parked product is parked
+  # whole, and one member opting back in would keep a product alive that the
+  # page no longer shows.
+  #
+  # Parking is not removing. The index and the checkout stay, and the entry is
+  # simply switched off: not polled, not searched, not offered when rongo asks
+  # which product you meant, and off the Repos page, which says in one line how
+  # many entries it is not showing. Citations already written keep working —
+  # parking stops new answers, it does not revise old ones. DELETING the entry
+  # is what purges it.
   #- name: legacy-crm
+  #  enabled: false
   #  repositories:
   #    - name: legacy-crm
   #      clone_url: https://forge.example.invalid/acme/legacy-crm.git

@@ -42,6 +42,15 @@ type RepoState struct {
 	Uses        []string
 }
 
+// Snapshot reports whether this is a hand-extracted source drop rather than a
+// clone: no remote to fetch from, and a commit rongo made itself.
+//
+// Derived rather than stored. repos.Load refuses a clone_url on a snapshot and
+// requires one everywhere else, so the empty URL already IS the fact; a column
+// beside it could only ever disagree with it, and there is no migration to get
+// wrong.
+func (r RepoState) Snapshot() bool { return r.CloneURL == "" }
+
 // StateStore reads and writes repo_state.
 type StateStore struct {
 	db *sql.DB
@@ -55,7 +64,9 @@ func NewStateStore(db *sql.DB) *StateStore {
 // SyncSpecs reconciles the database with the repository list. An entry present
 // in the list is inserted or updated; an entry ABSENT from the list is PURGED —
 // its row, its files, its symbols and its chunks in all three tables. It returns
-// the names it purged, so the caller can remove their checkouts too.
+// what it purged, so the caller can remove their checkouts too — except a
+// snapshot's, which is a directory the operator extracted by hand and rongo has
+// no business deleting. Purged carries that distinction out of the transaction.
 //
 // Removing an entry from the YAML is therefore how rongo is made to forget a
 // repository. That reverses the earlier behaviour, which only set enabled = 0:
@@ -64,7 +75,7 @@ func NewStateStore(db *sql.DB) *StateStore {
 // the explicit purge the comments promised was never implemented. The cost of
 // the reversal is that a mistyped name: re-indexes instead of resuming — cheap,
 // because embed_cache is keyed on content hash and not on the repository.
-func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]string, error) {
+func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purged, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -79,15 +90,15 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	var purged []string
-	for _, name := range known {
-		if listed[name] {
+	var purged []Purged
+	for _, k := range known {
+		if listed[k.Name] {
 			continue
 		}
-		if err := purgeRepoTx(ctx, tx, name); err != nil {
+		if err := purgeRepoTx(ctx, tx, k.Name); err != nil {
 			return nil, err
 		}
-		purged = append(purged, name)
+		purged = append(purged, k)
 	}
 
 	for _, spec := range specs {
@@ -185,20 +196,33 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 	return tx.Commit()
 }
 
-// namesTx lists every repository the database knows about, inside a transaction.
-func namesTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name FROM repo_state ORDER BY name`)
+// Purged is one repository SyncSpecs removed, and whether it was a snapshot.
+//
+// The flag travels with the name because the caller does different things with
+// the two: a clone's checkout is rongo's own and goes with the index, while a
+// snapshot's directory was extracted by hand and must be left exactly where it
+// is. By the time the caller reads this the row is gone, so the fact has to be
+// carried out of the transaction rather than looked up after it.
+type Purged struct {
+	Name     string
+	Snapshot bool
+}
+
+// namesTx lists every repository the database knows about, inside a transaction,
+// with the clone_url that says whether each is a snapshot.
+func namesTx(ctx context.Context, tx *sql.Tx) ([]Purged, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name, clone_url FROM repo_state ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	var out []Purged
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, cloneURL string
+		if err := rows.Scan(&name, &cloneURL); err != nil {
 			return nil, err
 		}
-		out = append(out, name)
+		out = append(out, Purged{Name: name, Snapshot: cloneURL == ""})
 	}
 	return out, rows.Err()
 }

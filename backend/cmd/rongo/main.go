@@ -170,13 +170,24 @@ func main() {
 		slog.Error("recording the repository list failed", "err", err)
 		os.Exit(1)
 	} else {
-		for _, name := range purged {
-			slog.Info("repository left the list; index purged", "repo", name)
+		for _, p := range purged {
+			slog.Info("repository left the list; index purged", "repo", p.Name)
+			// A snapshot's directory is an archive the operator extracted by
+			// hand into the repository root. rongo did not create it and does
+			// not delete it: the index is what governs answers, and destroying
+			// somebody's unpacked source to tidy up after a YAML edit is not a
+			// trade this makes. Re-adding the entry indexes it again from what
+			// is still on disk.
+			if p.Snapshot {
+				slog.Info("the extracted snapshot directory was left in place",
+					"repo", p.Name, "dir", filepath.Join(cfg.RepoRoot, p.Name))
+				continue
+			}
 			// Not fatal. The index is already gone, which is what governs the
 			// answers; a checkout left behind is disk, and exiting here would
 			// turn a stale directory into a server that will not boot.
-			if err := gitClient.RemoveCheckout(name); err != nil {
-				slog.Error("removing the purged checkout failed", "repo", name, "err", err)
+			if err := gitClient.RemoveCheckout(p.Name); err != nil {
+				slog.Error("removing the purged checkout failed", "repo", p.Name, "err", err)
 			}
 		}
 		slog.Info("repository list loaded", "path", cfg.ReposFile, "entries", len(specs))

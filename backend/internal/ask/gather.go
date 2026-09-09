@@ -161,9 +161,16 @@ func (g *Gatherer) referenced(ctx context.Context, from Source) ([]Source, error
 	// repository does not define at all is genuine composition — peeq calling
 	// into go-sqlite3 — and still travels.
 	q := `
+-- Every count here is over ENABLED repositories only. Filtering just the final
+-- join would keep a parked repository out of the result while still letting it
+-- shape one: its definitions would count towards maxDefiners, push a name over
+-- the threshold, and drop it from selective — costing a LIVE repository a hop
+-- it should have made. Parked code influences nothing.
 WITH selective AS (
     SELECT s.name
     FROM symbols s
+    JOIN files sf ON sf.id = s.file_id
+    JOIN repo_state sr ON sr.name = sf.repo AND sr.enabled = 1
     WHERE s.name IN (` + placeholders(len(names)) + `)
     GROUP BY s.name
     HAVING COUNT(DISTINCT s.file_id) <= ?
@@ -176,11 +183,18 @@ home AS (
     WHERE f.repo = ?
 )
 SELECT DISTINCT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
-       (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2 WHERE s2.name = s.name) AS definers
+       (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2
+          JOIN files f2 ON f2.id = s2.file_id
+          JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
+        WHERE s2.name = s.name) AS definers
 FROM symbols s
 JOIN selective sel ON sel.name = s.name
 JOIN files f  ON f.id = s.file_id
-JOIN repo_state r ON r.name = f.repo
+-- enabled = 1: a parked repository is not a hop target. AGENTS.md already
+-- requires the target to be indexed before crossing a boundary, and a
+-- repository the reader cannot see on the Repos page is not one to pull code
+-- out of on rongo's own initiative.
+JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 JOIN chunks c ON c.file_id = f.id AND s.line BETWEEN c.start_line AND c.end_line
 WHERE NOT (f.repo = ? AND f.path = ?)
   AND (f.repo = ? OR s.name NOT IN (SELECT name FROM home))

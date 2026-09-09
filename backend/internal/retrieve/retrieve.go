@@ -417,7 +417,14 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 // A project of one is still a project: it is listed, and its own name resolves
 // to its single member, which is the same answer the repository name gives.
 func (r *Retriever) reposAndProjects(ctx context.Context) ([]string, map[string][]string, error) {
-	rows, err := r.store.db.QueryContext(ctx, `SELECT name, project FROM repo_state ORDER BY name`)
+	// enabled = 1: a parked repository is not a name the index knows. That is
+	// deliberate rather than incidental — it puts naming one on exactly the path
+	// a repository that was never indexed takes, where the name is dropped from
+	// the restriction and the turn says so out loud. Keeping the name would send
+	// it into `WHERE f.repo IN (…)`, match nothing, and report "nothing found"
+	// about the whole corpus.
+	rows, err := r.store.db.QueryContext(ctx,
+		`SELECT name, project FROM repo_state WHERE enabled = 1 ORDER BY name`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
 	}

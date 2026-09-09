@@ -20,8 +20,18 @@ type Spec struct {
 	// Name identifies the repository and becomes its directory under
 	// BACKEND_REPO_ROOT, so it must be a safe single path segment.
 	Name string
-	// CloneURL must not embed credentials; see TokenEnv.
+	// CloneURL must not embed credentials; see TokenEnv. Empty for a Snapshot,
+	// which is the one entry shape with no remote at all.
 	CloneURL string
+	// Snapshot marks a repository the operator extracted by hand into
+	// BACKEND_REPO_ROOT/<Name> — a source archive with no .git, no remote and no
+	// upstream. rongo commits it once and indexes that commit, so every path
+	// downstream still reads a real sha; it is never fetched, so it stays as it
+	// was extracted until it is extracted again.
+	//
+	// Storage does not carry this as a column: a snapshot's CloneURL is empty,
+	// which already says it, and a column could only ever disagree.
+	Snapshot bool
 	// Branch is optional. Empty means "resolve the remote's default branch",
 	// which is NOT necessarily master — this corpus mixes master and main.
 	Branch string
@@ -66,7 +76,11 @@ type file struct {
 // that is how a reader thinks about it, it states the grouping once instead of
 // once per entry, and a repository cannot end up in two projects at all.
 type rawProject struct {
-	Name         string    `yaml:"name"`
+	Name string `yaml:"name"`
+	// Enabled parks the whole product in one edit. A *bool for rawSpec's
+	// reason: a plain bool defaults to false, which would silently park every
+	// project in the file.
+	Enabled      *bool     `yaml:"enabled"`
 	Repositories []rawSpec `yaml:"repositories"`
 }
 
@@ -78,6 +92,7 @@ type rawSpec struct {
 	Branch      string   `yaml:"branch"`
 	TokenEnv    string   `yaml:"token_env"`
 	Enabled     *bool    `yaml:"enabled"`
+	Snapshot    bool     `yaml:"snapshot"`
 	Part        string   `yaml:"part"`
 	Description string   `yaml:"description"`
 	Uses        []string `yaml:"uses"`
@@ -147,6 +162,16 @@ func Load(path string) ([]Spec, error) {
 			return nil, fmt.Errorf("project %q names no repository", name)
 		}
 
+		// A parked product is parked WHOLE: the project's false beats a member's
+		// true, and the two are ANDed rather than the member overriding. One
+		// repository opting back in would keep a product alive that the page no
+		// longer shows and the router no longer offers — visible nowhere,
+		// answering anyway, which is the state this flag exists to prevent.
+		projectEnabled := true
+		if p.Enabled != nil {
+			projectEnabled = *p.Enabled
+		}
+
 		for j, r := range p.Repositories {
 			if err := validateName(r.Name); err != nil {
 				return nil, fmt.Errorf("project %q, entry %d: %w", name, j, err)
@@ -159,17 +184,22 @@ func Load(path string) ([]Spec, error) {
 			}
 			seen[r.Name] = true
 
-			if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
+			if r.Snapshot {
+				if err := validateSnapshot(r); err != nil {
+					return nil, err
+				}
+			} else if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
 				return nil, err
 			}
 
-			enabled := true
-			if r.Enabled != nil {
-				enabled = *r.Enabled
+			enabled := projectEnabled
+			if r.Enabled != nil && !*r.Enabled {
+				enabled = false
 			}
 			specs = append(specs, Spec{
 				Name:        r.Name,
 				CloneURL:    strings.TrimSpace(r.CloneURL),
+				Snapshot:    r.Snapshot,
 				Branch:      strings.TrimSpace(r.Branch),
 				TokenEnv:    strings.TrimSpace(r.TokenEnv),
 				Enabled:     enabled,
@@ -261,9 +291,17 @@ func validateProjects(specs []Spec) error {
 	// Two branches of one repository inside one project would search the same
 	// file at two commits and answer as one product. AGENTS.md already forbids
 	// two cards differing only by branch; this is the same rule one level up.
+	//
+	// Snapshots are exempt, because they all share the empty URL: their identity
+	// is the directory they were extracted into, which Name already keeps unique
+	// across the whole corpus. Keying them on "" would refuse a product built
+	// from two drops as two branches of one repository.
 	type pair struct{ project, cloneURL string }
 	first := make(map[pair]string, len(specs))
 	for _, s := range specs {
+		if s.CloneURL == "" {
+			continue
+		}
 		k := pair{s.Project, s.CloneURL}
 		if other, ok := first[k]; ok {
 			return fmt.Errorf(
@@ -271,6 +309,28 @@ func validateProjects(specs []Spec) error {
 				other, s.Name, s.Project)
 		}
 		first[k] = s.Name
+	}
+	return nil
+}
+
+// validateSnapshot refuses the three fields that presuppose a remote.
+//
+// None of them could be honoured: there is nothing to authenticate to, nothing
+// to resolve a default branch from, and nothing to clone. Refusing by name
+// rather than ignoring them is the same rule KnownFields(true) enforces one
+// level up — a field that reads as declared and does nothing is a repository
+// that silently is not what it says.
+func validateSnapshot(r rawSpec) error {
+	for _, f := range []struct{ name, value string }{
+		{"clone_url", r.CloneURL},
+		{"branch", r.Branch},
+		{"token_env", r.TokenEnv},
+	} {
+		if strings.TrimSpace(f.value) != "" {
+			return fmt.Errorf(
+				"%s: snapshot: true cannot be combined with %s — a snapshot is a directory extracted into the repository root by hand, with no remote to clone, authenticate to or resolve a branch from",
+				r.Name, f.name)
+		}
 	}
 	return nil
 }

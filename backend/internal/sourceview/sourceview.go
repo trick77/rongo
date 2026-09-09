@@ -85,6 +85,11 @@ func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error
 		return File{}, fmt.Errorf("%w: commit %q", ErrInvalid, sha)
 	}
 
+	// No enabled filter, for the same reason the thread's sources have none:
+	// this serves the record. A citation written before its repository was
+	// parked must still open at the commit it was read from, or "every claim is
+	// citable" stops holding retroactively. Parking stops new answers; it does
+	// not close the ones already given.
 	var branch string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)

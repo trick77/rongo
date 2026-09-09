@@ -52,8 +52,13 @@ type Map struct {
 func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	m := Map{of: map[string]string{}, projects: map[string]Project{}}
 
+	// enabled = 1: a parked repository is not offered on a clarification card
+	// and does not count towards a project's membership. Offering one would ask
+	// the reader to choose a product that answers nothing, and a project whose
+	// members are all parked disappears entirely rather than becoming an option
+	// with no code behind it.
 	rows, err := db.QueryContext(ctx,
-		`SELECT name, project, part, description FROM repo_state ORDER BY name`)
+		`SELECT name, project, part, description FROM repo_state WHERE enabled = 1 ORDER BY name`)
 	if err != nil {
 		return Map{}, err
 	}

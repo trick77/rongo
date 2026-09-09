@@ -21,6 +21,11 @@ type RepoStatus struct {
 	Files     int
 	Chunks    int
 	Modules   int
+	// Snapshot is true for a hand-extracted source drop rather than a clone.
+	// The page says so because a snapshot's LastSHA never moves on its own:
+	// without the word, a correct one-off index is indistinguishable from a
+	// poller that stopped working.
+	Snapshot bool
 	// Enabled is false for a repository the YAML declares with `enabled: false`.
 	// It keeps its index and its row here — it is a repository being left alone,
 	// not one being retired. A repository REMOVED from repos.yaml is purged and
@@ -83,6 +88,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"chunks":      st.Chunks,
 			"modules":     st.Modules,
 			"enabled":     st.Enabled,
+			"snapshot":    st.Snapshot,
 			"last_error":  st.LastError,
 			"project":     st.Project,
 			"part":        st.Part,

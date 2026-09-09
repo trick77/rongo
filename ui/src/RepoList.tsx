@@ -11,6 +11,10 @@ export type Repo = {
   chunks: number;
   modules: number;
   enabled: boolean;
+  /** A hand-extracted source drop rather than a clone: no remote, so its commit
+   * never moves on its own. Drawn, because without the word a correct one-off
+   * index reads exactly like a poller that stopped. */
+  snapshot: boolean;
   last_error: string;
   /** The product this repository belongs to. A repository standing alone is a
    * project of one named after itself, so this is never empty in practice. */
@@ -89,6 +93,63 @@ export function wiringSpec(p: Project): FlowSpec | null {
         src: [],
       })),
     edges,
+  };
+}
+
+/** parkedSummary is the one line standing in for every repository the page is
+ * not showing, or null when there is nothing to say.
+ *
+ * Null rather than an empty string, because nothing disabled is the ordinary
+ * case and it has to stay completely quiet — an empty paragraph is still a gap
+ * in the layout. Counting lives here rather than in the component so it can be
+ * read at every count without rendering.
+ *
+ * It says how many repositories, how many projects they sit in, and how many of
+ * those projects have no enabled member left. That last clause earns its place:
+ * a wholly parked project loses its panel AND its name, so nothing else on the
+ * page would hint the product exists. A single parked row inside a live project
+ * is a smaller absence and gets no special mention.
+ *
+ * No names. They live in repos.yaml, which is where the flag was set and the
+ * only place it can be changed; a list here would be a second copy of the truth
+ * with nothing a reader could do about it. */
+export type Parked = {
+  /** What is missing, and how much of it. Set brighter: it is the scannable half. */
+  count: string;
+  /** What being parked means. Faint: it is the same every time. */
+  note: string;
+};
+
+export function parkedSummary(repos: Repo[]): Parked | null {
+  const parked = repos.filter((r) => !r.enabled);
+  if (parked.length === 0) return null;
+
+  const projectOf = (r: Repo) => r.project || r.name;
+  const projects = new Set(parked.map(projectOf));
+  const live = new Set(repos.filter((r) => r.enabled).map(projectOf));
+  const whole = [...projects].filter((p) => !live.has(p)).length;
+
+  const what =
+    parked.length === 1
+      ? "1 repository is"
+      : projects.size === 1
+        ? `${parked.length} repositories in 1 project are`
+        : `${parked.length} repositories in ${projects.size} projects are`;
+  // "the project entirely" when there is only one and it went whole; "one
+  // project entirely" when it is one of several. Both read as English; a single
+  // phrase for both does not.
+  const entirely =
+    whole === 0
+      ? ""
+      : whole === projects.size && projects.size === 1
+        ? ", the project entirely"
+        : whole === 1
+          ? ", one project entirely"
+          : `, ${whole} projects entirely`;
+  const they = parked.length === 1 ? "It keeps its index and is" : "They keep their index and are";
+  return {
+    count: `${what} disabled and not shown${entirely}.`,
+    note: `${they} not polled.`,
   };
 }
 
@@ -226,11 +287,28 @@ export default function RepoList() {
     );
   }
 
-  const repos = state.repos;
-  const projects = byProject(repos);
-  const active = repos.filter((r) => r.enabled).length;
-  const sum = (pick: (r: Repo) => number) => repos.reduce((n, r) => n + pick(r), 0);
-  const lastRun = lastRunAt(repos);
+  // Everything parked. Kept apart from the empty state above for the same
+  // reason "failed" is kept apart from "empty": "nothing is configured" and
+  // "all of it is switched off" are different facts with different fixes, and
+  // the stat block would otherwise render six zeros with no word of why.
+  if (!state.repos.some((r) => r.enabled)) {
+    const all = parkedSummary(state.repos)!;
+    return (
+      <p className="text-muted">
+        {all.count} {all.note}
+      </p>
+    );
+  }
+
+  // A parked repository leaves the page entirely — no panel, no row, and out of
+  // every count. The stat block describes what is drawn beneath it, so counting
+  // what is hidden would leave the totals disagreeing with the panels, which is
+  // the one job that block has. The line below carries what the totals dropped.
+  const shown = state.repos.filter((r) => r.enabled);
+  const parked = parkedSummary(state.repos);
+  const projects = byProject(shown);
+  const sum = (pick: (r: Repo) => number) => shown.reduce((n, r) => n + pick(r), 0);
+  const lastRun = lastRunAt(shown);
 
   return (
     <>
@@ -240,12 +318,22 @@ export default function RepoList() {
           repository count is how that product is built. */}
       <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-ui border border-border bg-panel sm:flex">
         <Stat label="Projects" value={projects.length} />
-        <Stat label="Repositories" value={repos.length} note={`${active} active`} />
+        {/* No "n active" note any more: with parked rows out of the count there
+            is no second number left to give, and the line below says what is
+            missing in words the note never had room for. */}
+        <Stat label="Repositories" value={shown.length} />
         <Stat label="Files" value={sum((r) => r.files)} />
         <Stat label="Chunks" value={sum((r) => r.chunks)} />
         <Stat label="Modules" value={sum((r) => r.modules)} />
         <Stat label="Last run" value={relative(lastRun)} />
       </div>
+      {/* Directly under the numbers it explains, and drawn only when there is
+          something to explain. Faint, because an absence is not news. */}
+      {parked && (
+        <p className="mb-5 -mt-2 px-0.5 text-[12.5px] text-faint">
+          <span className="text-muted">{parked.count}</span> {parked.note}
+        </p>
+      )}
       {projects.map((p) => (
         <ProjectPanel key={p.name} project={p} />
       ))}
@@ -365,9 +453,26 @@ function ProjectPanel({ project }: { project: Project }) {
                           Error
                         </span>
                       )}
+                      {/* Unreachable from this page since parked repositories
+                          stopped being drawn at all — the line under the stats
+                          says how many instead. Kept because rowState still
+                          reports "disabled" into data-state, and because the
+                          page is one `enabled` filter away from showing them
+                          again. */}
                       {!r.enabled && (
                         <span className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted">
                           Disabled
+                        </span>
+                      )}
+                      {/* Independent of both again: a snapshot is how the code
+                          got here, not how the last run went. It sits last so
+                          the run's own outcome reads first. */}
+                      {r.snapshot && (
+                        <span
+                          className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
+                          title="Extracted by hand into the repository root. There is no remote, so this commit only changes when the archive is extracted again."
+                        >
+                          Snapshot
                         </span>
                       )}
                     </span>
