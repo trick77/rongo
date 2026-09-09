@@ -31,11 +31,16 @@ type publicShare struct {
 	Messages []threads.Message `json:"messages"`
 }
 
-// noindex marks a public response as something no crawler should keep. Set
-// before anything else is written, so it is on the 404 as well: an indexed
-// "not available" page is still a token in somebody's search results.
+// noindex marks a public response as something no crawler and no cache should
+// keep. Set before anything else is written, so it is on the 404 as well: an
+// indexed "not available" page is still a token in somebody's search results.
+//
+// no-store goes with it, as it does on the served shell: the answer to a
+// capability URL is private data, and a shared cache in front that kept it
+// would go on serving a thread after its link was revoked.
 func noindex(w http.ResponseWriter) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	w.Header().Set("Cache-Control", "no-store")
 }
 
 // notFound is the one answer every public lookup gives for a token that is

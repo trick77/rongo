@@ -114,6 +114,9 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 	if rec.Header().Get("X-Robots-Tag") != "noindex, nofollow" {
 		t.Errorf("X-Robots-Tag = %q, want noindex", rec.Header().Get("X-Robots-Tag"))
 	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store: a cache in front would serve a revoked thread", rec.Header().Get("Cache-Control"))
+	}
 }
 
 func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
@@ -134,6 +137,17 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save steps: %v", err)
 	}
+	// And a second turn that ended in a card: the card is on the link, and it
+	// is the one place a thread row number could ride the public payload.
+	asked, err := st.AddQuestion(ctx, th.ID, "ba", "en", "Which one?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := st.Clarify(ctx, asked.ID, ask.Clarification{Candidates: []ask.Candidate{
+		{Repo: "rongo", Branch: "master", ModuleKey: "a", Title: "A", Summary: "the a"},
+	}}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
 	sh := share(t, srv, th.PublicID)
 
 	// When
@@ -142,9 +156,14 @@ func TestPublicShare_carriesNoUsageCostOrFollowups(t *testing.T) {
 	// Then nothing about what the turn cost, and nothing to ask next: there is
 	// no composer on that page to ask it with.
 	body := rec.Body.String()
+	if !strings.Contains(body, `"clarification"`) {
+		t.Fatalf("the card is not on the link:\n%s", body)
+	}
 	// The timeline goes with them: how long each step took and what the
 	// pipeline is made of is the same class of thing as what the turn cost.
-	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`} {
+	// And thread_id, the row number the card used to carry: the same counter
+	// Message.ThreadID and the thread's public_id exist to keep off the wire.
+	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `"thread_id"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("the public payload carries %s:\n%s", leak, body)
 		}
