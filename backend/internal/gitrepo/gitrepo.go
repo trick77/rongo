@@ -93,16 +93,26 @@ func (c *Client) EnsureSnapshot(ctx context.Context, spec repos.Spec) (string, e
 	dir := c.Dir(spec)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Not wrapped as "stat failed": the ordinary cause is an operator who
-		// has not extracted the archive yet, and this reaches the Repos page
-		// verbatim. A silent empty index would look healthy instead.
-		return "", fmt.Errorf(
-			"snapshot %s: %s does not exist — extract the source archive there, with the archive's own top-level folder unpacked away",
-			spec.Name, dir)
+		// A missing directory is the ordinary case — nobody has extracted the
+		// archive yet — and it reaches the Repos page verbatim, because a silent
+		// empty index would look healthy instead. Anything else (a permission
+		// problem, an I/O error) is reported as itself: telling an operator to
+		// extract an archive that is already sitting there sends them nowhere.
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(
+				"snapshot %s: %s does not exist — extract the source archive there, with the archive's own top-level folder unpacked away",
+				spec.Name, dir)
+		}
+		return "", fmt.Errorf("snapshot %s: read %s: %w", spec.Name, dir, err)
 	}
-	if len(entries) == 0 {
+	// .git does not count. `rm -rf <dir>/*` leaves it behind, because the glob
+	// skips dotfiles — and a directory holding nothing else would otherwise be
+	// committed as the deletion of every file, leaving the Repos page showing a
+	// repository with 0 files and no error at all. That is precisely the silent
+	// empty index this guard exists to prevent.
+	if len(entries) == 0 || (len(entries) == 1 && entries[0].Name() == ".git") {
 		return "", fmt.Errorf(
-			"snapshot %s: %s is empty — extract the source archive there, with the archive's own top-level folder unpacked away",
+			"snapshot %s: %s holds no source — extract the source archive there, with the archive's own top-level folder unpacked away",
 			spec.Name, dir)
 	}
 
@@ -110,11 +120,11 @@ func (c *Client) EnsureSnapshot(ctx context.Context, spec repos.Spec) (string, e
 		if err := c.assertSnapshotCheckout(ctx, spec, dir); err != nil {
 			return "", err
 		}
-	} else if _, err := c.snapshotRun(ctx, dir, "init", "-q", "-b", SnapshotBranch); err != nil {
+	} else if _, err := c.run(ctx, dir, "init", "-q", "-b", SnapshotBranch); err != nil {
 		return "", err
 	}
 
-	if _, err := c.snapshotRun(ctx, dir, "add", "-A"); err != nil {
+	if _, err := c.run(ctx, dir, "add", "-A"); err != nil {
 		return "", err
 	}
 	// Commit only when the staged tree differs from HEAD. An unchanged drop must
@@ -126,14 +136,14 @@ func (c *Client) EnsureSnapshot(ctx context.Context, spec repos.Spec) (string, e
 		return "", err
 	}
 	if changed {
-		if _, err := c.snapshotRun(ctx, dir,
+		if _, err := c.run(ctx, dir,
 			"-c", "user.name=rongo", "-c", "user.email=rongo@localhost",
 			"commit", "-q", "-m", "snapshot"); err != nil {
 			return "", err
 		}
 	}
 
-	out, err := c.snapshotRun(ctx, dir, "rev-parse", "HEAD")
+	out, err := c.run(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -148,12 +158,12 @@ func (c *Client) EnsureSnapshot(ctx context.Context, spec repos.Spec) (string, e
 // nothing fetches any more — a checkout the page describes wrongly in every
 // column. The operator removes it; rongo will not decide that for them.
 func (c *Client) assertSnapshotCheckout(ctx context.Context, spec repos.Spec, dir string) error {
-	if out, err := c.snapshotRun(ctx, dir, "remote"); err == nil && strings.TrimSpace(out) != "" {
+	if out, err := c.run(ctx, dir, "remote"); err == nil && strings.TrimSpace(out) != "" {
 		return fmt.Errorf(
 			"snapshot %s: %s holds a clone with remote %q, not an extracted archive — remove the directory before indexing it as a snapshot",
 			spec.Name, dir, strings.Fields(out)[0])
 	}
-	out, err := c.snapshotRun(ctx, dir, "symbolic-ref", "--short", "HEAD")
+	out, err := c.run(ctx, dir, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		// A detached HEAD has no symbolic ref. That is not a snapshot either:
 		// its commits could not be committed onto a branch.
@@ -173,10 +183,10 @@ func (c *Client) assertSnapshotCheckout(ctx context.Context, spec repos.Spec, di
 // HEAD — the first commit — counts as a difference: there is nothing to compare
 // against and everything to record.
 func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) {
-	if _, err := c.snapshotRun(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+	if _, err := c.run(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
 		return true, nil
 	}
-	_, err := c.snapshotRun(ctx, dir, "diff", "--cached", "--quiet")
+	_, err := c.run(ctx, dir, "diff", "--cached", "--quiet")
 	if err == nil {
 		return false, nil
 	}
@@ -197,18 +207,8 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 // with "bad object" on every cycle and the entry never recovers. The caller
 // asks first and re-indexes in full instead.
 func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) bool {
-	_, err := c.snapshotRun(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
+	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
 	return err == nil
-}
-
-// snapshotRun is run() with safe.directory set for the drop.
-//
-// The container runs as uid 1000 and an extracted archive belongs to whoever
-// unpacked it, so git 2.35.2+ refuses every command in it with "dubious
-// ownership". The repository root is rongo's own directory either way; this
-// says so rather than asking the operator to chown a tree they maintain.
-func (c *Client) snapshotRun(ctx context.Context, dir string, args ...string) (string, error) {
-	return c.run(ctx, dir, append([]string{"-c", "safe.directory=" + dir}, args...)...)
 }
 
 // OriginURL reports which remote a checkout was actually made from.
@@ -233,6 +233,19 @@ func (c *Client) OriginURL(ctx context.Context, spec repos.Spec) (string, error)
 	}
 	out, err := c.run(ctx, dir, "remote", "get-url", "origin")
 	if err != nil {
+		// A repository with no origin at all is a SNAPSHOT's drop sitting where
+		// a clone belongs: the entry was switched from `snapshot: true` to a
+		// clone_url, or a purged snapshot's name was re-added as a clone, and
+		// purge deliberately leaves the extracted tree on disk. Passing the raw
+		// "No such remote" up left that entry failing on every cycle forever
+		// with nothing saying why. This is the mirror of the refusal
+		// assertSnapshotCheckout makes in the other direction, and it asks for
+		// the same thing: rongo will not delete a tree it did not create.
+		if strings.Contains(err.Error(), "No such remote") {
+			return "", fmt.Errorf(
+				"%s: %s holds an extracted snapshot with no remote, not a clone of %s — remove the directory before indexing it as a cloned repository",
+				spec.Name, dir, spec.CloneURL)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
@@ -378,8 +391,9 @@ func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]
 // the working tree keeps every chunk attributable to an exact SHA, which is
 // what makes a citation verifiable later.
 func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, c.git, "show", sha+":"+path)
-	cmd.Dir = c.Dir(spec)
+	dir := c.Dir(spec)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "show", sha+":"+path)...)
+	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -395,8 +409,9 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 // non-file object asks here first, so the refusal costs nothing: ReadFile
 // buffers the whole object before returning it.
 func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) (kind string, size int64, err error) {
-	cmd := exec.CommandContext(ctx, c.git, "cat-file", "--batch-check")
-	cmd.Dir = c.Dir(spec)
+	dir := c.Dir(spec)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "cat-file", "--batch-check")...)
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(sha + ":" + path + "\n")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -416,8 +431,26 @@ func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) 
 	return fields[1], n, nil
 }
 
+// safeDirectory prefixes args with the ownership exemption for dir.
+//
+// git 2.35.2+ refuses EVERY command in a repository owned by another user
+// ("dubious ownership"). The container runs as uid 1000 and a snapshot's drop
+// belongs to whoever unpacked the archive, so without this the first command
+// after the commit fails and the entry sits in a permanent error — and the
+// source viewer fails too, on a citation that is perfectly valid.
+//
+// It goes here rather than at the snapshot call sites because it has to hold
+// for every command: an earlier version set it on the two calls EnsureSnapshot
+// makes and left ListPaths, ChangedPaths, ChangedEntries, ReadFile and Object
+// without it, which is most of the ones a snapshot actually needs. Every
+// directory this is applied to is under the repository root rongo owns or was
+// told to use, so there is nothing wider being exempted than rongo's own tree.
+func safeDirectory(dir string, args ...string) []string {
+	return append([]string{"-c", "safe.directory=" + dir}, args...)
+}
+
 func (c *Client) run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, c.git, args...)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...)
 	cmd.Dir = dir
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
