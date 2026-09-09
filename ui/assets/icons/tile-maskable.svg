@@ -1,0 +1,39 @@
+<!-- Android maskable variant of tile.svg (icon-maskable-512.png).
+
+     OPAQUE for the reason tile-touch.svg is, with a different flattening colour
+     behind it: Android fills a maskable icon's alpha with the LAUNCHER's own
+     background, which is often light. The ground here is #1f1f1e, the
+     index.css color-bg token, so the chip never floats on someone else's white.
+
+     Android also crops to whatever shape the launcher picks, and only the middle
+     80% — a circle of radius 25.6 in this 64 box — is guaranteed to survive. A
+     rounded square of half-side s and corner radius r reaches sqrt(2)*(s-r)+r
+     from the centre, which for the master's proportions is 39.456 * coverage, so
+     coverage caps at 25.6 / 39.456 = 0.6488. This uses 0.486, well under it:
+     scale = 0.486, translate = 32 * (1 - 0.486) = 16.448.
+
+     gen-icons.sh checks the result rather than trusting this arithmetic — it
+     paints the safe circle over the render in the ground colour and requires
+     what is left to be one flat colour.
+
+     Everything inside the group is a hand-mirrored copy of tile.svg. Change one,
+     change all three. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <linearGradient id="chip" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="46" y2="64">
+    <stop offset="0" stop-color="#e08a68"/>
+    <stop offset="1" stop-color="#c25f34"/>
+  </linearGradient>
+  <rect x="0" y="0" width="64" height="64" fill="#1f1f1e"/>
+  <g transform="translate(16.448 16.448) scale(0.486)">
+    <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#chip)"/>
+    <g transform="translate(4 3) scale(0.56)" fill="none" stroke="#1f1f1e" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M30 12 H70" stroke-width="14"/>
+      <path d="M50 12 V90" stroke-width="12"/>
+      <path d="M15 36 H85" stroke-width="10"/>
+      <path d="M9 32 V40" stroke-width="13"/>
+      <path d="M91 32 V40" stroke-width="13"/>
+      <path d="M50 54 C 34 57 17 67 11 89" stroke-width="11"/>
+      <path d="M50 54 C 66 57 83 67 89 89" stroke-width="11"/>
+    </g>
+  </g>
+</svg>

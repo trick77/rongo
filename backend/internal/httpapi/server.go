@@ -81,6 +81,10 @@ type Threads interface {
 	Shares(ctx context.Context, subject string) ([]threads.Share, error)
 	SharedIDs(ctx context.Context, subject string) (map[int64]bool, error)
 	SharedThread(ctx context.Context, token string) (threads.Share, []threads.Message, error)
+	// SharedTitle is the same read cut down to one column, for the link
+	// preview in the served HTML: that runs on every page view of a share
+	// link, and does not need the turns.
+	SharedTitle(ctx context.Context, token string) (string, error)
 	SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error)
 }
 
@@ -197,7 +201,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/shares/{token}/source", s.handlePublicShareSource)
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
-	s.mux.Handle("/", web.Handler())
+	// The shell is handed the share title so a link unfurls in Slack and X
+	// with the thread's own question — no crawler runs the JavaScript that
+	// would otherwise set it.
+	s.mux.Handle("/", web.HandlerWithShareTitles(s.shareTitle))
 }
 
 // requireAuth is the single gate every authenticated route goes through.

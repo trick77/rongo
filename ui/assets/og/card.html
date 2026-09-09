@@ -1,0 +1,123 @@
+<!doctype html>
+<!--
+  The 1200x630 picture every share link unfurls with (ui/public/og.png).
+
+  Rendered by headless Chrome, not librsvg, because the card is typeset in the
+  self-hosted woff2 variable faces under ui/src/fonts and fontconfig cannot
+  resolve those for a standalone SVG rasteriser. See ui/scripts/gen-og.sh.
+
+  Everything here is STATE-FREE on purpose. A crawler scrapes this picture once
+  and caches it effectively forever, so anything that could change - a version,
+  a count, a thread's own words - would be frozen wrong within the day. The
+  thread's title travels in the og:title meta instead, which is re-read on every
+  scrape.
+
+  Centred rather than left-aligned, because WhatsApp keeps only the middle 630px
+  of the card and throws the rest away.
+
+  The mark is a hand-mirrored copy of assets/icons/tile.svg, stroked in the
+  accent ramp instead of knocked out of it - there is no chip here to knock it
+  out of. Change the glyph in one place, change it in all four.
+-->
+<meta charset="utf-8" />
+<title>Rongo</title>
+<style>
+  @font-face {
+    font-family: "Anthropic Sans";
+    src: url("../../src/fonts/SansWebVariable-TextRegular.woff2") format("woff2");
+    font-weight: 300 800;
+  }
+  @font-face {
+    font-family: "Anthropic Serif";
+    src: url("../../src/fonts/SerifWebVariable-TextRegular.woff2") format("woff2");
+    font-weight: 300 800;
+  }
+  * {
+    margin: 0;
+    box-sizing: border-box;
+  }
+  body {
+    width: 1200px;
+    height: 630px;
+    background: #1f1f1e; /* index.css color-bg */
+    font-family: "Anthropic Sans", system-ui;
+    color: #faf9f5;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Two soft auras, accent and ochre, so the ground is not a flat rectangle in
+     a feed full of flat rectangles. Kept very low contrast: Slack and Telegram
+     both downscale this hard. */
+  .aura {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(680px 480px at 22% 12%, rgba(217, 119, 87, 0.17), transparent 70%),
+      radial-gradient(620px 460px at 84% 92%, rgba(214, 161, 90, 0.1), transparent 70%);
+  }
+  .eyebrow {
+    position: absolute;
+    top: 56px;
+    font-size: 21px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #9c9a92; /* color-muted */
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 34px;
+    margin-bottom: 32px;
+    position: relative;
+  }
+  .row svg {
+    width: 112px;
+    height: 112px;
+  }
+  /* The wordmark is the one thing gen-og.sh measures to catch a font that did
+     not load, so keep it on one line and in the serif face. */
+  .word {
+    font-family: "Anthropic Serif";
+    font-size: 108px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: #f4f0e8; /* color-wordmark */
+  }
+  .lede {
+    font-size: 35px;
+    line-height: 1.36;
+    max-width: 800px;
+    color: #e4e1d8; /* color-ink-dim */
+    position: relative;
+  }
+</style>
+<div class="aura"></div>
+<div class="eyebrow">Ask the codebase</div>
+<div class="row">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="72" y2="100">
+      <stop offset="0" stop-color="#e08a68" />
+      <stop offset="1" stop-color="#c25f34" />
+    </linearGradient>
+    <g fill="none" stroke="url(#g)" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M30 12 H70" stroke-width="14" />
+      <path d="M50 12 V90" stroke-width="12" />
+      <path d="M15 36 H85" stroke-width="10" />
+      <path d="M9 32 V40" stroke-width="13" />
+      <path d="M91 32 V40" stroke-width="13" />
+      <path d="M50 54 C 34 57 17 67 11 89" stroke-width="11" />
+      <path d="M50 54 C 66 57 83 67 89 89" stroke-width="11" />
+    </g>
+  </svg>
+  <div class="word">Rongo</div>
+</div>
+<div class="lede">
+  A question about a codebase, answered in plain language, with the diagram and the places the
+  answer was read from.
+</div>

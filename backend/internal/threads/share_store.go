@@ -274,6 +274,27 @@ func (s *Store) SharedThread(ctx context.Context, token string) (Share, []Messag
 	return sh, msgs, nil
 }
 
+// SharedTitle is what a live link is called, and nothing else. The link
+// preview in the served HTML needs the title on every page view of an
+// unauthenticated path, and SharedThread would read every turn up to the
+// ceiling to hand back one column.
+//
+// Revoked answers the same as unknown, the way every public read here does.
+func (s *Store) SharedTitle(ctx context.Context, token string) (string, error) {
+	var title string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT t.title
+		FROM shared_threads sh JOIN threads t ON t.id = sh.thread_id
+		WHERE sh.token = ? AND sh.revoked = 0`, token).Scan(&title)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNoShare
+	}
+	if err != nil {
+		return "", fmt.Errorf("read shared title: %w", err)
+	}
+	return title, nil
+}
+
 // SharedCitation reports whether this share cites that exact file at that
 // exact commit. It is the whole authorisation of the public source viewer:
 // /api/source takes any repo/path/sha and would be a reader for the entire

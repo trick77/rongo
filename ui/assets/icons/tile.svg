@@ -1,0 +1,37 @@
+<!-- Rongo's mark: the rongorongo glyph that stands beside the wordmark in
+     rongo-wide.jpg, redrawn as seven round-capped strokes so it still reads at
+     16px, where a trace of the painted original turns to mush.
+
+     Construction is ../ismimodown's, so the two apps read as one family: a
+     rounded chip carrying the app's accent gradient, with the glyph painted
+     over it in the app ground. Painted, not knocked through — a real knockout
+     shows the launcher's own colour through the strokes and looks hollow on a
+     light one.
+
+     The gradient is userSpaceOnUse rather than the default objectBoundingBox.
+     That matters the moment a variant strokes the glyph with a gradient instead
+     of filling the chip with it: every subpath gets its own bbox, the
+     horizontal strokes have zero height, and they render empty.
+
+     Geometry lives in a 0..100 box and is scaled into the 64x64 chip. Coverage
+     is the whole tile here; the two OS variants below inset it. Any change to
+     the paths has to be mirrored by hand into tile-touch.svg,
+     tile-maskable.svg and assets/og/card.html — there is no shared include. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <linearGradient id="chip" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="46" y2="64">
+    <stop offset="0" stop-color="#e08a68"/>
+    <stop offset="1" stop-color="#c25f34"/>
+  </linearGradient>
+  <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#chip)"/>
+  <g transform="translate(4 3) scale(0.56)" fill="none" stroke="#1f1f1e" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M30 12 H70" stroke-width="14"/>
+    <path d="M50 12 V90" stroke-width="12"/>
+    <path d="M15 36 H85" stroke-width="10"/>
+    <!-- The hands are vertical paddles, not knobs: that is what the banner
+         draws, and a circle reads as a bullet at small sizes. -->
+    <path d="M9 32 V40" stroke-width="13"/>
+    <path d="M91 32 V40" stroke-width="13"/>
+    <path d="M50 54 C 34 57 17 67 11 89" stroke-width="11"/>
+    <path d="M50 54 C 66 57 83 67 89 89" stroke-width="11"/>
+  </g>
+</svg>
