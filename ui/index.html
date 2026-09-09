@@ -4,6 +4,57 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rongo</title>
+
+    <!-- The address bar and the OS chrome, dark like the app. -->
+    <meta name="theme-color" content="#1f1f1e" />
+
+    <!-- Icons. Sources live in ui/assets/icons, rasters are written by
+         ui/scripts/gen-icons.sh and committed. There is no favicon.ico and no
+         /favicon.svg: backend/web answers both with a 404 and has a test that
+         says so. -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Link previews.
+
+         The four placeholder values below are substituted by backend/web at
+         serve time, and what stands here is what an untouched file means: the
+         site-wide card. A share link gets the thread's own title in the same
+         slots. That has to happen on the server because Slack, X, WhatsApp and
+         iMessage do not run JavaScript, and SharePage sets document.title long
+         after the crawler has left.
+
+         og:image and og:url are absolute because WhatsApp and others never
+         resolve a relative one. Rongo is deployed under whatever host its
+         operator picked, so the origin is built from the request rather than
+         written here.
+
+         og:image:width/height are present so Slack and Telegram lay the card
+         out full-width instead of falling back to a thumbnail, and
+         twitter:image:alt is repeated because X does not inherit
+         og:image:alt. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Rongo" />
+    <meta property="og:title" content="__OG_TITLE__" />
+    <meta property="og:description" content="__OG_DESC__" />
+    <meta property="og:url" content="__OG_URL__" />
+    <meta property="og:image" content="__OG_IMAGE__" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Rongo — a question about a codebase, answered in plain language."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="__OG_TITLE__" />
+    <meta name="twitter:description" content="__OG_DESC__" />
+    <meta name="twitter:image" content="__OG_IMAGE__" />
+    <meta
+      name="twitter:image:alt"
+      content="Rongo — a question about a codebase, answered in plain language."
+    />
   </head>
   <body>
     <div id="root"></div>

@@ -7,7 +7,7 @@
 //
 // "dev" is what an unstamped build says: `make build` without VERSION, `go run`,
 // and every test binary. The UI treats it as no version at all and says only
-// that Rongo can be wrong.
+// that Rongo can make mistakes.
 package version
 
 var Version = "dev"

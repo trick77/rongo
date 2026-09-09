@@ -145,7 +145,7 @@ export default function Ask({
   onUsage?: (total: { tokens: number; cost: number | null } | null) => void;
   /** The build answering, from /api/me. Empty or "dev" when the binary was
    * built without a version stamped into it, and then the footer says only
-   * that Rongo can be wrong. */
+   * that Rongo can make mistakes. */
   version?: string;
 }) {
   const [question, setQuestion] = useState("");
@@ -1136,7 +1136,7 @@ export default function Ask({
               omitted rather than shown as "dev" when the binary was not
               stamped — see App's Me. */}
           <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
-            Rongo can be wrong.
+            Rongo can make mistakes. Please double-check responses.
             {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
           </p>
         </form>

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -160,6 +161,34 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		SharedAt: sh.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		Messages: msgs,
 	})
+}
+
+// shareTitle is what the SPA shell puts in a link preview's og:title, so a
+// share link unfurls in Slack or X as the question it answers rather than as a
+// bare URL. It reports false for a token that is unknown or revoked, which is
+// the same thing handlePublicShare above already says with a 404 — the shell
+// tells a crawler nothing the public API does not.
+//
+// It runs on every page view of a share link, not once per crawler, so it
+// reads the title alone rather than the whole thread: a browser opening the
+// link would otherwise read every turn twice, once for the HTML and once for
+// the JSON the SPA then fetches.
+func (s *Server) shareTitle(ctx context.Context, token string) (string, bool) {
+	if s.deps.Threads == nil {
+		return "", false
+	}
+	title, err := s.deps.Threads.SharedTitle(ctx, token)
+	if err != nil {
+		// A token that is not live is the ordinary case and says nothing. A
+		// database that cannot answer is not: without this line every link on
+		// the estate quietly unfurls as the site card and the log is silent
+		// about why.
+		if !errors.Is(err, threads.ErrNoShare) {
+			slog.Error("read shared title failed", "err", err)
+		}
+		return "", false
+	}
+	return title, true
 }
 
 // handlePublicShareSource opens a cited file for a reader who has no session.

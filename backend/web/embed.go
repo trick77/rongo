@@ -2,11 +2,22 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 )
+
+// Go's MIME table has no .webmanifest entry, so http.FileServer would answer
+// text/plain for it. Chrome rejects a manifest served that way and silently
+// drops the PWA icons and theme colour — no console error, nothing in the
+// network tab beyond a 200.
+func init() {
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
 
 //go:embed all:dist
 var distFS embed.FS
@@ -44,9 +55,9 @@ func HasBuiltIndex() bool {
 //
 // A thread address is checked by SHAPE only: 22 URL-safe characters, what the
 // store mints. Whether that thread exists is a question this handler cannot
-// answer — it has no session and no database — and answering it here would
-// tell anyone, signed in or not, which addresses are real. The app asks the
-// API and says so itself.
+// answer — it has no session, and the only thing it may ask the record is a
+// share link's title — and answering it here would tell anyone, signed in or
+// not, which addresses are real. The app asks the API and says so itself.
 func isRoute(path string) bool {
 	switch path {
 	case "/", "/new", "/projects", "/shared":
@@ -87,13 +98,70 @@ const threadAddressLen = 22
 // reload-on-stale-chunk heuristic can act on. If the SPA has never been
 // built, dist/index.html is absent (only .gitkeep is tracked there) and the
 // handler serves the placeholder instead.
-func Handler() http.Handler {
+func Handler() http.Handler { return HandlerWithShareTitles(nil) }
+
+// ShareTitle answers the one question the shell asks about a share link: what
+// the shared thread is called. It reports false for a token that is unknown or
+// revoked, exactly as GET /api/shares/{token} already answers 404 for those —
+// so this tells a crawler nothing that endpoint does not.
+type ShareTitle func(ctx context.Context, token string) (string, bool)
+
+// HandlerWithShareTitles is Handler with the link-preview title for /share/
+// wired up. Crawlers do not run JavaScript, so a share link unfurls with
+// whatever the served HTML says; SharePage sets document.title long after
+// Slack has read the page and left.
+//
+// Passing nil serves the site-wide card everywhere, which is what Handler
+// does and what a binary without a thread record has to do anyway.
+func HandlerWithShareTitles(shareTitle ShareTitle) http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic("web: dist directory missing from embed: " + err.Error())
 	}
+	return handler(sub, shareTitle)
+}
+
+// handler is HandlerWithShareTitles over any file system, so a test can serve
+// a shell of its own. The embedded dist/ is only built by `make fe-build` and
+// is gitignored, so CI runs the Go job against a tree that has none — a test
+// that needed the real one would skip there and assert nothing.
+func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 	files := http.FileServer(http.FS(sub))
 	_, builtIndexErr := fs.Stat(sub, "index.html")
+	// Read once. The shell is a few kilobytes and every SPA route serves it.
+	// A shell that stats but cannot be read is the same situation as no build
+	// at all, so it takes the placeholder path rather than serving nothing.
+	shell, shellErr := fs.ReadFile(sub, "index.html")
+	if builtIndexErr == nil && shellErr != nil {
+		builtIndexErr = shellErr
+	}
+
+	// serveShell writes the SPA shell with its link-preview placeholders
+	// filled in. A share link carries the thread's own title and a noindex
+	// header, matching what the public API sends for the same token: unfurl
+	// it, do not put it in a search index.
+	serveShell := func(w http.ResponseWriter, r *http.Request) {
+		var title, desc string
+		if token, ok := strings.CutPrefix(r.URL.Path, "/share/"); ok && token != "" {
+			if shareTitle != nil {
+				if t, found := shareTitle(r.Context(), token); found {
+					// Both together, or neither: a revoked link described as
+					// "a shared thread, frozen where it was shared" under the
+					// bare site title is a card for something that is gone.
+					title, desc = t, shareDesc
+				}
+			}
+			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		}
+		body := renderShell(shell, r, title, desc)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		// The card is built from the request, so a cache in front keyed on
+		// path alone would serve one reader's host and title to the next.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Vary", "X-Forwarded-Host, X-Forwarded-Proto")
+		_, _ = w.Write(body)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// "/api" (no trailing slash) must also be excluded, not just "/api/" —
@@ -115,13 +183,17 @@ func Handler() http.Handler {
 			_, _ = w.Write(placeholderHTML)
 			return
 		}
+		// "/" comes through here too, and lands on the shell: the trimmed name
+		// is "", which no fs.FS will stat, so the root never reaches the file
+		// server. "/index.html" does, and the file server answers it with its
+		// usual 301 to "./" rather than the raw shell.
 		if _, err := fs.Stat(sub, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
 			if strings.HasPrefix(r.URL.Path, "/assets/") || !isRoute(r.URL.Path) {
 				http.NotFound(w, r)
 				return
 			}
-			r = r.Clone(r.Context())
-			r.URL.Path = "/"
+			serveShell(w, r)
+			return
 		}
 		files.ServeHTTP(w, r)
 	})

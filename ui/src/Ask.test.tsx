@@ -2438,7 +2438,11 @@ describe("the composer's own box", () => {
   it("says which build answered, under the composer", () => {
     strict(<Ask version="0.0.77" />);
 
-    expect(screen.getByText(/Rongo can be wrong\. You're talking to Rongo v0\.0\.77\./)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Rongo can make mistakes\. Please double-check responses\. You're talking to Rongo v0\.0\.77\./,
+      ),
+    ).toBeTruthy();
   });
 
   // An unstamped binary, and the session App fabricates when /api/me cannot be
@@ -2446,7 +2450,7 @@ describe("the composer's own box", () => {
   it.each(["", "dev"])("drops the version sentence for %o", (version) => {
     strict(<Ask version={version} />);
 
-    expect(screen.getByText("Rongo can be wrong.")).toBeTruthy();
+    expect(screen.getByText("Rongo can make mistakes. Please double-check responses.")).toBeTruthy();
     expect(screen.queryByText(/You're talking to/)).toBeNull();
   });
 

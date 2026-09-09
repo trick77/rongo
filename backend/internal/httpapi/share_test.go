@@ -15,6 +15,7 @@ import (
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
+	"github.com/trick77/rongo/web"
 )
 
 // shareServer wires a dev-auth server over a real thread store and a fake
@@ -197,6 +198,82 @@ func TestPublicShare_unknownRevokedAndDeletedAllAnswerTheSame(t *testing.T) {
 		if rec.Header().Get("X-Robots-Tag") == "" {
 			t.Errorf("%s token: the 404 is indexable", name)
 		}
+	}
+}
+
+// What the shell asks the record for. Kept separate from the page test below,
+// which needs a built dist/ and therefore skips in CI.
+func TestShareTitle_answersOnlyForALiveLink(t *testing.T) {
+	srv, st, _ := shareServer(t)
+	ctx := context.Background()
+	live := share(t, srv, sharedTurn(t, st, testSubject).PublicID)
+	revokedThread := sharedTurn(t, st, testSubject)
+	revoked := share(t, srv, revokedThread.PublicID)
+	if rec := act(srv, http.MethodDelete, fmt.Sprintf("/api/threads/%s/share", revokedThread.PublicID), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d, want 204", rec.Code)
+	}
+
+	// A live link answers with the thread's own title.
+	if title, ok := srv.shareTitle(ctx, live.Token); !ok || title != live.Title {
+		t.Errorf("shareTitle(live) = %q, %v; want %q, true", title, ok, live.Title)
+	}
+	// A revoked and an invented token both say nothing, the way the public
+	// API answers 404 for either.
+	for name, token := range map[string]string{
+		"revoked": revoked.Token,
+		"unknown": "AAAAAAAAAAAAAAAAAAAAAA",
+	} {
+		if title, ok := srv.shareTitle(ctx, token); ok {
+			t.Errorf("shareTitle(%s) = %q, true; want no answer", name, title)
+		}
+	}
+	// And a server with no thread record at all — the state every handler
+	// here has to survive — answers nothing rather than panicking.
+	if _, ok := NewServer(Deps{}).shareTitle(ctx, live.Token); ok {
+		t.Error("a server with no thread store answered a share title")
+	}
+}
+
+// The page a link actually opens, not the JSON behind it. Slack, X and
+// WhatsApp read the served HTML and never run the JavaScript that sets
+// document.title, so the title has to be in the bytes the server writes.
+//
+// Skipped on a tree with no `make fe-build`: there is no shell to fill in, and
+// the placeholder has no cards.
+func TestSharePage_unfurlsAsTheThreadsOwnQuestion(t *testing.T) {
+	if !web.HasBuiltIndex() {
+		t.Skip("no built dist/index.html; run make fe-build")
+	}
+	// Given a shared thread
+	srv, st, _ := shareServer(t)
+	th := sharedTurn(t, st, testSubject)
+	sh := share(t, srv, th.PublicID)
+
+	// When a crawler opens the link
+	rec := getPublic(srv, "/share/"+sh.Token)
+
+	// Then the card carries the question, and the page stays out of search
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `content="`+sh.Title+`"`) {
+		t.Errorf("og:title is not the thread's title %q", sh.Title)
+	}
+	if rec.Header().Get("X-Robots-Tag") == "" {
+		t.Error("a shared page is indexable")
+	}
+
+	// And a token that is not live falls back to the site card rather than
+	// saying anything about it — the same 200 and shell any SPA route gets.
+	blank := getPublic(srv, "/share/AAAAAAAAAAAAAAAAAAAAAA")
+	if blank.Code != http.StatusOK {
+		t.Fatalf("unknown token: status = %d, want 200", blank.Code)
+	}
+	if strings.Contains(blank.Body.String(), `content="`+sh.Title+`"`) {
+		t.Error("an unknown token was given a real thread's title")
+	}
+	if !strings.Contains(blank.Body.String(), `property="og:title" content="Rongo"`) {
+		t.Error("unknown token did not fall back to the site card")
 	}
 }
 
