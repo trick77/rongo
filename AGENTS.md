@@ -77,7 +77,7 @@ Rules, not description. The code is truth — how a rule is implemented is disco
 - **Never default a branch to `master`** — an omitted branch resolves the remote's default. The corpus is mixed: peeq/loom/rongo are `master`, `ncruces/go-sqlite3` and `asg017/sqlite-vec` are `main`.
 - **One branch per entry**, named (`shop-backend@release-2024.3`), so no two cards can differ only by branch.
 - **A configured branch vanishing upstream is a loud error on the Repos page**, never a silent stop — otherwise the index freezes while looking healthy.
-- **A repo dropping out of `repos.yaml` is purged** — row, files, chunks, both mirrors, checkout. `enabled: false` parks one instead. Purging by hand needs `purgeContent`'s per-file order: the FK cascade misses `chunks_vec`/`chunks_fts`. Floor under it: `repos.Load` REFUSES a list naming no repository, so a truncated file, a mistyped top-level key, or the old flat `repositories:` shape cannot wipe the corpus.
+- **A repo dropping out of `repos.yaml` is purged** — row, files, chunks, both mirrors, checkout. `enabled: false` parks one instead. Purging by hand needs `purgeContent`'s per-file order: the FK cascade misses `chunks_vec`/`chunks_fts`. Floor under it: `repos.Load` REFUSES a list naming no repository, so a truncated file cannot wipe the corpus. Neither can a half-migrated one: any leftover top-level `repositories:` is refused by name even beside a valid `projects:` block, and the decode is `KnownFields(true)` so an unknown key is an error, never a silently ignored entry.
 - **The checkout's `origin` is the identity, the directory name is only a label.** A `clone_url` that no longer matches the checkout resets the repo and re-clones, or one repo's code answers under another's name.
 
 ### Sharing and routes

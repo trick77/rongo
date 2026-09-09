@@ -237,9 +237,8 @@ func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
 	//
 	// Three shapes reach it without anything looking wrong: a truncated file,
 	// `repos:` typed for `projects:`, and the flat `repositories:` this file
-	// used before projects nested — yaml.v3 ignores an unknown top-level key and
-	// reports no error at all, so the old shape must land here rather than load
-	// as an empty corpus.
+	// used before projects nested. Each must be an error rather than an empty
+	// corpus, whichever check catches it.
 	for _, body := range []string{
 		"",
 		"projects:\n",
@@ -249,6 +248,62 @@ func TestLoad_aListThatNamesNothingIsAnError(t *testing.T) {
 		if _, err := Load(writeYAML(t, body)); err == nil {
 			t.Errorf("Load(%q) err = nil, want a refusal of a list naming no repository", body)
 		}
+	}
+}
+
+// TestLoad_rejectsAHalfMigratedFile is the dangerous one, and the reason the
+// old key is declared rather than ignored. A nested block written above a flat
+// list not yet moved parses clean, yaml.v3 says nothing about the key it does
+// not know, and Load would return only the nested half — after which SyncSpecs
+// purges every repository missing from it: rows, chunks, both mirrors and the
+// checkouts. The mistake has to be loud, because its quiet form deletes data.
+func TestLoad_rejectsAHalfMigratedFile(t *testing.T) {
+	// Given: shop moved under a project, loom and netra left where they were.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+
+repositories:
+  - name: loom
+    clone_url: https://github.com/trick77/loom.git
+    project: loom
+  - name: netra
+    clone_url: https://github.com/trick77/netra.git
+    project: netra
+`)
+
+	// When
+	_, err := Load(path)
+
+	// Then
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal — the flat half would be purged in silence")
+	}
+	if !strings.Contains(err.Error(), "repositories:") {
+		t.Errorf("Load() err = %v, want it to name the leftover top-level key", err)
+	}
+}
+
+func TestLoad_rejectsAStrayProjectKeyOnAnEntry(t *testing.T) {
+	// The other half of the same migration: project: left on a nested entry
+	// reads as declared and does nothing at all. An unknown key in this file is
+	// always a repository that silently is not what it says.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-ui
+        clone_url: https://forge.example.invalid/acme/shop-ui.git
+        project: something-else
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of a key that no longer means anything")
 	}
 }
 

@@ -5,7 +5,10 @@
 package repos
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -83,19 +86,37 @@ func Load(path string) ([]Spec, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read repository list %s: %w", path, err)
 	}
+	// The old shape is looked for FIRST, and leniently, so it is named as what
+	// it is. A half-migrated file usually still carries `project:` on the
+	// entries that were not moved, and the strict decode below would report
+	// those instead — true, but it sends the reader to the wrong line.
+	var old struct {
+		Repositories []struct{} `yaml:"repositories"`
+	}
+	if err := yaml.Unmarshal(body, &old); err == nil && len(old.Repositories) > 0 {
+		return nil, fmt.Errorf(
+			"%s has a top-level `repositories:` list, which is the old flat shape — nest those entries under a `projects:` block, because entries left outside one are not loaded and everything they name would be purged",
+			path)
+	}
+
 	var f file
-	if err := yaml.Unmarshal(body, &f); err != nil {
+	// KnownFields, not Unmarshal: an unknown key is a typo, and every typo in
+	// this file is a repository that silently is not what it says. A `project:`
+	// left on a nested entry after the migration is exactly that — it reads as
+	// declared and does nothing.
+	dec := yaml.NewDecoder(bytes.NewReader(body))
+	dec.KnownFields(true)
+	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	// A list that names nothing is refused rather than returned empty, and this
 	// is the floor under the purge: a repository absent from the list loses its
 	// index and its checkout, so "the file parsed and mentions no repository"
-	// would wipe the whole corpus. The ways to reach that state are not exotic —
-	// a truncated file after a botched deploy, or a top-level `repositories:`,
-	// which is the shape this file had before projects nested and which yaml.v3
-	// accepts and silently reads as no projects at all. Refusing here puts the
-	// caller on its "list unavailable" path, which leaves everything exactly as
-	// it was and says so.
+	// would wipe the whole corpus. The way to reach that state is not exotic: a
+	// truncated file after a botched deploy. Refusing here puts the caller on
+	// its "list unavailable" path, which leaves everything exactly as it was
+	// and says so. The two other shapes that used to land here — a mistyped
+	// top-level key and the old flat list — are refused above, by name.
 	if len(f.Projects) == 0 {
 		return nil, fmt.Errorf(
 			"%s names no project: expected a `projects:` list, each with a `repositories:` list of at least one entry", path)
