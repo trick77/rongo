@@ -173,7 +173,7 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 			// A mishearing. Dropped in silence, exactly as before.
 			continue
 		}
-		if segmentOfAnyRepo(folded, indexed) && !namesAsWholeWord(question, folded) {
+		if segmentOfAnyRepo(folded, indexed) && !namesAsWholeWord(question, n) {
 			// The model split an indexed name and named the half. Dropped in
 			// silence: the reader never wrote it.
 			continue
@@ -233,11 +233,21 @@ func segmentOfAnyRepo(folded string, indexed []string) bool {
 		return false
 	}
 	for _, n := range indexed {
-		name := foldRepo(n)
-		for _, seg := range strings.FieldsFunc(name, func(r rune) bool {
+		segs := strings.FieldsFunc(foldRepo(n), func(r rune) bool {
 			return r == '-' || r == '_'
-		}) {
-			if seg == folded && seg != name {
+		})
+		if len(segs) < 2 {
+			// A name with no separator has no half to take. Comparing it here
+			// would only repeat what nearAnyRepo already decided.
+			continue
+		}
+		for _, seg := range segs {
+			// Folded on both sides. foldRepo drops a trailing "s" from the
+			// whole name, which is not the same as dropping it from a segment:
+			// "tools-media" keeps its s and "media-tools" loses it, and an
+			// unfolded comparison would suppress the guess in one order and
+			// report it in the other.
+			if foldRepo(seg) == folded {
 				return true
 			}
 		}
@@ -256,18 +266,49 @@ func segmentOfAnyRepo(folded string, indexed []string) bool {
 // opposite - a question spelling a longer name still narrows to the indexed
 // repository inside it - which is why this is a separate test rather than a
 // second caller of that one.
-func namesAsWholeWord(question, folded string) bool {
-	if folded == "" {
-		return false
-	}
+//
+// The name is tested BOTH as the guess spells it and folded, because folding
+// takes a trailing "s" off: a reader asking "how does media-tools differ from
+// tools?" wrote "tools", the folded guess is "tool", and searching for that
+// alone finds an occurrence whose own s is a word rune - so the question that
+// names the missing repository outright would read as never naming it.
+func namesAsWholeWord(question, name string) bool {
 	q := strings.ToLower(question)
+	for _, form := range spellings(name) {
+		if carriesWholeWord(q, form) {
+			return true
+		}
+	}
+	return false
+}
+
+// spellings is the guess as the reader may have typed it and as foldRepo
+// compares it, without a duplicate when the two agree.
+func spellings(name string) []string {
+	var out []string
+	raw := strings.ToLower(strings.TrimSpace(name))
+	if i := strings.LastIndexByte(raw, '/'); i >= 0 {
+		raw = raw[i+1:]
+	}
+	if raw != "" {
+		out = append(out, raw)
+	}
+	if folded := foldRepo(name); folded != "" && folded != raw {
+		out = append(out, folded)
+	}
+	return out
+}
+
+// carriesWholeWord reports whether the lower-cased question holds name with a
+// nameRune on neither side.
+func carriesWholeWord(q, name string) bool {
 	for i := 0; ; {
-		j := strings.Index(q[i:], folded)
+		j := strings.Index(q[i:], name)
 		if j < 0 {
 			return false
 		}
 		start := i + j
-		end := start + len(folded)
+		end := start + len(name)
 		if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
 			return true
 		}

@@ -309,6 +309,47 @@ func TestResolveReposStillReportsAHyphenSegmentTheQuestionNames(t *testing.T) {
 	}
 }
 
+func TestResolveReposStillReportsAPluralSegmentTheQuestionNames(t *testing.T) {
+	// foldRepo takes a trailing "s" off, so the folded guess is "tool" while
+	// the reader typed "tools". Testing only the folded spelling finds an
+	// occurrence whose own s is a word rune, and the question that names the
+	// missing repository outright would read as never naming it.
+	db := testDB(t)
+	addMember(t, db, "media-tools", "media-tools")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"media-tools", "tools"},
+		"how does media-tools differ from tools?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 1 || unknown[0] != "tools" {
+		t.Errorf("unknown = %v, want the repository the reader named and the index lacks", unknown)
+	}
+}
+
+func TestResolveReposDropsAHyphenSegmentWhicheverHalfCarriesThePlural(t *testing.T) {
+	// The mirror of the transmission case: foldRepo strips the s from
+	// "media-tools" and not from "tools-media", so the halves have to be
+	// folded one by one or the same invented name is suppressed in one order
+	// and reported in the other.
+	db := testDB(t)
+	addMember(t, db, "tools-media", "tools-media")
+	r := New(db, nil)
+
+	_, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"tools-media", "tools"}, "what does tools-media do?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want nothing claimed about a name the question never wrote", unknown)
+	}
+}
+
 func TestResolveReposStillReportsANameThatIsNoSegment(t *testing.T) {
 	// A follow-up carries its subject from the previous turn, so the guess
 	// names a repository the current question does not spell. That name is
