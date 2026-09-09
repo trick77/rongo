@@ -95,7 +95,7 @@ func TestOf_anUnknownRepositoryIsItsOwnProject(t *testing.T) {
 	}
 }
 
-func TestLoad_carriesKindDescriptionAndEdges(t *testing.T) {
+func TestLoad_carriesPartDescriptionAndEdges(t *testing.T) {
 	// The structure block and the Projects page both read this.
 	m, _ := Load(context.Background(), shopDB(t))
 
@@ -108,7 +108,7 @@ func TestLoad_carriesKindDescriptionAndEdges(t *testing.T) {
 		by[r.Name] = r
 	}
 	if by["shop-ui"].Part != "ui" || by["shop-ui"].Description != "Customer-facing storefront, React." {
-		t.Errorf("shop-ui = %+v, want its kind and description", by["shop-ui"])
+		t.Errorf("shop-ui = %+v, want its part and description", by["shop-ui"])
 	}
 	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
 		t.Errorf("shop-ui.Uses = %v, want [shop-backend]", got)

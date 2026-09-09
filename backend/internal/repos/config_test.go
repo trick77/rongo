@@ -412,7 +412,7 @@ projects:
 		t.Fatalf("Load() err = %v, want nil", err)
 	}
 	if specs[0].Project != "shop" || specs[0].Part != "ui" {
-		t.Errorf("specs[0] project/kind = %q/%q, want shop/ui", specs[0].Project, specs[0].Part)
+		t.Errorf("specs[0] project/part = %q/%q, want shop/ui", specs[0].Project, specs[0].Part)
 	}
 	if specs[0].Description != "Customer-facing storefront, React." {
 		t.Errorf("specs[0].Description = %q", specs[0].Description)
@@ -420,7 +420,7 @@ projects:
 	if len(specs[0].Uses) != 1 || specs[0].Uses[0] != "shop-backend" {
 		t.Errorf("specs[0].Uses = %v, want [shop-backend]", specs[0].Uses)
 	}
-	// kind and description are optional, and so is uses: a consumer reached
+	// part and description are optional, and so is uses: a consumer reached
 	// from a queue declares no sibling at all.
 	if len(specs[2].Uses) != 0 {
 		t.Errorf("specs[2].Uses = %v, want empty", specs[2].Uses)

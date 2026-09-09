@@ -398,8 +398,12 @@ function ProjectPanel({ project }: { project: Project }) {
                       (r.enabled ? "" : "text-faint")
                     }
                   >
+                    {/* Capped: the row has the whole table to spend, and a
+                        sentence run across a wide monitor is one long measure
+                        nobody reads to the end of. The cell still spans every
+                        column so the text starts at the repository name. */}
                     <td colSpan={8} className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted">
-                      {r.description}
+                      <div className="max-w-[64rem]">{r.description}</div>
                     </td>
                   </tr>
                 )}

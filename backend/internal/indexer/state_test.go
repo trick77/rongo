@@ -332,7 +332,7 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 		by[r.Name] = r
 	}
 	if got := by["shop-ui"]; got.Project != "shop" || got.Part != "ui" || got.Description != "Storefront, React." {
-		t.Errorf("shop-ui = %+v, want project shop, kind ui and its description", got)
+		t.Errorf("shop-ui = %+v, want project shop, part ui and its description", got)
 	}
 	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
 		t.Errorf("shop-ui.Uses = %v, want [shop-backend]", got)
