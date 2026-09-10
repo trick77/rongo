@@ -1,0 +1,216 @@
+[
+ {
+  "question": "What happens when a customer places an order?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "front-end",
+    "paths": ["api/orders/index.js"],
+    "verified": "index.js:48 app.post(\"/orders\"), :122 forwards to endpoints.ordersUrl + '/orders'"
+   },
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:50 @RequestMapping POST /orders, :61-73 fetches address, customer, card and items, :78-96 payment, :99-102 shipping, :115 customerOrderRepository.save"
+   },
+   {
+    "repo": "payment",
+    "paths": ["transport.go", "service.go"],
+    "verified": "transport.go:29 POST /paymentAuth, service.go:40-58 Authorise"
+   },
+   {
+    "repo": "shipping",
+    "paths": ["src/main/java/works/weave/socks/shipping/controllers/ShippingController.java"],
+    "verified": "ShippingController.java:36 POST /shipping, :40 rabbitTemplate.convertAndSend(\"shipping-task\", shipment)"
+   },
+   {
+    "repo": "queue-master",
+    "paths": ["src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"],
+    "verified": "ShippingTaskHandler.java:13 handleMessage(Shipment)"
+   }
+  ],
+  "note": "Five repositories, three languages. Nothing but the string literals /orders, /paymentAuth, /shipping and shipping-task connects them."
+ },
+ {
+  "question": "Wer wird benachrichtigt, wenn eine Sendung zum Versand ansteht?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "shipping",
+    "paths": [
+     "src/main/java/works/weave/socks/shipping/controllers/ShippingController.java",
+     "src/main/java/works/weave/socks/shipping/configuration/RabbitMqConfiguration.java"
+    ],
+    "verified": "ShippingController.java:40 convertAndSend(\"shipping-task\", ...); RabbitMqConfiguration.java:18 queueName = \"shipping-task\""
+   },
+   {
+    "repo": "queue-master",
+    "paths": [
+     "src/main/java/works/weave/socks/queuemaster/configuration/ShippingConsumerConfiguration.java",
+     "src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"
+    ],
+    "verified": "ShippingConsumerConfiguration.java:15 queueName = \"shipping-task\", :37 container.setQueueNames; ShippingTaskHandler.java:13 handleMessage"
+   }
+  ],
+  "note": "The producer/consumer edge in its purest form: the same string literal in two repositories, with no import, no symbol and no type in common."
+ },
+ {
+  "question": "What happens to a guest's shopping cart when they log in?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "front-end",
+    "paths": ["api/user/index.js"],
+    "verified": "index.js:250 GET /login, :283 calls cartsUrl + '/' + custId + '/merge?sessionId=' + sessionId, :288 a failed merge does not prevent login"
+   },
+   {
+    "repo": "carts",
+    "paths": [
+     "src/main/java/works/weave/socks/cart/controllers/CartsController.java",
+     "src/main/java/works/weave/socks/cart/cart/CartResource.java"
+    ],
+    "verified": "CartsController.java:35 GET /carts/{customerId}/merge, :36-40 mergeCarts; CartResource.java:38-39 merge adds every item of the session cart"
+   }
+  ]
+ },
+ {
+  "question": "Was passiert, wenn eine Zahlung abgelehnt wird?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:91-97 a null or unauthorised PaymentResponse raises PaymentDeclinedException, so the order is never saved"
+   },
+   {
+    "repo": "payment",
+    "paths": ["service.go"],
+    "verified": "service.go:46-54 authorised stays false and the message reads \"Payment declined: amount exceeds ...\""
+   }
+  ],
+  "note": "The German question says Zahlung; the deciding code is Go and says Authorise."
+ },
+ {
+  "question": "Which service decides whether a payment is authorised, and on what basis?",
+  "kind": "why",
+  "resolution": "unique",
+  "candidates": [
+   {
+    "repo": "payment",
+    "paths": ["service.go"],
+    "verified": "service.go:36-38 declineOverAmount is the only criterion, :47-53 anything above it is declined; :40-45 a zero or negative amount is an error, not a decline"
+   }
+  ],
+  "note": "Single-repo control question. If retrieval cannot answer this one, a flow miss elsewhere is not about edges."
+ },
+ {
+  "question": "Wie kommt ein Kunde zu einem Konto, und wo landen seine Kartendaten?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "front-end",
+    "paths": ["api/user/index.js"],
+    "verified": "index.js:218 merges the cart after registration; the register handler forwards to the user service"
+   },
+   {
+    "repo": "user",
+    "paths": ["api/transport.go"],
+    "verified": "transport.go:44 POST /register, :68 POST /customers, :80 POST /cards, :56 GET /cards"
+   }
+  ]
+ },
+ {
+  "question": "Where is a customer's address stored, and who reads it while an order is being placed?",
+  "kind": "where",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "user",
+    "paths": ["api/transport.go"],
+    "verified": "transport.go:62 GET /addresses, :74 POST /addresses"
+   },
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:61-63 addressFuture = asyncGetService.getResource(item.address, ...), :79-83 the address goes into the PaymentRequest"
+   }
+  ]
+ },
+ {
+  "question": "Welche anderen Dienste fragt der Bestelldienst ab, bevor eine Bestellung gespeichert wird?",
+  "kind": "what",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "orders",
+    "paths": [
+     "src/main/java/works/weave/socks/orders/controllers/OrdersController.java",
+     "src/main/java/works/weave/socks/orders/config/OrdersConfigurationProperties.java"
+    ],
+    "verified": "OrdersConfigurationProperties.java:12 payment at /paymentAuth, and the shipping URI below it; OrdersController.java:61-73 address, customer, card and items are fetched first"
+   },
+   {
+    "repo": "user",
+    "paths": ["api/transport.go"],
+    "verified": "transport.go:50 GET /customers, :56 GET /cards, :62 GET /addresses"
+   },
+   {
+    "repo": "payment",
+    "paths": ["transport.go"],
+    "verified": "transport.go:29 POST /paymentAuth"
+   },
+   {
+    "repo": "shipping",
+    "paths": ["src/main/java/works/weave/socks/shipping/controllers/ShippingController.java"],
+    "verified": "ShippingController.java:36 POST /shipping"
+   }
+  ],
+  "note": "This is the question the repo-narrowing prompt is worst at: the asker cannot name the repositories, because naming them is the answer."
+ },
+ {
+  "question": "What happens to a shipment when the message queue is unavailable?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "shipping",
+    "paths": ["src/main/java/works/weave/socks/shipping/controllers/ShippingController.java"],
+    "verified": "ShippingController.java:41-44 the send is wrapped in try/catch and the shipment is returned anyway: \"Unable to add to queue ... Accepting anyway\""
+   },
+   {
+    "repo": "queue-master",
+    "paths": ["src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"],
+    "verified": "ShippingTaskHandler.java:13 the handler is the only consumer, so a dropped message is never processed"
+   }
+  ],
+  "note": "A silent data-loss path a BA would want to know about, and it is invisible from either repository alone."
+ },
+ {
+  "question": "Wie wird der Rechnungsbetrag einer Bestellung berechnet?",
+  "kind": "how",
+  "resolution": "composition",
+  "candidates": [
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:154-159 calculateTotal sums quantity * unitPrice and adds a hard-coded shipping cost of 4.99"
+   },
+   {
+    "repo": "carts",
+    "paths": ["src/main/java/works/weave/socks/cart/controllers/ItemsController.java"],
+    "verified": "ItemsController.java:21 /carts/{customerId}/items is where the items and their unit prices come from"
+   },
+   {
+    "repo": "catalogue",
+    "paths": ["service.go"],
+    "verified": "service.go:36 Sock.Price, :55 baseQuery selects sock.price - the unit price originates here"
+   }
+  ],
+  "note": "The 4.99 shipping cost is a business rule living as a literal in a Java controller, while the unit prices come out of a Go service's SQL. Three repositories, and the question names none of them."
+ }
+]

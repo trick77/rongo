@@ -197,7 +197,7 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	}
 	for _, repo := range []string{"peeq", "shop"} {
 		if err := w.ReplaceFile(ctx, repo, "src/A.java", "sha", "java", 10,
-			sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+			sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 			t.Fatalf("ReplaceFile(%s) err = %v", repo, err)
 		}
 	}
@@ -640,7 +640,7 @@ func seedPurgeable(t *testing.T, name string) (*sql.DB, *StateStore) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	if err := NewWriter(db).ReplaceFile(ctx, name, "src/A.java", "sha", "java", 10,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 	return db, s
@@ -727,7 +727,7 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	if err := NewWriter(db).ReplaceFile(ctx, "peeq", "src/A.java", "sha", "java", 10,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {

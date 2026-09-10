@@ -369,7 +369,7 @@ func TestPollOnce_reClonesWhenTheCheckoutPointsAtAnotherRemote(t *testing.T) {
 	// The recording index writes nothing, so the content of that first run is
 	// seeded here — it is what has to be gone afterwards.
 	if err := NewWriter(db).ReplaceFile(ctx, "fixture", "src/A.java", "sha", "java", 10,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 
@@ -520,7 +520,7 @@ func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
 	if err := NewWriter(db).ReplaceFile(ctx, "fixture", "src/A.java", "sha", "java", 10,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 
