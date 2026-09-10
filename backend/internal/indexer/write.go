@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 )
@@ -79,7 +80,7 @@ func NewWriter(db *sql.DB) *Writer {
 // length — the same column would then mean two different things depending on
 // which path wrote it.
 func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, size int,
-	chunks []Chunk, vecs [][]float32, syms []symbols.Symbol) error {
+	chunks []Chunk, vecs [][]float32, syms []symbols.Symbol, toks []edges.Token) error {
 	if len(chunks) != len(vecs) {
 		return fmt.Errorf("index %s/%s: %d chunks but %d vectors", repo, path, len(chunks), len(vecs))
 	}
@@ -144,6 +145,16 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 			`INSERT INTO symbols (file_id, name, kind, line, scope) VALUES (?,?,?,?,?)`,
 			fileID, s.Name, s.Kind, s.Line, s.Scope); err != nil {
 			return fmt.Errorf("index %s/%s symbol %s: %w", repo, path, s.Name, err)
+		}
+	}
+	// Integration tokens ride along with the file for the same reason symbols
+	// do: they are derived from its content, so they must be replaced with it
+	// or an edge outlives the line that declared it.
+	for _, tok := range toks {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO integration_tokens (file_id, kind, value, line) VALUES (?,?,?,?)`,
+			fileID, string(tok.Kind), tok.Value, tok.Line); err != nil {
+			return fmt.Errorf("index %s/%s token %s: %w", repo, path, tok.Value, err)
 		}
 	}
 	return tx.Commit()
@@ -254,6 +265,9 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM symbols WHERE file_id = ?`, fileID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM integration_tokens WHERE file_id = ?`, fileID); err != nil {
 		return err
 	}
 	return nil

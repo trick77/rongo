@@ -56,7 +56,7 @@ func TestReplaceFile_refusesAChunkWithoutSearchText(t *testing.T) {
 	chunks := []Chunk{{Ordinal: 0, StartLine: 1, EndLine: 2, Text: "e", RawText: "// only a comment", ContentHash: "h"}}
 
 	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A.java", "sha", "java", 10,
-		chunks, [][]float32{vec(1)}, nil)
+		chunks, [][]float32{vec(1)}, nil, nil)
 
 	if err == nil {
 		t.Fatal("ReplaceFile accepted a chunk with an empty SearchText")
@@ -81,7 +81,7 @@ func TestReplaceFile_keywordLaneIndexesSearchTextNotTheComment(t *testing.T) {
 		ContentHash: "h1",
 	}}
 	if err := w.ReplaceFile(context.Background(), "shop", "src/A.java", "sha", "java", 10,
-		chunks, [][]float32{vec(1)}, nil); err != nil {
+		chunks, [][]float32{vec(1)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestReplaceFile_writesAllFourTablesWithMatchingRowids(t *testing.T) {
 	// When
 	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java", 64,
 		sampleChunks(), [][]float32{vec(1), vec(2)},
-		[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}})
+		[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}}, nil)
 
 	// Then
 	if err != nil {
@@ -150,7 +150,7 @@ func TestReplaceFile_isAtomic(t *testing.T) {
 
 	// When
 	err := testee.ReplaceFile(context.Background(), "shop", "src/A.java", "abc123", "java", 64,
-		sampleChunks(), [][]float32{vec(1), {1, 2}}, nil)
+		sampleChunks(), [][]float32{vec(1), {1, 2}}, nil, nil)
 
 	// Then
 	if err == nil {
@@ -183,7 +183,7 @@ func TestReplaceFile_replacesRatherThanAccumulates(t *testing.T) {
 		t.Helper()
 		if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
 			sampleChunks(), [][]float32{vec(1), vec(2)},
-			[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}}); err != nil {
+			[]symbols.Symbol{{Name: "run", Kind: "method", Line: 1}}, nil); err != nil {
 			t.Fatalf("ReplaceFile() err = %v", err)
 		}
 	}
@@ -216,7 +216,7 @@ func TestDeleteFile_clearsAllThreeChunkTables(t *testing.T) {
 	testee := NewWriter(db)
 	ctx := context.Background()
 	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestRecordSkipped_clearsChunksOfAFileThatUsedToBeIndexed(t *testing.T) {
 	testee := NewWriter(db)
 	ctx := context.Background()
 	if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, nil); err != nil {
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
 
@@ -322,7 +322,7 @@ func TestReplaceFile_rejectsAVectorCountMismatch(t *testing.T) {
 
 	// When
 	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A.java", "abc", "java", 64,
-		sampleChunks(), [][]float32{vec(1)}, nil)
+		sampleChunks(), [][]float32{vec(1)}, nil, nil)
 
 	// Then
 	if err == nil {
@@ -334,7 +334,7 @@ func TestReplaceFile_rejectsAVectorCountMismatch(t *testing.T) {
 func storedSymbols(t *testing.T, db *sql.DB, lang string, syms []symbols.Symbol) []string {
 	t.Helper()
 	err := NewWriter(db).ReplaceFile(context.Background(), "shop", "src/A."+lang, "abc123", lang, 64,
-		sampleChunks(), [][]float32{vec(1), vec(2)}, syms)
+		sampleChunks(), [][]float32{vec(1), vec(2)}, syms, nil)
 	if err != nil {
 		t.Fatalf("ReplaceFile() err = %v, want nil", err)
 	}

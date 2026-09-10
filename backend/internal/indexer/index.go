@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path"
 
+	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/repos"
@@ -241,7 +242,12 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		// been embedded, and no later run would notice.
 		return fmt.Errorf("embed %s/%s: %w", st.Name, path, err)
 	}
-	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, len(body), chunks, vecs, syms)
+	// Extraction, not inference: every token is a literal that stood next to a
+	// messaging call or a route declaration in this file. It costs no model
+	// call and no network, so it rides along with the file rather than needing
+	// a pass of its own.
+	toks := edges.Extract(path, body)
+	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, len(body), chunks, vecs, syms, toks)
 }
 
 // vectors resolves one file's chunks to vectors, embedding only the misses.
