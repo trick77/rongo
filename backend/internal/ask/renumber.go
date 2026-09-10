@@ -293,19 +293,28 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 // only the first group leaves the second at prompt numbering, which puts a
 // wrong source under a chip. Both groups are read and the value is emitted
 // as the one array it was meant to be.
+//
+// The groups may be separated by a comma as well as by nothing at all: the
+// model reaching for JSON halfway writes [1],[43], which is neither the chain
+// the prose rule asks for nor the array the fence needs, and is exactly as
+// unparseable. It is the same value written a second way, so it folds the
+// same way. A comma only joins two groups when a bracket follows it, so
+// "src":[1],"kind" ends the value where it should.
 var (
 	// Whitespace is allowed everywhere JSON allows it: a model that writes
 	// "src" : [ 9 ] means the same array, and read strictly it went through
 	// unrenumbered - a prompt index drawn as a chip.
 	srcGroup    = `\[\s*(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\s*\]`
-	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*(` + srcGroup + `(?:\s*` + srcGroup + `)*)`)
+	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*(` + srcGroup + `(?:\s*,?\s*` + srcGroup + `)*)`)
 	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
-	// What may still grow into another group of the chain: nothing yet, or a
-	// bracket that has not closed. Held back until it is decided.
-	srcMoreRe = regexp.MustCompile(`^\s*(\[[\d\s,]*)?$`)
-	// The seam between two groups of a chain, which becomes the comma the
-	// array should have carried.
-	srcJoinRe = regexp.MustCompile(`\]\s*\[`)
+	// What may still grow into another group of the chain: nothing yet, a
+	// comma that has not been followed yet, or a bracket that has not closed.
+	// Held back until it is decided.
+	srcMoreRe = regexp.MustCompile(`^\s*(?:,\s*)?(\[[\d\s,]*)?$`)
+	// The seam between two groups of a chain, with or without the comma the
+	// model half-remembered, which becomes the one comma the array should
+	// have carried.
+	srcJoinRe = regexp.MustCompile(`\]\s*,?\s*\[`)
 )
 
 // Reading the content rather than the fence tag is what keeps a diagram a
