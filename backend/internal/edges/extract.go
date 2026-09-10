@@ -57,8 +57,12 @@ type Token struct {
 // "any literal that looks like a topic" would fill the table with constants
 // that are not destinations, and a wrong edge is worse than a missing one — it
 // pulls unrelated code into an answer that then cites it.
+// `send` is deliberately NOT here on its own. Express writes res.send("done")
+// and the shape rule accepts "done", so a bare rule records it as a queue and
+// two services doing it produce a wrong cross-repo edge — the exact failure
+// this package says is worse than a missing one. Only the qualified forms.
 var messagingCall = regexp.MustCompile(`(?i)\b(?:` +
-	`convertAndSend|convertSendAndReceive|send|sendDefault|` + // Spring AMQP / KafkaTemplate
+	`convertAndSend|convertSendAndReceive|sendDefault|sendMessage|` + // Spring AMQP / KafkaTemplate
 	`setQueueNames|setQueue|setTopics|setDestinationName|` +
 	`RabbitListener|KafkaListener|JmsListener|StreamListener|` +
 	`Queue|TopicExchange|DirectExchange|FanoutExchange|NewTopic|` +
@@ -69,7 +73,11 @@ var messagingCall = regexp.MustCompile(`(?i)\b(?:` +
 // holds is a destination. This is what catches the corpus's real case: both
 // sides write `String queueName = "shipping-task"` and use the constant, so the
 // literal never appears inside the call itself.
-var destinationVar = regexp.MustCompile(`(?i)\b\w*(?:queue|topic|exchange|channel|routingKey)\w*\s*(?:=|:=|:)\s*"([^"]{2,120})"`)
+//
+// The keyword must END the identifier, optionally followed by Name or Key.
+// A trailing wildcard matched `exchangeRate = "USD"` and recorded USD as a
+// destination; a name that merely CONTAINS "queue" is not a queue name.
+var destinationVar = regexp.MustCompile(`(?i)\b\w*(?:queue|topic|exchange|channel|routingkey)(?:name|key)?\s*(?:=|:=|:)\s*"([^"]{2,120})"`)
 
 // routeAnnotation matches the server side of an HTTP route in the frameworks
 // that declare it: Spring's mapping annotations, gorilla/mux and net/http in

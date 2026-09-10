@@ -41,12 +41,20 @@ func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour
 		JOIN integration_tokens other
 		  ON other.kind = mine.kind AND other.value = mine.value
 		JOIN files other_f ON other_f.id = other.file_id
+		-- Enabled only, and in the COUNT as well as the join. Filtering just
+		-- the result would keep a parked repository out of an answer while
+		-- still letting it shape one: its tokens would count towards the
+		-- spread ceiling, push a value over it, and cost a LIVE repository an
+		-- edge it should have had. Same rule, and same reasoning, as the
+		-- reference walk in internal/ask.
+		JOIN repo_state other_r ON other_r.name = other_f.repo AND other_r.enabled = 1
 		WHERE me.repo = ? AND me.path = ?
 		  AND other_f.repo <> me.repo
 		  AND (
 		    SELECT COUNT(DISTINCT f2.repo)
 		    FROM integration_tokens t2
 		    JOIN files f2 ON f2.id = t2.file_id
+		    JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
 		    WHERE t2.kind = mine.kind AND t2.value = mine.value
 		  ) <= ?
 		ORDER BY other_f.repo, other_f.path, other.line`, repo, path, spreadCeiling)

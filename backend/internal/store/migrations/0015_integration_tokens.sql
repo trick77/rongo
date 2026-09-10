@@ -25,3 +25,17 @@ CREATE TABLE integration_tokens (
 -- every other file carrying the same one.
 CREATE INDEX idx_integration_tokens_value ON integration_tokens(kind, value);
 CREATE INDEX idx_integration_tokens_file ON integration_tokens(file_id);
+
+-- One forced re-index, for the same reason 0010 deletes rows here rather than
+-- waiting: an incremental poll passes only the paths a commit CHANGED
+-- (indexer/poller.go, "only the changed paths"), and tokens are written by the
+-- file pipeline. Without this, an existing database would carry an empty
+-- integration_tokens for as long as its files sit untouched, which for a
+-- settled service is indefinitely, and every lookup would return nothing while
+-- looking perfectly healthy.
+--
+-- Emptying last_sha makes the next poll pass nil paths, which indexes the
+-- repository whole. It is not expensive: the embedding cache is keyed on
+-- content hash and repository-independent, so unchanged chunks are re-read and
+-- re-chunked but never re-embedded.
+UPDATE repo_state SET last_sha = '';

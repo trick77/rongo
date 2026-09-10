@@ -24,10 +24,12 @@ estate is a convention, not a link. A wrong edge is worse than a missing one,
 because retrieval follows it and the answer then cites what it found.
 
 `edges.Reach` composes: one in-repo hop, the crossing, one in-repo hop. The
-in-repo hop uses the same rule `internal/ask` walks references by — selective
-symbols, definer ceiling of eight — in BOTH directions, because the corpus needs
-both: forward finds the configuration class a controller calls into, backward
-finds the handler that a queue's configuration wires up.
+in-repo hop is the rule `internal/ask` walks references by — whole identifiers,
+definer ceiling of eight counted across enabled repositories — applied in BOTH
+directions, because the corpus needs both: forward finds the configuration class
+a controller calls into, backward finds the handler that a queue's configuration
+wires up. Fan-out is capped and every hop is ordered, so the walk is bounded and
+its trail is the same on every run.
 
 ## The boundaries are crossed
 
@@ -112,6 +114,39 @@ data**, so there is no shared literal to match.
   would be inventing one.
 
 That is the honest ceiling of this approach on this corpus: 20 of 29.
+
+## What the review changed, and what it did not
+
+A medium review of the branch found seven things. The four that touched a
+number or a correctness claim:
+
+- **Parked repositories were hop targets.** Neither the crossing nor the spread
+  ceiling filtered `repo_state.enabled`, so `Reach` could cite a repository the
+  operator had removed from the Repos page, and a token in two live plus two
+  parked repositories was discarded as a convention. Both counted now, the same
+  way `internal/ask` counts them.
+- **The in-repo hop was not the rule it claimed to be.** It matched substrings,
+  so the symbol `Item` hit `ItemsController` and `OrderItem`, and it counted
+  definers per repository where `ask` counts them across the estate. It now
+  tokenizes identifiers exactly as `ask` does. **The catalogue number is
+  unchanged at 20/29 under the stricter rule**, which says the looser matching
+  was not doing the work the figure was crediting it with.
+- **The table would have stayed empty on every existing install.** An
+  incremental poll passes only the paths a commit changed, so tokens would
+  arrive one edited file at a time and a settled service would never get any.
+  The migration now empties `last_sha` to force one full pass, the same remedy
+  `0010_symbol_definitions.sql` uses for the same reason. Cheap: the embedding
+  cache is keyed on content hash, so nothing is re-embedded.
+- **Two false-destination shapes.** A bare `send` rule recorded `res.send("done")`
+  as a queue called `done`, and a wildcard name rule recorded
+  `exchangeRate = "USD"` as a queue called `USD`. Both are the kind of
+  coincidence that produces a wrong edge between two services, which this
+  package holds to be worse than a missing one. Fenced by tests.
+
+Two performance findings were also real: the backward half of the in-repo hop
+was an unconstrained join of every chunk against every symbol row, and the walk
+had no fan-out cap. Both fixed, and the effect is visible — `TestFlowEdgeReach`
+went from 16.0s to 0.68s.
 
 ## A rough edge worth naming
 

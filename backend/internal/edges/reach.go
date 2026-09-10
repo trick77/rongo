@@ -3,15 +3,26 @@ package edges
 import (
 	"context"
 	"database/sql"
+	"sort"
 	"strings"
+	"unicode"
 )
 
 // maxDefiners is the selectivity ceiling for the in-repo hop, and it is the
 // same rule internal/ask applies when it walks references: a name thirty files
-// define says nothing about which one this code depends on. Kept at the same
-// value rather than tuned separately — two walks disagreeing about what counts
-// as a selective name would make a gathered set depend on which one found it.
+// define says nothing about which one this code depends on. Counted the same
+// way too — across ENABLED repositories, not within one — so the two walks
+// cannot disagree about which names are selective.
 const maxDefiners = 8
+
+// inlandFanOut caps how many files one in-repo hop may return.
+//
+// Without it the walk is unbounded: in a Java repository most files mention
+// some selective name, each becomes a crossing start, and each crossing runs
+// another full hop on the far side. internal/ask bounds its walk with a hop
+// budget; this is the equivalent. Files are ordered before the cut, so the cap
+// takes a stable set rather than whichever rows the database returned first.
+const inlandFanOut = 24
 
 // Step says how a file was reached, so a measurement can tell an edge from the
 // in-repo hops on either side of it, and so a later answer can explain itself.
@@ -52,29 +63,33 @@ type Reached struct {
 // can take one step inland, and that is all this adds. Two steps inland would
 // start dragging the repository in, which is the failure the definer ceiling
 // exists to prevent.
+//
+// The result is deterministic: every hop is ordered before it is used, so the
+// same corpus produces the same trail, which is what makes a measurement over
+// it reproducible.
 func Reach(ctx context.Context, db *sql.DB, repo, path string) ([]Reached, error) {
 	seen := map[[2]string]bool{{repo, path}: true}
 	var out []Reached
 
 	// One step inland from the start, so a file that only CALLS the thing
 	// carrying the literal can still cross.
-	starts := []struct{ repo, path string }{{repo, path}}
+	starts := []fileRef{{repo: repo, path: path}}
 	inland, err := inRepoNeighbours(ctx, db, repo, path)
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range inland {
-		if seen[[2]string{f.repo, f.path}] {
+		key := [2]string{f.repo, f.path}
+		if seen[key] {
 			continue
 		}
-		seen[[2]string{f.repo, f.path}] = true
+		seen[key] = true
 		out = append(out, Reached{Repo: f.repo, Path: f.path, Step: StepInRepoBefore, Through: path})
 		starts = append(starts, f)
 	}
 
 	// The crossings, from the start and from everything one step inland.
-	type crossing struct{ repo, path string }
-	var crossed []crossing
+	var crossed []fileRef
 	for _, s := range starts {
 		ns, err := Neighbours(ctx, db, s.repo, s.path)
 		if err != nil {
@@ -88,7 +103,7 @@ func Reach(ctx context.Context, db *sql.DB, repo, path string) ([]Reached, error
 			seen[key] = true
 			out = append(out, Reached{Repo: n.Repo, Path: n.Path, Step: StepEdge,
 				Via: n.Value, Kind: n.Kind, Through: s.path})
-			crossed = append(crossed, crossing{n.Repo, n.Path})
+			crossed = append(crossed, fileRef{repo: n.Repo, path: n.Path})
 		}
 	}
 
@@ -120,102 +135,129 @@ type fileRef struct{ repo, path string }
 // configuration class a controller calls into. Backward finds the handler that
 // a queue's configuration wires up — the configuration names the handler, the
 // handler names nothing.
+//
+// Matching is on WHOLE identifiers, never on substrings. `strings.Contains`
+// made the symbol `Item` match `ItemsController`, `OrderItem` and `LineItem`,
+// which is a different and much looser walk than the one internal/ask runs;
+// the text is tokenized the same way ask tokenizes it instead.
 func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fileRef, error) {
-	var fileID int64
 	var text string
 	err := db.QueryRowContext(ctx, `
-		SELECT f.id, COALESCE(GROUP_CONCAT(c.raw_text, char(10)), '')
+		SELECT COALESCE(GROUP_CONCAT(c.raw_text, char(10)), '')
 		FROM files f LEFT JOIN chunks c ON c.file_id = f.id
 		WHERE f.repo = ? AND f.path = ?
-		GROUP BY f.id`, repo, path).Scan(&fileID, &text)
+		GROUP BY f.id`, repo, path).Scan(&text)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	mentioned := identifierSet(text)
 
-	// Every selective symbol in this repository, with the file defining it.
+	// Every symbol this repository defines, with the file defining it, dropping
+	// names too common across the ESTATE to say anything.
 	rows, err := db.QueryContext(ctx, `
 		SELECT s.name, f.path
 		FROM symbols s
 		JOIN files f ON f.id = s.file_id
 		WHERE f.repo = ?
-		  AND (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2
+		  AND (SELECT COUNT(DISTINCT s2.file_id)
+		         FROM symbols s2
 		         JOIN files f2 ON f2.id = s2.file_id
-		        WHERE f2.repo = f.repo AND s2.name = s.name) <= ?`, repo, maxDefiners)
+		         JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
+		        WHERE s2.name = s.name) <= ?`, repo, maxDefiners)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	type sym struct{ name, path string }
-	var syms []sym
+	hit := map[string]bool{}
 	mine := map[string]bool{}
 	for rows.Next() {
-		var s sym
-		if err := rows.Scan(&s.name, &s.path); err != nil {
+		var name, defPath string
+		if err := rows.Scan(&name, &defPath); err != nil {
 			return nil, err
 		}
-		if s.path == path {
-			mine[s.name] = true
+		if len(name) <= 2 {
 			continue
 		}
-		syms = append(syms, s)
+		if defPath == path {
+			mine[name] = true
+			continue
+		}
+		// Forward: this file mentions a name that file defines.
+		if mentioned[name] {
+			hit[defPath] = true
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	hit := map[string]bool{}
-	// Forward: this file mentions a name another file defines.
-	for _, s := range syms {
-		if len(s.name) >= 4 && strings.Contains(text, s.name) {
-			hit[s.path] = true
-		}
-	}
-	// Backward: another file mentions a name this file defines. Done as one
-	// query rather than a scan per candidate, because a repository has
-	// thousands of chunks and this walk runs per gathered source.
+	// Backward: another file in this repository mentions a name THIS file
+	// defines. Done by reading the repository's chunks once and tokenizing
+	// them, rather than by joining every chunk against every symbol row, which
+	// is a cartesian product the DISTINCT only hides the cost of.
 	if len(mine) > 0 {
-		names := make([]any, 0, len(mine)+1)
-		ph := make([]string, 0, len(mine))
-		for n := range mine {
-			if len(n) < 4 {
+		back, err := db.QueryContext(ctx, `
+			SELECT f.path, COALESCE(GROUP_CONCAT(c.raw_text, char(10)), '')
+			FROM files f JOIN chunks c ON c.file_id = f.id
+			WHERE f.repo = ? AND f.path <> ?
+			GROUP BY f.path`, repo, path)
+		if err != nil {
+			return nil, err
+		}
+		for back.Next() {
+			var p, body string
+			if err := back.Scan(&p, &body); err != nil {
+				back.Close()
+				return nil, err
+			}
+			if hit[p] {
 				continue
 			}
-			names = append(names, n)
-			ph = append(ph, "?")
-		}
-		if len(names) > 0 {
-			back, err := db.QueryContext(ctx, `
-				SELECT DISTINCT f.path
-				FROM chunks c JOIN files f ON f.id = c.file_id
-				JOIN symbols s ON s.name IN (`+strings.Join(ph, ",")+`)
-				WHERE f.repo = ? AND f.path <> ?
-				  AND instr(c.raw_text, s.name) > 0`,
-				append(append([]any{}, names...), repo, path)...)
-			if err != nil {
-				return nil, err
-			}
-			for back.Next() {
-				var p string
-				if err := back.Scan(&p); err != nil {
-					back.Close()
-					return nil, err
+			for name := range identifierSet(body) {
+				if mine[name] {
+					hit[p] = true
+					break
 				}
-				hit[p] = true
 			}
-			back.Close()
-			if err := back.Err(); err != nil {
-				return nil, err
-			}
+		}
+		back.Close()
+		if err := back.Err(); err != nil {
+			return nil, err
 		}
 	}
 
-	out := make([]fileRef, 0, len(hit))
+	paths := make([]string, 0, len(hit))
 	for p := range hit {
+		paths = append(paths, p)
+	}
+	// Ordered before the cap, so the hop is the same set on every run.
+	sort.Strings(paths)
+	if len(paths) > inlandFanOut {
+		paths = paths[:inlandFanOut]
+	}
+	out := make([]fileRef, 0, len(paths))
+	for _, p := range paths {
 		out = append(out, fileRef{repo: repo, path: p})
 	}
 	return out, nil
+}
+
+// identifierSet tokenizes source the way internal/ask does: on anything that is
+// not a letter, a digit or an underscore, keeping names longer than two
+// characters. Kept identical on purpose — two walks disagreeing about what an
+// identifier is would make a gathered set depend on which one found it.
+func identifierSet(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
+	}) {
+		if len(f) > 2 {
+			out[f] = true
+		}
+	}
+	return out
 }
