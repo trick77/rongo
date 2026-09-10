@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/edges"
+	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 )
 
