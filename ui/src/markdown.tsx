@@ -6,8 +6,8 @@ import Diagram, { parseDiagram } from "./diagram";
 /**
  * A small Markdown renderer covering exactly what the answer prompt produces:
  * headings, paragraphs, bold, inline code, fenced code (coloured by its
- * language tag, see highlight.tsx), lists, and the one fence that is not
- * code: a `diagram` fence, drawn by diagram.tsx.
+ * language tag, see highlight.tsx), lists, pipe tables, and the one fence that
+ * is not code: a `diagram` fence, drawn by diagram.tsx.
  *
  * It builds React nodes and never HTML. The text is model output, and
  * dangerouslySetInnerHTML would turn a prompt injection into a script tag.
@@ -254,6 +254,67 @@ const headingRe = /^(#{1,6})\s+(.*)$/;
 const bulletRe = /^\s*[-*]\s+(.*)$/;
 const orderedRe = /^\s*\d+[.)]\s+(.*)$/;
 
+/** sepRe is a table's second line: the dashes under the header row, with or
+ * without the outer pipes and with GFM's alignment colons (which are read as
+ * syntax and then ignored - the columns are left-aligned either way). */
+const sepRe = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** tableAt says a table starts at `at`. It is the dashes that make a table,
+ * never the pipes above them: a sentence about `a | b` is prose, and a header
+ * row whose separator has not arrived yet is prose too, until it does.
+ *
+ * This is a lookahead over two lines rather than a line test, which is why it
+ * is not part of startsBlock - and why the paragraph loop below has to ask it
+ * the same question. A single-line "starts with a pipe" test there would let
+ * the paragraph branch consume nothing while the table branch still waited for
+ * the separator, and renderMarkdown would spin on every streamed token. */
+function tableAt(lines: string[], at: number): boolean {
+  return (
+    at + 1 < lines.length &&
+    lines[at].includes("|") &&
+    !fenceRe.test(lines[at]) &&
+    lines[at + 1].includes("|") &&
+    sepRe.test(lines[at + 1])
+  );
+}
+
+/** cellsOf cuts one row into its cells.
+ *
+ * The split respects inline code and GFM's escaped \|, because a cell holding
+ * `a | b` is one cell and not two - an answer about a shell pipeline or a
+ * regex holds exactly that. The outer pipes of `| a | b |` delimit, so the
+ * empty pieces outside them are dropped; an empty cell written INSIDE the row
+ * survives. */
+function cellsOf(row: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let code = false;
+  for (let i = 0; i < row.length; i++) {
+    const ch = row[i];
+    if (ch === "\\" && row[i + 1] === "|") {
+      cur += "|";
+      i++;
+      continue;
+    }
+    if (ch === "`") code = !code;
+    if (ch === "|" && !code) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  if (row.trim().startsWith("|")) out.shift();
+  // The trailing piece goes only when the closing pipe really delimited: it is
+  // then empty. Reading the row's LAST CHARACTER instead loses the whole row
+  // whenever a backtick is still unbalanced - the pipe was swallowed into the
+  // code span, the piece holds the row's only text, and every streamed table
+  // with a pipe inside inline code passes through exactly that state.
+  if (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return out.map((cell) => cell.trim());
+}
+
 function startsBlock(line: string): boolean {
   return (
     fenceRe.test(line) ||
@@ -393,8 +454,70 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       continue;
     }
 
+    if (tableAt(lines, i)) {
+      const head = cellsOf(lines[i]);
+      const key = k++;
+      i += 2;
+      const rows: string[][] = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() !== "" &&
+        !startsBlock(lines[i]) &&
+        lines[i].includes("|")
+      ) {
+        // The header decides the width. A row that came up short or long is
+        // normal model output, and columns that stopped lining up would be a
+        // worse table than a padded one. A row of nothing but its opening pipe
+        // is not a row yet - the first token of one still arriving - and an
+        // empty band would flash under the header for as long as it took the
+        // rest to come.
+        const cells = cellsOf(lines[i]);
+        i++;
+        if (cells.length === 0) continue;
+        while (cells.length < head.length) cells.push("");
+        rows.push(cells.slice(0, head.length));
+      }
+      // Cells run through inline(), so a marker in one is a chip and a cell of
+      // code is code. The fade is off for the same reason bold turns it off:
+      // the cell mounts fresh the moment the separator row arrives, and text
+      // the reader had already read would drop to a fifth of its brightness
+      // and climb back.
+      out.push(
+        // A table wider than the column scrolls inside its own box rather
+        // than pushing the answer sideways. md-table is the streaming caret's
+        // hook (index.css): a table is written row by row over seconds, and
+        // the caret has to follow it as it does a paragraph.
+        <div key={key} className="md-table overflow-x-auto">
+          <table>
+            <thead>
+              <tr>
+                {head.map((cell, c) => (
+                  <th key={c}>{inline(cell, `tb${key}-h${c}`, hooks, false)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (
+                    <td key={c}>{inline(cell, `tb${key}-${r}-${c}`, hooks, false)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "" && !startsBlock(lines[i])) {
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !startsBlock(lines[i]) &&
+      !tableAt(lines, i)
+    ) {
       para.push(lines[i++]);
     }
     out.push(
