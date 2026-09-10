@@ -483,6 +483,15 @@ export default function Ask({
   useEffect(() => {
     const el = box.current;
     if (!el) return;
+    // A composer with no layout box measures zero, and writing that back
+    // pinned it at 0px: padding alone, the placeholder sliced through the
+    // middle, the textarea's own scrollbar showing as a grey pill above the
+    // button row. Ask stays mounted while another page is on screen, so a
+    // load straight onto /projects or /shared ran this effect under
+    // display:none — and nothing re-measured when the pane came back,
+    // because only the question is watched. It stayed collapsed until the
+    // first keystroke healed it, which is what made it look random.
+    if (!el.scrollHeight) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }, [question]);
