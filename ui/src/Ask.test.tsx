@@ -2435,6 +2435,31 @@ describe("the composer's own box", () => {
     expect(form?.className).toContain("max-w-[900px]");
   });
 
+  // The regression this keeps out: Ask stays mounted under `hidden` while
+  // another page is on screen, so the grow-with-the-question effect ran with
+  // no layout box, measured zero and wrote it back. The composer stayed a
+  // sliver of padding — placeholder cut through the middle, its own scrollbar
+  // showing as a grey pill — until a keystroke re-ran the effect.
+  it("keeps its height when it is measured with no layout box", async () => {
+    const user = userEvent.setup();
+    strict(<Ask />);
+
+    const box = screen.getByLabelText("Question") as HTMLTextAreaElement;
+    // jsdom lays nothing out, so scrollHeight is 0 — the hidden composer.
+    expect(box.scrollHeight).toBe(0);
+    expect(box.style.height).not.toBe("0px");
+
+    // Given a box again, it goes back to following the question.
+    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 60 });
+    await user.type(box, "How?");
+    expect(box.style.height).toBe("60px");
+
+    // And never past the few lines it is allowed to grow to.
+    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 900 });
+    await user.type(box, "!");
+    expect(box.style.height).toBe("200px");
+  });
+
   it("says which build answered, under the composer", () => {
     strict(<Ask version="0.0.77" />);
 
