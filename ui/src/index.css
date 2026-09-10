@@ -236,9 +236,38 @@ body {
   font-weight: 530;
 }
 
+/* A pipe table. It scrolls inside its own box (the wrapper in markdown.tsx)
+   rather than widening the answer, so the width here is the content's, not the
+   column's. Hairlines between the rows only: a full grid reads as a
+   spreadsheet next to prose this quiet. */
+.ui-markdown table {
+  /* min-width, not width: the table fills the column when its content is
+     narrower and grows past it when it is not, which is what makes the
+     wrapper's overflow a scroll instead of squeezed, wrapped columns. */
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.ui-markdown :where(th, td) {
+  padding: 0.35rem 0.7rem 0.35rem 0;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ui-markdown th {
+  color: var(--color-ink);
+  font-weight: 530;
+}
+
+.ui-markdown tbody tr:last-child :where(th, td) {
+  border-bottom: 0;
+}
+
 /* No em rule: the renderer has no emphasis node, so there would be nothing to
-   style. Same for blockquote, hr, table and links — loom carries all of them,
-   rongo emits none of them. */
+   style. Same for blockquote, hr and links — loom carries all of them, rongo
+   emits none of them. */
 
 /* Inline code only. The fenced block sets its own font on the <pre>, and this
    selector must not shrink the <code> inside it a second time. */
@@ -375,9 +404,15 @@ body {
    under text it has nothing to do with. Named blocks rather than :last-child
    on its own: a list draws the caret on its last item, not once on the <ul>
    and again on the item, and a diagram - a picture, or the box saying one is
-   coming - is not a line of writing and gets none. */
+   coming - is not a line of writing and gets none.
+
+   A table is a line of writing: it arrives row by row over seconds, so the
+   caret sits in its last cell, and in the header while the first row is still
+   on its way. */
 .ui-markdown.streaming > :is(p, h2, h3, h4, pre):last-child::after,
-.ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after {
+.ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
+.ui-markdown.streaming > .md-table:last-child tbody tr:last-child > td:last-child::after,
+.ui-markdown.streaming > .md-table:last-child:has(tbody:empty) th:last-child::after {
   content: "";
   display: inline-block;
   width: 2px;

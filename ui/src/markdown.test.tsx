@@ -25,6 +25,102 @@ describe("Markdown", () => {
     expect(container.textContent).not.toContain("```");
   });
 
+  describe("tables", () => {
+    const table = [
+      "| Field | Meaning |",
+      "| --- | --- |",
+      "| id | the row |",
+      "| kind | the part |",
+    ].join("\n");
+
+    it("renders a pipe table as a table, not a paragraph full of pipes", () => {
+      const { container } = render(<Markdown text={table} />);
+      expect(container.querySelectorAll("table")).toHaveLength(1);
+      expect(container.querySelectorAll("thead th")).toHaveLength(2);
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+      expect(container.querySelector("thead th")?.textContent).toBe("Field");
+      expect(container.querySelector("tbody td")?.textContent).toBe("id");
+      expect(container.textContent).not.toContain("|");
+      expect(container.textContent).not.toContain("---");
+    });
+
+    it("reads a table without the outer pipes", () => {
+      const { container } = render(<Markdown text={"a | b\n--- | ---\n1 | 2"} />);
+      expect(container.querySelectorAll("thead th")).toHaveLength(2);
+      expect(container.querySelectorAll("tbody td")).toHaveLength(2);
+    });
+
+    it("leaves a header row whose separator has not arrived as text", () => {
+      // Half-written markup is the normal case while an answer streams, and
+      // this one also guards the paragraph loop: a line the table branch will
+      // not take yet has to stay something the paragraph branch consumes, or
+      // renderMarkdown never advances.
+      const { container } = render(<Markdown text={"| Field | Meaning |"} />);
+      expect(container.querySelector("table")).toBeNull();
+      expect(container.textContent).toBe("| Field | Meaning |");
+    });
+
+    it("leaves a sentence with a pipe in it alone", () => {
+      const { container } = render(<Markdown text={"Read a | b as a choice."} />);
+      expect(container.querySelector("table")).toBeNull();
+      expect(container.textContent).toBe("Read a | b as a choice.");
+    });
+
+    it("keeps a pipe inside inline code in one cell", () => {
+      const src = "| Command | Note |\n| --- | --- |\n| `ps | grep go` | one cell |";
+      const { container } = render(<Markdown text={src} />);
+      const cells = container.querySelectorAll("tbody td");
+      expect(cells).toHaveLength(2);
+      expect(cells[0].querySelector("code")?.textContent).toBe("ps | grep go");
+    });
+
+    it("turns a marker in a cell into a citation chip", () => {
+      const src = "| Field | Meaning |\n| --- | --- |\n| id | the row [1] |";
+      const { container } = render(<Markdown text={src} backed={new Set([1])} />);
+      expect(container.querySelector("tbody td sup")?.textContent).toBe("[1]");
+    });
+
+    it("pads a short row so the columns stay lined up", () => {
+      const src = "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 |";
+      const { container } = render(<Markdown text={src} />);
+      expect(container.querySelectorAll("tbody td")).toHaveLength(3);
+    });
+
+    it("keeps the text of a row whose backtick has not closed yet", () => {
+      // Mid-stream this is every table with a pipe inside inline code: the
+      // closing pipe is still inside the code span, so it never delimited and
+      // the piece holding it is the row itself.
+      const src = "| Command | Note |\n| --- | --- |\n| `ps | one cell |";
+      const { container } = render(<Markdown text={src} />);
+      expect(container.querySelector("tbody tr")?.textContent).toContain("ps");
+    });
+
+    it("keeps an empty cell written inside the row", () => {
+      const src = "| a | b |\n| --- | --- |\n| 1 |  |";
+      const { container } = render(<Markdown text={src} />);
+      const cells = container.querySelectorAll("tbody td");
+      expect(cells).toHaveLength(2);
+      expect(cells[0].textContent).toBe("1");
+      expect(cells[1].textContent).toBe("");
+    });
+
+    it("never blanks a row while it streams in", () => {
+      const row = "| `ps | grep go` | one cell |";
+      const src = "| Command | Note |\n| --- | --- |\n" + row;
+      for (let n = 1; n <= row.length; n++) {
+        const { container } = render(<Markdown text={src.slice(0, src.length - row.length + n)} />);
+        const body = container.querySelector("tbody tr");
+        if (body) expect(body.textContent?.trim()).not.toBe("");
+      }
+    });
+
+    it("ends the table at the blank line and keeps rendering after it", () => {
+      const { container } = render(<Markdown text={table + "\n\nAfter."} />);
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+      expect(container.querySelector("p")?.textContent).toBe("After.");
+    });
+  });
+
   describe("code block colouring", () => {
     it("colours a fence by its language tag, text unchanged", () => {
       const { container } = render(<Markdown text={"```go\nfunc main() {}\n```"} />);
