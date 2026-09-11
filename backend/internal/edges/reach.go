@@ -8,12 +8,18 @@ import (
 	"unicode"
 )
 
-// maxDefiners is the selectivity ceiling for the in-repo hop, and it is the
-// same rule internal/ask applies when it walks references: a name thirty files
-// define says nothing about which one this code depends on. Counted the same
-// way too — across ENABLED repositories, not within one — so the two walks
-// cannot disagree about which names are selective.
-const maxDefiners = 8
+// MaxDefiners is the selectivity ceiling of a symbol hop: how many files may
+// define a name before following it says nothing about which one this code
+// depends on. ONE constant for both walks — internal/ask reads it for the
+// reference walk the product runs, and Reach below reads it for the measured
+// composed walk — so the two cannot disagree about which names are selective.
+// Counted across ENABLED repositories, not within one.
+//
+// Four was measured on the real corpus (internal/ask): it drops Close (31
+// files), err (23) and Error (10) while keeping a genuine service method,
+// which is defined once or twice. Reach was first written with eight, and the
+// flow catalogue measures the same 20 of 29 parts at four.
+const MaxDefiners = 4
 
 // inlandFanOut caps how many files one in-repo hop may return.
 //
@@ -166,7 +172,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 		         FROM symbols s2
 		         JOIN files f2 ON f2.id = s2.file_id
 		         JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
-		        WHERE s2.name = s.name) <= ?`, repo, maxDefiners)
+		        WHERE s2.name = s.name) <= ?`, repo, MaxDefiners)
 	if err != nil {
 		return nil, err
 	}

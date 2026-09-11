@@ -881,6 +881,18 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	}, nil
 }
 
+// reachedVia says, for the answer prompt, how a source that the search did
+// not return got there. A symbol hop names the symbol. A crossing names the
+// queue or route AND the file on the near side, because that is the fact the
+// answer has to state: shipping sends to the queue queue-master listens on,
+// and no line of either file says so on its own.
+func reachedVia(reason string) string {
+	if rest, ok := strings.CutPrefix(reason, "edge:"); ok {
+		return "reached in another repository, which shares the " + rest
+	}
+	return "reached via " + strings.TrimPrefix(reason, "reference:")
+}
+
 // renderSources numbers the gathered material. The number IS the citation
 // marker the model writes, so it never has to invent an identifier for a
 // file; the renumberer turns it into the reader's number on the way out.
@@ -895,7 +907,7 @@ func renderSources(question string, sources []Source) string {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
 		}
 		if s.Reason != "" && s.Reason != "hit" {
-			fmt.Fprintf(&b, " [reached via %s]", strings.TrimPrefix(s.Reason, "reference:"))
+			fmt.Fprintf(&b, " [%s]", reachedVia(s.Reason))
 		}
 		b.WriteString("\n")
 		b.WriteString(s.Text)

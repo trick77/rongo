@@ -68,6 +68,9 @@ type gatherArm struct {
 	// gathering result that changed because the CODE changed from one that
 	// changed because the measurement did.
 	docDecay float64
+	// noCrossings switches the repository crossing off, which is how the
+	// walk behaved before the edge table reached it.
+	noCrossings bool
 }
 
 // gatherOutcome is one question under one arm.
@@ -143,6 +146,11 @@ func TestEvalMeasureGathered(t *testing.T) {
 		{name: "raw + walk", expanded: false, hops: opts.MaxHops},
 		{name: "expanded + walk", expanded: true, hops: opts.MaxHops},
 		{name: "expanded + walk, no doc decay", expanded: true, hops: opts.MaxHops, docDecay: 1.0},
+		// The walk before repository crossings existed: no crossing, and the
+		// whole budget to the symbol walk. On a corpus with one manifest edge
+		// and no queue this is the arm that says what the crossing reserve
+		// costs — the product arm above pays it whether or not an edge fires.
+		{name: "expanded + walk, crossings off", expanded: true, hops: opts.MaxHops, noCrossings: true},
 	}
 
 	t.Logf("questions=%d max_hops=%d token_budget=%d", len(questions), opts.MaxHops, opts.TokenBudget)
@@ -154,7 +162,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 		} else {
 			r.DocDecay = retrieve.DefaultDocDecay
 		}
-		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget})
+		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget, NoCrossings: arm.noCrossings})
 		var out []gatherOutcome
 		for _, q := range questions {
 			query := retrieve.Query{Text: q.Text, Question: q.Text, K: gatherSearchK}
