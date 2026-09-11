@@ -37,8 +37,15 @@ func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
 	want := usage.Call{Step: "embed", Model: "text-embedding-3-small", Prompt: 9}
-	if calls[0] != want {
-		t.Errorf("call = %+v, want %+v", calls[0], want)
+	// The duration is measured here, not reported by the endpoint: checked on
+	// its own, then cleared so this stays a test about the tokens.
+	got := calls[0]
+	if got.Ms == nil {
+		t.Error("the call must be timed")
+	}
+	got.Ms = nil
+	if got != want {
+		t.Errorf("call = %+v, want %+v", got, want)
 	}
 }
 

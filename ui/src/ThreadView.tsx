@@ -4,7 +4,7 @@ import Clarify from "./Clarify";
 import Narrow from "./Narrow";
 import Question from "./Question";
 import Trace from "./Trace";
-import { CheckIcon, Chevron, CopyIcon } from "./icons";
+import { CheckIcon, CopyIcon } from "./icons";
 import {
   clock,
   groupByQuestion,
@@ -29,8 +29,8 @@ import {
  * chips, Retry and the candidate buttons are simply not rendered — a reader
  * with no session has no move to make, and offering one would be a lie.
  *
- * What the view remembers about itself — which failure is unfolded, which
- * usage block is open, which turn has just been copied — lives here rather
+ * What the view remembers about itself — which failure is unfolded and which
+ * turn has just been copied — lives here rather
  * than in the caller. None of it survives leaving the thread, and none of it
  * is any of Ask's business. The source viewer is the exception, and is the
  * caller's: it is a page-level overlay, and the pane beside the thread opens
@@ -46,6 +46,11 @@ export type ThreadActions = {
   onChoose: (i: number, idx: number) => void;
   // The too-broad panel's move: the repositories the reader picked off it.
   onNarrow: (i: number, repos: string[]) => void;
+  // Opens the stats pane on this turn. The pill used to unfold a table here;
+  // it now opens the pane, which holds the same ledger and everything the
+  // table had nowhere to put — what was cached, how long each call took, and
+  // what filled the answer's context.
+  onOpenStats: (i: number) => void;
 };
 
 export type ThreadViewProps = {
@@ -122,9 +127,6 @@ export default function ThreadView({
   // state: copying the question and copying the answer are two controls, and
   // one flag would light both.
   const [copiedQuestion, setCopiedQuestion] = useState<number | null>(null);
-  // The turn whose usage breakdown is open, if any. One at a time: it is a
-  // glance at what a turn cost, not a report to keep open.
-  const [openUsage, setOpenUsage] = useState<number | null>(null);
   // The superseded failures the reader has unfolded. A failure stays in the
   // record and stays on the page, but a turn that went on to answer should
   // not open with the attempt that broke — so it folds to a line, and the
@@ -140,7 +142,6 @@ export default function ThreadView({
 
   // Another thread: the indices this view is holding mean something else now.
   useEffect(() => {
-    setOpenUsage(null);
     setOpenFailure(new Set());
     setCopied(null);
   }, [threadKey]);
@@ -501,13 +502,14 @@ export default function ThreadView({
                       {turn.usage && (
                         <button
                           type="button"
-                          aria-expanded={openUsage === i}
-                          aria-label={`Usage of turn ${i + 1}`}
-                          onClick={() => setOpenUsage(openUsage === i ? null : i)}
+                          aria-label={`Token stats of turn ${i + 1}`}
+                          onClick={() => actions.onOpenStats(i)}
                           className={
                             pill +
-                            " ml-auto inline-flex items-center gap-1.5 font-mono " +
-                            (openUsage === i ? "bg-elevated text-muted" : "bg-active text-faint hover:text-muted")
+                            // No chevron: this opens a pane beside the thread
+                            // rather than unfolding under itself, and a
+                            // chevron would promise the old behaviour.
+                            " ml-auto inline-flex items-center gap-1.5 bg-active font-mono text-faint hover:text-muted"
                           }
                         >
                           {tokens(turn.usage.total_tokens)}
@@ -517,60 +519,9 @@ export default function ThreadView({
                               {money(turn.usage.cost_usd)}
                             </>
                           )}
-                          <Chevron open={openUsage === i} />
                         </button>
                       )}
                     </div>
-                    {turn.usage && openUsage === i && (
-                      <div className="mt-2.5 ml-auto w-full max-w-[470px] overflow-x-auto rounded-ui border border-border bg-panel px-3.5 py-2.5 font-mono text-xs">
-                        <table className="w-full border-collapse">
-                          <thead>
-                            <tr className="text-faint">
-                              <th className="border-b border-border-soft pb-1.5 text-left font-normal">call</th>
-                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">in</th>
-                              <th className="border-b border-border-soft pb-1.5 text-right font-normal">out</th>
-                              {turn.usage.cost_usd != null && (
-                                <th className="border-b border-border-soft pb-1.5 text-right font-normal">cost</th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {turn.usage.calls.map((c, k) => (
-                              <tr key={k} className="text-muted">
-                                <td className="py-1 text-ink-dim">
-                                  {c.step}
-                                  <span className="ml-2 text-faint">{c.model}</span>
-                                </td>
-                                <td className="py-1 text-right">{c.prompt_tokens.toLocaleString("en-GB")}</td>
-                                <td className="py-1 text-right">
-                                  {c.completion_tokens > 0 ? c.completion_tokens.toLocaleString("en-GB") : "–"}
-                                </td>
-                                {turn.usage!.cost_usd != null && (
-                                  <td className="py-1 text-right">{c.cost_usd != null ? money(c.cost_usd) : "–"}</td>
-                                )}
-                              </tr>
-                            ))}
-                            <tr className="text-ink-dim">
-                              <td className="border-t border-border-soft pt-1.5">total</td>
-                              <td className="border-t border-border-soft pt-1.5 text-right">
-                                {turn.usage.prompt_tokens.toLocaleString("en-GB")}
-                              </td>
-                              <td className="border-t border-border-soft pt-1.5 text-right">
-                                {turn.usage.completion_tokens.toLocaleString("en-GB")}
-                              </td>
-                              {turn.usage.cost_usd != null && (
-                                <td className="border-t border-border-soft pt-1.5 text-right">{money(turn.usage.cost_usd)}</td>
-                              )}
-                            </tr>
-                          </tbody>
-                        </table>
-                        <p className="mt-2 font-sans text-xs text-faint">
-                          {turn.usage.cost_usd != null
-                            ? "Computed from the registry's list price, USD per million tokens: the deployments at MiMo's own API whatever endpoint they were called at, embeddings at theirs. Not a bill: the provider's invoice is."
-                            : "Tokens only: no price table is loaded. The server log says why."}
-                        </p>
-                      </div>
-                    )}
                   </div>
                 )}
                   </>

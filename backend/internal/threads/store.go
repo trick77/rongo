@@ -513,9 +513,13 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 	}
 	defer tx.Rollback()
 	for _, c := range calls {
+		// nullable() rather than the ints themselves: a call whose reply
+		// carried no details object stores NULL, and reads back absent. Zero
+		// is reserved for "the endpoint said zero".
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO message_usage (message_id, step, model, prompt_tokens, completion_tokens)
-			VALUES (?,?,?,?,?)`, messageID, c.Step, c.Model, c.Prompt, c.Completion); err != nil {
+			INSERT INTO message_usage (message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms)
+			VALUES (?,?,?,?,?,?,?,?)`, messageID, c.Step, c.Model, c.Prompt, c.Completion,
+			nullable(c.Cached), nullable(c.Reasoning), nullable(c.Ms)); err != nil {
 			return fmt.Errorf("store usage of %s: %w", c.Step, err)
 		}
 	}
@@ -524,8 +528,8 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 
 func (s *Store) calls(ctx context.Context, messageID int64) ([]usage.Call, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT step, model, prompt_tokens, completion_tokens FROM message_usage
-		 WHERE message_id = ? ORDER BY id`, messageID)
+		`SELECT step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms
+		 FROM message_usage WHERE message_id = ? ORDER BY id`, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("read usage: %w", err)
 	}
@@ -533,12 +537,32 @@ func (s *Store) calls(ctx context.Context, messageID int64) ([]usage.Call, error
 	out := []usage.Call{}
 	for rows.Next() {
 		var c usage.Call
-		if err := rows.Scan(&c.Step, &c.Model, &c.Prompt, &c.Completion); err != nil {
+		var cached, reasoning, ms sql.NullInt64
+		if err := rows.Scan(&c.Step, &c.Model, &c.Prompt, &c.Completion, &cached, &reasoning, &ms); err != nil {
 			return nil, fmt.Errorf("scan usage: %w", err)
 		}
+		// A turn answered before the columns existed reads back with these
+		// absent, which is what it is: not measured, rather than zero.
+		c.Cached, c.Reasoning, c.Ms = counted(cached), counted(reasoning), counted(ms)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// nullable writes an absent count as NULL.
+func nullable(n *int) any {
+	if n == nil {
+		return nil
+	}
+	return *n
+}
+
+// counted is nullable's other half: a NULL column reads back absent.
+func counted(n sql.NullInt64) *int {
+	if !n.Valid {
+		return nil
+	}
+	return usage.Int(int(n.Int64))
 }
 
 // Fail records that a turn did not produce an answer. The question stays: a

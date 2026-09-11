@@ -124,6 +124,25 @@ type Answer struct {
 	// sentence a reader sees is rendered from it, and a later resume or
 	// re-explain rebuilds the same prompt rules from it.
 	Scope Scope
+	// Prompt is what the call was sent, measured HERE rather than billed by
+	// the endpoint: the upstream reports one prompt figure and never says
+	// which part of it was the rules, which the code and which the question.
+	// The parts are the same chars-per-four estimate the gatherer budgets
+	// with, so they will not add up to Usage.Prompt exactly — the total is
+	// billed, the split is measured, and the reader is told which is which.
+	Prompt PromptParts
+}
+
+// PromptParts is the answer prompt by section, in estimated tokens. System is
+// every rule the audience, language and scope assembled — and the thread's
+// previous question with it, because a follow-up is written into the rules
+// (answerFollowUp) rather than into the message the reader typed. Sources is
+// the code in front of the model, headers and separators included. Question
+// is what was asked, and only that.
+type PromptParts struct {
+	System   int `json:"system"`
+	Sources  int `json:"sources"`
+	Question int `json:"question"`
 }
 
 // Answerer writes the answer. This is the only step that runs on Pro, and the
@@ -856,9 +875,22 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 			onToken(s)
 		}
 	}
+	// Measured before the call, from the exact strings that go on the wire.
+	// The user message is the question with the code under it, so the code is
+	// what is left once the question is taken off — counted that way round
+	// because the headers, paths and separators renderSources writes are part
+	// of what the sources cost, and attributing them to the question would
+	// flatter the figure that matters.
+	user := renderSources(question, sources)
+	asked := estimateTokens(question)
+	parts := PromptParts{
+		System:   estimateTokens(system),
+		Sources:  max(estimateTokens(user)-asked, 0),
+		Question: asked,
+	}
 	usage, err := a.llm.Stream(ctx, []llm.Message{
 		{Role: "system", Content: system},
-		{Role: "user", Content: renderSources(question, sources)},
+		{Role: "user", Content: user},
 	}, func(tok string) { emit(rn.feed(tok)) }, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
 	emit(rn.flush())
 	var cut *llm.FinishError
@@ -886,6 +918,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Citations: rn.citations(sources),
 		Usage:     usage,
 		Sources:   sources,
+		Prompt:    parts,
 	}, nil
 }
 

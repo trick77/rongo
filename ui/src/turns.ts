@@ -114,6 +114,16 @@ export type UsageCall = {
   prompt_tokens: number;
   completion_tokens: number;
   cost_usd?: number;
+  // The part of prompt_tokens the endpoint served from its cache, and the
+  // part of completion_tokens spent thinking. Both are subsets of the count
+  // above them, never additions. Absent on a turn answered before they were
+  // recorded, which is not the same as a call that cached nothing.
+  cached_tokens?: number;
+  reasoning_tokens?: number;
+  // How long the call took, wall clock. Absent for the same reason.
+  ms?: number;
+  // The window of the model this call went to, when the registry sizes it.
+  context_tokens?: number;
 };
 
 /** Usage is the usage event's payload and a stored message's `usage`. */
@@ -126,6 +136,8 @@ export type Usage = {
   // has none. Absent and zero are different things: zero is "priced, and it
   // cost nothing", absent is "not priced here".
   cost_usd?: number;
+  // The turn's cached share, summed over the calls that reported one.
+  cached_tokens?: number;
 };
 
 /** tokens formats a count the way the pill shows it. */

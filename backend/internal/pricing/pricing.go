@@ -55,16 +55,31 @@ type Provider struct {
 	Models map[string]Model `json:"models"`
 }
 
-// Model is one model as the registry prices it. A nil Cost is a model the
-// registry lists but does not price.
+// Model is one model as the registry prices and sizes it. A nil Cost is a
+// model the registry lists but does not price.
 type Model struct {
 	Cost *Cost `json:"cost"`
+	// Limit is how much the model holds. Absent for an entry that does not
+	// say, and then nothing is shown rather than a guessed window.
+	Limit *Limit `json:"limit"`
 }
 
 // Cost is USD per million tokens, the unit usage.Price uses.
 type Cost struct {
 	Input  float64 `json:"input"`
 	Output float64 `json:"output"`
+	// CacheRead is what a prompt token served from the upstream's cache
+	// costs. Both MiMo deployments list one, two orders of magnitude under
+	// their input price.
+	CacheRead float64 `json:"cache_read"`
+}
+
+// Limit is what the model can hold: Context covers prompt and completion
+// together, Output caps the completion alone. Only Context is read — the
+// completion cap rongo works to is its own, well under the model's.
+type Limit struct {
+	Context int `json:"context"`
+	Output  int `json:"output"`
 }
 
 // hostsWithoutAPI maps the base URL host of a provider whose registry entry
@@ -152,9 +167,30 @@ func agreedPrice(reg Registry, ids []string, model string) (usage.Price, string)
 		if !listed || m.Cost == nil {
 			return usage.Price{}, fmt.Sprintf("provider %s does not price %s", id, model)
 		}
-		p := usage.Price{In: m.Cost.Input, Out: m.Cost.Output}
-		if found && p != agreed {
-			return usage.Price{}, fmt.Sprintf("providers %s share the endpoint but price %s differently; the endpoint does not say which contract applies", strings.Join(ids, ", "), model)
+		p := usage.Price{In: m.Cost.Input, Out: m.Cost.Output, CacheRead: m.Cost.CacheRead}
+		if m.Limit != nil {
+			p.Context = m.Limit.Context
+		}
+		// Only what is charged decides whether the contracts agree. The
+		// window is not a price, and comparing whole structs made one entry
+		// that omits `limit` empty the WHOLE table for every model — a
+		// warning here is all-or-nothing at the caller. A cache price that
+		// two entries both state and state differently is a real
+		// disagreement; one that only one of them states is not.
+		if found {
+			if p.In != agreed.In || p.Out != agreed.Out || (p.CacheRead > 0 && agreed.CacheRead > 0 && p.CacheRead != agreed.CacheRead) {
+				return usage.Price{}, fmt.Sprintf("providers %s share the endpoint but price %s differently; the endpoint does not say which contract applies", strings.Join(ids, ", "), model)
+			}
+			if agreed.CacheRead == 0 {
+				agreed.CacheRead = p.CacheRead
+			}
+			// The smaller window of the two, and any window beats none: a
+			// ceiling claimed larger than the contract allows is the error
+			// that would matter.
+			if agreed.Context == 0 || (p.Context > 0 && p.Context < agreed.Context) {
+				agreed.Context = p.Context
+			}
+			continue
 		}
 		agreed, found = p, true
 	}
