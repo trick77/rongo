@@ -75,6 +75,17 @@ type Events struct {
 	// before the search, at most once, and not at all when there is nothing
 	// to say — which is every ordinary turn.
 	OnNotice func(text string)
+	// OnDetail reports what a step found, once the step is done: the
+	// understanding's terms and scope, hits per repository, the routing rung,
+	// the sources by reason, the answer's usage. Facts the pipeline held
+	// anyway and used to log for nobody; the trace draws them under the step.
+	OnDetail func(step string, detail map[string]any)
+}
+
+func (e Events) detail(step string, d map[string]any) {
+	if e.OnDetail != nil && len(d) > 0 {
+		e.OnDetail(step, d)
+	}
 }
 
 func (e Events) notice(text string) {
@@ -243,6 +254,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
 	ev.notice(ScopeNotice(lang, scope))
+	ev.detail("understanding", understandingDetail(u, scope, pin))
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
@@ -261,12 +273,14 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
+	ev.detail("searching", searchDetail(hits))
 
 	ev.status("routing")
 	d, err := p.router.Route(ctx, question, audience, lang, hits, known, all)
 	if err != nil {
 		return Answer{}, nil, err
 	}
+	ev.detail("routing", routingDetail(d))
 	if d.Ask {
 		// The turn ends here. The understanding travels with it: a resumed
 		// turn that re-derives its own terms can search differently and
@@ -413,6 +427,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 	if err != nil {
 		return Answer{}, err
 	}
+	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget))
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, terms), Scope: scope}, nil
 	}
@@ -425,10 +440,157 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 		ev.notice(ScopeNotice(lang, scope))
 	}
 
+	return p.answer(ctx, question, audience, lang, sources, scope, followingUp, ev)
+}
+
+// answer is the one Pro call every entry point ends in, with the writing
+// step's detail attached once the stream has closed: what it cost, and how
+// many of the sources in front of the model it actually cited.
+func (p *Pipeline) answer(ctx context.Context, question string, audience Audience, lang Language,
+	sources []Source, scope Scope, followingUp string, ev Events) (Answer, error) {
 	ev.status("answering")
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
+	if err == nil {
+		ev.detail("writing", map[string]any{
+			"prompt_tokens":     answer.Usage.Prompt,
+			"completion_tokens": answer.Usage.Completion,
+			"cited":             len(answer.Citations),
+			"sources":           len(sources),
+		})
+	}
 	return answer, err
+}
+
+// understandingDetail is what the first step found: the phrasings the search
+// will run, the identifiers the model guessed, and the scope the turn settled
+// on. Terms and code terms are the model's; the scope is the index's answer
+// to them, which is why both are shown — a guess that missed the index is
+// exactly what a reader wants to see when a search came back thin.
+func understandingDetail(u Understanding, scope Scope, pin []string) map[string]any {
+	d := map[string]any{}
+	if u.Intent != "" {
+		d["intent"] = u.Intent
+	}
+	if len(u.Terms) > 0 {
+		d["terms"] = u.Terms
+	}
+	if len(u.CodeTerms) > 0 {
+		d["code_terms"] = u.CodeTerms
+	}
+	if len(scope.Known) > 0 {
+		d["repos"] = scope.Known
+	}
+	if len(scope.Unknown) > 0 {
+		d["unknown_repos"] = scope.Unknown
+	}
+	if len(scope.Outside) > 0 {
+		d["outside_repos"] = scope.Outside
+	}
+	if len(pin) > 0 {
+		d["pinned"] = true
+	}
+	if scope.All {
+		d["all_repos"] = true
+	}
+	return d
+}
+
+// searchDetail is what the search returned: how many hits, per repository,
+// and the best one with the lanes that found it — "keyword strict" against
+// "semantic" is the difference between a literal match and a guess.
+func searchDetail(hits []retrieve.Hit) map[string]any {
+	d := map[string]any{"hits": len(hits)}
+	perRepo := map[string]int{}
+	for _, h := range hits {
+		perRepo[h.Repo]++
+	}
+	if len(perRepo) > 0 {
+		d["per_repo"] = perRepo
+	}
+	if len(hits) > 0 {
+		best := map[string]any{"repo": hits[0].Repo, "path": hits[0].Path}
+		if len(hits[0].Lanes) > 0 {
+			best["lanes"] = hits[0].Lanes
+		}
+		d["best"] = best
+	}
+	return d
+}
+
+// routingDetail is the decision and the rung that made it, plus what the
+// rung counted. The rung name is the ladder's own (route.go); the trace
+// turns it into a sentence a reader understands.
+func routingDetail(dec Decision) map[string]any {
+	d := map[string]any{"rung": dec.Rung}
+	switch {
+	case dec.TooBroad:
+		d["decision"] = "too_broad"
+	case dec.Ask:
+		d["decision"] = "ask"
+	default:
+		d["decision"] = "answer"
+	}
+	if dec.Ask && len(dec.Candidates) > 0 {
+		names := make([]string, 0, len(dec.Candidates))
+		for _, c := range dec.Candidates {
+			if c.Repo != "" {
+				names = append(names, c.Repo)
+			}
+		}
+		d["candidates"] = names
+	}
+	if dec.Projects > 0 {
+		d["projects"] = dec.Projects
+	}
+	if dec.Repos > 0 {
+		d["repos"] = dec.Repos
+	}
+	return d
+}
+
+// gatherDetail is what reached the answer and how: hits, symbol references,
+// crossings on a queue or route, the repositories they span, the budget
+// used, and each boundary crossed with the token that crossed it.
+func gatherDetail(sources []Source, budget int) map[string]any {
+	d := map[string]any{"sources": len(sources)}
+	var hits, refs, crossings, tokens int
+	repos := map[string]bool{}
+	var crossed []map[string]string
+	seenCrossing := map[string]bool{}
+	for _, s := range sources {
+		tokens += estimateTokens(s.Text)
+		repos[s.Repo] = true
+		switch {
+		case s.Reason == "hit":
+			hits++
+		case strings.HasPrefix(s.Reason, "edge:"):
+			crossings++
+			// "edge:<kind> <value> from <repo>/<path>"
+			rest := strings.TrimPrefix(s.Reason, "edge:")
+			via, from, _ := strings.Cut(rest, " from ")
+			fromRepo, _, _ := strings.Cut(from, "/")
+			key := fromRepo + "->" + s.Repo + " " + via
+			if !seenCrossing[key] {
+				seenCrossing[key] = true
+				crossed = append(crossed, map[string]string{"from": fromRepo, "to": s.Repo, "via": via})
+			}
+		default:
+			refs++
+		}
+	}
+	d["hits"] = hits
+	d["references"] = refs
+	d["crossings"] = crossings
+	d["tokens"] = tokens
+	if budget > 0 {
+		d["budget"] = budget
+	}
+	d["repos"] = len(repos)
+	if len(crossed) > 0 {
+		d["crossed"] = crossed
+	}
+	return d
 }
 
 // searchScoped runs the search the turn's scope calls for.
@@ -555,6 +717,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		}
 	}
 
+	ev.detail("searching", searchDetail(hits))
 	scope = p.describeProjects(ctx, scope)
 
 	ev.status("gathering")
@@ -562,14 +725,12 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	if err != nil {
 		return Answer{}, err
 	}
+	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget))
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
 	}
 
-	ev.status("answering")
-	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
-	answer.Scope = scope
-	return answer, err
+	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -584,11 +745,10 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 		return Answer{}, fmt.Errorf("reexplain: no sources left to answer from")
 	}
 
-	ev.status("answering")
 	// Rebuilt here too. Structure is never persisted, so a re-explain that
 	// skipped this would answer the same question from the same sources with
 	// the project structure missing — the two-backends disambiguation present
 	// in the first answer and gone from the second.
 	scope = p.describeProjects(ctx, scope)
-	return p.answerer.Answer(ctx, question, audience, lang, sources, scope, "", ev.tokens())
+	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
 }

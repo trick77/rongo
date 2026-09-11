@@ -10,8 +10,11 @@ import { Chevron } from "./icons";
  */
 export type TraceState = "running" | "done" | "waiting" | "decided" | "failed";
 
-/** One status event, with the moment it arrived. */
-export type Step = { step: string; at: number };
+/** What a step found, as the backend reports it once the step is done. */
+export type StepDetail = Record<string, unknown>;
+
+/** One status event, with the moment it arrived, and what the step found. */
+export type Step = { step: string; at: number; detail?: StepDetail };
 
 const doneLabel = "Done";
 const waitingLabel = "Waiting for a choice";
@@ -41,15 +44,218 @@ export function stepLabel(step: string): string {
   return stepLabels[step] ?? step;
 }
 
+/**
+ * The routing rung, as the reader should hear it. The backend's names are the
+ * ladder's own (route.go); a reader is told what the rung looked at, never
+ * its identifier.
+ */
+const rungSentences: Record<string, Record<string, string>> = {
+  answer: {
+    named_repos: "Answering directly: the question named the project, so there is nothing to choose.",
+    all_repos: "Answering across every project, as the question asked.",
+    repo_deps: "Answering directly: the matching repositories depend on each other, so they are one mechanism.",
+    margin: "Answering directly: one module matched far ahead of the rest.",
+    judge: "Answering directly: the matches are parts of one mechanism.",
+    role: "Answering directly: the options could only be told apart by code.",
+  },
+  ask: {
+    repository: "Asking back: the matches span several projects and the question named none.",
+    judge: "Asking back: the matches are independent alternatives.",
+    margin: "Asking back: no module matched clearly ahead of the others.",
+  },
+  too_broad: {
+    too_broad: "Asking for a narrower question: more projects matched than a card can offer.",
+  },
+};
+
+function rungSentence(decision: string, rung: string): string {
+  return rungSentences[decision]?.[rung] ?? (decision === "ask" ? "Asking back." : "Answering directly.");
+}
+
 function seconds(ms: number): string {
   return (Math.max(ms, 0) / 1000).toFixed(1) + "s";
+}
+
+const asStrings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+const asNumber = (v: unknown): number | null => (typeof v === "number" ? v : null);
+
+function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
+  return (
+    <>
+      {values.map((v) => (
+        <span key={v} className={"trace-chip" + (dim ? " trace-chip-dim" : "")}>
+          {v}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function tokens(n: number): string {
+  return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
+}
+
+/**
+ * What a step found, drawn under its label. Every fact here is one the backend
+ * already held for the step; nothing is a claim about the answer. A step
+ * without a detail draws no row, which is every turn stored before the
+ * detail existed.
+ */
+function Detail({ step, detail }: { step: string; detail: StepDetail }) {
+  switch (step) {
+    case "understanding": {
+      const terms = asStrings(detail.terms);
+      const code = asStrings(detail.code_terms);
+      const repos = asStrings(detail.repos);
+      const unknown = asStrings(detail.unknown_repos);
+      const outside = asStrings(detail.outside_repos);
+      let scope: string;
+      if (repos.length > 0) {
+        scope = repos.join(", ") + (detail.pinned ? ", the thread's scope" : ", named by the question");
+      } else if (detail.all_repos) {
+        scope = "every indexed project, as the question asked";
+      } else {
+        scope = "every indexed project (none named)";
+      }
+      return (
+        <div className="trace-detail">
+          {terms.length > 0 && (
+            <>
+              <span className="trace-k">Looking for</span> <Chips values={terms} />
+            </>
+          )}
+          {code.length > 0 && (
+            <>
+              {" "}
+              <span className="trace-k">in the code as</span> <Chips values={code} />
+            </>
+          )}
+          <br />
+          <span className="trace-k">Scope</span> {scope}
+          {unknown.length > 0 && <>; not indexed: {unknown.join(", ")}</>}
+          {outside.length > 0 && <>; outside this thread: {outside.join(", ")}</>}
+        </div>
+      );
+    }
+    case "searching": {
+      const hits = asNumber(detail.hits) ?? 0;
+      const perRepo = (detail.per_repo ?? {}) as Record<string, number>;
+      const best = (detail.best ?? null) as { repo?: string; path?: string; lanes?: string[] } | null;
+      const lanes = asStrings(best?.lanes).map((l) => l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"));
+      return (
+        <div className="trace-detail">
+          {hits} {hits === 1 ? "hit" : "hits"}
+          {Object.keys(perRepo).length > 0 && (
+            <>
+              {" · "}
+              <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
+            </>
+          )}
+          {best?.path && (
+            <>
+              {" · best "}
+              <span className="trace-chip">
+                {best.repo}/{best.path}
+              </span>
+              {lanes.length > 0 && (
+                <>
+                  {" "}
+                  <span className="trace-k">found by</span> <Chips dim values={[...new Set(lanes)]} />
+                </>
+              )}
+            </>
+          )}
+        </div>
+      );
+    }
+    case "routing": {
+      const decision = String(detail.decision ?? "answer");
+      const rung = String(detail.rung ?? "");
+      const candidates = asStrings(detail.candidates);
+      return (
+        <div className="trace-detail">
+          {rungSentence(decision, rung)}
+          {decision !== "answer" && candidates.length > 0 && (
+            <>
+              {" "}
+              <Chips values={candidates} />
+            </>
+          )}
+          {rung !== "judge" && rung !== "role" && decision !== "answer" && <> · decided by rule, no model</>}
+        </div>
+      );
+    }
+    case "gathering": {
+      const hits = asNumber(detail.hits) ?? 0;
+      const refs = asNumber(detail.references) ?? 0;
+      const crossings = asNumber(detail.crossings) ?? 0;
+      const sources = asNumber(detail.sources) ?? 0;
+      const repos = asNumber(detail.repos) ?? 0;
+      const used = asNumber(detail.tokens);
+      const budget = asNumber(detail.budget);
+      const crossed = (Array.isArray(detail.crossed) ? detail.crossed : []) as { from?: string; to?: string; via?: string }[];
+      return (
+        <div className="trace-detail">
+          {hits} hits
+          {refs > 0 && (
+            <>
+              {" → "}
+              <span className="trace-chip">+{refs} referenced</span>
+            </>
+          )}
+          {crossings > 0 && (
+            <>
+              {" "}
+              <span className="trace-chip trace-chip-edge">+{crossings} across a boundary</span>
+            </>
+          )}
+          {" · "}
+          {sources} sources in {repos} {repos === 1 ? "repository" : "repositories"}
+          {used !== null && budget !== null && (
+            <>
+              {" · "}
+              {tokens(used)} of {tokens(budget)} tokens
+            </>
+          )}
+          {crossed.map((c, i) => (
+            <span key={i}>
+              <br />
+              <span className="trace-k">Crossed</span> {c.from} → {c.to} <span className="trace-k">on the</span> {c.via}
+            </span>
+          ))}
+        </div>
+      );
+    }
+    case "writing": {
+      const inTok = asNumber(detail.prompt_tokens);
+      const outTok = asNumber(detail.completion_tokens);
+      const cited = asNumber(detail.cited);
+      const sources = asNumber(detail.sources);
+      return (
+        <div className="trace-detail">
+          {inTok !== null && <>{tokens(inTok)} tokens in</>}
+          {outTok !== null && <>{inTok !== null ? " · " : ""}{tokens(outTok)} tokens out</>}
+          {cited !== null && sources !== null && (
+            <>
+              {" · "}
+              {cited} of {sources} sources cited
+            </>
+          )}
+        </div>
+      );
+    }
+    default:
+      return null;
+  }
 }
 
 /**
  * The timeline is expanded and grows as the steps arrive for as long as the turn
  * runs: progress is something the reader watches, and while it is moving there is
  * no toggle on screen at all. Every step is a node on one continuous line with the
- * time it took, and the running one carries the spinner.
+ * time it took, and the running one carries the spinner. A step that has reported
+ * what it found carries that under its label.
  *
  * The closing row is the state the turn ended in, and it is also the toggle: when
  * the turn closes, the steps roll up behind it and the finished trace is one row
@@ -131,6 +337,7 @@ export default function Trace({
                   <time className="font-mono text-[11.5px] leading-7 tabular-nums text-faint">
                     {seconds(until - s.at)}
                   </time>
+                  {s.detail && <Detail step={s.step} detail={s.detail} />}
                 </li>
               );
             })}

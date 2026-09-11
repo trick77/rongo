@@ -435,6 +435,13 @@ type Decision struct {
 	// names the index already carries, so nothing was named by a model and
 	// nothing was left out.
 	TooBroad bool
+	// Rung is the ladder rung that decided (route.go's rung names), and
+	// Repos and Projects are what the grouping counted. Carried out for the
+	// trace, which says why a card came or an answer went ahead; the ladder's
+	// log line has always had them, and a reader never saw it.
+	Rung     string
+	Repos    int
+	Projects int
 }
 
 // Router decides whether a turn can be answered or has to ask.
@@ -863,6 +870,7 @@ func (r *Router) Route(ctx context.Context, question string, audience Audience, 
 		return Decision{}, err
 	}
 	l.log(ctx, r.margin, d.Ask)
+	d.Rung, d.Repos, d.Projects = l.rung, l.repos, l.projects
 	return d, nil
 }
 

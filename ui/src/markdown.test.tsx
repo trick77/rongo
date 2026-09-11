@@ -130,8 +130,8 @@ describe("Markdown", () => {
 
     it("does not open a blank line at the end of a fence still arriving", () => {
       // The newline the last line was written with is not content yet. Kept,
-      // the block ends on an empty line and the streaming caret (index.css)
-      // blinks there instead of after the code.
+      // the block ends on an empty line that the next token closes again, and
+      // the code block jumps by a line on every fence that streams.
       const { container } = render(<Markdown text={"```go\nfunc main() {}\n"} />);
       expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
     });
