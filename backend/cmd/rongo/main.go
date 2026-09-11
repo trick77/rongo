@@ -342,11 +342,20 @@ func main() {
 	// second the budget needs close to 14 minutes. The idle watchdog, not this
 	// one, is what catches a stalled upstream.
 	models := llm.NewClient(llm.Config{
-		BaseURL:     cfg.LLMBaseURL,
-		APIKey:      cfg.LLMAPIKey,
-		Timeout:     15 * time.Minute,
-		IdleTimeout: 90 * time.Second,
+		BaseURL:       cfg.LLMBaseURL,
+		APIKey:        cfg.LLMAPIKey,
+		Timeout:       15 * time.Minute,
+		IdleTimeout:   90 * time.Second,
+		TurnMaxTokens: cfg.TurnMaxTokens,
 	}, nil)
+	// Said at boot like the inventory is: the ceiling is what stops a turn
+	// nobody bounded, and a host running without one should be able to see
+	// that in its log rather than find out from a bill.
+	if cfg.TurnMaxTokens > 0 {
+		slog.Info("turn token ceiling", "max_tokens", cfg.TurnMaxTokens)
+	} else {
+		slog.Warn("turn token ceiling off", "max_tokens", 0)
+	}
 	// One short-gate call reorders a pool of sixty before the cut to twenty:
 	// measured twice on the pinned corpus (unique gathered 0.905 → 0.952,
 	// composition 4/5 → 5/5, flow corpus 27/30 → 28/30), see

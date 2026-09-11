@@ -48,6 +48,22 @@ type Asker interface {
 // place and the raw text in the other would leak it through the other door.
 const turnFailed = "The turn failed."
 
+// turnOverBudget is what a turn says when the token ceiling refused its next
+// call (llm.ErrTurnBudget). Its own message, because the fix is a different
+// one: not "ask again" but "this question spends more than one turn may",
+// and a reader who sees the generic line retries a turn that will trip again.
+const turnOverBudget = "The turn stopped: it spent more tokens than one turn is allowed."
+
+// failureMessage is what the stream and the record say for a failed turn:
+// the ceiling's own line when that is what stopped it, the generic one for
+// everything else. Never the error's text; see turnFailed.
+func failureMessage(err error) string {
+	if errors.Is(err, llm.ErrTurnBudget) {
+		return turnOverBudget
+	}
+	return turnFailed
+}
+
 // maxNarrowRepos is how many repositories a too-broad panel lets the reader
 // pick. Three, because every one of them costs its own search at full depth
 // and the fused result is still cut to one comparison's worth — a fourth side
@@ -617,7 +633,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			turnStopped(ctx, "resumed turn failed", thread.ID, err)
-			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
+			why := failureMessage(err)
+			if ferr := s.deps.Threads.Fail(record, msg.ID, why); ferr != nil {
 				recordFailed(ctx, "record turn failure failed", ferr)
 			}
 			closeRecord()
@@ -626,7 +643,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// only say so if it knows which row it is retrying. Without it a
 			// retry writes head 0 and the record claims the question was
 			// typed twice.
-			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
+			send("error", map[string]any{"message": why, "message_id": msg.ID})
 			return
 		}
 		// Written a second time, over the scope stored before the call: the
@@ -659,13 +676,14 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
 		turnStopped(ctx, "turn failed", thread.ID, err)
-		if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
+		why := failureMessage(err)
+		if ferr := s.deps.Threads.Fail(record, msg.ID, why); ferr != nil {
 			recordFailed(ctx, "record turn failure failed", ferr)
 		}
 		closeRecord()
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
-		send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
+		send("error", map[string]any{"message": why, "message_id": msg.ID})
 		return
 	}
 	// Stored whichever way the turn ended, before the ending is sent: a card
@@ -1084,11 +1102,12 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		turnStopped(ctx, "reexplain failed", msg.ThreadID, err)
-		if ferr := s.deps.Threads.Fail(record, newMsg.ID, turnFailed); ferr != nil {
+		why := failureMessage(err)
+		if ferr := s.deps.Threads.Fail(record, newMsg.ID, why); ferr != nil {
 			recordFailed(ctx, "record turn failure failed", ferr)
 		}
 		closeRecord()
-		send("error", map[string]any{"message": turnFailed, "message_id": newMsg.ID})
+		send("error", map[string]any{"message": why, "message_id": newMsg.ID})
 		return
 	}
 	if err := s.deps.Threads.Finish(record, newMsg.ID, answer.Text, answer.Citations); err != nil {

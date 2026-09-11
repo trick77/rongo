@@ -67,7 +67,19 @@ type Config struct {
 	// running the same pipeline against another name.
 	Pro       string
 	ShortGate string
+	// TurnMaxTokens is the most a single turn may spend across all of its
+	// calls, prompt and completion, read off the usage meter on the context
+	// before each request. A tripwire, not a budget: the turn is a fixed
+	// pipeline whose cost is bounded by its per-call caps, and this is what
+	// says so out loud once a loop or a retry that nobody bounded appears.
+	// Zero turns it off. A context without a meter is never checked.
+	TurnMaxTokens int
 }
+
+// ErrTurnBudget is why a call was refused when the turn had already spent
+// its TurnMaxTokens. Wrapped with the figures; callers test it with
+// errors.Is and say something a reader can act on, never the raw text.
+var ErrTurnBudget = errors.New("turn token budget spent")
 
 // Message is one OpenAI-compatible chat message.
 type Message struct {
@@ -212,6 +224,25 @@ type Client struct {
 	log         *slog.Logger
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
+	turnMaxTokens  int
+}
+
+// underBudget refuses the next call once the turn's meter has reached the
+// ceiling. Checked before the request and never mid-stream: a call that
+// started runs to its own completion cap, and the tripwire stops the one
+// after it.
+func (c *Client) underBudget(ctx context.Context) error {
+	if c.turnMaxTokens <= 0 {
+		return nil
+	}
+	m := usage.MeterFrom(ctx)
+	if m == nil {
+		return nil
+	}
+	if spent := m.Total(); spent >= c.turnMaxTokens {
+		return fmt.Errorf("%w: %d of %d tokens", ErrTurnBudget, spent, c.turnMaxTokens)
+	}
+	return nil
 }
 
 // deployment maps a lane to the name sent on the wire.
@@ -240,13 +271,14 @@ func NewClient(cfg Config, hc *http.Client) *Client {
 		log = slog.Default()
 	}
 	return &Client{
-		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
-		apiKey:      cfg.APIKey,
-		http:        hc,
-		idleTimeout: cfg.IdleTimeout,
-		log:         log,
-		pro:         cfg.Pro,
-		shortGate:   cfg.ShortGate,
+		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		apiKey:        cfg.APIKey,
+		http:          hc,
+		idleTimeout:   cfg.IdleTimeout,
+		log:           log,
+		pro:           cfg.Pro,
+		shortGate:     cfg.ShortGate,
+		turnMaxTokens: cfg.TurnMaxTokens,
 	}
 }
 
@@ -401,6 +433,9 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 }
 
 func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream bool) (*http.Response, error) {
+	if err := c.underBudget(ctx); err != nil {
+		return nil, err
+	}
 	body := chatRequest{
 		Model:               c.deployment(o.model),
 		Messages:            msgs,

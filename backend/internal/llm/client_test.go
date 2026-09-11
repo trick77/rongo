@@ -94,6 +94,89 @@ func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
 	}
 }
 
+// spentMeter is a turn that has already paid for n tokens.
+func spentMeter(n int) context.Context {
+	m := usage.New()
+	m.Record(usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: n, Completion: 0})
+	return usage.WithMeter(context.Background(), m)
+}
+
+func TestComplete_refusesTheNextCallOnceTheTurnHasSpentItsCeiling(t *testing.T) {
+	// Given a client with a ceiling and a turn that has reached it
+	c, got := fakeUpstream(t, "ok")
+	c.turnMaxTokens = 100
+	ctx := spentMeter(100)
+
+	// When
+	_, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, WithStep("answer"))
+
+	// Then: refused before any request, and the reason is testable
+	if !errors.Is(err, ErrTurnBudget) {
+		t.Fatalf("err = %v, want ErrTurnBudget", err)
+	}
+	if !strings.Contains(err.Error(), "100 of 100") {
+		t.Fatalf("err = %v, want the figures", err)
+	}
+	if got.Model != "" {
+		t.Fatal("the upstream must not see a request the ceiling refused")
+	}
+}
+
+func TestStream_refusesTheNextCallOnceTheTurnHasSpentItsCeiling(t *testing.T) {
+	// Given
+	c := streamingUpstream(t, []string{"never"}, "stop", 1)
+	c.turnMaxTokens = 100
+	ctx := spentMeter(250)
+	var tokens []string
+
+	// When
+	_, err := c.Stream(ctx, []Message{{Role: "user", Content: "x"}}, func(s string) { tokens = append(tokens, s) }, WithStep("answer"))
+
+	// Then
+	if !errors.Is(err, ErrTurnBudget) {
+		t.Fatalf("err = %v, want ErrTurnBudget", err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("streamed %v after the ceiling refused the call", tokens)
+	}
+}
+
+func TestComplete_underTheCeilingTheCallGoesThrough(t *testing.T) {
+	// Given a turn one token short of the ceiling
+	c, got := fakeUpstream(t, "ok")
+	c.turnMaxTokens = 100
+	ctx := spentMeter(99)
+
+	// When
+	out, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, WithStep("answer"))
+
+	// Then: the call runs to its own cap; the tripwire stops the one after it
+	if err != nil || out != "ok" {
+		t.Fatalf("out=%q err=%v, want ok", out, err)
+	}
+	if got.Model == "" {
+		t.Fatal("the upstream must have seen the request")
+	}
+	if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, WithStep("followups")); !errors.Is(err, ErrTurnBudget) {
+		t.Fatalf("the call after the ceiling was crossed must be refused, got %v", err)
+	}
+}
+
+func TestComplete_noCeilingOrNoMeterIsNeverRefused(t *testing.T) {
+	// Given: ceiling off, a turn far past any figure
+	c, _ := fakeUpstream(t, "ok")
+	c.turnMaxTokens = 0
+	if _, _, err := c.Complete(spentMeter(1_000_000), []Message{{Role: "user", Content: "x"}}, WithStep("answer")); err != nil {
+		t.Fatalf("with the ceiling off: %v", err)
+	}
+
+	// Given: ceiling on, a context without a meter (the indexer's)
+	c.turnMaxTokens = 1
+	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}}, WithStep("answer")); err != nil {
+		t.Fatalf("without a meter: %v", err)
+	}
+}
+
 // captured is one request body as the fake upstream saw it.
 type captured struct {
 	Model               string          `json:"model"`

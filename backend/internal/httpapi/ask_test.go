@@ -14,6 +14,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
@@ -701,6 +702,39 @@ func TestAsk_aFailedTurnKeepsItsQuestionAndSaysNothingSecret(t *testing.T) {
 	msgs, _ := st.Messages(context.Background(), "dev-user", list[0].ID)
 	if len(msgs) != 1 || msgs[0].Question != "How?" {
 		t.Errorf("messages = %+v, want the failed turn kept with its question", msgs)
+	}
+}
+
+func TestAsk_aTurnStoppedByTheTokenCeilingSaysSoAndStillReportsWhatItPaidFor(t *testing.T) {
+	// Given a pipeline whose next call the ceiling refused, after two paid ones
+	paid := []usage.Call{
+		{Step: "understand", Model: "mimo-v2.5", Prompt: 200000, Completion: 100},
+		{Step: "rerank", Model: "mimo-v2.5", Prompt: 60000, Completion: 50},
+	}
+	deps, st := askDeps(t, &fakeAsker{
+		calls: paid,
+		err:   fmt.Errorf("answer: %w: 260150 of 250000 tokens", llm.ErrTurnBudget),
+	})
+
+	// When
+	rec := postAsk(t, deps, `{"question":"How?","audience":"ba"}`)
+
+	// Then: the stream says the ceiling's line, never the generic one or the figures
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, turnOverBudget) {
+		t.Fatalf("stream did not say the ceiling stopped the turn: %s", body)
+	}
+	if strings.Contains(body, turnFailed) || strings.Contains(body, "of 250000 tokens") {
+		t.Errorf("stream carried the generic line or the raw error: %s", body)
+	}
+	// And the record says the same, with the calls the turn paid for
+	list, _ := st.List(context.Background(), "dev-user")
+	msgs, _ := st.Messages(context.Background(), "dev-user", list[0].ID)
+	if len(msgs) != 1 || msgs[0].Error != turnOverBudget {
+		t.Fatalf("messages = %+v, want the turn recorded with the ceiling's line", msgs)
+	}
+	if u := usageEvent(t, body); u.Total != 260150 {
+		t.Errorf("usage total = %d, want 260150", u.Total)
 	}
 }
 
