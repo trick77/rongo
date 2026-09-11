@@ -31,6 +31,35 @@ func rerankLLM(t *testing.T, reply string, saw *string) *llm.Client {
 	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
 }
 
+// rerankLLMPicking replies with the number of the result whose header names
+// path, read off the prompt it was sent — a model that recognises one file.
+func rerankLLMPicking(t *testing.T, path string, saw *string) *llm.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		prompt := req.Messages[len(req.Messages)-1].Content
+		if saw != nil {
+			*saw = prompt
+		}
+		reply := `{"relevant":[]}`
+		for _, line := range strings.Split(prompt, "\n") {
+			if strings.HasPrefix(line, "[") && strings.Contains(line, path) {
+				reply = `{"relevant":[` + line[1:strings.IndexByte(line, ']')] + `]}`
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": reply}, "finish_reason": "stop"}},
+			"usage":   map[string]int{},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+}
+
 func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
 	var prompt string
 	hits := []Hit{

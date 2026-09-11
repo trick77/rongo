@@ -542,6 +542,16 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 	if candidates <= 0 {
 		candidates = defaultCandidates
 	}
+	// With a reranker the fused list is cut to its pool rather than to k, and
+	// the lanes must reach as deep as that pool, or the pool is the lanes:
+	// forty rows per lane cannot fill a list of sixty.
+	cutTo := k
+	if r.Reranker != nil && r.Reranker.Pool > k {
+		cutTo = r.Reranker.Pool
+		if candidates < cutTo {
+			candidates = cutTo
+		}
+	}
 
 	var usable []string
 	for _, t := range texts {
@@ -595,15 +605,6 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 		}
 	}
 
-	cutTo := k
-	if r.Reranker != nil && r.Reranker.Pool > k {
-		cutTo = r.Reranker.Pool
-		// The lanes must reach as deep as the pool, or the pool is the
-		// lanes: forty rows per lane cannot fill a list of sixty.
-		if candidates < cutTo {
-			candidates = cutTo
-		}
-	}
 	fused := FuseWeightedDecayed(lanes, cutTo, Decays{Repo: r.RepoDecay, Test: r.TestDecay, Doc: r.DocDecay})
 	if fused == nil {
 		// An empty slice, never nil: the caller distinguishes "nothing found"
