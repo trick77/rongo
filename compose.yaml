@@ -53,9 +53,11 @@ services:
       - no-new-privileges:true
     read_only: true
     # rongo is PID 1 in here and reaps only the git it runs itself. git fetch
-    # and clone fork a detached "git gc --auto" that is orphaned to PID 1 and
-    # exits later, so without an init each poll left one zombie behind: 192 of
-    # them after a day, until the container was restarted. tini reaps them.
+    # forks a detached helper (gc --auto, a session leader: the zombies showed
+    # as "Zs") that is orphaned to PID 1 and exits later, so without an init
+    # every fetch left one behind: 192 in 13 hours, until the container was
+    # restarted. tini reaps them, and the read-only, cap-dropped setup is
+    # untouched because docker-init is bind-mounted in from the host.
     init: true
     tmpfs:
       - /tmp
