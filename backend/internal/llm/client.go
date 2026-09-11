@@ -59,6 +59,14 @@ type Config struct {
 	// Zero disables the watchdog; the coarse Timeout still applies.
 	IdleTimeout time.Duration
 	Logger      *slog.Logger
+	// Pro and ShortGate, when set, replace the two deployment names on the
+	// wire. The PRODUCT never sets them — its deployments are the constants
+	// above, and config.Load reads no variable for them. They exist for the
+	// evaluation harness alone, whose job includes asking whether the next
+	// model answers better than this one, and which can only ask that by
+	// running the same pipeline against another name.
+	Pro       string
+	ShortGate string
 }
 
 // Message is one OpenAI-compatible chat message.
@@ -202,6 +210,19 @@ type Client struct {
 	http        *http.Client
 	idleTimeout time.Duration
 	log         *slog.Logger
+	// pro and shortGate are the wire names for the two lanes; see Config.
+	pro, shortGate string
+}
+
+// deployment maps a lane to the name sent on the wire.
+func (c *Client) deployment(lane string) string {
+	switch {
+	case lane == ProDeployment && c.pro != "":
+		return c.pro
+	case lane == ShortGateDeployment && c.shortGate != "":
+		return c.shortGate
+	}
+	return lane
 }
 
 // NewClient builds a Client. hc may be nil, in which case one is made with the
@@ -224,6 +245,8 @@ func NewClient(cfg Config, hc *http.Client) *Client {
 		http:        hc,
 		idleTimeout: cfg.IdleTimeout,
 		log:         log,
+		pro:         cfg.Pro,
+		shortGate:   cfg.ShortGate,
 	}
 }
 
@@ -379,7 +402,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 
 func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream bool) (*http.Response, error) {
 	body := chatRequest{
-		Model:               o.model,
+		Model:               c.deployment(o.model),
 		Messages:            msgs,
 		Stream:              stream,
 		Thinking:            o.thinking,

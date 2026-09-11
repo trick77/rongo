@@ -33,7 +33,9 @@ import (
 // flowExpansionsFile freezes the understanding step's output per flow
 // question, for the reason expansions.json exists: the model is not
 // deterministic, and a measurement of retrieval must not move with its mood.
-const flowExpansionsFile = "flow-expansions.json"
+func flowExpansionsFile() string {
+	return envOr("BACKEND_EVAL_FLOW_EXPANSIONS", "flow-expansions.json")
+}
 
 // TestExpandFlowQuestions freezes one expansion per flow question. One
 // short-gate call each; BACKEND_EVAL_EXPAND=missing keeps what is frozen and
@@ -51,10 +53,10 @@ func TestExpandFlowQuestions(t *testing.T) {
 	}, nil))
 
 	previous := map[string]expansion{}
-	if body, err := os.ReadFile(flowExpansionsFile); err == nil {
+	if body, err := os.ReadFile(flowExpansionsFile()); err == nil {
 		var list []expansion
 		if err := json.Unmarshal(body, &list); err != nil {
-			t.Fatalf("parse %s: %v", flowExpansionsFile, err)
+			t.Fatalf("parse %s: %v", flowExpansionsFile(), err)
 		}
 		for _, e := range list {
 			previous[e.Question] = e
@@ -92,20 +94,20 @@ func TestExpandFlowQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := os.WriteFile(flowExpansionsFile, body, 0o644); err != nil {
-		t.Fatalf("write %s: %v", flowExpansionsFile, err)
+	if err := os.WriteFile(flowExpansionsFile(), body, 0o644); err != nil {
+		t.Fatalf("write %s: %v", flowExpansionsFile(), err)
 	}
 }
 
 func loadFlowExpansions(t *testing.T) map[string]expansion {
 	t.Helper()
-	body, err := os.ReadFile(flowExpansionsFile)
+	body, err := os.ReadFile(flowExpansionsFile())
 	if err != nil {
-		t.Skipf("no %s yet; run TestExpandFlowQuestions first", flowExpansionsFile)
+		t.Skipf("no %s yet; run TestExpandFlowQuestions first", flowExpansionsFile())
 	}
 	var list []expansion
 	if err := json.Unmarshal(body, &list); err != nil {
-		t.Fatalf("parse %s: %v", flowExpansionsFile, err)
+		t.Fatalf("parse %s: %v", flowExpansionsFile(), err)
 	}
 	out := map[string]expansion{}
 	for _, e := range list {

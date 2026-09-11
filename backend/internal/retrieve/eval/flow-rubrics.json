@@ -1,0 +1,126 @@
+[
+  {
+    "question": "What happens when a customer places an order?",
+    "lang": "en",
+    "must": [
+      "The front-end forwards the order to the orders service.",
+      "The orders service fetches the customer's address, card and cart items from other services before charging.",
+      "Payment is authorised by a separate payment service, and a declined payment stops the order.",
+      "The orders service posts the shipment to the shipping service.",
+      "Shipping publishes the shipment on a message queue that a separate consumer (queue-master) picks up."
+    ],
+    "must_not": [
+      "The orders service itself decides whether the payment is authorised.",
+      "The order is saved before payment is authorised."
+    ]
+  },
+  {
+    "question": "Wer wird benachrichtigt, wenn eine Sendung zum Versand ansteht?",
+    "lang": "de",
+    "must": [
+      "Der Versanddienst legt die Sendung in eine Warteschlange (shipping-task).",
+      "Ein separater Dienst (queue-master) liest diese Warteschlange und verarbeitet die Sendung.",
+      "Die Verbindung zwischen beiden ist der Name der Warteschlange, nicht ein direkter Aufruf."
+    ],
+    "must_not": [
+      "Der Versanddienst ruft den Verarbeiter direkt auf.",
+      "Es wird eine E-Mail oder eine Benachrichtigung an eine Person geschickt."
+    ]
+  },
+  {
+    "question": "What happens to a guest's shopping cart when they log in?",
+    "lang": "en",
+    "must": [
+      "On login the front-end asks the carts service to merge the session cart into the customer's cart.",
+      "The merge adds every item of the session cart to the customer's cart.",
+      "A failed merge does not prevent the login."
+    ],
+    "must_not": [
+      "The guest cart is discarded on login."
+    ]
+  },
+  {
+    "question": "Was passiert, wenn eine Zahlung abgelehnt wird?",
+    "lang": "de",
+    "must": [
+      "Der Zahlungsdienst lehnt Beträge über einer festen Obergrenze ab.",
+      "Der Bestelldienst wirft bei abgelehnter Zahlung einen Fehler und speichert die Bestellung nicht."
+    ],
+    "must_not": [
+      "Die Bestellung wird trotz abgelehnter Zahlung gespeichert.",
+      "Der Bestelldienst entscheidet selbst über die Zahlung."
+    ]
+  },
+  {
+    "question": "Which service decides whether a payment is authorised, and on what basis?",
+    "lang": "en",
+    "must": [
+      "The payment service decides.",
+      "The only criterion is a configured maximum amount: anything above it is declined.",
+      "A zero or negative amount is an error rather than a decline."
+    ],
+    "must_not": [
+      "The decision consults a bank, a card network or the customer's card details."
+    ]
+  },
+  {
+    "question": "Wie kommt ein Kunde zu einem Konto, und wo landen seine Kartendaten?",
+    "lang": "de",
+    "must": [
+      "Die Registrierung geht vom Front-end an den Benutzerdienst (user).",
+      "Der Benutzerdienst nimmt Kartendaten über einen eigenen Endpunkt entgegen und speichert sie.",
+      "Nach der Registrierung wird der Warenkorb der Sitzung übernommen."
+    ],
+    "must_not": [
+      "Kartendaten werden im Zahlungsdienst gespeichert."
+    ]
+  },
+  {
+    "question": "Where is a customer's address stored, and who reads it while an order is being placed?",
+    "lang": "en",
+    "must": [
+      "Addresses are stored by the user service, which serves them over its addresses endpoint.",
+      "The orders service fetches the address while placing an order and passes it into the payment request."
+    ],
+    "must_not": [
+      "The orders service stores the address itself."
+    ]
+  },
+  {
+    "question": "Welche anderen Dienste fragt der Bestelldienst ab, bevor eine Bestellung gespeichert wird?",
+    "lang": "de",
+    "must": [
+      "Der Benutzerdienst (user) wird nach Adresse, Kunde und Karte gefragt.",
+      "Der Warenkorbdienst (carts) liefert die Positionen.",
+      "Der Zahlungsdienst (payment) autorisiert die Zahlung.",
+      "Der Versanddienst (shipping) erhält die Sendung."
+    ],
+    "must_not": [
+      "Der Bestelldienst fragt den Katalogdienst direkt ab."
+    ]
+  },
+  {
+    "question": "What happens to a shipment when the message queue is unavailable?",
+    "lang": "en",
+    "must": [
+      "The send to the queue is wrapped in a try/catch and the shipment is still returned as accepted.",
+      "The message is lost: the queue consumer is the only reader, so a dropped message is never processed."
+    ],
+    "must_not": [
+      "The shipment is retried later or stored for later delivery.",
+      "The caller is told that the shipment failed."
+    ]
+  },
+  {
+    "question": "Wie wird der Rechnungsbetrag einer Bestellung berechnet?",
+    "lang": "de",
+    "must": [
+      "Der Bestelldienst summiert Menge mal Einzelpreis über die Positionen.",
+      "Dazu kommt ein fest codierter Versandkostenbetrag von 4.99.",
+      "Die Einzelpreise stammen aus dem Warenkorb beziehungsweise dem Katalogdienst, nicht aus dem Bestelldienst."
+    ],
+    "must_not": [
+      "Rabatte oder Steuern werden berechnet."
+    ]
+  }
+]

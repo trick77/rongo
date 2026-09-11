@@ -99,18 +99,23 @@ type flowPart struct {
 
 func (p flowPart) String() string { return p.Repo + "/" + p.Path }
 
+// flowQuestionsFile is the committed flow corpus's questions, or another
+// corpus's file named by BACKEND_EVAL_FLOW_QUESTIONS — a private estate's
+// questions are kept out of the repository and pointed at from outside it.
+func flowQuestionsFile() string { return envOr("BACKEND_EVAL_FLOW_QUESTIONS", "flow-questions.json") }
+
 func loadFlowQuestions(t *testing.T) []flowQuestion {
 	t.Helper()
-	body, err := os.ReadFile("flow-questions.json")
+	body, err := os.ReadFile(flowQuestionsFile())
 	if err != nil {
-		t.Fatalf("read flow-questions.json: %v", err)
+		t.Fatalf("read %s: %v", flowQuestionsFile(), err)
 	}
 	var qs []flowQuestion
 	if err := json.Unmarshal(body, &qs); err != nil {
-		t.Fatalf("parse flow-questions.json: %v", err)
+		t.Fatalf("parse %s: %v", flowQuestionsFile(), err)
 	}
 	if len(qs) == 0 {
-		t.Fatal("flow-questions.json is empty")
+		t.Fatalf("%s is empty", flowQuestionsFile())
 	}
 	return qs
 }
