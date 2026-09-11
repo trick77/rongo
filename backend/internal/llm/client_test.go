@@ -32,8 +32,16 @@ func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
 	want := usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: 11, Completion: 7}
-	if calls[0] != want {
-		t.Errorf("call = %+v, want %+v", calls[0], want)
+	// The duration is measured here rather than reported by the endpoint, so
+	// it is checked on its own and then cleared: what this test is about is
+	// the step, the deployment and the upstream's own numbers.
+	got := calls[0]
+	if got.Ms == nil {
+		t.Error("the call must be timed")
+	}
+	got.Ms = nil
+	if got != want {
+		t.Errorf("call = %+v, want %+v", got, want)
 	}
 }
 
@@ -54,8 +62,13 @@ func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
 	want := usage.Call{Step: "answer", Model: ProDeployment, Prompt: 3, Completion: 4}
-	if calls[0] != want {
-		t.Errorf("call = %+v, want %+v", calls[0], want)
+	got := calls[0]
+	if got.Ms == nil {
+		t.Error("the call must be timed")
+	}
+	got.Ms = nil
+	if got != want {
+		t.Errorf("call = %+v, want %+v", got, want)
 	}
 }
 
@@ -91,6 +104,92 @@ func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
 	out, _ := ask(t, c, WithStep("route"))
 	if out != "ok" {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestComplete_recordsTheCachedAndReasoningSharesAndHowLongItTook(t *testing.T) {
+	// Given an endpoint that reports both details objects, as MiMo does
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":3267,"completion_tokens":64,"total_tokens":3331,
+			"prompt_tokens_details":{"cached_tokens":3264},
+			"completion_tokens_details":{"reasoning_tokens":40}}}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "s3cret"}, srv.Client())
+	m := usage.New()
+	ctx := usage.WithMeter(context.Background(), m)
+
+	// When
+	if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, WithStep("answer")); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Then the shares the decoder used to discard are on the record
+	got := m.Calls()[0]
+	if got.Cached == nil || *got.Cached != 3264 {
+		t.Fatalf("cached = %v, want 3264", got.Cached)
+	}
+	if got.Reasoning == nil || *got.Reasoning != 40 {
+		t.Fatalf("reasoning = %v, want 40", got.Reasoning)
+	}
+	if got.Ms == nil {
+		t.Fatal("ms = absent, want the call timed")
+	}
+	// And the cached share is a subset: the tokens themselves are unchanged.
+	if got.Prompt != 3267 {
+		t.Fatalf("prompt = %d, want 3267 whatever was cached", got.Prompt)
+	}
+}
+
+func TestComplete_anEndpointThatSendsNoDetailsLeavesThemAbsentNotZero(t *testing.T) {
+	// Given the fake upstream, which reports the three plain figures only
+	c, _ := fakeUpstream(t, "ok")
+	m := usage.New()
+
+	// When
+	if _, _, err := c.Complete(usage.WithMeter(context.Background(), m), []Message{{Role: "user", Content: "x"}}, WithStep("route")); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Then nothing is claimed about a cache nobody mentioned
+	got := m.Calls()[0]
+	if got.Cached != nil || got.Reasoning != nil {
+		t.Fatalf("cached=%v reasoning=%v, want both absent", got.Cached, got.Reasoning)
+	}
+	if got.Ms == nil {
+		t.Fatal("the duration is measured here, not reported by the endpoint; it must be present")
+	}
+}
+
+func TestStream_recordsTheDetailsFromTheTrailingUsageFrame(t *testing.T) {
+	// Given a stream whose trailing usage frame carries the details objects
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		fmt.Fprint(w, `data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,`+
+			`"prompt_tokens_details":{"cached_tokens":64},"completion_tokens_details":{"reasoning_tokens":0}}}`+"\n\n")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+	m := usage.New()
+
+	// When
+	if _, err := c.Stream(usage.WithMeter(context.Background(), m), []Message{{Role: "user", Content: "x"}}, nil, WithStep("answer")); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Then
+	got := m.Calls()[0]
+	if got.Cached == nil || *got.Cached != 64 {
+		t.Fatalf("cached = %v, want 64", got.Cached)
+	}
+	// A zero the endpoint stated is a measurement, and is kept as zero.
+	if got.Reasoning == nil || *got.Reasoning != 0 {
+		t.Fatalf("reasoning = %v, want a stated zero", got.Reasoning)
 	}
 }
 

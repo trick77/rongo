@@ -77,6 +77,64 @@ func TestReport_sumsTokensAndPricesOnlyWhenPricesAreConfigured(t *testing.T) {
 	}
 }
 
+func TestReport_aCachedPrefixIsChargedAtTheCachePrice(t *testing.T) {
+	// Given a call whose prompt the upstream mostly served from its cache
+	calls := []Call{{Step: "answer", Model: "pro", Prompt: 10_000, Completion: 1_000, Cached: Int(9_000)}}
+	p := Prices{"pro": Price{In: 0.435, Out: 0.87, CacheRead: 0.0036, Context: 1_048_576}}
+
+	// When
+	r := p.Report(calls)
+
+	// Then the cached part is priced at cache_read, not at the input price
+	// (1000*0.435 + 9000*0.0036 + 1000*0.87) / 1e6
+	want := (1_000*0.435 + 9_000*0.0036 + 1_000*0.87) / 1e6
+	if got := *r.CostUSD; got < want-1e-12 || got > want+1e-12 {
+		t.Fatalf("cost = %v, want %v", got, want)
+	}
+	// And the full-price figure is what it would have been: the whole point
+	// is that this is lower.
+	if full := (10_000*0.435 + 1_000*0.87) / 1e6; *r.CostUSD >= full {
+		t.Fatalf("cost %v is not below the uncached %v", *r.CostUSD, full)
+	}
+	if r.Cached == nil || *r.Cached != 9_000 {
+		t.Fatalf("cached = %v, want 9000", r.Cached)
+	}
+	if r.Calls[0].ContextTokens != 1_048_576 {
+		t.Fatalf("window = %d, want the model's", r.Calls[0].ContextTokens)
+	}
+	// And the tokens are untouched: cached is a subset of prompt, never an
+	// addition to it.
+	if r.Prompt != 10_000 || r.Total != 11_000 {
+		t.Fatalf("tokens = %d/%d, want 10000/11000", r.Prompt, r.Total)
+	}
+}
+
+func TestReport_withoutACachePriceNothingIsDiscounted(t *testing.T) {
+	// Given a model whose registry entry lists no cache price
+	calls := []Call{{Step: "rerank", Model: "gate", Prompt: 10_000, Completion: 100, Cached: Int(9_000)}}
+	p := Prices{"gate": Price{In: 0.14, Out: 0.28}}
+
+	// When
+	r := p.Report(calls)
+
+	// Then the old arithmetic stands: no discount is invented for a contract
+	// that does not say there is one.
+	want := (10_000*0.14 + 100*0.28) / 1e6
+	if got := *r.CostUSD; got < want-1e-12 || got > want+1e-12 {
+		t.Fatalf("cost = %v, want %v", got, want)
+	}
+}
+
+func TestReport_aTurnThatReportedNoCachedFigureCarriesNoneAtAll(t *testing.T) {
+	// Given a turn from before the figure was recorded
+	r := Prices{"pro": Price{In: 1, Out: 1}}.Report([]Call{{Step: "answer", Model: "pro", Prompt: 10, Completion: 2}})
+
+	// Then absent, not zero: the two say different things.
+	if r.Cached != nil {
+		t.Fatalf("cached = %v, want absent", *r.Cached)
+	}
+}
+
 func TestMeter_totalIsEveryTokenTheTurnPaidFor(t *testing.T) {
 	m := New()
 	if m.Total() != 0 {

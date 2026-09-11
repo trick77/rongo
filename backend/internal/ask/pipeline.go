@@ -456,12 +456,25 @@ func (p *Pipeline) answer(ctx context.Context, question string, audience Audienc
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
 	if err == nil {
-		ev.detail("writing", map[string]any{
+		d := map[string]any{
 			"prompt_tokens":     answer.Usage.Prompt,
 			"completion_tokens": answer.Usage.Completion,
 			"cited":             len(answer.Citations),
 			"sources":           len(sources),
-		})
+			// The prompt by section, measured rather than billed — the split
+			// the endpoint never reports. The reader is told which is which
+			// where it is drawn.
+			"prompt_system":   answer.Prompt.System,
+			"prompt_sources":  answer.Prompt.Sources,
+			"prompt_question": answer.Prompt.Question,
+		}
+		// The window this prompt was measured against, when the registry
+		// sizes the model. Absent for a model it does not, the same way an
+		// unpriced model carries no cost.
+		if answer.Usage.PromptDetails != nil {
+			d["cached_tokens"] = answer.Usage.PromptDetails.Cached
+		}
+		ev.detail("writing", d)
 	}
 	return answer, err
 }

@@ -160,7 +160,12 @@ func (c *Client) embedOne(ctx context.Context, inputs []string) ([][]float32, er
 	}
 	// A turn's query embedding is metered; indexing runs on a context without
 	// a meter and is not. Embedding has no completion side.
-	usage.Record(ctx, usage.Call{Step: "embed", Model: c.model, Prompt: int(parsed.Usage.PromptTokens)})
+	usage.Record(ctx, usage.Call{
+		Step:   "embed",
+		Model:  c.model,
+		Prompt: int(parsed.Usage.PromptTokens),
+		Ms:     usage.Int(int(time.Since(started).Milliseconds())),
+	})
 	if len(parsed.Data) != len(inputs) {
 		return nil, fmt.Errorf("embedding count mismatch: got %d, want %d", len(parsed.Data), len(inputs))
 	}

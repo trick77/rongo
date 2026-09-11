@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView from "./SourceView";
+import { StatsPane } from "./StatsPane";
 import { Chevron } from "./icons";
 import {
   asMarkdown,
@@ -129,12 +130,19 @@ export default function Ask({
   onActivity = () => {},
   onBusy = () => {},
   onUsage = () => {},
+  threadStatsOpen = false,
+  onCloseThreadStats = () => {},
   version = "",
 }: {
   /** The thread to show, or null for a fresh one. */
   threadId?: string | null;
   /** Reports the thread this view is on; null means the id led nowhere. */
   onThread?: (id: string | null) => void;
+  /** The thread badge in the shell opens the stats pane on the thread. The
+   * badge lives in the header and the turns live here, so the shell holds
+   * the flag and this holds the pane. */
+  threadStatsOpen?: boolean;
+  onCloseThreadStats?: () => void;
   /** Something changed that the thread list should see. */
   onActivity?: () => void;
   /** Reports whether a turn is in flight, so the thread list can lock. */
@@ -153,6 +161,11 @@ export default function Ask({
   const [audience, setAudience] = useState<Audience>("ba");
   const [language, setLanguage] = useState(storedLanguage);
   const [turns, setTurns] = useState<Turn[]>([]);
+  // The turn whose stats pane is open, if any. The thread's own pane is the
+  // shell's flag rather than state here, because the badge that opens it is
+  // in the header — but both end in the one pane, and a turn beats the
+  // thread when the reader opened it from a turn.
+  const [turnStats, setTurnStats] = useState<number | null>(null);
   // Whether a thread's turns are on their way. Distinct from busy, which is a
   // turn being answered: this is the record being fetched, and it is what
   // tells the empty column to hold the shape of a thread instead of offering
@@ -891,6 +904,7 @@ export default function Ask({
       onFollowup: askFollowup,
       onChoose: chooseCandidate,
       onNarrow: narrowTo,
+      onOpenStats: (i: number) => setTurnStats(i),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [turns],
@@ -1030,6 +1044,19 @@ export default function Ask({
               onToggleSources={toggleSources}
               threadKey={openThread}
             />
+            {(turnStats !== null || threadStatsOpen) && (
+              <StatsPane
+                target={turnStats !== null ? { kind: "turn", index: turnStats } : { kind: "thread" }}
+                turns={turns}
+                onClose={() => {
+                  // The pane is one thing with two ways in, so closing it
+                  // clears both: a reader who opened a turn from the header's
+                  // thread pane must not be left with the thread pane behind it.
+                  setTurnStats(null);
+                  onCloseThreadStats();
+                }}
+              />
+            )}
             <div ref={bottom} />
           </div>
         </div>

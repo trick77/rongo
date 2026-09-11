@@ -917,18 +917,122 @@ describe("Ask, what a turn cost", () => {
     const user = await ask("How?");
 
     // Tokens only: no price is configured, so no money anywhere.
-    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
     expect(pill.textContent).toContain("2,952 tok");
     expect(pill.textContent).not.toContain("$");
     expect(screen.queryByText("understand")).toBeNull();
 
     await user.click(pill);
 
-    // Every call the turn made, the gates included, with its deployment.
-    expect(screen.getByText("understand")).toBeTruthy();
-    expect(screen.getByText("mimo-v2.5-pro")).toBeTruthy();
-    expect(screen.getByText("embed")).toBeTruthy();
-    expect(screen.getByText(/no price table is loaded/)).toBeTruthy();
+    // The pane, on this turn: every call it made, the gates included, with
+    // its deployment.
+    const pane = await screen.findByRole("dialog", { name: "Token stats" });
+    expect(pane.textContent).toContain("understand");
+    expect(pane.textContent).toContain("mimo-v2.5-pro");
+    expect(pane.textContent).toContain("embed");
+    // And the counts, split by what was paid for.
+    expect(pane.textContent).toContain("model calls");
+    expect(pane.textContent).toContain("embedding calls");
+  });
+
+  it("shows what was cached, what each call took, and what filled the answer", async () => {
+    // Given a turn whose endpoint reported the two details objects, and a
+    // trace carrying the prompt split
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("token", { text: "The answer." }),
+      // The detail attaches to the step of that name, so the step has to have
+      // been announced — which is what the pipeline does.
+      ev("status", { step: "writing" }),
+      ev("detail", {
+        step: "writing",
+        detail: {
+          prompt_tokens: 2000,
+          completion_tokens: 500,
+          cited: 3,
+          sources: 4,
+          cached_tokens: 1800,
+          prompt_system: 700,
+          prompt_sources: 1200,
+          prompt_question: 100,
+        },
+      }),
+      ev("usage", {
+        ...usage,
+        cost_usd: 0.004,
+        cached_tokens: 1800,
+        calls: [
+          { step: "understand", model: "mimo-v2.5", prompt_tokens: 400, completion_tokens: 40, ms: 900, cached_tokens: 0 },
+          { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0, ms: 120 },
+          {
+            step: "answer",
+            model: "mimo-v2.5-pro",
+            prompt_tokens: 2000,
+            completion_tokens: 500,
+            ms: 38600,
+            cached_tokens: 1800,
+            context_tokens: 1048576,
+            cost_usd: 0.004,
+          },
+        ],
+      }),
+      ev("done", { message_id: 1 }),
+    ]);
+
+    const user = await ask("How?");
+
+    // When
+    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+
+    // Then the figures the old table had nowhere to put
+    const pane = await screen.findByRole("dialog", { name: "Token stats" });
+    expect(pane.textContent).toContain("1,800"); // cached
+    expect(pane.textContent).toContain("38.6 s"); // the answer call's duration
+    // The window is a number, never a bar: a 1M window against a 2k prompt
+    // draws the same sliver on every turn there has ever been.
+    expect(pane.textContent).toContain("2,000 of 1,048,576");
+    expect(pane.textContent).toContain("system prompt");
+    expect(pane.textContent).toContain("gathered sources");
+  });
+
+  it("the ⓘ opens one line and closes it again", async () => {
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("token", { text: "The answer." }),
+      ev("usage", usage),
+      ev("done", { message_id: 1 }),
+    ]);
+    const user = await ask("How?");
+    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+
+    const info = await screen.findByRole("button", { name: "What an embedding call means" });
+    expect(screen.queryByText(/turned into a vector/)).toBeNull();
+
+    await user.click(info);
+    expect(screen.getByText(/turned into a vector/)).toBeTruthy();
+
+    await user.click(info);
+    expect(screen.queryByText(/turned into a vector/)).toBeNull();
+  });
+
+  it("a turn that never recorded the newer figures simply does not draw them", async () => {
+    // Given a stored turn from before the columns existed: tokens, nothing else
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("token", { text: "The answer." }),
+      ev("usage", usage),
+      ev("done", { message_id: 1 }),
+    ]);
+    const user = await ask("How?");
+
+    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+
+    // Then no empty scaffolding: no duration column, no cache column, and no
+    // context section at all.
+    const pane = await screen.findByRole("dialog", { name: "Token stats" });
+    expect(pane.textContent).not.toContain("took");
+    expect(pane.textContent).not.toContain("cached");
+    expect(pane.textContent).not.toContain("What filled the answer call");
   });
 
   it("shows money once the server prices the calls", async () => {
@@ -941,7 +1045,7 @@ describe("Ask, what a turn cost", () => {
 
     await ask("How?");
 
-    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
     expect(pill.textContent).toContain("$0.008");
   });
 
@@ -954,7 +1058,7 @@ describe("Ask, what a turn cost", () => {
 
     await ask("How?");
 
-    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
     expect(pill.textContent).toContain("452 tok");
     // But no actions: there is no answer to re-explain or copy.
     expect(screen.queryByRole("button", { name: /Explain as/ })).toBeNull();
@@ -1000,7 +1104,7 @@ describe("Ask, what a turn cost", () => {
       </StrictMode>,
     );
 
-    const pill = await screen.findByRole("button", { name: "Usage of turn 1" });
+    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
     expect(pill.textContent).toContain("2,952 tok");
     expect(pill.textContent).toContain("$0.005");
     await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.005 }));

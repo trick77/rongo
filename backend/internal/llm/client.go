@@ -94,6 +94,25 @@ type Usage struct {
 	Prompt     int `json:"prompt_tokens"`
 	Completion int `json:"completion_tokens"`
 	Total      int `json:"total_tokens"`
+	// The two details objects the endpoint sends on every reply. Both hold a
+	// SUBSET of the count above them, never an addition — Total equals
+	// prompt plus completion whether anything was cached or not, which is
+	// why a turn's figures looked complete while the cached share was being
+	// discarded by the decoder.
+	PromptDetails     *PromptDetails     `json:"prompt_tokens_details"`
+	CompletionDetails *CompletionDetails `json:"completion_tokens_details"`
+}
+
+// PromptDetails is how much of the prompt the upstream did not have to read
+// again. Priced at cache_read, far under the input price.
+type PromptDetails struct {
+	Cached int `json:"cached_tokens"`
+}
+
+// CompletionDetails is how much of the completion went on thinking rather
+// than on the text the reader sees. It comes out of the same completion cap.
+type CompletionDetails struct {
+	Reasoning int `json:"reasoning_tokens"`
 }
 
 // FinishError is how the upstream ended a completion when it was not a
@@ -149,12 +168,29 @@ func WithStep(name string) Option {
 }
 
 // record writes one call into the context's meter, if a turn is metering.
-func record(ctx context.Context, o callOptions, u Usage) {
+// took is wall clock for the whole call, request to last byte.
+func record(ctx context.Context, o callOptions, u Usage, took time.Duration) {
 	step := o.step
 	if step == "" {
 		step = "llm"
 	}
-	usage.Record(ctx, usage.Call{Step: step, Model: o.model, Prompt: u.Prompt, Completion: u.Completion})
+	c := usage.Call{
+		Step:       step,
+		Model:      o.model,
+		Prompt:     u.Prompt,
+		Completion: u.Completion,
+		Ms:         usage.Int(int(took.Milliseconds())),
+	}
+	// A details object saying zero is a measurement — this call cached
+	// nothing — and is recorded as zero. Only a reply that carried no details
+	// object at all leaves the figure absent.
+	if u.PromptDetails != nil {
+		c.Cached = usage.Int(u.PromptDetails.Cached)
+	}
+	if u.CompletionDetails != nil {
+		c.Reasoning = usage.Int(u.CompletionDetails.Reasoning)
+	}
+	usage.Record(ctx, c)
 }
 
 // Option adjusts a single call.
@@ -296,6 +332,10 @@ func resolve(opts []Option) callOptions {
 // Complete runs one non-streaming call and returns the assistant's content.
 func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (string, Usage, error) {
 	o := resolve(opts)
+	// Timed from before the request so the figure is what a reader waited
+	// for, queueing at the endpoint included, not what the endpoint spent
+	// generating.
+	started := time.Now()
 	resp, err := c.post(ctx, msgs, o, false)
 	if err != nil {
 		return "", Usage{}, err
@@ -314,7 +354,7 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	}
 	// Recorded before the choices check: a reply without choices was still
 	// paid for.
-	record(ctx, o, out.Usage)
+	record(ctx, o, out.Usage, time.Since(started))
 	if len(out.Choices) == 0 {
 		return "", out.Usage, errors.New("chat completion carried no choices")
 	}
@@ -342,6 +382,9 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	}
 
 	o := resolve(opts)
+	// Timed from before the request, closed when the last frame is read: for
+	// the answer call that is the whole time the reader watched it write.
+	started := time.Now()
 	resp, err := c.post(ctx, msgs, o, true)
 	if err != nil {
 		return Usage{}, err
@@ -421,7 +464,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// ignores include_usage) records nothing rather than zeros — a zero row
 	// would read as "this call was free", and it was not; it is unknown.
 	if got.Total > 0 {
-		record(ctx, o, got)
+		record(ctx, o, got, time.Since(started))
 	}
 	if err := sc.Err(); err != nil {
 		return got, fmt.Errorf("read stream: %w", redactURL(err))

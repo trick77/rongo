@@ -25,7 +25,7 @@ const fixture = `{
   "xiaomi": {
     "id": "xiaomi", "name": "Xiaomi", "api": "https://api.xiaomimimo.com/v1",
     "models": {
-      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87, "cache_read": 0.0036}},
+      "mimo-v2.5-pro": {"id": "mimo-v2.5-pro", "cost": {"input": 0.435, "output": 0.87, "cache_read": 0.0036}, "limit": {"context": 1048576, "output": 131072}},
       "mimo-v2.5": {"id": "mimo-v2.5", "cost": {"input": 0.14, "output": 0.28}},
       "mimo-v2.5-tts": {"id": "mimo-v2.5-tts"}
     }
@@ -159,6 +159,28 @@ func TestResolve_pricesTheDeploymentsFromMiMosAPIAndEmbedFromItsEndpoint(t *test
 	}
 	if p := prices[embed]; p.In != 0.02 || p.Out != 0 {
 		t.Errorf("embed = %+v, want 0.02/0", p)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings = %v, want none", warnings)
+	}
+}
+
+func TestResolve_carriesTheCacheReadPriceAndTheWindowFromTheSameEntry(t *testing.T) {
+	// Given a registry that prices and sizes one deployment, and only prices
+	// the other
+	reg := fetchFixture(t)
+
+	// When
+	prices, warnings := Resolve(reg, openaiURL, embed)
+
+	// Then the entry's cache price and window ride along with the price
+	if p := prices[llm.ProDeployment]; p.CacheRead != 0.0036 || p.Context != 1048576 {
+		t.Errorf("pro = %+v, want cache_read 0.0036 and a 1048576 window", p)
+	}
+	// And a model the registry prices but does not size is still priced: no
+	// window is shown rather than the model being dropped.
+	if p := prices[llm.ShortGateDeployment]; p.In != 0.14 || p.CacheRead != 0 || p.Context != 0 {
+		t.Errorf("gate = %+v, want the price kept and no cache price or window", p)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)

@@ -193,6 +193,10 @@ export default function App() {
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
   const [usageTotal, setUsageTotal] = useState<ThreadTotal | null>(null);
+  // Whether the header badge has opened the thread's stats. The pane itself
+  // is Ask's, where the turns are; this is only the flag, because the badge
+  // that opens it sits in a different cell of the shell's grid.
+  const [threadStats, setThreadStats] = useState(false);
   const session = useSession();
   const index = useIndexStatus(session.state === "in", threadsVersion);
 
@@ -329,7 +333,7 @@ export default function App() {
               <span className="truncate font-serif text-[19px] font-medium text-accent-strong">
                 {openTitle ?? "New question"}
               </span>
-              {total && <ThreadUsageBadge total={total} />}
+              {total && <ThreadUsageBadge total={total} onOpen={() => setThreadStats(true)} />}
             </>
           ) : page === "projects" ? (
             <>
@@ -513,6 +517,8 @@ export default function App() {
                 setBusy(b);
                 setBusyThread(b ? id : null);
               }}
+              threadStatsOpen={threadStats}
+              onCloseThreadStats={() => setThreadStats(false)}
               onUsage={(u) =>
                 // Compared by value: Ask reports on every change of its turn
                 // list, which is once per streamed token, and a fresh object

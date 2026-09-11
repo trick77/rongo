@@ -432,6 +432,46 @@ func TestSaveUsage_everyCallOfATurnComesBackWithTheThreadEvenWhenItAskedOrFailed
 	}
 }
 
+func TestSaveUsage_aFigureTheEndpointNeverSentComesBackAbsentNotZero(t *testing.T) {
+	// Given one call whose reply carried the details objects, and one whose
+	// did not - the shape of a turn answered before the columns existed
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How?")
+	msg, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
+	if err := s.SaveUsage(ctx, msg.ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 3267, Completion: 64,
+			Cached: usage.Int(3264), Reasoning: usage.Int(0), Ms: usage.Int(38600)},
+		{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
+	}); err != nil {
+		t.Fatalf("SaveUsage: %v", err)
+	}
+
+	// When
+	msgs, err := s.Messages(ctx, "anna", th.ID)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+
+	// Then what was measured comes back measured
+	got := msgs[0].Calls
+	if len(got) != 2 {
+		t.Fatalf("calls = %d, want 2", len(got))
+	}
+	if got[0].Cached == nil || *got[0].Cached != 3264 || got[0].Ms == nil || *got[0].Ms != 38600 {
+		t.Errorf("answer call = %+v, want its cached share and duration", got[0])
+	}
+	// A stated zero stays zero: the endpoint said this call reasoned about
+	// nothing, which is not the same as nobody having looked.
+	if got[0].Reasoning == nil || *got[0].Reasoning != 0 {
+		t.Errorf("reasoning = %v, want a stored zero", got[0].Reasoning)
+	}
+	// And what nobody measured comes back absent
+	if got[1].Cached != nil || got[1].Reasoning != nil || got[1].Ms != nil {
+		t.Errorf("embed call = %+v, want the three unmeasured figures absent", got[1])
+	}
+}
+
 func TestFail_keepsTheQuestionInTheRecord(t *testing.T) {
 	// A turn that broke still happened. Dropping the question would leave the
 	// reader wondering what they asked.

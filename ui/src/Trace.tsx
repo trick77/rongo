@@ -232,15 +232,31 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const outTok = asNumber(detail.completion_tokens);
       const cited = asNumber(detail.cited);
       const sources = asNumber(detail.sources);
+      const cached = asNumber(detail.cached_tokens);
+      const system = asNumber(detail.prompt_system);
+      const sourceTok = asNumber(detail.prompt_sources);
       return (
         <div className="trace-detail">
           {inTok !== null && <>{tokens(inTok)} tokens in</>}
+          {/* The cached share sits next to the figure it is part of, never
+              added to it: the endpoint read this much of the prompt before
+              and charged a fraction for it. */}
+          {cached !== null && cached > 0 && <span className="trace-k"> ({tokens(cached)} cached)</span>}
           {outTok !== null && <>{inTok !== null ? " · " : ""}{tokens(outTok)} tokens out</>}
           {cited !== null && sources !== null && (
             <>
               {" · "}
               {cited} of {sources} sources cited
             </>
+          )}
+          {/* Where the prompt went. Measured at four characters per token
+              rather than billed, which is why it is said in the same breath
+              rather than dressed as another exact figure. */}
+          {system !== null && sourceTok !== null && (
+            <span className="trace-k">
+              {" · about "}
+              {tokens(system)} of rules, {tokens(sourceTok)} of code
+            </span>
           )}
         </div>
       );

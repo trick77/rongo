@@ -55,16 +55,31 @@ type Provider struct {
 	Models map[string]Model `json:"models"`
 }
 
-// Model is one model as the registry prices it. A nil Cost is a model the
-// registry lists but does not price.
+// Model is one model as the registry prices and sizes it. A nil Cost is a
+// model the registry lists but does not price.
 type Model struct {
 	Cost *Cost `json:"cost"`
+	// Limit is how much the model holds. Absent for an entry that does not
+	// say, and then nothing is shown rather than a guessed window.
+	Limit *Limit `json:"limit"`
 }
 
 // Cost is USD per million tokens, the unit usage.Price uses.
 type Cost struct {
 	Input  float64 `json:"input"`
 	Output float64 `json:"output"`
+	// CacheRead is what a prompt token served from the upstream's cache
+	// costs. Both MiMo deployments list one, two orders of magnitude under
+	// their input price.
+	CacheRead float64 `json:"cache_read"`
+}
+
+// Limit is what the model can hold: Context covers prompt and completion
+// together, Output caps the completion alone. Only Context is read — the
+// completion cap rongo works to is its own, well under the model's.
+type Limit struct {
+	Context int `json:"context"`
+	Output  int `json:"output"`
 }
 
 // hostsWithoutAPI maps the base URL host of a provider whose registry entry
@@ -152,7 +167,14 @@ func agreedPrice(reg Registry, ids []string, model string) (usage.Price, string)
 		if !listed || m.Cost == nil {
 			return usage.Price{}, fmt.Sprintf("provider %s does not price %s", id, model)
 		}
-		p := usage.Price{In: m.Cost.Input, Out: m.Cost.Output}
+		// The window is read from the same entry as the price and is allowed
+		// to be missing: an entry that prices a model but does not size it
+		// still prices it. A window nobody listed stays zero and nothing is
+		// drawn, the way an unpriced model shows tokens only.
+		p := usage.Price{In: m.Cost.Input, Out: m.Cost.Output, CacheRead: m.Cost.CacheRead}
+		if m.Limit != nil {
+			p.Context = m.Limit.Context
+		}
 		if found && p != agreed {
 			return usage.Price{}, fmt.Sprintf("providers %s share the endpoint but price %s differently; the endpoint does not say which contract applies", strings.Join(ids, ", "), model)
 		}
