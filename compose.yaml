@@ -52,6 +52,11 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # rongo is PID 1 in here and reaps only the git it runs itself. git fetch
+    # and clone fork a detached "git gc --auto" that is orphaned to PID 1 and
+    # exits later, so without an init each poll left one zombie behind: 192 of
+    # them after a day, until the container was restarted. tini reaps them.
+    init: true
     tmpfs:
       - /tmp
     # No host port: rongo answers questions about proprietary source, so the
