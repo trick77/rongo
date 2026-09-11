@@ -398,29 +398,41 @@ body {
   z-index: 20;
 }
 
-/* The caret of a streaming answer, drawn at the end of its last block so it
-   stands right after the last word written. A sibling element cannot: the
-   blocks around it are blocks, so it would sit on the line below, blinking
-   under text it has nothing to do with. Named blocks rather than :last-child
-   on its own: a list draws the caret on its last item, not once on the <ul>
-   and again on the item, and a diagram - a picture, or the box saying one is
-   coming - is not a line of writing and gets none.
+/* A streaming answer carries the `streaming` class for the text fade
+   (markdown.tsx). It used to draw a blinking caret on its last block as well;
+   that is gone - the fade already says where the text ends, and a cursor on a
+   page nobody types into read as an invitation to. */
 
-   A table is a line of writing: it arrives row by row over seconds, so the
-   caret sits in its last cell, and in the header while the first row is still
-   on its way. */
-.ui-markdown.streaming > :is(p, h2, h3, h4, pre):last-child::after,
-.ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
-.ui-markdown.streaming > .md-table:last-child tbody tr:last-child > td:last-child::after,
-.ui-markdown.streaming > .md-table:last-child:has(tbody:empty) th:last-child::after {
-  content: "";
+/* What a step found, under its label in the activity timeline: spans the
+   label and duration columns of the steps grid, and reads a size down. */
+.trace-detail {
+  grid-column: 2 / 4;
+  margin: -6px 0 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+.trace-k {
+  color: var(--color-faint);
+}
+.trace-chip {
   display: inline-block;
-  width: 2px;
-  height: 1em;
-  background: var(--color-accent-strong);
-  vertical-align: -2px;
-  margin-left: 2px;
-  animation: blink 1s steps(2) infinite;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.3;
+  background: var(--color-active);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 5px;
+  padding: 1px 6px;
+  margin: 1px 3px 1px 0;
+  color: var(--color-ink-dim);
+}
+.trace-chip-dim {
+  color: var(--color-muted);
+}
+.trace-chip-edge {
+  border-color: #3d4a33;
+  color: #8fc49a;
 }
 
 .pulse {
@@ -471,11 +483,6 @@ body {
   }
   to {
     background-position: 135% 0;
-  }
-}
-@keyframes blink {
-  50% {
-    opacity: 0;
   }
 }
 @keyframes skeleton-fade {

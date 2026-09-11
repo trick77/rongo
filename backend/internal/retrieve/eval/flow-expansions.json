@@ -1,0 +1,82 @@
+[
+  {
+    "question": "What happens when a customer places an order?",
+    "texts": [
+      "What happens when a customer places an order?",
+      "order placement process customer order workflow what occurs during order creation",
+      "Order OrderService placeOrder OrderController OrderRepository OrderEvent"
+    ]
+  },
+  {
+    "question": "Wer wird benachrichtigt, wenn eine Sendung zum Versand ansteht?",
+    "texts": [
+      "Wer wird benachrichtigt, wenn eine Sendung zum Versand ansteht?",
+      "Wer wird über Sendungen zum Versand informiert Benachrichtigung bei Versandbereitschaft Empfänger der Versandbenachrichtigung",
+      "NotificationService ShipmentReady notify ShippingDepartment OrderFulfillment sendNotification"
+    ]
+  },
+  {
+    "question": "What happens to a guest's shopping cart when they log in?",
+    "texts": [
+      "What happens to a guest's shopping cart when they log in?",
+      "guest shopping cart behavior on login cart persistence after authentication anonymous cart merging with user account",
+      "Cart GuestCart UserCart mergeCart login session cartService mergeAnonymousCart"
+    ]
+  },
+  {
+    "question": "Was passiert, wenn eine Zahlung abgelehnt wird?",
+    "texts": [
+      "Was passiert, wenn eine Zahlung abgelehnt wird?",
+      "Was geschieht bei abgelehnter Zahlung Ablauf nach Zahlungsablehnung Verhalten bei gescheiterter Zahlung",
+      "PaymentDeclined handlePaymentDecline PaymentFailed onPaymentDeclined processDeclinedPayment PaymentStatus"
+    ]
+  },
+  {
+    "question": "Which service decides whether a payment is authorised, and on what basis?",
+    "texts": [
+      "Which service decides whether a payment is authorised, and on what basis?",
+      "payment authorization service payment authorization decision logic payment authorization basis",
+      "PaymentAuthorizationService AuthorizationService PaymentService AuthorizationDecision PaymentProcessor AuthorizationLogic PaymentGateway"
+    ]
+  },
+  {
+    "question": "Wie kommt ein Kunde zu einem Konto, und wo landen seine Kartendaten?",
+    "texts": [
+      "Wie kommt ein Kunde zu einem Konto, und wo landen seine Kartendaten?",
+      "Kundenkonto-Erstellung Speicherort der Kartendaten Kundenregistrierung und Kartenspeicherung",
+      "Customer Account Card PaymentMethod createAccount storeCard PaymentService"
+    ]
+  },
+  {
+    "question": "Where is a customer's address stored, and who reads it while an order is being placed?",
+    "texts": [
+      "Where is a customer's address stored, and who reads it while an order is being placed?",
+      "customer address storage location address data access during order placement where is customer address kept and who uses it",
+      "Customer Address Order OrderService CustomerRepository OrderRepository placeOrder"
+    ]
+  },
+  {
+    "question": "Welche anderen Dienste fragt der Bestelldienst ab, bevor eine Bestellung gespeichert wird?",
+    "texts": [
+      "Welche anderen Dienste fragt der Bestelldienst ab, bevor eine Bestellung gespeichert wird?",
+      "Welche externen Dienste werden vor dem Speichern einer Bestellung aufgerufen? Welche Abhängigkeiten hat der Bestelldienst vor dem Persistieren? Welche Services werden vor dem Speichern einer Bestellung konsultiert?",
+      "OrderService OrderRepository save persist validate checkInventory paymentService inventoryService"
+    ]
+  },
+  {
+    "question": "What happens to a shipment when the message queue is unavailable?",
+    "texts": [
+      "What happens to a shipment when the message queue is unavailable?",
+      "shipment behavior when message queue is down handling shipment processing during queue outage shipment processing with unavailable message queue",
+      "Shipment MessageQueue processShipment queueUnavailable handleQueueFailure retryLogic shipmentService"
+    ]
+  },
+  {
+    "question": "Wie wird der Rechnungsbetrag einer Bestellung berechnet?",
+    "texts": [
+      "Wie wird der Rechnungsbetrag einer Bestellung berechnet?",
+      "Wie wird der Rechnungsbetrag einer Bestellung berechnet? Berechnung des Rechnungsbetrags für eine Bestellung Berechnung des Gesamtbetrags einer Bestellung",
+      "calculateTotal orderTotal invoiceAmount calculateInvoice Order Invoice calculateOrderTotal"
+    ]
+  }
+]

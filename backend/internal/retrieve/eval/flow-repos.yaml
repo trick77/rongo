@@ -1,0 +1,35 @@
+# The flow corpus: Sock Shop, eight repositories, three languages, pinned on
+# 2026-09-10 (docs/measurements/2026-09-10-flow-corpus.md). One project, and
+# deliberately no part, description or uses: those are hand-written facts that
+# reach routing and the answer prompt, and declaring them would hand the model
+# the cross-repository structure the flow questions exist to test.
+#
+# The clones are local, each carrying a branch pin20260910 at the sha the
+# measurement document lists. hack/run-flow-eval.sh points at this file.
+projects:
+  - name: sock-shop
+    repositories:
+      - name: front-end
+        clone_url: /tmp/sockshop-pin/front-end
+        branch: pin20260910
+      - name: orders
+        clone_url: /tmp/sockshop-pin/orders
+        branch: pin20260910
+      - name: carts
+        clone_url: /tmp/sockshop-pin/carts
+        branch: pin20260910
+      - name: catalogue
+        clone_url: /tmp/sockshop-pin/catalogue
+        branch: pin20260910
+      - name: payment
+        clone_url: /tmp/sockshop-pin/payment
+        branch: pin20260910
+      - name: shipping
+        clone_url: /tmp/sockshop-pin/shipping
+        branch: pin20260910
+      - name: queue-master
+        clone_url: /tmp/sockshop-pin/queue-master
+        branch: pin20260910
+      - name: user
+        clone_url: /tmp/sockshop-pin/user
+        branch: pin20260910

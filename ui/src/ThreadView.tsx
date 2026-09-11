@@ -366,10 +366,10 @@ export default function ThreadView({
                     same block ../loom uses. The measure stays capped here:
                     rongo's answer column is wider than loom's rail.
 
-                    streaming draws the caret (index.css) on the answer's last
-                    block rather than after the container: as a sibling of the
-                    markdown the caret was a block of its own, and blinked on
-                    the line below the words it belongs to. */}
+                    streaming is what the text fade keys on (markdown.tsx):
+                    text still arriving fades in, and the class comes off with
+                    the done event. Nothing else marks a streaming answer — the
+                    caret it once drew is gone. */}
                 {turn.text && (
                   <div
                     className={`ui-markdown mt-4 max-w-[68ch]${turn.done ? "" : " streaming"}`}

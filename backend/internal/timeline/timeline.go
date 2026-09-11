@@ -27,6 +27,13 @@ type Step struct {
 	// browser's own live trace uses, so a stored turn and a live one are read
 	// by the same code.
 	At int64 `json:"at"`
+	// Detail is what the step found, attached when the step is done: the
+	// understanding's terms and scope, the search's hits per repository, the
+	// routing rung as a sentence, the gathered sources by reason, the answer's
+	// usage. Facts the pipeline already held and logged; a step that reports
+	// none has no key here, and every turn stored before the field existed
+	// decodes without one.
+	Detail map[string]any `json:"detail,omitempty"`
 }
 
 // Trace is the whole of one turn's timeline, as it is stored and served.
@@ -57,6 +64,24 @@ func (r *Recorder) Record(step string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.steps = append(r.steps, Step{Step: step, At: time.Now().UnixMilli()})
+}
+
+// Detail attaches what a step found to the LATEST step of that name. A
+// detail for a step never announced is dropped: the trace is a record of
+// what was announced, and a detail row with no step above it would describe
+// nothing the reader saw.
+func (r *Recorder) Detail(step string, detail map[string]any) {
+	if len(detail) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.steps) - 1; i >= 0; i-- {
+		if r.steps[i].Step == step {
+			r.steps[i].Detail = detail
+			return
+		}
+	}
 }
 
 // Close returns the turn's timeline, ended at now.
@@ -94,5 +119,12 @@ func From(ctx context.Context) *Recorder {
 func Record(ctx context.Context, step string) {
 	if r := From(ctx); r != nil {
 		r.Record(step)
+	}
+}
+
+// Detail attaches a step's detail in the context's recorder, if there is one.
+func Detail(ctx context.Context, step string, detail map[string]any) {
+	if r := From(ctx); r != nil {
+		r.Detail(step, detail)
 	}
 }

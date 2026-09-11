@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -26,18 +27,19 @@ type Source struct {
 	// SHA is the commit the file was indexed at; see retrieve.Hit.SHA.
 	SHA  string
 	Text string
-	// Reason is "hit" for something the search returned, or
-	// "reference:<symbol>" for something a hop reached.
+	// Reason is "hit" for something the search returned,
+	// "reference:<symbol>" for something a symbol hop reached, or
+	// "edge:<kind> <value> from <repo>/<path>" for something reached across a
+	// repository boundary on a shared queue name or route.
 	Reason string
 	// Hop is 0 for a search hit and counts up from there.
 	Hop int
 }
 
 // maxDefiners is how many files may define a name before following it is
-// pointless. Measured on the real corpus: at 4 it drops Close (31 files), err
-// (23) and Error (10) while keeping a genuine service method, which is defined
-// once or twice.
-const maxDefiners = 4
+// pointless. The value and its measurement live in internal/edges, which
+// walks the same rule; see edges.MaxDefiners.
+const maxDefiners = edges.MaxDefiners
 
 // GatherOptions bounds the walk. Both bounds exist because a mechanism spread
 // over a handler, a service and a template is exactly what plain top-k misses —
@@ -49,6 +51,20 @@ type GatherOptions struct {
 	// are never evicted by it: an answer cites what it was built on, and a
 	// citation into dropped material is one rongo cannot stand behind.
 	TokenBudget int
+	// NoCrossings switches the repository crossing off, leaving the symbol
+	// walk alone. The product never sets it; it exists for the evaluation
+	// harness, which has to measure the walk with and without the edge table
+	// on the same questions to say what the crossing buys.
+	NoCrossings bool
+	// RouteSuffix lets a crossing match a client's route tail against the
+	// path a server serves; see edges.Match. Off until the flow corpus says
+	// what it buys.
+	RouteSuffix bool
+	// WholeFileTokens is the size up to which the file a hit sits in is read
+	// whole, in estimated tokens; a larger file contributes the rest of the
+	// hit's own symbol only. Zero is off, which the eval's baseline arm uses.
+	// See wholeFile.
+	WholeFileTokens int
 }
 
 // Gatherer expands search hits into the material an answer is written from.
@@ -95,7 +111,60 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 		spent += estimateTokens(h.RawText)
 	}
 
+	// take admits one reached chunk under a budget. It reports false when
+	// that budget is spent, and the caller then STOPS rather than trimming
+	// what is already gathered, so what the answer cites is always present —
+	// and stopping means stopping: continuing would keep querying the rest of
+	// the frontier for rows that can never be taken.
+	take := func(s Source, hop, budget int) bool {
+		if seen[s.ChunkID] {
+			return true
+		}
+		cost := estimateTokens(s.Text)
+		if spent+cost > budget {
+			return false
+		}
+		seen[s.ChunkID] = true
+		s.Hop = hop
+		spent += cost
+		out = append(out, s)
+		return true
+	}
+
+	// The symbol walk spends up to the budget less the crossing reserve; see
+	// crossingReserve for why the reserve exists and what it costs.
+	symbolBudget := g.opts.TokenBudget
+	if !g.opts.NoCrossings {
+		symbolBudget -= g.opts.TokenBudget / crossingReserve
+	}
+
+	// The rest of the file a hit sits in, before any symbol hop: the nearest
+	// explanation of a chunk is the chunk beside it, and the two unique
+	// questions the walk never reached were a constant explained one chunk
+	// away from the hit with no symbol linking them. Under the symbol walk's
+	// budget, and taken at hop 0 — it is the hit's own file — but never
+	// evicting a hit, which take guarantees.
+	if g.opts.WholeFileTokens > 0 {
+		filed := map[string]bool{}
+		for _, h := range hits {
+			key := h.Repo + "\x00" + h.Path
+			if filed[key] {
+				continue
+			}
+			filed[key] = true
+			more, err := g.wholeFile(ctx, h)
+			if err != nil {
+				return nil, err
+			}
+			for _, s := range more {
+				if !take(s, 0, symbolBudget) {
+					break
+				}
+			}
+		}
+	}
 	frontier := out
+symbols:
 	for hop := 1; hop <= g.opts.MaxHops; hop++ {
 		var next []Source
 		for _, from := range frontier {
@@ -103,23 +172,13 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 			if err != nil {
 				return nil, err
 			}
-			for _, ref := range refs {
+			for _, ref := range mechanismFirst(refs) {
 				if seen[ref.ChunkID] {
 					continue
 				}
-				cost := estimateTokens(ref.Text)
-				if spent+cost > g.opts.TokenBudget {
-					// Budget reached. The walk STOPS rather than trimming what
-					// is already gathered, so what the answer cites is always
-					// present — and stopping means stopping: continuing would
-					// keep querying the rest of the frontier for rows that can
-					// never be taken.
-					return out, nil
+				if !take(ref, hop, symbolBudget) {
+					break symbols
 				}
-				seen[ref.ChunkID] = true
-				ref.Hop = hop
-				spent += cost
-				out = append(out, ref)
 				next = append(next, ref)
 			}
 		}
@@ -127,6 +186,187 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 			break
 		}
 		frontier = next
+	}
+	if g.opts.NoCrossings {
+		return out, nil
+	}
+
+	// The crossing, from EVERYTHING the walk gathered — hits and references
+	// alike. Measured on the flow corpus, every edge-only miss had the same
+	// shape: the literal sat in a file NEXT TO the one the answer needs.
+	// OrdersController calls config.getPaymentUri(), and the string
+	// "/paymentAuth" lives in the properties class the symbol walk reached at
+	// hop one. Crossing only from the hits would consult the edge table only
+	// for files that happen to carry their own literal.
+	//
+	// A crossing lands on one chunk and then takes ONE symbol hop on the far
+	// side, because the far end of a queue is a Spring configuration class and
+	// the file that does the work is the handler it wires up, which carries
+	// no literal at all. That is the composed walk docs/measurements/
+	// 2026-09-10-integration-edges.md measured: in-repo hop, crossing, in-repo
+	// hop. It does not count against MaxHops — a crossing is bounded by the
+	// spread ceiling and lands on a single chunk, where a symbol hop fans out
+	// — and it runs under the FULL budget, which is what the reserve is for.
+	crossed := map[string]bool{}
+	starts := append([]Source{}, out...)
+	for _, from := range starts {
+		key := from.Repo + "\x00" + from.Path
+		if crossed[key] {
+			// One file crosses once, whichever of its chunks got here.
+			continue
+		}
+		crossed[key] = true
+		far, err := g.crossings(ctx, from)
+		if err != nil {
+			return nil, err
+		}
+		for _, landing := range mechanismFirst(far) {
+			if seen[landing.ChunkID] {
+				continue
+			}
+			if !take(landing, from.Hop+1, g.opts.TokenBudget) {
+				return out, nil
+			}
+			inland, err := g.referenced(ctx, landing)
+			if err != nil {
+				return nil, err
+			}
+			for _, ref := range mechanismFirst(inland) {
+				if !take(ref, from.Hop+2, g.opts.TokenBudget) {
+					return out, nil
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// crossingReserve is the share of the token budget the symbol walk leaves
+// untouched for repository crossings: one part in six, 4000 of the default
+// 24000 tokens.
+//
+// Without it the crossing never runs on a corpus that fans out. Measured on
+// the flow corpus (Java, Spring): twenty hits reached 141 sources at the FIRST
+// symbol hop and the budget was gone before a single edge was consulted, so
+// the product gathered exactly what the walk alone gathered — 20 of 30 parts,
+// and the order-placement flow at 2 of 6 with payment, shipping and the queue
+// consumer never in front of the model. A crossing is the one hop the symbol
+// walk cannot make, and it is scarce: at most three repositories per token
+// and one chunk per landing. Six chunks of room is what the flagship flow
+// needs, and a corpus with no edges at all pays for the reserve with six
+// fewer reference chunks out of a hundred and ten. What that costs on the Go
+// corpus is measured, not assumed: TestEvalMeasureGathered, in
+// internal/retrieve/eval.
+const crossingReserve = 6
+
+// wholeFile returns the chunks of a hit's file the answer should read
+// beside the hit: every other chunk when the file is small (at most
+// WholeFileTokens in all), otherwise only the chunks that continue the
+// hit's own symbol — a function cut into windows is one mechanism, and
+// half of it is not. Ordered by ordinal, so the file reads in order.
+func (g *Gatherer) wholeFile(ctx context.Context, h retrieve.Hit) ([]Source, error) {
+	rows, err := g.db.QueryContext(ctx, `
+		SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
+		FROM files f
+		JOIN repo_state r ON r.name = f.repo
+		JOIN chunks c ON c.file_id = f.id
+		WHERE f.repo = ? AND f.path = ?
+		ORDER BY c.ordinal`, h.Repo, h.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read the file of %s/%s: %w", h.Repo, h.Path, err)
+	}
+	defer rows.Close()
+	var all []Source
+	total := 0
+	for rows.Next() {
+		var s Source
+		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text); err != nil {
+			return nil, fmt.Errorf("scan a chunk of %s/%s: %w", h.Repo, h.Path, err)
+		}
+		total += estimateTokens(s.Text)
+		all = append(all, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []Source
+	for _, s := range all {
+		if s.ChunkID == h.ChunkID {
+			continue
+		}
+		switch {
+		case total <= g.opts.WholeFileTokens:
+			s.Reason = "file:whole"
+		case h.Symbol != "" && s.Symbol == h.Symbol:
+			s.Reason = "file:symbol"
+		default:
+			continue
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// mechanismFirst orders one hop's candidates so that test files come after
+// everything else. A test that references the service is a correct hop and a
+// poor waypoint — the composed-walk measurement reached payment/service.go
+// through component_test.go — and retrieval already demotes tests for the
+// same reason (retrieve.DefaultTestDecay). Within each half the incoming
+// order is kept, so the walk stays deterministic.
+func mechanismFirst(ss []Source) []Source {
+	out := make([]Source, 0, len(ss))
+	for _, s := range ss {
+		if !retrieve.IsTestPath(s.Path) {
+			out = append(out, s)
+		}
+	}
+	for _, s := range ss {
+		if retrieve.IsTestPath(s.Path) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// crossings finds, in OTHER repositories, the chunk holding the same queue
+// name or route literal as from's file — the one link a producer and its
+// consumer share when they share no import, no type and no symbol.
+//
+// It lands on the chunk at the token's line, never on the whole file: the far
+// side of "/paymentAuth" is one handler registration in a transport file,
+// and the rest of that file is no more relevant than any other. The
+// selectivity rule (a token in more than three repositories is a convention,
+// not a link) and the enabled-only filter live in edges.Neighbours, so this
+// walk and the measurement in internal/edges cannot disagree about which
+// tokens cross.
+func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error) {
+	ns, err := edges.NeighboursWith(ctx, g.db, from.Repo, from.Path, edges.Match{Suffix: g.opts.RouteSuffix})
+	if err != nil {
+		return nil, fmt.Errorf("cross from %s/%s: %w", from.Repo, from.Path, err)
+	}
+	var out []Source
+	for _, n := range ns {
+		var s Source
+		err := g.db.QueryRowContext(ctx, `
+			SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
+			FROM files f
+			JOIN repo_state r ON r.name = f.repo
+			JOIN chunks c ON c.file_id = f.id
+			WHERE f.repo = ? AND f.path = ? AND ? BETWEEN c.start_line AND c.end_line
+			ORDER BY c.ordinal
+			LIMIT 1`, n.Repo, n.Path, n.Line).Scan(
+			&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text)
+		if err == sql.ErrNoRows {
+			// A token on a line no chunk covers — an overlong line that was
+			// split, or a file whose chunks moved since the token was written.
+			// Nothing to cite, so nothing to gather.
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read the far side of %s %q: %w", n.Kind, n.Value, err)
+		}
+		s.Reason = fmt.Sprintf("edge:%s %s from %s/%s", n.Kind, n.Value, from.Repo, from.Path)
+		out = append(out, s)
 	}
 	return out, nil
 }

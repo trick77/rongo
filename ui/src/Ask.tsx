@@ -584,6 +584,17 @@ export default function Ask({
             onActivity();
           } else if (name === "status") {
             patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
+          } else if (name === "detail") {
+            // What the step found, attached to the LATEST step of that name:
+            // a step's detail arrives once the step is done, and "searching"
+            // can run twice in a comparison turn.
+            patchLast((t) => {
+              const i = t.steps.map((s) => s.step).lastIndexOf(payload.step);
+              if (i < 0) return t;
+              const steps = t.steps.slice();
+              steps[i] = { ...steps[i], detail: payload.detail ?? undefined };
+              return { ...t, steps };
+            });
           } else if (name === "notice") patchLast((t) => ({ ...t, notice: payload.text ?? "" }));
           else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));

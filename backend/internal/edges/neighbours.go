@@ -34,12 +34,37 @@ const spreadCeiling = 3
 // gap this closes is the one that has no symbol, no import and no type in
 // common, which only appears across a repository boundary.
 func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour, error) {
+	return NeighboursWith(ctx, db, repo, path, Match{})
+}
+
+// Match says how two route tokens are compared.
+type Match struct {
+	// Suffix lets a route match another that ENDS in it at a segment
+	// boundary: the client writes cartsUrl + "/" + id + "/merge" and records
+	// "/merge", the server serves "/carts/{customerId}/merge". Exact matching
+	// never joins them. Off by default; measured on the flow corpus before it
+	// is turned on anywhere, because a loose route rule is how "/get" joins
+	// the estate to itself. Destinations are never suffix-matched.
+	Suffix bool
+}
+
+// NeighboursWith is Neighbours under an explicit Match.
+func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match) ([]Neighbour, error) {
+	same := `other.value = mine.value`
+	if m.Suffix {
+		// Every route starts with "/", so a shorter route that is the tail of
+		// a longer one already sits at a segment boundary: "/emerge" does not
+		// end in "/merge", "/x/merge" does.
+		same = `(other.value = mine.value OR (mine.kind = 'route' AND (
+			(length(other.value) > length(mine.value) AND substr(other.value, -length(mine.value)) = mine.value)
+			OR (length(mine.value) > length(other.value) AND substr(mine.value, -length(other.value)) = other.value))))`
+	}
 	rows, err := db.QueryContext(ctx, `
 		SELECT other_f.repo, other_f.path, other.kind, other.value, other.line
 		FROM files me
 		JOIN integration_tokens mine ON mine.file_id = me.id
 		JOIN integration_tokens other
-		  ON other.kind = mine.kind AND other.value = mine.value
+		  ON other.kind = mine.kind AND `+same+`
 		JOIN files other_f ON other_f.id = other.file_id
 		-- Enabled only, and in the COUNT as well as the join. Filtering just
 		-- the result would keep a parked repository out of an answer while

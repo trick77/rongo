@@ -403,8 +403,9 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       }
       // A fence still arriving ends on the newline its last line was written
       // with, and that empty line is not content yet — the next token fills
-      // it. Kept, it opens a blank line inside the block, and the streaming
-      // caret (index.css) blinks on it instead of after the code.
+      // it. Kept, it opens a blank line inside the block that the next token
+      // then closes again, and the code block jumps by a line on every fence
+      // that streams.
       if (!closed && body.length > 0 && body[body.length - 1] === "") body.pop();
       // Coloured straight from the grammar, never through text(): a marker-
       // shaped a[1] inside code is code, as the backend's splitFences agrees.
@@ -484,9 +485,8 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       // and climb back.
       out.push(
         // A table wider than the column scrolls inside its own box rather
-        // than pushing the answer sideways. md-table is the streaming caret's
-        // hook (index.css): a table is written row by row over seconds, and
-        // the caret has to follow it as it does a paragraph.
+        // than pushing the answer sideways. md-table names the box so the
+        // stylesheet can size it apart from the prose around it.
         <div key={key} className="md-table overflow-x-auto">
           <table>
             <thead>

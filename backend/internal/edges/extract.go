@@ -154,8 +154,23 @@ func Extract(filePath string, body []byte) []Token {
 		out = append(out, Token{Kind: kind, Value: value, Line: line})
 	}
 
-	for i, line := range strings.Split(string(body), "\n") {
+	lines := strings.Split(string(body), "\n")
+	// prefix is the class-level @RequestMapping in force: Spring serves the
+	// method path UNDER it, and a client spelling the whole path matches
+	// nothing else. Both spellings are recorded — the bare method path is
+	// what the flow corpus's clients write.
+	prefix := ""
+	// pending is the class-level path read off the annotation, promoted to
+	// prefix on the top-level class line that follows it. Every top-level
+	// class line promotes, so a second controller in the same file starts
+	// with no prefix unless it declares one. A nested class, indented, is
+	// still inside the controller and leaves the prefix alone.
+	pending := ""
+	for i, line := range lines {
 		lineNo := i + 1
+		if isTopLevelClassLine(line) {
+			prefix, pending = pending, ""
+		}
 
 		// A destination named by the variable it is assigned to. Checked first
 		// and independently of the call rules, because the literal and the call
@@ -173,25 +188,106 @@ func Extract(filePath string, body []byte) []Token {
 		if !messaging && !routing && !client {
 			continue
 		}
+		classLevel := routing && strings.Contains(line, "RequestMapping") && classFollows(lines, i)
 		for _, m := range stringLiteral.FindAllStringSubmatch(line, -1) {
 			lit := firstNonEmpty(m[1], m[2], m[3])
 			if lit == "" {
 				continue
+			}
+			if m[2] != "" && strings.HasPrefix(lit, "${") {
+				// A template literal whose base is configuration:
+				// `${this.configuration.basePath}/beruf`. The base says
+				// nothing; the constant part after it is the route the
+				// server declares, cut at the next interpolation.
+				lit = templateRoute(lit)
+				if lit == "" {
+					continue
+				}
 			}
 			switch {
 			case routeShape.MatchString(lit) && !uninteresting[lit]:
 				// A route is a route whichever side declared it. Which side
 				// this is does not need recording: the edge is the shared
 				// value, and both ends want to find each other.
+				if classLevel {
+					// The class-level path is a route in its own right —
+					// the front-end calls "/carts" — AND the prefix every
+					// method path below is served under.
+					pending = strings.TrimSuffix(lit, "/")
+					add(KindRoute, lit, lineNo)
+					continue
+				}
 				if routing || client {
 					add(KindRoute, lit, lineNo)
+					if routing && prefix != "" {
+						add(KindRoute, prefix+lit, lineNo)
+					}
 				}
+			case classLevel && uninteresting[lit] && routeShape.MatchString(lit):
+				// "/api" as a class-level prefix is not a token, but it is
+				// still the prefix the method paths are served under.
+				pending = strings.TrimSuffix(lit, "/")
 			case messaging && isDestinationShape(lit):
 				add(KindDestination, lit, lineNo)
 			}
 		}
 	}
 	return out
+}
+
+// classFollows reports whether the annotation on line i sits on a class or
+// interface rather than on a method: the next line that is neither blank nor
+// another annotation declares one.
+func classFollows(lines []string, i int) bool {
+	for j := i + 1; j < len(lines) && j <= i+8; j++ {
+		t := strings.TrimSpace(lines[j])
+		if t == "" || strings.HasPrefix(t, "@") || isCommentLine(t) {
+			continue
+		}
+		return isClassLine(t)
+	}
+	return false
+}
+
+// classDecl is a class or interface declaration: the keyword at a token
+// boundary followed by a name, so a comment saying "the class " or a string
+// holding the word does not count.
+var classDecl = regexp.MustCompile(`(?:^|[\s(])(?:class|interface)\s+[A-Za-z_]`)
+
+// isClassLine reports whether line declares a class or interface.
+func isClassLine(line string) bool {
+	t := strings.TrimSpace(line)
+	return !isCommentLine(t) && classDecl.MatchString(t)
+}
+
+// isTopLevelClassLine is isClassLine for a declaration at column zero: the
+// controller itself, not a nested class or a code line mentioning one.
+func isTopLevelClassLine(line string) bool {
+	return len(line) > 0 && line[0] != ' ' && line[0] != '\t' && isClassLine(line)
+}
+
+// isCommentLine reports whether a trimmed line is a comment line.
+func isCommentLine(t string) bool {
+	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
+}
+
+// templateRoute cuts the constant route out of a template literal that opens
+// with an interpolated base: the text between the first "}" and the next
+// "${", without a trailing slash. Empty when nothing constant is there.
+func templateRoute(lit string) string {
+	end := strings.IndexByte(lit, '}')
+	if end < 0 {
+		return ""
+	}
+	rest := lit[end+1:]
+	if i := strings.Index(rest, "${"); i >= 0 {
+		rest = rest[:i]
+	}
+	rest = strings.TrimSuffix(rest, "/")
+	if len(rest) < 2 || rest[0] != '/' {
+		return ""
+	}
+	return rest
 }
 
 // isDestinationShape keeps prose out of the destination namespace. A queue name

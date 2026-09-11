@@ -566,6 +566,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	events := ask.Events{
 		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
+		OnDetail: func(step string, d map[string]any) {
+			timeline.Detail(ctx, step, d)
+			send("detail", map[string]any{"step": step, "detail": d})
+		},
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
 	}
@@ -1057,7 +1061,11 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, ask.Events{
 		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
-		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
+		OnDetail: func(step string, d map[string]any) {
+			timeline.Detail(ctx, step, d)
+			send("detail", map[string]any{"step": step, "detail": d})
+		},
+		OnToken: func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
 	// The same rule as handleAsk: what the turn paid for is stored and
 	// reported however it ended.

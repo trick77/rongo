@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/units"
 )
 
 // fakeSearch records the query it was handed and returns fixed hits.
@@ -113,6 +114,10 @@ type fakeRouter struct {
 	// "nothing declared", which is what almost every test here wants.
 	projects    projects.Map
 	projectsErr error
+	// units and unitDeps are what each repository is built from, per
+	// repository name. Nil is a repository of one build.
+	units    map[string][]units.Unit
+	unitDeps map[string][]units.Dep
 }
 
 func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
@@ -126,6 +131,11 @@ func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, 
 // about projects gets the behaviour rongo had before they existed.
 func (f *fakeRouter) Projects(context.Context) (projects.Map, error) {
 	return f.projects, f.projectsErr
+}
+
+// Units returns what the test declared for the repository, or nothing.
+func (f *fakeRouter) Units(_ context.Context, repo string) ([]units.Unit, []units.Dep, error) {
+	return f.units[repo], f.unitDeps[repo], nil
 }
 
 // pipelineFakes is what newTestPipeline wires by default; an option overrides

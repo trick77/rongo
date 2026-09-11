@@ -135,6 +135,25 @@ describe("Ask", () => {
     });
   });
 
+  it("draws what a step found under it once the detail arrives", async () => {
+    // The detail lands on the latest step of its name: it is sent when the
+    // step is done, and a comparison turn announces "searching" twice.
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("status", { step: "searching" }),
+      ev("status", { step: "gathering" }),
+      ev("detail", { step: "searching", detail: { hits: 20, per_repo: { orders: 12, payment: 8 } } }),
+    ]);
+
+    await ask("How?");
+
+    await waitFor(() => {
+      const status = screen.getByRole("status").textContent ?? "";
+      expect(status).toContain("20 hits");
+      expect(status).toContain("orders 12");
+    });
+  });
+
   it("lists the sources with their branch - without it a forge link leads nowhere", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),
@@ -1829,15 +1848,14 @@ describe("Ask, a language the record decided", () => {
   });
 });
 
-describe("Ask, the caret of a streaming answer", () => {
-  // The caret used to be a sibling element of the markdown, which made it a
-  // block of its own: it blinked on the line BELOW the words it belongs to.
-  // It is now drawn on the last block itself (index.css), so what the markup
-  // has to get right is the marker class and which block comes last.
+describe("Ask, the streaming mark on an answer", () => {
+  // The `streaming` class is what the text fade keys on while an answer
+  // arrives; it comes off with the done event. It once also drew a caret on
+  // the last block, and that is gone: no `.caret` element, no ::after rule.
   // The connection stays open for the assertions: a stream that closes with
   // no `done` is a lost connection now, and the turn ends with an error rather
   // than sitting there mid-answer.
-  it("marks the answer block as streaming so the caret sits on its last line", async () => {
+  it("marks the answer block as streaming while text arrives, with no caret element", async () => {
     const stream = pushableStream();
     const user = userEvent.setup();
     render(

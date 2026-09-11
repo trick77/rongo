@@ -94,3 +94,8 @@ docs/plans/
 # the operator's own copy and carries real clone URLs and token_env names for
 # internal forges. Same leak class the .env rules above guard against.
 repos.yaml
+
+# Private evaluation material: a real estate's manifest, questions and rubrics.
+# Never committed; pointed at through EVAL_REPOS_FILE, BACKEND_EVAL_FLOW_QUESTIONS,
+# BACKEND_EVAL_FLOW_EXPANSIONS and BACKEND_EVAL_RUBRICS (hack/run-flow-eval.sh).
+backend/internal/retrieve/eval/private/
