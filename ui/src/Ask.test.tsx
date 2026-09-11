@@ -1035,6 +1035,26 @@ describe("Ask, what a turn cost", () => {
     expect(pane.textContent).not.toContain("What filled the answer call");
   });
 
+  it("the shell's badge opens the pane on the thread, and closing it tells the shell", async () => {
+    // Given a stored thread and the shell reporting that its badge was pressed
+    const onClose = vi.fn();
+    routedFetch([{ ...storedTurn, usage }]);
+    render(
+      <StrictMode>
+        <Ask threadId="7" threadStatsOpen onCloseThreadStats={onClose} />
+      </StrictMode>,
+    );
+
+    // Then the pane opens on the thread, not on a turn
+    const pane = await screen.findByRole("dialog", { name: "Token stats" });
+    expect(within(pane).getByRole("heading", { level: 2 }).textContent).toBe("Thread");
+
+    // And closing it is reported up: the flag lives in the shell.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Close token stats" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("shows money once the server prices the calls", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),
