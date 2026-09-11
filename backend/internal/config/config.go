@@ -90,6 +90,11 @@ type Config struct {
 	// them one question walks the corpus.
 	GatherMaxHops     int
 	GatherTokenBudget int
+	// TurnMaxTokens is the most one turn may spend across its model and
+	// embedding calls. A tripwire, not a budget: turns measure 24–37k, the
+	// heaviest on record 83k, and the default sits three times above that so
+	// normal operation never meets it. Zero turns it off.
+	TurnMaxTokens int
 	// Embedding endpoint. EmbedDim is also the width the vec0 table is built
 	// with, so changing it means a new database, not a restart — store.BuiltDim
 	// makes a mismatch a loud failure rather than a wrong answer.
@@ -157,6 +162,7 @@ func Load() (Config, error) {
 		PricesURL:         envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
 		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
 		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
 		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
@@ -291,6 +297,17 @@ func envIntOr(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// envIntOrOff is envIntOr for a limit that can be switched off: an explicit
+// 0 means off and is kept, where envIntOr would read it as malformed and put
+// the default back. Anything else that is not a positive integer falls back
+// like envIntOr does.
+func envIntOrOff(key string, fallback int) int {
+	if strings.TrimSpace(os.Getenv(key)) == "0" {
+		return 0
+	}
+	return envIntOr(key, fallback)
 }
 
 // envFloatOr reads a positive float setting. A malformed or non-positive

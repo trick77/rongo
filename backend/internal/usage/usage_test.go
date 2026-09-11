@@ -77,6 +77,19 @@ func TestReport_sumsTokensAndPricesOnlyWhenPricesAreConfigured(t *testing.T) {
 	}
 }
 
+func TestMeter_totalIsEveryTokenTheTurnPaidFor(t *testing.T) {
+	m := New()
+	if m.Total() != 0 {
+		t.Fatalf("an empty meter totals %d, want 0", m.Total())
+	}
+	m.Record(Call{Step: "understand", Prompt: 100, Completion: 20})
+	m.Record(Call{Step: "embed", Prompt: 30})
+	m.Record(Call{Step: "answer", Prompt: 5000, Completion: 800})
+	if got := m.Total(); got != 5950 {
+		t.Fatalf("total %d, want 5950", got)
+	}
+}
+
 func TestReport_ofNoCallsIsEmptyNotNil(t *testing.T) {
 	r := Prices{"m": Price{In: 1, Out: 1}}.Report(nil)
 	if r.Calls == nil || r.Total != 0 {

@@ -41,6 +41,19 @@ func (m *Meter) Record(c Call) {
 	m.calls = append(m.calls, c)
 }
 
+// Total is every token recorded so far, prompt and completion alike. It is
+// what the per-turn ceiling in internal/llm reads before a call; the meter
+// is short, so summing beats keeping a running figure in step.
+func (m *Meter) Total() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, c := range m.calls {
+		n += c.Prompt + c.Completion
+	}
+	return n
+}
+
 // Calls returns what was recorded so far, in order. Never nil.
 func (m *Meter) Calls() []Call {
 	m.mu.Lock()

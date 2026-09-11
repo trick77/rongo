@@ -38,6 +38,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_ROUTE_MARGIN",
 	"BACKEND_GATHER_MAX_HOPS",
 	"BACKEND_GATHER_TOKEN_BUDGET",
+	"BACKEND_TURN_MAX_TOKENS",
 	"BACKEND_OIDC_ISSUER",
 	"BACKEND_OIDC_CLIENT_ID",
 	"BACKEND_OIDC_CLIENT_SECRET",
@@ -100,6 +101,43 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	}
 	if cfg.AuthMode != AuthModeDev {
 		t.Errorf("AuthMode = %q, want %q", cfg.AuthMode, AuthModeDev)
+	}
+	if cfg.TurnMaxTokens != 250000 {
+		t.Errorf("TurnMaxTokens = %d, want 250000", cfg.TurnMaxTokens)
+	}
+}
+
+func TestLoad_turnMaxTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want int
+	}{
+		{"a figure is kept", "500000", 500000},
+		{"zero switches the ceiling off", "0", 0},
+		{"a malformed value falls back", "lots", 250000},
+		{"a negative value falls back", "-5", 250000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given
+			setEnv(t, map[string]string{
+				"BACKEND_SESSION_SECRET":  validSecret,
+				"BACKEND_EMBED_BASE_URL":  "http://embeddings.invalid/v1",
+				"BACKEND_TURN_MAX_TOKENS": tc.env,
+			})
+
+			// When
+			cfg, err := Load()
+
+			// Then
+			if err != nil {
+				t.Fatalf("Load() err = %v, want nil", err)
+			}
+			if cfg.TurnMaxTokens != tc.want {
+				t.Errorf("TurnMaxTokens = %d, want %d", cfg.TurnMaxTokens, tc.want)
+			}
+		})
 	}
 }
 
