@@ -12,6 +12,7 @@ import (
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/symbols"
+	"github.com/trick77/rongo/internal/units"
 )
 
 // GitClient is the part of gitrepo.Client the pipeline uses.
@@ -106,7 +107,7 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		return Counts{}, err
 	}
 
-	ix.syncDeps(ctx, spec, st, sha)
+	declared := ix.syncStructure(ctx, spec, st, sha)
 
 	for _, tg := range targets {
 		if ctx.Err() != nil {
@@ -122,36 +123,79 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 			return Counts{}, err
 		}
 	}
+	ix.linkUnits(ctx, st, declared)
 	return ix.totals(ctx, st.Name)
 }
 
-// syncDeps records what this repository publishes and pulls. A failure here is
-// logged and swallowed: repo_deps is a routing hint, and losing it degrades a
-// clarification decision. Failing the index run over it would take the whole
-// repository out of search for a manifest problem.
-func (ix *Indexer) syncDeps(ctx context.Context, spec repos.Spec, st RepoState, sha string) {
+// structure is what the manifests said, carried from before the file pass to
+// after it: the import-level links between nx units are read out of the
+// indexed chunks, so they can only be written once the files are in.
+type structure struct {
+	units   []units.Unit
+	aliases map[string]string
+}
+
+// syncStructure records what this repository publishes and pulls (repo_deps)
+// and what it is built from (units, unit_deps). A failure here is logged and
+// swallowed: both tables are routing and prompt hints, and losing them
+// degrades a clarification decision or a sentence of the answer. Failing the
+// index run over it would take the whole repository out of search for a
+// manifest problem.
+func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoState, sha string) structure {
 	paths, err := ix.git.ListPaths(ctx, spec, sha)
 	if err != nil {
 		ix.log.Warn("list paths for repo_deps failed", "repo", st.Name, "err", err)
-		return
+		return structure{}
 	}
+	read := func(p string) ([]byte, error) { return ix.git.ReadFile(ctx, spec, sha, p) }
 	mods := map[string][]byte{}
 	for _, p := range paths {
 		if path.Base(p) != "go.mod" {
 			continue
 		}
-		body, err := ix.git.ReadFile(ctx, spec, sha, p)
+		body, err := read(p)
 		if err != nil {
 			ix.log.Warn("read go.mod failed", "repo", st.Name, "path", p, "err", err)
 			continue
 		}
 		mods[p] = body
 	}
-	if len(mods) == 0 {
+
+	us, deps, skipped := units.Scan(st.Name, paths, read)
+	for _, s := range skipped {
+		ix.log.Warn("manifest skipped", "repo", st.Name, "manifest", s)
+	}
+	var publishes, requires []string
+	for _, u := range us {
+		if u.Publishes != "" {
+			publishes = append(publishes, u.Publishes)
+		}
+	}
+	for _, d := range deps {
+		if d.Coordinate != "" {
+			requires = append(requires, d.Coordinate)
+		}
+	}
+	if len(mods) > 0 || len(publishes) > 0 || len(requires) > 0 {
+		if err := repodeps.SyncWith(ctx, ix.db, st.Name, mods, publishes, requires); err != nil {
+			ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
+		}
+	}
+	if err := units.Sync(ctx, ix.db, st.Name, us, deps); err != nil {
+		ix.log.Warn("sync units failed", "repo", st.Name, "err", err)
+		return structure{}
+	}
+	return structure{units: us, aliases: units.Aliases(paths, read)}
+}
+
+// linkUnits adds the dependencies only the source declares, once the source
+// is indexed. Same policy as syncStructure: logged, never fatal.
+func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
+	if len(s.units) == 0 {
 		return
 	}
-	if err := repodeps.Sync(ctx, ix.db, st.Name, mods); err != nil {
-		ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
+	if err := units.LinkImports(ctx, ix.db, st.Name, s.units, s.aliases); err != nil {
+		ix.log.Warn("link unit imports failed", "repo", st.Name, "err", err)
 	}
 }
 

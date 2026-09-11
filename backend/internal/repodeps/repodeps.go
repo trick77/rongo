@@ -58,6 +58,15 @@ func Parse(goMod []byte) (string, []string, error) {
 // "no-op" and must still let the successful rows stand. If every manifest for
 // a repository is unparsable, no rows are written for it at all.
 func Sync(ctx context.Context, db *sql.DB, repo string, mods map[string][]byte) error {
+	return SyncWith(ctx, db, repo, mods, nil, nil)
+}
+
+// SyncWith is Sync plus coordinates read from other manifests — the Maven
+// groupId:artifactId a module publishes and the ones it pulls, an npm package
+// name — which internal/units reads. One write for all of them, because Sync
+// replaces the repository's rows whole: two writers would each erase the
+// other's edges.
+func SyncWith(ctx context.Context, db *sql.DB, repo string, mods map[string][]byte, publishes, requires []string) error {
 	type row struct{ coordinate, direction string }
 	var rows []row
 	var skipped []string
@@ -71,6 +80,12 @@ func Sync(ctx context.Context, db *sql.DB, repo string, mods map[string][]byte) 
 		for _, r := range requires {
 			rows = append(rows, row{r, "requires"})
 		}
+	}
+	for _, p := range publishes {
+		rows = append(rows, row{p, "publishes"})
+	}
+	for _, r := range requires {
+		rows = append(rows, row{r, "requires"})
 	}
 
 	tx, err := db.BeginTx(ctx, nil)

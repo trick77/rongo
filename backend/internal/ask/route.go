@@ -16,6 +16,7 @@ import (
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/units"
 )
 
 // Candidate is one place an answer could come from: a module in a repository,
@@ -578,6 +579,16 @@ func (r *Router) Projects(ctx context.Context) (projects.Map, error) {
 	return projects.Load(ctx, r.db)
 }
 
+// Units reads what one repository is built from, for the answer prompt's
+// structure block. Read fresh per turn for Projects' reason. A Router with no
+// database has none, which is a repository of one build.
+func (r *Router) Units(ctx context.Context, repo string) ([]units.Unit, []units.Dep, error) {
+	if r.db == nil {
+		return nil, nil, nil
+	}
+	return units.Load(ctx, r.db, repo)
+}
+
 // Judge asks the model whether cs are independent alternatives or parts of one
 // mechanism — the rung that decides whether the CODE is ambiguous. Exported so
 // the eval harness can call it once per question and reuse the answer across
@@ -1044,7 +1055,26 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 func (r *Router) anyDependency(ctx context.Context, cs []Candidate) (bool, error) {
 	for i, a := range cs {
 		for j, b := range cs {
-			if i == j || a.Repo == b.Repo {
+			if i == j {
+				continue
+			}
+			if a.Repo == b.Repo {
+				// Inside one repository the manifest edge is a declared
+				// unit dependency (internal/units): an app and the library
+				// it imports, a service and the persistence module it
+				// builds against. Two directories that are not units have
+				// no such edge and fall through to the margin and the judge,
+				// exactly as before units existed.
+				if a.ModuleKey == "" || b.ModuleKey == "" || a.ModuleKey == b.ModuleKey || r.db == nil {
+					continue
+				}
+				ok, err := units.Linked(ctx, r.db, a.Repo, a.ModuleKey, b.ModuleKey)
+				if err != nil {
+					return false, fmt.Errorf("units linked %s: %s -> %s: %w", a.Repo, a.ModuleKey, b.ModuleKey, err)
+				}
+				if ok {
+					return true, nil
+				}
 				continue
 			}
 			ok, err := repodeps.DependsOn(ctx, r.db, a.Repo, b.Repo)

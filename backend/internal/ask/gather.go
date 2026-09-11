@@ -56,6 +56,10 @@ type GatherOptions struct {
 	// harness, which has to measure the walk with and without the edge table
 	// on the same questions to say what the crossing buys.
 	NoCrossings bool
+	// RouteSuffix lets a crossing match a client's route tail against the
+	// path a server serves; see edges.Match. Off until the flow corpus says
+	// what it buys.
+	RouteSuffix bool
 }
 
 // Gatherer expands search hits into the material an answer is written from.
@@ -257,7 +261,7 @@ func mechanismFirst(ss []Source) []Source {
 // walk and the measurement in internal/edges cannot disagree about which
 // tokens cross.
 func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error) {
-	ns, err := edges.Neighbours(ctx, g.db, from.Repo, from.Path)
+	ns, err := edges.NeighboursWith(ctx, g.db, from.Repo, from.Path, edges.Match{Suffix: g.opts.RouteSuffix})
 	if err != nil {
 		return nil, fmt.Errorf("cross from %s/%s: %w", from.Repo, from.Path, err)
 	}

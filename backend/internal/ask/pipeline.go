@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/units"
 )
 
 // searchK is how many fused hits the gatherer starts from. Deeper than the ten
@@ -40,6 +41,9 @@ type Routes interface {
 	// owns the database handle the pipeline would otherwise need for nothing
 	// else.
 	Projects(ctx context.Context) (projects.Map, error)
+	// Units is what one repository is built from, as its manifests declare
+	// it. Same owner as Projects, for the same reason.
+	Units(ctx context.Context, repo string) ([]units.Unit, []units.Dep, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -363,8 +367,29 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 		}
 	}
 	scope.Structure = StructureBlock(ps)
+	// What each repository in scope is built from: the apps and services a
+	// person names, and which uses which. Templated from the manifests the
+	// indexer read (internal/units), never a source, closed by the same rule
+	// the project block is. A repository of one build adds nothing.
+	for _, repo := range scope.Known {
+		us, deps, err := p.router.Units(ctx, repo)
+		if err != nil {
+			slog.Warn("units unavailable, answering without them", "thread", llm.ThreadID(ctx), "repo", repo, "err", err)
+			continue
+		}
+		scope.Structure += units.Describe(repo, us, deps)
+	}
+	if scope.Structure != "" && len(scope.Projects) == 0 {
+		scope.Structure += structureIsConfiguration
+	}
 	return scope
 }
+
+// structureIsConfiguration closes a structure block that StructureBlock did
+// not close itself — a units paragraph with no project block above it. The
+// sentence is StructureBlock's, word for word.
+const structureIsConfiguration = "\nThis is configuration, not code. It says which repository plays which part " +
+	"and which calls which. Never present it as something you read in the sources, and never cite it."
 
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
 // what the turn has to say about its own footing, and answer under that.

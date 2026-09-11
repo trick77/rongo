@@ -20,6 +20,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/trick77/rongo/internal/units"
 )
 
 // Module is one routing unit: a directory prefix plus the indexed files that
@@ -29,7 +31,11 @@ type Module struct {
 	Repo string
 	// Key is the directory prefix, repo-relative. "." is the repository root,
 	// which doubles as the catch-all for everything too small to be a module.
-	Key        string
+	Key string
+	// Name is what the build calls the module when the cut followed a
+	// declared unit — the nx project name, the Maven artifactId — and empty
+	// when it is a directory the cut chose on its own.
+	Name       string
 	Paths      []string
 	ChunkCount int
 	// Oversized records that the module exceeded MaxChunks and could not be
@@ -64,12 +70,99 @@ type group struct {
 }
 
 // Cluster returns repo's modules, ordered by Key.
+//
+// Where the repository's build declares its parts (internal/units: an nx
+// application, a Maven module), each declared unit is one module, whatever
+// its size — a library of two chunks is still the library a person names.
+// The directory rule below runs over what no unit claims. That is the
+// difference between a card offering "vorerfassung" and one offering
+// apps/vorerfassung/src/app.
 func Cluster(ctx context.Context, db *sql.DB, repo string, o Opts) ([]Module, error) {
 	own, err := loadDirs(ctx, db, repo)
 	if err != nil {
 		return nil, err
 	}
+	declared, err := claimByUnits(ctx, db, repo, own)
+	if err != nil {
+		return nil, err
+	}
+	rest, err := clusterDirs(repo, own, o)
+	if err != nil {
+		return nil, err
+	}
+	out := append(declared, rest...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
 
+// claimByUnits takes every file under a declared unit out of own and returns
+// one module per unit that owns at least one indexed file.
+func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*group) ([]Module, error) {
+	us, _, err := units.Load(ctx, db, repo)
+	if err != nil {
+		return nil, fmt.Errorf("load units of %s: %w", repo, err)
+	}
+	if len(us) == 0 {
+		return nil, nil
+	}
+	byKey := map[string]*Module{}
+	for d, g := range own {
+		var keep []string
+		kept := 0
+		for _, p := range g.paths {
+			u := units.Of(us, p)
+			if u == nil {
+				keep = append(keep, p)
+				continue
+			}
+			m, ok := byKey[u.Key]
+			if !ok {
+				m = &Module{Repo: repo, Key: u.Key, Name: u.Name}
+				byKey[u.Key] = m
+			}
+			m.Paths = append(m.Paths, p)
+			kept++
+		}
+		if kept == 0 {
+			continue
+		}
+		// A directory's chunk count is a sum over its files; the files that
+		// left take their share with them, pro rata, because loadDirs only
+		// kept the total. Exact per-file counts would need a second query
+		// for a number nothing routes on.
+		if len(g.paths) > 0 {
+			g.chunks = g.chunks * len(keep) / len(g.paths)
+		}
+		g.paths = keep
+		if len(keep) == 0 {
+			delete(own, d)
+		}
+	}
+	var out []Module
+	for _, m := range byKey {
+		sort.Strings(m.Paths)
+		m.ChunkCount = chunkCount(ctx, db, repo, m.Paths)
+		out = append(out, *m)
+	}
+	return out, nil
+}
+
+// chunkCount is the number of chunks over paths, for the module list.
+func chunkCount(ctx context.Context, db *sql.DB, repo string, paths []string) int {
+	n := 0
+	for _, p := range paths {
+		var c int
+		if err := db.QueryRowContext(ctx,
+			`SELECT COUNT(c.id) FROM files f LEFT JOIN chunks c ON c.file_id = f.id WHERE f.repo = ? AND f.path = ?`,
+			repo, p).Scan(&c); err == nil {
+			n += c
+		}
+	}
+	return n
+}
+
+// clusterDirs is the directory rule over whatever own still holds.
+func clusterDirs(repo string, own map[string]*group, o Opts) ([]Module, error) {
 	// Deepest first, so a directory sees everything its children handed up
 	// before it decides whether it is a module.
 	dirs := make([]string, 0, len(own))

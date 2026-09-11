@@ -119,6 +119,7 @@ type flowGatherArm struct {
 	name        string
 	hops        int
 	noCrossings bool
+	routeSuffix bool
 }
 
 // TestFlowGathered reports, per arm and per question, which parts of the flow
@@ -145,6 +146,7 @@ func TestFlowGathered(t *testing.T) {
 		{name: "search only", hops: 0, noCrossings: true},
 		{name: "symbol walk", hops: deployed.MaxHops, noCrossings: true},
 		{name: "symbol walk + crossings (the product)", hops: deployed.MaxHops},
+		{name: "symbol walk + crossings, route suffix matching", hops: deployed.MaxHops, routeSuffix: true},
 	}
 
 	// Searched once per question, shared across the arms: the arms differ
@@ -164,7 +166,8 @@ func TestFlowGathered(t *testing.T) {
 	}
 
 	for _, arm := range arms {
-		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: deployed.TokenBudget, NoCrossings: arm.noCrossings})
+		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: deployed.TokenBudget,
+			NoCrossings: arm.noCrossings, RouteSuffix: arm.routeSuffix})
 		var totalParts, totalReached, totalSources, whole int
 		t.Logf("\n=== arm: %s", arm.name)
 		for _, q := range questions {
