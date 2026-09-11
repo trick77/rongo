@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import SourceView, { type SourceRef } from "../SourceView";
-import ThreadView, { SourcesPane, paneAudienceTurn } from "../ThreadView";
+import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "../ThreadView";
 import ThreadUsageBadge from "../ThreadUsageBadge";
 import {
   linkChosenCandidates,
@@ -42,6 +42,9 @@ export default function SharePage({ token }: { token: string }) {
   // it. The audience is on the wire — handlePublicShare drops the follow-ups,
   // the per-turn usage and the timeline, and nothing else.
   const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
+  // The turn the reader pointed the pane at from the chip under it; null is
+  // the newest citing turn. Nothing resets it: a share never gains a turn.
+  const [sourceTurn, setSourceTurn] = useState<number | null>(null);
 
   // Belt and braces with the X-Robots-Tag the two public endpoints set: a
   // crawler that reaches the page rather than the API sees this one. Removed
@@ -132,6 +135,17 @@ export default function SharePage({ token }: { token: string }) {
   }
 
   const showSources = sourcesOpen ?? paneAudienceTurn(state.turns)?.audience === "dev";
+  const listedTurn = sourceTurn ?? sourceTurnOf(state.turns);
+  // As in Ask: the chip shuts the pane only when it is open on that very
+  // turn; from any other turn it moves the pane there.
+  const toggleSources = (i: number) => {
+    if (showSources && i === listedTurn) {
+      setSourcesOpen(false);
+      return;
+    }
+    setSourceTurn(i);
+    setSourcesOpen(true);
+  };
 
   return (
     // The app's own shell: a 56px header over the thread, and the Sources
@@ -177,8 +191,9 @@ export default function SharePage({ token }: { token: string }) {
                 actions={null}
                 onOpenSource={setViewing}
                 onHot={setHot}
+                sourceTurn={listedTurn}
                 sourcesOpen={showSources}
-                onToggleSources={() => setSourcesOpen(!showSources)}
+                onToggleSources={toggleSources}
                 threadKey={token}
               />
             </div>
@@ -197,6 +212,7 @@ export default function SharePage({ token }: { token: string }) {
         {showSources && (
           <SourcesPane
             turns={state.turns}
+            sourceTurn={listedTurn}
             hot={hot}
             onOpen={setViewing}
             onClose={() => setSourcesOpen(false)}
