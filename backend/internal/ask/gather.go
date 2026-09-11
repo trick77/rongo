@@ -60,6 +60,11 @@ type GatherOptions struct {
 	// path a server serves; see edges.Match. Off until the flow corpus says
 	// what it buys.
 	RouteSuffix bool
+	// WholeFileTokens is the size up to which the file a hit sits in is read
+	// whole, in estimated tokens; a larger file contributes the rest of the
+	// hit's own symbol only. Zero is off, which the eval's baseline arm uses.
+	// See wholeFile.
+	WholeFileTokens int
 }
 
 // Gatherer expands search hits into the material an answer is written from.
@@ -131,6 +136,32 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 	symbolBudget := g.opts.TokenBudget
 	if !g.opts.NoCrossings {
 		symbolBudget -= g.opts.TokenBudget / crossingReserve
+	}
+
+	// The rest of the file a hit sits in, before any symbol hop: the nearest
+	// explanation of a chunk is the chunk beside it, and the two unique
+	// questions the walk never reached were a constant explained one chunk
+	// away from the hit with no symbol linking them. Under the symbol walk's
+	// budget, and taken at hop 0 — it is the hit's own file — but never
+	// evicting a hit, which take guarantees.
+	if g.opts.WholeFileTokens > 0 {
+		filed := map[string]bool{}
+		for _, h := range hits {
+			key := h.Repo + "\x00" + h.Path
+			if filed[key] {
+				continue
+			}
+			filed[key] = true
+			more, err := g.wholeFile(ctx, h)
+			if err != nil {
+				return nil, err
+			}
+			for _, s := range more {
+				if !take(s, 0, symbolBudget) {
+					break
+				}
+			}
+		}
 	}
 	frontier := out
 symbols:
@@ -227,6 +258,54 @@ symbols:
 // corpus is measured, not assumed: TestEvalMeasureGathered, in
 // internal/retrieve/eval.
 const crossingReserve = 6
+
+// wholeFile returns the chunks of a hit's file the answer should read
+// beside the hit: every other chunk when the file is small (at most
+// WholeFileTokens in all), otherwise only the chunks that continue the
+// hit's own symbol — a function cut into windows is one mechanism, and
+// half of it is not. Ordered by ordinal, so the file reads in order.
+func (g *Gatherer) wholeFile(ctx context.Context, h retrieve.Hit) ([]Source, error) {
+	rows, err := g.db.QueryContext(ctx, `
+		SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
+		FROM files f
+		JOIN repo_state r ON r.name = f.repo
+		JOIN chunks c ON c.file_id = f.id
+		WHERE f.repo = ? AND f.path = ?
+		ORDER BY c.ordinal`, h.Repo, h.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read the file of %s/%s: %w", h.Repo, h.Path, err)
+	}
+	defer rows.Close()
+	var all []Source
+	total := 0
+	for rows.Next() {
+		var s Source
+		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text); err != nil {
+			return nil, fmt.Errorf("scan a chunk of %s/%s: %w", h.Repo, h.Path, err)
+		}
+		total += estimateTokens(s.Text)
+		all = append(all, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []Source
+	for _, s := range all {
+		if s.ChunkID == h.ChunkID {
+			continue
+		}
+		switch {
+		case total <= g.opts.WholeFileTokens:
+			s.Reason = "file:whole"
+		case h.Symbol != "" && s.Symbol == h.Symbol:
+			s.Reason = "file:symbol"
+		default:
+			continue
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
 
 // mechanismFirst orders one hop's candidates so that test files come after
 // everything else. A test that references the service is a correct hop and a

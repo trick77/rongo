@@ -187,6 +187,11 @@ func TestEvalMeasureAnswers(t *testing.T) {
 		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
 		Dim:     dim,
 	}, nil))
+	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
+	// measures the fused order the product ran before the reranker shipped.
+	if envOr("BACKEND_EVAL_RERANK", "1") != "0" {
+		retriever.Reranker = retrieve.NewLLMReranker(c, 60)
+	}
 	opts := gatherOpts(t)
 	mo := modules.Opts{MinChunks: envIntOr(t, "BACKEND_MODULE_MIN_CHUNKS", 8), MaxChunks: envIntOr(t, "BACKEND_MODULE_MAX_CHUNKS", 150)}
 	pipeline := ask.NewPipeline(c, retriever, ask.NewGatherer(db, opts), ask.NewRouter(c, db, routeMargin(t), mo))

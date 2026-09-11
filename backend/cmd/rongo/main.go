@@ -347,9 +347,16 @@ func main() {
 		Timeout:     15 * time.Minute,
 		IdleTimeout: 90 * time.Second,
 	}, nil)
+	// One short-gate call reorders a pool of sixty before the cut to twenty:
+	// measured twice on the pinned corpus (unique gathered 0.905 → 0.952,
+	// composition 4/5 → 5/5, flow corpus 27/30 → 28/30), see
+	// docs/measurements/2026-09-11-arms-after-the-crossing.md. It stores
+	// nothing; a reply it cannot read keeps the fused order.
+	retriever := retrieve.New(db, embedder)
+	retriever.Reranker = retrieve.NewLLMReranker(models, 60)
 	deps.Ask = ask.NewPipeline(
 		models,
-		retrieve.New(db, embedder),
+		retriever,
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
 	)

@@ -71,6 +71,8 @@ type gatherArm struct {
 	// noCrossings switches the repository crossing off, which is how the
 	// walk behaved before the edge table reached it.
 	noCrossings bool
+	// wholeFile is GatherOptions.WholeFileTokens for the arm; 0 is off.
+	wholeFile int
 }
 
 // gatherOutcome is one question under one arm.
@@ -151,6 +153,10 @@ func TestEvalMeasureGathered(t *testing.T) {
 		// and no queue this is the arm that says what the crossing reserve
 		// costs — the product arm above pays it whether or not an edge fires.
 		{name: "expanded + walk, crossings off", expanded: true, hops: opts.MaxHops, noCrossings: true},
+		// The file a hit sits in read whole when small, or the rest of the
+		// hit's symbol when not: the arm that says whether "a constant three
+		// levels down a large file" is reachable without a symbol.
+		{name: "expanded + walk + whole file", expanded: true, hops: opts.MaxHops, wholeFile: 1500},
 	}
 
 	t.Logf("questions=%d max_hops=%d token_budget=%d", len(questions), opts.MaxHops, opts.TokenBudget)
@@ -162,7 +168,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 		} else {
 			r.DocDecay = retrieve.DefaultDocDecay
 		}
-		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget, NoCrossings: arm.noCrossings})
+		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget, NoCrossings: arm.noCrossings, WholeFileTokens: arm.wholeFile})
 		var out []gatherOutcome
 		for _, q := range questions {
 			query := retrieve.Query{Text: q.Text, Question: q.Text, K: gatherSearchK}

@@ -1065,7 +1065,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})
 		},
-		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
+		OnToken: func(tok string) { send("token", map[string]any{"text": tok}) },
 	})
 	// The same rule as handleAsk: what the turn paid for is stored and
 	// reported however it ended.

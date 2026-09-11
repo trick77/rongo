@@ -122,6 +122,8 @@ type flowGatherArm struct {
 	hops        int
 	noCrossings bool
 	routeSuffix bool
+	wholeFile   int
+	rerank      bool
 }
 
 // TestFlowGathered reports, per arm and per question, which parts of the flow
@@ -149,27 +151,57 @@ func TestFlowGathered(t *testing.T) {
 		{name: "symbol walk", hops: deployed.MaxHops, noCrossings: true},
 		{name: "symbol walk + crossings (the product)", hops: deployed.MaxHops},
 		{name: "symbol walk + crossings, route suffix matching", hops: deployed.MaxHops, routeSuffix: true},
+		{name: "symbol walk + crossings + whole file", hops: deployed.MaxHops, wholeFile: 1500},
+	}
+	// The reranker reorders the search itself, so it is an arm over a second
+	// hit list; it needs a model and is skipped when none is configured.
+	var reranked *retrieve.Retriever
+	if base := os.Getenv("BACKEND_LLM_BASE_URL"); base != "" {
+		reranked = retrieve.New(db, embed.NewClient(embed.Config{
+			BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
+			APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
+			Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
+			Dim:     dim,
+		}, nil))
+		reranked.Candidates = 60
+		reranked.Reranker = retrieve.NewLLMReranker(llm.NewClient(llm.Config{
+			BaseURL: base, APIKey: os.Getenv("BACKEND_LLM_API_KEY"), Timeout: 2 * time.Minute,
+		}, nil), 60)
+		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
 	}
 
-	// Searched once per question, shared across the arms: the arms differ
-	// in gathering only, and a second embedding call per arm would add the
-	// embedding endpoint's own variance to a comparison of the walk.
-	hitsFor := map[string][]retrieve.Hit{}
-	for _, q := range questions {
-		e, ok := expansions[q.Text]
-		if !ok {
-			t.Fatalf("no frozen expansion for %q; run TestExpandFlowQuestions", q.Text)
+	// Searched once per question and retriever, shared across the arms: the
+	// arms differ in gathering only, and a second embedding call per arm
+	// would add the embedding endpoint's own variance to a comparison of the
+	// walk.
+	search := func(r *retrieve.Retriever) map[string][]retrieve.Hit {
+		out := map[string][]retrieve.Hit{}
+		for _, q := range questions {
+			e, ok := expansions[q.Text]
+			if !ok {
+				t.Fatalf("no frozen expansion for %q; run TestExpandFlowQuestions", q.Text)
+			}
+			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Repos: e.Repos, Question: q.Text, K: gatherSearchK})
+			if err != nil {
+				t.Fatalf("search %q: %v", q.Text, err)
+			}
+			out[q.Text] = hits
 		}
-		hits, err := retriever.Search(ctx, retrieve.Query{Texts: e.Texts, Repos: e.Repos, Question: q.Text, K: gatherSearchK})
-		if err != nil {
-			t.Fatalf("search %q: %v", q.Text, err)
-		}
-		hitsFor[q.Text] = hits
+		return out
+	}
+	hitsFor := search(retriever)
+	var rerankedHits map[string][]retrieve.Hit
+	if reranked != nil {
+		rerankedHits = search(reranked)
 	}
 
 	for _, arm := range arms {
+		hitsFor := hitsFor
+		if arm.rerank {
+			hitsFor = rerankedHits
+		}
 		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: deployed.TokenBudget,
-			NoCrossings: arm.noCrossings, RouteSuffix: arm.routeSuffix})
+			NoCrossings: arm.noCrossings, RouteSuffix: arm.routeSuffix, WholeFileTokens: arm.wholeFile})
 		var totalParts, totalReached, totalSources, whole int
 		t.Logf("\n=== arm: %s", arm.name)
 		for _, q := range questions {
