@@ -40,9 +40,9 @@ Checks:
 2. Click a candidate. The card collapses to "Chosen: {title}" with a
    hairline border, the chosen row carries a "Chosen" badge, and the answer
    streams below it.
-3. Open the "How does rongo know this?" details block once the answer is done.
-   It lists an "N sources" count and one `repo · path:start-end (branch)` line
-   per source. Click one (or its row in the Sources pane): an overlay opens
+3. Click the "N Sources" pill under the answer once it is done. The Sources
+   pane opens on that turn and lists one `repo branch path:start-end` row per
+   source. Click a row (or a marker in the text): an overlay opens
    the file out of rongo's own checkout, at the commit the answer was written
    from, with the cited lines marked and scrolled into view. Confirm the
    marked lines say what the answer claims; Escape closes it.
@@ -64,7 +64,7 @@ Checks:
 
 1. Ask a question that answers. After the citations, the trace shows
    "Suggesting follow-ups" and then Done; two or three pills appear between the
-   "How does rongo know this?" block and the "Explain as ..." row. They are
+   "N Sources" pill and the "Explain as ..." row. They are
    never ochre.
 2. Open the usage pill: its call table lists a `followups` row on the
    short-gate model, and the turn's total includes it.

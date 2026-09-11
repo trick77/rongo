@@ -154,13 +154,12 @@ describe("Ask", () => {
 
     const user = await ask("How?");
 
-    const evidence = await screen.findByText(/How does Rongo know this/);
-    expect(evidence).toBeTruthy();
-    const turn = evidence.closest("article")!;
-    expect(turn.textContent).toContain("release-2024.3");
-    expect(turn.textContent).toContain("store.go:3-40");
-    // The Sources pane lists the same file, so a reader keeps it in view.
-    expect((await openSources(user)).textContent).toContain("store.go");
+    // The chip under the answer counts them; the pane is where they are read.
+    const chip = await screen.findByRole("button", { name: /Sources/ });
+    expect(chip.textContent).toContain("1");
+    const pane = await openSources(user);
+    expect(pane.textContent).toContain("release-2024.3");
+    expect(pane.textContent).toContain("store.go:3-40");
   });
 
   it("opens the cited file, at the cited commit, when a source is clicked", async () => {
@@ -173,7 +172,7 @@ describe("Ask", () => {
       ev("done", {}),
     ]);
     const user = await ask("How?");
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
 
     // From here on fetch serves the file, not the stream.
     const fetchMock = vi.fn(async () => ({
@@ -282,7 +281,7 @@ describe("Ask, the Sources pane", () => {
   it("stays shut on an Analyst answer, and the chip says how many there are", async () => {
     streamFrames(answered());
     await ask("How?");
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
 
     // The Analyst was given an explanation with no paths in it on purpose;
     // the file list is not what that reader came for.
@@ -303,7 +302,7 @@ describe("Ask, the Sources pane", () => {
     await user.type(screen.getByLabelText("Question"), "How?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
     expect(pane()).toBeTruthy();
     expect(chip()!.getAttribute("aria-expanded")).toBe("true");
   });
@@ -311,7 +310,7 @@ describe("Ask, the Sources pane", () => {
   it("closes on the × and comes back on the chip", async () => {
     streamFrames(answered());
     const user = await ask("How?");
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
 
     await user.click(chip()!);
     expect(pane()).toBeTruthy();
@@ -323,20 +322,37 @@ describe("Ask, the Sources pane", () => {
     expect(pane()).toBeTruthy();
   });
 
-  it("the chip is on the turn the pane shows, and on no other", async () => {
+  it("every citing turn has a chip, and each points the pane at its own turn", async () => {
     streamFrames(answered());
     const user = await ask("How?");
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
 
-    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", cited), ev("done", {})]);
+    const later = [
+      { marker: 1, repo: "peeq", branch: "master", path: "internal/b.go", start_line: 5, end_line: 6, sha: "0123abcdef" },
+    ];
+    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", later), ev("done", {})]);
     await user.type(screen.getByLabelText("Question"), "And then?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/And so/);
 
-    // Both turns cite, but the pane only ever lists the newer one — a chip on
-    // the older answer would open somebody else's sources.
-    expect(screen.getAllByText(/How does Rongo know this/)).toHaveLength(2);
-    expect(screen.getAllByRole("button", { name: /Sources/ })).toHaveLength(1);
+    const chips = screen.getAllByRole("button", { name: /Sources/ });
+    expect(chips).toHaveLength(2);
+
+    // The older chip lists the older answer's file, not the newest turn's.
+    await user.click(chips[0]);
+    expect(pane()!.textContent).toContain("a.go");
+    expect(pane()!.textContent).not.toContain("b.go");
+    expect(chips[0].getAttribute("aria-expanded")).toBe("true");
+    expect(chips[1].getAttribute("aria-expanded")).toBe("false");
+
+    // The newer chip moves the pane rather than shutting it.
+    await user.click(chips[1]);
+    expect(pane()!.textContent).toContain("b.go");
+    expect(chips[1].getAttribute("aria-expanded")).toBe("true");
+
+    // The same chip again shuts it.
+    await user.click(chips[1]);
+    expect(pane()).toBeNull();
   });
 
   it("opens while a Developer answer is still being written, not after it", async () => {
@@ -366,7 +382,7 @@ describe("Ask, the Sources pane", () => {
   it("the reader's choice outlives a follow-up", async () => {
     streamFrames(answered());
     const user = await ask("How?");
-    await screen.findByText(/How does Rongo know this/);
+    await screen.findByRole("button", { name: /Sources/ });
     await user.click(chip()!);
     expect(pane()).toBeTruthy();
 
@@ -445,7 +461,9 @@ describe("Ask, a stored thread", () => {
 
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
     expect(screen.getByText(/How does an Apple TV get at the file/)).toBeTruthy();
-    expect(screen.getByText(/store\.go:3-40/).closest("article")).toBeTruthy();
+    // A Developer's turn: the pane is open with it, and lists the file.
+    expect(screen.getByRole("button", { name: /Sources/ }).textContent).toContain("1");
+    expect(screen.getByRole("complementary", { name: "Sources" }).textContent).toContain("store.go:3-40");
     // A turn written before timelines were stored has none, and draws none:
     // an empty frame under an old answer would be a claim about a turn nobody
     // watched.

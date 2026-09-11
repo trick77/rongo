@@ -7,7 +7,6 @@ import Trace from "./Trace";
 import { CheckIcon, Chevron, CopyIcon } from "./icons";
 import {
   clock,
-  forgeLine,
   groupByQuestion,
   languages,
   money,
@@ -64,15 +63,16 @@ export type ThreadViewProps = {
    * reads the hot marker through this. */
   onHot?: (marker: number | null) => void;
   /**
-   * Whether the sources pane is on screen, and the way to turn it round. Both
-   * are the caller's: the pane is a cell of ITS grid, while the chip that
-   * opens it is a row inside a turn, so the page is the only thing that sees
-   * both ends. Left out — the share page before it grew one, a test — the
-   * chip is not rendered at all and the disclosure under the answer is the
-   * only way to the sources, which is what happens below `xl` anyway.
+   * The turn the sources pane lists, whether the pane is on screen, and the
+   * way to turn it round from a given turn. All the caller's: the pane is a
+   * cell of ITS grid, while the chip that opens it is a row inside a turn, so
+   * the page is the only thing that sees both ends. Left out — a test — the
+   * chip is not rendered at all and the markers in the text are the only way
+   * to a source, which is what happens below `xl` anyway.
    */
+  sourceTurn?: number;
   sourcesOpen?: boolean;
-  onToggleSources?: () => void;
+  onToggleSources?: (turnIndex: number) => void;
   /**
    * Which thread these turns are. Everything this view remembers is an INDEX
    * into them, and the same index in the next thread is a different turn — so
@@ -112,6 +112,7 @@ export default function ThreadView({
   actions = null,
   onOpenSource,
   onHot,
+  sourceTurn,
   sourcesOpen = false,
   onToggleSources,
   threadKey = null,
@@ -201,7 +202,9 @@ export default function ThreadView({
   // addresses a turn by its position in it — and only the rendering groups.
   const groups = useMemo(() => groupByQuestion(turns), [turns]);
 
-  const sourceTurnIndex = sourceTurnOf(turns);
+  // The turn the pane lists. Without the caller's word on it, the newest
+  // citing turn, which is what the pane shows on its own.
+  const sourceTurnIndex = sourceTurn ?? sourceTurnOf(turns);
 
   // A highlight belongs to the turn the pane shows. When the pane moves to a
   // newer turn, the old Markdown's mouseleave never fires for it.
@@ -421,46 +424,23 @@ export default function ThreadView({
                   </div>
                 )}
 
-                {turn.citations.length > 0 && (
-                  <details className="mt-4 text-sm">
-                    <summary className="flex cursor-pointer list-none items-center gap-2 text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
-                      <Chevron /> How does Rongo know this?{" "}
-                      <span className="text-faint">{turn.citations.length} sources</span>
-                    </summary>
-                    <ul className="mt-2 space-y-1">
-                      {turn.citations.map((c) => (
-                        <li key={c.marker}>
-                          <sup className="font-mono text-accent-strong">{c.marker}</sup>{" "}
-                          <button
-                            type="button"
-                            onClick={() => showSource(c)}
-                            className="border-b border-transparent font-mono text-[13px] text-muted hover:border-accent hover:text-ink"
-                          >
-                            {forgeLine(c)}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-
-                {/* The way into the pane, on the one turn the pane can
-                    actually show. It lists the newest citing turn and nothing
-                    else, so a chip on an older answer would open a list of a
-                    later answer's files — the reader clicks "6 sources" and
-                    gets somebody else's six.
+                {/* The way into the pane, under every answer that cites. The
+                    pane lists one turn at a time, and this chip is what points
+                    it at THIS one: the reader clicks "6 sources" under an older
+                    answer and gets that answer's six, not the newest turn's.
+                    Expanded means the pane is open on this turn, not merely
+                    open.
 
                     Only from `xl`, where the pane exists at all. Narrower than
-                    that the disclosure above is the sources, as it has always
-                    been. No aria-controls: the pane is unmounted while shut,
-                    and the attribute would name an element that is not
-                    there. */}
-                {onToggleSources && turn.citations.length > 0 && i === sourceTurnIndex && (
+                    that the markers in the text are the way to a source. No
+                    aria-controls: the pane is unmounted while shut, and the
+                    attribute would name an element that is not there. */}
+                {onToggleSources && turn.citations.length > 0 && (
                   <div className="mt-4 hidden xl:block">
                     <button
                       type="button"
-                      aria-expanded={sourcesOpen}
-                      onClick={onToggleSources}
+                      aria-expanded={sourcesOpen && i === sourceTurnIndex}
+                      onClick={() => onToggleSources(i)}
                       className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
                     >
                       <span className="font-mono text-xs text-accent-strong">{turn.citations.length}</span>
@@ -613,29 +593,32 @@ export default function ThreadView({
  */
 export function SourcesPane({
   turns,
+  sourceTurn,
   hot,
   onOpen,
   onClose,
 }: {
   turns: Turn[];
+  /** The turn to list. Left out, the newest citing one. */
+  sourceTurn?: number;
   hot: number | null;
   onOpen: (c: Citation) => void;
   /** Shuts the pane. The caller owns whether it is on screen — this only says
    * that the reader asked for it to go. */
   onClose?: () => void;
 }) {
-  const sourceTurnIndex = sourceTurnOf(turns);
-  const sourceTurn = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
+  const sourceTurnIndex = sourceTurn ?? sourceTurnOf(turns);
+  const listed = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
   const groups = useMemo(() => groupByQuestion(turns), [turns]);
   return (
     <aside aria-label="Sources" className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
       <header className="flex items-center border-b border-border px-4.5 py-3.5 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
         Sources
-        {sourceTurn && (
+        {listed && (
           <span className="ml-auto font-mono tracking-normal">
             {/* The turn the reader sees, counted in questions like the pill
                 on the article — not the row's place in the record. */}
-            turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {sourceTurn.citations.length}
+            turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {listed.citations.length}
           </span>
         )}
         {/* The same close the source viewer and the diagram draw: a × at the
@@ -649,7 +632,7 @@ export function SourcesPane({
             aria-label="Close"
             className={
               "-my-1 grid h-8 w-8 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink" +
-              (sourceTurn ? " -mr-1" : " -mr-1 ml-auto")
+              (listed ? " -mr-1" : " -mr-1 ml-auto")
             }
           >
             ×
@@ -657,12 +640,12 @@ export function SourcesPane({
         )}
       </header>
       <div className="thin-scroll min-h-0 flex-1 overflow-auto">
-        {!sourceTurn && (
+        {!listed && (
           <p className="px-4.5 py-4 text-[13px] text-faint">
             The files an answer was written from appear here, numbered like the markers in the text.
           </p>
         )}
-        {sourceTurn?.citations.map((c) => (
+        {listed?.citations.map((c) => (
           // The whole row opens the file; the file name underlines on
           // hover so the row reads as something to open, without a glyph.
           <button

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import ThreadView, { SourcesPane, paneAudienceTurn } from "./ThreadView";
+import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView from "./SourceView";
 import { Chevron } from "./icons";
 import {
@@ -180,6 +180,11 @@ export default function Ask({
   // the list is noise. A click on the × or on the chip settles it for the
   // rest of the thread; opening another thread asks the question again.
   const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
+  // The turn the reader pointed the pane at, by clicking the chip under it.
+  // null is "none in particular", and the pane lists the newest citing turn.
+  // A new turn clears it: the reader asked again, and the answer to that is
+  // what they are reading now, so its sources are the ones beside it.
+  const [sourceTurn, setSourceTurn] = useState<number | null>(null);
   const threadId = useRef<string | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -346,6 +351,7 @@ export default function Ask({
     // last thread's reader: a × pressed on one conversation is not a standing
     // instruction about the next one.
     setSourcesOpen(null);
+    setSourceTurn(null);
     // The thread being written comes back from the parked copy, never from the
     // server: the record has no answer on it yet — the row is only finished
     // when the turn is — so a fetch would replace a half-written answer with
@@ -469,6 +475,12 @@ export default function Ask({
     }
     if (following.current) scrollSelf(el, el.scrollHeight);
   }, [turns]);
+
+  // A turn added or a thread swapped in: the reader's pick of a turn for the
+  // pane is an index into what was there before, and means nothing now.
+  useEffect(() => {
+    setSourceTurn(null);
+  }, [turns.length]);
 
   // The running total follows the turns: it grows when a usage event lands
   // and resets when another thread is opened.
@@ -878,6 +890,21 @@ export default function Ask({
   // by itself when the new answer arrives — which is still the reader's own
   // click, one step removed.
   const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
+  // The turn the pane lists: the one the reader pointed it at, else the
+  // newest that cited anything.
+  const listedTurn = sourceTurn ?? sourceTurnOf(turns);
+  // The chip under a turn: opens the pane on that turn, or shuts it when it
+  // is already open on that very turn. On any other turn it moves the pane
+  // rather than closing it — the reader asked for a different list, not for
+  // no list.
+  const toggleSources = (i: number) => {
+    if (showSources && i === listedTurn) {
+      setSourcesOpen(false);
+      return;
+    }
+    setSourceTurn(i);
+    setSourcesOpen(true);
+  };
 
   return (
     // The Sources pane takes a fixed column only when it is open AND there is
@@ -987,8 +1014,9 @@ export default function Ask({
               actions={actions}
               onOpenSource={showSource}
               onHot={setHot}
+              sourceTurn={listedTurn}
               sourcesOpen={showSources}
-              onToggleSources={() => setSourcesOpen(!showSources)}
+              onToggleSources={toggleSources}
               threadKey={openThread}
             />
             <div ref={bottom} />
@@ -1153,7 +1181,7 @@ export default function Ask({
       </div>
 
       {showSources && (
-        <SourcesPane turns={turns} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
+        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
       )}
 
       {viewing && <SourceView source={viewing} onClose={() => setViewing(null)} />}
