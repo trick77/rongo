@@ -77,8 +77,8 @@ type Retriever struct {
 	// Reads its zero the way TestDecay does.
 	DocDecay float64
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
-	// see LLMReranker. Nil — the product's setting until measured — is the
-	// fused order as it has always been.
+	// see LLMReranker. The product sets it; nil is the fused order as it has
+	// always been, and the eval harness's baseline.
 	Reranker *LLMReranker
 }
 

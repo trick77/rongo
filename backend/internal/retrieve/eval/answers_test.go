@@ -7,7 +7,9 @@
 // claims it must not make, and the files it has to cite. It is what a change
 // upstream of the answer call is measured by, and it is the model-swap test:
 // BACKEND_EVAL_PRO_MODEL and BACKEND_EVAL_GATE_MODEL point the two lanes at
-// another deployment for the harness alone.
+// another deployment for the harness alone. The judge runs on its own client
+// without those overrides, so a swapped gate model is graded by the same
+// judge as the baseline.
 //
 //	hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
 //	BACKEND_EVAL_ANSWER_RUNS=1 hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
@@ -72,22 +74,35 @@ func loadRubrics(t *testing.T) map[string]Rubric {
 	return out
 }
 
-// answerLLM is the client every answer-quality call goes through, with the
+// answerLLM is the client every pipeline call goes through, with the
 // harness-only lane overrides applied.
 func answerLLM(t *testing.T) *llm.Client {
+	t.Helper()
+	cfg := evalLLMConfig(t)
+	cfg.Pro = os.Getenv("BACKEND_EVAL_PRO_MODEL")
+	cfg.ShortGate = os.Getenv("BACKEND_EVAL_GATE_MODEL")
+	return llm.NewClient(cfg, nil)
+}
+
+// judgeLLM is the judge's client: the deployments the product reads, never
+// the overrides, so the grader does not change with the candidate.
+func judgeLLM(t *testing.T) *llm.Client {
+	t.Helper()
+	return llm.NewClient(evalLLMConfig(t), nil)
+}
+
+func evalLLMConfig(t *testing.T) llm.Config {
 	t.Helper()
 	base := os.Getenv("BACKEND_LLM_BASE_URL")
 	if base == "" {
 		t.Skip("BACKEND_LLM_BASE_URL is unset")
 	}
-	return llm.NewClient(llm.Config{
+	return llm.Config{
 		BaseURL:     base,
 		APIKey:      os.Getenv("BACKEND_LLM_API_KEY"),
 		Timeout:     15 * time.Minute,
 		IdleTimeout: 90 * time.Second,
-		Pro:         os.Getenv("BACKEND_EVAL_PRO_MODEL"),
-		ShortGate:   os.Getenv("BACKEND_EVAL_GATE_MODEL"),
-	}, nil)
+	}
 }
 
 // verdict is the judge's reply: one word per rubric line.
@@ -181,6 +196,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 	c := answerLLM(t)
+	judge := judgeLLM(t)
 	retriever := retrieve.New(db, embed.NewClient(embed.Config{
 		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
 		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
@@ -248,7 +264,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 					}
 				}
 			}
-			v, err := judgeAnswer(ctx, c, r, a.Text)
+			v, err := judgeAnswer(ctx, judge, r, a.Text)
 			if err != nil {
 				rec.Err = "judge: " + err.Error()
 				t.Logf("  %-70s judge failed: %v", short(q.Text), err)

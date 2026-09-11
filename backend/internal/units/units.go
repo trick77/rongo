@@ -259,6 +259,9 @@ var (
 	pomGroup    = xmlTag("groupId")
 	pomPackage  = xmlTag("packaging")
 	pomPlugins  = regexp.MustCompile(`(?s)<build>.*?</build>`)
+	// pomManaged is the <dependencyManagement> block: versions pinned for
+	// modules that may depend on them, not a dependency of this one.
+	pomManaged = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
 )
 
 func scanMaven(repo string, paths []string, has map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
@@ -300,7 +303,10 @@ func scanMaven(repo string, paths []string, has map[string]bool, read Read) (uni
 		}
 		pm := pom{key: path.Dir(p), artifact: artifact, group: group,
 			service: strings.Contains(s, "spring-boot-maven-plugin")}
-		for _, d := range pomDeps.FindAllStringSubmatch(s, -1) {
+		// Only the module's own <dependencies> count: a managed version or a
+		// plugin's dependency is not an edge the build has.
+		declared := pomManaged.ReplaceAllString(pomPlugins.ReplaceAllString(s, ""), "")
+		for _, d := range pomDeps.FindAllStringSubmatch(declared, -1) {
 			a := first(pomArtifact, d[1])
 			g := first(pomGroup, d[1])
 			if a == "" {

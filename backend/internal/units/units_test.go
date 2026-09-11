@@ -65,7 +65,9 @@ func TestScan_readsAMavenMultiModuleBuild(t *testing.T) {
 <modules><module>lib/persistence</module><module>service/intranet</module></modules></project>`
 	persistence := `<project><parent><groupId>ch.example.claims</groupId><artifactId>claims-parent</artifactId></parent>
 <artifactId>claims-persistence</artifactId>
-<dependencies><dependency><groupId>org.springframework</groupId><artifactId>spring-jdbc</artifactId></dependency></dependencies></project>`
+<dependencyManagement><dependencies><dependency><groupId>ch.example.managed</groupId><artifactId>pinned-only</artifactId></dependency></dependencies></dependencyManagement>
+<dependencies><dependency><groupId>org.springframework</groupId><artifactId>spring-jdbc</artifactId></dependency></dependencies>
+<build><plugins><plugin><artifactId>some-plugin</artifactId><dependencies><dependency><groupId>ch.example.plugin</groupId><artifactId>helper</artifactId></dependency></dependencies></plugin></plugins></build></project>`
 	intranet := `<project><parent><groupId>ch.example.claims</groupId><artifactId>claims-parent</artifactId></parent>
 <artifactId>claims-intranet-service</artifactId>
 <dependencies>
@@ -102,7 +104,7 @@ func TestScan_readsAMavenMultiModuleBuild(t *testing.T) {
 		t.Errorf("internal deps = %v", internal)
 	}
 	if strings.Join(external, ",") != "lib/persistence->org.springframework:spring-jdbc,service/intranet->ch.example.workflow:camunda-intranet" {
-		t.Errorf("external deps = %v", external)
+		t.Errorf("external deps = %v (a managed version and a plugin's dependency are not edges)", external)
 	}
 }
 

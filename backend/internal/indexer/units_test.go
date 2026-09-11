@@ -17,6 +17,8 @@ func TestIndexRepoRecordsTheUnitsAnNxWorkspaceDeclares(t *testing.T) {
 		"libs/shared/project.json":    `{"name":"shared","projectType":"library"}`,
 		"libs/shared/src/index.ts":    "export const thing = 1;\n",
 		"node_modules/x/project.json": `{"name":"not-ours"}`,
+		"third_party/y/project.json":  `{"name":"vendored"}`,
+		"out/apps/z/project.json":     `{"name":"built"}`,
 	}, nil)
 	st := h.stateOf(t)
 

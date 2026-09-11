@@ -160,8 +160,16 @@ func Extract(filePath string, body []byte) []Token {
 	// nothing else. Both spellings are recorded — the bare method path is
 	// what the flow corpus's clients write.
 	prefix := ""
+	// pending is the class-level path read off the annotation, promoted to
+	// prefix on the class line that follows it. Every class line promotes,
+	// so a second controller in the same file starts with no prefix unless
+	// it declares one.
+	pending := ""
 	for i, line := range lines {
 		lineNo := i + 1
+		if isClassLine(line) {
+			prefix, pending = pending, ""
+		}
 
 		// A destination named by the variable it is assigned to. Checked first
 		// and independently of the call rules, because the literal and the call
@@ -204,7 +212,7 @@ func Extract(filePath string, body []byte) []Token {
 					// The class-level path is a route in its own right —
 					// the front-end calls "/carts" — AND the prefix every
 					// method path below is served under.
-					prefix = strings.TrimSuffix(lit, "/")
+					pending = strings.TrimSuffix(lit, "/")
 					add(KindRoute, lit, lineNo)
 					continue
 				}
@@ -217,7 +225,7 @@ func Extract(filePath string, body []byte) []Token {
 			case classLevel && uninteresting[lit] && routeShape.MatchString(lit):
 				// "/api" as a class-level prefix is not a token, but it is
 				// still the prefix the method paths are served under.
-				prefix = strings.TrimSuffix(lit, "/")
+				pending = strings.TrimSuffix(lit, "/")
 			case messaging && isDestinationShape(lit):
 				add(KindDestination, lit, lineNo)
 			}
@@ -232,12 +240,28 @@ func Extract(filePath string, body []byte) []Token {
 func classFollows(lines []string, i int) bool {
 	for j := i + 1; j < len(lines) && j <= i+8; j++ {
 		t := strings.TrimSpace(lines[j])
-		if t == "" || strings.HasPrefix(t, "@") {
+		if t == "" || strings.HasPrefix(t, "@") || isCommentLine(t) {
 			continue
 		}
-		return strings.Contains(t, "class ") || strings.Contains(t, "interface ")
+		return isClassLine(t)
 	}
 	return false
+}
+
+// classDecl is a class or interface declaration: the keyword at a token
+// boundary followed by a name, so a comment saying "the class " or a string
+// holding the word does not count.
+var classDecl = regexp.MustCompile(`(?:^|[\s(])(?:class|interface)\s+[A-Za-z_]`)
+
+// isClassLine reports whether line declares a class or interface.
+func isClassLine(line string) bool {
+	t := strings.TrimSpace(line)
+	return !isCommentLine(t) && classDecl.MatchString(t)
+}
+
+// isCommentLine reports whether a trimmed line is a comment line.
+func isCommentLine(t string) bool {
+	return strings.HasPrefix(t, "//") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "*")
 }
 
 // templateRoute cuts the constant route out of a template literal that opens

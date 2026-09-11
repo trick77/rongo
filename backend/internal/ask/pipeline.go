@@ -380,28 +380,38 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 			scope.Loose = append(scope.Loose, r)
 		}
 	}
-	scope.Structure = StructureBlock(ps)
 	// What each repository in scope is built from: the apps and services a
 	// person names, and which uses which. Templated from the manifests the
 	// indexer read (internal/units), never a source, closed by the same rule
 	// the project block is. A repository of one build adds nothing.
+	var parts string
 	for _, repo := range scope.Known {
 		us, deps, err := p.router.Units(ctx, repo)
 		if err != nil {
 			slog.Warn("units unavailable, answering without them", "thread", llm.ThreadID(ctx), "repo", repo, "err", err)
 			continue
 		}
-		scope.Structure += units.Describe(repo, us, deps)
+		parts += units.Describe(repo, us, deps)
 	}
-	if scope.Structure != "" && len(scope.Projects) == 0 {
-		scope.Structure += structureIsConfiguration
-	}
+	scope.Structure = withParts(StructureBlock(ps), parts)
 	return scope
 }
 
-// structureIsConfiguration closes a structure block that StructureBlock did
-// not close itself — a units paragraph with no project block above it. The
-// sentence is StructureBlock's, word for word.
+// withParts appends the units paragraphs to a structure block so that the
+// never-cite sentence closes the whole block once, last. StructureBlock ends
+// a declared project with that sentence; it is moved behind the paragraphs
+// rather than left in the middle, where the parts list would sit outside
+// the rule.
+func withParts(structure, parts string) string {
+	if parts == "" {
+		return structure
+	}
+	return strings.TrimSuffix(structure, structureIsConfiguration) + parts + structureIsConfiguration
+}
+
+// structureIsConfiguration closes a structure block: the sentence
+// StructureBlock ends a declared project with, word for word, so the block
+// can be re-closed once after the units paragraphs.
 const structureIsConfiguration = "\nThis is configuration, not code. It says which repository plays which part " +
 	"and which calls which. Never present it as something you read in the sources, and never cite it."
 

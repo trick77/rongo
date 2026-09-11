@@ -130,8 +130,12 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 // structure is what the manifests said, carried from before the file pass to
 // after it: the import-level links between nx units are read out of the
 // indexed chunks, so they can only be written once the files are in.
+// scanned is false when the tree could not be listed, which keeps the
+// previous units in place rather than clearing them.
 type structure struct {
+	scanned bool
 	units   []units.Unit
+	deps    []units.Dep
 	aliases map[string]string
 }
 
@@ -147,6 +151,10 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 		ix.log.Warn("list paths for repo_deps failed", "repo", st.Name, "err", err)
 		return structure{}
 	}
+	// A manifest under node_modules/, third_party/ or a build directory is
+	// not this repository's: the file selector skips those paths, and so
+	// does the structure scan.
+	paths = ownPaths(paths)
 	read := func(p string) ([]byte, error) { return ix.git.ReadFile(ctx, spec, sha, p) }
 	mods := map[string][]byte{}
 	for _, p := range paths {
@@ -181,21 +189,27 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 			ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
 		}
 	}
-	if err := units.Sync(ctx, ix.db, st.Name, us, deps); err != nil {
-		ix.log.Warn("sync units failed", "repo", st.Name, "err", err)
-		return structure{}
-	}
-	return structure{units: us, aliases: units.Aliases(paths, read)}
+	return structure{scanned: true, units: us, deps: deps, aliases: units.Aliases(paths, read)}
 }
 
-// linkUnits adds the dependencies only the source declares, once the source
-// is indexed. Same policy as syncStructure: logged, never fatal.
+// linkUnits writes the repository's units and every edge between them, the
+// declared ones and the ones only the source shows, once the source is
+// indexed. One write, after the files: the previous units and edges stand
+// until the new set is whole, so a question asked mid-run reads a complete
+// structure rather than units with no edges. Same policy as syncStructure:
+// logged, never fatal.
 func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
-	if len(s.units) == 0 {
+	if !s.scanned {
 		return
 	}
-	if err := units.LinkImports(ctx, ix.db, st.Name, s.units, s.aliases); err != nil {
+	deps := s.deps
+	imports, err := units.ImportDeps(ctx, ix.db, st.Name, s.units, s.aliases)
+	if err != nil {
 		ix.log.Warn("link unit imports failed", "repo", st.Name, "err", err)
+	}
+	deps = append(deps, imports...)
+	if err := units.Sync(ctx, ix.db, st.Name, s.units, deps); err != nil {
+		ix.log.Warn("sync units failed", "repo", st.Name, "err", err)
 	}
 }
 

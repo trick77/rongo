@@ -263,6 +263,29 @@ func vendoredSegment(p string) string {
 	return ""
 }
 
+// generatedSegment reports the build-output directory a path lives under.
+func generatedSegment(p string) string {
+	for _, seg := range strings.Split(path.Clean(p), "/") {
+		if generatedDirs[seg] {
+			return seg
+		}
+	}
+	return ""
+}
+
+// ownPaths drops the paths that live under a vendored or build-output
+// directory: the same segments Select skips, decided on the path alone. A
+// manifest there describes somebody else's build and must not become a unit.
+func ownPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if vendoredSegment(p) == "" && generatedSegment(p) == "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // generatedReason checks the path and then the content, because generators
 // differ: some announce themselves in a marker, others only by where they live.
 func generatedReason(p string, body []byte) string {
@@ -273,10 +296,8 @@ func generatedReason(p string, body []byte) string {
 	if strings.HasSuffix(base, ".min.js") || strings.HasSuffix(base, ".min.css") {
 		return "is minified"
 	}
-	for _, seg := range strings.Split(path.Clean(p), "/") {
-		if generatedDirs[seg] {
-			return "lives under " + seg + "/, which holds build output"
-		}
+	if seg := generatedSegment(p); seg != "" {
+		return "lives under " + seg + "/, which holds build output"
 	}
 	// Only the head: generators put the marker in the first lines, and scanning
 	// a megabyte for it on every file would cost more than it saves.

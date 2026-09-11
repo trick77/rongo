@@ -22,16 +22,27 @@ import (
 // never indexed, never embedded, which keeps it outside the rule against
 // model-written text about code.
 //
-// It is an ARM until measured. The Retriever runs it only when Reranker is
-// set, which the product does not do; internal/retrieve/eval sets it to say
-// what it buys before anything ships.
+// Measured and shipped (docs/measurements/2026-09-11-arms-after-the-crossing.md):
+// the product sets Reranker in main.go, and internal/retrieve/eval can turn it
+// off to read the fused-order baseline. The fused list is always in hand, so
+// the reranker never fails a search: a call that errors or a reply that
+// cannot be read keeps the fused order and says so in the log.
 type LLMReranker struct {
 	llm *llm.Client
 	// Pool is how deep the fused list goes before the model sees it. Sixty is
 	// where the rank diagnostic put every reachable miss.
 	Pool int
-	// Log receives the model's raw reply on a parse failure; nil is the default.
+	// Log receives the warning when the fused order is kept; nil means the
+	// default logger.
 	Log *slog.Logger
+}
+
+// logger is Log, or the default logger when none was set.
+func (r *LLMReranker) logger() *slog.Logger {
+	if r.Log != nil {
+		return r.Log
+	}
+	return slog.Default()
 }
 
 // NewLLMReranker builds a reranker over the short-gate lane.
@@ -82,15 +93,16 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		{Role: "user", Content: b.String()},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(rerankMaxTokens), llm.WithStep("rerank"))
 	if err != nil {
-		return nil, fmt.Errorf("rerank: %w", err)
+		// The fused order answered every question before the reranker
+		// existed; a gate-lane outage must not turn a search into an error.
+		r.logger().Warn("rerank call failed; fused order kept", "err", err)
+		return cut(hits, k), nil
 	}
 	var reply struct {
 		Relevant []int `json:"relevant"`
 	}
 	if err := json.Unmarshal([]byte(stripFence(out)), &reply); err != nil {
-		if r.Log != nil {
-			r.Log.Warn("rerank reply was not JSON; fused order kept", "reply", excerpt(out, 120))
-		}
+		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", excerpt(out, 120))
 		return cut(hits, k), nil
 	}
 	taken := make([]bool, len(hits))

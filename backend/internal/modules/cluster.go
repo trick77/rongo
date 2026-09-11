@@ -67,6 +67,9 @@ type group struct {
 	key    string
 	paths  []string
 	chunks int
+	// perPath is each file's chunk count, so a file a unit claims takes
+	// exactly its share out of chunks.
+	perPath map[string]int
 }
 
 // Cluster returns repo's modules, ordered by Key.
@@ -121,17 +124,12 @@ func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*
 				byKey[u.Key] = m
 			}
 			m.Paths = append(m.Paths, p)
+			m.ChunkCount += g.perPath[p]
+			g.chunks -= g.perPath[p]
 			kept++
 		}
 		if kept == 0 {
 			continue
-		}
-		// A directory's chunk count is a sum over its files; the files that
-		// left take their share with them, pro rata, because loadDirs only
-		// kept the total. Exact per-file counts would need a second query
-		// for a number nothing routes on.
-		if len(g.paths) > 0 {
-			g.chunks = g.chunks * len(keep) / len(g.paths)
 		}
 		g.paths = keep
 		if len(keep) == 0 {
@@ -141,24 +139,9 @@ func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*
 	var out []Module
 	for _, m := range byKey {
 		sort.Strings(m.Paths)
-		m.ChunkCount = chunkCount(ctx, db, repo, m.Paths)
 		out = append(out, *m)
 	}
 	return out, nil
-}
-
-// chunkCount is the number of chunks over paths, for the module list.
-func chunkCount(ctx context.Context, db *sql.DB, repo string, paths []string) int {
-	n := 0
-	for _, p := range paths {
-		var c int
-		if err := db.QueryRowContext(ctx,
-			`SELECT COUNT(c.id) FROM files f LEFT JOIN chunks c ON c.file_id = f.id WHERE f.repo = ? AND f.path = ?`,
-			repo, p).Scan(&c); err == nil {
-			n += c
-		}
-	}
-	return n
 }
 
 // clusterDirs is the directory rule over whatever own still holds.
@@ -271,10 +254,11 @@ ORDER BY f.path`
 		d := path.Dir(p)
 		g, ok := dirs[d]
 		if !ok {
-			g = &group{key: d}
+			g = &group{key: d, perPath: map[string]int{}}
 			dirs[d] = g
 		}
 		g.paths = append(g.paths, p)
+		g.perPath[p] = n
 		g.chunks += n
 	}
 	if err := rows.Err(); err != nil {

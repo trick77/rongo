@@ -98,3 +98,21 @@ func TestLLMRerank_keepsTheFusedOrderWhenTheReplyIsNotJSON(t *testing.T) {
 		t.Errorf("a reply that could not be read changed the order: %+v", got)
 	}
 }
+
+// TestLLMRerank_keepsTheFusedOrderWhenTheCallFails: the gate lane going down
+// is not a search failure. The fused list was in hand before the call.
+func TestLLMRerank_keepsTheFusedOrderWhenTheCallFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
+	r := NewLLMReranker(llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), 60)
+	got, err := r.Rerank(context.Background(), "q", hits, 2)
+	if err != nil {
+		t.Fatalf("a failed rerank call became a search error: %v", err)
+	}
+	if len(got) != 2 || got[0].ChunkID != 1 || got[1].ChunkID != 2 {
+		t.Errorf("a failed call changed the order: %+v", got)
+	}
+}

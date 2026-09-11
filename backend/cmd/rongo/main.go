@@ -351,7 +351,8 @@ func main() {
 	// measured twice on the pinned corpus (unique gathered 0.905 → 0.952,
 	// composition 4/5 → 5/5, flow corpus 27/30 → 28/30), see
 	// docs/measurements/2026-09-11-arms-after-the-crossing.md. It stores
-	// nothing; a reply it cannot read keeps the fused order.
+	// nothing; a call that fails or a reply it cannot read keeps the fused
+	// order, so the gate lane going down never fails a search.
 	retriever := retrieve.New(db, embedder)
 	retriever.Reranker = retrieve.NewLLMReranker(models, 60)
 	deps.Ask = ask.NewPipeline(

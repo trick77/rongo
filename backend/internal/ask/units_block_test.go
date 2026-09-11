@@ -43,3 +43,35 @@ func TestDescribeProjectsAppendsWhatANarrowedRepositoryIsBuiltFrom(t *testing.T)
 		t.Errorf("a repository of one build got a structure block: %q", got.Structure)
 	}
 }
+
+// TestDescribeProjectsClosesTheBlockOnceAfterTheParts: with a declared
+// project above the units paragraph, the never-cite sentence is still the
+// last thing in the block, and appears once. Left where StructureBlock put
+// it, the parts list would sit after the rule that covers it.
+func TestDescribeProjectsClosesTheBlockOnceAfterTheParts(t *testing.T) {
+	r := &fakeRouter{
+		projects: shopMap(t),
+		units: map[string][]units.Unit{"shop-backend": {
+			{Key: "api", Kind: units.KindMavenService, Name: "api"},
+			{Key: "worker", Kind: units.KindMavenService, Name: "worker"},
+		}},
+		unitDeps: map[string][]units.Dep{"shop-backend": {{From: "api", To: "worker"}}},
+	}
+	p := newTestPipeline(t, func(f *pipelineFakes) { f.router = r })
+
+	got := p.describeProjects(context.Background(), Scope{Known: []string{"shop-ui", "shop-backend", "shop-events"}})
+	closer := "This is configuration, not code."
+	if n := strings.Count(got.Structure, closer); n != 1 {
+		t.Errorf("the closing sentence appears %d times, want once:\n%s", n, got.Structure)
+	}
+	parts := strings.Index(got.Structure, `Repository "shop-backend" is built from 2 parts:`)
+	if parts < 0 {
+		t.Fatalf("structure lacks the parts paragraph:\n%s", got.Structure)
+	}
+	if strings.Index(got.Structure, closer) < parts {
+		t.Errorf("the closing sentence sits before the parts it has to cover:\n%s", got.Structure)
+	}
+	if !strings.Contains(got.Structure, "api uses worker.") {
+		t.Errorf("structure lacks the unit edge:\n%s", got.Structure)
+	}
+}

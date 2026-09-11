@@ -68,3 +68,33 @@ func TestExtractReadsTheRouteOutOfAGeneratedClientTemplate(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractScopesTheClassLevelPrefixToItsOwnClass: a second controller in
+// the same file starts without the first one's prefix, and a comment that
+// says "class" after a method-level mapping does not make it class-level.
+func TestExtractScopesTheClassLevelPrefixToItsOwnClass(t *testing.T) {
+	testee := []byte(`
+@RestController
+@RequestMapping("/carts")
+public class CartsController {
+    @GetMapping("/{id}")
+    public void get() {}
+}
+
+@RestController
+public class OrdersController {
+    @RequestMapping("/orders")
+    // the class above serves carts; this one is a method mapping
+    public void list() {}
+}
+`)
+	got := values(Extract("Controllers.java", testee), KindRoute)
+	for _, want := range []string{"/carts", "/carts/{id}", "/orders"} {
+		if !has(got, want) {
+			t.Errorf("routes = %v, missing %s", got, want)
+		}
+	}
+	if has(got, "/carts/orders") {
+		t.Errorf("the first class's prefix leaked into the second: %v", got)
+	}
+}
