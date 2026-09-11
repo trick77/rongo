@@ -468,9 +468,9 @@ func (p *Pipeline) answer(ctx context.Context, question string, audience Audienc
 			"prompt_sources":  answer.Prompt.Sources,
 			"prompt_question": answer.Prompt.Question,
 		}
-		// The window this prompt was measured against, when the registry
-		// sizes the model. Absent for a model it does not, the same way an
-		// unpriced model carries no cost.
+		// How much of the prompt the endpoint had read before and did not
+		// charge full price for again. Absent when the reply carried no
+		// details object: that is unknown, not zero.
 		if answer.Usage.PromptDetails != nil {
 			d["cached_tokens"] = answer.Usage.PromptDetails.Cached
 		}

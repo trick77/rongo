@@ -164,6 +164,28 @@ describe("StatsPane, this turn", () => {
     expect(pane.textContent).not.toContain("$");
   });
 
+  it("says what was spent thinking, and only when something was", async () => {
+    const user = userEvent.setup();
+    const thinking: Usage = {
+      ...full,
+      calls: full.calls.map((c) => (c.step === "answer" ? { ...c, reasoning_tokens: 260 } : c)),
+    };
+    const { rerender } = render(
+      <StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Why?", thinking, [writingStep])]} onClose={() => {}} />,
+    );
+
+    expect(screen.getByText("spent thinking")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "What thinking means" }));
+    expect(screen.getByText(/thinking rather than writing/)).toBeTruthy();
+
+    // Zero on every call: the row would be noise on every turn, and both
+    // deployments have reported zero on everything measured so far.
+    rerender(
+      <StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Why?", full, [writingStep])]} onClose={() => {}} />,
+    );
+    expect(screen.queryByText("spent thinking")).toBeNull();
+  });
+
   it("says so when the turn has no usage at all", () => {
     render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Nothing?", null)]} onClose={() => {}} />);
     expect(screen.getByText(/no usage on record/)).toBeTruthy();
@@ -196,7 +218,7 @@ describe("StatsPane, the thread", () => {
     render(<StatsPane target={{ kind: "turn", index: 0 }} turns={turns} onClose={() => {}} />);
 
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Turn 1");
-    await user.click(screen.getByRole("button", { name: "Thread", exact: true }));
+    await user.click(screen.getByRole("button", { name: /^Thread$/ }));
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Thread");
     await user.click(screen.getByRole("button", { name: "This turn" }));
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Turn 1");

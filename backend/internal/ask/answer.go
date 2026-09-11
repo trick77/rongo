@@ -134,9 +134,11 @@ type Answer struct {
 }
 
 // PromptParts is the answer prompt by section, in estimated tokens. System is
-// every rule the audience, language and scope assembled; Sources is the code
-// in front of the model; Question is what was asked, with the thread's
-// earlier turn when there is one.
+// every rule the audience, language and scope assembled — and the thread's
+// previous question with it, because a follow-up is written into the rules
+// (answerFollowUp) rather than into the message the reader typed. Sources is
+// the code in front of the model, headers and separators included. Question
+// is what was asked, and only that.
 type PromptParts struct {
 	System   int `json:"system"`
 	Sources  int `json:"sources"`

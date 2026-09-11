@@ -67,6 +67,18 @@ const fixture = `{
       "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.05, "output": 0}}
     }
   },
+  "twin-a": {
+    "id": "twin-a", "api": "https://api.twin.example/v1",
+    "models": {
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02, "output": 0}, "limit": {"context": 8192}}
+    }
+  },
+  "twin-b": {
+    "id": "twin-b", "api": "https://api.twin.example/v1",
+    "models": {
+      "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02, "output": 0}}
+    }
+  },
   "local-a": {
     "id": "local-a", "api": "http://127.0.0.1:1337/v1",
     "models": {
@@ -115,8 +127,8 @@ func fetchFixture(t *testing.T) Registry {
 
 func TestFetch_decodesProvidersEndpointsAndCosts(t *testing.T) {
 	reg := fetchFixture(t)
-	if len(reg) != 10 {
-		t.Fatalf("decoded %d providers, want 10", len(reg))
+	if len(reg) != 12 {
+		t.Fatalf("decoded %d providers, want 12", len(reg))
 	}
 	if reg["xiaomi"].API != xiaomiURL {
 		t.Errorf("xiaomi api = %q", reg["xiaomi"].API)
@@ -184,6 +196,28 @@ func TestResolve_carriesTheCacheReadPriceAndTheWindowFromTheSameEntry(t *testing
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
+	}
+}
+
+func TestResolve_aWindowOnlyOneOfTwoEntriesStatesIsNotADisagreement(t *testing.T) {
+	// Given two providers on one URL that charge the same and differ only in
+	// whether they say how much the model holds
+	reg := fetchFixture(t)
+
+	// When
+	prices, warnings := Resolve(reg, "https://api.twin.example/v1", embed)
+
+	// Then the table stands. A window is not a price, and treating a missing
+	// one as a contract disagreement would empty the table for EVERY model,
+	// because one warning drops the lot.
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none: the two entries agree on what they charge", warnings)
+	}
+	if p := prices[embed]; p.In != 0.02 || p.Context != 8192 {
+		t.Errorf("embed = %+v, want the shared price and the window the one entry states", p)
+	}
+	if len(prices) != 3 {
+		t.Errorf("priced %d models, want the two deployments and the embedding model", len(prices))
 	}
 }
 

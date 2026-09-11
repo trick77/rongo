@@ -1055,6 +1055,24 @@ describe("Ask, what a turn cost", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("closes the pane when the thread underneath it changes", async () => {
+    // Given the pane open on turn 1 of one thread
+    const onClose = vi.fn();
+    routedFetch([{ ...storedTurn, usage }]);
+    const { rerender } = render(<Ask threadId="7" onCloseThreadStats={onClose} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+    await screen.findByRole("dialog", { name: "Token stats" });
+
+    // When the reader moves to another thread - Back, or the rail
+    rerender(<Ask threadId="8" onCloseThreadStats={onClose} />);
+
+    // Then it does not stay open over someone else's figures: the index it
+    // holds means a different turn now.
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Token stats" })).toBeNull());
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("shows money once the server prices the calls", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),

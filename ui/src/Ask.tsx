@@ -389,6 +389,13 @@ export default function Ask({
     // skeleton holds their place — an empty list alone would offer the
     // welcome to someone who has just opened a thread.
     setTurns([]);
+    // The pane holds an INDEX into the turns that were just dropped, and the
+    // same index in the next thread is a different turn. Browser Back
+    // switches threads without a click reaching the pane's own overlay, so
+    // closing it here is the only thing that stops it redrawing itself
+    // around someone else's figures. The shell's flag goes with it.
+    setTurnStats(null);
+    onCloseThreadStats();
     opened.current = true;
     if (openThread === null) {
       setLoading(false);

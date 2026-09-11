@@ -181,14 +181,23 @@ function TurnStats({ turn, said, toggle }: { turn: Turn; said: string | null; to
   const anyMs = u.calls.some((x) => x.ms != null);
   const anyCached = u.calls.some((x) => x.cached_tokens != null);
   const totalMs = u.calls.reduce((n, x) => n + (x.ms ?? 0), 0);
+  const thought = u.calls.reduce((n, x) => n + (x.reasoning_tokens ?? 0), 0);
 
   return (
     <>
       <div className="grid grid-cols-2 gap-2">
         <Kpi value={num(u.total_tokens)} label="tokens" />
         {u.cost_usd != null && <Kpi value={money(u.cost_usd)} label="at list price" />}
-        {anyMs && <Kpi value={ms(totalMs)} label="spent calling models" />}
+        {/* Added up, not elapsed: candidate naming fires one call per
+            candidate from separate goroutines, so the calls of one turn do
+            not lie end to end. The trace's own clock is the wall time. */}
+        {anyMs && <Kpi value={ms(totalMs)} label="added up over the calls" />}
         {u.cached_tokens != null && u.cached_tokens > 0 && <Kpi value={num(u.cached_tokens)} label="served from cache" />}
+        {/* Only when there was any: both deployments answered with zero
+            reasoning tokens on every call measured so far, and a row of
+            zeroes on every turn would be noise around the figures that
+            move. The count is recorded either way. */}
+        {thought > 0 && <Kpi value={num(thought)} label="spent thinking" />}
       </div>
 
       <Section title="Calls">
@@ -277,9 +286,24 @@ function TurnStats({ turn, said, toggle }: { turn: Turn; said: string | null; to
             >
               What does cached mean?
             </button>
+            {thought > 0 && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  aria-label="What thinking means"
+                  aria-expanded={said === "reasoning"}
+                  onClick={() => toggle("reasoning")}
+                  className="text-faint underline decoration-dotted underline-offset-2 hover:text-muted"
+                >
+                  What does thinking mean?
+                </button>
+              </>
+            )}
           </p>
         )}
         {said === "cached" && <Said>{glossary.cached}</Said>}
+        {said === "reasoning" && <Said>{glossary.reasoning}</Said>}
       </div>
 
       {system != null && sources != null && question != null && (
