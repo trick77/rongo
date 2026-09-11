@@ -136,6 +136,8 @@ type structure struct {
 	scanned bool
 	units   []units.Unit
 	deps    []units.Dep
+	// mods is each go.mod's text by path, for repo_deps.
+	mods    map[string][]byte
 	aliases map[string]string
 }
 
@@ -173,34 +175,35 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 	for _, s := range skipped {
 		ix.log.Warn("manifest skipped", "repo", st.Name, "manifest", s)
 	}
+	return structure{scanned: true, units: us, deps: deps, mods: mods, aliases: units.Aliases(paths, read)}
+}
+
+// linkUnits writes what the manifests said: the repository's units, every
+// edge between them (the declared ones and the ones only the source shows)
+// and its repo_deps coordinates, once the source is indexed. One step,
+// after the files: the previous structure stands until the new one is
+// whole, so a question asked mid-run reads a complete structure rather than
+// units with no edges, or repo_deps at a commit the units are not at. Same
+// policy as syncStructure: logged, never fatal.
+func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
+	if !s.scanned {
+		return
+	}
 	var publishes, requires []string
-	for _, u := range us {
+	for _, u := range s.units {
 		if u.Publishes != "" {
 			publishes = append(publishes, u.Publishes)
 		}
 	}
-	for _, d := range deps {
+	for _, d := range s.deps {
 		if d.Coordinate != "" {
 			requires = append(requires, d.Coordinate)
 		}
 	}
-	if len(mods) > 0 || len(publishes) > 0 || len(requires) > 0 {
-		if err := repodeps.SyncWith(ctx, ix.db, st.Name, mods, publishes, requires); err != nil {
+	if len(s.mods) > 0 || len(publishes) > 0 || len(requires) > 0 {
+		if err := repodeps.SyncWith(ctx, ix.db, st.Name, s.mods, publishes, requires); err != nil {
 			ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
 		}
-	}
-	return structure{scanned: true, units: us, deps: deps, aliases: units.Aliases(paths, read)}
-}
-
-// linkUnits writes the repository's units and every edge between them, the
-// declared ones and the ones only the source shows, once the source is
-// indexed. One write, after the files: the previous units and edges stand
-// until the new set is whole, so a question asked mid-run reads a complete
-// structure rather than units with no edges. Same policy as syncStructure:
-// logged, never fatal.
-func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
-	if !s.scanned {
-		return
 	}
 	deps := s.deps
 	imports, err := units.ImportDeps(ctx, ix.db, st.Name, s.units, s.aliases)

@@ -15,6 +15,7 @@ package units
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"path"
 	"regexp"
 	"sort"
@@ -70,8 +71,8 @@ type Read func(path string) ([]byte, error)
 
 // Scan reads the manifests among paths and returns the units they declare and
 // the dependencies written in them. Import-level dependencies (an nx app
-// importing "@lib") are not here; they need the source and are linked from
-// the index by LinkImports.
+// importing "@lib") are not here; they need the source and are read from
+// the index by ImportDeps.
 //
 // A manifest that fails to parse is skipped: the structure is a hint for
 // naming and composition, and losing a whole repository's units over one
@@ -168,7 +169,7 @@ func scanNx(repo string, paths []string, has map[string]bool, read Read) (units 
 }
 
 // Aliases reads tsconfig.base.json's paths: an import alias and the unit
-// directory it points into. Exported because LinkImports needs it at a
+// directory it points into. Exported because ImportDeps needs it at a
 // different time than Scan runs — after the files are indexed.
 func Aliases(paths []string, read Read) map[string]string {
 	out := map[string]string{}
@@ -251,18 +252,38 @@ var (
 	xmlTag = func(tag string) *regexp.Regexp {
 		return regexp.MustCompile(`(?s)<` + tag + `>\s*([^<]+?)\s*</` + tag + `>`)
 	}
-	pomModules  = regexp.MustCompile(`(?s)<modules>(.*?)</modules>`)
-	pomModule   = xmlTag("module")
+	pomModules = regexp.MustCompile(`(?s)<modules>(.*?)</modules>`)
+	pomModule  = xmlTag("module")
+	// pomDeps matches every <dependency> element wherever it sits; it cuts
+	// them all out of the text the module's own coordinates are read from.
+	// The module's dependencies themselves come from pomDependencies.
 	pomDeps     = regexp.MustCompile(`(?s)<dependency>(.*?)</dependency>`)
 	pomParent   = regexp.MustCompile(`(?s)<parent>(.*?)</parent>`)
 	pomArtifact = xmlTag("artifactId")
 	pomGroup    = xmlTag("groupId")
 	pomPackage  = xmlTag("packaging")
 	pomPlugins  = regexp.MustCompile(`(?s)<build>.*?</build>`)
-	// pomManaged is the <dependencyManagement> block: versions pinned for
-	// modules that may depend on them, not a dependency of this one.
-	pomManaged = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
 )
+
+// pomProject is the one path in a pom that lists the module's own
+// dependencies: project/dependencies/dependency. A <dependency> under
+// <dependencyManagement>, a plugin, a profile or <reporting> is not an edge
+// the build has, and reading the tree rather than matching the tag keeps
+// every such container out at once.
+type pomProject struct {
+	Dependencies []struct {
+		GroupID    string `xml:"groupId"`
+		ArtifactID string `xml:"artifactId"`
+	} `xml:"dependencies>dependency"`
+}
+
+// pomDependencies reads the module's own dependencies, or nothing for a
+// pom that is not well-formed XML.
+func pomDependencies(body []byte) (pomProject, error) {
+	var proj pomProject
+	err := xml.Unmarshal(body, &proj)
+	return proj, err
+}
 
 func scanMaven(repo string, paths []string, has map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
 	type pom struct {
@@ -303,12 +324,14 @@ func scanMaven(repo string, paths []string, has map[string]bool, read Read) (uni
 		}
 		pm := pom{key: path.Dir(p), artifact: artifact, group: group,
 			service: strings.Contains(s, "spring-boot-maven-plugin")}
-		// Only the module's own <dependencies> count: a managed version or a
-		// plugin's dependency is not an edge the build has.
-		declared := pomManaged.ReplaceAllString(pomPlugins.ReplaceAllString(s, ""), "")
-		for _, d := range pomDeps.FindAllStringSubmatch(declared, -1) {
-			a := first(pomArtifact, d[1])
-			g := first(pomGroup, d[1])
+		proj, err := pomDependencies(body)
+		if err != nil {
+			skipped = append(skipped, p+": "+err.Error())
+			continue
+		}
+		for _, d := range proj.Dependencies {
+			a := strings.TrimSpace(d.ArtifactID)
+			g := strings.TrimSpace(d.GroupID)
 			if a == "" {
 				continue
 			}

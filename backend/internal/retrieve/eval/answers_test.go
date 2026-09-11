@@ -206,7 +206,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
 	// measures the fused order the product ran before the reranker shipped.
 	if envOr("BACKEND_EVAL_RERANK", "1") != "0" {
-		retriever.Reranker = retrieve.NewLLMReranker(c, 60)
+		retriever.Reranker = evalReranker(t, c)
 	}
 	opts := gatherOpts(t)
 	mo := modules.Opts{MinChunks: envIntOr(t, "BACKEND_MODULE_MIN_CHUNKS", 8), MaxChunks: envIntOr(t, "BACKEND_MODULE_MAX_CHUNKS", 150)}

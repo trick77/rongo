@@ -164,9 +164,9 @@ func TestFlowGathered(t *testing.T) {
 			Dim:     dim,
 		}, nil))
 		reranked.Candidates = 60
-		reranked.Reranker = retrieve.NewLLMReranker(llm.NewClient(llm.Config{
+		reranked.Reranker = evalReranker(t, llm.NewClient(llm.Config{
 			BaseURL: base, APIKey: os.Getenv("BACKEND_LLM_API_KEY"), Timeout: 2 * time.Minute,
-		}, nil), 60)
+		}, nil))
 		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
 	}
 

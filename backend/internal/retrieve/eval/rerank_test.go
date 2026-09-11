@@ -37,7 +37,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 	plain := retrieve.New(db, embedder)
 	reranked := retrieve.New(db, embedder)
 	reranked.Candidates = 60
-	reranked.Reranker = retrieve.NewLLMReranker(client, 60)
+	reranked.Reranker = evalReranker(t, client)
 	arms := []arm{{"fused order (the product)", plain}, {"fused order + short-gate rerank over 60", reranked}}
 
 	questions := loadQuestions(t)

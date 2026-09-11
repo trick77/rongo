@@ -116,3 +116,19 @@ func TestLLMRerank_keepsTheFusedOrderWhenTheCallFails(t *testing.T) {
 		t.Errorf("a failed call changed the order: %+v", got)
 	}
 }
+
+// TestLLMRerank_reportsACancelledContextAsSuch: a reader who left is not a
+// gate-lane outage, and the search reports the cancellation like every
+// other step.
+func TestLLMRerank_reportsACancelledContextAsSuch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upstream down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := NewLLMReranker(llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), 60)
+	if _, err := r.Rerank(ctx, "q", []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}, 1); err == nil {
+		t.Fatal("a cancelled context was answered with the fused order")
+	}
+}

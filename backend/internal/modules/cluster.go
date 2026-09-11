@@ -111,7 +111,6 @@ func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*
 	byKey := map[string]*Module{}
 	for d, g := range own {
 		var keep []string
-		kept := 0
 		for _, p := range g.paths {
 			u := units.Of(us, p)
 			if u == nil {
@@ -126,10 +125,6 @@ func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*
 			m.Paths = append(m.Paths, p)
 			m.ChunkCount += g.perPath[p]
 			g.chunks -= g.perPath[p]
-			kept++
-		}
-		if kept == 0 {
-			continue
 		}
 		g.paths = keep
 		if len(keep) == 0 {

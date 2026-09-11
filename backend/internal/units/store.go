@@ -50,32 +50,16 @@ func Sync(ctx context.Context, db *sql.DB, repo string, us []Unit, deps []Dep) e
 // importFrom matches the module specifier of an ES import or re-export.
 var importFrom = regexp.MustCompile(`(?m)(?:from|import|require\()\s*["']([^"']+)["']`)
 
-// LinkImports adds the dependencies an nx workspace does not write down in
+// ImportDeps reads the dependencies an nx workspace does not write down in
 // any manifest: an app importing "@lib" uses the library that alias points
 // into. It reads the indexed chunks rather than the checkout, so it runs
-// after the file pass and costs no second read of the tree.
+// after the file pass and costs no second read of the tree; Sync writes
+// what it returns together with the declared edges.
 //
 // aliases is tsconfig.base.json's paths as Aliases returns them. A specifier
 // that starts with an alias resolves to the unit whose key the alias's target
 // lies under; anything else — a package, a relative path — is not a unit edge.
-func LinkImports(ctx context.Context, db *sql.DB, repo string, us []Unit, aliases map[string]string) error {
-	deps, err := ImportDeps(ctx, db, repo, us, aliases)
-	if err != nil {
-		return err
-	}
-	for _, d := range deps {
-		if _, err := db.ExecContext(ctx,
-			`INSERT OR IGNORE INTO unit_deps (repo, from_key, to_key, coordinate) VALUES (?, ?, ?, '')`,
-			repo, d.From, d.To); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ImportDeps reads the edges the source shows between units: an import of a
-// tsconfig alias from a file in one unit into the unit the alias resolves
-// to. Ordered by from then to, so a sync writes them the same way each run.
+// Ordered by from then to, so a sync writes them the same way each run.
 func ImportDeps(ctx context.Context, db *sql.DB, repo string, us []Unit, aliases map[string]string) ([]Dep, error) {
 	if len(aliases) == 0 || len(us) == 0 {
 		return nil, nil

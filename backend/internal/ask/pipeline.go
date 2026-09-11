@@ -398,8 +398,8 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 }
 
 // withParts appends the units paragraphs to a structure block so that the
-// never-cite sentence closes the whole block once, last. StructureBlock ends
-// a declared project with that sentence; it is moved behind the paragraphs
+// never-cite sentence closes the whole block once, last. StructureBlock
+// closes its block with that sentence; it is moved behind the paragraphs
 // rather than left in the middle, where the parts list would sit outside
 // the rule.
 func withParts(structure, parts string) string {
@@ -408,12 +408,6 @@ func withParts(structure, parts string) string {
 	}
 	return strings.TrimSuffix(structure, structureIsConfiguration) + parts + structureIsConfiguration
 }
-
-// structureIsConfiguration closes a structure block: the sentence
-// StructureBlock ends a declared project with, word for word, so the block
-// can be re-closed once after the units paragraphs.
-const structureIsConfiguration = "\nThis is configuration, not code. It says which repository plays which part " +
-	"and which calls which. Never present it as something you read in the sources, and never cite it."
 
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
 // what the turn has to say about its own footing, and answer under that.

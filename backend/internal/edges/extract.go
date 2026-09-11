@@ -161,13 +161,14 @@ func Extract(filePath string, body []byte) []Token {
 	// what the flow corpus's clients write.
 	prefix := ""
 	// pending is the class-level path read off the annotation, promoted to
-	// prefix on the class line that follows it. Every class line promotes,
-	// so a second controller in the same file starts with no prefix unless
-	// it declares one.
+	// prefix on the top-level class line that follows it. Every top-level
+	// class line promotes, so a second controller in the same file starts
+	// with no prefix unless it declares one. A nested class, indented, is
+	// still inside the controller and leaves the prefix alone.
 	pending := ""
 	for i, line := range lines {
 		lineNo := i + 1
-		if isClassLine(line) {
+		if isTopLevelClassLine(line) {
 			prefix, pending = pending, ""
 		}
 
@@ -257,6 +258,12 @@ var classDecl = regexp.MustCompile(`(?:^|[\s(])(?:class|interface)\s+[A-Za-z_]`)
 func isClassLine(line string) bool {
 	t := strings.TrimSpace(line)
 	return !isCommentLine(t) && classDecl.MatchString(t)
+}
+
+// isTopLevelClassLine is isClassLine for a declaration at column zero: the
+// controller itself, not a nested class or a code line mentioning one.
+func isTopLevelClassLine(line string) bool {
+	return len(line) > 0 && line[0] != ' ' && line[0] != '\t' && isClassLine(line)
 }
 
 // isCommentLine reports whether a trimmed line is a comment line.

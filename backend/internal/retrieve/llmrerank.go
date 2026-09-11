@@ -93,6 +93,10 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		{Role: "user", Content: b.String()},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(rerankMaxTokens), llm.WithStep("rerank"))
 	if err != nil {
+		if ctx.Err() != nil {
+			// The reader left; there is no turn to keep an order for.
+			return nil, ctx.Err()
+		}
 		// The fused order answered every question before the reranker
 		// existed; a gate-lane outage must not turn a search into an error.
 		r.logger().Warn("rerank call failed; fused order kept", "err", err)

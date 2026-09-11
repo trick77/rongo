@@ -737,11 +737,19 @@ func StructureBlock(ps []projects.Project) string {
 					"so do not connect them to the others yourself.\n", strings.Join(unreached, ", "))
 			}
 		}
-		b.WriteString("\nThis is configuration, not code. It says which repository plays which part " +
-			"and which calls which. Never present it as something you read in the sources, and never cite it.")
+	}
+	if b.Len() > 0 {
+		b.WriteString(structureIsConfiguration)
 	}
 	return b.String()
 }
+
+// structureIsConfiguration closes a structure block, once, last: the project
+// blocks and the units paragraphs are one class of input and one rule
+// covers them. describeProjects re-closes the block after the paragraphs
+// with this same constant.
+const structureIsConfiguration = "\nThis is configuration, not code. It says which repository plays which part " +
+	"and which calls which. Never present it as something you read in the sources, and never cite it."
 
 // Answer writes the answer for one turn, streaming it token by token.
 //

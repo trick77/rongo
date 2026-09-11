@@ -98,3 +98,31 @@ public class OrdersController {
 		t.Errorf("the first class's prefix leaked into the second: %v", got)
 	}
 }
+
+// TestExtractKeepsTheClassLevelPrefixAcrossANestedClass: a static DTO class
+// inside the controller and a code line whose literal mentions a class are
+// both indented; neither ends the controller's prefix.
+func TestExtractKeepsTheClassLevelPrefixAcrossANestedClass(t *testing.T) {
+	testee := []byte(`
+@RestController
+@RequestMapping("/carts")
+public class CartController {
+    public static class Dto {}
+
+    @GetMapping("/{id}")
+    public Cart get() {
+        log.info("resolved class Handler");
+        return null;
+    }
+
+    @PostMapping("/{id}/items")
+    public void add() {}
+}
+`)
+	got := values(Extract("CartController.java", testee), KindRoute)
+	for _, want := range []string{"/carts", "/carts/{id}", "/carts/{id}/items"} {
+		if !has(got, want) {
+			t.Errorf("routes = %v, missing %s", got, want)
+		}
+	}
+}

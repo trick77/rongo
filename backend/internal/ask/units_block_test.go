@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/units"
 )
 
@@ -73,5 +74,36 @@ func TestDescribeProjectsClosesTheBlockOnceAfterTheParts(t *testing.T) {
 	}
 	if !strings.Contains(got.Structure, "api uses worker.") {
 		t.Errorf("structure lacks the unit edge:\n%s", got.Structure)
+	}
+}
+
+// TestWithPartsClosesTwoProjectsAndTheirPartsOnce: two declared projects in
+// scope and a units paragraph after them are one block under one sentence,
+// which comes last.
+func TestWithPartsClosesTwoProjectsAndTheirPartsOnce(t *testing.T) {
+	block := StructureBlock([]projects.Project{
+		{Name: "shop", Members: []projects.Repo{{Name: "shop-ui", Part: "ui"}, {Name: "shop-backend", Part: "backend"}}},
+		{Name: "crm", Members: []projects.Repo{{Name: "crm-ui", Part: "ui"}, {Name: "crm-api", Part: "backend"}}},
+	})
+	parts := units.Describe("shop-backend", []units.Unit{
+		{Key: "api", Kind: units.KindMavenService, Name: "api"},
+		{Key: "worker", Kind: units.KindMavenService, Name: "worker"},
+	}, []units.Dep{{From: "api", To: "worker"}})
+
+	got := withParts(block, parts)
+	closer := "This is configuration, not code."
+	if n := strings.Count(got, closer); n != 1 {
+		t.Errorf("the closing sentence appears %d times, want once:\n%s", n, got)
+	}
+	if !strings.HasSuffix(got, structureIsConfiguration) {
+		t.Errorf("the block does not end with the closing sentence:\n%s", got)
+	}
+	for _, want := range []string{`Project "shop"`, `Project "crm"`, `Repository "shop-backend" is built from 2 parts:`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("block lacks %q:\n%s", want, got)
+		}
+	}
+	if withParts(block, "") != block {
+		t.Errorf("no parts changed the block")
 	}
 }

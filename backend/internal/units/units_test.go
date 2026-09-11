@@ -67,7 +67,9 @@ func TestScan_readsAMavenMultiModuleBuild(t *testing.T) {
 <artifactId>claims-persistence</artifactId>
 <dependencyManagement><dependencies><dependency><groupId>ch.example.managed</groupId><artifactId>pinned-only</artifactId></dependency></dependencies></dependencyManagement>
 <dependencies><dependency><groupId>org.springframework</groupId><artifactId>spring-jdbc</artifactId></dependency></dependencies>
-<build><plugins><plugin><artifactId>some-plugin</artifactId><dependencies><dependency><groupId>ch.example.plugin</groupId><artifactId>helper</artifactId></dependency></dependencies></plugin></plugins></build></project>`
+<build><plugins><plugin><artifactId>some-plugin</artifactId><dependencies><dependency><groupId>ch.example.plugin</groupId><artifactId>helper</artifactId></dependency></dependencies></plugin></plugins></build>
+<profiles><profile><id>it</id><dependencies><dependency><groupId>org.testcontainers</groupId><artifactId>postgresql</artifactId></dependency></dependencies></profile></profiles>
+<reporting><plugins><plugin><artifactId>rep</artifactId><dependencies><dependency><groupId>org.rep</groupId><artifactId>repdep</artifactId></dependency></dependencies></plugin></plugins></reporting></project>`
 	intranet := `<project><parent><groupId>ch.example.claims</groupId><artifactId>claims-parent</artifactId></parent>
 <artifactId>claims-intranet-service</artifactId>
 <dependencies>
@@ -104,7 +106,7 @@ func TestScan_readsAMavenMultiModuleBuild(t *testing.T) {
 		t.Errorf("internal deps = %v", internal)
 	}
 	if strings.Join(external, ",") != "lib/persistence->org.springframework:spring-jdbc,service/intranet->ch.example.workflow:camunda-intranet" {
-		t.Errorf("external deps = %v (a managed version and a plugin's dependency are not edges)", external)
+		t.Errorf("external deps = %v (a managed version, a plugin's, a profile's or a report's dependency is not an edge)", external)
 	}
 }
 
@@ -208,7 +210,7 @@ func TestSync_replacesAndLoadsAndLinks(t *testing.T) {
 	}
 }
 
-func TestLinkImports_readsAliasImportsOutOfTheIndex(t *testing.T) {
+func TestImportDeps_readsAliasImportsOutOfTheIndex(t *testing.T) {
 	db := unitsDB(t)
 	ctx := context.Background()
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('ui', 'file:///x', 'main')`); err != nil {
@@ -230,11 +232,12 @@ import { Local } from './local';`)
 	seed("libs/shared/src/index.ts", `export const Thing = 1; import x from "@angular/core";`)
 	seed("apps/claims/README.md", `from "@shared" in prose is not an import`)
 	us := []Unit{{Key: "apps/claims", Kind: KindNxApp, Name: "claims"}, {Key: "libs/shared", Kind: KindNxLib, Name: "shared"}}
-	if err := Sync(ctx, db, "ui", us, nil); err != nil {
-		t.Fatal(err)
+	imports, err := ImportDeps(ctx, db, "ui", us, map[string]string{"@shared": "libs/shared/src/index.ts"})
+	if err != nil {
+		t.Fatalf("ImportDeps: %v", err)
 	}
-	if err := LinkImports(ctx, db, "ui", us, map[string]string{"@shared": "libs/shared/src/index.ts"}); err != nil {
-		t.Fatalf("LinkImports: %v", err)
+	if err := Sync(ctx, db, "ui", us, imports); err != nil {
+		t.Fatal(err)
 	}
 	_, deps, err := Load(ctx, db, "ui")
 	if err != nil {
