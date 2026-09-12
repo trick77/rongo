@@ -93,35 +93,36 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-// Usage is what one call cost, as the upstream reported it. Returned to the
-// caller, and also recorded into the usage.Meter on the context when there is
-// one — that is how a turn's total reaches message_usage.
+// Usage is what one call cost, as the upstream reported it and llmwire
+// decoded it. Returned to the caller, and also recorded into the usage.Meter
+// on the context when there is one — that is how a turn's total reaches
+// message_usage.
 type Usage struct {
-	Prompt     int `json:"prompt_tokens"`
-	Completion int `json:"completion_tokens"`
-	Total      int `json:"total_tokens"`
+	Prompt     int
+	Completion int
+	Total      int
 	// The two details objects the endpoint sends on every reply. Both hold a
 	// SUBSET of the count above them, never an addition — Total equals
 	// prompt plus completion whether anything was cached or not, which is
 	// why a turn's figures looked complete while the cached share was being
 	// discarded by the decoder.
-	PromptDetails     *PromptDetails     `json:"prompt_tokens_details"`
-	CompletionDetails *CompletionDetails `json:"completion_tokens_details"`
+	PromptDetails     *PromptDetails
+	CompletionDetails *CompletionDetails
 	// CostNanoUSD is what llmwire priced the call at from its own table, in
 	// billionths of a dollar; nil when it had no rate for the model.
-	CostNanoUSD *int64 `json:"-"`
+	CostNanoUSD *int64
 }
 
 // PromptDetails is how much of the prompt the upstream did not have to read
 // again. Priced at cache_read, far under the input price.
 type PromptDetails struct {
-	Cached int `json:"cached_tokens"`
+	Cached int
 }
 
 // CompletionDetails is how much of the completion went on thinking rather
 // than on the text the reader sees. It comes out of the same completion cap.
 type CompletionDetails struct {
-	Reasoning int `json:"reasoning_tokens"`
+	Reasoning int
 }
 
 // usageFrom maps llmwire's accounting onto Usage. A nil lane is one the

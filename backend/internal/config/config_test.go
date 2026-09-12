@@ -623,3 +623,33 @@ func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 		t.Fatal("Load() err = nil, want an error about an unknown auth mode")
 	}
 }
+
+func TestLoad_embedDimDefaultsToTheModelsWidth(t *testing.T) {
+	// Given the large model and no explicit width
+	setEnv(t, map[string]string{"BACKEND_EMBED_MODEL": "text-embedding-3-large"})
+
+	// When
+	cfg, err := Load()
+
+	// Then the width is the profile's, not a number typed here
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.EmbedDim != 3072 {
+		t.Errorf("EmbedDim = %d, want 3072 from the model's profile", cfg.EmbedDim)
+	}
+}
+
+func TestLoad_rejectsAnEmbedModelLlmwireDoesNotKnow(t *testing.T) {
+	for _, model := range []string{"text-embedding-ada-002", "mimo-v2.5"} {
+		t.Run(model, func(t *testing.T) {
+			// Given a model without an embedding profile
+			setEnv(t, map[string]string{"BACKEND_EMBED_MODEL": model})
+
+			// When / Then: refused at boot, not on the first request
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_EMBED_MODEL") {
+				t.Fatalf("Load() err = %v, want a refusal naming BACKEND_EMBED_MODEL", err)
+			}
+		})
+	}
+}

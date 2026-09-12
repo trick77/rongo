@@ -14,8 +14,8 @@
 // It runs OUT OF BAND on purpose. internal/llm speaks one completion and one
 // stream and says so ("No tools, no image path"): adding tool plumbing to the
 // shipping client for a diagnostic would put a code path into the product that
-// nothing in the product uses. So this file carries its own minimal
-// tool-calling client, and internal/llm is left alone.
+// nothing in the product uses. So this file talks to llmwire directly, which
+// carries the tool wire, and internal/llm is left alone.
 //
 // Run it after TestEvalIndex has built the flow corpus:
 //
@@ -28,12 +28,10 @@
 package eval
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,6 +39,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/trick77/llmwire"
 
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -152,70 +152,58 @@ func TestFlowQuestionsAreWellFormed(t *testing.T) {
 // ALREADY has: the hybrid search it ships, ripgrep it already shells out to,
 // the ctags symbols it already stores, and reading a file. Giving the loop a
 // tool the product does not have would measure a product that does not exist.
-func flowToolSpecs() []map[string]any {
+func flowToolSpecs() []llmwire.Tool {
 	strProp := func(desc string) map[string]any {
 		return map[string]any{"type": "string", "description": desc}
 	}
-	return []map[string]any{
+	return []llmwire.Tool{
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "search",
-				"description": "Hybrid semantic and keyword search over the indexed corpus. Returns matching code chunks with repository, path and line range.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"query": strProp("What to look for, in natural language or code vocabulary."),
-						"repo":  strProp("Optional repository name to restrict the search to."),
-					},
-					"required": []string{"query"},
+			Name:        "search",
+			Description: "Hybrid semantic and keyword search over the indexed corpus. Returns matching code chunks with repository, path and line range.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": strProp("What to look for, in natural language or code vocabulary."),
+					"repo":  strProp("Optional repository name to restrict the search to."),
 				},
+				"required": []string{"query"},
 			},
 		},
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "grep",
-				"description": "Literal or regular-expression search over the checked-out source, like ripgrep. Use it to follow an exact string such as a queue name or a route across repositories.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"pattern": strProp("The pattern to search for."),
-						"repo":    strProp("Optional repository name to restrict the search to."),
-					},
-					"required": []string{"pattern"},
+			Name:        "grep",
+			Description: "Literal or regular-expression search over the checked-out source, like ripgrep. Use it to follow an exact string such as a queue name or a route across repositories.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"pattern": strProp("The pattern to search for."),
+					"repo":    strProp("Optional repository name to restrict the search to."),
 				},
+				"required": []string{"pattern"},
 			},
 		},
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "symbol",
-				"description": "Look up where a symbol (class, function, method) is defined.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name": strProp("The symbol name."),
-					},
-					"required": []string{"name"},
+			Name:        "symbol",
+			Description: "Look up where a symbol (class, function, method) is defined.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": strProp("The symbol name."),
 				},
+				"required": []string{"name"},
 			},
 		},
 		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "read_file",
-				"description": "Read a file from a repository, or a line range of it.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"repo":  strProp("Repository name."),
-						"path":  strProp("Path within the repository."),
-						"start": strProp("Optional first line, 1-based."),
-						"end":   strProp("Optional last line."),
-					},
-					"required": []string{"repo", "path"},
+			Name:        "read_file",
+			Description: "Read a file from a repository, or a line range of it.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"repo":  strProp("Repository name."),
+					"path":  strProp("Path within the repository."),
+					"start": strProp("Optional first line, 1-based."),
+					"end":   strProp("Optional last line."),
 				},
+				"required": []string{"repo", "path"},
 			},
 		},
 	}
@@ -384,6 +372,14 @@ func clip(s string, n int) string {
 	return s[:n] + "\n… truncated"
 }
 
+// deref reads an optional token count, zero when the endpoint did not say.
+func deref(n *int64) int64 {
+	if n == nil {
+		return 0
+	}
+	return *n
+}
+
 func atoiOr(s string, def int) int {
 	var n int
 	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
@@ -392,86 +388,41 @@ func atoiOr(s string, def int) int {
 	return n
 }
 
-// --- the minimal tool-calling client ---------------------------------------
+// --- the tool-calling client ----------------------------------------------
 
-type toolChatMessage struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
-	ToolCalls  []toolChatCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Name       string         `json:"name,omitempty"`
-}
-
-type toolChatCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
-type toolChatResponse struct {
-	Choices []struct {
-		Message struct {
-			Content   string         `json:"content"`
-			ToolCalls []toolChatCall `json:"tool_calls"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage struct {
-		Prompt     int `json:"prompt_tokens"`
-		Completion int `json:"completion_tokens"`
-		Total      int `json:"total_tokens"`
-	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// flowChat posts one chat-completions request with tools. The deployment names
-// come from internal/llm and are not configurable there; they are repeated here
+// flowWire is the llmwire client the loop talks through, built once per run
+// from the same environment the product reads. The deployment names come from
+// internal/llm and are not configurable there; they are passed in per call
 // rather than exported, so the product's rule that a deployment is never an
 // environment variable stays intact.
-func flowChat(ctx context.Context, deployment string, msgs []toolChatMessage) (*toolChatResponse, error) {
-	base := strings.TrimRight(os.Getenv("BACKEND_LLM_BASE_URL"), "/")
-	if base == "" {
-		return nil, fmt.Errorf("BACKEND_LLM_BASE_URL is empty")
-	}
-	payload := map[string]any{
-		"model":       deployment,
-		"messages":    msgs,
-		"tools":       flowToolSpecs(),
-		"tool_choice": "auto",
-		"max_tokens":  2048,
-		"temperature": 0,
-	}
-	body, err := json.Marshal(payload)
+func flowWire(t *testing.T) *llmwire.Client {
+	t.Helper()
+	cfg := evalLLMConfig(t, 5*time.Minute)
+	return llmwire.New(llmwire.Config{
+		BaseURL:         cfg.BaseURL,
+		APIKey:          cfg.APIKey,
+		HeaderTimeout:   cfg.Timeout,
+		CallTimeout:     cfg.Timeout,
+		EmulateOpenCode: cfg.EmulateOpenCode,
+	})
+}
+
+// flowChat posts one chat-completions request with tools.
+func flowChat(ctx context.Context, wire *llmwire.Client, deployment string, msgs []llmwire.Message) (*llmwire.ChatResponse, error) {
+	maxTokens := 2048
+	temperature := 0.0
+	resp, _, err := wire.Chat(ctx, llmwire.ChatRequest{
+		Model:       deployment,
+		Messages:    msgs,
+		Tools:       flowToolSpecs(),
+		ToolChoice:  llmwire.ToolChoice{Mode: llmwire.ToolChoiceAuto},
+		MaxTokens:   &maxTokens,
+		Temperature: &temperature,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("upstream: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("BACKEND_LLM_API_KEY"))
-	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var out toolChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode (status %d): %w", resp.StatusCode, err)
-	}
-	if out.Error != nil {
-		return nil, fmt.Errorf("upstream: %s", out.Error.Message)
-	}
-	if len(out.Choices) == 0 {
-		return nil, fmt.Errorf("no choices (status %d)", resp.StatusCode)
-	}
-	return &out, nil
+	return resp, nil
 }
 
 const flowSystemPrompt = `You answer questions about a codebase spread over several repositories.
@@ -489,47 +440,41 @@ type flowTrajectory struct {
 	Err      error
 }
 
-func runFlowQuestion(ctx context.Context, t *testing.T, env *flowEnv, deployment string, q flowQuestion) flowTrajectory {
+func runFlowQuestion(ctx context.Context, t *testing.T, env *flowEnv, wire *llmwire.Client, deployment string, q flowQuestion) flowTrajectory {
 	env.seen = map[flowPart]bool{}
 	traj := flowTrajectory{Question: q.Text}
-	msgs := []toolChatMessage{
-		{Role: "system", Content: flowSystemPrompt},
-		{Role: "user", Content: q.Text},
+	msgs := []llmwire.Message{
+		llmwire.System(flowSystemPrompt),
+		llmwire.User(q.Text),
 	}
 	budget := flowToolBudget()
 	for i := 0; i < budget; i++ {
-		resp, err := flowChat(ctx, deployment, msgs)
+		resp, err := flowChat(ctx, wire, deployment, msgs)
 		if err != nil {
 			traj.Err = err
 			break
 		}
-		traj.Tokens += resp.Usage.Total
-		choice := resp.Choices[0]
-		if len(choice.Message.ToolCalls) == 0 {
-			traj.Answer = choice.Message.Content
+		traj.Tokens += int(deref(resp.Usage.Input.Total) + deref(resp.Usage.Output.Total))
+		if len(resp.ToolCalls) == 0 {
+			traj.Answer = resp.Content
 			break
 		}
-		msgs = append(msgs, toolChatMessage{
-			Role:      "assistant",
-			Content:   choice.Message.Content,
-			ToolCalls: choice.Message.ToolCalls,
+		msgs = append(msgs, llmwire.Message{
+			Role:      llmwire.RoleAssistant,
+			Text:      resp.Content,
+			ToolCalls: resp.ToolCalls,
 		})
-		for _, call := range choice.Message.ToolCalls {
+		for _, call := range resp.ToolCalls {
 			args := map[string]string{}
 			var raw map[string]any
-			if err := json.Unmarshal([]byte(call.Function.Arguments), &raw); err == nil {
+			if err := json.Unmarshal([]byte(call.Arguments), &raw); err == nil {
 				for k, v := range raw {
 					args[k] = fmt.Sprint(v)
 				}
 			}
-			result := env.call(ctx, call.Function.Name, args)
-			traj.Steps = append(traj.Steps, fmt.Sprintf("%s(%s)", call.Function.Name, call.Function.Arguments))
-			msgs = append(msgs, toolChatMessage{
-				Role:       "tool",
-				ToolCallID: call.ID,
-				Name:       call.Function.Name,
-				Content:    clip(result, 6000),
-			})
+			result := env.call(ctx, call.Name, args)
+			traj.Steps = append(traj.Steps, fmt.Sprintf("%s(%s)", call.Name, call.Arguments))
+			msgs = append(msgs, llmwire.ToolResult(call.ID, clip(result, 6000)))
 		}
 	}
 	traj.Reached = map[flowPart]bool{}
@@ -571,11 +516,12 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	}
 
 	questions := loadFlowQuestions(t)
+	wire := flowWire(t)
 	for _, deployment := range flowDeployments {
 		t.Run(deployment, func(t *testing.T) {
 			var totalParts, totalReached int
 			for _, q := range questions {
-				traj := runFlowQuestion(ctx, t, env, deployment, q)
+				traj := runFlowQuestion(ctx, t, env, wire, deployment, q)
 				parts := q.parts()
 				reached := 0
 				var missing []string

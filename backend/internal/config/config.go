@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/trick77/llmwire"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -128,12 +130,25 @@ type Config struct {
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
-	// The embedding dimension is the one integer setting that may NOT fall back
-	// silently: it is baked into the vec0 table when the database is created,
-	// so a typo ("3O72" with a letter O) would build a 1536-wide table while
-	// the operator believes it is 3072, and the mistake surfaces much later as
-	// a per-request dimension mismatch.
-	embedDim := 1536
+	// The embedding model must be one llmwire ships a profile for, since the
+	// profile is where the vector width comes from and the wire refuses any
+	// other name on the first request anyway. Failing here says so at boot.
+	embedModel := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
+	profile, err := llmwire.Default().Lookup(embedModel)
+	if err != nil {
+		return Config{}, fmt.Errorf("BACKEND_EMBED_MODEL: %w", err)
+	}
+	if profile.Endpoint != llmwire.EndpointEmbeddings {
+		return Config{}, fmt.Errorf("BACKEND_EMBED_MODEL = %q is a %s model, not an embedding model", embedModel, profile.Endpoint)
+	}
+
+	// The embedding dimension defaults to the width the model returns, from
+	// its profile. It is the one integer setting that may NOT fall back
+	// silently when set: it is baked into the vec0 table when the database is
+	// created, so a typo ("3O72" with a letter O) would build a 1536-wide
+	// table while the operator believes it is 3072, and the mistake surfaces
+	// much later as a per-request dimension mismatch.
+	embedDim := profile.Embedding.DefaultDimensions
 	if v := strings.TrimSpace(os.Getenv("BACKEND_EMBED_DIM")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n <= 0 {
@@ -170,7 +185,7 @@ func Load() (Config, error) {
 		TurnMaxTokens:      envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
 		EmbedBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
 		EmbedAPIKey:        strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
-		EmbedModel:         envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
+		EmbedModel:         embedModel,
 		EmbedDim:           embedDim,
 		AuthMode:           AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),

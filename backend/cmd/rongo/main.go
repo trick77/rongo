@@ -344,7 +344,6 @@ func main() {
 		BaseURL:         cfg.LLMBaseURL,
 		APIKey:          cfg.LLMAPIKey,
 		Timeout:         15 * time.Minute,
-		IdleTimeout:     90 * time.Second,
 		TurnMaxTokens:   cfg.TurnMaxTokens,
 		EmulateOpenCode: cfg.LLMEmulateOpenCode,
 	}, nil)
