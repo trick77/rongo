@@ -116,12 +116,16 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 	var tokens int64
 	if resp.Usage.Input.Total != nil {
 		tokens = *resp.Usage.Input.Total
-		usage.Record(ctx, usage.Call{
+		call := usage.Call{
 			Step:   "embed",
 			Model:  c.model,
 			Prompt: int(tokens),
 			Ms:     usage.Int(int(time.Since(started).Milliseconds())),
-		})
+		}
+		if resp.Usage.Cost.Provenance != llmwire.Unpriced {
+			call.CostNanoUSD = usage.Nano(resp.Usage.Cost.NanoUSD)
+		}
+		usage.Record(ctx, call)
 	}
 	if c.dim > 0 {
 		for _, v := range resp.Vectors {

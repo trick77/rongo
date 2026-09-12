@@ -107,6 +107,9 @@ type Usage struct {
 	// discarded by the decoder.
 	PromptDetails     *PromptDetails     `json:"prompt_tokens_details"`
 	CompletionDetails *CompletionDetails `json:"completion_tokens_details"`
+	// CostNanoUSD is what llmwire priced the call at from its own table, in
+	// billionths of a dollar; nil when it had no rate for the model.
+	CostNanoUSD *int64 `json:"-"`
 }
 
 // PromptDetails is how much of the prompt the upstream did not have to read
@@ -141,6 +144,9 @@ func usageFrom(u llmwire.Usage) Usage {
 	}
 	if u.Output.Reasoning != nil {
 		out.CompletionDetails = &CompletionDetails{Reasoning: int(*u.Output.Reasoning)}
+	}
+	if u.Cost.Provenance != llmwire.Unpriced {
+		out.CostNanoUSD = usage.Nano(u.Cost.NanoUSD)
 	}
 	return out
 }
@@ -207,6 +213,7 @@ func record(ctx context.Context, o callOptions, u Usage, took time.Duration) {
 	if u.CompletionDetails != nil {
 		c.Reasoning = usage.Int(u.CompletionDetails.Reasoning)
 	}
+	c.CostNanoUSD = u.CostNanoUSD
 	usage.Record(ctx, c)
 }
 

@@ -8,7 +8,6 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
-	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
@@ -126,11 +125,6 @@ type Deps struct {
 	// simply ends, which is what it did before the pills existed.
 	Suggester func(ctx context.Context, question, answer string, audience ask.Audience,
 		sources []ask.Source, scope ask.Scope, lang ask.Language) []string
-	// Prices turns stored tokens into money, per model, read at report time
-	// because the table is refreshed from a registry behind the process's
-	// back. Nil or empty means the browser sees tokens only — the honest
-	// default when nothing says what the endpoint charges.
-	Prices *pricing.Table
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.

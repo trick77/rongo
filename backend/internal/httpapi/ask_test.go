@@ -15,7 +15,6 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/llm"
-	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/threads"
@@ -913,8 +912,10 @@ func itoa(n int64) string {
 
 // gateCalls is what a turn pays for before it decides how to end: the
 // understanding gate and the query embedding.
+// gateCalls is what a fake turn paid for: one priced call, as llmwire
+// prices them on the way in, and one the wire had no rate for.
 var gateCalls = []usage.Call{
-	{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20},
+	{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20, CostNanoUSD: usage.Nano(140_000)},
 	{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
 }
 
@@ -952,8 +953,9 @@ func TestAsk_theUsageEventCarriesEveryCallOfTheTurnAndTheCallsAreStored(t *testi
 	if got.Prompt != 112 || got.Completion != 20 || got.Total != 132 {
 		t.Errorf("totals = %d/%d/%d, want 112/20/132", got.Prompt, got.Completion, got.Total)
 	}
-	if got.CostUSD != nil {
-		t.Errorf("cost = %v, want none: no prices are configured", *got.CostUSD)
+	// The one priced call is the turn's cost; the unpriced one adds nothing.
+	if got.CostUSD == nil || *got.CostUSD < 0.00014-1e-12 || *got.CostUSD > 0.00014+1e-12 {
+		t.Errorf("cost = %v, want 0.00014 from the one priced call", got.CostUSD)
 	}
 	// And the record holds them, so a reload and the thread total see them.
 	msgs, err := st.Messages(context.Background(), testSubject, threadRowOf(t, st, body))
@@ -1050,13 +1052,12 @@ func TestAsk_aTurnThatFailedOrAskedBackStillReportsAndStoresWhatItPaidFor(t *tes
 	}
 }
 
-func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
-	// Given a stored turn with usage, and a price for the gate deployment only
+func TestThread_servesStoredUsageWithTheCostEachCallWasPricedAt(t *testing.T) {
+	// Given a stored turn with usage, one call priced and one not
 	srv, _ := newTestServerWithStore(t, func(f *fakeAsker) {
 		f.tokens = []string{"The ", "answer."}
 		f.calls = gateCalls
 	})
-	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	body := doSSE(t, srv, "/api/ask", `{"question":"how?"}`)
 	id := threadIDOf(t, body)
 
@@ -1065,8 +1066,8 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	// Then: usage on the message, priced from the CURRENT table — the embed
-	// call has no price and carries none, the understanding call does.
+	// Then: usage on the message, each call at the cost it was stored with —
+	// the embed call has none and carries none, the understanding call does.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -1081,7 +1082,7 @@ func TestThread_servesStoredUsagePricedWhenPricesAreConfigured(t *testing.T) {
 	if u.Total != 132 || len(u.Calls) != 2 {
 		t.Errorf("usage = %+v", u)
 	}
-	// 100*1 + 20*2 = 140 per million
+	// 140_000 nanodollars
 	if u.CostUSD == nil || *u.CostUSD < 0.00014-1e-12 || *u.CostUSD > 0.00014+1e-12 {
 		t.Errorf("cost = %v, want 0.00014", u.CostUSD)
 	}

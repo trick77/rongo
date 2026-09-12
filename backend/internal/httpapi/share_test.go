@@ -12,7 +12,6 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
-	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
@@ -137,10 +136,9 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 }
 
 func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
-	// Given a priced server and a shared thread of two turns that paid for
-	// calls, offered follow-ups and were watched through a timeline
+	// Given a shared thread of two turns that paid for priced calls, offered
+	// follow-ups and were watched through a timeline
 	srv, st, _ := shareServer(t)
-	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
 	msgs, err := st.Messages(ctx, testSubject, th.ID)
@@ -148,8 +146,8 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 		t.Fatalf("messages: %v", err)
 	}
 	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
-		{Step: "route", Model: "mimo-v2.5", Prompt: 100, Completion: 10},
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 1000, Completion: 100},
+		{Step: "route", Model: "mimo-v2.5", Prompt: 100, Completion: 10, CostNanoUSD: usage.Nano(120_000)},
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 1000, Completion: 100, CostNanoUSD: usage.Nano(1_200_000)},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
@@ -163,7 +161,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	}
 	later := laterTurn(t, st, th.ID)
 	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 2000, Completion: 200},
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 2000, Completion: 200, CostNanoUSD: usage.Nano(2_400_000)},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
@@ -183,7 +181,8 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	// When
 	rec := getPublic(srv, "/api/shares/"+sh.Token)
 
-	// Then the thread's total is on the page, priced from the table ...
+	// Then the thread's total is on the page, summed from what each call was
+	// stored at ...
 	var got struct {
 		TotalTokens *int     `json:"total_tokens"`
 		CostUSD     *float64 `json:"cost_usd"`
@@ -194,7 +193,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	if got.TotalTokens == nil || *got.TotalTokens != 3410 {
 		t.Errorf("total_tokens = %v, want 3410", got.TotalTokens)
 	}
-	// (100+1000+2000)*1 + (10+100+200)*2 = 3720 per million
+	// 120_000 + 1_200_000 + 2_400_000 nanodollars
 	if got.CostUSD == nil {
 		t.Error("cost_usd missing on a priced thread")
 	} else if d := *got.CostUSD - 0.00372; d > 1e-9 || d < -1e-9 {
@@ -217,7 +216,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 }
 
 func TestPublicShare_carriesTokensOnlyWhenNothingIsPriced(t *testing.T) {
-	// Given a server without a price table and a turn that paid for a call
+	// Given a turn that paid for a call nothing priced
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)
@@ -248,7 +247,6 @@ func TestPublicShare_carriesTokensOnlyWhenNothingIsPriced(t *testing.T) {
 func TestPublicShare_carriesNoTotalWhenNothingWasPaidFor(t *testing.T) {
 	// Given a shared turn with no usage rows
 	srv, st, _ := shareServer(t)
-	srv.deps.Prices = pricing.NewFixedTable(usage.Prices{"mimo-v2.5": usage.Price{In: 1, Out: 2}})
 	th := sharedTurn(t, st, testSubject)
 	sh := share(t, srv, th.PublicID)
 

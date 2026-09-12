@@ -8,8 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/trick77/rongo/internal/pricing"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -88,10 +86,6 @@ type Config struct {
 	// headers. Mandatory and explicit, because a default either way is a
 	// guess about which host is behind BACKEND_LLM_BASE_URL.
 	LLMEmulateOpenCode bool
-	// PricesURL is the registry the price table is resolved from. Empty turns
-	// the lookup off: tokens only. There is no hand-typed price anywhere —
-	// a made-up figure next to a real token count would read as a bill.
-	PricesURL string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -171,7 +165,6 @@ func Load() (Config, error) {
 		LLMBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
 		LLMAPIKey:          strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
 		LLMEmulateOpenCode: emulate,
-		PricesURL:          envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
 		GatherMaxHops:      envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget:  envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		TurnMaxTokens:      envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),

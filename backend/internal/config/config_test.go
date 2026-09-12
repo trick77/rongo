@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 )
@@ -15,7 +14,6 @@ const validSecret = "s3cret-long-enough"
 // all of them before setting their own, so a developer with e.g. BACKEND_ADDR
 // exported in their shell doesn't fail an unrelated test.
 var allBackendEnvVars = []string{
-	"BACKEND_PRICES_URL",
 	"BACKEND_ADDR",
 	"BACKEND_DB_PATH",
 	"BACKEND_REPO_ROOT",
@@ -623,32 +621,5 @@ func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Load() err = nil, want an error about an unknown auth mode")
-	}
-}
-
-func TestLoad_pricesRegistryDefaultsToModelsDevAndEmptyTurnsItOff(t *testing.T) {
-	// Given: nothing said about the registry. setEnv leaves every variable
-	// present and empty, and for this one empty is a value, so it is
-	// removed outright.
-	setEnv(t, nil)
-	os.Unsetenv("BACKEND_PRICES_URL")
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	// Then: the public registry is the source
-	if cfg.PricesURL != "https://models.dev/api.json" {
-		t.Errorf("PricesURL = %q, want models.dev", cfg.PricesURL)
-	}
-
-	// Given: the lookup switched off
-	setEnv(t, map[string]string{"BACKEND_PRICES_URL": ""})
-	cfg, err = Load()
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	// Then: no URL, so main never fetches; tokens only
-	if cfg.PricesURL != "" {
-		t.Errorf("PricesURL = %q, want empty", cfg.PricesURL)
 	}
 }

@@ -35,7 +35,7 @@ Rules, not description. The code is truth — how a rule is implemented is disco
 - BA answer = core mechanism, three to five paragraphs, then stop. Edge cases go to a follow-up. DEV gets room for inline code.
 - **Every answer opens with ONE sentence that answers the question**, then explains - both audiences. A list only where the mechanism really is a set (branches, options, ordered steps); prose that is prose stays prose, and a marker sits on the item making the claim. No headings: mocked and left out, because a short answer wearing three of them looks over-built and the model misjudges that more often than it misjudges a list.
 - Embeddings cached by chunk content hash; never re-embed unchanged content.
-- Prices from models.dev, never typed — there is no `BACKEND_PRICE_*`. Both MiMo deployments are priced from **`api.xiaomimimo.com`** whatever endpoint rongo calls, because a token plan lists them at 0 and a reseller at a markup. Unpriceable model → tokens only + a log warning, never a guess.
+- Prices are llmwire's: every call is priced from its `profiles.yaml` as the reply comes in and stored per row (`message_usage.cost_nano_usd`), at the vendor's list rate whatever host rongo calls. Never re-derived from tokens, never typed here, never fetched; a price change is a llmwire bump. Unpriced call → tokens only, and a row from before the column stays unpriced.
 
 ## Invariants (must hold in every feature)
 

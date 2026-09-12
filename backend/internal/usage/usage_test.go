@@ -39,95 +39,72 @@ func TestMeter_collectsEveryCallInOrderAndIsSafeForConcurrentCallers(t *testing.
 	}
 }
 
-func TestReport_sumsTokensAndPricesOnlyWhenPricesAreConfigured(t *testing.T) {
+func TestReport_sumsTokensAndPricesOnlyTheCallsLlmwirePriced(t *testing.T) {
 	calls := []Call{
 		{Step: "route", Model: "mimo-v2.5-pro", Prompt: 1000, Completion: 10},
 		{Step: "embed", Model: "text-embedding-3-small", Prompt: 500},
 		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 2000, Completion: 1000},
 	}
 
-	// No prices: tokens only, no money anywhere.
-	r := Prices{}.Report(calls)
+	// No call priced: tokens only, no money anywhere. This is every turn
+	// stored before costs were recorded, and it stays that way — tokens are
+	// never re-priced against today's table.
+	r := Price(calls)
 	if r.Prompt != 3500 || r.Completion != 1010 || r.Total != 4510 {
 		t.Fatalf("totals = %d/%d/%d, want 3500/1010/4510", r.Prompt, r.Completion, r.Total)
 	}
 	if r.CostUSD != nil {
-		t.Fatalf("cost = %v, want none without prices", *r.CostUSD)
+		t.Fatalf("cost = %v, want none when nothing was priced", *r.CostUSD)
 	}
 	if len(r.Calls) != 3 || r.Calls[0].CostUSD != nil {
-		t.Fatal("per-call cost must be absent without prices")
+		t.Fatal("per-call cost must be absent when nothing was priced")
 	}
 
-	// Prices for the Pro deployment only: the embed call is unpriced and
-	// contributes nothing, but the total is still a number.
-	p := Prices{"mimo-v2.5-pro": Price{In: 1.0, Out: 4.0}}
-	r = p.Report(calls)
+	// Two of the three priced: the embed call contributes nothing, but the
+	// total is still a number.
+	calls[0].CostNanoUSD = Nano(1_040_000)
+	calls[2].CostNanoUSD = Nano(6_000_000)
+	r = Price(calls)
 	if r.CostUSD == nil {
-		t.Fatal("cost must be present once any price is configured")
+		t.Fatal("cost must be present once any call carries a price")
 	}
-	// (1000+2000)/1e6 * 1.0 + (10+1000)/1e6 * 4.0 = 0.003 + 0.00404
 	if got, want := *r.CostUSD, 0.00704; got < want-1e-9 || got > want+1e-9 {
 		t.Fatalf("cost = %v, want %v", got, want)
 	}
 	if r.Calls[1].CostUSD != nil {
-		t.Fatal("an unpriced model must carry no cost, not zero")
+		t.Fatal("an unpriced call must carry no cost, not zero")
 	}
 	if c := r.Calls[0].CostUSD; c == nil || *c < 0.00104-1e-9 || *c > 0.00104+1e-9 {
 		t.Fatalf("route cost = %v, want 0.00104", c)
 	}
 }
 
-func TestReport_aCachedPrefixIsChargedAtTheCachePrice(t *testing.T) {
-	// Given a call whose prompt the upstream mostly served from its cache
-	calls := []Call{{Step: "answer", Model: "pro", Prompt: 10_000, Completion: 1_000, Cached: Int(9_000)}}
-	p := Prices{"pro": Price{In: 0.435, Out: 0.87, CacheRead: 0.0036, Context: 1_048_576}}
+func TestReport_theWindowComesFromLlmwiresProfile(t *testing.T) {
+	// Given a call to a deployment llmwire sizes, and one to a model it has
+	// never heard of
+	r := Price([]Call{
+		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 10, Completion: 2, Cached: Int(9)},
+		{Step: "answer", Model: "nobody-knows", Prompt: 10, Completion: 2},
+	})
 
-	// When
-	r := p.Report(calls)
-
-	// Then the cached part is priced at cache_read, not at the input price
-	// (1000*0.435 + 9000*0.0036 + 1000*0.87) / 1e6
-	want := (1_000*0.435 + 9_000*0.0036 + 1_000*0.87) / 1e6
-	if got := *r.CostUSD; got < want-1e-12 || got > want+1e-12 {
-		t.Fatalf("cost = %v, want %v", got, want)
+	// Then the known one carries its window and the other none: a made-up
+	// window would read as a real ceiling.
+	if r.Calls[0].ContextTokens <= 0 {
+		t.Fatalf("window = %d, want the profile's", r.Calls[0].ContextTokens)
 	}
-	// And the full-price figure is what it would have been: the whole point
-	// is that this is lower.
-	if full := (10_000*0.435 + 1_000*0.87) / 1e6; *r.CostUSD >= full {
-		t.Fatalf("cost %v is not below the uncached %v", *r.CostUSD, full)
+	if r.Calls[1].ContextTokens != 0 {
+		t.Fatalf("window = %d for an unknown model, want 0", r.Calls[1].ContextTokens)
 	}
-	if r.Cached == nil || *r.Cached != 9_000 {
-		t.Fatalf("cached = %v, want 9000", r.Cached)
-	}
-	if r.Calls[0].ContextTokens != 1_048_576 {
-		t.Fatalf("window = %d, want the model's", r.Calls[0].ContextTokens)
-	}
-	// And the tokens are untouched: cached is a subset of prompt, never an
-	// addition to it.
-	if r.Prompt != 10_000 || r.Total != 11_000 {
-		t.Fatalf("tokens = %d/%d, want 10000/11000", r.Prompt, r.Total)
-	}
-}
-
-func TestReport_withoutACachePriceNothingIsDiscounted(t *testing.T) {
-	// Given a model whose registry entry lists no cache price
-	calls := []Call{{Step: "rerank", Model: "gate", Prompt: 10_000, Completion: 100, Cached: Int(9_000)}}
-	p := Prices{"gate": Price{In: 0.14, Out: 0.28}}
-
-	// When
-	r := p.Report(calls)
-
-	// Then the old arithmetic stands: no discount is invented for a contract
-	// that does not say there is one.
-	want := (10_000*0.14 + 100*0.28) / 1e6
-	if got := *r.CostUSD; got < want-1e-12 || got > want+1e-12 {
-		t.Fatalf("cost = %v, want %v", got, want)
+	// And cached is summed over the calls that reported one, a subset of the
+	// prompt and never an addition to it.
+	if r.Cached == nil || *r.Cached != 9 || r.Prompt != 20 {
+		t.Fatalf("cached/prompt = %v/%d, want 9/20", r.Cached, r.Prompt)
 	}
 }
 
 func TestReport_aTurnThatReportedNoCachedFigureCarriesNoneAtAll(t *testing.T) {
 	// Given a turn from before the figure was recorded
-	r := Prices{"pro": Price{In: 1, Out: 1}}.Report([]Call{{Step: "answer", Model: "pro", Prompt: 10, Completion: 2}})
+	r := Price([]Call{{Step: "answer", Model: "pro", Prompt: 10, Completion: 2, CostNanoUSD: Nano(1)}})
 
 	// Then absent, not zero: the two say different things.
 	if r.Cached != nil {
@@ -149,11 +126,11 @@ func TestMeter_totalIsEveryTokenTheTurnPaidFor(t *testing.T) {
 }
 
 func TestReport_ofNoCallsIsEmptyNotNil(t *testing.T) {
-	r := Prices{"m": Price{In: 1, Out: 1}}.Report(nil)
+	r := Price(nil)
 	if r.Calls == nil || r.Total != 0 {
 		t.Fatalf("report = %+v, want an empty call list and zero totals", r)
 	}
-	if r.CostUSD == nil || *r.CostUSD != 0 {
-		t.Fatal("with prices configured an empty turn costs zero, not nothing")
+	if r.CostUSD != nil {
+		t.Fatal("an empty turn priced nothing, so it carries no cost rather than zero")
 	}
 }
