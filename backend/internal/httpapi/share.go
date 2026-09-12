@@ -182,7 +182,7 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		Messages: msgs,
 	}
 	if len(calls) > 0 {
-		report := s.deps.Prices.Prices().Report(calls)
+		report := usage.Price(calls)
 		out.TotalTokens = &report.Total
 		out.CostUSD = report.CostUSD
 	}

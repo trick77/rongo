@@ -599,7 +599,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.SaveUsage(record, msg.ID, calls); err != nil {
 			recordFailed(ctx, "record usage failed", err)
 		}
-		send("usage", s.deps.Prices.Prices().Report(calls))
+		send("usage", usage.Price(calls))
 	}
 
 	if resume != nil {
@@ -1069,7 +1069,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.SaveUsage(record, newMsg.ID, calls); err != nil {
 			recordFailed(ctx, "record usage failed", err)
 		}
-		send("usage", s.deps.Prices.Prices().Report(calls))
+		send("usage", usage.Price(calls))
 	}
 	if err != nil {
 		turnStopped(ctx, "reexplain failed", msg.ThreadID, err)
@@ -1163,7 +1163,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	// instead of a zero.
 	for i := range msgs {
 		if len(msgs[i].Calls) > 0 {
-			report := s.deps.Prices.Prices().Report(msgs[i].Calls)
+			report := usage.Price(msgs[i].Calls)
 			msgs[i].Usage = &report
 		}
 	}

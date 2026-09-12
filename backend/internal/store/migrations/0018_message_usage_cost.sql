@@ -1,0 +1,13 @@
+-- message_usage: what the call cost, as llmwire priced it when the reply
+-- came in, in billionths of a dollar at the vendor's list rate.
+--
+-- Stored per call rather than derived at report time from tokens and a
+-- price table: the table used to be fetched from models.dev daily, and a
+-- turn's cost changed whenever the fetch did. Now the figure is fixed at the
+-- moment the call was paid for, the way a receipt is.
+--
+-- NULLABLE on purpose. Rows written before this migration keep NULL, and so
+-- does a call to a model llmwire has no rate for: a call nobody priced must
+-- not read as a call that cost nothing. Integer, because a sum of floats
+-- drifts and a bill does not.
+ALTER TABLE message_usage ADD COLUMN cost_nano_usd INTEGER;

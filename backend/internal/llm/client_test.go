@@ -33,14 +33,19 @@ func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
 	want := usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: 11, Completion: 7}
-	// The duration is measured here rather than reported by the endpoint, so
-	// it is checked on its own and then cleared: what this test is about is
-	// the step, the deployment and the upstream's own numbers.
+	// The duration is measured here rather than reported by the endpoint,
+	// and the cost is llmwire's from its own table: 11 in at 0.14 and 7 out
+	// at 0.28 USD per million. Each checked on its own and then cleared:
+	// what this test is about is the step, the deployment and the upstream's
+	// own numbers.
 	got := calls[0]
 	if got.Ms == nil {
 		t.Error("the call must be timed")
 	}
-	got.Ms = nil
+	if got.CostNanoUSD == nil || *got.CostNanoUSD != 3_500 {
+		t.Errorf("cost = %v nanodollars, want 3500", got.CostNanoUSD)
+	}
+	got.Ms, got.CostNanoUSD = nil, nil
 	if got != want {
 		t.Errorf("call = %+v, want %+v", got, want)
 	}
@@ -64,6 +69,12 @@ func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
 	}
 	want := usage.Call{Step: "answer", Model: ProDeployment, Prompt: 3, Completion: 4}
 	got := calls[0]
+	// Priced by llmwire as the stream closed: 3 in at 0.435 and 4 out at
+	// 0.87 USD per million.
+	if got.CostNanoUSD == nil || *got.CostNanoUSD != 4_785 {
+		t.Errorf("cost = %v nanodollars, want 4785", got.CostNanoUSD)
+	}
+	got.CostNanoUSD = nil
 	if got.Ms == nil {
 		t.Error("the call must be timed")
 	}

@@ -31,19 +31,24 @@ func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
 		t.Fatalf("Embed: %v", err)
 	}
 
-	// Then: one call, labelled embed, prompt side only.
+	// Then: one call, labelled embed, prompt side only, priced by llmwire
+	// at the model's list rate: 9 tokens at 0.02 USD per million.
 	calls := m.Calls()
 	if len(calls) != 1 {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
 	want := usage.Call{Step: "embed", Model: "text-embedding-3-small", Prompt: 9}
-	// The duration is measured here, not reported by the endpoint: checked on
-	// its own, then cleared so this stays a test about the tokens.
+	// The duration is measured here, not reported by the endpoint, and the
+	// cost is llmwire's: each checked on its own, then cleared so this stays
+	// a test about the tokens.
 	got := calls[0]
 	if got.Ms == nil {
 		t.Error("the call must be timed")
 	}
-	got.Ms = nil
+	if got.CostNanoUSD == nil || *got.CostNanoUSD != 180 {
+		t.Errorf("cost = %v nanodollars, want 180", got.CostNanoUSD)
+	}
+	got.Ms, got.CostNanoUSD = nil, nil
 	if got != want {
 		t.Errorf("call = %+v, want %+v", got, want)
 	}

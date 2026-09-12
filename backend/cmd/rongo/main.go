@@ -27,7 +27,6 @@ import (
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
-	"github.com/trick77/rongo/internal/pricing"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -379,15 +378,6 @@ func main() {
 	) []string {
 		return ask.Followups(ctx, models, question, answer, audience, sources, scope, lang)
 	}
-	// Prices come from the registry: the MiMo deployments at MiMo's own API
-	// listing whatever endpoint they are called at, the embedding model at
-	// its endpoint. The table is read per report, so a fetch that lands after
-	// boot prices the thread that is already open.
-	deps.Prices = pricing.Start(pollCtx, &workers, pricing.Source{
-		URL:          cfg.PricesURL,
-		EmbedBaseURL: cfg.EmbedBaseURL,
-		EmbedModel:   cfg.EmbedModel,
-	})
 	srv := httpapi.NewServer(deps)
 
 	httpServer := &http.Server{

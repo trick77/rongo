@@ -10,6 +10,8 @@ package usage
 import (
 	"context"
 	"sync"
+
+	"github.com/trick77/llmwire"
 )
 
 // Call is one paid request, as the upstream reported it.
@@ -42,7 +44,17 @@ type Call struct {
 	Cached    *int `json:"cached_tokens,omitempty"`
 	Reasoning *int `json:"reasoning_tokens,omitempty"`
 	Ms        *int `json:"ms,omitempty"`
+	// CostNanoUSD is what the call cost at the vendor's list price, in
+	// billionths of a dollar, priced by llmwire from its own table as the
+	// reply came in. Absent when llmwire had no rate for the model, and on
+	// every row written before the column existed: a call nobody priced must
+	// not read as a call that cost nothing. Integer, because a sum of floats
+	// drifts and a bill does not.
+	CostNanoUSD *int64 `json:"cost_nano_usd,omitempty"`
 }
+
+// Nano is the pointer form of a cost, the way Int is for the counts.
+func Nano(n int64) *int64 { return &n }
 
 // Int is the pointer form of n, for the three optional counts on Call. The
 // clients know their figures; only a row read back from before the columns
@@ -111,34 +123,8 @@ func Record(ctx context.Context, c Call) {
 	}
 }
 
-// Price is what a model charges, in USD per million tokens, and how much of
-// it the model can hold. Embedding models have no output side; their Out
-// stays zero.
-//
-// The window rides along with the price because the registry ships both in
-// the same entry: models.dev carries cost and limit side by side, and a
-// second map keyed the same way would be two lookups and two chances for
-// them to disagree about which models are known.
-type Price struct {
-	In  float64
-	Out float64
-	// CacheRead is what a prompt token the upstream served from its cache
-	// costs. Zero means the registry does not list one, and then a cached
-	// token is charged at In — no discount is invented for a model whose
-	// contract does not say there is one.
-	CacheRead float64
-	// Context is how many tokens the model can hold, prompt and completion
-	// together. Zero means the registry does not say, and then nothing is
-	// shown: a made-up window would read as a real ceiling.
-	Context int
-}
-
-// Prices maps a model name to its price. Empty means nothing is priced and a
-// report carries tokens only.
-type Prices map[string]Price
-
-// CallReport is one call with its cost, when the model is priced, and the
-// window of the model it went to, when the registry sizes it.
+// CallReport is one call with its cost, when llmwire priced it, and the
+// window of the model it went to, when llmwire's profile sizes it.
 type CallReport struct {
 	Call
 	CostUSD *float64 `json:"cost_usd,omitempty"`
@@ -160,26 +146,29 @@ type Report struct {
 	// before the figure was recorded must not read as a turn that cached
 	// nothing.
 	Cached *int `json:"cached_tokens,omitempty"`
-	// CostUSD is present as soon as any price is configured, even when every
-	// call went to an unpriced model. Absent means "not priced here", zero
-	// means "priced, and this turn cost nothing" — the two must not merge.
+	// CostUSD is present as soon as any call carries a price. Absent means
+	// "nothing here was priced", zero means "priced, and this turn cost
+	// nothing" — the two must not merge. A turn stored before costs were
+	// recorded is absent for good; the figure is what llmwire said at the
+	// time, never re-derived from tokens against today's table.
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 }
 
-// Report sums the calls and prices the ones whose model has a price. A call
-// to an unpriced model carries no cost rather than zero; the total counts it
+// Price sums the calls and turns the stored nanodollars into dollars. A
+// call without a price carries no cost rather than zero; the total counts it
 // as nothing, which is the honest number for "we do not know".
-func (p Prices) Report(calls []Call) Report {
+func Price(calls []Call) Report {
 	r := Report{Calls: make([]CallReport, 0, len(calls))}
-	var cost float64
+	var cost int64
+	priced := false
 	cached, anyCached := 0, false
 	for _, c := range calls {
-		cr := CallReport{Call: c}
-		if price, ok := p[c.Model]; ok {
-			v := callCost(c, price)
+		cr := CallReport{Call: c, ContextTokens: contextWindow(c.Model)}
+		if c.CostNanoUSD != nil {
+			v := float64(*c.CostNanoUSD) / 1e9
 			cr.CostUSD = &v
-			cr.ContextTokens = price.Context
-			cost += v
+			cost += *c.CostNanoUSD
+			priced = true
 		}
 		if c.Cached != nil {
 			cached += *c.Cached
@@ -193,25 +182,20 @@ func (p Prices) Report(calls []Call) Report {
 	if anyCached {
 		r.Cached = &cached
 	}
-	if len(p) > 0 {
-		r.CostUSD = &cost
+	if priced {
+		v := float64(cost) / 1e9
+		r.CostUSD = &v
 	}
 	return r
 }
 
-// callCost prices one call, charging the part of the prompt the upstream
-// served from its cache at the cache price. The MiMo listing puts that price
-// fifty to a hundred times below the input price, and a thread's later turns
-// repeat the prefix of its first, so charging every prompt token at full
-// price is not a rounding difference — it is the wrong number.
-//
-// Without a cache price nothing is discounted: a model whose registry entry
-// does not list one is charged the way it always was.
-func callCost(c Call, price Price) float64 {
-	cached := 0
-	if c.Cached != nil && price.CacheRead > 0 {
-		cached = min(*c.Cached, c.Prompt)
+// contextWindow is how many tokens the model can hold, from llmwire's
+// profile. Zero for a model it does not know, and then nothing is shown: a
+// made-up window would read as a real ceiling.
+func contextWindow(model string) int {
+	p, err := llmwire.Default().Lookup(model)
+	if err != nil {
+		return 0
 	}
-	full := float64(c.Prompt - cached)
-	return (full*price.In + float64(cached)*price.CacheRead + float64(c.Completion)*price.Out) / 1e6
+	return int(p.Limits.Context)
 }
