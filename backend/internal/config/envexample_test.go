@@ -5,6 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/trick77/llmwire"
+	"github.com/trick77/rongo/internal/llm"
 )
 
 // activeEnvExampleVars returns the BACKEND_* names that .env.example leaves
@@ -36,12 +39,20 @@ func activeEnvExampleVars(t *testing.T) []string {
 // endpointEnv is the mandatory set Load does not read: the model and
 // embedding endpoints are named by their llmwire profiles and read by
 // llmwire when main builds the clients, and a missing one stops the boot
-// there rather than in Load.
-var endpointEnv = map[string]bool{
-	"BACKEND_EMBED_BASE_URL": true,
-	"BACKEND_EMBED_API_KEY":  true,
-	"BACKEND_CHAT_BASE_URL":  true,
-	"BACKEND_CHAT_API_KEY":   true,
+// there rather than in Load. Derived from the profiles, not listed, so a
+// llmwire bump that renames a variable fails here and not at the boot.
+func endpointEnv(t *testing.T) map[string]bool {
+	t.Helper()
+	names := map[string]bool{}
+	for _, id := range []string{llm.ProDeployment, "text-embedding-3-small"} {
+		p, err := llmwire.Default().Lookup(id)
+		if err != nil {
+			t.Fatalf("profile %s: %v", id, err)
+		}
+		names[p.BaseURLEnv] = true
+		names[p.APIKeyEnv] = true
+	}
+	return names
 }
 
 // The file drifted once already: settings that Load happily defaults stood
@@ -81,8 +92,9 @@ func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
 	if _, err := Load(); err != nil {
 		t.Fatalf("a filled-in .env.example copy must load, got: %v", err)
 	}
+	endpoint := endpointEnv(t)
 	for _, name := range active {
-		if endpointEnv[name] {
+		if endpoint[name] {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
