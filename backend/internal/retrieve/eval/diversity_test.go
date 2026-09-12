@@ -3,10 +3,8 @@ package eval
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -42,12 +40,7 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)

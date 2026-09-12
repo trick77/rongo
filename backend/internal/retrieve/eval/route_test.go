@@ -3,7 +3,6 @@ package eval
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -117,11 +115,11 @@ func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string
 
 // llmClientForRouting builds the model client the routing arms share. Skips —
 // never fails — when no endpoint is configured, exactly like
-// TestExpandQuestions: a routing arm without BACKEND_LLM_BASE_URL cannot call
+// TestExpandQuestions: a routing arm without BACKEND_CHAT_BASE_URL cannot call
 // the judge at all.
 func llmClientForRouting(t *testing.T) *llm.Client {
 	t.Helper()
-	return llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
+	return evalLLM(t, 2*time.Minute)
 }
 
 // routeMargin reads BACKEND_ROUTE_MARGIN the same way config.go does, so the
@@ -331,12 +329,7 @@ func TestEvalMeasureRouting(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)
@@ -392,12 +385,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)
@@ -461,12 +449,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)

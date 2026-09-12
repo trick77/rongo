@@ -97,6 +97,15 @@ func main() {
 	}
 	slog.Info("external tools resolved", "git", tools.Git, "rg", tools.Rg, "ctags", tools.Ctags)
 
+	// Both model clients before the database is touched, so a missing
+	// endpoint variable stops the boot where a config error would: with
+	// nothing migrated, purged or swept.
+	embedder, models, err := newModelClients(cfg)
+	if err != nil {
+		slog.Error("model endpoint", "err", err)
+		os.Exit(1)
+	}
+
 	// ctx is the process-wide root: startup work and the background workers all
 	// hang off it, so a shutdown cancels everything from one place.
 	ctx := context.Background()
@@ -233,17 +242,12 @@ func main() {
 	indexer.LogInventory(ctx, state, slog.Default(), cfg.ReposFile, listLoaded)
 
 	pipeline := indexer.New(indexer.Deps{
-		DB:      db,
-		Git:     gitClient,
-		Symbols: symbols.NewExtractor(tools.Ctags),
-		Embedder: embed.NewClient(embed.Config{
-			BaseURL: cfg.EmbedBaseURL,
-			APIKey:  cfg.EmbedAPIKey,
-			Model:   cfg.EmbedModel,
-			Dim:     cfg.EmbedDim,
-		}, nil),
-		Cache:  embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
-		Writer: indexer.NewWriter(db),
+		DB:       db,
+		Git:      gitClient,
+		Symbols:  symbols.NewExtractor(tools.Ctags),
+		Embedder: embedder,
+		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
 			MaxBytes: cfg.IndexMaxFileBytes,
 			Exclude:  cfg.IndexExclude,
@@ -298,12 +302,6 @@ func main() {
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: cfg.EmbedBaseURL,
-		APIKey:  cfg.EmbedAPIKey,
-		Model:   cfg.EmbedModel,
-		Dim:     cfg.EmbedDim,
-	}, nil)
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
@@ -332,21 +330,6 @@ func main() {
 		}
 		deps.OIDC = oidcSvc
 	}
-	// config.Load rejects an empty BACKEND_LLM_BASE_URL, so the pipeline is
-	// always wired: a rongo that indexes but cannot answer is not a mode
-	// anyone wants to be in by accident.
-	// Timeout bounds one whole call, body included. The answer streams for as
-	// long as its 16384-token budget takes, hidden reasoning counted, and the
-	// default of five minutes would cut a slow one mid-answer: at 20 tokens a
-	// second the budget needs close to 14 minutes. The idle watchdog, not this
-	// one, is what catches a stalled upstream.
-	models := llm.NewClient(llm.Config{
-		BaseURL:         cfg.LLMBaseURL,
-		APIKey:          cfg.LLMAPIKey,
-		Timeout:         15 * time.Minute,
-		TurnMaxTokens:   cfg.TurnMaxTokens,
-		EmulateOpenCode: cfg.LLMEmulateOpenCode,
-	}, nil)
 	// Said at boot like the inventory is: the ceiling is what stops a turn
 	// nobody bounded, and a host running without one should be able to see
 	// that in its log rather than find out from a bill.
@@ -451,4 +434,33 @@ func chunkOptions(cfg config.Config) indexer.ChunkOptions {
 // searches against.
 func moduleOpts(cfg config.Config) modules.Opts {
 	return modules.Opts{MinChunks: cfg.ModuleMinChunks, MaxChunks: cfg.ModuleMaxChunks}
+}
+
+// newModelClients builds the embedder and the chat client. The endpoints are
+// the env vars each model's llmwire profile names, read by llmwire; a missing
+// one comes back named.
+//
+// One embedder for indexing and for the query side of every answer. It is
+// needed whether or not indexing is on, so a missing variable is fatal either
+// way. The chat client is always wired: a rongo that indexes but cannot
+// answer is not a mode anyone wants to be in by accident. Its Timeout bounds
+// one whole call, body included. The answer streams for as long as its
+// 16384-token budget takes, hidden reasoning counted, and the default of five
+// minutes would cut a slow one mid-answer: at 20 tokens a second the budget
+// needs close to 14 minutes. The idle watchdog, not this one, is what catches
+// a stalled upstream.
+func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
+	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	models, err := llm.NewClient(llm.Config{
+		Timeout:         15 * time.Minute,
+		TurnMaxTokens:   cfg.TurnMaxTokens,
+		EmulateOpenCode: cfg.ChatEmulateOpenCode,
+	}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return embedder, models, nil
 }

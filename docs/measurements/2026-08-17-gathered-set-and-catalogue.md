@@ -215,7 +215,7 @@ other, which is a corpus change, not a question-set change.
 ```
 BACKEND_EVAL=1 BACKEND_EVAL_DB=/tmp/rongo-eval-small.db \
 BACKEND_EMBED_BASE_URL=... BACKEND_EMBED_API_KEY=... \
-BACKEND_LLM_BASE_URL=... BACKEND_LLM_API_KEY=... \
+BACKEND_CHAT_BASE_URL=... BACKEND_CHAT_API_KEY=... \
 BACKEND_EMBED_MODEL=text-embedding-3-small BACKEND_EMBED_DIM=1536 \
 BACKEND_REPO_ROOT=/tmp/rongo-eval-repos \
 go test -v -timeout 120m \

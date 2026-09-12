@@ -82,41 +82,67 @@ func answerLLM(t *testing.T) *llm.Client {
 	cfg := evalLLMConfig(t, 15*time.Minute)
 	cfg.Pro = os.Getenv("BACKEND_EVAL_PRO_MODEL")
 	cfg.ShortGate = os.Getenv("BACKEND_EVAL_GATE_MODEL")
-	return llm.NewClient(cfg, nil)
+	return mustLLM(t, cfg)
 }
 
 // judgeLLM is the judge's client: the deployments the product reads, never
 // the overrides, so the grader does not change with the candidate.
 func judgeLLM(t *testing.T) *llm.Client {
 	t.Helper()
-	return llm.NewClient(evalLLMConfig(t, 15*time.Minute), nil)
+	return evalLLM(t, 15*time.Minute)
 }
 
-// evalLLMConfig is the one place the harness reads the model endpoint from
-// the environment, the way config.Load does for the product: the base URL
-// skips the test when unset, the opencode flag is mandatory and must be a
-// boolean. A harness that silently sent llmwire's own client string to the
-// token-plan host would measure a bot's welcome, not the model.
+// evalLLMConfig reads the one model setting the harness owns, the way
+// config.Load does for the product: the opencode flag is mandatory and must
+// be a boolean. A harness that silently sent llmwire's own client string to
+// the token-plan host would measure a bot's welcome, not the model. The
+// endpoint itself is llmwire's to read; evalLLM skips when it is unset.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
-	base := os.Getenv("BACKEND_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is unset")
+	if os.Getenv("BACKEND_CHAT_BASE_URL") == "" {
+		t.Skip("BACKEND_CHAT_BASE_URL is unset")
 	}
-	raw := strings.TrimSpace(os.Getenv("BACKEND_LLM_EMULATE_OPENCODE"))
+	raw := strings.TrimSpace(os.Getenv("BACKEND_CHAT_EMULATE_OPENCODE"))
 	if raw == "" {
-		t.Fatal("BACKEND_LLM_EMULATE_OPENCODE is required: true or false, the same as for the product")
+		t.Fatal("BACKEND_CHAT_EMULATE_OPENCODE is required: true or false, the same as for the product")
 	}
 	emulate, err := strconv.ParseBool(raw)
 	if err != nil {
-		t.Fatalf("BACKEND_LLM_EMULATE_OPENCODE=%q is not a boolean; want true or false", raw)
+		t.Fatalf("BACKEND_CHAT_EMULATE_OPENCODE=%q is not a boolean; want true or false", raw)
 	}
 	return llm.Config{
-		BaseURL:         base,
-		APIKey:          os.Getenv("BACKEND_LLM_API_KEY"),
 		Timeout:         timeout,
 		EmulateOpenCode: emulate,
 	}
+}
+
+// evalLLM is the model client on the product's deployments. A missing
+// endpoint variable is llmwire's named error, and fatal: evalLLMConfig has
+// already skipped the unset case.
+func evalLLM(t *testing.T, timeout time.Duration) *llm.Client {
+	t.Helper()
+	return mustLLM(t, evalLLMConfig(t, timeout))
+}
+
+func mustLLM(t *testing.T, cfg llm.Config) *llm.Client {
+	t.Helper()
+	c, err := llm.NewClient(cfg, nil)
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+	return c
+}
+
+// evalEmbedder is the embedding client on the endpoint BACKEND_EMBED_BASE_URL
+// and BACKEND_EMBED_API_KEY name, read by llmwire; a missing one is its named
+// error. requireEval has already gated the test on a real endpoint.
+func evalEmbedder(t *testing.T, model string, dim int) *embed.Client {
+	t.Helper()
+	c, err := embed.NewClient(embed.Config{Model: model, Dim: dim}, nil)
+	if err != nil {
+		t.Fatalf("embed.NewClient: %v", err)
+	}
+	return c
 }
 
 // verdict is the judge's reply: one word per rubric line.
@@ -211,12 +237,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	ctx := context.Background()
 	c := answerLLM(t)
 	judge := judgeLLM(t)
-	retriever := retrieve.New(db, embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil))
+	retriever := retrieve.New(db, evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim))
 	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
 	// measures the fused order the product ran before the reranker shipped.
 	if envOr("BACKEND_EVAL_RERANK", "1") != "0" {

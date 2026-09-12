@@ -3,6 +3,7 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -23,7 +25,7 @@ func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
 			"usage": map[string]any{"prompt_tokens": 9, "total_tokens": 9},
 		}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 	m := usage.New()
 
 	// When
@@ -114,7 +116,7 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 			{Index: 1, Embedding: vecOf(2, 4)},
 		}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), []string{"one", "two", "three"})
@@ -152,7 +154,7 @@ func TestEmbed_duplicateIndexIsAnError(t *testing.T) {
 			{Index: 1, Embedding: vecOf(3, 4)},
 		}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a", "b", "c"})
@@ -168,7 +170,7 @@ func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{{Index: 0, Embedding: vecOf(1, 3)}}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -188,7 +190,7 @@ func TestEmbed_errorCarriesStatusAndACappedBody(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return http.StatusServiceUnavailable, huge
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -211,7 +213,7 @@ func TestEmbed_aTransportErrorNeverCarriesTheURL(t *testing.T) {
 	// net/http wraps EVERY transport failure in a *url.Error carrying the full
 	// URL, and that error is what the caller logs — so the plain wrapped error
 	// is a credential in a log line.
-	testee := NewClient(Config{
+	testee := mustClient(t, Config{
 		BaseURL: "http://127.0.0.1:1/v1?api-key=s3cret-key-value",
 		Model:   "text-embedding-3-small", Dim: 4,
 		HeartbeatInterval: -1,
@@ -242,7 +244,7 @@ func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(block)
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// When
@@ -269,7 +271,7 @@ func TestEmbed_emptyInputMakesNoRequest(t *testing.T) {
 	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), nil)
@@ -295,7 +297,7 @@ func TestEmbed_splitsLargeInputIntoBatchesKeepingOrder(t *testing.T) {
 		}
 		return 200, map[string]any{"data": data}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 	inputs := make([]string, 150)
 	for i := range inputs {
 		inputs[i] = fmt.Sprintf("text-%d", i)
@@ -318,5 +320,27 @@ func TestEmbed_splitsLargeInputIntoBatchesKeepingOrder(t *testing.T) {
 	}
 	if len(*seen) < 2 {
 		t.Errorf("made %d requests for 150 inputs, want several bounded batches", len(*seen))
+	}
+}
+
+// mustClient is NewClient for a test whose Config names its fake server, so
+// the only way it can fail is a bug in the constructor.
+func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
+	t.Helper()
+	c, err := NewClient(cfg, hc)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return c
+}
+
+// With no BaseURL the constructor asks llmwire for the profile's variables,
+// and a missing one comes back named rather than as a client that dials "".
+func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
+	t.Setenv("BACKEND_EMBED_BASE_URL", "")
+	_, err := NewClient(Config{Model: "text-embedding-3-small", Dim: 1536}, nil)
+	var me *llmwire.MissingEnvError
+	if !errors.As(err, &me) || me.Var != "BACKEND_EMBED_BASE_URL" {
+		t.Fatalf("got %v", err)
 	}
 }

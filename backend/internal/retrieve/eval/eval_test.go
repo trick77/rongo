@@ -190,18 +190,13 @@ func TestEvalIndex(t *testing.T) {
 	gitc := gitrepo.New(gitBin, envOr("BACKEND_REPO_ROOT", "/tmp/rongo-eval-repos"))
 	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 	pipeline := indexer.New(indexer.Deps{
-		DB:      db,
-		Git:     gitc,
-		Symbols: symbols.NewExtractor(ctagsBin),
-		Embedder: embed.NewClient(embed.Config{
-			BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-			APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-			Model:   model,
-			Dim:     dim,
-		}, nil),
-		Cache:  embed.NewCache(db, model, dim),
-		Writer: indexer.NewWriter(db),
-		Chunk:  evalChunkOptions(),
+		DB:       db,
+		Git:      gitc,
+		Symbols:  symbols.NewExtractor(ctagsBin),
+		Embedder: evalEmbedder(t, model, dim),
+		Cache:    embed.NewCache(db, model, dim),
+		Writer:   indexer.NewWriter(db),
+		Chunk:    evalChunkOptions(),
 	})
 
 	active, err := state.Active(ctx)
@@ -296,12 +291,7 @@ func TestEvalMeasure(t *testing.T) {
 	ctx := context.Background()
 	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 
-	client := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   model,
-		Dim:     dim,
-	}, nil)
+	client := evalEmbedder(t, model, dim)
 	r := retrieve.New(db, client)
 	if v := os.Getenv("BACKEND_SEARCH_MAX_DISTANCE"); v != "" {
 		d, err := strconv.ParseFloat(v, 64)

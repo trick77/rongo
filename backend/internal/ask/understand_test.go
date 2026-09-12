@@ -36,7 +36,7 @@ func modelUpstream(t *testing.T, content string) (*llm.Client, *string, *string)
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &gotModel, &gotPrompt
+	return fakeLLM(t, srv), &gotModel, &gotPrompt
 }
 
 const appleTVReply = `{

@@ -57,7 +57,7 @@ func followupsLLM(t *testing.T, reply string, status int) (*llm.Client, *followu
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), up
+	return fakeLLM(t, srv), up
 }
 
 func followupsSources() []Source {

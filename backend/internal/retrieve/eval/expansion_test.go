@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/embed"
-	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -80,7 +78,7 @@ func loadExpansionRepos(t *testing.T) map[string][]string {
 // costs one short-gate call per question.
 func TestExpandQuestions(t *testing.T) {
 	requireEval(t)
-	c := llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
+	c := evalLLM(t, 2*time.Minute)
 	u := ask.NewUnderstander(c)
 
 	// Retried, and the file is written BEFORE anything fails. The model
@@ -287,7 +285,7 @@ func TestExpandQuestionRepos(t *testing.T) {
 		byQuestion[e.Question] = e
 	}
 
-	c := llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
+	c := evalLLM(t, 2*time.Minute)
 	u := ask.NewUnderstander(c)
 
 	var out []expansion
@@ -382,12 +380,7 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	client := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	client := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	r := retrieve.New(db, client)
 	expansions := loadExpansions(t)
 	questions := loadQuestions(t)
