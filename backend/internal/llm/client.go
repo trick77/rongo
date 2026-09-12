@@ -1,24 +1,29 @@
 // Package llm talks to rongo's two MiMo deployments over an OpenAI-compatible
 // chat completions endpoint.
 //
-// Ported from loom's client, which had already worked out the parts that matter
-// here, and cut down to what rongo's pipeline needs: one completion call and one
-// streaming call. No tools, no image path.
+// The wire is github.com/trick77/llmwire: it renders the request the way each
+// deployment wants it, reads the stream, decodes usage, redacts the key out of
+// error bodies and bounds the call by named timeouts. What stays here is what
+// rongo means by a call — two lanes, a completion cap on every request, the
+// usage meter and the per-turn ceiling. One completion call and one streaming
+// call; no tools, no image path.
+//
+// Session affinity is llmwire's: under Config.EmulateOpenCode the client
+// presents as the opencode client and carries one session id per process,
+// minted at construction and rotated after a thirty-minute idle gap. Calls are
+// not pinned per thread.
 package llm
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/trick77/llmwire"
 
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -40,23 +45,18 @@ const (
 // where that shows up first.
 const defaultMaxTokens = 4096
 
-// chatUserAgent is the User-Agent sent to the MiMo endpoint: the client string
-// an OpenAI-compatible SDK sends, which is the shape that endpoint is built
-// around. Go's default "Go-http-client/1.1" names the HTTP library and says
-// nothing about the protocol being spoken. Same value as loom against the same
-// endpoint, so behaviour stays comparable between the two.
-const chatUserAgent = "opencode/1.18.26 ai-sdk/openai-compatible/3.0.43 ai-sdk/provider-utils/5.0.36 runtime/bun/1.4.0"
-
-const maxErrorBodyBytes = 8 << 10
-
 // Config holds the endpoint settings. The deployment names are not here on
 // purpose.
 type Config struct {
 	BaseURL string
 	APIKey  string
+	// Timeout bounds the whole call, and also how long the endpoint may take
+	// to send response headers: Pro queues at the endpoint before it answers,
+	// and llmwire's one-minute header default would end a queued call that
+	// was about to be served. Zero takes llmwire's defaults.
 	Timeout time.Duration
 	// IdleTimeout aborts a stream when no frame arrives within the window.
-	// Zero disables the watchdog; the coarse Timeout still applies.
+	// Zero takes llmwire's default of ninety seconds.
 	IdleTimeout time.Duration
 	Logger      *slog.Logger
 	// Pro and ShortGate, when set, replace the two deployment names on the
@@ -64,7 +64,8 @@ type Config struct {
 	// above, and config.Load reads no variable for them. They exist for the
 	// evaluation harness alone, whose job includes asking whether the next
 	// model answers better than this one, and which can only ask that by
-	// running the same pipeline against another name.
+	// running the same pipeline against another name. The name must be one
+	// llmwire's registry knows; an unknown one fails the first call.
 	Pro       string
 	ShortGate string
 	// TurnMaxTokens is the most a single turn may spend across all of its
@@ -74,6 +75,10 @@ type Config struct {
 	// says so out loud once a loop or a retry that nobody bounded appears.
 	// Zero turns it off. A context without a meter is never checked.
 	TurnMaxTokens int
+	// EmulateOpenCode presents every request as the opencode client: its
+	// User-Agent and the session header pair. MiMo's token-plan host serves
+	// that client; a neutral User-Agent is not what its traffic looks like.
+	EmulateOpenCode bool
 }
 
 // ErrTurnBudget is why a call was refused when the turn had already spent
@@ -115,6 +120,35 @@ type CompletionDetails struct {
 	Reasoning int `json:"reasoning_tokens"`
 }
 
+// usageFrom maps llmwire's accounting onto Usage. A nil lane is one the
+// upstream did not report, and stays absent: a details object saying zero is
+// a measurement, no details object is silence, and record keeps the two
+// apart.
+func usageFrom(u llmwire.Usage) Usage {
+	var out Usage
+	if u.Input.Total != nil {
+		out.Prompt = int(*u.Input.Total)
+	}
+	if u.Output.Total != nil {
+		out.Completion = int(*u.Output.Total)
+	}
+	out.Total = out.Prompt + out.Completion
+	if u.Input.CacheRead != nil {
+		out.PromptDetails = &PromptDetails{Cached: int(*u.Input.CacheRead)}
+	}
+	if u.Output.Reasoning != nil {
+		out.CompletionDetails = &CompletionDetails{Reasoning: int(*u.Output.Reasoning)}
+	}
+	return out
+}
+
+// reported says the upstream sent a usage object at all. Only then is the
+// call recorded: a stream that broke before its usage frame is unknown, not
+// free.
+func reported(u llmwire.Usage) bool {
+	return u.Input.Total != nil || u.Output.Total != nil
+}
+
 // FinishError is how the upstream ended a completion when it was not a
 // normal stop: "length" when the completion budget ran out, "content_filter"
 // and the like. Both Complete and Stream return it, and Stream returns it only
@@ -131,30 +165,10 @@ func (e *FinishError) Error() string {
 		e.Reason, e.Completion)
 }
 
-type thinkingOption struct {
-	Type string `json:"type"`
-}
-
-type streamOptions struct {
-	IncludeUsage bool `json:"include_usage"`
-}
-
-type chatRequest struct {
-	Model               string          `json:"model"`
-	Messages            []Message       `json:"messages"`
-	Stream              bool            `json:"stream,omitempty"`
-	StreamOptions       *streamOptions  `json:"stream_options,omitempty"`
-	Thinking            *thinkingOption `json:"thinking,omitempty"`
-	MaxCompletionTokens int             `json:"max_completion_tokens"`
-	// Temperature is omitted unless a call names one, so the endpoint's own
-	// default keeps applying to everything that does not care.
-	Temperature *float64 `json:"temperature,omitempty"`
-}
-
 // callOptions is what the Option funcs assemble.
 type callOptions struct {
 	model       string
-	thinking    *thinkingOption
+	thinkingOff bool
 	maxTokens   int
 	temperature *float64
 	step        string
@@ -221,7 +235,7 @@ func Pro() Option {
 // change the deployment: a Pro call can be asked not to think, and a short-gate
 // call can be asked to.
 func WithoutThinking() Option {
-	return func(o *callOptions) { o.thinking = &thinkingOption{Type: "disabled"} }
+	return func(o *callOptions) { o.thinkingOff = true }
 }
 
 // WithMaxTokens caps the completion. Use it wherever a truncated reply is not
@@ -253,11 +267,9 @@ func WithTemperature(v float64) Option {
 
 // Client calls the chat completions endpoint.
 type Client struct {
-	baseURL     string
-	apiKey      string
-	http        *http.Client
-	idleTimeout time.Duration
-	log         *slog.Logger
+	wire   *llmwire.Client
+	apiKey string
+	log    *slog.Logger
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
 	turnMaxTokens  int
@@ -292,25 +304,26 @@ func (c *Client) deployment(lane string) string {
 	return lane
 }
 
-// NewClient builds a Client. hc may be nil, in which case one is made with the
-// configured timeout.
+// NewClient builds a Client. hc may be nil, in which case llmwire makes one.
+// A caller-supplied hc must not carry http.Client.Timeout: that bound caps
+// body reads too and would cut a long answer mid-stream, which is what the
+// named timeouts in Config exist to prevent.
 func NewClient(cfg Config, hc *http.Client) *Client {
-	if hc == nil {
-		timeout := cfg.Timeout
-		if timeout <= 0 {
-			timeout = 5 * time.Minute
-		}
-		hc = &http.Client{Timeout: timeout}
-	}
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Client{
-		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		wire: llmwire.New(llmwire.Config{
+			BaseURL:         cfg.BaseURL,
+			APIKey:          cfg.APIKey,
+			HeaderTimeout:   cfg.Timeout,
+			IdleTimeout:     cfg.IdleTimeout,
+			CallTimeout:     cfg.Timeout,
+			HTTPClient:      hc,
+			EmulateOpenCode: cfg.EmulateOpenCode,
+		}),
 		apiKey:        cfg.APIKey,
-		http:          hc,
-		idleTimeout:   cfg.IdleTimeout,
 		log:           log,
 		pro:           cfg.Pro,
 		shortGate:     cfg.ShortGate,
@@ -329,133 +342,95 @@ func resolve(opts []Option) callOptions {
 	return o
 }
 
+// request renders what one call sends. Thinking is left at the deployment's
+// default — on — unless the call switched it off; temperature is omitted
+// unless a call names one, so the endpoint's own default keeps applying to
+// everything that does not care.
+func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
+	req := llmwire.ChatRequest{
+		Model:       c.deployment(o.model),
+		Messages:    make([]llmwire.Message, 0, len(msgs)),
+		MaxTokens:   &o.maxTokens,
+		Temperature: o.temperature,
+	}
+	for _, m := range msgs {
+		req.Messages = append(req.Messages, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
+	}
+	if o.thinkingOff {
+		req.Reasoning = llmwire.ReasoningOff()
+	}
+	return req
+}
+
+// warn logs what llmwire could not send as asked. Debug, because a warning
+// here is a request the wire coerced and still sent, not a failed call.
+func (c *Client) warn(ws []llmwire.Warning) {
+	for _, w := range ws {
+		c.log.Debug("llm: wire warning", "kind", w.Kind, "feature", w.Feature, "details", w.Details)
+	}
+}
+
 // Complete runs one non-streaming call and returns the assistant's content.
 func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (string, Usage, error) {
 	o := resolve(opts)
+	if err := c.underBudget(ctx); err != nil {
+		return "", Usage{}, err
+	}
 	// Timed from before the request so the figure is what a reader waited
 	// for, queueing at the endpoint included, not what the endpoint spent
 	// generating.
 	started := time.Now()
-	resp, err := c.post(ctx, msgs, o, false)
+	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
+	c.warn(warnings)
 	if err != nil {
-		return "", Usage{}, err
+		return "", Usage{}, c.chatError(err)
 	}
-	defer resp.Body.Close()
-
-	var out struct {
-		Choices []struct {
-			Message      Message `json:"message"`
-			FinishReason string  `json:"finish_reason"`
-		} `json:"choices"`
-		Usage Usage `json:"usage"`
+	u := usageFrom(resp.Usage)
+	record(ctx, o, u, time.Since(started))
+	// A reply cut at the cap is not a reply. Every caller here parses the
+	// content, and a truncated JSON body read as "unparseable" would hide
+	// that the budget was the cause.
+	if fr := resp.FinishReason; fr != "" && fr != "stop" {
+		return resp.Content, u, &FinishError{Reason: fr, Completion: u.Completion}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", Usage{}, fmt.Errorf("decode chat completion: %w", err)
-	}
-	// Recorded before the choices check: a reply without choices was still
-	// paid for.
-	record(ctx, o, out.Usage, time.Since(started))
-	if len(out.Choices) == 0 {
-		return "", out.Usage, errors.New("chat completion carried no choices")
-	}
-	// The same rule as Stream: a reply cut at the cap is not a reply. Every
-	// caller here parses the content, and a truncated JSON body read as
-	// "unparseable" would hide that the budget was the cause.
-	if fr := out.Choices[0].FinishReason; fr != "" && fr != "stop" {
-		return out.Choices[0].Message.Content, out.Usage, &FinishError{Reason: fr, Completion: out.Usage.Completion}
-	}
-	return out.Choices[0].Message.Content, out.Usage, nil
+	return resp.Content, u, nil
 }
 
 // Stream runs one streaming call, handing each content delta to onToken as it
 // arrives. Only the final answer streams; every other step is an ordinary
 // request.
 func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string), opts ...Option) (Usage, error) {
-	// The watchdog is armed here, not merely configured. An upstream that
-	// stalls after the first delta would otherwise hold the reader on a
-	// half-written answer until the coarse HTTP timeout — minutes of a cursor
-	// that looks like it is still thinking.
-	if c.idleTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(ctx)
-		defer cancel()
-	}
-
 	o := resolve(opts)
+	if err := c.underBudget(ctx); err != nil {
+		return Usage{}, err
+	}
 	// Timed from before the request, closed when the last frame is read: for
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
-	resp, err := c.post(ctx, msgs, o, true)
+	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
+	c.warn(warnings)
 	if err != nil {
-		return Usage{}, err
+		return Usage{}, c.chatError(err)
 	}
-	defer resp.Body.Close()
-
-	// beat is called for every frame that arrives; the timer fires only when
-	// none has for the whole window.
-	beat := func() {}
-	if c.idleTimeout > 0 {
-		timer := time.AfterFunc(c.idleTimeout, func() { _ = resp.Body.Close() })
-		defer timer.Stop()
-		beat = func() { timer.Reset(c.idleTimeout) }
-	}
+	defer stream.Close()
 
 	// finishReason is how the upstream said the stream ended. Anything but a
 	// normal stop is a failure the caller must hear about: a reasoning model
 	// that spends the whole completion budget thinking ends with "length" and
 	// not one content delta, and reading that as success once stored an empty
-	// answer as a finished turn. The reason is recorded and the stream read to
+	// answer as a finished turn. The reason is kept and the stream read to
 	// the end, because the usage frame that follows it carries the completion
 	// count the error needs.
-	var got Usage
 	var finishReason string
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for sc.Scan() {
-		beat()
-		line := strings.TrimSpace(sc.Text())
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
-			continue
-		}
-		var frame struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-				FinishReason string `json:"finish_reason"`
-			} `json:"choices"`
-			Usage *Usage `json:"usage"`
-			// Error is what an OpenAI-style upstream sends when it fails AFTER
-			// status 200: one frame with no choices. Dropping it read as a
-			// clean, empty stream.
-			Error *struct {
-				Message string `json:"message"`
-				Type    string `json:"type"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(payload), &frame); err != nil {
-			// A malformed frame is not worth killing a half-written answer for.
-			c.log.Warn("unparseable stream frame", "err", err, "frame", c.redactKey(head(payload, 512)))
-			continue
-		}
-		if frame.Error != nil {
-			return got, fmt.Errorf("chat completion failed mid-stream (%s): %s",
-				frame.Error.Type, c.redactKey(frame.Error.Message))
-		}
-		if frame.Usage != nil && (frame.Usage.Total > 0 || frame.Usage.Completion > 0) {
-			got = *frame.Usage
-		}
-		for _, ch := range frame.Choices {
-			if ch.Delta.Content != "" && onToken != nil {
-				onToken(ch.Delta.Content)
+	for stream.Next() {
+		ev := stream.Event()
+		switch ev.Kind {
+		case llmwire.EventContent:
+			if ev.Text != "" && onToken != nil {
+				onToken(ev.Text)
 			}
-			if ch.FinishReason != "" {
-				finishReason = ch.FinishReason
-			}
+		case llmwire.EventFinish:
+			finishReason = ev.FinishReason
 		}
 	}
 	// Recorded even when the read failed, as long as a usage frame arrived:
@@ -463,11 +438,13 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// its usage frame (idle timeout, a dropped connection, an endpoint that
 	// ignores include_usage) records nothing rather than zeros — a zero row
 	// would read as "this call was free", and it was not; it is unknown.
-	if got.Total > 0 {
+	wu := stream.Usage()
+	got := usageFrom(wu)
+	if reported(wu) {
 		record(ctx, o, got, time.Since(started))
 	}
-	if err := sc.Err(); err != nil {
-		return got, fmt.Errorf("read stream: %w", redactURL(err))
+	if err := stream.Err(); err != nil {
+		return got, c.chatError(err)
 	}
 	if finishReason != "" && finishReason != "stop" {
 		return got, &FinishError{Reason: finishReason, Completion: got.Completion}
@@ -475,91 +452,34 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	return got, nil
 }
 
-func (c *Client) post(ctx context.Context, msgs []Message, o callOptions, stream bool) (*http.Response, error) {
-	if err := c.underBudget(ctx); err != nil {
-		return nil, err
+// chatError phrases a wire failure the way the rest of rongo reads it. An
+// APIError without a status is the error frame an upstream sends after
+// status 200; anything else keeps llmwire's own wording, which already names
+// the bound that fired.
+//
+// The key is stripped by value on top of llmwire's redaction, which knows
+// credentials by shape only. An upstream that echoes the Authorization header
+// would otherwise put a key of another shape into every log line that touches
+// the failure.
+func (c *Client) chatError(err error) error {
+	var apiErr *llmwire.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == 0 {
+			return fmt.Errorf("chat completion failed mid-stream (%s): %s", apiErr.Type, c.redactKey(apiErr.Message))
+		}
+		return fmt.Errorf("chat completion failed with status %d: %s", apiErr.StatusCode, c.redactKey(apiErr.Message))
 	}
-	body := chatRequest{
-		Model:               c.deployment(o.model),
-		Messages:            msgs,
-		Stream:              stream,
-		Thinking:            o.thinking,
-		MaxCompletionTokens: o.maxTokens,
-		Temperature:         o.temperature,
+	if c.apiKey != "" && strings.Contains(err.Error(), c.apiKey) {
+		return errors.New(c.redactKey(err.Error()))
 	}
-	if stream {
-		body.StreamOptions = &streamOptions{IncludeUsage: true}
-	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("marshal chat request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("create chat request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("User-Agent", chatUserAgent)
-	// Session headers pin a conversation to one upstream node. Both names carry
-	// the same value; the upstream sends the pair too. Every call a turn makes —
-	// the gates, the answer, the title written alongside it — shares the id,
-	// because the thread is attached once to the request context. A call made
-	// outside a turn falls back to the per-process id.
-	sessionID := chatSessionID(threadIDFromContext(ctx))
-	req.Header.Set("X-Session-Id", sessionID)
-	req.Header.Set("X-Session-Affinity", sessionID)
-	// Accept-Encoding is left unset on purpose so net/http keeps negotiating and
-	// decompressing gzip transparently; setting it by hand would hand us a
-	// compressed body to decode ourselves.
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, redactURL(err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		// The upstream may echo request headers back in an error body. Strip
-		// the key before it reaches a log line.
-		return nil, fmt.Errorf("chat completion failed with status %d: %s",
-			resp.StatusCode, c.redactKey(string(msg)))
-	}
-	return resp, nil
+	return err
 }
 
 // redactKey removes the API key from text that is about to be quoted into an
-// error. An upstream that echoes the Authorization header would otherwise put
-// the credential into every log line that touches the failure.
+// error.
 func (c *Client) redactKey(s string) string {
 	if c.apiKey == "" {
 		return s
 	}
 	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
-}
-
-// head keeps a log line from carrying a whole frame.
-func head(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
-// redactURL keeps a transport error from carrying the full request URL, which
-// can hold query parameters. Same rule as the embedding client: scheme and host
-// are enough to tell an operator where it failed.
-func redactURL(err error) error {
-	var uerr *url.Error
-	if !errors.As(err, &uerr) {
-		return err
-	}
-	where := "the model endpoint"
-	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
-		where = u.Scheme + "://" + u.Host
-	}
-	return fmt.Errorf("%s %s: %w", uerr.Op, where, uerr.Err)
 }

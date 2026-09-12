@@ -94,6 +94,7 @@ services:
       # refuses to start rather than answering every question with 503.
       BACKEND_LLM_BASE_URL: ${BACKEND_LLM_BASE_URL:?set it in .env, the OpenAI-compatible chat completions endpoint}
       BACKEND_LLM_API_KEY: ${BACKEND_LLM_API_KEY:?set it in .env, the key for BACKEND_LLM_BASE_URL}
+      BACKEND_LLM_EMULATE_OPENCODE: ${BACKEND_LLM_EMULATE_OPENCODE:?set it in .env, true for MiMo's token-plan host}
       BACKEND_EMBED_BASE_URL: ${BACKEND_EMBED_BASE_URL:?set it in .env, an OpenAI-compatible /embeddings endpoint}
       BACKEND_EMBED_API_KEY: ${BACKEND_EMBED_API_KEY:?set it in .env, the key for BACKEND_EMBED_BASE_URL}
       BACKEND_EMBED_MODEL: ${BACKEND_EMBED_MODEL:-text-embedding-3-small}

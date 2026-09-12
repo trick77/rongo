@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +35,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_EMBED_DIM",
 	"BACKEND_LLM_BASE_URL",
 	"BACKEND_LLM_API_KEY",
+	"BACKEND_LLM_EMULATE_OPENCODE",
 	"BACKEND_MODULE_MIN_CHUNKS",
 	"BACKEND_MODULE_MAX_CHUNKS",
 	"BACKEND_ROUTE_MARGIN",
@@ -55,6 +58,9 @@ var mandatoryEnv = map[string]string{
 	"BACKEND_EMBED_API_KEY":  "embed-key",
 	"BACKEND_LLM_BASE_URL":   "http://models.invalid/v1",
 	"BACKEND_LLM_API_KEY":    "llm-key",
+	// Mandatory rather than defaulted: which client string the endpoint wants
+	// depends on which host is behind BACKEND_LLM_BASE_URL.
+	"BACKEND_LLM_EMULATE_OPENCODE": "true",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
@@ -290,6 +296,46 @@ func TestLoad_requiresAModelKey(t *testing.T) {
 	// Then
 	if err == nil {
 		t.Fatal("Load() err = nil, want a demand for BACKEND_LLM_API_KEY")
+	}
+}
+
+func TestLoad_requiresTheOpencodeFlagToBeABoolean(t *testing.T) {
+	for _, v := range []string{"", "maybe", "yes please"} {
+		t.Run(fmt.Sprintf("%q", v), func(t *testing.T) {
+			// Given
+			setEnv(t, map[string]string{"BACKEND_LLM_EMULATE_OPENCODE": v})
+
+			// When
+			_, err := Load()
+
+			// Then
+			if err == nil || !strings.Contains(err.Error(), "BACKEND_LLM_EMULATE_OPENCODE") {
+				t.Fatalf("Load() err = %v, want a demand for BACKEND_LLM_EMULATE_OPENCODE", err)
+			}
+		})
+	}
+}
+
+func TestLoad_readsTheOpencodeFlag(t *testing.T) {
+	for _, tc := range []struct {
+		v    string
+		want bool
+	}{{"true", true}, {"false", false}, {"1", true}, {"0", false}} {
+		t.Run(tc.v, func(t *testing.T) {
+			// Given
+			setEnv(t, map[string]string{"BACKEND_LLM_EMULATE_OPENCODE": tc.v})
+
+			// When
+			cfg, err := Load()
+
+			// Then
+			if err != nil {
+				t.Fatalf("Load() err = %v", err)
+			}
+			if cfg.LLMEmulateOpenCode != tc.want {
+				t.Errorf("LLMEmulateOpenCode = %v, want %v", cfg.LLMEmulateOpenCode, tc.want)
+			}
+		})
 	}
 }
 

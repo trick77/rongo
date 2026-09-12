@@ -24,8 +24,8 @@ import (
 // Thread is one conversation.
 type Thread struct {
 	// ID is the row number and never leaves the process. It is the foreign key
-	// every message, share and usage row hangs off, and the value the LLM
-	// session cache and the in-flight turn map are keyed by.
+	// every message, share and usage row hangs off, and the value the
+	// in-flight turn map is keyed by.
 	ID int64 `json:"-"`
 	// PublicID is the thread's address: what stands in /thread/… and on every
 	// /api/threads/… path, and the only thread identifier the browser ever

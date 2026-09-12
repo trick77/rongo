@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -97,11 +98,13 @@ func evalLLMConfig(t *testing.T) llm.Config {
 	if base == "" {
 		t.Skip("BACKEND_LLM_BASE_URL is unset")
 	}
+	emulate, _ := strconv.ParseBool(os.Getenv("BACKEND_LLM_EMULATE_OPENCODE"))
 	return llm.Config{
-		BaseURL:     base,
-		APIKey:      os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout:     15 * time.Minute,
-		IdleTimeout: 90 * time.Second,
+		BaseURL:         base,
+		APIKey:          os.Getenv("BACKEND_LLM_API_KEY"),
+		Timeout:         15 * time.Minute,
+		IdleTimeout:     90 * time.Second,
+		EmulateOpenCode: emulate,
 	}
 }
 

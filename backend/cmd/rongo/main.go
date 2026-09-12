@@ -342,11 +342,12 @@ func main() {
 	// second the budget needs close to 14 minutes. The idle watchdog, not this
 	// one, is what catches a stalled upstream.
 	models := llm.NewClient(llm.Config{
-		BaseURL:       cfg.LLMBaseURL,
-		APIKey:        cfg.LLMAPIKey,
-		Timeout:       15 * time.Minute,
-		IdleTimeout:   90 * time.Second,
-		TurnMaxTokens: cfg.TurnMaxTokens,
+		BaseURL:         cfg.LLMBaseURL,
+		APIKey:          cfg.LLMAPIKey,
+		Timeout:         15 * time.Minute,
+		IdleTimeout:     90 * time.Second,
+		TurnMaxTokens:   cfg.TurnMaxTokens,
+		EmulateOpenCode: cfg.LLMEmulateOpenCode,
 	}, nil)
 	// Said at boot like the inventory is: the ceiling is what stops a turn
 	// nobody bounded, and a host running without one should be able to see
