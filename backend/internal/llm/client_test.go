@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/trick77/llmwire"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/trick77/llmwire"
 
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -804,4 +805,15 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 		t.Fatalf("NewClient: %v", err)
 	}
 	return c
+}
+
+// With no BaseURL the constructor asks llmwire for the profile's variables,
+// and a missing one comes back named rather than as a client that dials "".
+func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
+	t.Setenv("BACKEND_CHAT_BASE_URL", "")
+	_, err := NewClient(Config{}, nil)
+	var me *llmwire.MissingEnvError
+	if !errors.As(err, &me) || me.Var != "BACKEND_CHAT_BASE_URL" {
+		t.Fatalf("got %v", err)
+	}
 }

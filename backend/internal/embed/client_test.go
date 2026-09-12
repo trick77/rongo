@@ -3,6 +3,7 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -330,4 +332,15 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 		t.Fatalf("NewClient: %v", err)
 	}
 	return c
+}
+
+// With no BaseURL the constructor asks llmwire for the profile's variables,
+// and a missing one comes back named rather than as a client that dials "".
+func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
+	t.Setenv("BACKEND_EMBED_BASE_URL", "")
+	_, err := NewClient(Config{Model: "text-embedding-3-small", Dim: 1536}, nil)
+	var me *llmwire.MissingEnvError
+	if !errors.As(err, &me) || me.Var != "BACKEND_EMBED_BASE_URL" {
+		t.Fatalf("got %v", err)
+	}
 }

@@ -99,32 +99,10 @@ func main() {
 
 	// Both model clients before the database is touched, so a missing
 	// endpoint variable stops the boot where a config error would: with
-	// nothing migrated, purged or swept. The endpoints are the env vars each
-	// model's llmwire profile names, read by llmwire; a missing one comes
-	// back named.
-	//
-	// One embedder for indexing and for the query side of every answer. It is
-	// needed whether or not indexing is on, so a missing variable is fatal
-	// either way.
-	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	// nothing migrated, purged or swept.
+	embedder, models, err := newModelClients(cfg)
 	if err != nil {
-		slog.Error("embedding endpoint", "err", err)
-		os.Exit(1)
-	}
-	// The pipeline is always wired: a rongo that indexes but cannot answer is
-	// not a mode anyone wants to be in by accident. Timeout bounds one whole
-	// call, body included. The answer streams for as long as its 16384-token
-	// budget takes, hidden reasoning counted, and the default of five minutes
-	// would cut a slow one mid-answer: at 20 tokens a second the budget needs
-	// close to 14 minutes. The idle watchdog, not this one, is what catches a
-	// stalled upstream.
-	models, err := llm.NewClient(llm.Config{
-		Timeout:         15 * time.Minute,
-		TurnMaxTokens:   cfg.TurnMaxTokens,
-		EmulateOpenCode: cfg.ChatEmulateOpenCode,
-	}, nil)
-	if err != nil {
-		slog.Error("chat endpoint", "err", err)
+		slog.Error("model endpoint", "err", err)
 		os.Exit(1)
 	}
 
@@ -456,4 +434,33 @@ func chunkOptions(cfg config.Config) indexer.ChunkOptions {
 // searches against.
 func moduleOpts(cfg config.Config) modules.Opts {
 	return modules.Opts{MinChunks: cfg.ModuleMinChunks, MaxChunks: cfg.ModuleMaxChunks}
+}
+
+// newModelClients builds the embedder and the chat client. The endpoints are
+// the env vars each model's llmwire profile names, read by llmwire; a missing
+// one comes back named.
+//
+// One embedder for indexing and for the query side of every answer. It is
+// needed whether or not indexing is on, so a missing variable is fatal either
+// way. The chat client is always wired: a rongo that indexes but cannot
+// answer is not a mode anyone wants to be in by accident. Its Timeout bounds
+// one whole call, body included. The answer streams for as long as its
+// 16384-token budget takes, hidden reasoning counted, and the default of five
+// minutes would cut a slow one mid-answer: at 20 tokens a second the budget
+// needs close to 14 minutes. The idle watchdog, not this one, is what catches
+// a stalled upstream.
+func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
+	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	models, err := llm.NewClient(llm.Config{
+		Timeout:         15 * time.Minute,
+		TurnMaxTokens:   cfg.TurnMaxTokens,
+		EmulateOpenCode: cfg.ChatEmulateOpenCode,
+	}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return embedder, models, nil
 }
