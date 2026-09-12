@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/trick77/llmwire"
@@ -145,25 +144,14 @@ func (c *Client) Embed(ctx context.Context, inputs []string) ([][]float32, error
 
 // embedError phrases a wire failure the way this package's callers read it.
 // An APIError carries the status and a body llmwire already capped and
-// redacted; a transport error is trimmed to scheme and host, because
-// net/http quotes the FULL URL and some deployments carry their key in a
-// query string. The host survives because "which endpoint was unreachable"
-// is the whole diagnostic value of the message.
+// redacted; a transport error already names scheme and host and nothing
+// more, so only the elapsed time is added.
 func embedError(err error, took time.Duration) error {
 	var apiErr *llmwire.APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode != 0 {
 		return fmt.Errorf("embedding failed with status %d: %s", apiErr.StatusCode, apiErr.Message)
 	}
-	var uerr *url.Error
-	if errors.As(err, &uerr) {
-		where := "the embedding endpoint"
-		if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
-			where = u.Scheme + "://" + u.Host
-		}
-		return fmt.Errorf("embed request failed after %s: %s %s: %w",
-			took.Round(time.Millisecond), uerr.Op, where, uerr.Err)
-	}
-	return err
+	return fmt.Errorf("embed request failed after %s: %w", took.Round(time.Millisecond), err)
 }
 
 // startHeartbeat logs at intervals while a request is in flight and returns a

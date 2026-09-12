@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 
 	"github.com/trick77/llmwire"
@@ -139,7 +137,9 @@ func usageFrom(u llmwire.Usage) Usage {
 	if u.Output.Total != nil {
 		out.Completion = int(*u.Output.Total)
 	}
-	out.Total = out.Prompt + out.Completion
+	if total, ok := u.Total(); ok {
+		out.Total = int(total)
+	}
 	if u.Input.CacheRead != nil {
 		out.PromptDetails = &PromptDetails{Cached: int(*u.Input.CacheRead)}
 	}
@@ -150,13 +150,6 @@ func usageFrom(u llmwire.Usage) Usage {
 		out.CostNanoUSD = usage.Nano(u.Cost.NanoUSD)
 	}
 	return out
-}
-
-// reported says the upstream sent a usage object at all. Only then is the
-// call recorded: a stream that broke before its usage frame is unknown, not
-// free.
-func reported(u llmwire.Usage) bool {
-	return u.Input.Total != nil || u.Output.Total != nil
 }
 
 // FinishError is how the upstream ended a completion when it was not a
@@ -278,9 +271,8 @@ func WithTemperature(v float64) Option {
 
 // Client calls the chat completions endpoint.
 type Client struct {
-	wire   *llmwire.Client
-	apiKey string
-	log    *slog.Logger
+	wire *llmwire.Client
+	log  *slog.Logger
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
 	turnMaxTokens  int
@@ -334,7 +326,6 @@ func NewClient(cfg Config, hc *http.Client) *Client {
 			HTTPClient:      hc,
 			EmulateOpenCode: cfg.EmulateOpenCode,
 		}),
-		apiKey:        cfg.APIKey,
 		log:           log,
 		pro:           cfg.Pro,
 		shortGate:     cfg.ShortGate,
@@ -394,7 +385,7 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
 	c.warn(warnings)
 	if err != nil {
-		return "", Usage{}, c.chatError(err)
+		return "", Usage{}, chatError(err)
 	}
 	u := usageFrom(resp.Usage)
 	record(ctx, o, u, time.Since(started))
@@ -421,7 +412,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
 	c.warn(warnings)
 	if err != nil {
-		return Usage{}, c.chatError(err)
+		return Usage{}, chatError(err)
 	}
 	defer stream.Close()
 
@@ -451,11 +442,11 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// would read as "this call was free", and it was not; it is unknown.
 	wu := stream.Usage()
 	got := usageFrom(wu)
-	if reported(wu) {
+	if wu.Reported() {
 		record(ctx, o, got, time.Since(started))
 	}
 	if err := stream.Err(); err != nil {
-		return got, c.chatError(err)
+		return got, chatError(err)
 	}
 	if finishReason != "" && finishReason != "stop" {
 		return got, &FinishError{Reason: finishReason, Completion: got.Completion}
@@ -466,47 +457,15 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 // chatError phrases a wire failure the way the rest of rongo reads it. An
 // APIError without a status is the error frame an upstream sends after
 // status 200; anything else keeps llmwire's own wording, which already names
-// the bound that fired.
-//
-// The key is stripped by value on top of llmwire's redaction, which knows
-// credentials by shape only. An upstream that echoes the Authorization header
-// would otherwise put a key of another shape into every log line that touches
-// the failure.
-func (c *Client) chatError(err error) error {
+// the bound that fired, carries no key (stripped by value, whatever its
+// shape) and no request URL.
+func chatError(err error) error {
 	var apiErr *llmwire.APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.StatusCode == 0 {
-			return fmt.Errorf("chat completion failed mid-stream (%s): %s", apiErr.Type, c.redactKey(apiErr.Message))
+			return fmt.Errorf("chat completion failed mid-stream (%s): %s", apiErr.Type, apiErr.Message)
 		}
-		return fmt.Errorf("chat completion failed with status %d: %s", apiErr.StatusCode, c.redactKey(apiErr.Message))
-	}
-	err = redactURL(err)
-	if c.apiKey != "" && strings.Contains(err.Error(), c.apiKey) {
-		return errors.New(c.redactKey(err.Error()))
+		return fmt.Errorf("chat completion failed with status %d: %s", apiErr.StatusCode, apiErr.Message)
 	}
 	return err
-}
-
-// redactURL keeps a transport error from carrying the full request URL, which
-// can hold query parameters. Same rule as the embedding client: scheme and host
-// are enough to tell an operator where it failed.
-func redactURL(err error) error {
-	var uerr *url.Error
-	if !errors.As(err, &uerr) {
-		return err
-	}
-	where := "the model endpoint"
-	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
-		where = u.Scheme + "://" + u.Host
-	}
-	return fmt.Errorf("%s %s: %w", uerr.Op, where, uerr.Err)
-}
-
-// redactKey removes the API key from text that is about to be quoted into an
-// error.
-func (c *Client) redactKey(s string) string {
-	if c.apiKey == "" {
-		return s
-	}
-	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
 }
