@@ -109,7 +109,7 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 			{Index: 1, Embedding: vecOf(2, 4)},
 		}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), []string{"one", "two", "three"})
@@ -147,7 +147,7 @@ func TestEmbed_duplicateIndexIsAnError(t *testing.T) {
 			{Index: 1, Embedding: vecOf(3, 4)},
 		}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a", "b", "c"})
@@ -163,7 +163,7 @@ func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{{Index: 0, Embedding: vecOf(1, 3)}}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -183,7 +183,7 @@ func TestEmbed_errorCarriesStatusAndACappedBody(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return http.StatusServiceUnavailable, huge
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -208,9 +208,9 @@ func TestEmbed_aTransportErrorNeverCarriesTheURL(t *testing.T) {
 	// is a credential in a log line.
 	testee := NewClient(Config{
 		BaseURL: "http://127.0.0.1:1/v1?api-key=s3cret-key-value",
-		Model:   "m", Dim: 4,
+		Model:   "text-embedding-3-small", Dim: 4,
 		HeartbeatInterval: -1,
-	}, &http.Client{Timeout: 2 * time.Second})
+	}, nil)
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -237,7 +237,7 @@ func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(block)
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// When
@@ -264,7 +264,7 @@ func TestEmbed_emptyInputMakesNoRequest(t *testing.T) {
 	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{}}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), nil)
@@ -290,7 +290,7 @@ func TestEmbed_splitsLargeInputIntoBatchesKeepingOrder(t *testing.T) {
 		}
 		return 200, map[string]any{"data": data}
 	})
-	testee := NewClient(Config{BaseURL: srv.URL, Model: "m", Dim: 4}, srv.Client())
+	testee := NewClient(Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
 	inputs := make([]string, 150)
 	for i := range inputs {
 		inputs[i] = fmt.Sprintf("text-%d", i)
