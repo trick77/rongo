@@ -29,8 +29,8 @@ import (
 // rather than a usage.Report, because a Report carries the per-call breakdown
 // and the model names, and neither is the reader's business. Both are absent
 // when the thread paid for nothing (no usage, not a zero); the cost alone is
-// absent when no price table is loaded (tokens only, the same rule as the
-// owner's view).
+// absent when no call was priced (tokens only, the same rule as the owner's
+// view).
 type publicShare struct {
 	Title       string            `json:"title"`
 	SharedAt    string            `json:"shared_at"`

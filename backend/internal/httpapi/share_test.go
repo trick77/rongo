@@ -216,7 +216,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 }
 
 func TestPublicShare_carriesTokensOnlyWhenNothingIsPriced(t *testing.T) {
-	// Given a server without a price table and a turn that paid for a call
+	// Given a turn that paid for a call nothing priced
 	srv, st, _ := shareServer(t)
 	ctx := context.Background()
 	th := sharedTurn(t, st, testSubject)

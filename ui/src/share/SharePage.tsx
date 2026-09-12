@@ -91,7 +91,7 @@ export default function SharePage({ token }: { token: string }) {
           // card shows which candidate was chosen.
           turns: storedRetries(linkChosenCandidates(list, list.map(storedTurn))),
           // No total means the thread paid for nothing: show nothing, not a
-          // zero. A total without a cost means no price table is loaded.
+          // zero. A total without a cost means no call was priced.
           usage: body.total_tokens == null ? null : { tokens: body.total_tokens, cost: body.cost_usd ?? null },
         });
       } catch {

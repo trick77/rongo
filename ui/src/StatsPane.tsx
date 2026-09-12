@@ -505,8 +505,8 @@ export function StatsPane({ target, turns, onClose }: { target: StatsTarget; tur
         </div>
 
         <p className="mt-5 font-sans text-[11.5px] leading-relaxed text-faint">
-          Prices are the registry's list price, USD per million tokens: the deployments at MiMo's own API whatever
-          endpoint they were called at, embeddings at theirs. Not a bill: the provider's invoice is.
+          Prices are the vendor's list price at the time of the call, whatever endpoint it went to. A turn from
+          before prices were recorded shows tokens only. Not a bill: the provider's invoice is.
         </p>
       </aside>
     </>

@@ -20,7 +20,7 @@ type Call struct {
 	// answer, title. It is the label a reader sees in the breakdown.
 	Step string `json:"step"`
 	// Model is the deployment or embedding model the call went to, and the
-	// key the price table is looked up by.
+	// id its context window is looked up by.
 	Model      string `json:"model"`
 	Prompt     int    `json:"prompt_tokens"`
 	Completion int    `json:"completion_tokens"`
@@ -40,7 +40,7 @@ type Call struct {
 	// All three are pointers for one reason: a turn answered before these
 	// were recorded must not read as a call that cached nothing, reasoned
 	// about nothing and took no time. Absent is absent — the same rule
-	// Report.CostUSD has kept since the price table could be empty.
+	// Report.CostUSD keeps for a turn nothing priced.
 	Cached    *int `json:"cached_tokens,omitempty"`
 	Reasoning *int `json:"reasoning_tokens,omitempty"`
 	Ms        *int `json:"ms,omitempty"`

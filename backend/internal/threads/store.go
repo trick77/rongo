@@ -112,12 +112,11 @@ type Message struct {
 	// the question it failed at.
 	HeadMessageID int64     `json:"head_message_id"`
 	CreatedAt     time.Time `json:"created_at"`
-	// Calls is every paid call this turn made, as stored. Tokens only: the
-	// HTTP layer prices them into Usage, because the price table is
-	// configuration the store does not know.
+	// Calls is every paid call this turn made, as stored, each with the cost
+	// it was priced at. The HTTP layer sums them into Usage.
 	Calls []usage.Call `json:"-"`
 	// Usage is what the browser sees: the calls, their sum, and the cost
-	// when prices are configured. Filled by the HTTP layer, never here.
+	// when any call was priced. Filled by the HTTP layer, never here.
 	Usage *usage.Report `json:"usage,omitempty"`
 	// Steps is the activity timeline this turn was watched through. Absent
 	// for a turn that announced nothing and for every turn written before the
