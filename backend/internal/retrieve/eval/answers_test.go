@@ -115,7 +115,6 @@ func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 		BaseURL:         base,
 		APIKey:          os.Getenv("BACKEND_LLM_API_KEY"),
 		Timeout:         timeout,
-		IdleTimeout:     90 * time.Second,
 		EmulateOpenCode: emulate,
 	}
 }

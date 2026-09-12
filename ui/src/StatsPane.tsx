@@ -29,7 +29,7 @@ const glossary: Record<string, string> = {
   cached:
     "The endpoint had already read this part of the prompt and did not charge full price for it again. A thread's later turns repeat the prefix of the first, which is when it happens.",
   context:
-    "How much of the model's window this call used. The window comes from the price registry; a model it does not list shows no window.",
+    "How much of the model's window this call used. The window is the model's own, from its profile; a model without one shows no window.",
   budget:
     "What the source walk may spend. When it runs out the walk stops where it is; nothing already gathered is cut short.",
   reasoning: "The part of the reply the model spent thinking rather than writing. It comes out of the same length cap.",
