@@ -50,6 +50,11 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 // logging emits one access line per request. It logs r.URL.Path and never the
 // query string or full URL: query strings carry tokens and, later, OIDC codes.
+//
+// A healthy /healthz is not logged. The container probes it every few
+// seconds, and a log that is mostly probes hides the requests a reader is
+// looking for; a probe that fails still logs, since that is the one worth
+// seeing.
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -57,6 +62,9 @@ func logging(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
+		if r.URL.Path == "/healthz" && rec.status < 400 {
+			return
+		}
 		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
