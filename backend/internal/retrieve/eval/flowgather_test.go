@@ -42,15 +42,7 @@ func flowExpansionsFile() string {
 // calls the model only for questions without an entry.
 func TestExpandFlowQuestions(t *testing.T) {
 	requireEval(t)
-	base := os.Getenv("BACKEND_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is unset")
-	}
-	u := ask.NewUnderstander(llm.NewClient(llm.Config{
-		BaseURL: base,
-		APIKey:  os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout: 2 * time.Minute,
-	}, nil))
+	u := ask.NewUnderstander(llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil))
 
 	previous := map[string]expansion{}
 	if body, err := os.ReadFile(flowExpansionsFile()); err == nil {
@@ -156,7 +148,7 @@ func TestFlowGathered(t *testing.T) {
 	// The reranker reorders the search itself, so it is an arm over a second
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
-	if base := os.Getenv("BACKEND_LLM_BASE_URL"); base != "" {
+	if os.Getenv("BACKEND_LLM_BASE_URL") != "" {
 		reranked = retrieve.New(db, embed.NewClient(embed.Config{
 			BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
 			APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
@@ -164,9 +156,7 @@ func TestFlowGathered(t *testing.T) {
 			Dim:     dim,
 		}, nil))
 		reranked.Candidates = 60
-		reranked.Reranker = evalReranker(t, llm.NewClient(llm.Config{
-			BaseURL: base, APIKey: os.Getenv("BACKEND_LLM_API_KEY"), Timeout: 2 * time.Minute,
-		}, nil))
+		reranked.Reranker = evalReranker(t, llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil))
 		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
 	}
 

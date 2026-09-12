@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/trick77/llmwire"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -278,12 +279,14 @@ func TestComplete_noCeilingOrNoMeterIsNeverRefused(t *testing.T) {
 
 // captured is one request body as the fake upstream saw it.
 type captured struct {
-	Model               string          `json:"model"`
-	Messages            []Message       `json:"messages"`
-	Stream              bool            `json:"stream"`
-	MaxCompletionTokens int             `json:"max_completion_tokens"`
-	Thinking            *thinkingOption `json:"thinking"`
-	Temperature         *float64        `json:"temperature"`
+	Model               string    `json:"model"`
+	Messages            []Message `json:"messages"`
+	Stream              bool      `json:"stream"`
+	MaxCompletionTokens int       `json:"max_completion_tokens"`
+	Thinking            *struct {
+		Type string `json:"type"`
+	} `json:"thinking"`
+	Temperature *float64 `json:"temperature"`
 }
 
 // fakeUpstream answers one chat completion and records what it was asked.
@@ -570,7 +573,7 @@ func TestStream_requestsUsageInTheStream(t *testing.T) {
 
 // headerCapture answers one call — a JSON completion or an SSE stream — and
 // hands back the headers the upstream saw.
-func headerCapture(t *testing.T, stream bool) (*Client, *http.Header) {
+func headerCapture(t *testing.T, stream bool, emulate bool) (*Client, *http.Header) {
 	t.Helper()
 	got := &http.Header{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -586,24 +589,15 @@ func headerCapture(t *testing.T, stream bool) (*Client, *http.Header) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "k"}, srv.Client()), got
+	return NewClient(Config{BaseURL: srv.URL, APIKey: "k", EmulateOpenCode: emulate}, srv.Client()), got
 }
 
-// TestChatUserAgentValue pins the exact client string. The header test below
-// compares against the constant and would pass on any value, so the literal is
-// asserted here — a typo in a version component is otherwise invisible.
-func TestChatUserAgentValue(t *testing.T) {
-	const want = "opencode/1.18.26 ai-sdk/openai-compatible/3.0.43 ai-sdk/provider-utils/5.0.36 runtime/bun/1.4.0"
-	if chatUserAgent != want {
-		t.Fatalf("chatUserAgent = %q, want %q", chatUserAgent, want)
-	}
-}
-
-// TestChatRequestNeverSendsGoDefaultUserAgent guards the failure this change
-// exists to prevent: net/http reinstating "Go-http-client/1.1" if the header is
-// ever dropped from post. Both entry points are checked — post is shared today,
-// but a later split must not silently leave one of them unidentified.
-func TestChatRequestNeverSendsGoDefaultUserAgent(t *testing.T) {
+// TestEmulateOpenCode_presentsAsTheOpencodeClient covers what the flag buys
+// on both entry points: opencode's own client string, and the session header
+// pair that pins a burst of calls to one upstream node. Both values are
+// llmwire's; what is pinned here is that rongo's flag reaches the wire, and
+// that a process sends one id for all of its calls.
+func TestEmulateOpenCode_presentsAsTheOpencodeClient(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		name := "Complete"
 		if stream {
@@ -611,125 +605,67 @@ func TestChatRequestNeverSendsGoDefaultUserAgent(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			// Given
-			c, got := headerCapture(t, stream)
+			c, got := headerCapture(t, stream, true)
 
 			// When
-			var err error
-			if stream {
-				_, err = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
-			} else {
-				_, _, err = c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
-			}
-			if err != nil {
+			if err := callOnce(c, stream); err != nil {
 				t.Fatalf("call: %v", err)
 			}
 
 			// Then
-			ua := got.Get("User-Agent")
-			if ua == "" || strings.HasPrefix(ua, "Go-http-client") {
-				t.Fatalf("User-Agent = %q, want the configured client string", ua)
+			if ua := got.Get("User-Agent"); ua != llmwire.OpenCodeUserAgent {
+				t.Errorf("User-Agent = %q, want %q", ua, llmwire.OpenCodeUserAgent)
 			}
-			if ua != chatUserAgent {
-				t.Errorf("User-Agent = %q, want %q", ua, chatUserAgent)
-			}
-			if accept := got.Get("Accept"); accept != "*/*" {
-				t.Errorf("Accept = %q, want */*", accept)
-			}
-		})
-	}
-}
-
-// TestChatRequestSendsSessionHeaders covers the affinity pair on both entry
-// points: the pair is what keeps a multi-turn thread on one upstream node, and
-// a request that drops it silently loses the pinning with no visible failure.
-func TestChatRequestSendsSessionHeaders(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		name := "Complete"
-		if stream {
-			name = "Stream"
-		}
-		t.Run(name, func(t *testing.T) {
-			// Given
-			c, got := headerCapture(t, stream)
-			ctx := WithThreadID(context.Background(), 7)
-
-			// When
-			if err := callOnce(c, ctx, stream); err != nil {
-				t.Fatalf("call: %v", err)
-			}
-
-			// Then
 			id := got.Get("X-Session-Id")
-			if !sessionIDPattern.MatchString(id) {
-				t.Fatalf("X-Session-Id = %q, want ses_<12 hex><14 base62>", id)
+			if !strings.HasPrefix(id, "ses_") {
+				t.Fatalf("X-Session-Id = %q, want an opencode-shaped session id", id)
 			}
 			if affinity := got.Get("X-Session-Affinity"); affinity != id {
 				t.Errorf("X-Session-Affinity = %q, want the same value as X-Session-Id %q", affinity, id)
 			}
-			if want := chatSessionID("7"); id != want {
-				t.Errorf("X-Session-Id = %q, want the id minted for the thread, %q", id, want)
+
+			// And a second call carries the same id: one process, one session.
+			if err := callOnce(c, stream); err != nil {
+				t.Fatalf("second call: %v", err)
+			}
+			if again := got.Get("X-Session-Id"); again != id {
+				t.Errorf("session id changed between calls: %q then %q", id, again)
 			}
 		})
 	}
 }
 
-// TestSessionHeaderIsStableWithinAThread is the property the header exists for:
-// two calls in one conversation must land on the same upstream node, and two
-// different conversations must not be pinned together.
-func TestSessionHeaderIsStableWithinAThread(t *testing.T) {
+// TestEmulateOpenCode_offSendsNeitherTheStringNorTheHeaders: an endpoint that
+// does not care gets llmwire's own client string and no session pair. Never
+// Go's default either — that names the HTTP library and says nothing about
+// the protocol being spoken.
+func TestEmulateOpenCode_offSendsNeitherTheStringNorTheHeaders(t *testing.T) {
 	// Given
-	c, got := headerCapture(t, false)
+	c, got := headerCapture(t, false, false)
 
 	// When
-	if err := callOnce(c, WithThreadID(context.Background(), 11), false); err != nil {
-		t.Fatalf("first call: %v", err)
-	}
-	first := got.Get("X-Session-Id")
-	if err := callOnce(c, WithThreadID(context.Background(), 11), false); err != nil {
-		t.Fatalf("second call: %v", err)
-	}
-	again := got.Get("X-Session-Id")
-	if err := callOnce(c, WithThreadID(context.Background(), 12), false); err != nil {
-		t.Fatalf("other-thread call: %v", err)
-	}
-	other := got.Get("X-Session-Id")
-
-	// Then
-	if again != first {
-		t.Errorf("session id changed within one thread: %q then %q", first, again)
-	}
-	if other == first {
-		t.Errorf("threads 11 and 12 share session id %q", other)
-	}
-}
-
-// TestThreadlessCallUsesProcessSessionID pins the fallback lane. The HTTP
-// handlers attach the thread before any model call, so nothing in a served turn
-// reaches this path today; it exists so a caller outside a turn still pins
-// somewhere rather than sending an empty header.
-func TestThreadlessCallUsesProcessSessionID(t *testing.T) {
-	// Given
-	c, got := headerCapture(t, false)
-
-	// When
-	if err := callOnce(c, context.Background(), false); err != nil {
+	if err := callOnce(c, false); err != nil {
 		t.Fatalf("call: %v", err)
 	}
 
 	// Then
-	if id := got.Get("X-Session-Id"); id != processSessionID {
-		t.Errorf("X-Session-Id = %q, want the per-process id %q", id, processSessionID)
+	ua := got.Get("User-Agent")
+	if ua == "" || strings.HasPrefix(ua, "Go-http-client") || ua == llmwire.OpenCodeUserAgent {
+		t.Errorf("User-Agent = %q, want llmwire's own string", ua)
+	}
+	if id := got.Get("X-Session-Id"); id != "" {
+		t.Errorf("X-Session-Id = %q, want none without emulation", id)
 	}
 }
 
 // callOnce makes one trivial request over whichever entry point is under test.
-func callOnce(c *Client, ctx context.Context, stream bool) error {
+func callOnce(c *Client, stream bool) error {
 	msgs := []Message{{Role: "user", Content: "x"}}
 	if stream {
-		_, err := c.Stream(ctx, msgs, func(string) {})
+		_, err := c.Stream(context.Background(), msgs, func(string) {})
 		return err
 	}
-	_, _, err := c.Complete(ctx, msgs)
+	_, _, err := c.Complete(context.Background(), msgs)
 	return err
 }
 
@@ -819,5 +755,30 @@ func TestComplete_aLengthFinishIsAnErrorNamingTheBudget(t *testing.T) {
 	}
 	if out != `{"decision": "comp` {
 		t.Errorf("out = %q, want the truncated text handed over with the error", out)
+	}
+}
+
+// TestChatError_aTransportErrorNamesTheHostNotTheURL: a base URL can carry a
+// credential in its query, and a dial failure quotes the URL it dialled.
+// llmwire wraps that error with %w, so the url.Error is still there to trim.
+func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
+	// Given an endpoint nobody listens on, named with a key in the query
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	addr := srv.URL
+	srv.Close()
+	c := NewClient(Config{BaseURL: addr + "/v1?key=querysecret"}, nil)
+
+	// When
+	_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
+
+	// Then
+	if err == nil {
+		t.Fatal("want a transport error against a closed listener")
+	}
+	if strings.Contains(err.Error(), "querysecret") {
+		t.Errorf("err = %v, the query string must not be quoted", err)
+	}
+	if !strings.Contains(err.Error(), addr) {
+		t.Errorf("err = %v, want scheme://host kept so an operator sees where it failed", err)
 	}
 }

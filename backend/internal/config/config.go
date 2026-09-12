@@ -82,6 +82,12 @@ type Config struct {
 	// environment lets a misconfigured host answer with a model nobody chose.
 	LLMBaseURL string
 	LLMAPIKey  string
+	// LLMEmulateOpenCode presents every model call as the opencode client:
+	// its User-Agent and session header pair. MiMo's token-plan host is sold
+	// as that client's backend; an endpoint that does not care ignores the
+	// headers. Mandatory and explicit, because a default either way is a
+	// guess about which host is behind BACKEND_LLM_BASE_URL.
+	LLMEmulateOpenCode bool
 	// PricesURL is the registry the price table is resolved from. Empty turns
 	// the lookup off: tokens only. There is no hand-typed price anywhere —
 	// a made-up figure next to a real token count would read as a bill.
@@ -143,6 +149,11 @@ func Load() (Config, error) {
 		embedDim = n
 	}
 
+	emulate, err := envBool("BACKEND_LLM_EMULATE_OPENCODE")
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
 		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
@@ -150,27 +161,28 @@ func Load() (Config, error) {
 		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
-		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
-		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
-		LLMBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
-		LLMAPIKey:         strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
-		PricesURL:         envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
-		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		EmbedBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
-		EmbedAPIKey:       strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
-		EmbedModel:        envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		EmbedDim:          embedDim,
-		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
+		IndexMaxFileBytes:  envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexEnabled:       envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:      envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:       envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		ModuleMinChunks:    envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:    envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:        envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		LLMBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
+		LLMAPIKey:          strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
+		LLMEmulateOpenCode: emulate,
+		PricesURL:          envOrUnset("BACKEND_PRICES_URL", pricing.DefaultURL),
+		GatherMaxHops:      envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget:  envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:      envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		EmbedBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
+		EmbedAPIKey:        strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
+		EmbedModel:         envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
+		EmbedDim:           embedDim,
+		AuthMode:           AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		SessionSecret:      strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
+		LogLevel:           envOr("BACKEND_LOG_LEVEL", "info"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.
@@ -323,6 +335,22 @@ func envFloatOr(key string, fallback float64) float64 {
 		return fallback
 	}
 	return f
+}
+
+// envBool reads a mandatory on/off setting. Empty or anything but a boolean
+// word is an error, not a default: the setting exists because the answer
+// depends on which host is behind the endpoint, and nobody but the operator
+// knows that.
+func envBool(key string) (bool, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return false, fmt.Errorf("%s is required: true or false", key)
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false, fmt.Errorf("%s=%q is not a boolean; want true or false", key, v)
+	}
+	return b, nil
 }
 
 // envBoolOr reads an on/off setting. Anything unrecognised falls back to the
