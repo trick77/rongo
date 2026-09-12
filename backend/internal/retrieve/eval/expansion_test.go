@@ -80,15 +80,7 @@ func loadExpansionRepos(t *testing.T) map[string][]string {
 // costs one short-gate call per question.
 func TestExpandQuestions(t *testing.T) {
 	requireEval(t)
-	base := os.Getenv("BACKEND_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is unset")
-	}
-	c := llm.NewClient(llm.Config{
-		BaseURL: base,
-		APIKey:  os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout: 2 * time.Minute,
-	}, nil)
+	c := llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
 	u := ask.NewUnderstander(c)
 
 	// Retried, and the file is written BEFORE anything fails. The model
@@ -287,10 +279,6 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 // field they do not use. Costs one short-gate call per question.
 func TestExpandQuestionRepos(t *testing.T) {
 	requireEval(t)
-	base := os.Getenv("BACKEND_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is unset")
-	}
 	// The records to attach to must already exist: this arm adds a field, it
 	// does not create the freeze.
 	existing := readExpansions(t)
@@ -299,11 +287,7 @@ func TestExpandQuestionRepos(t *testing.T) {
 		byQuestion[e.Question] = e
 	}
 
-	c := llm.NewClient(llm.Config{
-		BaseURL: base,
-		APIKey:  os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout: 2 * time.Minute,
-	}, nil)
+	c := llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
 	u := ask.NewUnderstander(c)
 
 	var out []expansion

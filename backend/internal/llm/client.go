@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -121,9 +122,11 @@ type CompletionDetails struct {
 }
 
 // usageFrom maps llmwire's accounting onto Usage. A nil lane is one the
-// upstream did not report, and stays absent: a details object saying zero is
-// a measurement, no details object is silence, and record keeps the two
-// apart.
+// upstream did not report, and stays absent, so record leaves the figure out
+// rather than writing a zero that reads as "cached nothing". llmwire keeps
+// the lanes, not the objects: a details object present but without the
+// field is the same as no object. MiMo sends both fields on every reply, so
+// nothing is lost there.
 func usageFrom(u llmwire.Usage) Usage {
 	var out Usage
 	if u.Input.Total != nil {
@@ -469,10 +472,26 @@ func (c *Client) chatError(err error) error {
 		}
 		return fmt.Errorf("chat completion failed with status %d: %s", apiErr.StatusCode, c.redactKey(apiErr.Message))
 	}
+	err = redactURL(err)
 	if c.apiKey != "" && strings.Contains(err.Error(), c.apiKey) {
 		return errors.New(c.redactKey(err.Error()))
 	}
 	return err
+}
+
+// redactURL keeps a transport error from carrying the full request URL, which
+// can hold query parameters. Same rule as the embedding client: scheme and host
+// are enough to tell an operator where it failed.
+func redactURL(err error) error {
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
+		return err
+	}
+	where := "the model endpoint"
+	if u, perr := url.Parse(uerr.URL); perr == nil && u.Host != "" {
+		where = u.Scheme + "://" + u.Host
+	}
+	return fmt.Errorf("%s %s: %w", uerr.Op, where, uerr.Err)
 }
 
 // redactKey removes the API key from text that is about to be quoted into an

@@ -121,15 +121,7 @@ func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string
 // the judge at all.
 func llmClientForRouting(t *testing.T) *llm.Client {
 	t.Helper()
-	base := os.Getenv("BACKEND_LLM_BASE_URL")
-	if base == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is unset")
-	}
-	return llm.NewClient(llm.Config{
-		BaseURL: base,
-		APIKey:  os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout: 2 * time.Minute,
-	}, nil)
+	return llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil)
 }
 
 // routeMargin reads BACKEND_ROUTE_MARGIN the same way config.go does, so the

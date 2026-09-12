@@ -757,3 +757,28 @@ func TestComplete_aLengthFinishIsAnErrorNamingTheBudget(t *testing.T) {
 		t.Errorf("out = %q, want the truncated text handed over with the error", out)
 	}
 }
+
+// TestChatError_aTransportErrorNamesTheHostNotTheURL: a base URL can carry a
+// credential in its query, and a dial failure quotes the URL it dialled.
+// llmwire wraps that error with %w, so the url.Error is still there to trim.
+func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
+	// Given an endpoint nobody listens on, named with a key in the query
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	addr := srv.URL
+	srv.Close()
+	c := NewClient(Config{BaseURL: addr + "/v1?key=querysecret"}, nil)
+
+	// When
+	_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
+
+	// Then
+	if err == nil {
+		t.Fatal("want a transport error against a closed listener")
+	}
+	if strings.Contains(err.Error(), "querysecret") {
+		t.Errorf("err = %v, the query string must not be quoted", err)
+	}
+	if !strings.Contains(err.Error(), addr) {
+		t.Errorf("err = %v, want scheme://host kept so an operator sees where it failed", err)
+	}
+}

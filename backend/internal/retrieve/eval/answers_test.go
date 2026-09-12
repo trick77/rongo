@@ -79,7 +79,7 @@ func loadRubrics(t *testing.T) map[string]Rubric {
 // harness-only lane overrides applied.
 func answerLLM(t *testing.T) *llm.Client {
 	t.Helper()
-	cfg := evalLLMConfig(t)
+	cfg := evalLLMConfig(t, 15*time.Minute)
 	cfg.Pro = os.Getenv("BACKEND_EVAL_PRO_MODEL")
 	cfg.ShortGate = os.Getenv("BACKEND_EVAL_GATE_MODEL")
 	return llm.NewClient(cfg, nil)
@@ -89,20 +89,32 @@ func answerLLM(t *testing.T) *llm.Client {
 // the overrides, so the grader does not change with the candidate.
 func judgeLLM(t *testing.T) *llm.Client {
 	t.Helper()
-	return llm.NewClient(evalLLMConfig(t), nil)
+	return llm.NewClient(evalLLMConfig(t, 15*time.Minute), nil)
 }
 
-func evalLLMConfig(t *testing.T) llm.Config {
+// evalLLMConfig is the one place the harness reads the model endpoint from
+// the environment, the way config.Load does for the product: the base URL
+// skips the test when unset, the opencode flag is mandatory and must be a
+// boolean. A harness that silently sent llmwire's own client string to the
+// token-plan host would measure a bot's welcome, not the model.
+func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
 	base := os.Getenv("BACKEND_LLM_BASE_URL")
 	if base == "" {
 		t.Skip("BACKEND_LLM_BASE_URL is unset")
 	}
-	emulate, _ := strconv.ParseBool(os.Getenv("BACKEND_LLM_EMULATE_OPENCODE"))
+	raw := strings.TrimSpace(os.Getenv("BACKEND_LLM_EMULATE_OPENCODE"))
+	if raw == "" {
+		t.Fatal("BACKEND_LLM_EMULATE_OPENCODE is required: true or false, the same as for the product")
+	}
+	emulate, err := strconv.ParseBool(raw)
+	if err != nil {
+		t.Fatalf("BACKEND_LLM_EMULATE_OPENCODE=%q is not a boolean; want true or false", raw)
+	}
 	return llm.Config{
 		BaseURL:         base,
 		APIKey:          os.Getenv("BACKEND_LLM_API_KEY"),
-		Timeout:         15 * time.Minute,
+		Timeout:         timeout,
 		IdleTimeout:     90 * time.Second,
 		EmulateOpenCode: emulate,
 	}
