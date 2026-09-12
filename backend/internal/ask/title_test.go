@@ -80,7 +80,7 @@ func titleLLM(t *testing.T, replies ...titleReply) (*llm.Client, *titleUpstream)
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), up
+	return fakeLLM(t, srv), up
 }
 
 func TestTitle_aFailedCallIsRetried(t *testing.T) {

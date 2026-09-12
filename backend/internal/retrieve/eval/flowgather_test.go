@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/embed"
-	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -42,7 +40,7 @@ func flowExpansionsFile() string {
 // calls the model only for questions without an entry.
 func TestExpandFlowQuestions(t *testing.T) {
 	requireEval(t)
-	u := ask.NewUnderstander(llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil))
+	u := ask.NewUnderstander(evalLLM(t, 2*time.Minute))
 
 	previous := map[string]expansion{}
 	if body, err := os.ReadFile(flowExpansionsFile()); err == nil {
@@ -128,12 +126,7 @@ func TestFlowGathered(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	retriever := retrieve.New(db, embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil))
+	retriever := retrieve.New(db, evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim))
 	expansions := loadFlowExpansions(t)
 	questions := loadFlowQuestions(t)
 	deployed := gatherOpts(t)
@@ -148,15 +141,10 @@ func TestFlowGathered(t *testing.T) {
 	// The reranker reorders the search itself, so it is an arm over a second
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
-	if os.Getenv("BACKEND_LLM_BASE_URL") != "" {
-		reranked = retrieve.New(db, embed.NewClient(embed.Config{
-			BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-			APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-			Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-			Dim:     dim,
-		}, nil))
+	if os.Getenv("BACKEND_CHAT_BASE_URL") != "" {
+		reranked = retrieve.New(db, evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim))
 		reranked.Candidates = 60
-		reranked.Reranker = evalReranker(t, llm.NewClient(evalLLMConfig(t, 2*time.Minute), nil))
+		reranked.Reranker = evalReranker(t, evalLLM(t, 2*time.Minute))
 		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
 	}
 

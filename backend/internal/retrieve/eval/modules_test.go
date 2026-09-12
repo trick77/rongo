@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/retrieve"
 )
@@ -152,12 +151,7 @@ func TestEvalMeasureModules(t *testing.T) {
 	ctx := context.Background()
 	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 
-	client := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   model,
-		Dim:     dim,
-	}, nil)
+	client := evalEmbedder(t, model, dim)
 	r := retrieve.New(db, client)
 
 	o := moduleOpts(t)

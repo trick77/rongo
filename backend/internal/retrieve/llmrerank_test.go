@@ -28,7 +28,7 @@ func rerankLLM(t *testing.T, reply string, saw *string) *llm.Client {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	return fakeLLM(t, srv)
 }
 
 // rerankLLMPicking replies with the number of the result whose header names
@@ -57,7 +57,7 @@ func rerankLLMPicking(t *testing.T, path string, saw *string) *llm.Client {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	return fakeLLM(t, srv)
 }
 
 func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
@@ -107,7 +107,7 @@ func TestLLMRerank_keepsTheFusedOrderWhenTheCallFails(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	hits := []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}
-	r := NewLLMReranker(llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), 60)
+	r := NewLLMReranker(fakeLLM(t, srv), 60)
 	got, err := r.Rerank(context.Background(), "q", hits, 2)
 	if err != nil {
 		t.Fatalf("a failed rerank call became a search error: %v", err)
@@ -127,8 +127,20 @@ func TestLLMRerank_reportsACancelledContextAsSuch(t *testing.T) {
 	t.Cleanup(srv.Close)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	r := NewLLMReranker(llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), 60)
+	r := NewLLMReranker(fakeLLM(t, srv), 60)
 	if _, err := r.Rerank(ctx, "q", []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}, 1); err == nil {
 		t.Fatal("a cancelled context was answered with the fused order")
 	}
+}
+
+// fakeLLM is the model client pointed at a test server. With BaseURL set,
+// llm.NewClient consults no environment variable, so the only way this can
+// fail is a bug in the constructor.
+func fakeLLM(t testing.TB, srv *httptest.Server) *llm.Client {
+	t.Helper()
+	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+	return c
 }

@@ -97,7 +97,7 @@ func TestStream_aStreamWithoutAUsageFrameRecordsNothingNotZeros(t *testing.T) {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{BaseURL: srv.URL}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 	m := usage.New()
 
 	// When
@@ -129,7 +129,7 @@ func TestComplete_recordsTheCachedAndReasoningSharesAndHowLongItTook(t *testing.
 			"completion_tokens_details":{"reasoning_tokens":40}}}`))
 	}))
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{BaseURL: srv.URL, APIKey: "s3cret"}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, APIKey: "s3cret"}, srv.Client())
 	m := usage.New()
 	ctx := usage.WithMeter(context.Background(), m)
 
@@ -186,7 +186,7 @@ func TestStream_recordsTheDetailsFromTheTrailingUsageFrame(t *testing.T) {
 		fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
 	m := usage.New()
 
 	// When
@@ -322,7 +322,7 @@ func fakeUpstreamEnding(t *testing.T, reply string, finishReason string) (*Clien
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "s3cret"}, srv.Client()), got
+	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "s3cret"}, srv.Client()), got
 }
 
 func ask(t *testing.T, c *Client, opts ...Option) (string, Usage) {
@@ -450,7 +450,7 @@ func TestComplete_theApiKeyNeverReachesAnError(t *testing.T) {
 		http.Error(w, "upstream refused: "+r.Header.Get("Authorization"), http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret-value"}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret-value"}, srv.Client())
 
 	_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
 
@@ -498,7 +498,7 @@ func streamingUpstream(t *testing.T, tokens []string, finishReason string, compl
 		_ = fl.Flush()
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
 }
 
 // rawStreamUpstream answers 200 with the one frame given and closes: the shape
@@ -511,7 +511,7 @@ func rawStreamUpstream(t *testing.T, frame string) *Client {
 		fmt.Fprintf(w, "data: %s\n\n", frame)
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
+	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
 }
 
 func TestStream_deliversTokensOneByOne(t *testing.T) {
@@ -557,7 +557,7 @@ func TestStream_anUpstreamThatStallsIsAbandoned(t *testing.T) {
 		time.Sleep(2 * time.Second)
 	}))
 	t.Cleanup(srv.Close)
-	c := NewClient(Config{BaseURL: srv.URL, IdleTimeout: 150 * time.Millisecond}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, IdleTimeout: 150 * time.Millisecond}, srv.Client())
 
 	var seen []string
 	start := time.Now()
@@ -600,7 +600,7 @@ func headerCapture(t *testing.T, stream bool, emulate bool) (*Client, *http.Head
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return NewClient(Config{BaseURL: srv.URL, APIKey: "k", EmulateOpenCode: emulate}, srv.Client()), got
+	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "k", EmulateOpenCode: emulate}, srv.Client()), got
 }
 
 // TestEmulateOpenCode_presentsAsTheOpencodeClient covers what the flag buys
@@ -778,7 +778,7 @@ func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
-	c := NewClient(Config{BaseURL: addr + "/v1?key=querysecret"}, nil)
+	c := mustClient(t, Config{BaseURL: addr + "/v1?key=querysecret"}, nil)
 
 	// When
 	_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
@@ -793,4 +793,15 @@ func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	if !strings.Contains(err.Error(), addr) {
 		t.Errorf("err = %v, want scheme://host kept so an operator sees where it failed", err)
 	}
+}
+
+// mustClient is NewClient for a test whose Config names its fake server, so
+// the only way it can fail is a bug in the constructor.
+func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
+	t.Helper()
+	c, err := NewClient(cfg, hc)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	return c
 }

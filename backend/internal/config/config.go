@@ -39,9 +39,10 @@ type Config struct {
 	// about the other half.
 	IndexMaxFileBytes int
 	// IndexEnabled switches the whole indexing side off, for a deployment that
-	// only serves the UI. It defaults to ON, and while it is on an embedding
-	// endpoint is mandatory: an indexer that cannot embed produces a repository
-	// list that looks configured and an index that stays empty.
+	// only serves the UI. It defaults to ON. The embedding endpoint is
+	// mandatory either way: the query side of every answer embeds the
+	// question, and an indexer that cannot embed produces a repository list
+	// that looks configured and an index that stays empty.
 	IndexEnabled bool
 	// IndexComments keeps whole-line comments in the text that is embedded and
 	// full-text indexed. Setting BACKEND_INDEX_COMMENTS=0 leaves only code in
@@ -77,17 +78,20 @@ type Config struct {
 	// sweep, pending a fix to the candidate layer (phase 4c). The number to
 	// beat is 0.803: a router that never asks anything at all.
 	RouteMargin float64
-	// The MiMo endpoint. The two deployment NAMES are hardcoded in
-	// internal/llm and deliberately not settings: a deployment name in the
-	// environment lets a misconfigured host answer with a model nobody chose.
-	LLMBaseURL string
-	LLMAPIKey  string
-	// LLMEmulateOpenCode presents every model call as the opencode client:
+	// The MiMo endpoint is not here: BACKEND_CHAT_BASE_URL and
+	// BACKEND_CHAT_API_KEY are named by the deployment's llmwire profile and
+	// read by llmwire itself when internal/llm builds its client, so a
+	// missing one is a boot error there. The two deployment NAMES are
+	// hardcoded in internal/llm and deliberately not settings: a deployment
+	// name in the environment lets a misconfigured host answer with a model
+	// nobody chose.
+	//
+	// ChatEmulateOpenCode presents every model call as the opencode client:
 	// its User-Agent and session header pair. MiMo's token-plan host is sold
 	// as that client's backend; an endpoint that does not care ignores the
 	// headers. Mandatory and explicit, because a default either way is a
-	// guess about which host is behind BACKEND_LLM_BASE_URL.
-	LLMEmulateOpenCode bool
+	// guess about which host is behind BACKEND_CHAT_BASE_URL.
+	ChatEmulateOpenCode bool
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -97,11 +101,11 @@ type Config struct {
 	// heaviest on record 83k, and the default sits three times above that so
 	// normal operation never meets it. Zero turns it off.
 	TurnMaxTokens int
-	// Embedding endpoint. EmbedDim is also the width the vec0 table is built
-	// with, so changing it means a new database, not a restart — store.BuiltDim
-	// makes a mismatch a loud failure rather than a wrong answer.
-	EmbedBaseURL  string
-	EmbedAPIKey   string
+	// Embedding model. Its endpoint, BACKEND_EMBED_BASE_URL and
+	// BACKEND_EMBED_API_KEY, is read by llmwire the same way as the chat one.
+	// EmbedDim is also the width the vec0 table is built with, so changing it
+	// means a new database, not a restart — store.BuiltDim makes a mismatch a
+	// loud failure rather than a wrong answer.
 	EmbedModel    string
 	EmbedDim      int
 	AuthMode      AuthMode
@@ -158,7 +162,7 @@ func Load() (Config, error) {
 		embedDim = n
 	}
 
-	emulate, err := envBool("BACKEND_LLM_EMULATE_OPENCODE")
+	emulate, err := envBool("BACKEND_CHAT_EMULATE_OPENCODE")
 	if err != nil {
 		return Config{}, err
 	}
@@ -170,27 +174,23 @@ func Load() (Config, error) {
 		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
-		IndexMaxFileBytes:  envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
-		IndexEnabled:       envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:      envBoolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:       envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		ModuleMinChunks:    envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:    envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:        envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
-		LLMBaseURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_LLM_BASE_URL")), "/"),
-		LLMAPIKey:          strings.TrimSpace(os.Getenv("BACKEND_LLM_API_KEY")),
-		LLMEmulateOpenCode: emulate,
-		GatherMaxHops:      envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget:  envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:      envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		EmbedBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_EMBED_BASE_URL")), "/"),
-		EmbedAPIKey:        strings.TrimSpace(os.Getenv("BACKEND_EMBED_API_KEY")),
-		EmbedModel:         embedModel,
-		EmbedDim:           embedDim,
-		AuthMode:           AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		SessionSecret:      strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:           envOr("BACKEND_LOG_LEVEL", "info"),
+		IndexMaxFileBytes:   envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexEnabled:        envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:       envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:        envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		ModuleMinChunks:     envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:     envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:         envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		ChatEmulateOpenCode: emulate,
+		GatherMaxHops:       envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget:   envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:       envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		EmbedModel:          embedModel,
+		EmbedDim:            embedDim,
+		AuthMode:            AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:          strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		SessionSecret:       strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
+		LogLevel:            envOr("BACKEND_LOG_LEVEL", "info"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.
@@ -216,26 +216,6 @@ func Load() (Config, error) {
 	if len(cfg.SessionSecret) < 16 {
 		return Config{}, fmt.Errorf(
 			"BACKEND_SESSION_SECRET must be at least 16 characters; generate one with `openssl rand -base64 32`")
-	}
-
-	if cfg.IndexEnabled && cfg.EmbedBaseURL == "" {
-		return Config{}, fmt.Errorf(
-			"BACKEND_EMBED_BASE_URL is required while indexing is enabled; set it, or set BACKEND_INDEX_ENABLED=false to run without indexing")
-	}
-	if cfg.IndexEnabled && cfg.EmbedAPIKey == "" {
-		return Config{}, fmt.Errorf(
-			"BACKEND_EMBED_API_KEY is required while indexing is enabled; the endpoint at BACKEND_EMBED_BASE_URL authenticates with it and answers 401 without")
-	}
-
-	// Answering questions is what rongo is for. Without a model endpoint it
-	// would start, index, and then answer every question with 503 — a
-	// deployment that looks healthy and is useless. Both values are fatal.
-	if cfg.LLMBaseURL == "" {
-		return Config{}, fmt.Errorf("BACKEND_LLM_BASE_URL is required; without it no question can be answered")
-	}
-	if cfg.LLMAPIKey == "" {
-		return Config{}, fmt.Errorf(
-			"BACKEND_LLM_API_KEY is required; the endpoint at BACKEND_LLM_BASE_URL authenticates with it and answers 401 without")
 	}
 
 	switch cfg.AuthMode {

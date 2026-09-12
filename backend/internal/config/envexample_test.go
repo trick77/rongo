@@ -33,9 +33,21 @@ func activeEnvExampleVars(t *testing.T) []string {
 	return active
 }
 
+// endpointEnv is the mandatory set Load does not read: the model and
+// embedding endpoints are named by their llmwire profiles and read by
+// llmwire when main builds the clients, and a missing one stops the boot
+// there rather than in Load.
+var endpointEnv = map[string]bool{
+	"BACKEND_EMBED_BASE_URL": true,
+	"BACKEND_EMBED_API_KEY":  true,
+	"BACKEND_CHAT_BASE_URL":  true,
+	"BACKEND_CHAT_API_KEY":   true,
+}
+
 // The file drifted once already: settings that Load happily defaults stood
 // active next to real mandatory ones, and the section header was the only
-// thing saying which was which. Load is the arbiter, not the header.
+// thing saying which was which. Load is the arbiter, not the header, except
+// for the endpoints, whose arbiter is llmwire.
 func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
 	// Given a copy of .env.example with every mandatory value filled in
 	active := activeEnvExampleVars(t)
@@ -70,6 +82,9 @@ func TestEnvExample_activeLinesAreTheOnesLoadCannotDefault(t *testing.T) {
 		t.Fatalf("a filled-in .env.example copy must load, got: %v", err)
 	}
 	for _, name := range active {
+		if endpointEnv[name] {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			// Given the same environment minus this one variable. setEnv seeds
 			// the mandatory set, so dropping one means overriding it to "".

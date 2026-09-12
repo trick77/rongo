@@ -28,7 +28,7 @@ func TestConfigOverridesReplaceTheLaneNamesOnTheWire(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewClient(Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash"}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash"}, srv.Client())
 	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestConfigOverridesReplaceTheLaneNamesOnTheWire(t *testing.T) {
 	}
 
 	seen = nil
-	plain := NewClient(Config{BaseURL: srv.URL}, srv.Client())
+	plain := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 	if _, _, err := plain.Complete(context.Background(), []Message{{Role: "user", Content: "x"}}, ShortGate()); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestConfigOverrideToAnUnknownModelFailsTheCall(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := NewClient(Config{BaseURL: srv.URL, Pro: "other-pro"}, srv.Client())
+	c := mustClient(t, Config{BaseURL: srv.URL, Pro: "other-pro"}, srv.Client())
 	_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}})
 
 	var unknown *llmwire.UnknownModelError

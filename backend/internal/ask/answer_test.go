@@ -56,7 +56,7 @@ func streamUpstreamEnding(t *testing.T, finishReason string, tokens []string) (*
 		_ = fl.Flush()
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &prompt, &calls
+	return fakeLLM(t, srv), &prompt, &calls
 }
 
 func twoSources() []Source {
@@ -468,4 +468,16 @@ func TestAnswer_aRefusalThatEnumeratesEveryMarkerIsStillResolved(t *testing.T) {
 			t.Fatalf("citation %d = %+v, want marker %d on %s", i, cit, i+1, sources[i].Path)
 		}
 	}
+}
+
+// fakeLLM is the model client pointed at a test server. With BaseURL set,
+// llm.NewClient consults no environment variable, so the only way this can
+// fail is a bug in the constructor.
+func fakeLLM(t testing.TB, srv *httptest.Server) *llm.Client {
+	t.Helper()
+	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	if err != nil {
+		t.Fatalf("llm.NewClient: %v", err)
+	}
+	return c
 }

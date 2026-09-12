@@ -110,7 +110,7 @@ func testLLM(t *testing.T, fn func(prompt string) string) *llm.Client {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	return fakeLLM(t, srv)
 }
 
 // testDBWithDeps opens a fresh migrated database, seeds a repo_state row for
@@ -837,7 +837,7 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), &models
+	return fakeLLM(t, srv), &models
 }
 
 func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
@@ -1139,7 +1139,7 @@ func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
+	r := newTestRouter(t, fakeLLM(t, srv), testDBWithDeps(t, nil))
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},
@@ -1204,7 +1204,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	r := newTestRouter(t, llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client()), testDBWithDeps(t, nil))
+	r := newTestRouter(t, fakeLLM(t, srv), testDBWithDeps(t, nil))
 	if _, err := r.Route(context.Background(), "how is authentication done?", AudienceDev, LanguageEN, []retrieve.Hit{
 		{Repo: "peeq", Path: "backend/internal/auth/session.go", Score: 0.50},
 		{Repo: "peeq", Path: "backend/internal/login/session.go", Score: 0.49},

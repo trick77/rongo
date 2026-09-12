@@ -232,18 +232,23 @@ func main() {
 	// declared uses edges.
 	indexer.LogInventory(ctx, state, slog.Default(), cfg.ReposFile, listLoaded)
 
+	// One embedder for indexing and for the query side of every answer, on
+	// the endpoint BACKEND_EMBED_BASE_URL and BACKEND_EMBED_API_KEY name. It
+	// is needed whether or not indexing is on, so a missing variable is fatal
+	// either way.
+	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	if err != nil {
+		slog.Error("embedding endpoint", "err", err)
+		os.Exit(1)
+	}
+
 	pipeline := indexer.New(indexer.Deps{
-		DB:      db,
-		Git:     gitClient,
-		Symbols: symbols.NewExtractor(tools.Ctags),
-		Embedder: embed.NewClient(embed.Config{
-			BaseURL: cfg.EmbedBaseURL,
-			APIKey:  cfg.EmbedAPIKey,
-			Model:   cfg.EmbedModel,
-			Dim:     cfg.EmbedDim,
-		}, nil),
-		Cache:  embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
-		Writer: indexer.NewWriter(db),
+		DB:       db,
+		Git:      gitClient,
+		Symbols:  symbols.NewExtractor(tools.Ctags),
+		Embedder: embedder,
+		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
 			MaxBytes: cfg.IndexMaxFileBytes,
 			Exclude:  cfg.IndexExclude,
@@ -298,12 +303,6 @@ func main() {
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
 
-	embedder := embed.NewClient(embed.Config{
-		BaseURL: cfg.EmbedBaseURL,
-		APIKey:  cfg.EmbedAPIKey,
-		Model:   cfg.EmbedModel,
-		Dim:     cfg.EmbedDim,
-	}, nil)
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
@@ -332,21 +331,23 @@ func main() {
 		}
 		deps.OIDC = oidcSvc
 	}
-	// config.Load rejects an empty BACKEND_LLM_BASE_URL, so the pipeline is
-	// always wired: a rongo that indexes but cannot answer is not a mode
-	// anyone wants to be in by accident.
+	// llm.NewClient refuses to build without BACKEND_CHAT_BASE_URL and its
+	// key, so the pipeline is always wired: a rongo that indexes but cannot
+	// answer is not a mode anyone wants to be in by accident.
 	// Timeout bounds one whole call, body included. The answer streams for as
 	// long as its 16384-token budget takes, hidden reasoning counted, and the
 	// default of five minutes would cut a slow one mid-answer: at 20 tokens a
 	// second the budget needs close to 14 minutes. The idle watchdog, not this
 	// one, is what catches a stalled upstream.
-	models := llm.NewClient(llm.Config{
-		BaseURL:         cfg.LLMBaseURL,
-		APIKey:          cfg.LLMAPIKey,
+	models, err := llm.NewClient(llm.Config{
 		Timeout:         15 * time.Minute,
 		TurnMaxTokens:   cfg.TurnMaxTokens,
-		EmulateOpenCode: cfg.LLMEmulateOpenCode,
+		EmulateOpenCode: cfg.ChatEmulateOpenCode,
 	}, nil)
+	if err != nil {
+		slog.Error("chat endpoint", "err", err)
+		os.Exit(1)
+	}
 	// Said at boot like the inventory is: the ceiling is what stops a turn
 	// nobody bounded, and a host running without one should be able to see
 	// that in its log rather than find out from a bill.

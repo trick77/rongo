@@ -13,10 +13,8 @@ package eval
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -29,12 +27,7 @@ func TestEvalRankOfMisses(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	r := retrieve.New(db, embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil))
+	r := retrieve.New(db, evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim))
 	// The pool has to be as deep as the cut, or the cut is the pool.
 	r.Candidates = deepK
 	expansions := loadExpansions(t)

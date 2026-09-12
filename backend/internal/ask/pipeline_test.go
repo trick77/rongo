@@ -217,7 +217,7 @@ func twoStepUpstream(t *testing.T, understanding string, answerTokens ...string)
 		_ = fl.Flush()
 	}))
 	t.Cleanup(srv.Close)
-	return llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	return fakeLLM(t, srv)
 }
 
 func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {

@@ -42,7 +42,6 @@ import (
 
 	"github.com/trick77/llmwire"
 
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -489,8 +488,8 @@ func runFlowQuestion(ctx context.Context, t *testing.T, env *flowEnv, wire *llmw
 // rate: WHERE a loop lost the thread is the finding, not how many it got.
 func TestFlowLoopDiagnostic(t *testing.T) {
 	requireEval(t)
-	if os.Getenv("BACKEND_LLM_BASE_URL") == "" {
-		t.Skip("BACKEND_LLM_BASE_URL is not set")
+	if os.Getenv("BACKEND_CHAT_BASE_URL") == "" {
+		t.Skip("BACKEND_CHAT_BASE_URL is not set")
 	}
 	dim := embedDim(t)
 	db := evalDB(t, dim)
@@ -502,17 +501,12 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	}
 	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 	env := &flowEnv{
-		t: t,
-		retriever: retrieve.New(db, embed.NewClient(embed.Config{
-			BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-			APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-			Model:   model,
-			Dim:     dim,
-		}, nil)),
-		db:       db,
-		repoRoot: envOr("BACKEND_REPO_ROOT", "/tmp/rongo-flow-repos"),
-		rg:       rg,
-		seen:     map[flowPart]bool{},
+		t:         t,
+		retriever: retrieve.New(db, evalEmbedder(t, model, dim)),
+		db:        db,
+		repoRoot:  envOr("BACKEND_REPO_ROOT", "/tmp/rongo-flow-repos"),
+		rg:        rg,
+		seen:      map[flowPart]bool{},
 	}
 
 	questions := loadFlowQuestions(t)

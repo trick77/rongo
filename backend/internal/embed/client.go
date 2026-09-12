@@ -52,27 +52,35 @@ type Client struct {
 }
 
 // NewClient builds a Client. hc is optional; one supplied must not carry
-// http.Client.Timeout, since llmwire bounds the call itself.
-func NewClient(cfg Config, hc *http.Client) *Client {
+// http.Client.Timeout, since llmwire bounds the call itself. BaseURL and
+// APIKey override the env vars the model's llmwire profile names
+// (BACKEND_EMBED_BASE_URL and BACKEND_EMBED_API_KEY); left empty, llmwire
+// reads those itself and a missing one is the error here, named. A test
+// points BaseURL at its fake and no variable is consulted.
+func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	if cfg.HeartbeatInterval == 0 {
 		cfg.HeartbeatInterval = defaultHeartbeat
 	}
+	wire, err := llmwire.FromEnv(cfg.Model, llmwire.Config{
+		BaseURL:       cfg.BaseURL,
+		APIKey:        cfg.APIKey,
+		HeaderTimeout: defaultTimeout,
+		CallTimeout:   defaultTimeout,
+		HTTPClient:    hc,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
-		wire: llmwire.New(llmwire.Config{
-			BaseURL:       cfg.BaseURL,
-			APIKey:        cfg.APIKey,
-			HeaderTimeout: defaultTimeout,
-			CallTimeout:   defaultTimeout,
-			HTTPClient:    hc,
-		}),
+		wire:      wire,
 		model:     cfg.Model,
 		dim:       cfg.Dim,
 		log:       cfg.Logger,
 		heartbeat: cfg.HeartbeatInterval,
-	}
+	}, nil
 }
 
 // Model names the deployment this client embeds against. It is configuration

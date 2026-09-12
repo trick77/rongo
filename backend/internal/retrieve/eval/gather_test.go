@@ -3,13 +3,11 @@ package eval
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -132,12 +130,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	client := embed.NewClient(embed.Config{
-		BaseURL: os.Getenv("BACKEND_EMBED_BASE_URL"),
-		APIKey:  os.Getenv("BACKEND_EMBED_API_KEY"),
-		Model:   envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"),
-		Dim:     dim,
-	}, nil)
+	client := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
 	r := retrieve.New(db, client)
 	questions := loadQuestions(t)
 	expansions := loadExpansions(t)
