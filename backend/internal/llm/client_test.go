@@ -771,7 +771,8 @@ func TestComplete_aLengthFinishIsAnErrorNamingTheBudget(t *testing.T) {
 
 // TestChatError_aTransportErrorNamesTheHostNotTheURL: a base URL can carry a
 // credential in its query, and a dial failure quotes the URL it dialled.
-// llmwire wraps that error with %w, so the url.Error is still there to trim.
+// llmwire takes that error apart since v0.0.14; this pins that rongo passes
+// it through untouched rather than re-wrapping the URL back in.
 func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	// Given an endpoint nobody listens on, named with a key in the query
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
