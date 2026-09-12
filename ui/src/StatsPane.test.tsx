@@ -141,7 +141,7 @@ describe("StatsPane, this turn", () => {
     expect(screen.getByText(/did not charge full price/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "What the context means" }));
-    expect(screen.getByText(/comes from the price registry/)).toBeTruthy();
+    expect(screen.getByText(/is the model's own, from its profile/)).toBeTruthy();
 
     const budget = screen.getByRole("button", { name: "What the source budget means" });
     await user.click(budget);

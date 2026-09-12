@@ -4,11 +4,12 @@ package config
 
 import (
 	"fmt"
-	"github.com/trick77/llmwire"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/trick77/llmwire"
 )
 
 // AuthMode selects how rongo identifies a caller.
