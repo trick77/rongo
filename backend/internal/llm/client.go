@@ -440,9 +440,12 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// its usage frame (idle timeout, a dropped connection, an endpoint that
 	// ignores include_usage) records nothing rather than zeros — a zero row
 	// would read as "this call was free", and it was not; it is unknown.
+	// Gated on the lanes, not on Reported(): an object carrying a bare
+	// total_tokens or an empty details object counts as reported and would
+	// record a 0/0 call — the free-looking row this guard exists to refuse.
 	wu := stream.Usage()
 	got := usageFrom(wu)
-	if wu.Reported() {
+	if _, ok := wu.Total(); ok {
 		record(ctx, o, got, time.Since(started))
 	}
 	if err := stream.Err(); err != nil {
