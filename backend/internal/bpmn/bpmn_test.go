@@ -131,8 +131,41 @@ func TestDescribeRendersOneLinePerNode(t *testing.T) {
 func TestDescribeNamesAnUnresolvedCall(t *testing.T) {
 	m, _ := Parse(orderIntake(t))
 	got := Describe("shop/order-intake.bpmn", m, func(string) string { return "" })
-	if !strings.Contains(got, `calls process "express-shipping", which is not in the indexed repositories`) {
+	if !strings.Contains(got, `calls process "express-shipping", whose model is not listed here`) {
 		t.Errorf("unresolved call not named:\n%s", got)
+	}
+}
+
+// bpmn-js and Camunda Modeler append the error, signal and message
+// definitions to the root AFTER the process, and a process without
+// isExecutable is the attribute's default, not an empty pool.
+func TestParseResolvesDefinitionsWrittenAfterTheProcessAndKeepsNonExecutableGraphs(t *testing.T) {
+	const model = `<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <process id="p">
+    <startEvent id="s" />
+    <serviceTask id="t" name="Charge" />
+    <boundaryEvent id="b" name="Declined" attachedToRef="t">
+      <errorEventDefinition errorRef="Error_1" />
+    </boundaryEvent>
+    <intermediateThrowEvent id="m">
+      <messageEventDefinition messageRef="Message_1" />
+    </intermediateThrowEvent>
+    <sequenceFlow id="f" sourceRef="s" targetRef="t" />
+  </process>
+  <error id="Error_1" name="paymentDeclined" errorCode="DECLINED" />
+  <message id="Message_1" name="orderPlaced" />
+</definitions>`
+	m, err := Parse([]byte(model))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.Processes[0]
+	if p.Nodes[2].Error != "paymentDeclined" || p.Nodes[3].Message != "orderPlaced" {
+		t.Errorf("definitions after the process did not resolve: %+v %+v", p.Nodes[2], p.Nodes[3])
+	}
+	got := Describe("shop/p.bpmn", m, func(string) string { return "" })
+	if !strings.Contains(got, "- Charge (serviceTask)") || !strings.Contains(got, "error paymentDeclined") {
+		t.Errorf("a graph without isExecutable must still be listed:\n%s", got)
 	}
 }
 

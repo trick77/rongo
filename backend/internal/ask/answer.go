@@ -367,7 +367,7 @@ quoted as written, never paraphrased or reassembled from memory.`
 const answerProcesses = `
 
 The process models among the sources are wired as follows, read from the model
-files themselves, one line per node in file order, each with the nodes it
+files themselves, one line per node in walk order from the start event, each with the nodes it
 leads to and the condition on each branch:
 
 %s

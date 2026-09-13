@@ -6,7 +6,7 @@
 // the same file for that), but a list of sourceRef/targetRef pairs is not
 // something an answer orders into a walk, and a call activity's target sits in
 // another file that retrieval did not return. Describe renders the graph as
-// one line per node, in file order, with the branches and their conditions
+// one line per node, in walk order, with the branches and their conditions
 // on it — read from the file at the commit the source was cited at, per turn,
 // never stored. Same footing as the structure block: derived from what is
 // indexed, so it cannot go stale on its own.
@@ -148,22 +148,22 @@ func Parse(body []byte) (*Model, error) {
 				}
 			case t.Name.Local == "errorEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Error = firstOf(m.Errors[attr(t, "errorRef")], attr(t, "errorRef"), "error")
+					n.Error = firstOf(attr(t, "errorRef"), "error")
 				}
 			case t.Name.Local == "signalEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Signal = firstOf(m.Signals[attr(t, "signalRef")], attr(t, "signalRef"), "signal")
+					n.Signal = firstOf(attr(t, "signalRef"), "signal")
 				}
 			case t.Name.Local == "escalationEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Escalation = firstOf(m.Escalations[attr(t, "escalationRef")], attr(t, "escalationRef"), "escalation")
+					n.Escalation = firstOf(attr(t, "escalationRef"), "escalation")
 				}
 			case t.Name.Local == "messageEventDefinition":
 				if n := enclosingNode(stack); n != nil {
 					// Unlike the others, a message with no reference says
 					// nothing worth a word: the engine's throw goes through
 					// the delegate, which is listed.
-					n.Message = firstOf(messages[attr(t, "messageRef")], attr(t, "messageRef"))
+					n.Message = attr(t, "messageRef")
 					// A message throw event carries its delegate on the
 					// definition, not on the event.
 					if n.Delegate == "" {
@@ -200,6 +200,26 @@ func Parse(body []byte) (*Model, error) {
 				scope = f.proc.Parent
 			}
 		}
+	}
+	// The references resolve AFTER the walk: bpmn-js and Camunda Modeler
+	// append the error, signal and message definitions to the root after the
+	// process, so at the time a boundary event is read its errorRef names a
+	// definition the decoder has not met yet. Read eagerly, every real export
+	// listed "error Error_0k3x1" instead of the name.
+	resolve := func(p *Process) {}
+	resolve = func(p *Process) {
+		for _, n := range p.Nodes {
+			n.Error = firstOf(m.Errors[n.Error], n.Error)
+			n.Signal = firstOf(m.Signals[n.Signal], n.Signal)
+			n.Escalation = firstOf(m.Escalations[n.Escalation], n.Escalation)
+			n.Message = firstOf(messages[n.Message], n.Message)
+		}
+		for _, sub := range p.Subs {
+			resolve(sub)
+		}
+	}
+	for _, p := range m.Processes {
+		resolve(p)
 	}
 	return m, nil
 }

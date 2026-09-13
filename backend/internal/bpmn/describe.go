@@ -6,7 +6,7 @@ import (
 )
 
 // Describe renders one model's executable processes as text for the answer
-// prompt: one line per node in file order, its outgoing flows on the same
+// prompt: one line per node in walk order, its outgoing flows on the same
 // line with their conditions, embedded sub-processes as blocks of their own
 // under the parent. Deterministic, no model, nothing inferred: every word is
 // an attribute of the file.
@@ -18,7 +18,12 @@ import (
 func Describe(where string, m *Model, resolved func(processID string) string) string {
 	var b strings.Builder
 	for _, p := range m.Processes {
-		if !p.Executable || len(p.Nodes) == 0 {
+		if len(p.Nodes) == 0 {
+			// A collaboration's other participants: pools with no nodes.
+			// isExecutable is NOT the gate: the attribute defaults to false,
+			// and a documentation model or an older export with a full
+			// graph and no attribute is still the wiring the reader asked
+			// about.
 			continue
 		}
 		describeProcess(&b, where, p, m, resolved)
@@ -55,7 +60,7 @@ func describeProcess(b *strings.Builder, where string, p *Process, m *Model, res
 			if file := resolved(n.Called); file != "" {
 				fmt.Fprintf(b, ", calls process %q in %s", n.Called, file)
 			} else {
-				fmt.Fprintf(b, ", calls process %q, which is not in the indexed repositories", n.Called)
+				fmt.Fprintf(b, ", calls process %q, whose model is not listed here", n.Called)
 			}
 		}
 		if n.AttachedTo != "" {

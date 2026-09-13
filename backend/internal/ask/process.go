@@ -77,7 +77,10 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 		model      *bpmn.Model
 	}
 	byRepo := map[string][]parsed{}
-	byProcess := map[string]parsed{} // process id -> the file defining it
+	// process id -> the file defining it, per repository: a call activity
+	// runs a process deployed beside it, and two repositories may each have
+	// an "order" process without either meaning the other's.
+	byProcess := map[string]map[string]parsed{}
 	for _, k := range order {
 		if _, done := byRepo[k.repo]; done {
 			continue
@@ -102,9 +105,12 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 			}
 			pd := parsed{repo: k.repo, path: r.Path, model: m}
 			byRepo[k.repo] = append(byRepo[k.repo], pd)
+			if byProcess[k.repo] == nil {
+				byProcess[k.repo] = map[string]parsed{}
+			}
 			for _, pr := range m.Processes {
-				if pr.Executable {
-					byProcess[pr.ID] = pd
+				if len(pr.Nodes) > 0 {
+					byProcess[k.repo][pr.ID] = pd
 				}
 			}
 		}
@@ -117,11 +123,13 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 		}
 		return parsed{}, false
 	}
-	resolved := func(id string) string {
-		if pd, ok := byProcess[id]; ok {
-			return pd.repo + "/" + pd.path
+	resolvedIn := func(repo string) func(string) string {
+		return func(id string) string {
+			if pd, ok := byProcess[repo][id]; ok {
+				return pd.repo + "/" + pd.path
+			}
+			return ""
 		}
-		return ""
 	}
 
 	// The models among the sources first, then what they call, one level:
@@ -129,13 +137,14 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 	// the level below that is a different question.
 	var b strings.Builder
 	rendered := map[string]bool{}
-	var called []string
+	type call struct{ repo, id string }
+	var called []call
 	render := func(pd parsed) bool {
 		where := pd.repo + "/" + pd.path
 		if rendered[where] {
 			return true
 		}
-		text := bpmn.Describe(where, pd.model, resolved)
+		text := bpmn.Describe(where, pd.model, resolvedIn(pd.repo))
 		if text == "" {
 			return true
 		}
@@ -146,7 +155,9 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 		b.WriteString(text)
 		b.WriteString("\n")
 		for _, pr := range pd.model.Processes {
-			called = append(called, calls(pr)...)
+			for _, id := range calls(pr) {
+				called = append(called, call{pd.repo, id})
+			}
 		}
 		return true
 	}
@@ -158,8 +169,8 @@ func (p *Pipeline) describeProcesses(ctx context.Context, sources []Source) stri
 	}
 	// A copy: render appends what the called models call in turn, and that
 	// second level stays out.
-	for _, id := range append([]string(nil), called...) {
-		if pd, ok := byProcess[id]; ok && !render(pd) {
+	for _, c := range append([]call(nil), called...) {
+		if pd, ok := byProcess[c.repo][c.id]; ok && !render(pd) {
 			cut = true
 		}
 	}
