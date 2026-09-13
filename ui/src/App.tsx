@@ -597,7 +597,10 @@ export default function App() {
           )}
           {page === "projects" && (
             <div className="h-full overflow-auto">
-              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+              {/* Wider than the reading pages: this one is a table of six
+                  columns with a repository name in mono, and at 900px the
+                  numbers on the right were the first thing to go. */}
+              <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
                 {/* leading-tight like Ask's welcome heading: without it the
                     taller line box puts this title 3px below the other page's. */}
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">

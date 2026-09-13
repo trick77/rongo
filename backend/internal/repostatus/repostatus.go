@@ -46,16 +46,17 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			return nil, fmt.Errorf("cluster %s: %w", st.Name, err)
 		}
 		out = append(out, httpapi.RepoStatus{
-			Name:      st.Name,
-			Branch:    st.Branch,
-			LastSHA:   st.LastSHA,
-			LastRunAt: st.LastRunAt,
-			Files:     st.Files,
-			Chunks:    st.Chunks,
-			Modules:   len(mods),
-			Enabled:   st.Enabled,
-			Snapshot:  st.Snapshot(),
-			LastError: st.LastError,
+			Name:          st.Name,
+			Branch:        st.Branch,
+			LastSHA:       st.LastSHA,
+			LastRunAt:     st.LastRunAt,
+			LastIndexedAt: st.LastIndexedAt,
+			Files:         st.Files,
+			Chunks:        st.Chunks,
+			Modules:       len(mods),
+			Enabled:       st.Enabled,
+			Snapshot:      st.Snapshot(),
+			LastError:     st.LastError,
 			// A row written before projects shipped has no project; it stands
 			// as one of its own, the same fallback projects.Load applies.
 			Project:     projectOr(st.Project, st.Name),

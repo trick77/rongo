@@ -30,9 +30,13 @@ type RepoState struct {
 	Enabled   bool
 	LastSHA   string
 	LastError string
+	// LastRunAt is the last poll, whatever it found: the poller's pulse.
 	LastRunAt time.Time
-	Files     int
-	Chunks    int
+	// LastIndexedAt is the last time the index was written: the moment a
+	// push became answerable. Zero until the first index run.
+	LastIndexedAt time.Time
+	Files         int
+	Chunks        int
 	// Project, Part, Description and Uses come from repos.yaml, not from the
 	// checkout: they say which product this repository belongs to and what part
 	// it plays in it. Nothing here is derived from code, and none of it is ever
@@ -225,7 +229,7 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE repo_state
-		SET last_sha = '', last_error = '', file_count = 0, chunk_count = 0
+		SET last_sha = '', last_indexed_at = '', last_error = '', file_count = 0, chunk_count = 0
 		WHERE name = ?`, name); err != nil {
 		return fmt.Errorf("reset %s: %w", name, err)
 	}
@@ -321,7 +325,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       file_count, chunk_count, token_env, project, part, description
+		       last_indexed_at, file_count, chunk_count, token_env, project, part, description
 		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -332,15 +336,18 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	for rows.Next() {
 		var r RepoState
 		var enabled int
-		var lastRun string
+		var lastRun, lastIndexed string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
-			&r.LastError, &lastRun, &r.Files, &r.Chunks, &r.TokenEnv,
+			&r.LastError, &lastRun, &lastIndexed, &r.Files, &r.Chunks, &r.TokenEnv,
 			&r.Project, &r.Part, &r.Description); err != nil {
 			return nil, err
 		}
 		r.Enabled = enabled == 1
 		if lastRun != "" {
 			r.LastRunAt, _ = time.Parse(time.RFC3339, lastRun)
+		}
+		if lastIndexed != "" {
+			r.LastIndexedAt, _ = time.Parse(time.RFC3339, lastIndexed)
 		}
 		out = append(out, r)
 	}
@@ -419,13 +426,15 @@ func (s *StateStore) attachUses(ctx context.Context, states []RepoState) error {
 }
 
 // MarkIndexed records a successful run and clears any previous error, so a
-// stale failure cannot alarm forever.
+// stale failure cannot alarm forever. It is the only writer of
+// last_indexed_at: a poll that found nothing new moves last_run_at alone.
 func (s *StateStore) MarkIndexed(ctx context.Context, name, sha string, c Counts) error {
+	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE repo_state
-		SET last_sha = ?, last_run_at = ?, last_error = '', file_count = ?, chunk_count = ?
+		SET last_sha = ?, last_run_at = ?, last_indexed_at = ?, last_error = '', file_count = ?, chunk_count = ?
 		WHERE name = ?`,
-		sha, time.Now().UTC().Format(time.RFC3339), c.Files, c.Chunks, name)
+		sha, now, now, c.Files, c.Chunks, name)
 	return err
 }
 

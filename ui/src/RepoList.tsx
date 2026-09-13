@@ -6,7 +6,11 @@ export type Repo = {
   name: string;
   branch: string;
   last_sha: string;
+  /** The last poll, whatever it found: the poller's pulse, not the index. */
   last_run_at: string | null;
+  /** The last time the index was written; null until the first run. This is
+   * what "is my push in the answers yet" reads. */
+  last_indexed_at: string | null;
   files: number;
   chunks: number;
   modules: number;
@@ -224,7 +228,17 @@ function rowState(r: Repo): string {
 
 const th = "px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-[.12em] text-faint";
 
-function Stat({ label, value, note }: { label: string; value: string | number; note?: string }) {
+function Stat({
+  label,
+  value,
+  note,
+  title,
+}: {
+  label: string;
+  value: string | number;
+  note?: string;
+  title?: string;
+}) {
   return (
     // The bottom border separates the two-up rows on a phone; from sm the
     // block is one flex row again and only the vertical rules are left. The
@@ -232,7 +246,10 @@ function Stat({ label, value, note }: { label: string; value: string | number; n
     // against the wrapper's border, which reads as a doubled line — and the
     // odd fifth stat takes the whole last row rather than leaving half of it
     // ruled and half of it blank.
-    <div className="flex-1 border-r border-b border-border px-4 py-3 even:border-r-0 last:col-span-2 last:border-r-0 last:border-b-0 sm:border-b-0 sm:px-5 sm:py-3.5 sm:even:border-r sm:last:border-r-0">
+    <div
+      className="flex-1 border-r border-b border-border px-4 py-3 even:border-r-0 last:col-span-2 last:border-r-0 last:border-b-0 sm:border-b-0 sm:px-5 sm:py-3.5 sm:even:border-r sm:last:border-r-0"
+      title={title}
+    >
       <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">{label}</div>
       <div className="mt-0.5 font-serif text-[21px] leading-tight tabular-nums text-ink sm:text-[26px]">
         {value}
@@ -325,7 +342,13 @@ export default function RepoList() {
         <Stat label="Files" value={sum((r) => r.files)} />
         <Stat label="Chunks" value={sum((r) => r.chunks)} />
         <Stat label="Modules" value={sum((r) => r.modules)} />
-        <Stat label="Last run" value={relative(lastRun)} />
+        {/* The poll, not the index: one health signal for the whole corpus.
+            Each row says when its own index was last written. */}
+        <Stat
+          label="Last poll"
+          value={relative(lastRun)}
+          title="The last time every repository was fetched and compared with its indexed commit."
+        />
       </div>
       {/* Directly under the numbers it explains, and drawn only when there is
           something to explain. Faint, because an absence is not news. */}
@@ -355,7 +378,7 @@ function ProjectPanel({ project }: { project: Project }) {
   return (
     <section className="mb-5 overflow-hidden rounded-ui border border-border bg-panel">
       <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-border bg-bg px-3.5 py-2.5">
-        <h3 className="font-medium text-ink">{project.name}</h3>
+        <h3 className="font-mono text-ink">{project.name}</h3>
         <span className="text-[12.5px] text-faint">
           {project.repos.length} {project.repos.length === 1 ? "repository" : "repositories"} ·{" "}
           {sum((r) => r.files)} files · {sum((r) => r.chunks)} chunks
@@ -383,15 +406,18 @@ function ProjectPanel({ project }: { project: Project }) {
         </div>
       )}
 
+      {/* Six columns, and only the first one flexes: every other cell is
+          sized to its content (w-px + nowrap), so the numbers on the right
+          are always inside the panel and a long repository name wraps
+          instead of pushing them out. Below sm the panel still scrolls,
+          which is where a 360px phone needs it. */}
       <div className="overflow-x-auto overscroll-x-contain">
-        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-sm">
+        <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="bg-bg">
-              <th className={th + " sticky left-0 z-10 border-b border-border bg-bg"}>Repository</th>
-              <th className={th + " border-b border-border"}>Part</th>
-              <th className={th + " border-b border-border"}>Branch</th>
+              <th className={th + " border-b border-border"}>Repository</th>
               <th className={th + " border-b border-border"}>State</th>
-              <th className={th + " border-b border-border"}>Last run</th>
+              <th className={th + " border-b border-border"}>Indexed</th>
               <th className={th + " border-b border-border text-right"}>Files</th>
               <th className={th + " border-b border-border text-right"}>Chunks</th>
               <th className={th + " border-b border-border text-right"}>Modules</th>
@@ -413,33 +439,30 @@ function ProjectPanel({ project }: { project: Project }) {
                     (r.enabled ? "" : "text-faint")
                   }
                 >
-                  {/* The explicit background is what a sticky cell needs, or the
-                      scrolled columns show through it. */}
-                  {/* A width, or the description in this cell squeezes the
-                      column until the repository name itself wraps mid-word —
-                      and the name is the one thing every row is identified by. */}
+                  {/* Name, then part and branch under it: two facts nobody
+                      compares down a column, so they cost no column. The name
+                      is muted and the project header is not, which is what
+                      makes the header read as the heading. */}
                   <td
                     className={
-                      "sticky left-0 z-10 w-[17rem] bg-panel px-3.5 py-3 " +
+                      "px-3.5 py-3 " +
                       (r.last_error ? "shadow-[inset_3px_0_0_var(--color-danger)]" : "")
                     }
                   >
-                    <span className="font-mono font-medium whitespace-nowrap">{r.name}</span>
+                    <span className="font-mono text-muted">{r.name}</span>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[12px] text-faint">
+                      {r.part && (
+                        <span className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim">
+                          {r.part}
+                        </span>
+                      )}
+                      <span>{r.branch}</span>
+                    </div>
                     {r.last_error && (
                       <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>
                     )}
                   </td>
-                  <td className="px-3.5 py-3">
-                    {r.part ? (
-                      <span className="rounded-full bg-active px-2.5 py-0.5 font-mono text-[11px] text-ink-dim">
-                        {r.part}
-                      </span>
-                    ) : (
-                      <span className="text-faint">—</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-3.5 py-3 font-mono">{r.branch}</td>
-                  <td className="px-3.5 py-3">
+                  <td className="w-px whitespace-nowrap px-3.5 py-3">
                     {/* Disabled and error are independent facts: a repo the YAML
                         disabled keeps its last error, and both are said. */}
                     <span className="flex flex-wrap gap-1">
@@ -477,24 +500,33 @@ function ProjectPanel({ project }: { project: Project }) {
                       )}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-3.5 py-3">
-                    <code className="font-mono text-xs">{shortSha(r.last_sha)}</code>
-                    <span className="ml-1.5 text-xs text-faint">{ago(r.last_run_at)}</span>
+                  {/* When the index was last written, and at which commit.
+                      Not the poll: that moved every half hour whether or not
+                      anything was indexed, and read as "indexed just now". */}
+                  <td
+                    className="w-px whitespace-nowrap px-3.5 py-3"
+                    title={`Indexed ${ago(r.last_indexed_at)}. Last poll ${ago(r.last_run_at)}.`}
+                  >
+                    {relative(r.last_indexed_at)}
+                    {/* Its own line: beside the time it cost the column 70px,
+                        which at 1024px with the sidebar open was the 25px
+                        that pushed Modules out of the panel. */}
+                    <code className="block font-mono text-xs text-faint">{shortSha(r.last_sha)}</code>
                   </td>
-                  <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
+                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
                     {r.files}
                   </td>
-                  <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
+                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
                     {r.chunks}
                   </td>
-                  <td className="whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
+                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
                     {r.modules}
                   </td>
                 </tr>
                 {/* The description gets the whole table width instead of the
-                    17rem name column, where 180 characters wrapped to six lines
-                    and grew the row while every other cell stayed one line
-                    tall. No description, no row: absence takes no marker. */}
+                    name column, where 180 characters wrapped to six lines and
+                    grew the row while every other cell stayed one line tall.
+                    No description, no row: absence takes no marker. */}
                 {r.description && (
                   <tr
                     data-state={st}
@@ -507,7 +539,7 @@ function ProjectPanel({ project }: { project: Project }) {
                         sentence run across a wide monitor is one long measure
                         nobody reads to the end of. The cell still spans every
                         column so the text starts at the repository name. */}
-                    <td colSpan={8} className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted">
+                    <td colSpan={6} className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted">
                       <div className="max-w-[64rem]">{r.description}</div>
                     </td>
                   </tr>

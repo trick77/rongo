@@ -55,8 +55,9 @@ func getRepos(t *testing.T, deps Deps) *httptest.ResponseRecorder {
 func TestRepos_reportsWhatThePageShows(t *testing.T) {
 	// Given
 	when := time.Date(2026, 8, 17, 9, 30, 0, 0, time.UTC)
+	indexed := time.Date(2026, 8, 15, 6, 0, 0, 0, time.UTC)
 	deps := Deps{Auth: devAuth(t), Repos: fakeRepos{out: []RepoStatus{{
-		Name: "peeq", Branch: "master", LastSHA: "abc1234", LastRunAt: when,
+		Name: "peeq", Branch: "master", LastSHA: "abc1234", LastRunAt: when, LastIndexedAt: indexed,
 		Files: 412, Chunks: 3120, Modules: 34, Enabled: true,
 	}}}}
 
@@ -75,13 +76,15 @@ func TestRepos_reportsWhatThePageShows(t *testing.T) {
 		t.Fatalf("got %d repositories, want 1", len(got))
 	}
 	for key, want := range map[string]any{
-		"name":     "peeq",
-		"branch":   "master",
-		"last_sha": "abc1234",
-		"files":    float64(412),
-		"chunks":   float64(3120),
-		"modules":  float64(34),
-		"enabled":  true,
+		"name":            "peeq",
+		"branch":          "master",
+		"last_sha":        "abc1234",
+		"last_run_at":     "2026-08-17T09:30:00Z",
+		"last_indexed_at": "2026-08-15T06:00:00Z",
+		"files":           float64(412),
+		"chunks":          float64(3120),
+		"modules":         float64(34),
+		"enabled":         true,
 	} {
 		if got[0][key] != want {
 			t.Errorf("%s = %v, want %v", key, got[0][key], want)
