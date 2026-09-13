@@ -357,6 +357,27 @@ one sentence that the other stages were not looked at. Every value is copied
 character for character from the line that sets it - a cron expression is
 quoted as written, never paraphrased or reassembled from memory.`
 
+// answerProcesses carries the wiring of the process models among the sources.
+// It exists because a model's nodes and flows reach the prompt as separate
+// chunks, in retrieval order, and a list of sourceRef/targetRef pairs is not
+// something the answer orders into a walk: measured, every trace question was
+// answered as a paragraph per chunk with no sequence. The listing gives the
+// order and the branching; the claims still come from the sources, which is
+// why the block ends with the same rule the structure block does.
+const answerProcesses = `
+
+The process models among the sources are wired as follows, read from the model
+files themselves, one line per node in file order, each with the nodes it
+leads to and the condition on each branch:
+
+%s
+Use this for the ORDER of the steps and for which branch is taken when: it is
+what the model file declares. What a step does is described in the sources and
+cited from them - cite the node's own source, never this listing. A called
+process listed here whose nodes have no source of their own may be walked by
+the names above, and then say in a clause that its model was not among the
+sources; say nothing about what its steps do inside.`
+
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
 where they carry the explanation. A fenced code block carries its language tag
@@ -558,6 +579,12 @@ type Scope struct {
 	// source under a stage directory and narrowing the crossing. Derived per
 	// turn like Structure, never persisted, for the same reason.
 	Stages stages.Set `json:"-"`
+	// Processes is the wiring of the process models among the sources, for
+	// the answer prompt: one line per node, the branches with their
+	// conditions, the models the call activities run. Derived per turn from
+	// the model files at their indexed commit, never persisted, for the
+	// reason Structure is not.
+	Processes string `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -882,6 +909,9 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// the turn's own projects reach it, so a pin that excludes a repository
 	// never has it described anyway.
 	system += scope.Structure
+	if scope.Processes != "" {
+		system += fmt.Sprintf(answerProcesses, scope.Processes)
+	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}

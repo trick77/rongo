@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,9 +35,11 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/sourceview"
 )
 
 // Rubric is what a correct answer to one question has to say, written from
@@ -230,6 +233,17 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	opts := gatherOpts(t)
 	mo := modules.Opts{MinChunks: envIntOr(t, "BACKEND_MODULE_MIN_CHUNKS", 8), MaxChunks: envIntOr(t, "BACKEND_MODULE_MAX_CHUNKS", 150)}
 	pipeline := ask.NewPipeline(c, retriever, ask.NewGatherer(db, opts), ask.NewRouter(c, db, routeMargin(t), mo))
+	// The product's process listing (main.go): the model files are read from
+	// the checkouts the index arm cloned. BACKEND_EVAL_PROCESSES=0 measures
+	// the answer without it.
+	if envOr("BACKEND_EVAL_PROCESSES", "1") != "0" {
+		gitBin, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatalf("git: %v", err)
+		}
+		gitc := gitrepo.New(gitBin, envOr("BACKEND_REPO_ROOT", "/tmp/rongo-eval-repos"))
+		pipeline.WithModels(sourceview.New(db, gitc, 1<<20))
+	}
 
 	questions := loadFlowQuestions(t)
 	rubrics := loadRubrics(t)
