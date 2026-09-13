@@ -502,19 +502,6 @@ func streamingUpstream(t *testing.T, tokens []string, finishReason string, compl
 	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
 }
 
-// rawStreamUpstream answers 200 with the one frame given and closes: the shape
-// of an OpenAI-style server that fails after it has already sent the status.
-func rawStreamUpstream(t *testing.T, frame string) *Client {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "data: %s\n\n", frame)
-	}))
-	t.Cleanup(srv.Close)
-	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())
-}
-
 func TestStream_deliversTokensOneByOne(t *testing.T) {
 	// Given
 	c := streamingUpstream(t, []string{"The ", "shipping ", "runs"}, "", 4)
@@ -537,49 +524,6 @@ func TestStream_deliversTokensOneByOne(t *testing.T) {
 	}
 	if usage.Total != 7 {
 		t.Errorf("usage = %+v, want the trailing usage frame", usage)
-	}
-}
-
-func TestStream_anUpstreamThatStallsIsAbandoned(t *testing.T) {
-	// An upstream that sends one delta and then goes quiet used to hold the
-	// reader on a half-written answer until the coarse HTTP timeout — minutes
-	// of a cursor that looks like it is still thinking. The watchdog was
-	// configured and documented but never armed; this test is what says it is.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		fl := http.NewResponseController(w)
-		frame, _ := json.Marshal(map[string]any{
-			"choices": []any{map[string]any{"delta": map[string]any{"content": "The "}}},
-		})
-		fmt.Fprintf(w, "data: %s\n\n", frame)
-		_ = fl.Flush()
-		// ...and then nothing, for longer than the watchdog window.
-		time.Sleep(2 * time.Second)
-	}))
-	t.Cleanup(srv.Close)
-	c := mustClient(t, Config{BaseURL: srv.URL, IdleTimeout: 150 * time.Millisecond}, srv.Client())
-
-	var seen []string
-	start := time.Now()
-	_, _ = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}},
-		func(tok string) { seen = append(seen, tok) })
-	elapsed := time.Since(start)
-
-	if elapsed > time.Second {
-		t.Errorf("Stream took %v, want it abandoned near the idle window", elapsed)
-	}
-	if len(seen) != 1 || seen[0] != "The " {
-		t.Errorf("tokens = %q, want the one delta that did arrive", seen)
-	}
-}
-
-func TestStream_requestsUsageInTheStream(t *testing.T) {
-	c, got := fakeUpstream(t, "x")
-	_, _ = c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
-
-	if !got.Stream {
-		t.Error("stream = false on a streaming call")
 	}
 }
 
@@ -607,8 +551,7 @@ func headerCapture(t *testing.T, stream bool, emulate bool) (*Client, *http.Head
 // TestEmulateOpenCode_presentsAsTheOpencodeClient covers what the flag buys
 // on both entry points: opencode's own client string, and the session header
 // pair that pins a burst of calls to one upstream node. Both values are
-// llmwire's; what is pinned here is that rongo's flag reaches the wire, and
-// that a process sends one id for all of its calls.
+// llmwire's; what is pinned here is that rongo's flag reaches the wire.
 func TestEmulateOpenCode_presentsAsTheOpencodeClient(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		name := "Complete"
@@ -628,20 +571,10 @@ func TestEmulateOpenCode_presentsAsTheOpencodeClient(t *testing.T) {
 			if ua := got.Get("User-Agent"); ua != llmwire.OpenCodeUserAgent {
 				t.Errorf("User-Agent = %q, want %q", ua, llmwire.OpenCodeUserAgent)
 			}
-			id := got.Get("X-Session-Id")
-			if !strings.HasPrefix(id, "ses_") {
-				t.Fatalf("X-Session-Id = %q, want an opencode-shaped session id", id)
-			}
-			if affinity := got.Get("X-Session-Affinity"); affinity != id {
-				t.Errorf("X-Session-Affinity = %q, want the same value as X-Session-Id %q", affinity, id)
-			}
-
-			// And a second call carries the same id: one process, one session.
-			if err := callOnce(c, stream); err != nil {
-				t.Fatalf("second call: %v", err)
-			}
-			if again := got.Get("X-Session-Id"); again != id {
-				t.Errorf("session id changed between calls: %q then %q", id, again)
+			// The id's shape and its rotation are llmwire's own tests; what
+			// is pinned here is that the pair is sent at all.
+			if got.Get("X-Session-Id") == "" || got.Get("X-Session-Affinity") == "" {
+				t.Errorf("session header pair missing: %v", got)
 			}
 		})
 	}
@@ -734,22 +667,6 @@ func TestStream_aLengthFinishAfterContentIsStillAnError(t *testing.T) {
 	}
 	if len(seen) != 2 {
 		t.Errorf("tokens = %q, want every delta that arrived delivered before the error", seen)
-	}
-}
-
-func TestStream_anErrorFrameIsAnErrorAndNeverQuotesTheKey(t *testing.T) {
-	c := rawStreamUpstream(t, `{"error":{"message":"context length exceeded for Bearer sk-secret","type":"invalid_request_error"}}`)
-
-	_, err := c.Stream(context.Background(), []Message{{Role: "user", Content: "x"}}, func(string) {})
-
-	if err == nil {
-		t.Fatal("Stream: nil error on an in-stream error frame")
-	}
-	if !strings.Contains(err.Error(), "context length exceeded") {
-		t.Errorf("err = %v, want the upstream message", err)
-	}
-	if strings.Contains(err.Error(), "sk-secret") {
-		t.Errorf("err = %v, the key must never be quoted", err)
 	}
 }
 

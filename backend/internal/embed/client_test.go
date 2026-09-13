@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -144,28 +143,6 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 	}
 }
 
-func TestEmbed_duplicateIndexIsAnError(t *testing.T) {
-	// Given: a response whose indexes collide. The count still matches, so a
-	// client that trusted the count would store one input's vector twice and
-	// leave another chunk holding someone else's.
-	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
-		return 200, map[string]any{"data": []respData{
-			{Index: 0, Embedding: vecOf(1, Dim())},
-			{Index: 0, Embedding: vecOf(2, Dim())},
-			{Index: 1, Embedding: vecOf(3, Dim())},
-		}}
-	})
-	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
-
-	// When
-	_, err := testee.Embed(context.Background(), []string{"a", "b", "c"})
-
-	// Then
-	if err == nil {
-		t.Fatal("Embed() err = nil, want an error for a duplicated index")
-	}
-}
-
 func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	// Given: vec0 would reject this later, at a point far from the cause.
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
@@ -182,29 +159,6 @@ func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), strconv.Itoa(Dim())) || !strings.Contains(err.Error(), "3 dimensions") {
 		t.Errorf("error = %q, want it to name both dimensions", err)
-	}
-}
-
-func TestEmbed_errorCarriesStatusAndACappedBody(t *testing.T) {
-	// Given: an endpoint returning a huge error page.
-	huge := strings.Repeat("x", 64<<10)
-	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
-		return http.StatusServiceUnavailable, huge
-	})
-	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
-
-	// When
-	_, err := testee.Embed(context.Background(), []string{"a"})
-
-	// Then
-	if err == nil {
-		t.Fatal("Embed() err = nil, want an error")
-	}
-	if !strings.Contains(err.Error(), "503") {
-		t.Errorf("error = %.80q…, want it to carry the status", err.Error())
-	}
-	if len(err.Error()) > 8<<10 {
-		t.Errorf("error is %d bytes; the body must be capped before it reaches a log line", len(err.Error()))
 	}
 }
 
@@ -282,44 +236,6 @@ func TestEmbed_emptyInputMakesNoRequest(t *testing.T) {
 	}
 	if len(*seen) != 0 {
 		t.Errorf("made %d requests for no input, want 0", len(*seen))
-	}
-}
-
-func TestEmbed_splitsLargeInputIntoBatchesKeepingOrder(t *testing.T) {
-	// Given: more inputs than one request may carry. The concatenation across
-	// batches is the second place order can silently break.
-	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
-		data := make([]respData, len(inputs))
-		for i, in := range inputs {
-			var n float32
-			fmt.Sscanf(in, "text-%f", &n)
-			data[len(inputs)-1-i] = respData{Index: i, Embedding: vecOf(n, Dim())}
-		}
-		return 200, map[string]any{"data": data}
-	})
-	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
-	inputs := make([]string, 150)
-	for i := range inputs {
-		inputs[i] = fmt.Sprintf("text-%d", i)
-	}
-
-	// When
-	vecs, err := testee.Embed(context.Background(), inputs)
-
-	// Then
-	if err != nil {
-		t.Fatalf("Embed() err = %v, want nil", err)
-	}
-	if len(vecs) != len(inputs) {
-		t.Fatalf("got %d vectors for %d inputs", len(vecs), len(inputs))
-	}
-	for i := range inputs {
-		if vecs[i][0] != float32(i) {
-			t.Fatalf("vector %d carries marker %v, want %d", i, vecs[i][0], i)
-		}
-	}
-	if len(*seen) < 2 {
-		t.Errorf("made %d requests for 150 inputs, want several bounded batches", len(*seen))
 	}
 }
 

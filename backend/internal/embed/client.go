@@ -38,18 +38,13 @@ const (
 const Model = "text-embedding-3-small"
 
 // profile is the registry's description of Model, resolved once. A build
-// whose constant names a model llmwire does not ship cannot start at all,
-// which is the right time to find out.
+// whose constant names a model llmwire does not ship, or a chat model, cannot
+// start at all, which is the right time to find out. The vector width is
+// llmwire's guarantee: an embeddings profile without one does not load.
 var profile = func() *llmwire.Profile {
-	p, err := llmwire.Default().Lookup(Model)
+	p, err := llmwire.Default().LookupEmbedding(Model)
 	if err != nil {
-		panic("embed: Model has no llmwire profile: " + err.Error())
-	}
-	if p.Endpoint != llmwire.EndpointEmbeddings {
-		panic("embed: Model is not an embeddings model: " + Model)
-	}
-	if p.Embedding.DefaultDimensions <= 0 {
-		panic("embed: Model's profile carries no vector width: " + Model)
+		panic("embed: " + err.Error())
 	}
 	return p
 }()

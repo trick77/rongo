@@ -31,6 +31,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/llmwire"
+
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/llm"
@@ -188,12 +190,9 @@ func judgeAnswer(ctx context.Context, c *llm.Client, r Rubric, answer string) (v
 	if err != nil {
 		return verdict{}, err
 	}
-	out = strings.TrimSpace(out)
-	if strings.HasPrefix(out, "```") {
-		out = strings.TrimSuffix(strings.TrimSpace(out[strings.IndexByte(out, '\n')+1:]), "```")
-	}
+	body, _ := llmwire.JSONObject(out)
 	var v verdict
-	if err := json.Unmarshal([]byte(out), &v); err != nil {
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
 		return verdict{}, fmt.Errorf("judge reply was not JSON: %w: %s", err, excerpt(out, 200))
 	}
 	return v, nil

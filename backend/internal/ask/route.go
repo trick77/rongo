@@ -11,6 +11,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/trick77/llmwire"
+
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/projects"
@@ -1144,7 +1146,8 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	// them apart.
 	ask, decoded := true, true
 	var got judgeDecision
-	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+	body, _ := llmwire.JSONObject(out)
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		decoded = false
 	} else {
 		ask = got.Decision != "compose"
@@ -1188,7 +1191,8 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 	// downstream as "cannot".
 	choose, decoded := false, true
 	var got choosableDecision
-	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+	body, _ := llmwire.JSONObject(out)
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		decoded = false
 	} else {
 		choose = got.Decision == "choose"
@@ -1257,7 +1261,8 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 				return
 			}
 			var got nameResult
-			if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+			body, _ := llmwire.JSONObject(out)
+			if err := json.Unmarshal([]byte(body), &got); err != nil {
 				return
 			}
 			if got.Title != "" {
