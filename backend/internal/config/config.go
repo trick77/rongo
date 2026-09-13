@@ -8,8 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/trick77/llmwire"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -101,13 +99,10 @@ type Config struct {
 	// heaviest on record 83k, and the default sits three times above that so
 	// normal operation never meets it. Zero turns it off.
 	TurnMaxTokens int
-	// Embedding model. Its endpoint, LLMWIRE_OPENAI_BASE_URL and
-	// LLMWIRE_OPENAI_API_KEY, is read by llmwire the same way as the chat one.
-	// EmbedDim is also the width the vec0 table is built with, so changing it
-	// means a new database, not a restart — store.BuiltDim makes a mismatch a
-	// loud failure rather than a wrong answer.
-	EmbedModel    string
-	EmbedDim      int
+	// No embedding model here: it is embed.Model, a constant of the build,
+	// and its width embed.Dim comes from the llmwire profile. Its endpoint,
+	// LLMWIRE_OPENAI_BASE_URL and LLMWIRE_OPENAI_API_KEY, is read by llmwire
+	// the same way as the chat one.
 	AuthMode      AuthMode
 	AdminToken    string // required when AuthMode is token
 	SessionSecret string // reserved: not read by anything yet — see the check below
@@ -134,34 +129,6 @@ type Config struct {
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
-	// The embedding model must be one llmwire ships a profile for, since the
-	// profile is where the vector width comes from and the wire refuses any
-	// other name on the first request anyway. Failing here says so at boot.
-	embedModel := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
-	profile, err := llmwire.Default().Lookup(embedModel)
-	if err != nil {
-		return Config{}, fmt.Errorf("BACKEND_EMBED_MODEL: %w", err)
-	}
-	if profile.Endpoint != llmwire.EndpointEmbeddings {
-		return Config{}, fmt.Errorf("BACKEND_EMBED_MODEL = %q is a %s model, not an embedding model", embedModel, profile.Endpoint)
-	}
-
-	// The embedding dimension defaults to the width the model returns, from
-	// its profile. It is the one integer setting that may NOT fall back
-	// silently when set: it is baked into the vec0 table when the database is
-	// created, so a typo ("3O72" with a letter O) would build a 1536-wide
-	// table while the operator believes it is 3072, and the mistake surfaces
-	// much later as a per-request dimension mismatch.
-	embedDim := profile.Embedding.DefaultDimensions
-	if v := strings.TrimSpace(os.Getenv("BACKEND_EMBED_DIM")); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return Config{}, fmt.Errorf(
-				"BACKEND_EMBED_DIM = %q is not a positive number of dimensions; it is baked into the vector table when the database is created, so it must not be guessed", v)
-		}
-		embedDim = n
-	}
-
 	emulate, err := envBool("BACKEND_CHAT_EMULATE_OPENCODE")
 	if err != nil {
 		return Config{}, err
@@ -185,8 +152,6 @@ func Load() (Config, error) {
 		GatherMaxHops:       envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget:   envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		TurnMaxTokens:       envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		EmbedModel:          embedModel,
-		EmbedDim:            embedDim,
 		AuthMode:            AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:          strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		SessionSecret:       strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),

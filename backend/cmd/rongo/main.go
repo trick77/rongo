@@ -121,7 +121,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	if err := store.Migrate(db, cfg.EmbedDim); err != nil {
+	if err := store.Migrate(db, embed.Dim()); err != nil {
 		slog.Error("apply migrations", "err", err)
 		os.Exit(1)
 	}
@@ -150,10 +150,10 @@ func main() {
 		slog.Error("read the vector table's dimension", "err", err)
 		os.Exit(1)
 	}
-	if builtDim != cfg.EmbedDim {
+	if builtDim != embed.Dim() {
 		slog.Error("this database was built for a different embedding model",
-			"built_dim", builtDim, "configured_dim", cfg.EmbedDim,
-			"fix", "point BACKEND_DB_PATH at a fresh file, or set BACKEND_EMBED_DIM back")
+			"built_dim", builtDim, "model_dim", embed.Dim(), "model", embed.Model,
+			"fix", "point BACKEND_DB_PATH at a fresh file, or run the build this database was made with")
 		os.Exit(1)
 	}
 
@@ -246,7 +246,7 @@ func main() {
 		Git:      gitClient,
 		Symbols:  symbols.NewExtractor(tools.Ctags),
 		Embedder: embedder,
-		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Cache:    embed.NewCache(db, embed.Model, embed.Dim()),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
 			MaxBytes: cfg.IndexMaxFileBytes,
@@ -450,7 +450,7 @@ func moduleOpts(cfg config.Config) modules.Opts {
 // needs close to 14 minutes. The idle watchdog, not this one, is what catches
 // a stalled upstream.
 func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
-	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	embedder, err := embed.NewClient(embed.Config{}, nil)
 	if err != nil {
 		return nil, nil, err
 	}

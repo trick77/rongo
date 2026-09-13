@@ -30,14 +30,39 @@ const (
 	defaultHeartbeat = 15 * time.Second
 )
 
+// Model is the deployment every vector in the database was produced by. A
+// constant of the build, not a setting: the vec0 table is created at Dim and
+// every stored vector is Dim wide, so "changing the model" is a new database,
+// and a name in the environment would let one process write vectors the
+// rest cannot search. Changing it means a rebuild, and a diff here says so.
+const Model = "text-embedding-3-small"
+
+// profile is the registry's description of Model, resolved once. A build
+// whose constant names a model llmwire does not ship cannot start at all,
+// which is the right time to find out.
+var profile = func() *llmwire.Profile {
+	p, err := llmwire.Default().Lookup(Model)
+	if err != nil {
+		panic("embed: Model has no llmwire profile: " + err.Error())
+	}
+	if p.Endpoint != llmwire.EndpointEmbeddings {
+		panic("embed: Model is not an embeddings model: " + Model)
+	}
+	if p.Embedding.DefaultDimensions <= 0 {
+		panic("embed: Model's profile carries no vector width: " + Model)
+	}
+	return p
+}()
+
+// Dim is the width of every vector Model returns, from its profile, and
+// therefore the width the vec0 table is built with.
+func Dim() int { return profile.Embedding.DefaultDimensions }
+
 // Config configures the embedding client. Logger defaults to slog.Default();
-// a negative HeartbeatInterval disables the heartbeat. Model must be one
-// llmwire's registry knows; an unknown one fails the first call.
+// a negative HeartbeatInterval disables the heartbeat.
 type Config struct {
 	BaseURL           string
 	APIKey            string
-	Model             string
-	Dim               int
 	Logger            *slog.Logger
 	HeartbeatInterval time.Duration
 }
@@ -64,7 +89,7 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if cfg.HeartbeatInterval == 0 {
 		cfg.HeartbeatInterval = defaultHeartbeat
 	}
-	wire, err := llmwire.FromEnv(cfg.Model, llmwire.Config{
+	wire, err := llmwire.FromEnv(Model, llmwire.Config{
 		BaseURL:       cfg.BaseURL,
 		APIKey:        cfg.APIKey,
 		HeaderTimeout: defaultTimeout,
@@ -76,8 +101,8 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	}
 	return &Client{
 		wire:      wire,
-		model:     cfg.Model,
-		dim:       cfg.Dim,
+		model:     Model,
+		dim:       Dim(),
 		log:       cfg.Logger,
 		heartbeat: cfg.HeartbeatInterval,
 	}, nil

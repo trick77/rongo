@@ -329,7 +329,7 @@ func TestEvalMeasureRouting(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	embedder := evalEmbedder(t)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)
@@ -385,7 +385,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	embedder := evalEmbedder(t)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)
@@ -449,7 +449,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	embedder := evalEmbedder(t)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)

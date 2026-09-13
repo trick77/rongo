@@ -15,7 +15,7 @@ func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
 	for _, v := range vars {
 		t.Setenv(v, "x")
 	}
-	cfg := config.Config{EmbedModel: "text-embedding-3-small", EmbedDim: 1536}
+	cfg := config.Config{}
 	if _, _, err := newModelClients(cfg); err != nil {
 		t.Fatalf("all four set: %v", err)
 	}
