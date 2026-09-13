@@ -13,6 +13,8 @@
 export type Route =
   | { view: "new" }
   | { view: "thread"; id: string }
+  /** Every thread, searchable: what the rail's page of 30 is a cut of. */
+  | { view: "threads" }
   | { view: "projects" }
   | { view: "shared" }
   /** The public page. Never rendered inside the app — see main.tsx. */
@@ -40,6 +42,7 @@ export function routeFromPath(path: string): Route {
     const token = decodeURIComponent(path.slice(sharePrefix.length));
     if (token !== "") return { view: "share", token };
   }
+  if (path === "/threads") return { view: "threads" };
   if (path === "/projects") return { view: "projects" };
   if (path === "/shared") return { view: "shared" };
   return { view: "new" };
@@ -56,6 +59,8 @@ export function pathForRoute(route: Route): string {
   switch (route.view) {
     case "thread":
       return threadPrefix + encodeURIComponent(route.id);
+    case "threads":
+      return "/threads";
     case "projects":
       return "/projects";
     case "shared":

@@ -143,6 +143,20 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
   });
 
+  it("opens the Threads page from the rail and marks it current", async () => {
+    await renderSignedIn();
+    const user = userEvent.setup();
+
+    const threads = screen.getByRole("button", { name: "Threads" });
+    await user.click(threads);
+
+    expect(window.location.pathname).toBe("/threads");
+    expect(threads.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByLabelText("Search threads")).toBeTruthy();
+    // The header names the page.
+    expect(screen.getByRole("banner").textContent).toContain("Threads");
+  });
+
   it("keeps the running thread when switching to Projects", async () => {
     // Unmounting Ask would drop the answer on screen while the stream keeps
     // writing into a dead component. The stored record only catches up once the
@@ -190,7 +204,9 @@ describe("App", () => {
     await screen.findByRole("heading", { level: 1 });
 
     await screen.findAllByText("How does shipping work?");
-    expect(screen.queryByText("Threads")).toBe(null);
+    // No "Threads /" breadcrumb root in the header. The word is in the rail
+    // now, where it is a page, not a root the title hangs off.
+    expect(screen.getByRole("banner").textContent).not.toContain("Threads");
   });
 });
 
@@ -204,7 +220,8 @@ function apiFetch(threads: unknown, messages: unknown) {
   const mock = vi.fn(async (url: string) => ({
     ok: true,
     status: 200,
-    json: async () => (String(url).startsWith("/api/threads/") ? messages : threads),
+    json: async () =>
+      String(url).startsWith("/api/threads/") ? messages : { items: threads, next_cursor: null },
   }));
   vi.stubGlobal("fetch", mock);
   return mock;
@@ -289,6 +306,28 @@ describe("App, the thread in the URL", () => {
 
     // Twice: the rail row and the header.
     await waitFor(() => expect(screen.getAllByText("Shipping, end to end").length).toBe(2));
+  });
+
+  // The rail is the latest 30, and a thread opened by its address can be any
+  // age. The header asks for that one row on its own rather than showing
+  // "New question" over a conversation that has a name.
+  it("names a thread the rail does not carry", async () => {
+    atPath("/thread/" + addr);
+    const mock = vi.fn(async (url: string) => {
+      const u = String(url);
+      const body = u.endsWith("/summary")
+        ? { id: addr, title: "Older than the rail", title_pending: false, created_at: "2025-01-01 10:00:00" }
+        : u.startsWith("/api/threads/")
+          ? oneTurn
+          : { items: [], next_cursor: null };
+      return { ok: true, status: 200, json: async () => body };
+    });
+    vi.stubGlobal("fetch", mock);
+    render(<StrictMode><App /></StrictMode>);
+
+    // Once: the header, with no rail row to go with it.
+    await waitFor(() => expect(screen.getAllByText("Older than the rail").length).toBe(1));
+    expect(mock).toHaveBeenCalledWith(`/api/threads/${addr}/summary`);
   });
 
   // A thread that is not yours, or was purged, comes back as an empty list

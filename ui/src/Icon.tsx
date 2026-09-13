@@ -23,6 +23,9 @@ const CODEPOINTS = {
   trash: 0xe101,
   upload: 0xe06d,
   eyeOff: 0xe06a,
+  messages: 0xe039,
+  allThreads: 0xe060,
+  search: 0xe0d3,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;

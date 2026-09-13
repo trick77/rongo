@@ -34,10 +34,13 @@ function day(iso: string): { date: string; ago: string } {
 
 export default function SharedLinks({
   onChange = () => {},
+  onCount = () => {},
   onOpenThread,
 }: {
   /** A link was taken back, so the rail's markers are stale. */
   onChange?: () => void;
+  /** How many links there are, for the header's pill; null until known. */
+  onCount?: (n: number | null) => void;
   onOpenThread: (id: string) => void;
 }) {
   const [state, setState] = useState<State>({ s: "loading" });
@@ -45,6 +48,15 @@ export default function SharedLinks({
   const [busy, setBusy] = useState<string | null>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+
+  // The count follows the list, and is withdrawn with it: a pill saying
+  // "0 live" over a list that failed to load would be a claim.
+  const count = state.s === "loaded" ? state.shares.length : null;
+  useEffect(() => {
+    onCount(count);
+    return () => onCount(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count]);
 
   useEffect(() => {
     let cancelled = false;

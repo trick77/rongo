@@ -5,11 +5,13 @@ import type { ThreadTotal } from "./turns";
 import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
+import ThreadsPage from "./ThreadsPage";
+import { railRow } from "./rail";
 import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
 import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
 
-type Page = "ask" | "projects" | "shared";
+type Page = "ask" | "threads" | "projects" | "shared";
 
 type Me = { subject: string; email: string; is_admin: boolean; version: string };
 
@@ -157,18 +159,6 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
   return status && { ok: status.ok, when: relative(status.last) };
 }
 
-/**
- * A rail button, ../loom's metrics: 26px tall, 14/20 text, 6px radius — its
- * SidebarItems.tsx has `h-[26px] rounded-md px-1.5 gap-2.5`. rounded-md rather
- * than the app's own rounded-ui-sm because the rail is loom's surface and 8px
- * reads rounder than loom's rows do; rounded-ui-sm stays for everything else.
- * The rail has two type sizes in total — this one and the day-group label in
- * Threads — plus the mono timestamp on a thread row.
- */
-const railRow =
-  "flex h-[26px] w-full items-center gap-2.5 rounded-md px-1.5 text-left text-sm/5 " +
-  "disabled:opacity-50";
-
 export default function App() {
   // The URL is where the app is. A thread has an address, so it can be sent to
   // someone, reloaded into, and reached with Back — none of which was true
@@ -178,7 +168,8 @@ export default function App() {
   // phone left the thread 90px. Not a route: it is not somewhere you are, and
   // Back must close a thread rather than a drawer.
   const [navOpen, setNavOpen] = useState(false);
-  const page: Page = route.view === "projects" || route.view === "shared" ? route.view : "ask";
+  const page: Page =
+    route.view === "threads" || route.view === "projects" || route.view === "shared" ? route.view : "ask";
   const threadId = route.view === "thread" ? route.id : null;
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
@@ -190,6 +181,14 @@ export default function App() {
   // answer is still arriving, which they are free to do.
   const [busyThread, setBusyThread] = useState<string | null>(null);
   const [threads, setThreads] = useState<Thread[]>([]);
+  // The open thread when the rail's page does not carry it: the rail is the
+  // latest 30, and a thread opened by its address can be any age. Fetched on
+  // its own only then, and keyed by the address so a rename (via
+  // threadsVersion) refreshes it.
+  const [summary, setSummary] = useState<Thread | null>(null);
+  // How many live links there are, as the Shared page counts them. The page
+  // is the one that lists them, so it is the one that knows.
+  const [sharedCount, setSharedCount] = useState<number | null>(null);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
   const [usageTotal, setUsageTotal] = useState<ThreadTotal | null>(null);
@@ -238,6 +237,29 @@ export default function App() {
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
 
+  const inRail = threadId !== null && threads.some((t) => t.id === threadId);
+  useEffect(() => {
+    if (threadId === null || inRail) {
+      setSummary(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/threads/${threadId}/summary`);
+        if (!res.ok) return;
+        const t: Thread = await res.json();
+        if (!cancelled) setSummary(t);
+      } catch {
+        // The header says "New question" until the row is known, which is
+        // what it says while the rail loads too.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId, inRail, threadsVersion]);
+
   // Escape closes the drawer, the second way out beside the backdrop. Bound
   // unconditionally rather than only while open: a listener added and removed
   // on every toggle is more moving parts than one that reads the state.
@@ -281,10 +303,10 @@ export default function App() {
   // there showed a question cut mid-word — then cut a second time by the
   // header's own truncate. The rail keeps the placeholder, where first words
   // are what tells one pending row from another.
-  // Counted off the thread list the rail already loaded rather than fetched
-  // again: the same query answers both, and the number is only chrome.
-  const sharedCount = threads.filter((t) => t.shared).length;
-  const openThread = threadId === null ? null : (threads.find((t) => t.id === threadId) ?? null);
+  const openThread =
+    threadId === null
+      ? null
+      : (threads.find((t) => t.id === threadId) ?? (summary?.id === threadId ? summary : null));
   const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
   const total = threadId === null ? null : usageTotal;
 
@@ -335,6 +357,8 @@ export default function App() {
               </span>
               {total && <ThreadUsageBadge total={total} onOpen={() => setThreadStats(true)} />}
             </>
+          ) : page === "threads" ? (
+            <span className="font-serif text-[19px] font-medium text-accent-strong">Threads</span>
           ) : page === "projects" ? (
             <>
               <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
@@ -343,9 +367,11 @@ export default function App() {
           ) : (
             <>
               <span className="font-serif text-[19px] font-medium text-accent-strong">Shared</span>
-              <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
-                {sharedCount === 1 ? "1 live" : `${sharedCount} live`}
-              </span>
+              {sharedCount !== null && (
+                <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
+                  {sharedCount === 1 ? "1 live" : `${sharedCount} live`}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -409,6 +435,23 @@ export default function App() {
               </span>
               New question
             </button>
+            {/* Every thread, under the one action, as ../loom's Sidebar has
+                it: the history below is the latest 30, and this is where the
+                rest of it is. */}
+            <button
+              type="button"
+              aria-current={page === "threads" ? "page" : undefined}
+              onClick={() => {
+                go({ view: "threads" });
+                setNavOpen(false);
+              }}
+              className={railRow + " " + (page === "threads" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="messages" size="21px" className="text-ink-dim" />
+              </span>
+              Threads
+            </button>
             <button
               type="button"
               aria-current={page === "projects" ? "page" : undefined}
@@ -470,6 +513,10 @@ export default function App() {
               refreshThreads();
             }}
             onRenamed={refreshThreads}
+            onAllThreads={() => {
+              go({ view: "threads" });
+              setNavOpen(false);
+            }}
           />
           {/* The foot: the index line alone, and only when there is a repo
               list for it to speak about. */}
@@ -529,6 +576,25 @@ export default function App() {
               }
             />
           </div>
+          {page === "threads" && (
+            <div className="h-full overflow-auto">
+              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+                <h2 className="mb-6 font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
+                  Threads
+                </h2>
+                <ThreadsPage
+                  activeId={threadId}
+                  version={threadsVersion}
+                  onSelect={(id) => selectThread(id)}
+                  onChanged={refreshThreads}
+                  onDeleted={(id) => {
+                    if (id === threadId) closeDeadThread();
+                    refreshThreads();
+                  }}
+                />
+              </div>
+            </div>
+          )}
           {page === "projects" && (
             <div className="h-full overflow-auto">
               <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
@@ -558,6 +624,7 @@ export default function App() {
                   immediate, and sharing again returns the same link.
                 </p>
                 <SharedLinks
+                  onCount={setSharedCount}
                   onChange={() => {
                     refreshThreads();
                   }}

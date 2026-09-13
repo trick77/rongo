@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event";
 import Threads from "./Threads";
 
 function threadList(list: unknown, ok = true) {
-  const fetchMock = vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => list }));
+  // The list comes in its envelope, as the API sends it.
+  const body = Array.isArray(list) ? { items: list, next_cursor: null } : list;
+  const fetchMock = vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => body }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -304,5 +306,41 @@ describe("Threads", () => {
       expect(screen.getByRole("dialog")).toBeTruthy();
       expect(screen.getByRole("button", { name: "How does shipping work?" })).toBeTruthy();
     });
+  });
+});
+
+describe("Threads, the latest 30", () => {
+  it("asks for the rail's page, not the whole history", async () => {
+    const fetchMock = threadList(two);
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    await screen.findByText("How does shipping work?");
+    expect(fetchMock).toHaveBeenCalledWith("/api/threads?limit=30");
+  });
+
+  it("opens the Threads page from the foot of the list", async () => {
+    threadList(two);
+    const onAllThreads = vi.fn();
+    render(<Threads activeId={null} onSelect={() => {}} version={0} onAllThreads={onAllThreads} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "All threads" }));
+    expect(onAllThreads).toHaveBeenCalledTimes(1);
+    // A door, not a place: never marked current.
+    expect(screen.getByRole("button", { name: "All threads" }).getAttribute("aria-current")).toBe(null);
+  });
+
+  it("has no foot under an empty list", async () => {
+    threadList([]);
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const list = await screen.findByRole("navigation", { name: "Threads" });
+    await waitFor(() => expect(within(list).queryByRole("button", { name: "All threads" })).toBe(null));
+  });
+
+  it("reads an answer that is not the envelope as an empty list", async () => {
+    // Anything but the envelope — an error page, a stub answering [] to
+    // every URL — is no list, not a crash.
+    threadList({ nope: true });
+    render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const list = await screen.findByRole("navigation", { name: "Threads" });
+    expect(within(list).queryAllByRole("button")).toHaveLength(0);
   });
 });

@@ -1110,6 +1110,8 @@ func (s *Server) thread(ctx context.Context, subject string, threadID int64, req
 	return threads.Thread{ID: threadID, PublicID: req.ThreadID}, nil
 }
 
+// handleThreads answers one page of the reader's threads: the rail asks for
+// 30, the Threads page for 50 at a time and then the page after, by cursor.
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Threads == nil {
 		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
@@ -1120,14 +1122,70 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	list, err := s.deps.Threads.List(r.Context(), u.Subject)
+	limit, ok := listLimit(w, r)
+	if !ok {
+		return
+	}
+	page, err := s.deps.Threads.ListPage(r.Context(), u.Subject, threads.ListOptions{
+		Limit:  limit,
+		Cursor: r.URL.Query().Get("cursor"),
+	})
 	if err != nil {
 		slog.Error("list threads failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(list)
+	_ = json.NewEncoder(w).Encode(page)
+}
+
+// listLimit reads ?limit=: absent means the store's default, and a number
+// that is not one, or is outside 1..MaxListLimit, is a 400 rather than
+// silently another page size — the browser asked for something specific.
+func listLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > threads.MaxListLimit {
+		http.Error(w, "limit must be between 1 and 1000", http.StatusBadRequest)
+		return 0, false
+	}
+	return n, true
+}
+
+// handleSearchThreads answers the Threads page's search box: every thread of
+// the reader's whose title or messages match, title hits first.
+func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Threads == nil {
+		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		http.Error(w, "q is required", http.StatusBadRequest)
+		return
+	}
+	limit, ok := listLimit(w, r)
+	if !ok {
+		return
+	}
+	hits, err := s.deps.Threads.Search(r.Context(), u.Subject, q, limit)
+	if err != nil {
+		slog.Error("search threads failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(struct {
+		Items []threads.Hit `json:"items"`
+	}{Items: hits})
 }
 
 func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
@@ -1169,6 +1227,28 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(msgs)
+}
+
+// handleThreadSummary is one thread's row — its title, for the header of a
+// thread the rail's page does not carry. Not the reader's → 404, like every
+// other read by address.
+func (s *Server) handleThreadSummary(w http.ResponseWriter, r *http.Request) {
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return
+	}
+	t, found, err := s.deps.Threads.Get(r.Context(), u.Subject, id)
+	if err != nil {
+		slog.Error("read thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(t)
 }
 
 // threadRequest is what the rail's own actions send: a rename carries the new
