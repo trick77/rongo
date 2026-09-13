@@ -178,6 +178,19 @@ type callOptions struct {
 	maxTokens   int
 	temperature *float64
 	step        string
+	jsonObject  bool
+}
+
+// WithJSONObject asks the endpoint for a JSON object and nothing else
+// (response_format json_object). Both MiMo profiles honour it, and NO call
+// uses it: measured on the five parsed calls (understand, the routing
+// judges, naming, the reranker) it moved the flow corpus 28/30+26/30 to
+// 25/27+26/30, inside judge noise, and the baseline had zero decode failures
+// for it to fix — the prompt plus llmwire.JSONObject at the call site already
+// reads every reply (docs/measurements/2026-09-13-json-object.md). It stays
+// defined so the next person finds that table before re-measuring.
+func WithJSONObject() Option {
+	return func(o *callOptions) { o.jsonObject = true }
 }
 
 // WithStep labels the call for the usage meter: the word a reader sees next
@@ -371,6 +384,9 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	}
 	if o.thinkingOff {
 		req.Reasoning = llmwire.ReasoningOff()
+	}
+	if o.jsonObject {
+		req.ResponseFormat = llmwire.ResponseFormat{Kind: llmwire.FormatJSONObject}
 	}
 	return req
 }
