@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/trick77/llmwire"
+
 	"github.com/trick77/rongo/internal/llm"
 )
 
@@ -184,24 +186,12 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 	}
 
 	var got Understanding
-	if err := json.Unmarshal([]byte(stripFence(out)), &got); err != nil {
+	body, _ := llmwire.JSONObject(out)
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		// Not a silent fallback to the raw question: that is precisely the
 		// behaviour this step replaces, and it would show up later as "the
 		// expansion did not help" rather than as "the expansion never ran".
 		return Understanding{}, fmt.Errorf("understand the question: reply was not JSON: %w", err)
 	}
 	return got, nil
-}
-
-// stripFence unwraps a ```json fenced block. Models emit them often enough that
-// treating one as a parse failure would make this step flaky for no reason.
-func stripFence(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[i+1:]
-	}
-	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "```"))
 }

@@ -321,18 +321,6 @@ func envBoolOr(key string, fallback bool) bool {
 	}
 }
 
-// envOrUnset is envOr for a setting where "" is a value: a variable that is
-// present and empty turns the feature off, only an absent one gets the
-// default. envOr cannot say that, because compose passes every variable
-// through and an unset one arrives empty — so this default is what a
-// compose deployment gets only when the variable is left out of the file.
-func envOrUnset(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok {
-		return strings.TrimSpace(v)
-	}
-	return fallback
-}
-
 func envOr(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v

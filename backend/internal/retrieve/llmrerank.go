@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/trick77/llmwire"
+
 	"github.com/trick77/rongo/internal/llm"
 )
 
@@ -105,7 +107,8 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	var reply struct {
 		Relevant []int `json:"relevant"`
 	}
-	if err := json.Unmarshal([]byte(stripFence(out)), &reply); err != nil {
+	body, _ := llmwire.JSONObject(out)
+	if err := json.Unmarshal([]byte(body), &reply); err != nil {
 		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", excerpt(out, 120))
 		return cut(hits, k), nil
 	}
@@ -139,17 +142,4 @@ func excerpt(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-// stripFence unwraps a ```json fence, the way internal/ask does for its own
-// JSON replies.
-func stripFence(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[i+1:]
-	}
-	return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "```"))
 }

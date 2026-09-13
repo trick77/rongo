@@ -396,7 +396,7 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
 	c.warn(warnings)
 	if err != nil {
-		return "", Usage{}, chatError(err)
+		return "", Usage{}, err
 	}
 	u := usageFrom(resp.Usage)
 	record(ctx, o, u, time.Since(started))
@@ -423,63 +423,34 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
 	c.warn(warnings)
 	if err != nil {
-		return Usage{}, chatError(err)
+		return Usage{}, err
 	}
 	defer stream.Close()
 
-	// finishReason is how the upstream said the stream ended. Anything but a
-	// normal stop is a failure the caller must hear about: a reasoning model
-	// that spends the whole completion budget thinking ends with "length" and
-	// not one content delta, and reading that as success once stored an empty
-	// answer as a finished turn. The reason is kept and the stream read to
-	// the end, because the usage frame that follows it carries the completion
-	// count the error needs.
-	var finishReason string
-	for stream.Next() {
-		ev := stream.Event()
-		switch ev.Kind {
-		case llmwire.EventContent:
-			if ev.Text != "" && onToken != nil {
-				onToken(ev.Text)
-			}
-		case llmwire.EventFinish:
-			finishReason = ev.FinishReason
-		}
-	}
-	// Recorded even when the read failed, as long as a usage frame arrived:
-	// what the upstream reported was paid for. A stream that broke before
-	// its usage frame (idle timeout, a dropped connection, an endpoint that
-	// ignores include_usage) records nothing rather than zeros — a zero row
-	// would read as "this call was free", and it was not; it is unknown.
+	// llmwire drains the stream and hands back what it assembled, error or
+	// not. Recorded even when the read failed, as long as a usage frame
+	// arrived: what the upstream reported was paid for. A stream that broke
+	// before its usage frame (idle timeout, a dropped connection, an endpoint
+	// that ignores include_usage) records nothing rather than zeros — a zero
+	// row would read as "this call was free", and it was not; it is unknown.
 	// Gated on the lanes, not on Reported(): an object carrying a bare
 	// total_tokens or an empty details object counts as reported and would
 	// record a 0/0 call — the free-looking row this guard exists to refuse.
-	wu := stream.Usage()
-	got := usageFrom(wu)
-	if _, ok := wu.Total(); ok {
+	res, err := stream.Collect(onToken)
+	got := usageFrom(res.Usage)
+	if _, ok := res.Usage.Total(); ok {
 		record(ctx, o, got, time.Since(started))
 	}
-	if err := stream.Err(); err != nil {
-		return got, chatError(err)
+	if err != nil {
+		return got, err
 	}
-	if finishReason != "" && finishReason != "stop" {
-		return got, &FinishError{Reason: finishReason, Completion: got.Completion}
+	// Anything but a normal stop is a failure the caller must hear about: a
+	// reasoning model that spends the whole completion budget thinking ends
+	// with "length" and not one content delta, and reading that as success
+	// once stored an empty answer as a finished turn. The usage frame follows
+	// the finish, which is why the count the error needs is only here.
+	if fr := res.FinishReason; fr != "" && fr != "stop" {
+		return got, &FinishError{Reason: fr, Completion: got.Completion}
 	}
 	return got, nil
-}
-
-// chatError phrases a wire failure the way the rest of rongo reads it. An
-// APIError without a status is the error frame an upstream sends after
-// status 200; anything else keeps llmwire's own wording, which already names
-// the bound that fired, carries no key (stripped by value, whatever its
-// shape) and no request URL.
-func chatError(err error) error {
-	var apiErr *llmwire.APIError
-	if errors.As(err, &apiErr) {
-		if apiErr.StatusCode == 0 {
-			return fmt.Errorf("chat completion failed mid-stream (%s): %s", apiErr.Type, apiErr.Message)
-		}
-		return fmt.Errorf("chat completion failed with status %d: %s", apiErr.StatusCode, apiErr.Message)
-	}
-	return err
 }
