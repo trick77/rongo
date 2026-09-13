@@ -77,6 +77,12 @@ type Config struct {
 	// says so out loud once a loop or a retry that nobody bounded appears.
 	// Zero turns it off. A context without a meter is never checked.
 	TurnMaxTokens int
+	// EmulateOpenCode presents every request as the opencode client: its
+	// User-Agent and the session header pair. The provider entry in
+	// llmwire's profiles.yaml already switches it on for the host that is
+	// sold as that client's backend; this adds it for one that is not
+	// marked, and cannot take it away from one that is.
+	EmulateOpenCode bool
 }
 
 // ErrTurnBudget is why a call was refused when the turn had already spent
@@ -332,12 +338,13 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 		log = slog.Default()
 	}
 	wire, err := llmwire.FromEnv(ProDeployment, llmwire.Config{
-		BaseURL:       cfg.BaseURL,
-		APIKey:        cfg.APIKey,
-		HeaderTimeout: cfg.Timeout,
-		IdleTimeout:   cfg.IdleTimeout,
-		CallTimeout:   cfg.Timeout,
-		HTTPClient:    hc,
+		BaseURL:         cfg.BaseURL,
+		APIKey:          cfg.APIKey,
+		HeaderTimeout:   cfg.Timeout,
+		IdleTimeout:     cfg.IdleTimeout,
+		CallTimeout:     cfg.Timeout,
+		HTTPClient:      hc,
+		EmulateOpenCode: cfg.EmulateOpenCode,
 	})
 	if err != nil {
 		return nil, err
