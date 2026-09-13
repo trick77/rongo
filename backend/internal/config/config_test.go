@@ -40,6 +40,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_OIDC_CLIENT_SECRET",
 	"BACKEND_OIDC_REDIRECT_URL",
 	"BACKEND_OIDC_ADMIN_GROUP",
+	"LLMWIRE_EMULATE_OPENCODE",
 }
 
 // mandatoryEnv is what .env.example leaves uncommented: the values nothing
@@ -94,6 +95,20 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	}
 	if cfg.TurnMaxTokens != 250000 {
 		t.Errorf("TurnMaxTokens = %d, want 250000", cfg.TurnMaxTokens)
+	}
+	if cfg.ChatEmulateOpenCode {
+		t.Error("ChatEmulateOpenCode = true, want off unless LLMWIRE_EMULATE_OPENCODE says so")
+	}
+}
+
+func TestLoad_emulateOpenCodeIsTheOperatorsSwitch(t *testing.T) {
+	setEnv(t, map[string]string{"LLMWIRE_EMULATE_OPENCODE": "true"})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if !cfg.ChatEmulateOpenCode {
+		t.Error("ChatEmulateOpenCode = false, want on")
 	}
 }
 
