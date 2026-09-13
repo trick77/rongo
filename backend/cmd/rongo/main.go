@@ -288,11 +288,15 @@ func main() {
 			"fix", "set BACKEND_INDEX_ENABLED=true")
 	}
 
+	// The viewer and the answer pipeline read files through the same service:
+	// the viewer shows a citation, the pipeline reads a process model whose
+	// nodes were cited, both at the indexed commit under the same rules.
+	source := sourceview.New(db, gitClient, cfg.IndexMaxFileBytes)
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
-		Source:         sourceview.New(db, gitClient, cfg.IndexMaxFileBytes),
+		Source:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
 		CookieSecure:   cfg.CookieSecure,
 	}
@@ -337,7 +341,7 @@ func main() {
 		retriever,
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
-	)
+	).WithModels(source)
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" id="Definitions_1">
+  <bpmn:error id="Error_1" name="paymentDeclined" errorCode="PAYMENT_DECLINED" />
+  <bpmn:process id="order-intake" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1">
+      <bpmn:outgoing>Flow_start</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="validate-order" name="Validate order" camunda:delegateExpression="#{shop.path('validateOrder')}">
+      <bpmn:incoming>Flow_start</bpmn:incoming>
+      <bpmn:outgoing>Flow_validated</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:subProcess id="charge" name="Charge payment">
+      <bpmn:incoming>Flow_validated</bpmn:incoming>
+      <bpmn:outgoing>Flow_charged</bpmn:outgoing>
+      <bpmn:startEvent id="Event_charge_start" />
+      <bpmn:sequenceFlow id="Flow_c1" sourceRef="Event_charge_start" targetRef="authorise" />
+      <bpmn:serviceTask id="authorise" name="Authorise card" camunda:delegateExpression="#{shop.path('authoriseCard')}" />
+      <bpmn:sequenceFlow id="Flow_c2" sourceRef="authorise" targetRef="Event_charge_end" />
+      <bpmn:endEvent id="Event_charge_end" />
+    </bpmn:subProcess>
+    <bpmn:boundaryEvent id="Event_declined" name="Payment declined" attachedToRef="charge">
+      <bpmn:outgoing>Flow_declined</bpmn:outgoing>
+      <bpmn:errorEventDefinition errorRef="Error_1" />
+    </bpmn:boundaryEvent>
+    <bpmn:exclusiveGateway id="Gateway_express" default="Flow_standard">
+      <bpmn:incoming>Flow_charged</bpmn:incoming>
+      <bpmn:outgoing>Flow_express</bpmn:outgoing>
+      <bpmn:outgoing>Flow_standard</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:callActivity id="ship-express" name="Ship express" calledElement="express-shipping">
+      <bpmn:incoming>Flow_express</bpmn:incoming>
+      <bpmn:outgoing>Flow_shipped_express</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:sendTask id="confirm" name="Send confirm-ation" camunda:delegateExpression="#{shop.path('sendConfirmation')}">
+      <bpmn:incoming>Flow_standard</bpmn:incoming>
+      <bpmn:incoming>Flow_shipped_express</bpmn:incoming>
+      <bpmn:outgoing>Flow_done</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:endEvent id="Event_done">
+      <bpmn:incoming>Flow_done</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="Event_abort" name="Order cancelled">
+      <bpmn:incoming>Flow_declined</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_start" sourceRef="StartEvent_1" targetRef="validate-order" />
+    <bpmn:sequenceFlow id="Flow_validated" sourceRef="validate-order" targetRef="charge" />
+    <bpmn:sequenceFlow id="Flow_charged" sourceRef="charge" targetRef="Gateway_express" />
+    <bpmn:sequenceFlow id="Flow_express" sourceRef="Gateway_express" targetRef="ship-express">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${shipping == 'EXPRESS'}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_standard" sourceRef="Gateway_express" targetRef="confirm" />
+    <bpmn:sequenceFlow id="Flow_shipped_express" sourceRef="ship-express" targetRef="confirm" />
+    <bpmn:sequenceFlow id="Flow_done" sourceRef="confirm" targetRef="Event_done" />
+    <bpmn:sequenceFlow id="Flow_declined" sourceRef="Event_declined" targetRef="Event_abort" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="order-intake">
+      <bpmndi:BPMNShape id="validate-order_di" bpmnElement="validate-order">
+        <dc:Bounds x="270" y="97" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_express_di" bpmnElement="Gateway_express" isMarkerVisible="true">
+        <dc:Bounds x="585" y="112" width="50" height="50" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/redact"
 	"github.com/trick77/rongo/internal/repos"
 )
@@ -171,4 +172,36 @@ func validatePath(path string) error {
 		}
 	}
 	return nil
+}
+
+// Models lists the process model files the index carries for repo, with the
+// commit each was indexed at. It is what the answer pipeline's process listing
+// reads (ask.Models); a skipped file has no row worth listing, for the reason
+// Read serves none.
+func (s *Service) Models(ctx context.Context, repo string) ([]ask.ModelRef, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT path, sha FROM files WHERE repo = ? AND lang = 'bpmn' AND skip_reason = '' ORDER BY path`, repo)
+	if err != nil {
+		return nil, fmt.Errorf("list the process models of %q: %w", repo, err)
+	}
+	defer rows.Close()
+	var out []ask.ModelRef
+	for rows.Next() {
+		var r ask.ModelRef
+		if err := rows.Scan(&r.Path, &r.SHA); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ReadModel is Read for the process listing: the file's bytes at the commit,
+// under every rule Read applies.
+func (s *Service) ReadModel(ctx context.Context, repo, path, sha string) ([]byte, error) {
+	f, err := s.Read(ctx, repo, path, sha)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(f.Content), nil
 }

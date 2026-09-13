@@ -132,6 +132,16 @@ type Pipeline struct {
 	router       Routes
 	gatherer     *Gatherer
 	answerer     *Answerer
+	// models is optional: without it a turn answers with no process listing,
+	// which is every turn before process models were read.
+	models Models
+}
+
+// WithModels gives the pipeline the index's process models, so a turn whose
+// sources include a BPMN file can tell the answer how that process is wired.
+func (p *Pipeline) WithModels(m Models) *Pipeline {
+	p.models = m
+	return p
 }
 
 // NewPipeline wires the steps.
@@ -525,6 +535,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 	// search, because a turn that fails or asks has still told the reader what
 	// it was looking at, and only now is there a second thing to say. A later
 	// notice replaces the earlier one in the UI, so this carries both.
+	scope.Processes = p.describeProcesses(ctx, sources)
 	if scope.DocsOnly = DocsOnly(sources); scope.DocsOnly {
 		ev.notice(ScopeNotice(lang, scope))
 	}

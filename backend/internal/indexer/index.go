@@ -281,7 +281,15 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(decision), len(body))
 	}
 
-	syms, err := ix.symbols.Extract(ctx, path, body)
+	var syms []symbols.Symbol
+	if lang == "bpmn" {
+		// A process model has a reader of its own: ctags has no BPMN parser,
+		// and its generic XML output would be nothing or noise. Decided here,
+		// on the language, so the ctags extractor stays a ctags extractor.
+		syms, err = symbols.ExtractBPMN(body)
+	} else {
+		syms, err = ix.symbols.Extract(ctx, path, body)
+	}
 	if err != nil {
 		// ctags failing on one file is a degradation, not a failure: the
 		// chunker falls back to line windows and the file stays searchable.

@@ -75,13 +75,21 @@ func estimateTokens(s string) int {
 // members, constants and imports are excluded deliberately: anchoring on them
 // would cut a struct in half at its first field, and they are already covered
 // by the region their enclosing definition owns.
-var structuralKinds = map[string]bool{
-	"func": true, "function": true, "method": true, "procedure": true,
-	"subroutine": true, "constructor": true, "class": true, "struct": true,
-	"interface": true, "trait": true, "enum": true, "type": true,
-	"typedef": true, "union": true, "module": true, "namespace": true,
-	"object": true, "singletonMethod": true, "macro": true,
-}
+var structuralKinds = func() map[string]bool {
+	kinds := map[string]bool{
+		"func": true, "function": true, "method": true, "procedure": true,
+		"subroutine": true, "constructor": true, "class": true, "struct": true,
+		"interface": true, "trait": true, "enum": true, "type": true,
+		"typedef": true, "union": true, "module": true, "namespace": true,
+		"object": true, "singletonMethod": true, "macro": true,
+	}
+	// A BPMN model's flow nodes anchor the way methods do; the reader that
+	// emits them says which kinds those are, so the two lists cannot drift.
+	for _, k := range symbols.BPMNStructuralKinds() {
+		kinds[k] = true
+	}
+	return kinds
+}()
 
 // commentPrefixes are the line-comment openers rongo recognises when pulling a
 // doc comment into its symbol's chunk. It is deliberately a small, syntax-blind
@@ -116,6 +124,14 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 
 	var out []Chunk
 	for _, r := range regions {
+		if r.sym.Kind == symbols.DiagramKind {
+			// A BPMN model's diagram-interchange block: shape coordinates
+			// and edge waypoints, half of every real file and nothing a
+			// question is about. Left out of the index rather than embedded
+			// as noise. The symbol itself is still stored, so the viewer
+			// can say where the block is; only the chunks are missing.
+			continue
+		}
 		for _, w := range windows(lines, r.start, r.end, opts) {
 			raw := strings.Join(lines[w.start-1:w.end], "\n")
 			if strings.TrimSpace(raw) == "" {

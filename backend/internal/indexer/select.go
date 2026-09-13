@@ -345,6 +345,9 @@ var extLang = map[string]string{
 	".php": "php", ".sh": "sh", ".sql": "sql", ".md": "md",
 	".yaml": "yaml", ".yml": "yaml", ".json": "json", ".xml": "xml", ".properties": "properties",
 	".html": "html", ".css": "css", ".scss": "scss",
+	// A BPMN process model. Not a ctags language: the indexer hands it to
+	// symbols.ExtractBPMN and the chunker anchors on its flow nodes.
+	".bpmn": "bpmn",
 }
 
 // LanguageOf maps a path to a language by extension, returning "" when it does
