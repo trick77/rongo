@@ -57,14 +57,14 @@ var secretKeyWords = []string{
 	"password", "passwd", "pwd", "secret", "token", "credential",
 	"apikey", "accesskey", "authkey", "signingkey", "encryptionkey",
 	"private", "consumerkey", "masterkey", "jaas", "passphrase",
-	"passwort", "kennwort",
+	"passwort", "kennwort", "sessionid",
 }
 
 // secretKeySegments are matched as a whole segment of the key — between
 // dots, dashes, underscores or camel-case humps — because as substrings they
 // are everywhere: "pass" in bypass and passthrough. "acme.api.pass" is a
 // credential.
-var secretKeySegments = map[string]bool{"pass": true, "pw": true, "session": true}
+var secretKeySegments = map[string]bool{"pass": true, "pw": true}
 
 // secretLastSegments are matched as the key's LAST segment only: "key" ends
 // acme.maps.key and acme.mapsKey, which are credentials, and begins

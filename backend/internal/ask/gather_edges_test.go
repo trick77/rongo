@@ -180,17 +180,35 @@ func TestGather_crossesAPropertyKeyIntoEveryStageOfTheInfraRepository(t *testing
 	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", 0, 1, 20, "JobSendDigest",
 		`@Scheduled(cron = "${acme.cron.send-digest}") public void run() {}`)
 	seedTokenIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", "property", "acme.cron.send-digest", 4)
+	// The code's default, in the SAME repository, which no symbol reaches.
+	seedChunkIn(t, db, "acme-service", "src/main/resources/application-default.properties", 0, 1, 10, "",
+		"acme.cron.send-digest=0/20 * * ? * * *\nacme.mail.processor=x\n")
+	seedTokenIn(t, db, "acme-service", "src/main/resources/application-default.properties", "property", "acme.cron.send-digest", 1)
 	for i, stage := range []string{"syst", "intg", "prod"} {
 		p := stage + "/intranet/application.properties"
 		seedChunkIn(t, db, "acme-infra", p, 0, 1, 10, "",
-			"# stage "+stage+"\nacme.cron.send-digest=0 "+string(rune('0'+i))+" * ? * * *\n")
+			"# stage "+stage+"\nacme.cron.send-digest=0 "+string(rune('0'+i))+" * ? * * *\nacme.mail.processor=x\n")
 		seedTokenIn(t, db, "acme-infra", p, "property", "acme.cron.send-digest", 2)
 	}
+	// A symbol the properties files happen to name. The far side of a
+	// property landing takes no symbol hop, so it must not arrive.
+	seedChunkIn(t, db, "acme-service", "src/main/java/acme/Processor.java", 0, 1, 10, "processor",
+		"class processor {}")
+	seedSymbolIn(t, db, "acme-service", "src/main/java/acme/Processor.java", "processor", 1)
 
 	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
 		Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
+	}
+
+	if d, ok := sourceIn(got, "acme-service", "src/main/resources/application-default.properties"); !ok {
+		t.Errorf("sources = %v, want the repository's own defaults file reached on the key", repoPaths(got))
+	} else if !strings.HasPrefix(d.Reason, "edge:property") {
+		t.Errorf("defaults reason = %q", d.Reason)
+	}
+	if _, ok := sourceIn(got, "acme-service", "src/main/java/acme/Processor.java"); ok {
+		t.Error("a property landing took a symbol hop into Processor.java")
 	}
 
 	for _, stage := range []string{"syst", "intg", "prod"} {

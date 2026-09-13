@@ -40,6 +40,7 @@ func TestRedact_configLines(t *testing.T) {
 		{"keystore is not key", "app.properties", "acme.keystore=file:/x", "acme.keystore=file:/x"},
 		{"german password", "app.properties", "acme.link.passwort=abc", "acme.link.passwort=<redacted>"},
 		{"fixed session id", "app.properties", "acme.authz.fixed-session-id=6f1c2b3a-0000-4000-8000-000000000000", "acme.authz.fixed-session-id=<redacted>"},
+		{"session in a logging key stays", "app.properties", "spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=100", "spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=100"},
 		{"nginx header line without a key", "nginx.conf", `    proxy_set_header Authorization "Basic YWJjOmRlZjEyMw==";`, `    proxy_set_header Authorization "<redacted>";`},
 		{"nginx line without a credential stays", "nginx.conf", `    proxy_set_header Host $host;`, `    proxy_set_header Host $host;`},
 		{"url credentials mid-line without a key", "nginx.conf", `    proxy_pass https://svc:hunter2@upstream.example.invalid/;`, `    proxy_pass https<redacted>upstream.example.invalid/;`},

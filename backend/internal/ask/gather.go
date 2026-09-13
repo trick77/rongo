@@ -237,6 +237,15 @@ symbols:
 		if !take(landing, from.Hop+1, g.opts.TokenBudget) {
 			return false, nil
 		}
+		if isPropertyEdge(landing.Reason) {
+			// A properties file is the far side, and it references no
+			// symbol; the words in it join whatever happens to be called
+			// "processor" or "cleanup" and spend the reserve on that. One
+			// stage's line costs one chunk, which is what lets every stage
+			// fit: the first run took intg's chunk plus its "references"
+			// and had no room left for prod.
+			return true, nil
+		}
 		inland, err := g.referenced(ctx, landing)
 		if err != nil {
 			return false, err

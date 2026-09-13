@@ -337,7 +337,9 @@ with. The code's placeholder ("${key:default}") and the repository's own
 default properties are the DEFAULT, which a stage file overrides. Answer with
 the default first, then the value for every stage by its name, each from its
 own source, and say when two stages share a value rather than reporting one
-value as the value.`
+value as the value. Every value is copied character for character from the
+line that sets it - a cron expression is quoted as written, never
+paraphrased or reassembled from memory.`
 
 // answerStageAsked replaces answerStages' last sentence when the question
 // named a stage: the search and the crossing were narrowed to it, so the
@@ -351,7 +353,9 @@ with. The code's placeholder ("${key:default}") and the repository's own
 default properties are the DEFAULT, which a stage file overrides. The
 question was asked for the stage %s and the sources were narrowed to it:
 answer with the default and that stage's value, name the stage, and say in
-one sentence that the other stages were not looked at.`
+one sentence that the other stages were not looked at. Every value is copied
+character for character from the line that sets it - a cron expression is
+quoted as written, never paraphrased or reassembled from memory.`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts

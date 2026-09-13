@@ -51,6 +51,58 @@ func TestNeighboursStaysOutOfItsOwnRepository(t *testing.T) {
 	}
 }
 
+func TestNeighboursFollowsAPropertyKeyInsideItsOwnRepositoryToo(t *testing.T) {
+	// Given: a job reading a key, the repository's own defaults file setting
+	// it, and an infrastructure repository setting it per stage. A properties
+	// file has no symbol, so the walk that connects code inside a repository
+	// never reaches it; the key is the only link, on both sides of the
+	// boundary.
+	db := edgeDB(t, "acme-service", "acme-infra")
+	seedFileWithTokens(t, db, "acme-service", "Job.java", "job", nil,
+		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 4}})
+	seedFileWithTokens(t, db, "acme-service", "src/main/resources/application-default.properties", "defaults", nil,
+		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 28}})
+	seedFileWithTokens(t, db, "acme-infra", "prod/application.properties", "prod", nil,
+		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 44}})
+
+	// When
+	got, err := Neighbours(context.Background(), db, "acme-service", "Job.java")
+	if err != nil {
+		t.Fatalf("Neighbours: %v", err)
+	}
+
+	// Then: the defaults file and the stage file, never the job itself.
+	if len(got) != 2 {
+		t.Fatalf("expected the defaults file and the stage file, got %+v", got)
+	}
+	if got[0].Repo != "acme-infra" || got[1].Path != "src/main/resources/application-default.properties" {
+		t.Errorf("neighbours = %+v", got)
+	}
+	for _, n := range got {
+		if n.Path == "Job.java" {
+			t.Errorf("the file itself came back as its own neighbour: %+v", n)
+		}
+	}
+
+	// From a properties file the home exception does not apply: two stage
+	// files share every key, and joining them would spend the reserve on
+	// nothing. The stage file still crosses to the service's files.
+	seedFileWithTokens(t, db, "acme-infra", "intg/application.properties", "intg", nil,
+		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 44}})
+	got, err = Neighbours(context.Background(), db, "acme-infra", "prod/application.properties")
+	if err != nil {
+		t.Fatalf("Neighbours: %v", err)
+	}
+	for _, n := range got {
+		if n.Repo == "acme-infra" {
+			t.Errorf("a stage file was joined to its sibling stage: %+v", n)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("want the two service files across the boundary, got %+v", got)
+	}
+}
+
 func TestNeighboursDropsATokenTheWholeEstateShares(t *testing.T) {
 	// Given: a route served by four repositories. That is a convention, and an
 	// edge on it would join everything to everything.
