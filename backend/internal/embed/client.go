@@ -73,10 +73,10 @@ type Client struct {
 
 // NewClient builds a Client. hc is optional; one supplied must not carry
 // http.Client.Timeout, since llmwire bounds the call itself. BaseURL and
-// APIKey override the env vars the model's llmwire profile names
-// (LLMWIRE_OPENAI_BASE_URL and LLMWIRE_OPENAI_API_KEY); left empty, llmwire
-// reads those itself and a missing one is the error here, named. A test
-// points BaseURL at its fake and no variable is consulted.
+// APIKey override the model's llmwire profile; left empty, llmwire uses the
+// host its profile ships and reads LLMWIRE_OPENAI_API_KEY itself, and a
+// missing key is the error here, named. A test points BaseURL at its fake and
+// no variable is consulted.
 func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

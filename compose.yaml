@@ -90,13 +90,12 @@ services:
       # Empty means no group check — every user Authelia's authorization_policy
       # let through is an admin. Set it only once a second tier exists here.
       BACKEND_OIDC_ADMIN_GROUP: ${BACKEND_OIDC_ADMIN_GROUP:-}
-      # The MiMo endpoint and its key. Mandatory: without them the process
-      # refuses to start rather than answering every question with 503.
-      LLMWIRE_MIMO_BASE_URL: ${LLMWIRE_MIMO_BASE_URL:?set it in .env, the OpenAI-compatible chat completions endpoint}
-      LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:?set it in .env, the key for LLMWIRE_MIMO_BASE_URL}
+      # The model and embedding keys. Mandatory: without them the process
+      # refuses to start rather than answering every question with 503. The
+      # hosts are llmwire's, carried by its profiles.
+      LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:?set it in .env, the key for MiMo's token-plan host}
       BACKEND_CHAT_EMULATE_OPENCODE: ${BACKEND_CHAT_EMULATE_OPENCODE:?set it in .env, true for MiMo's token-plan host}
-      LLMWIRE_OPENAI_BASE_URL: ${LLMWIRE_OPENAI_BASE_URL:?set it in .env, an OpenAI-compatible /embeddings endpoint}
-      LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for LLMWIRE_OPENAI_BASE_URL}
+      LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for OpenAI's /embeddings}
       # Forge tokens for private repositories, named by token_env in repos.yaml.
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.

@@ -141,7 +141,7 @@ func TestFlowGathered(t *testing.T) {
 	// The reranker reorders the search itself, so it is an arm over a second
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
-	if os.Getenv("LLMWIRE_MIMO_BASE_URL") != "" {
+	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
 		reranked = retrieve.New(db, evalEmbedder(t))
 		reranked.Candidates = 60
 		reranked.Reranker = evalReranker(t, evalLLM(t, 2*time.Minute))

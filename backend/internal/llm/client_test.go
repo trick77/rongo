@@ -728,12 +728,13 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 }
 
 // With no BaseURL the constructor asks llmwire for the profile's variables,
-// and a missing one comes back named rather than as a client that dials "".
+// and a missing key comes back named rather than as a client that dials "".
 func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
 	t.Setenv("LLMWIRE_MIMO_BASE_URL", "")
+	t.Setenv("LLMWIRE_MIMO_API_KEY", "")
 	_, err := NewClient(Config{}, nil)
 	var me *llmwire.MissingEnvError
-	if !errors.As(err, &me) || me.Var != "LLMWIRE_MIMO_BASE_URL" {
+	if !errors.As(err, &me) || me.Var != "LLMWIRE_MIMO_API_KEY" {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -49,13 +49,11 @@ var allBackendEnvVars = []string{
 // defaults. setEnv seeds them so a test about something else doesn't have to
 // repeat them; a test about one of them overrides it with "".
 var mandatoryEnv = map[string]string{
-	"BACKEND_SESSION_SECRET":  validSecret,
-	"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
-	"LLMWIRE_OPENAI_API_KEY":  "embed-key",
-	"LLMWIRE_MIMO_BASE_URL":   "http://models.invalid/v1",
-	"LLMWIRE_MIMO_API_KEY":    "llm-key",
+	"BACKEND_SESSION_SECRET": validSecret,
+	"LLMWIRE_OPENAI_API_KEY": "embed-key",
+	"LLMWIRE_MIMO_API_KEY":   "llm-key",
 	// Mandatory rather than defaulted: which client string the endpoint wants
-	// depends on which host is behind LLMWIRE_MIMO_BASE_URL.
+	// depends on which host serves the deployment.
 	"BACKEND_CHAT_EMULATE_OPENCODE": "true",
 }
 
@@ -75,8 +73,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":  validSecret,
-		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_SESSION_SECRET": validSecret,
 	})
 
 	// When
@@ -122,7 +119,6 @@ func TestLoad_turnMaxTokens(t *testing.T) {
 			// Given
 			setEnv(t, map[string]string{
 				"BACKEND_SESSION_SECRET":  validSecret,
-				"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
 				"BACKEND_TURN_MAX_TOKENS": tc.env,
 			})
 
@@ -251,8 +247,7 @@ func TestLoad_readsTheOpencodeFlag(t *testing.T) {
 func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":  validSecret,
-		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_SESSION_SECRET": validSecret,
 	})
 
 	// When
@@ -270,9 +265,8 @@ func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 func TestLoad_acceptsAnExplicitRouteMargin(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":  validSecret,
-		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_ROUTE_MARGIN":    "0.4",
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_ROUTE_MARGIN":   "0.4",
 	})
 
 	// When
@@ -292,10 +286,9 @@ func TestLoad_trimsAdminToken(t *testing.T) {
 	// an env file) must authenticate the same as one without, or every
 	// correct-looking Bearer request gets a silent 401.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":  validSecret,
-		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_AUTH_MODE":       "token",
-		"BACKEND_ADMIN_TOKEN":     "s3cret-token\n",
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_AUTH_MODE":      "token",
+		"BACKEND_ADMIN_TOKEN":    "s3cret-token\n",
 	})
 
 	cfg, err := Load()
@@ -356,7 +349,6 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"LLMWIRE_OPENAI_BASE_URL":    "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
@@ -402,7 +394,6 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"LLMWIRE_OPENAI_BASE_URL":    "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",

@@ -12,10 +12,11 @@ import (
 	"github.com/trick77/rongo/internal/store"
 )
 
-// The endpoints are llmwire's to read from the environment; what main owns is
-// refusing to boot, with the variable named, when one is missing.
+// The hosts are llmwire's profiles' and the keys are llmwire's to read from
+// the environment; what main owns is refusing to boot, with the variable
+// named, when a key is missing.
 func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
-	vars := []string{"LLMWIRE_OPENAI_BASE_URL", "LLMWIRE_OPENAI_API_KEY", "LLMWIRE_MIMO_BASE_URL", "LLMWIRE_MIMO_API_KEY"}
+	vars := []string{"LLMWIRE_OPENAI_API_KEY", "LLMWIRE_MIMO_API_KEY"}
 	for _, v := range vars {
 		t.Setenv(v, "x")
 	}
