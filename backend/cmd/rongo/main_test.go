@@ -63,3 +63,31 @@ func TestMigrateForModel_refusesAFileBuiltForAnotherWidth(t *testing.T) {
 		t.Fatalf("got %v, want a refusal naming the model", err)
 	}
 }
+
+// Both failures on the way to the width are reported as such, never as a
+// width mismatch.
+func TestMigrateForModel_namesTheStepThatFailed(t *testing.T) {
+	closed, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Close()
+	if err := migrateForModel(closed); err == nil || !strings.Contains(err.Error(), "apply migrations") {
+		t.Fatalf("closed database: got %v, want the migration step named", err)
+	}
+
+	gone, err := store.Open(filepath.Join(t.TempDir(), "gone.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gone.Close()
+	if err := migrateForModel(gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gone.Exec(`DROP TABLE chunks_vec`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateForModel(gone); err == nil || !strings.Contains(err.Error(), "dimension") {
+		t.Fatalf("vector table gone: got %v, want the read step named", err)
+	}
+}
