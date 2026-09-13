@@ -161,3 +161,39 @@ projects:
   #      part: consumer
   #      description: Kafka consumer, ingests order events into the shop DB.
   #      enabled: false
+  #
+  # The product's deployment configuration: Kustomize overlays and Spring
+  # properties, one directory per stage. It belongs in the SAME project block,
+  # so a question about the product reaches it, and it declares no uses: the
+  # link to the services is the property key itself. The backend reads
+  # "${shop.cron.send-digest}", its own application-default.properties sets
+  # the default, and prod/… sets what production runs with; rongo joins the
+  # three on the key and the answer states the default and every stage's
+  # value, or one stage's when the question names it.
+  #
+  # stages is declared, never read off the tree: which directories are stages
+  # and what a reader calls them is not something the files say. A name or
+  # alias in the question narrows the search to that directory — so an
+  # ordinary word is refused as either. "integration" is the one people reach
+  # for: "how is the payment integration done" is a question about code, and
+  # narrowing it to intg/ would answer it from one stage's configuration while
+  # claiming the others were left out on purpose. Write "intg", and let the
+  # understanding step map "the integration environment" onto it.
+  #
+  # Credential values in configuration files never reach the index, the
+  # embedding endpoint or the source viewer: a value under a key that names a
+  # password, secret, token or key, or shaped like one (ENC(...), a JWT, a
+  # long hex or base64 blob, credentials in a URL), is stored as <redacted>.
+  # The key line stays, so "where is the database password set" still has
+  # an answer. Secret and SealedSecret manifests are skipped whole.
+  #    - name: shop-infra
+  #      clone_url: https://forge.example.invalid/acme/shop-infra.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      part: infra
+  #      description: Kustomize overlays and Spring properties per stage; the deployed values.
+  #      stages:
+  #        - name: prod
+  #          path: prod/**
+  #          aliases: [production, produktion, produktiv]
+  #        - name: intg
+  #          path: intg/**
