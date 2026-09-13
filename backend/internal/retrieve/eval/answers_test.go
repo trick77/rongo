@@ -99,8 +99,8 @@ func judgeLLM(t *testing.T) *llm.Client {
 // endpoint itself is llmwire's to read; evalLLM skips when it is unset.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
-	if os.Getenv("BACKEND_CHAT_BASE_URL") == "" {
-		t.Skip("BACKEND_CHAT_BASE_URL is unset")
+	if os.Getenv("LLMWIRE_MIMO_BASE_URL") == "" {
+		t.Skip("LLMWIRE_MIMO_BASE_URL is unset")
 	}
 	raw := strings.TrimSpace(os.Getenv("BACKEND_CHAT_EMULATE_OPENCODE"))
 	if raw == "" {
@@ -133,8 +133,8 @@ func mustLLM(t *testing.T, cfg llm.Config) *llm.Client {
 	return c
 }
 
-// evalEmbedder is the embedding client on the endpoint BACKEND_EMBED_BASE_URL
-// and BACKEND_EMBED_API_KEY name, read by llmwire; a missing one is its named
+// evalEmbedder is the embedding client on the endpoint LLMWIRE_OPENAI_BASE_URL
+// and LLMWIRE_OPENAI_API_KEY name, read by llmwire; a missing one is its named
 // error. requireEval has already gated the test on a real endpoint.
 func evalEmbedder(t *testing.T, model string, dim int) *embed.Client {
 	t.Helper()

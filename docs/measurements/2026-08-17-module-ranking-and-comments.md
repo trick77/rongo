@@ -191,7 +191,7 @@ argument for keeping comments in the search lanes.
 
 ```
 BACKEND_EVAL=1 BACKEND_EVAL_DB=/tmp/rongo-eval-small.db \
-BACKEND_EMBED_BASE_URL=... BACKEND_EMBED_API_KEY=... \
+LLMWIRE_OPENAI_BASE_URL=... LLMWIRE_OPENAI_API_KEY=... \
 BACKEND_REPOS_FILE=<root>/repos.yaml BACKEND_REPO_ROOT=/tmp/rongo-eval-repos \
 go test -v -timeout 60m -run 'TestEvalIndex|TestModuleList|TestEvalMeasureModules' \
   ./internal/retrieve/eval/
