@@ -136,11 +136,11 @@ var codeExt = map[string]bool{
 }
 
 // placeholderExt is where a "${a.b}" inside a double-quoted string is a
-// Spring property placeholder and nothing else. JavaScript and TypeScript are
-// deliberately absent: there "${cart.id}" is template interpolation, and
-// recording it would join a front-end to whatever repository has a key of
-// that name.
-var placeholderExt = map[string]bool{".java": true, ".kt": true, ".scala": true}
+// Spring property placeholder and nothing else. JavaScript, TypeScript,
+// Kotlin and Scala are deliberately absent: there "${order.id}" is string
+// interpolation, and recording it would join a file to whatever repository
+// has a key of that name. Java has no string templates.
+var placeholderExt = map[string]bool{".java": true}
 
 // propertiesExt is where every key is a property token. Only the properties
 // format: flattening arbitrary yaml would record spec.template.spec.containers

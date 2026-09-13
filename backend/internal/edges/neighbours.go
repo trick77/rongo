@@ -83,10 +83,14 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		  -- properties file the exception does not apply — two stage files
 		  -- of one infrastructure repository share every key, and joining
 		  -- them to each other would spend the crossing reserve on nothing.
-		  -- The file itself is never its own neighbour.
+		  -- And the far side at home is a properties file, never a sibling
+		  -- class reading the same key: the walk reaches those, and each
+		  -- would cost a chunk of the reserve. The file itself is never its
+		  -- own neighbour.
 		  AND (other_f.repo <> me.repo
 		       OR (mine.kind = 'property' AND other_f.path <> me.path
-		           AND me.path NOT LIKE '%.properties'))
+		           AND me.path NOT LIKE '%.properties'
+		           AND other_f.path LIKE '%.properties'))
 		  AND (
 		    SELECT COUNT(DISTINCT f2.repo)
 		    FROM integration_tokens t2

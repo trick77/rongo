@@ -166,6 +166,10 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 			// is for.
 			p.log.Debug("repository unchanged", "repo", st.Name,
 				"sha", gitrepo.ShortSHA(res.SHA), "took", took(repoStart))
+			// After MarkChecked cleared last_error, so the warning survives
+			// an unchanged HEAD and a stage declared after the last index is
+			// checked without waiting for a push.
+			p.warnEmptyStages(ctx, st.Name)
 		}
 	}
 
@@ -410,10 +414,11 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 }
 
 // warnEmptyStages puts a declared stage that no indexed path lies under on
-// the Repos page, after a run that indexed the repository. The index is
-// fine — last_sha has moved — but the repos.yaml entry names a directory the
-// checkout does not have, and a question narrowed to that stage would find
-// nothing and say so as though the corpus were the reason.
+// the Repos page, after every poll of the repository — an index run or an
+// unchanged HEAD alike, because MarkChecked clears last_error and the entry
+// is still wrong. The index is fine; the repos.yaml entry names a directory
+// the checkout does not have, and a question narrowed to that stage would
+// find nothing and say so as though the corpus were the reason.
 func (p *Poller) warnEmptyStages(ctx context.Context, name string) {
 	empty, err := p.state.EmptyStages(ctx, name)
 	if err != nil {

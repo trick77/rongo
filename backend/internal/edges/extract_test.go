@@ -257,6 +257,8 @@ func TestExtractDoesNotReadTemplateInterpolationAsAProperty(t *testing.T) {
 	for _, c := range []struct{ path, body string }{
 		{"ui/src/cart.ts", "const url = `${base}/carts/${cart.id}/merge`;\nfetch(url);\n"},
 		{"cmd/x/main.go", "s := \"${acme.cron.send-digest}\"\n"},
+		{"src/Order.kt", "log.info(\"order ${order.id} created\")\n"},
+		{"src/Order.scala", "val s = s\"order ${order.id}\"\n"},
 		{"README.md", "Set `${acme.cron.send-digest}` to change the schedule.\n"},
 		{"values.yaml", "acme.cron.send-digest: 0 0 * ? * * *\n"},
 	} {

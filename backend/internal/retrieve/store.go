@@ -119,8 +119,10 @@ func (p StagePrefixes) clause(alias string) (string, []any) {
 	q := " AND (" + alias + ".repo NOT IN (" + placeholders(len(repos)) + ")"
 	args = append(args, toAny(repos)...)
 	for _, r := range repos {
-		q += " OR (" + alias + ".repo = ? AND substr(" + alias + ".path, 1, ?) = ?)"
-		args = append(args, r, len(p[r]), p[r])
+		// length() in SQL, not len() in Go: substr counts characters and
+		// len counts bytes, and a prefix with an umlaut would never match.
+		q += " OR (" + alias + ".repo = ? AND substr(" + alias + ".path, 1, length(?)) = ?)"
+		args = append(args, r, p[r], p[r])
 	}
 	return q + ")", args
 }

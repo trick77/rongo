@@ -22,9 +22,18 @@ func TestRedact_configLines(t *testing.T) {
 		{"comment untouched", "app.properties", "# password=notreally", "# password=notreally"},
 		{"jwt value", "app.properties", "acme.client.assertion=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.abc", "acme.client.assertion=<redacted>"},
 		{"base64 blob value", "app.properties", "acme.blob=QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5QUJDREVGR0g=", "acme.blob=<redacted>"},
-		{"hex value", "app.properties", "acme.digest=0123456789abcdef0123456789abcdef", "acme.digest=<redacted>"},
+		{"hex value", "app.properties", "acme.hmac=0123456789abcdef0123456789abcdef", "acme.hmac=<redacted>"},
 		{"cron value stays", "app.properties", "acme.cron.send-digest=0 0 * ? * * *", "acme.cron.send-digest=0 0 * ? * * *"},
-		{"credentials in a url", "app.properties", "spring.datasource.url=jdbc:postgresql://app:hunter2@db.example.invalid:5432/app", "spring.datasource.url=<redacted>"},
+		{"credentials in a url", "app.properties", "spring.datasource.url=jdbc:postgresql://app:hunter2@db.example.invalid:5432/app", "spring.datasource.url=jdbc:postgresql://<redacted>@db.example.invalid:5432/app"},
+		{"bare url line with credentials", "values.yaml", "  - https://svc:hunter2@upstream.example.invalid/path", "  - https://<redacted>@upstream.example.invalid/path"},
+		{"json array url with credentials", "config.json", `    "https://svc:hunter2@upstream.example.invalid/path",`, `    "https://<redacted>@upstream.example.invalid/path",`},
+		{"git sha under newTag stays", "kustomization.yaml", "    newTag: 3f2a9c1e5b7d4a6f8e0c2b1d9a7f6e5c4b3a2d1e", "    newTag: 3f2a9c1e5b7d4a6f8e0c2b1d9a7f6e5c4b3a2d1e"},
+		{"digest under image stays", "deployment.yaml", "        image: registry.example.invalid/x@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "        image: registry.example.invalid/x@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+		{"hex under a secret key still goes", "app.properties", "acme.api.token=0123456789abcdef0123456789abcdef", "acme.api.token=<redacted>"},
+		{"env file with a stage suffix", ".env.prod", "SMTP_PASSWORD=hunter2", "SMTP_PASSWORD=<redacted>"},
+		{"kustomization resource named task-scheduler stays", "kustomization.yaml", "  - task-scheduler-deployment.yaml", "  - task-scheduler-deployment.yaml"},
+		{"comment starting with Basic stays", "app.conf", "# Basic settings for prod", "# Basic settings for prod"},
+		{"disk-pressure stays", "kustomization.yaml", "  - disk-pressure-monitor.yaml", "  - disk-pressure-monitor.yaml"},
 		{"url without credentials stays", "app.properties", "spring.datasource.url=jdbc:postgresql://db.example.invalid:5432/app", "spring.datasource.url=jdbc:postgresql://db.example.invalid:5432/app"},
 		{"basic auth value", "values.yaml", "  authorization: Basic YWJjOmRlZg==", "  authorization: <redacted>"},
 		{"bearer value", ".env", "AUTH=Bearer abc.def", "AUTH=<redacted>"},
@@ -43,7 +52,7 @@ func TestRedact_configLines(t *testing.T) {
 		{"session in a logging key stays", "app.properties", "spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=100", "spring.jpa.properties.hibernate.session.events.log.LOG_QUERIES_SLOWER_THAN_MS=100"},
 		{"nginx header line without a key", "nginx.conf", `    proxy_set_header Authorization "Basic YWJjOmRlZjEyMw==";`, `    proxy_set_header Authorization "<redacted>";`},
 		{"nginx line without a credential stays", "nginx.conf", `    proxy_set_header Host $host;`, `    proxy_set_header Host $host;`},
-		{"url credentials mid-line without a key", "nginx.conf", `    proxy_pass https://svc:hunter2@upstream.example.invalid/;`, `    proxy_pass https<redacted>upstream.example.invalid/;`},
+		{"url credentials mid-line without a key", "nginx.conf", `    proxy_pass https://svc:hunter2@upstream.example.invalid/;`, `    proxy_pass https://<redacted>@upstream.example.invalid/;`},
 		{"jasypt mid-line without a key", "app.conf", `export DB_URL_WITH_ENC "x ENC(abc) y"`, `export DB_URL_WITH_ENC "x <redacted> y"`},
 		{"image name with long path stays", "kustomization.yaml", "  - name: registry.example.invalid/team-public/product/product-intranet-service", "  - name: registry.example.invalid/team-public/product/product-intranet-service"},
 		{"url with long path stays", "app.properties", "acme.nexus=https://nexus.example.invalid/content/groups/public/ch/acme/stager2/maven-metadata.xml", "acme.nexus=https://nexus.example.invalid/content/groups/public/ch/acme/stager2/maven-metadata.xml"},
@@ -121,7 +130,7 @@ func TestRedact_untouchedBodyIsReturnedAsIs(t *testing.T) {
 func TestIsConfigPath(t *testing.T) {
 	for p, want := range map[string]bool{
 		"a/b/application.properties": true, "x.yaml": true, "x.yml": true, ".env": true,
-		"x.json": true, "x.toml": true, "x.ini": true, "nginx.conf": true,
+		"x.json": true, "x.toml": true, "x.ini": true, "nginx.conf": true, "deploy/.env.prod": true, ".env.local": true,
 		"Main.java": false, "main.go": false, "README.md": false, "x.jks": false,
 	} {
 		if got := IsConfigPath(p); got != want {

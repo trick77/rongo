@@ -39,7 +39,10 @@ func IsConfigPath(p string) bool {
 	if configExt[strings.ToLower(path.Ext(p))] {
 		return true
 	}
-	return strings.ToLower(path.Base(p)) == ".env"
+	// .env, .env.prod, .env.local: path.Ext reads the stage suffix as the
+	// extension, and a stage-suffixed env file is exactly the file at stake.
+	base := strings.ToLower(path.Base(p))
+	return base == ".env" || strings.HasPrefix(base, ".env.")
 }
 
 // keyLine is the one shape every supported format shares: optional indent
@@ -95,14 +98,33 @@ var secretValueShapes = []*regexp.Regexp{
 // inlineShapes are credentials recognisable wherever they stand in a line
 // that has no key at all — an nginx `proxy_set_header Authorization "Basic
 // …";`, a shell export in a .conf. Only the shapes that are unmistakable
-// mid-line: the base64 and hex rules stay anchored to a whole value, where
-// a key says what the value is.
-var inlineShapes = regexp.MustCompile(`(?i)ENC\([^)]*\)` +
-	`|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` +
-	`|\b(?:basic|bearer)\s+[A-Za-z0-9+/=._-]{8,}` +
-	`|(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)[A-Za-z0-9_-]{16,}` +
-	`|(?:AKIA|ASIA)[0-9A-Z]{16}` +
-	`|://[^/\s@:]+:[^/\s@]+@`)
+// mid-line, each fenced by a word boundary and a minimum length: the first
+// draft matched "sk-" inside task-scheduler and "Basic settings" in a
+// comment, and rewrote resource lists a kustomization is made of. The
+// base64 and hex rules stay anchored to a whole value, where a key says
+// what the value is.
+var inlineShapes = regexp.MustCompile(`\bENC\([^)]*\)` +
+	`|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` +
+	`|\b(?i:basic)\s+[A-Za-z0-9+/]{12,}={0,2}` +
+	`|\b(?i:bearer)\s+[A-Za-z0-9._~+/-]{20,}` +
+	`|\b(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)[A-Za-z0-9_-]{16,}` +
+	`|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)
+
+// urlCredentials is user:password inside a URL, on ANY line: a key line's
+// whole-value rules never see a bare "https://u:p@host" list item, whose
+// "https" reads as the key. Only the credential is replaced, so the host
+// and the path — the part an answer needs — stay.
+var urlCredentials = regexp.MustCompile(`://[^/\s@:'"]+:[^/\s@'"]+@`)
+
+// versionSegments are keys whose value is an identifier that happens to be
+// hex — a git sha under newTag, a digest, a checksum. "Which version runs
+// in prod" is answered from these, so the value shapes do not apply under
+// them; a key that NAMES a secret still is one.
+var versionSegments = map[string]bool{
+	"tag": true, "newtag": true, "sha": true, "commit": true, "rev": true,
+	"revision": true, "version": true, "digest": true, "checksum": true,
+	"hash": true, "image": true, "id": true,
+}
 
 // placeholder is "${ENV_VAR}" or "${a.key:default}": a pointer to where the
 // value lives, not the value. Kept even under a secret key.
@@ -125,6 +147,11 @@ func Redact(p string, body []byte) []byte {
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSuffix(lines[i], "\r")
 		crlf := len(line) != len(lines[i])
+		if urlCredentials.MatchString(line) {
+			line = urlCredentials.ReplaceAllString(line, "://"+Marker+"@")
+			lines[i] = line + eol(crlf)
+			changed = true
+		}
 		m := keyLine.FindStringSubmatch(line)
 		if m == nil || isComment(m[1], line) {
 			// No key to judge by: only the unmistakable shapes, in place.
@@ -160,7 +187,7 @@ func Redact(p string, body []byte) []byte {
 			out = append(out, lines[i])
 			continue
 		}
-		if !secretKey && !isSecretValue(unquoted) {
+		if !secretKey && (isVersionKey(key) || !isSecretValue(unquoted)) {
 			out = append(out, lines[i])
 			continue
 		}
@@ -248,6 +275,13 @@ func segments(key string) []string {
 		out = append(out, strings.ToLower(key[start:]))
 	}
 	return out
+}
+
+// isVersionKey reports a key whose last segment says the value is an
+// identifier rather than a credential.
+func isVersionKey(key string) bool {
+	segs := segments(key)
+	return len(segs) > 0 && versionSegments[segs[len(segs)-1]]
 }
 
 func isSecretValue(v string) bool {

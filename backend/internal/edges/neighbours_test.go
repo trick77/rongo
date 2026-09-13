@@ -64,6 +64,10 @@ func TestNeighboursFollowsAPropertyKeyInsideItsOwnRepositoryToo(t *testing.T) {
 		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 28}})
 	seedFileWithTokens(t, db, "acme-infra", "prod/application.properties", "prod", nil,
 		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 44}})
+	// A sibling class reading the same key is the walk's business, not a
+	// landing: at home only a properties file is a neighbour.
+	seedFileWithTokens(t, db, "acme-service", "OtherJob.java", "other", nil,
+		[]Token{{Kind: KindProperty, Value: "acme.cron.send-digest", Line: 9}})
 
 	// When
 	got, err := Neighbours(context.Background(), db, "acme-service", "Job.java")
@@ -79,8 +83,8 @@ func TestNeighboursFollowsAPropertyKeyInsideItsOwnRepositoryToo(t *testing.T) {
 		t.Errorf("neighbours = %+v", got)
 	}
 	for _, n := range got {
-		if n.Path == "Job.java" {
-			t.Errorf("the file itself came back as its own neighbour: %+v", n)
+		if n.Path == "Job.java" || n.Path == "OtherJob.java" {
+			t.Errorf("a class of the same repository came back as a neighbour: %+v", n)
 		}
 	}
 
@@ -98,8 +102,8 @@ func TestNeighboursFollowsAPropertyKeyInsideItsOwnRepositoryToo(t *testing.T) {
 			t.Errorf("a stage file was joined to its sibling stage: %+v", n)
 		}
 	}
-	if len(got) != 2 {
-		t.Errorf("want the two service files across the boundary, got %+v", got)
+	if len(got) != 3 {
+		t.Errorf("want the three service files across the boundary, got %+v", got)
 	}
 }
 
