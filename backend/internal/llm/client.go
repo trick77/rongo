@@ -45,10 +45,10 @@ const (
 const defaultMaxTokens = 4096
 
 // Config holds the endpoint settings. The deployment names are not here on
-// purpose. BaseURL and APIKey override the env vars the deployment's llmwire
-// profile names (LLMWIRE_MIMO_BASE_URL and LLMWIRE_MIMO_API_KEY); left empty,
-// the production case, llmwire reads those itself. A test points BaseURL at
-// its fake and no variable is consulted.
+// purpose. BaseURL and APIKey override the deployment's llmwire profile; left
+// empty, the production case, llmwire uses the host its profile ships and
+// reads LLMWIRE_MIMO_API_KEY itself. A test points BaseURL at its fake and no
+// variable is consulted.
 type Config struct {
 	BaseURL string
 	APIKey  string
@@ -328,9 +328,8 @@ func (c *Client) deployment(lane string) string {
 // body reads too and would cut a long answer mid-stream, which is what the
 // named timeouts in Config exist to prevent.
 //
-// The error is a missing LLMWIRE_MIMO_BASE_URL or LLMWIRE_MIMO_API_KEY,
-// named. Both lanes live on the one host, so the Pro profile's variables
-// serve the gate as well.
+// The error is a missing LLMWIRE_MIMO_API_KEY, named. Both lanes live on the
+// one host, so the Pro profile's key serves the gate as well.
 func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	log := cfg.Logger
 	if log == nil {
