@@ -2,10 +2,14 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/config"
+	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/store"
 )
 
 // The endpoints are llmwire's to read from the environment; what main owns is
@@ -28,5 +32,34 @@ func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
 				t.Fatalf("got %v, want a MissingEnvError naming %s", err, v)
 			}
 		})
+	}
+}
+
+// The vec0 table is created at embed.Model's width, and a file created at
+// another width is refused rather than written into.
+func TestMigrateForModel_refusesAFileBuiltForAnotherWidth(t *testing.T) {
+	fresh, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	if err := migrateForModel(fresh); err != nil {
+		t.Fatalf("a fresh file: %v", err)
+	}
+	if built, _ := store.BuiltDim(fresh); built != embed.Dim() {
+		t.Fatalf("built %d, want %d", built, embed.Dim())
+	}
+
+	other, err := store.Open(filepath.Join(t.TempDir(), "other.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	if err := store.Migrate(other, embed.Dim()+1); err != nil {
+		t.Fatal(err)
+	}
+	err = migrateForModel(other)
+	if err == nil || !strings.Contains(err.Error(), embed.Model) {
+		t.Fatalf("got %v, want a refusal naming the model", err)
 	}
 }
