@@ -22,7 +22,7 @@ func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
 	}
 	cfg := config.Config{}
 	if _, _, err := newModelClients(cfg); err != nil {
-		t.Fatalf("all four set: %v", err)
+		t.Fatalf("both keys set: %v", err)
 	}
 	for _, v := range vars {
 		t.Run(v, func(t *testing.T) {

@@ -88,8 +88,7 @@ type Config struct {
 	// its User-Agent and session header pair. MiMo's token-plan host is sold
 	// as that client's backend; an endpoint that does not care ignores the
 	// headers. Mandatory and explicit, because a default either way is a
-	// guess about which host serves the deployment (LLMWIRE_MIMO_BASE_URL
-	// can still override llmwire's).
+	// guess about which host serves the deployment.
 	ChatEmulateOpenCode bool
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
