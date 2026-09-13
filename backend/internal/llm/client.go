@@ -8,10 +8,10 @@
 // usage meter and the per-turn ceiling. One completion call and one streaming
 // call; no tools, no image path.
 //
-// Session affinity is llmwire's: under Config.EmulateOpenCode the client
-// presents as the opencode client and carries one session id per process,
-// minted at construction and rotated after a thirty-minute idle gap. Calls are
-// not pinned per thread.
+// Session affinity and the opencode identity are llmwire's: the MiMo provider
+// entry in its profiles.yaml switches them on, and the client then carries one
+// session id per process, minted at construction and rotated after a
+// thirty-minute idle gap. Calls are not pinned per thread.
 package llm
 
 import (
@@ -77,10 +77,6 @@ type Config struct {
 	// says so out loud once a loop or a retry that nobody bounded appears.
 	// Zero turns it off. A context without a meter is never checked.
 	TurnMaxTokens int
-	// EmulateOpenCode presents every request as the opencode client: its
-	// User-Agent and the session header pair. MiMo's token-plan host serves
-	// that client; a neutral User-Agent is not what its traffic looks like.
-	EmulateOpenCode bool
 }
 
 // ErrTurnBudget is why a call was refused when the turn had already spent
@@ -336,13 +332,12 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 		log = slog.Default()
 	}
 	wire, err := llmwire.FromEnv(ProDeployment, llmwire.Config{
-		BaseURL:         cfg.BaseURL,
-		APIKey:          cfg.APIKey,
-		HeaderTimeout:   cfg.Timeout,
-		IdleTimeout:     cfg.IdleTimeout,
-		CallTimeout:     cfg.Timeout,
-		HTTPClient:      hc,
-		EmulateOpenCode: cfg.EmulateOpenCode,
+		BaseURL:       cfg.BaseURL,
+		APIKey:        cfg.APIKey,
+		HeaderTimeout: cfg.Timeout,
+		IdleTimeout:   cfg.IdleTimeout,
+		CallTimeout:   cfg.Timeout,
+		HTTPClient:    hc,
 	})
 	if err != nil {
 		return nil, err

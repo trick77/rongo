@@ -94,7 +94,6 @@ services:
       # refuses to start rather than answering every question with 503. The
       # hosts are llmwire's, carried by its profiles.
       LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:?set it in .env, the key for MiMo's token-plan host}
-      BACKEND_CHAT_EMULATE_OPENCODE: ${BACKEND_CHAT_EMULATE_OPENCODE:?set it in .env, true for MiMo's token-plan host}
       LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for OpenAI's /embeddings}
       # Forge tokens for private repositories, named by token_env in repos.yaml.
       # Passed through even when unset so adding a private repo later is a

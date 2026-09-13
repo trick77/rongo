@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,28 +93,15 @@ func judgeLLM(t *testing.T) *llm.Client {
 	return evalLLM(t, 15*time.Minute)
 }
 
-// evalLLMConfig reads the one model setting the harness owns, the way
-// config.Load does for the product: the opencode flag is mandatory and must
-// be a boolean. A harness that silently sent llmwire's own client string to
-// the token-plan host would measure a bot's welcome, not the model. The
-// endpoint itself is llmwire's to read; evalLLM skips when it is unset.
+// evalLLMConfig builds the model config the same way the product does: the
+// host, the key variable and the opencode identity are all llmwire's, from
+// the deployment's provider entry. evalLLM skips when the key is unset.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
 	if os.Getenv("LLMWIRE_MIMO_API_KEY") == "" {
 		t.Skip("LLMWIRE_MIMO_API_KEY is unset")
 	}
-	raw := strings.TrimSpace(os.Getenv("BACKEND_CHAT_EMULATE_OPENCODE"))
-	if raw == "" {
-		t.Fatal("BACKEND_CHAT_EMULATE_OPENCODE is required: true or false, the same as for the product")
-	}
-	emulate, err := strconv.ParseBool(raw)
-	if err != nil {
-		t.Fatalf("BACKEND_CHAT_EMULATE_OPENCODE=%q is not a boolean; want true or false", raw)
-	}
-	return llm.Config{
-		Timeout:         timeout,
-		EmulateOpenCode: emulate,
-	}
+	return llm.Config{Timeout: timeout}
 }
 
 // evalLLM is the model client on the product's deployments. A missing
