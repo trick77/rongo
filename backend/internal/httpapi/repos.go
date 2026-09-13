@@ -42,6 +42,7 @@ type RepoStatus struct {
 	Part        string
 	Description string
 	Uses        []string
+	Stages      []string
 }
 
 // RepoStatusSource reports the state of every repository rongo knows about.
@@ -94,6 +95,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"part":        st.Part,
 			"description": st.Description,
 			"uses":        uses(st.Uses),
+			"stages":      uses(st.Stages),
 		})
 	}
 	// no-store, because this is a STATUS page and a cached status page lies.
