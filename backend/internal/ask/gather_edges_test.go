@@ -167,3 +167,83 @@ func TestGather_readsTestFilesAfterTheMechanism(t *testing.T) {
 		t.Errorf("order = %v, want %v", paths(got), want)
 	}
 }
+
+// TestGather_crossesAPropertyKeyIntoEveryStageOfTheInfraRepository: the
+// job reads "${acme.cron.send-digest}", the service's own defaults set it,
+// and the infrastructure repository sets it once per stage. One key, three
+// landings in the far repository — one chunk per stage file — which is what
+// lets an answer state the value for every stage rather than for one.
+func TestGather_crossesAPropertyKeyIntoEveryStageOfTheInfraRepository(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-service")
+	seedRepo(t, db, "acme-infra")
+	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", 0, 1, 20, "JobSendDigest",
+		`@Scheduled(cron = "${acme.cron.send-digest}") public void run() {}`)
+	seedTokenIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", "property", "acme.cron.send-digest", 4)
+	for i, stage := range []string{"syst", "intg", "prod"} {
+		p := stage + "/intranet/application.properties"
+		seedChunkIn(t, db, "acme-infra", p, 0, 1, 10, "",
+			"# stage "+stage+"\nacme.cron.send-digest=0 "+string(rune('0'+i))+" * ? * * *\n")
+		seedTokenIn(t, db, "acme-infra", p, "property", "acme.cron.send-digest", 2)
+	}
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	for _, stage := range []string{"syst", "intg", "prod"} {
+		s, ok := sourceIn(got, "acme-infra", stage+"/intranet/application.properties")
+		if !ok {
+			t.Errorf("sources = %v, want the %s stage reached across the property key", repoPaths(got), stage)
+			continue
+		}
+		if !strings.HasPrefix(s.Reason, "edge:property acme.cron.send-digest from acme-service/") {
+			t.Errorf("reason = %q, want the property key named", s.Reason)
+		}
+		if s.Hop != 1 {
+			t.Errorf("%s hop = %d, want 1", stage, s.Hop)
+		}
+	}
+}
+
+func TestCrossings_orderRoutesAndDestinationsBeforeProperties(t *testing.T) {
+	// The reserve was measured with routes and destinations alone; a file
+	// naming twenty properties must not spend it before a queue's far side
+	// is reached.
+	db := gatherDB(t)
+	seedRepo(t, db, "a")
+	seedRepo(t, db, "b")
+	fromID := seedChunkIn(t, db, "a", "A.java", 0, 1, 10, "A", "x")
+	seedTokenIn(t, db, "a", "A.java", "property", "k.one", 1)
+	seedTokenIn(t, db, "a", "A.java", "property", "k.two", 2)
+	seedTokenIn(t, db, "a", "A.java", "destination", "q", 3)
+	seedTokenIn(t, db, "a", "A.java", "route", "/r", 4)
+	for _, f := range []struct{ path, kind, value string }{
+		{"one.properties", "property", "k.one"},
+		{"two.properties", "property", "k.two"},
+		{"Consumer.java", "destination", "q"},
+		{"Controller.java", "route", "/r"},
+	} {
+		seedChunkIn(t, db, "b", f.path, 0, 1, 10, "", f.value)
+		seedTokenIn(t, db, "b", f.path, f.kind, f.value, 1)
+	}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+	from := Source{ChunkID: fromID, Repo: "a", Path: "A.java"}
+
+	far, err := g.crossings(context.Background(), from)
+	if err != nil {
+		t.Fatalf("crossings: %v", err)
+	}
+
+	want := []string{"Controller.java", "Consumer.java", "one.properties", "two.properties"}
+	if len(far) != len(want) {
+		t.Fatalf("landings = %v, want %v", paths(far), want)
+	}
+	for i := range want {
+		if far[i].Path != want[i] {
+			t.Errorf("landing %d = %s, want %s (order %v)", i, far[i].Path, want[i], paths(far))
+		}
+	}
+}

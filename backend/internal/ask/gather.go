@@ -344,6 +344,12 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 	if err != nil {
 		return nil, fmt.Errorf("cross from %s/%s: %w", from.Repo, from.Path, err)
 	}
+	// Routes and destinations before properties. The reserve was measured
+	// with the first two alone (docs/measurements/2026-09-11-edges-in-
+	// gather.md), and a file reading twenty properties would otherwise
+	// spend it on configuration lines before the queue's far side is
+	// reached. A newer kind may only add after the measured ones.
+	sort.SliceStable(ns, func(i, j int) bool { return kindRank(ns[i].Kind) < kindRank(ns[j].Kind) })
 	var out []Source
 	for _, n := range ns {
 		var s Source
@@ -506,4 +512,17 @@ func estimateTokens(s string) int {
 		return 0
 	}
 	return (n + 3) / 4
+}
+
+// kindRank orders the edge kinds a crossing follows: the two the reserve was
+// measured with first, then property keys.
+func kindRank(k edges.Kind) int {
+	switch k {
+	case edges.KindRoute:
+		return 0
+	case edges.KindDestination:
+		return 1
+	default:
+		return 2
+	}
 }

@@ -40,6 +40,12 @@ const (
 	KindRoute Kind = "route"
 	// KindDestination is a queue, topic or exchange name.
 	KindDestination Kind = "destination"
+	// KindProperty is a configuration key: "${acme.cron.send-digest}" in
+	// the code that reads it, "acme.cron.send-digest=..." in the properties
+	// file that sets it. The code's placeholder and default live in one
+	// repository, the deployed value per stage in another, and the key is
+	// the only thing they share.
+	KindProperty Kind = "property"
 )
 
 // Token is one extracted destination with the line it was found on.
@@ -129,6 +135,29 @@ var codeExt = map[string]bool{
 	".cs": true, ".php": true,
 }
 
+// placeholderExt is where a "${a.b}" inside a double-quoted string is a
+// Spring property placeholder and nothing else. JavaScript and TypeScript are
+// deliberately absent: there "${cart.id}" is template interpolation, and
+// recording it would join a front-end to whatever repository has a key of
+// that name.
+var placeholderExt = map[string]bool{".java": true, ".kt": true, ".scala": true}
+
+// propertiesExt is where every key is a property token. Only the properties
+// format: flattening arbitrary yaml would record spec.template.spec.containers
+// from every manifest in every repository, and a Spring application.yaml is
+// a follow-up with its own rule.
+var propertiesExt = map[string]bool{".properties": true}
+
+// propertyPlaceholder is "${key}" or "${key:default}" inside a double-quoted
+// literal. The key needs a dot or a dash: "${id}" in a Java string is a
+// message template far more often than a property, and a property key has
+// at least one segment.
+var propertyPlaceholder = regexp.MustCompile(`"[^"\n]*?\$\{([A-Za-z][\w]*[.\-][\w.\-]*)(?::[^}"]*)?\}`)
+
+// propertyLine is one key of a properties file, "=" or ":" separated. A
+// leading "#" or "!" is a comment in that format.
+var propertyLine = regexp.MustCompile(`^\s*([A-Za-z][\w.\-\[\]]*)\s*[=:]`)
+
 // Extract reads one file and returns the destinations it names.
 //
 // It works line by line rather than by parsing. A parser per language would be
@@ -136,7 +165,11 @@ var codeExt = map[string]bool{
 // the edges that exist, and their failure mode is a missing token rather than a
 // wrong one.
 func Extract(filePath string, body []byte) []Token {
-	if !codeExt[strings.ToLower(path.Ext(filePath))] {
+	ext := strings.ToLower(path.Ext(filePath))
+	if propertiesExt[ext] {
+		return propertyKeys(body)
+	}
+	if !codeExt[ext] {
 		return nil
 	}
 	var out []Token
@@ -155,6 +188,13 @@ func Extract(filePath string, body []byte) []Token {
 	}
 
 	lines := strings.Split(string(body), "\n")
+	if placeholderExt[ext] {
+		for i, line := range lines {
+			for _, m := range propertyPlaceholder.FindAllStringSubmatch(line, -1) {
+				add(KindProperty, m[1], i+1)
+			}
+		}
+	}
 	// prefix is the class-level @RequestMapping in force: Spring serves the
 	// method path UNDER it, and a client spelling the whole path matches
 	// nothing else. Both spellings are recorded — the bare method path is
@@ -321,4 +361,22 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// propertyKeys is the configuration side of a property edge: every key of a
+// properties file, at the line it is set on. Values are not read — the
+// deployed value is what the answer will quote from the chunk, and a
+// credential value has been redacted before this runs.
+func propertyKeys(body []byte) []Token {
+	var out []Token
+	seen := map[string]bool{}
+	for i, line := range strings.Split(string(body), "\n") {
+		m := propertyLine.FindStringSubmatch(line)
+		if m == nil || seen[m[1]] {
+			continue
+		}
+		seen[m[1]] = true
+		out = append(out, Token{Kind: KindProperty, Value: m[1], Line: i + 1})
+	}
+	return out
 }
