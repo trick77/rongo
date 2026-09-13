@@ -131,8 +131,15 @@ describe("RepoList", () => {
       expect(cell.className).toContain("w-px");
       expect(cell.className).toContain("whitespace-nowrap");
     }
-    // The error stripe still sits on the name cell.
-    expect(name.className).not.toContain("shadow-[inset_3px");
+  });
+
+  it("keeps the error stripe on the name cell", async () => {
+    respondWith(200, [{ ...peeq, last_error: "fetch: could not read from remote repository" }]);
+    render(<RepoList />);
+    await screen.findByRole("heading", { name: "peeq" });
+    const name = screen.getByText("peeq", { selector: "span" }).closest("td")!;
+    expect(name.className).toContain("shadow-[inset_3px_0_0_var(--color-danger)]");
+    expect(within(name).getByText("fetch: could not read from remote repository")).toBeTruthy();
   });
 
   it("shows when the index was written, not when the poller last looked", async () => {

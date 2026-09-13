@@ -229,7 +229,7 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE repo_state
-		SET last_sha = '', last_error = '', file_count = 0, chunk_count = 0
+		SET last_sha = '', last_indexed_at = '', last_error = '', file_count = 0, chunk_count = 0
 		WHERE name = ?`, name); err != nil {
 		return fmt.Errorf("reset %s: %w", name, err)
 	}

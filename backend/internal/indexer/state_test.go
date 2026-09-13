@@ -856,6 +856,11 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 	if active[0].Files != 0 || active[0].Chunks != 0 {
 		t.Errorf("counts = %d files / %d chunks, want 0/0", active[0].Files, active[0].Chunks)
 	}
+	// A reset row must not claim an index it no longer has: the page would
+	// show "Indexed 2 d ago" beside 0 chunks while a re-clone fails.
+	if !active[0].LastIndexedAt.IsZero() {
+		t.Errorf("LastIndexedAt = %v, want zero after a reset", active[0].LastIndexedAt)
+	}
 	// ... and the content is gone from all four tables, mirrors included.
 	for _, q := range []string{
 		`SELECT COUNT(*) FROM files`,
