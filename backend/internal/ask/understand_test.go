@@ -53,7 +53,7 @@ func TestUnderstand_returnsTermsAndGuessedCodeVocabulary(t *testing.T) {
 	c, _, _ := modelUpstream(t, appleTVReply)
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{})
+	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{}, nil)
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestUnderstand_searchTextsCarryBothLanguages(t *testing.T) {
 	c, _, _ := modelUpstream(t, appleTVReply)
 	q := "How does an Apple TV get at the media file without signing in?"
 
-	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{})
+	got, err := NewUnderstander(c).Understand(context.Background(), q, Thread{}, nil)
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestUnderstand_runsOnTheShortGateDeployment(t *testing.T) {
 	// would pay the expensive queue for a JSON blob.
 	c, model, prompt := modelUpstream(t, appleTVReply)
 
-	if _, err := NewUnderstander(c).Understand(context.Background(), "How does shipping work?", Thread{}); err != nil {
+	if _, err := NewUnderstander(c).Understand(context.Background(), "How does shipping work?", Thread{}, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestUnderstand_toleratesAFencedJsonBlock(t *testing.T) {
 	// parse failure would make the step flaky for no reason.
 	c, _, _ := modelUpstream(t, "```json\n"+appleTVReply+"\n```")
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{})
+	got, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{}, nil)
 
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
@@ -141,7 +141,7 @@ func TestUnderstand_malformedJsonIsAnErrorNotAnEmptyExpansion(t *testing.T) {
 	// look like the expansion simply did not help.
 	c, _, _ := modelUpstream(t, "I think you mean the playback code?")
 
-	_, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{})
+	_, err := NewUnderstander(c).Understand(context.Background(), "x", Thread{}, nil)
 
 	if err == nil {
 		t.Fatal("prose answer accepted as an understanding")
@@ -162,7 +162,7 @@ func TestUnderstand_readsTheAskForEveryRepository(t *testing.T) {
   "all_repos": true
 }`)
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "in all repos, how are token costs calculated in $?", Thread{})
+	got, err := NewUnderstander(c).Understand(context.Background(), "in all repos, how are token costs calculated in $?", Thread{}, nil)
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestUnderstand_readsTheAskForEveryRepository(t *testing.T) {
 func TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll(t *testing.T) {
 	c, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "how are token costs calculated in $?", Thread{})
+	got, err := NewUnderstander(c).Understand(context.Background(), "how are token costs calculated in $?", Thread{}, nil)
 	if err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestUnderstand_carriesThePreviousTurnSoAFollowUpCanBeResolved(t *testing.T)
 	}
 
 	if _, err := NewUnderstander(c).Understand(context.Background(),
-		"Kannst du das in einem Diagramm aufzeigen?", prev); err != nil {
+		"Kannst du das in einem Diagramm aufzeigen?", prev, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 
@@ -234,7 +234,7 @@ func TestUnderstand_thePreviousAnswersDiagramIsNotWhatTheFollowUpIsAbout(t *test
 			"Danach werden die Embeddings gecacht.",
 	}
 
-	if _, err := NewUnderstander(c).Understand(context.Background(), "Und wo wird das gecacht?", prev); err != nil {
+	if _, err := NewUnderstander(c).Understand(context.Background(), "Und wo wird das gecacht?", prev, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 
@@ -252,7 +252,7 @@ func TestUnderstand_thePreviousAnswersDiagramIsNotWhatTheFollowUpIsAbout(t *test
 func TestUnderstand_afirstTurnCarriesNothing(t *testing.T) {
 	c, _, prompt := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
 
-	if _, err := NewUnderstander(c).Understand(context.Background(), "How is pricing resolved?", Thread{}); err != nil {
+	if _, err := NewUnderstander(c).Understand(context.Background(), "How is pricing resolved?", Thread{}, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
 	if strings.Contains(*prompt, "Previous question") {

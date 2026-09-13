@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/trick77/rongo/internal/store"
@@ -91,6 +92,41 @@ func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 // Post-filtering the repository would return nothing for any repository holding
 // a small slice of the corpus, which is most of them.
 func (s *Store) SearchVector(ctx context.Context, vec []float32, k int, maxDistance float64, repos []string) ([]Hit, error) {
+	return s.SearchVectorIn(ctx, vec, k, maxDistance, repos, nil)
+}
+
+// StagePrefixes narrows the repositories that declare stages to the asked
+// stage's directory: repository name to the path prefix its files must
+// carry. A repository absent from the map is not narrowed at all — the
+// service repository beside an infrastructure one keeps every file — and a
+// repository present with a prefix nothing starts with contributes nothing,
+// which is what asking for a stage a repository does not have means.
+type StagePrefixes map[string]string
+
+// clause is the SQL restriction over f's repo and path, with its arguments,
+// or empty when nothing is narrowed. substr rather than LIKE, so "_" in a
+// directory name is a character and not a wildcard.
+func (p StagePrefixes) clause(alias string) (string, []any) {
+	if len(p) == 0 {
+		return "", nil
+	}
+	repos := make([]string, 0, len(p))
+	for r := range p {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+	var args []any
+	q := " AND (" + alias + ".repo NOT IN (" + placeholders(len(repos)) + ")"
+	args = append(args, toAny(repos)...)
+	for _, r := range repos {
+		q += " OR (" + alias + ".repo = ? AND substr(" + alias + ".path, 1, ?) = ?)"
+		args = append(args, r, len(p[r]), p[r])
+	}
+	return q + ")", args
+}
+
+// SearchVectorIn is SearchVector under a stage restriction as well.
+func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDistance float64, repos []string, stage StagePrefixes) ([]Hit, error) {
 	if k <= 0 {
 		k = 10
 	}
@@ -117,6 +153,10 @@ func (s *Store) SearchVector(ctx context.Context, vec []float32, k int, maxDista
 		inner += " AND f2.repo IN (" + placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
+	// The stage restriction rides in the same subquery, for the same reason.
+	stageQ, stageArgs := stage.clause("f2")
+	inner += stageQ
+	args = append(args, stageArgs...)
 	inner += ")"
 	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ? ORDER BY distance`
 	args = append(args, maxDistance, maxDistance)
@@ -150,6 +190,11 @@ func (s *Store) SearchVector(ctx context.Context, vec []float32, k int, maxDista
 // resolves it as a hidden column on the virtual table, where aliases are not
 // recognised.
 func (s *Store) SearchKeyword(ctx context.Context, match string, n int, repos []string) ([]Hit, error) {
+	return s.SearchKeywordIn(ctx, match, n, repos, nil)
+}
+
+// SearchKeywordIn is SearchKeyword under a stage restriction as well.
+func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
 	if strings.TrimSpace(match) == "" {
 		return nil, nil
 	}
@@ -164,6 +209,9 @@ func (s *Store) SearchKeyword(ctx context.Context, match string, n int, repos []
 		q += " AND f.repo IN (" + placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
+	stageQ, stageArgs := stage.clause("f")
+	q += stageQ
+	args = append(args, stageArgs...)
 	q += "\n\t\tORDER BY bm25(chunks_fts) LIMIT ?"
 	args = append(args, n)
 

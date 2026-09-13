@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/stages"
 	"github.com/trick77/rongo/internal/units"
 )
 
@@ -44,6 +45,9 @@ type Routes interface {
 	// Units is what one repository is built from, as its manifests declare
 	// it. Same owner as Projects, for the same reason.
 	Units(ctx context.Context, repo string) ([]units.Unit, []units.Dep, error)
+	// Stages is every declared deployment stage of every enabled repository,
+	// read fresh per turn like Projects. Same owner, same reason.
+	Stages(ctx context.Context) (stages.Set, error)
 }
 
 // Clarification is how a turn ends when it asks instead of answering. The
@@ -184,10 +188,16 @@ type Thread struct {
 func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, lang Language, t Thread, ev Events) (Answer, *Clarification, error) {
 	pin := t.Pin
 	ev.status("understanding")
-	u, err := p.understander.Understand(ctx, question, t)
+	declared := p.declaredStages(ctx)
+	u, err := p.understander.Understand(ctx, question, t, declared.Names())
 	if err != nil {
 		return Answer{}, nil, err
 	}
+	// The stage before the repositories: a reader writing "in production"
+	// gets it guessed as a repository name as often as not, and unresolved
+	// it would become a false "no project called production in the index".
+	stage, stageDetail := resolveStage(question, u.Stage, declared)
+	u.Repos = withoutStageWords(u.Repos, declared)
 
 	known, unknown, err := p.search.ResolveRepos(ctx, u.Repos, question)
 	if err != nil {
@@ -241,7 +251,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		allDenied = all
 		all = false
 	}
-	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all}
+	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all, Stage: stage}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -249,12 +259,12 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// beside it for the same reason: under one, "known" is the thread's doing
 	// rather than the question's.
 	slog.Info("scope", "thread", llm.ThreadID(ctx), "known", known, "unknown", unknown,
-		"outside", outside, "pin", pin, "all_repos", all, "all_denied", allDenied)
+		"outside", outside, "pin", pin, "all_repos", all, "all_denied", allDenied, "stage", stage)
 	// Sent before the search rather than with the answer: it is already known
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
 	ev.notice(ScopeNotice(lang, scope))
-	ev.detail("understanding", understandingDetail(u, scope, pin))
+	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin), stageDetail))
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")
@@ -269,7 +279,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if len(pin) > 0 {
 		scopedQuestion = ""
 	}
-	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known)
+	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known, declared.Prefixes(stage))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -352,6 +362,11 @@ func intersect(named, pin []string) []string {
 // answer is phrased, not whether it is correct, and losing a whole turn because
 // repo_uses could not be read would be the worse trade.
 func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
+	// The declared stages ride on the scope for the answer: they label a
+	// source under a stage directory and narrow the crossing when one was
+	// asked. Read here rather than in Run because every entry point — a
+	// resume, a re-explain — comes through here and needs them alike.
+	scope.Stages = p.declaredStages(ctx)
 	if len(scope.Known) == 0 {
 		return scope
 	}
@@ -397,6 +412,76 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 	return scope
 }
 
+// declaredStages reads the stage declarations for this turn. Unavailable
+// reads as none declared, and says so: a turn then answers without a stage,
+// which is the ordinary turn, rather than failing.
+func (p *Pipeline) declaredStages(ctx context.Context) stages.Set {
+	declared, err := p.router.Stages(ctx)
+	if err != nil {
+		slog.Warn("stages unavailable, answering without them", "thread", llm.ThreadID(ctx), "err", err)
+		return nil
+	}
+	return declared
+}
+
+// resolveStage settles which stage a turn is about, from the reader's own
+// words first and the understanding step's field second, and reports how
+// for the trace.
+//
+// The reader's wording wins: a declared stage name or alias in the question
+// is the reader narrowing the turn, the same way a named repository is. The
+// model's field covers the phrasings no alias can — "the integration
+// environment" for intg — and it is only ever one of the declared names, or
+// dropped. When the two disagree the turn is NOT narrowed and the trace says
+// so: narrowing on a guess against the reader's own words would hand back
+// one stage's value as the answer to a question about another.
+//
+// Two stages named at once is a question about both, and both is what an
+// unnarrowed turn gathers.
+func resolveStage(question, guessed string, declared stages.Set) (string, map[string]any) {
+	detail := map[string]any{}
+	named := declared.Mentioned(question)
+	model, ok := declared.Resolve(guessed)
+	if guessed != "" && !ok {
+		detail["stage_dropped"] = guessed
+	}
+	switch {
+	case len(named) >= 2:
+		detail["stages_named"] = named
+		return "", detail
+	case len(named) == 1 && ok && model != named[0]:
+		detail["stage_conflict"] = []string{named[0], model}
+		return "", detail
+	case len(named) == 1:
+		return named[0], detail
+	case ok:
+		return model, detail
+	}
+	return "", detail
+}
+
+// withoutStageWords drops a stage name or alias from the guessed
+// repositories: "production" is a stage, and left in it would resolve to no
+// repository and be reported as one the index lacks.
+func withoutStageWords(repos []string, declared stages.Set) []string {
+	var out []string
+	for _, r := range repos {
+		if _, isStage := declared.Resolve(r); !isStage {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// withStageDetail folds the stage resolution into the understanding step's
+// trace detail.
+func withStageDetail(d, stage map[string]any) map[string]any {
+	for k, v := range stage {
+		d[k] = v
+	}
+	return d
+}
+
 // withParts appends the units paragraphs to a structure block so that the
 // never-cite sentence closes the whole block once, last. StructureBlock
 // closes its block with that sentence; it is moved behind the paragraphs
@@ -427,7 +512,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 	scope = p.describeProjects(ctx, scope)
 
 	ev.status("gathering")
-	sources, err := p.gatherer.Gather(ctx, hits)
+	sources, err := p.gatherer.GatherWithin(ctx, hits, scope.Stages.Prefixes(scope.Stage))
 	if err != nil {
 		return Answer{}, err
 	}
@@ -509,6 +594,9 @@ func understandingDetail(u Understanding, scope Scope, pin []string) map[string]
 	}
 	if scope.All {
 		d["all_repos"] = true
+	}
+	if scope.Stage != "" {
+		d["stage"] = scope.Stage
 	}
 	return d
 }
@@ -625,16 +713,16 @@ func gatherDetail(sources []Source, budget int) map[string]any {
 // searchK per repository, not searchK divided among them: each side gets the
 // same depth it would have got as the only named one, and gather applies no
 // cap to hits by design.
-func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, known []string) ([]retrieve.Hit, error) {
+func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
-		return p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: question, K: searchK})
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: question, K: searchK, Stage: stage})
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
 		// Question is left out on purpose: it names every one of these
 		// repositories, and knownRepos would union them all back in, undoing
 		// the one-repository-at-a-time cut this exists for.
-		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK})
+		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK, Stage: stage})
 		if err != nil {
 			return nil, err
 		}
@@ -690,6 +778,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	audience Audience, lang Language, scope Scope, ev Events) (Answer, error) {
 
 	texts := u.SearchTexts(question)
+	stage := p.declaredStages(ctx).Prefixes(scope.Stage)
 	var hits []retrieve.Hit
 	if len(repos) > 0 {
 		// A restriction the index cannot resolve is not a narrow search, it is
@@ -721,14 +810,14 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// question is left out for the reason the single-repository search
 		// left it out — knownRepos would union the other repositories back in
 		// and undo the choice.
-		hits, err = p.searchScoped(ctx, "", texts, known)
+		hits, err = p.searchScoped(ctx, "", texts, known, stage)
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
 	} else {
 		ev.status("searching")
 		var err error
-		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Question: question, K: searchK})
+		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Question: question, K: searchK, Stage: stage})
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
@@ -738,7 +827,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	scope = p.describeProjects(ctx, scope)
 
 	ev.status("gathering")
-	sources, err := p.gatherer.Gather(ctx, hits)
+	sources, err := p.gatherer.GatherWithin(ctx, hits, scope.Stages.Prefixes(scope.Stage))
 	if err != nil {
 		return Answer{}, err
 	}

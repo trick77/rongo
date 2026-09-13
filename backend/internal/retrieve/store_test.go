@@ -137,6 +137,103 @@ func TestSearchVector_repoFilterIsAPreFilter(t *testing.T) {
 	}
 }
 
+// stageFixture is a service beside an infrastructure repository with three
+// stage directories, every chunk equally near the query and carrying the
+// same key, so only the stage restriction decides what comes back.
+func stageFixture(t *testing.T) *sql.DB {
+	t.Helper()
+	db := testDB(t)
+	addRepo(t, db, "acme-service", "master")
+	addRepo(t, db, "acme-infra", "main")
+	addChunk(t, db, "acme-service", "src/main/resources/application-default.properties", "", "acme.cron.send-digest=0/20", nearVec)
+	for _, stage := range []string{"syst", "intg", "prod"} {
+		addChunk(t, db, "acme-infra", stage+"/intranet/application.properties", "", "acme.cron.send-digest=0 0", nearVec)
+	}
+	addChunk(t, db, "acme-infra", "resources/base/deployment.yaml", "", "acme.cron.send-digest base", nearVec)
+	return db
+}
+
+func stagePaths(hits []Hit) map[string]bool {
+	out := map[string]bool{}
+	for _, h := range hits {
+		out[h.Repo+"/"+h.Path] = true
+	}
+	return out
+}
+
+func TestSearch_stageRestrictionNarrowsOnlyTheRepositoriesDeclaringIt(t *testing.T) {
+	// Given: a stage restriction for prod. The infrastructure repository
+	// declares stages, so it is narrowed to prod/; the service declares none
+	// and stays wide open.
+	db := stageFixture(t)
+	prefixes := StagePrefixes{"acme-infra": "prod/"}
+
+	for name, lane := range map[string]func() ([]Hit, error){
+		"vector": func() ([]Hit, error) {
+			return NewStore(db).SearchVectorIn(context.Background(), queryVec, 10, DefaultMaxDistance, nil, prefixes)
+		},
+		"keyword": func() ([]Hit, error) {
+			return NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, prefixes)
+		},
+		"pipeline": func() ([]Hit, error) {
+			return New(db, fixedEmbedder{vec: queryVec}).Search(context.Background(),
+				Query{Text: "acme cron send digest", K: 10, Stage: prefixes})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			hits, err := lane()
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			got := stagePaths(hits)
+			want := map[string]bool{
+				"acme-service/src/main/resources/application-default.properties": true,
+				"acme-infra/prod/intranet/application.properties":                true,
+			}
+			for p := range want {
+				if !got[p] {
+					t.Errorf("%s missing from %v", p, got)
+				}
+			}
+			for p := range got {
+				if !want[p] {
+					t.Errorf("%s leaked past the stage restriction", p)
+				}
+			}
+		})
+	}
+}
+
+func TestSearchVector_stageRestrictionIsAPreFilter(t *testing.T) {
+	// Given: k = 1 and the infra repository's other stages nearer to the
+	// query than prod. A post-filter would hand back one syst row and drop
+	// it, leaving prod unreachable.
+	db := testDB(t)
+	addRepo(t, db, "acme-infra", "main")
+	addChunk(t, db, "acme-infra", "syst/a.properties", "", "x", nearVec)
+	addChunk(t, db, "acme-infra", "intg/a.properties", "", "x", nearVec)
+	addChunk(t, db, "acme-infra", "prod/a.properties", "", "x", midVec)
+
+	hits, err := NewStore(db).SearchVectorIn(context.Background(), queryVec, 1, DefaultMaxDistance, nil, StagePrefixes{"acme-infra": "prod/"})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(hits) != 1 || hits[0].Path != "prod/a.properties" {
+		t.Errorf("hits = %v, want prod's chunk: the stage restriction ran after the KNN", hits)
+	}
+}
+
+func TestSearch_noStageMeansNoRestriction(t *testing.T) {
+	db := stageFixture(t)
+	hits, err := NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, nil)
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(hits) != 5 {
+		t.Errorf("got %d hits, want all 5 with no stage asked", len(hits))
+	}
+}
+
 func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
 	// Given
 	db := testDB(t)

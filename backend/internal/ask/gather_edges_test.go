@@ -208,6 +208,38 @@ func TestGather_crossesAPropertyKeyIntoEveryStageOfTheInfraRepository(t *testing
 	}
 }
 
+// TestGatherWithin_landsOnlyInTheAskedStage: the same fixture under "in
+// production". The search was narrowed to prod/; the crossing must be too,
+// or the answer reports every stage after all.
+func TestGatherWithin_landsOnlyInTheAskedStage(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-service")
+	seedRepo(t, db, "acme-infra")
+	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", 0, 1, 20, "JobSendDigest",
+		`@Scheduled(cron = "${acme.cron.send-digest}") public void run() {}`)
+	seedTokenIn(t, db, "acme-service", "src/main/java/acme/JobSendDigest.java", "property", "acme.cron.send-digest", 4)
+	for _, stage := range []string{"syst", "intg", "prod"} {
+		p := stage + "/intranet/application.properties"
+		seedChunkIn(t, db, "acme-infra", p, 0, 1, 10, "", "acme.cron.send-digest=0 0 * ? * * *\n")
+		seedTokenIn(t, db, "acme-infra", p, "property", "acme.cron.send-digest", 1)
+	}
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		GatherWithin(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)}, retrieve.StagePrefixes{"acme-infra": "prod/"})
+	if err != nil {
+		t.Fatalf("GatherWithin: %v", err)
+	}
+
+	if _, ok := sourceIn(got, "acme-infra", "prod/intranet/application.properties"); !ok {
+		t.Errorf("sources = %v, want the prod stage reached", repoPaths(got))
+	}
+	for _, other := range []string{"syst", "intg"} {
+		if _, ok := sourceIn(got, "acme-infra", other+"/intranet/application.properties"); ok {
+			t.Errorf("the %s stage arrived under a prod restriction", other)
+		}
+	}
+}
+
 func TestCrossings_orderRoutesAndDestinationsBeforeProperties(t *testing.T) {
 	// The reserve was measured with routes and destinations alone; a file
 	// naming twenty properties must not spend it before a queue's far side

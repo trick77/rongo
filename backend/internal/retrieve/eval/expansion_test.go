@@ -123,7 +123,7 @@ func TestExpandQuestions(t *testing.T) {
 		var texts []string
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
-			got, err := u.Understand(context.Background(), q.Text, ask.Thread{})
+			got, err := u.Understand(context.Background(), q.Text, ask.Thread{}, nil)
 			if err == nil {
 				texts = got.SearchTexts(q.Text)
 				break
@@ -300,7 +300,7 @@ func TestExpandQuestionRepos(t *testing.T) {
 		var repos []string
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
-			got, err := u.Understand(context.Background(), q.Text, ask.Thread{})
+			got, err := u.Understand(context.Background(), q.Text, ask.Thread{}, nil)
 			if err == nil {
 				repos = got.Repos
 				last = nil

@@ -46,6 +46,12 @@ type Query struct {
 	Question string
 	// K is how many hits to return. Zero means 10.
 	K int
+	// Stage narrows the repositories that declare stages to one stage's
+	// directory; see StagePrefixes. Nil is every stage. Unlike Repos it is
+	// never a guess: it is built from the reader's own words against the
+	// declared stage names, and a repository declaring no stages is never
+	// touched by it.
+	Stage StagePrefixes
 }
 
 // texts is what the lanes actually search for.
@@ -106,7 +112,7 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	return r.searchTexts(ctx, q.texts(), repos, q.K)
+	return r.searchTexts(ctx, q.texts(), repos, q.K, q.Stage)
 }
 
 // ResolveRepos sorts what a question said about repositories into the names
@@ -534,7 +540,7 @@ func nameRune(r rune) bool {
 // guessed code vocabulary, and each becomes its own semantic lane before fusion.
 // That arrived as another lane rather than as a reshaping of this function,
 // which is what the slice was for.
-func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []string, k int) ([]Hit, error) {
+func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []string, k int, stage StagePrefixes) ([]Hit, error) {
 	if k <= 0 {
 		k = 10
 	}
@@ -573,7 +579,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 		return nil, fmt.Errorf("embedder returned %d vectors for %d query texts", len(vecs), len(usable))
 	}
 	for i, v := range vecs {
-		hits, err := r.store.SearchVector(ctx, v, candidates, r.MaxDistance, repos)
+		hits, err := r.store.SearchVectorIn(ctx, v, candidates, r.MaxDistance, repos, stage)
 		if err != nil {
 			return nil, err
 		}
@@ -590,7 +596,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 	// queries against a single file.
 	for _, text := range usable {
 		for _, tier := range BuildFTSQueries(text) {
-			hits, err := r.store.SearchKeyword(ctx, tier.Match, candidates, repos)
+			hits, err := r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage)
 			if err != nil {
 				return nil, err
 			}

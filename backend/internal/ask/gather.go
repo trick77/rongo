@@ -90,6 +90,15 @@ func NewGatherer(db *sql.DB, o GatherOptions) *Gatherer {
 // caller reports with the terms it tried; inventing a starting point here would
 // produce a confident answer about whatever happened to be nearby.
 func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, error) {
+	return g.GatherWithin(ctx, hits, nil)
+}
+
+// GatherWithin is Gather with a crossing landing only where stage allows: a
+// repository declaring stages is entered only under the asked stage's
+// directory, the same restriction the search ran under. Without it the
+// search would honour "in production" and the crossing would land on every
+// stage's line anyway, with the answer then reporting them all.
+func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage retrieve.StagePrefixes) ([]Source, error) {
 	if len(hits) == 0 {
 		return nil, nil
 	}
@@ -220,7 +229,7 @@ symbols:
 		if err != nil {
 			return nil, err
 		}
-		for _, landing := range mechanismFirst(far) {
+		for _, landing := range mechanismFirst(within(far, stage)) {
 			if seen[landing.ChunkID] {
 				continue
 			}
@@ -512,6 +521,23 @@ func estimateTokens(s string) int {
 		return 0
 	}
 	return (n + 3) / 4
+}
+
+// within keeps the landings the stage restriction allows, for the crossing.
+// A repository absent from the restriction is not narrowed; one present
+// keeps only paths under its prefix.
+func within(landings []Source, stage retrieve.StagePrefixes) []Source {
+	if len(stage) == 0 {
+		return landings
+	}
+	var out []Source
+	for _, s := range landings {
+		if prefix, ok := stage[s.Repo]; ok && !strings.HasPrefix(s.Path, prefix) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // kindRank orders the edge kinds a crossing follows: the two the reserve was

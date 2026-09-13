@@ -55,20 +55,54 @@ var keyLine = regexp.MustCompile(`^(\s*(?:-\s+)?)("?)([\w.\-\[\]]+)("?)(\s*[=:]\
 // and a keystore PASSWORD is caught by "password".
 var secretKeyWords = []string{
 	"password", "passwd", "pwd", "secret", "token", "credential",
-	"apikey", "private", "consumerkey", "masterkey", "jaas",
+	"apikey", "accesskey", "authkey", "signingkey", "encryptionkey",
+	"private", "consumerkey", "masterkey", "jaas", "passphrase",
+	"passwort", "kennwort",
 }
+
+// secretKeySegments are matched as a whole segment of the key — between
+// dots, dashes, underscores or camel-case humps — because as substrings they
+// are everywhere: "pass" in bypass and passthrough. "acme.api.pass" is a
+// credential.
+var secretKeySegments = map[string]bool{"pass": true, "pw": true, "session": true}
+
+// secretLastSegments are matched as the key's LAST segment only: "key" ends
+// acme.maps.key and acme.mapsKey, which are credentials, and begins
+// key-serializer, which is not. A key whose only segment is "key" (a yaml
+// configMapKeyRef) is a name, not a value, and stays.
+var secretLastSegments = map[string]bool{"key": true}
+
+// segmentSplit finds the boundaries inside a key: separators and the start
+// of a camel-case hump.
+var segmentSplit = regexp.MustCompile(`[.\-_\[\]]+|(?:[a-z0-9])(?:[A-Z])`)
 
 // secretValueShapes are values that are credentials under ANY key. Each is
 // anchored to the whole value: unanchored, the base64 rule would eat a
 // registry image name or a URL path, which are exactly the values an infra
 // answer is made of.
 var secretValueShapes = []*regexp.Regexp{
-	regexp.MustCompile(`^ENC\(.*\)$`),                                             // jasypt
-	regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`), // JWT
-	regexp.MustCompile(`^[A-Za-z0-9+/]{40,}={0,2}$`),                              // base64 blob
-	regexp.MustCompile(`^[0-9a-fA-F]{32,}$`),                                      // hex digest or key
-	regexp.MustCompile(`(?i)(password|secret)\s*=`),                               // a JAAS line carries its password inline
+	regexp.MustCompile(`^ENC\(.*\)$`),                                              // jasypt
+	regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`),  // JWT
+	regexp.MustCompile(`^[A-Za-z0-9+/]{40,}={0,2}$`),                               // base64 blob
+	regexp.MustCompile(`^[0-9a-fA-F]{32,}$`),                                       // hex digest or key
+	regexp.MustCompile(`(?i)(password|secret)\s*=`),                                // a JAAS line carries its password inline
+	regexp.MustCompile(`^(?i)(basic|bearer)\s+\S+$`),                               // an Authorization header value
+	regexp.MustCompile(`://[^/\s@:]+:[^/\s@]+@`),                                   // credentials inside a URL
+	regexp.MustCompile(`^(?i)(AKIA|ASIA)[0-9A-Z]{16}$`),                            // AWS access key id
+	regexp.MustCompile(`^(?i)(gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)\S+$`), // vendor token prefixes
 }
+
+// inlineShapes are credentials recognisable wherever they stand in a line
+// that has no key at all — an nginx `proxy_set_header Authorization "Basic
+// …";`, a shell export in a .conf. Only the shapes that are unmistakable
+// mid-line: the base64 and hex rules stay anchored to a whole value, where
+// a key says what the value is.
+var inlineShapes = regexp.MustCompile(`(?i)ENC\([^)]*\)` +
+	`|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` +
+	`|\b(?:basic|bearer)\s+[A-Za-z0-9+/=._-]{8,}` +
+	`|(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)[A-Za-z0-9_-]{16,}` +
+	`|(?:AKIA|ASIA)[0-9A-Z]{16}` +
+	`|://[^/\s@:]+:[^/\s@]+@`)
 
 // placeholder is "${ENV_VAR}" or "${a.key:default}": a pointer to where the
 // value lives, not the value. Kept even under a secret key.
@@ -93,6 +127,12 @@ func Redact(p string, body []byte) []byte {
 		crlf := len(line) != len(lines[i])
 		m := keyLine.FindStringSubmatch(line)
 		if m == nil || isComment(m[1], line) {
+			// No key to judge by: only the unmistakable shapes, in place.
+			if inlineShapes.MatchString(line) {
+				out = append(out, inlineShapes.ReplaceAllString(line, Marker)+eol(crlf))
+				changed = true
+				continue
+			}
 			out = append(out, lines[i])
 			continue
 		}
@@ -174,7 +214,40 @@ func isSecretKey(key string) bool {
 			return true
 		}
 	}
-	return false
+	segs := segments(key)
+	if len(segs) < 2 {
+		return false
+	}
+	for _, seg := range segs {
+		if secretKeySegments[seg] {
+			return true
+		}
+	}
+	return secretLastSegments[segs[len(segs)-1]]
+}
+
+// segments splits a key at separators and camel-case humps, lower-cased:
+// "acme.jwtKeystorePassword" is acme, jwt, keystore, password.
+func segments(key string) []string {
+	var out []string
+	start := 0
+	for _, loc := range segmentSplit.FindAllStringIndex(key, -1) {
+		end := loc[0]
+		if key[loc[0]] != '.' && key[loc[0]] != '-' && key[loc[0]] != '_' && key[loc[0]] != '[' && key[loc[0]] != ']' {
+			// A hump match covers the last lower-case letter and the first
+			// upper-case one; the boundary is between them.
+			end = loc[0] + 1
+			loc[1] = end
+		}
+		if end > start {
+			out = append(out, strings.ToLower(key[start:end]))
+		}
+		start = loc[1]
+	}
+	if start < len(key) {
+		out = append(out, strings.ToLower(key[start:]))
+	}
+	return out
 }
 
 func isSecretValue(v string) bool {
