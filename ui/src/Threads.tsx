@@ -2,16 +2,14 @@ import { useEffect, useState } from "react";
 
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
-import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
-import ShareDialog from "./share/ShareDialog";
-import { shareFor, type Share } from "./share/api";
+import { railLabel, railRow } from "./rail";
+import { useThreadActions } from "./useThreadActions";
 
 /**
- * The rail's label size, ../loom's: 12/16 in sentence case, not an uppercase
- * tracked eyebrow. The day groups below are the only thing wearing it — the
- * rail has no heading of its own, the titles stand alone.
+ * How much history the rail carries: ../loom's 30. The rest is on the
+ * Threads page, which the foot of the list opens.
  */
-const railLabel = "px-1.5 text-xs/4 text-rail-label";
+export const railLimit = 30;
 
 export type Thread = {
   /**
@@ -34,7 +32,7 @@ export type Thread = {
 };
 
 /** The day group a thread lands in, in the words the rail uses. */
-function group(iso: string, now = new Date()): string {
+export function group(iso: string, now = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Earlier";
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -47,8 +45,22 @@ function group(iso: string, now = new Date()): string {
 
 
 /**
- * The thread list. Titles only — the conversation itself is a record, and this
- * is the way back into it after a reload.
+ * Reads one page of threads off the list's envelope. Anything that is not
+ * one — a stubbed fetch answering [] to every URL, an error page — is an empty
+ * list rather than a throw: asking a new question still works, and that is
+ * the important path.
+ */
+export function pageItems(body: unknown): Thread[] {
+  if (body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)) {
+    return (body as { items: Thread[] }).items;
+  }
+  return [];
+}
+
+/**
+ * The thread list — the latest 30. Titles only: the conversation itself is a
+ * record, and this is the way back into it after a reload. Everything older
+ * is a click away on the Threads page, which the foot of the list opens.
  *
  * The list is reloaded whenever `version` changes rather than on a timer. Two
  * moments need it: the placeholder title appears the instant a question is
@@ -65,6 +77,7 @@ export default function Threads({
   onDeleted = () => {},
   onRenamed = () => {},
   onShared = () => {},
+  onAllThreads = () => {},
 }: {
   activeId: string | null;
   /** Only ever a real thread: clearing to a new question is the rail's job. */
@@ -86,18 +99,28 @@ export default function Threads({
   onRenamed?: () => void;
   /** A link was made or taken back; the row markers are stale. */
   onShared?: () => void;
+  /** The foot of the list: the page with every thread on it. */
+  onAllThreads?: () => void;
 }) {
   const [threads, setThreads] = useState<Thread[]>([]);
-  // Which row's menu is open, and which thread a dialog is asking about.
-  // Both are ids rather than objects: the list reloads underneath them.
+  // Which row's menu is open. An id rather than an object: the list reloads
+  // underneath it.
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<Thread | null>(null);
-  const [deleting, setDeleting] = useState<Thread | null>(null);
-  // The thread whose link is being handed out, and the link it already has.
-  // Fetched before the dialog opens, so it never flashes "Share thread" at
-  // someone whose thread is already shared.
-  const [sharing, setSharing] = useState<{ thread: Thread; share: Share | null } | null>(null);
-  const [pending, setPending] = useState(false);
+  const actions = useThreadActions({
+    onRenamed: (id, title) => {
+      setThreads((prev) => prev.map((x) => (x.id === id ? { ...x, title } : x)));
+      onRenamed();
+    },
+    onDeleted: (id) => {
+      setThreads((prev) => prev.filter((x) => x.id !== id));
+      onDeleted(id);
+    },
+    onShared: (id, shared) => {
+      // The row's marker follows the link, without waiting for a reload.
+      setThreads((prev) => prev.map((x) => (x.id === id ? { ...x, shared } : x)));
+      onShared();
+    },
+  });
 
   // The menu closes on a pointer anywhere but the menu itself and the kebabs
   // — another row's title included, which switches thread and would otherwise
@@ -126,10 +149,10 @@ export default function Threads({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/threads");
+        const res = await fetch(`/api/threads?limit=${railLimit}`);
         if (!res.ok) return;
-        const list = await res.json();
-        if (!cancelled && Array.isArray(list)) {
+        const list = pageItems(await res.json());
+        if (!cancelled) {
           setThreads(list);
           onList(list);
         }
@@ -150,63 +173,6 @@ export default function Threads({
     const last = groups[groups.length - 1];
     if (last && last.label === label) last.items.push(t);
     else groups.push({ label, items: [t] });
-  }
-
-  /**
-   * Both actions answer 204 and carry nothing back, so the row is dropped or
-   * the list reloaded from what was asked for rather than from a response
-   * body. A failure leaves the dialog up: the row is still there, and telling
-   * someone their thread is gone when it is not is worse than saying nothing.
-   */
-  async function rename(t: Thread, title: string) {
-    setPending(true);
-    try {
-      const res = await fetch(`/api/threads/${t.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
-      });
-      if (!res.ok) return;
-      setThreads((prev) => prev.map((x) => (x.id === t.id ? { ...x, title } : x)));
-      setRenaming(null);
-      onRenamed();
-    } catch {
-      // Nothing to say: the title on screen is still the stored one.
-    } finally {
-      setPending(false);
-    }
-  }
-
-  /**
-   * Opens the dialog on what the thread already has. The list is asked first
-   * rather than the dialog fetching for itself: a dialog that opened on "not
-   * shared" and corrected itself a beat later would offer Create on a thread
-   * that is already out there.
-   */
-  async function openShare(t: Thread) {
-    let share: Share | null = null;
-    try {
-      share = await shareFor(t.id);
-    } catch {
-      // Treated as "no link yet": Create then answers with the link the thread
-      // already has, because the server keeps the token it minted.
-    }
-    setSharing({ thread: t, share });
-  }
-
-  async function remove(t: Thread) {
-    setPending(true);
-    try {
-      const res = await fetch(`/api/threads/${t.id}`, { method: "DELETE" });
-      if (!res.ok) return;
-      setThreads((prev) => prev.filter((x) => x.id !== t.id));
-      setDeleting(null);
-      onDeleted(t.id);
-    } catch {
-      // Same: the row stays, and the dialog with it.
-    } finally {
-      setPending(false);
-    }
   }
 
   const item =
@@ -352,15 +318,15 @@ export default function Threads({
                       <ThreadMenu
                         onShare={() => {
                           setOpenMenu(null);
-                          void openShare(t);
+                          actions.startShare(t);
                         }}
                         onRename={() => {
                           setOpenMenu(null);
-                          setRenaming(t);
+                          actions.startRename(t);
                         }}
                         onDelete={() => {
                           setOpenMenu(null);
-                          setDeleting(t);
+                          actions.startDelete(t);
                         }}
                       />
                     )}
@@ -370,39 +336,25 @@ export default function Threads({
             </ul>
           </div>
         ))}
+        {/* The foot, ../loom's Sidebar: the way to every thread, painted like
+            the actions at the top of the rail and never marked current — it
+            is a door, not a place. Only once there is history to be more of:
+            an empty rail with "All threads" under it would promise a page
+            with nothing on it. */}
+        {threads.length > 0 && (
+          <button
+            type="button"
+            onClick={onAllThreads}
+            className={railRow + " mt-1.5 text-rail hover:bg-rail-hover"}
+          >
+            <span className="grid h-5 w-5 shrink-0 place-items-center">
+              <Icon name="allThreads" size="21px" className="text-ink-dim" />
+            </span>
+            All threads
+          </button>
+        )}
       </div>
-      {renaming && (
-        <RenameThreadModal
-          title={renaming.title}
-          busy={pending}
-          onCancel={() => setRenaming(null)}
-          onSubmit={(title) => void rename(renaming, title)}
-        />
-      )}
-      {deleting && (
-        <DeleteThreadModal
-          title={deleting.title}
-          busy={pending}
-          onCancel={() => setDeleting(null)}
-          onDelete={() => void remove(deleting)}
-        />
-      )}
-      {sharing && (
-        <ShareDialog
-          threadID={sharing.thread.id}
-          title={sharing.thread.title}
-          share={sharing.share}
-          onCancel={() => setSharing(null)}
-          onChange={(share) => {
-            // The row's marker follows the link, without waiting for a reload.
-            setThreads((prev) =>
-              prev.map((x) => (x.id === sharing.thread.id ? { ...x, shared: share !== null } : x)),
-            );
-            setSharing((prev) => (prev ? { ...prev, share } : prev));
-            onShared();
-          }}
-        />
-      )}
+      {actions.dialogs}
     </nav>
   );
 }

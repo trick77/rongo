@@ -33,6 +33,13 @@ type Threads interface {
 	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
 	Fail(ctx context.Context, messageID int64, msg string) error
 	List(ctx context.Context, subject string) ([]threads.Thread, error)
+	// ListPage, Get and Search are the Threads page's reads: the rail and the
+	// page read the list a page at a time, the header asks for one thread the
+	// rail's page does not carry, and the search box asks by title and by
+	// what was said.
+	ListPage(ctx context.Context, subject string, opts threads.ListOptions) (threads.ThreadPage, error)
+	Get(ctx context.Context, subject string, threadID int64) (threads.Thread, bool, error)
+	Search(ctx context.Context, subject, query string, limit int) ([]threads.Hit, error)
 	Message(ctx context.Context, subject string, messageID int64) (threads.Message, bool, error)
 	Messages(ctx context.Context, subject string, threadID int64) ([]threads.Message, error)
 	Owns(ctx context.Context, subject string, threadID int64) (bool, error)
@@ -172,7 +179,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
+	s.mux.Handle("GET /api/threads/search", s.requireAuth(http.HandlerFunc(s.handleSearchThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
+	s.mux.Handle("GET /api/threads/{id}/summary", s.requireAuth(http.HandlerFunc(s.handleThreadSummary)))
 	s.mux.Handle("PATCH /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleRenameThread)))
 	s.mux.Handle("DELETE /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteThread)))
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))

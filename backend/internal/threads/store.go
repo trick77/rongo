@@ -585,7 +585,9 @@ func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
 	return nil
 }
 
-// List returns a user's threads, newest first.
+// List returns a user's threads, newest first — all of them. The rail and
+// the Threads page read pages through ListPage; this is for the callers that
+// need the whole set.
 func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, public_id, title, title_settled, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
@@ -593,30 +595,12 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
 	defer rows.Close()
-	out := []Thread{}
-	for rows.Next() {
-		var t Thread
-		var created string
-		var settled bool
-		if err := rows.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created); err != nil {
-			return nil, fmt.Errorf("scan thread: %w", err)
-		}
-		t.TitlePending = !settled
-		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	// One extra query for the whole list rather than a join on the statement
-	// above: nearly every reader has no share at all, and the join would be
-	// paid on every load of the rail — which is every turn.
-	shared, err := s.SharedIDs(ctx, subject)
+	out, err := scanThreads(rows)
 	if err != nil {
 		return nil, err
 	}
-	for i := range out {
-		out[i].Shared = shared[out[i].ID]
+	if err := s.markShared(ctx, subject, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
