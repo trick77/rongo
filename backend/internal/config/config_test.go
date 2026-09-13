@@ -29,8 +29,6 @@ var allBackendEnvVars = []string{
 	"BACKEND_FORGE_TOKEN_GITHUB",
 	"LLMWIRE_OPENAI_BASE_URL",
 	"LLMWIRE_OPENAI_API_KEY",
-	"BACKEND_EMBED_MODEL",
-	"BACKEND_EMBED_DIM",
 	"LLMWIRE_MIMO_BASE_URL",
 	"LLMWIRE_MIMO_API_KEY",
 	"BACKEND_CHAT_EMULATE_OPENCODE",
@@ -87,9 +85,6 @@ func TestLoad_appliesDefaults(t *testing.T) {
 	// Then
 	if err != nil {
 		t.Fatalf("Load() err = %v, want nil", err)
-	}
-	if cfg.EmbedModel != "text-embedding-3-small" || cfg.EmbedDim != 1536 {
-		t.Errorf("embedding defaults = %s/%d, want text-embedding-3-small/1536", cfg.EmbedModel, cfg.EmbedDim)
 	}
 	if !cfg.IndexEnabled {
 		t.Error("IndexEnabled = false, want indexing on by default")
@@ -250,49 +245,6 @@ func TestLoad_readsTheOpencodeFlag(t *testing.T) {
 				t.Errorf("ChatEmulateOpenCode = %v, want %v", cfg.ChatEmulateOpenCode, tc.want)
 			}
 		})
-	}
-}
-
-func TestLoad_rejectsAMalformedEmbedDim(t *testing.T) {
-	// Given: the dimension is baked into the vec0 table when the database is
-	// created. Falling back the way every other integer setting does would let
-	// "3O72" (letter O) build a 1536-wide table while the operator believes it
-	// is 3072 — and the mistake would only surface much later, as a dimension
-	// mismatch on every insert.
-	for _, bad := range []string{"0", "-1", "3O72", "big"} {
-		setEnv(t, map[string]string{
-			"BACKEND_SESSION_SECRET":  validSecret,
-			"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
-			"BACKEND_EMBED_DIM":       bad,
-		})
-
-		// When
-		_, err := Load()
-
-		// Then
-		if err == nil {
-			t.Errorf("Load() err = nil for BACKEND_EMBED_DIM=%q, want a refusal", bad)
-		}
-	}
-}
-
-func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
-	// Given
-	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":  validSecret,
-		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_EMBED_DIM":       "3072",
-	})
-
-	// When
-	cfg, err := Load()
-
-	// Then
-	if err != nil {
-		t.Fatalf("Load() err = %v, want nil", err)
-	}
-	if cfg.EmbedDim != 3072 {
-		t.Errorf("EmbedDim = %d, want 3072", cfg.EmbedDim)
 	}
 }
 
@@ -537,35 +489,5 @@ func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Load() err = nil, want an error about an unknown auth mode")
-	}
-}
-
-func TestLoad_embedDimDefaultsToTheModelsWidth(t *testing.T) {
-	// Given the large model and no explicit width
-	setEnv(t, map[string]string{"BACKEND_EMBED_MODEL": "text-embedding-3-large"})
-
-	// When
-	cfg, err := Load()
-
-	// Then the width is the profile's, not a number typed here
-	if err != nil {
-		t.Fatalf("Load() err = %v", err)
-	}
-	if cfg.EmbedDim != 3072 {
-		t.Errorf("EmbedDim = %d, want 3072 from the model's profile", cfg.EmbedDim)
-	}
-}
-
-func TestLoad_rejectsAnEmbedModelLlmwireDoesNotKnow(t *testing.T) {
-	for _, model := range []string{"text-embedding-ada-002", "mimo-v2.5"} {
-		t.Run(model, func(t *testing.T) {
-			// Given a model without an embedding profile
-			setEnv(t, map[string]string{"BACKEND_EMBED_MODEL": model})
-
-			// When / Then: refused at boot, not on the first request
-			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "BACKEND_EMBED_MODEL") {
-				t.Fatalf("Load() err = %v, want a refusal naming BACKEND_EMBED_MODEL", err)
-			}
-		})
 	}
 }

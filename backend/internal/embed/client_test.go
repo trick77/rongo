@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -21,11 +22,11 @@ func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
 	// Given: the endpoint reports usage, as OpenAI-compatible ones do.
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{
-			"data":  []respData{{Index: 0, Embedding: vecOf(1, 4)}},
+			"data":  []respData{{Index: 0, Embedding: vecOf(1, Dim())}},
 			"usage": map[string]any{"prompt_tokens": 9, "total_tokens": 9},
 		}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 	m := usage.New()
 
 	// When
@@ -111,12 +112,12 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 	// whether or not the client realigns, so it would test nothing.
 	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{
-			{Index: 2, Embedding: vecOf(3, 4)},
-			{Index: 0, Embedding: vecOf(1, 4)},
-			{Index: 1, Embedding: vecOf(2, 4)},
+			{Index: 2, Embedding: vecOf(3, Dim())},
+			{Index: 0, Embedding: vecOf(1, Dim())},
+			{Index: 1, Embedding: vecOf(2, Dim())},
 		}}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), []string{"one", "two", "three"})
@@ -149,12 +150,12 @@ func TestEmbed_duplicateIndexIsAnError(t *testing.T) {
 	// leave another chunk holding someone else's.
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{
-			{Index: 0, Embedding: vecOf(1, 4)},
-			{Index: 0, Embedding: vecOf(2, 4)},
-			{Index: 1, Embedding: vecOf(3, 4)},
+			{Index: 0, Embedding: vecOf(1, Dim())},
+			{Index: 0, Embedding: vecOf(2, Dim())},
+			{Index: 1, Embedding: vecOf(3, Dim())},
 		}}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a", "b", "c"})
@@ -170,7 +171,7 @@ func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{{Index: 0, Embedding: vecOf(1, 3)}}}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -179,7 +180,7 @@ func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Embed() err = nil, want an error for a short vector")
 	}
-	if !strings.Contains(err.Error(), "4") || !strings.Contains(err.Error(), "3") {
+	if !strings.Contains(err.Error(), strconv.Itoa(Dim())) || !strings.Contains(err.Error(), "3 dimensions") {
 		t.Errorf("error = %q, want it to name both dimensions", err)
 	}
 }
@@ -190,7 +191,7 @@ func TestEmbed_errorCarriesStatusAndACappedBody(t *testing.T) {
 	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
 		return http.StatusServiceUnavailable, huge
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	// When
 	_, err := testee.Embed(context.Background(), []string{"a"})
@@ -214,8 +215,7 @@ func TestEmbed_aTransportErrorNeverCarriesTheURL(t *testing.T) {
 	// URL, and that error is what the caller logs — so the plain wrapped error
 	// is a credential in a log line.
 	testee := mustClient(t, Config{
-		BaseURL: "http://127.0.0.1:1/v1?api-key=s3cret-key-value",
-		Model:   "text-embedding-3-small", Dim: 4,
+		BaseURL:           "http://127.0.0.1:1/v1?api-key=s3cret-key-value",
 		HeartbeatInterval: -1,
 	}, nil)
 
@@ -244,7 +244,7 @@ func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(block)
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// When
@@ -271,7 +271,7 @@ func TestEmbed_emptyInputMakesNoRequest(t *testing.T) {
 	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
 		return 200, map[string]any{"data": []respData{}}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	// When
 	vecs, err := testee.Embed(context.Background(), nil)
@@ -293,11 +293,11 @@ func TestEmbed_splitsLargeInputIntoBatchesKeepingOrder(t *testing.T) {
 		for i, in := range inputs {
 			var n float32
 			fmt.Sscanf(in, "text-%f", &n)
-			data[len(inputs)-1-i] = respData{Index: i, Embedding: vecOf(n, 4)}
+			data[len(inputs)-1-i] = respData{Index: i, Embedding: vecOf(n, Dim())}
 		}
 		return 200, map[string]any{"data": data}
 	})
-	testee := mustClient(t, Config{BaseURL: srv.URL, Model: "text-embedding-3-small", Dim: 4}, srv.Client())
+	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 	inputs := make([]string, 150)
 	for i := range inputs {
 		inputs[i] = fmt.Sprintf("text-%d", i)
@@ -338,7 +338,7 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 // and a missing one comes back named rather than as a client that dials "".
 func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
 	t.Setenv("LLMWIRE_OPENAI_BASE_URL", "")
-	_, err := NewClient(Config{Model: "text-embedding-3-small", Dim: 1536}, nil)
+	_, err := NewClient(Config{}, nil)
 	var me *llmwire.MissingEnvError
 	if !errors.As(err, &me) || me.Var != "LLMWIRE_OPENAI_BASE_URL" {
 		t.Fatalf("got %v", err)

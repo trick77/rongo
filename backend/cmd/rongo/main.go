@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -121,8 +122,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	if err := store.Migrate(db, cfg.EmbedDim); err != nil {
-		slog.Error("apply migrations", "err", err)
+	if err := migrateForModel(db); err != nil {
+		slog.Error("prepare database", "err", err)
 		os.Exit(1)
 	}
 	// A title call cannot outlive the process that started it, so a thread
@@ -139,21 +140,6 @@ func main() {
 	// can open.
 	if err := threads.NewStore(db).BackfillPublicIDs(ctx); err != nil {
 		slog.Error("give existing threads an address", "err", err)
-		os.Exit(1)
-	}
-	// The vec0 table's width is fixed when the database is created. Pointing a
-	// differently configured process at an existing file is a loud failure
-	// here rather than a rejected insert on every chunk much later — and, worse,
-	// a semantic lane that silently answers nothing.
-	builtDim, err := store.BuiltDim(db)
-	if err != nil {
-		slog.Error("read the vector table's dimension", "err", err)
-		os.Exit(1)
-	}
-	if builtDim != cfg.EmbedDim {
-		slog.Error("this database was built for a different embedding model",
-			"built_dim", builtDim, "configured_dim", cfg.EmbedDim,
-			"fix", "point BACKEND_DB_PATH at a fresh file, or set BACKEND_EMBED_DIM back")
 		os.Exit(1)
 	}
 
@@ -246,7 +232,7 @@ func main() {
 		Git:      gitClient,
 		Symbols:  symbols.NewExtractor(tools.Ctags),
 		Embedder: embedder,
-		Cache:    embed.NewCache(db, cfg.EmbedModel, cfg.EmbedDim),
+		Cache:    embed.NewCache(db, embed.Model, embed.Dim()),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
 			MaxBytes: cfg.IndexMaxFileBytes,
@@ -450,7 +436,7 @@ func moduleOpts(cfg config.Config) modules.Opts {
 // needs close to 14 minutes. The idle watchdog, not this one, is what catches
 // a stalled upstream.
 func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
-	embedder, err := embed.NewClient(embed.Config{Model: cfg.EmbedModel, Dim: cfg.EmbedDim}, nil)
+	embedder, err := embed.NewClient(embed.Config{}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -463,4 +449,25 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 		return nil, nil, err
 	}
 	return embedder, models, nil
+}
+
+// migrateForModel applies the migrations at embed.Model's vector width and
+// then refuses a database built at any other. The vec0 table's width is
+// fixed when the file is created, so a build with a different embedding
+// model pointed at an existing file fails here, loudly, rather than with a
+// rejected insert on every chunk much later — and, worse, a semantic lane
+// that silently answers nothing.
+func migrateForModel(db *sql.DB) error {
+	if err := store.Migrate(db, embed.Dim()); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
+	}
+	built, err := store.BuiltDim(db)
+	if err != nil {
+		return fmt.Errorf("read the vector table's dimension: %w", err)
+	}
+	if built != embed.Dim() {
+		return fmt.Errorf("this database was built for a different embedding model: built %d wide, %s is %d wide; point BACKEND_DB_PATH at a fresh file, or run the build this database was made with",
+			built, embed.Model, embed.Dim())
+	}
+	return nil
 }

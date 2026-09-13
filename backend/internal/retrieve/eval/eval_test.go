@@ -7,7 +7,6 @@
 //
 //	BACKEND_EVAL=1 \
 //	LLMWIRE_OPENAI_BASE_URL=... LLMWIRE_OPENAI_API_KEY=... \
-//	BACKEND_EMBED_MODEL=text-embedding-3-small BACKEND_EMBED_DIM=1536 \
 //	BACKEND_EVAL_DB=/tmp/rongo-eval-small.db \
 //	BACKEND_REPOS_FILE=../../../../repos.yaml BACKEND_REPO_ROOT=/tmp/rongo-eval-repos \
 //	go test -v -timeout 60m -run TestEval ./internal/retrieve/eval/
@@ -113,13 +112,11 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// embedDim is the product's: embed.Model's width from its profile. The
+// harness has no model of its own to pick.
 func embedDim(t *testing.T) int {
 	t.Helper()
-	n, err := strconv.Atoi(envOr("BACKEND_EMBED_DIM", "1536"))
-	if err != nil || n <= 0 {
-		t.Fatalf("BACKEND_EMBED_DIM = %q, want a positive number", os.Getenv("BACKEND_EMBED_DIM"))
-	}
-	return n
+	return embed.Dim()
 }
 
 func loadQuestions(t *testing.T) []Question {
@@ -157,8 +154,8 @@ func evalDB(t *testing.T, dim int) *sql.DB {
 		t.Fatalf("read the built dimension: %v", err)
 	}
 	if built != dim {
-		t.Fatalf("%s was built for %d dimensions but BACKEND_EMBED_DIM is %d — use a separate file per model",
-			path, built, dim)
+		t.Fatalf("%s was built for %d dimensions but %s is %d wide — use a separate file per model",
+			path, built, embed.Model, dim)
 	}
 	return db
 }
@@ -188,13 +185,12 @@ func TestEvalIndex(t *testing.T) {
 		t.Fatalf("ctags: %v", err)
 	}
 	gitc := gitrepo.New(gitBin, envOr("BACKEND_REPO_ROOT", "/tmp/rongo-eval-repos"))
-	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 	pipeline := indexer.New(indexer.Deps{
 		DB:       db,
 		Git:      gitc,
 		Symbols:  symbols.NewExtractor(ctagsBin),
-		Embedder: evalEmbedder(t, model, dim),
-		Cache:    embed.NewCache(db, model, dim),
+		Embedder: evalEmbedder(t),
+		Cache:    embed.NewCache(db, embed.Model, dim),
 		Writer:   indexer.NewWriter(db),
 		Chunk:    evalChunkOptions(),
 	})
@@ -289,9 +285,8 @@ func TestEvalMeasure(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 
-	client := evalEmbedder(t, model, dim)
+	client := evalEmbedder(t)
 	r := retrieve.New(db, client)
 	if v := os.Getenv("BACKEND_SEARCH_MAX_DISTANCE"); v != "" {
 		d, err := strconv.ParseFloat(v, 64)
@@ -339,7 +334,7 @@ func TestEvalMeasure(t *testing.T) {
 	}
 
 	t.Logf("")
-	t.Logf("model=%s dim=%d questions=%d max_distance=%v", model, dim, len(results), r.MaxDistance)
+	t.Logf("model=%s dim=%d questions=%d max_distance=%v", embed.Model, dim, len(results), r.MaxDistance)
 
 	// The headline is the unique cohort. Mixing the other two in would silently
 	// change what recall@5 means against every earlier document.

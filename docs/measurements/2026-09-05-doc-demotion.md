@@ -110,7 +110,6 @@ Then the sweep, as the package doc describes:
 ```
 BACKEND_EVAL=1 \
 LLMWIRE_OPENAI_BASE_URL=... LLMWIRE_OPENAI_API_KEY=... \
-BACKEND_EMBED_MODEL=text-embedding-3-small BACKEND_EMBED_DIM=1536 \
 BACKEND_EVAL_DB=/tmp/rongo-eval-small.db \
 BACKEND_REPOS_FILE=../../../../repos.yaml BACKEND_REPO_ROOT=/tmp/rongo-eval-repos \
 go test -v -timeout 60m -run TestEval ./internal/retrieve/eval/

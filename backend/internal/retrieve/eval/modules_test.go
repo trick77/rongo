@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/retrieve"
 )
@@ -149,9 +150,8 @@ func TestEvalMeasureModules(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 
-	client := evalEmbedder(t, model, dim)
+	client := evalEmbedder(t)
 	r := retrieve.New(db, client)
 
 	o := moduleOpts(t)
@@ -195,7 +195,7 @@ func TestEvalMeasureModules(t *testing.T) {
 	n := float64(len(questions))
 	t.Logf("")
 	t.Logf("model=%s dim=%d questions=%d candidates=%d min_chunks=%d max_chunks=%d modules=%d",
-		model, dim, len(questions), moduleCandidates, o.MinChunks, o.MaxChunks, len(mods))
+		embed.Model, dim, len(questions), moduleCandidates, o.MinChunks, o.MaxChunks, len(mods))
 	t.Logf("")
 	t.Logf("%-14s %-10s %-10s %s", "arm", "recall@5", "recall@20", "MRR")
 	for _, a := range arms {

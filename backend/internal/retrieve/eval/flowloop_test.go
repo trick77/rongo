@@ -499,10 +499,9 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ripgrep: %v", err)
 	}
-	model := envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small")
 	env := &flowEnv{
 		t:         t,
-		retriever: retrieve.New(db, evalEmbedder(t, model, dim)),
+		retriever: retrieve.New(db, evalEmbedder(t)),
 		db:        db,
 		repoRoot:  envOr("BACKEND_REPO_ROOT", "/tmp/rongo-flow-repos"),
 		rg:        rg,

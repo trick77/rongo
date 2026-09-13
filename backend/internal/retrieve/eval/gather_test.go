@@ -130,7 +130,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	client := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	client := evalEmbedder(t)
 	r := retrieve.New(db, client)
 	questions := loadQuestions(t)
 	expansions := loadExpansions(t)

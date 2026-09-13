@@ -380,7 +380,7 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	client := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	client := evalEmbedder(t)
 	r := retrieve.New(db, client)
 	expansions := loadExpansions(t)
 	questions := loadQuestions(t)

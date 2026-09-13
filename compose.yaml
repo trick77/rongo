@@ -97,10 +97,6 @@ services:
       BACKEND_CHAT_EMULATE_OPENCODE: ${BACKEND_CHAT_EMULATE_OPENCODE:?set it in .env, true for MiMo's token-plan host}
       LLMWIRE_OPENAI_BASE_URL: ${LLMWIRE_OPENAI_BASE_URL:?set it in .env, an OpenAI-compatible /embeddings endpoint}
       LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for LLMWIRE_OPENAI_BASE_URL}
-      BACKEND_EMBED_MODEL: ${BACKEND_EMBED_MODEL:-text-embedding-3-small}
-      # Baked into the vector table when the database is created. Changing it
-      # means a NEW database file, not a restart.
-      BACKEND_EMBED_DIM: ${BACKEND_EMBED_DIM:-1536}
       # Forge tokens for private repositories, named by token_env in repos.yaml.
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.

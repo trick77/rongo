@@ -33,7 +33,7 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	embedder := evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim)
+	embedder := evalEmbedder(t)
 	r := retrieve.New(db, embedder)
 	expansions := loadExpansions(t)
 	expansionRepos := loadExpansionRepos(t)

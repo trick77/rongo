@@ -136,9 +136,9 @@ func mustLLM(t *testing.T, cfg llm.Config) *llm.Client {
 // evalEmbedder is the embedding client on the endpoint LLMWIRE_OPENAI_BASE_URL
 // and LLMWIRE_OPENAI_API_KEY name, read by llmwire; a missing one is its named
 // error. requireEval has already gated the test on a real endpoint.
-func evalEmbedder(t *testing.T, model string, dim int) *embed.Client {
+func evalEmbedder(t *testing.T) *embed.Client {
 	t.Helper()
-	c, err := embed.NewClient(embed.Config{Model: model, Dim: dim}, nil)
+	c, err := embed.NewClient(embed.Config{}, nil)
 	if err != nil {
 		t.Fatalf("embed.NewClient: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	ctx := context.Background()
 	c := answerLLM(t)
 	judge := judgeLLM(t)
-	retriever := retrieve.New(db, evalEmbedder(t, envOr("BACKEND_EMBED_MODEL", "text-embedding-3-small"), dim))
+	retriever := retrieve.New(db, evalEmbedder(t))
 	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
 	// measures the fused order the product ran before the reranker shipped.
 	if envOr("BACKEND_EVAL_RERANK", "1") != "0" {
