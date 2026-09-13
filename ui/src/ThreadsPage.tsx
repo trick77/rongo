@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
@@ -41,7 +41,10 @@ export default function ThreadsPage({
   onSelect: (id: string) => void;
   /** A title or a link changed here; the rail is stale. */
   onChanged: () => void;
-  /** A thread is gone. The shell closes it if it was the one on screen. */
+  /**
+   * A thread is gone. The shell closes it if it was the one on screen and
+   * bumps `version`, like onChanged.
+   */
   onDeleted: (id: string) => void;
 }) {
   const [input, setInput] = useState("");
@@ -66,10 +69,33 @@ export default function ThreadsPage({
     },
     [],
   );
-  // The search box empties the scrolled list too: a mutation (a rename or a
-  // delete from a row's menu, via version) reloads whichever list is showing.
+  // What empties the scrolled list: the search box, and a change made
+  // SOMEWHERE ELSE (a rename in the rail, a new question's title landing),
+  // which `version` reports. A change made here is patched into the rows in
+  // place instead — the reader eight pages down who renames a row must not
+  // be sent back to the top — so the bumps this page causes itself are
+  // counted and skipped when they come back round.
   const searching = term !== "";
-  const list = useInfiniteList(fetchPage, [searching, version]);
+  const ownBumps = useRef(0);
+  const seen = useRef(version);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    // Compared to the last version seen rather than run on every change:
+    // the first run, and a second run of the same version under StrictMode,
+    // must not cost a reload.
+    if (version === seen.current) return;
+    seen.current = version;
+    if (ownBumps.current > 0) {
+      ownBumps.current--;
+      return;
+    }
+    setReload((n) => n + 1);
+  }, [version]);
+  const changed = () => {
+    ownBumps.current++;
+    onChanged();
+  };
+  const list = useInfiniteList(fetchPage, [searching, reload]);
 
   const [search, setSearch] = useState<{ term: string; hits: Hit[]; failed: boolean } | null>(null);
   useEffect(() => {
@@ -93,23 +119,24 @@ export default function ThreadsPage({
     return () => {
       cancelled = true;
     };
-  }, [term, searching, version]);
+  }, [term, searching, reload]);
 
   const actions = useThreadActions({
     onRenamed: (id, title) => {
       list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, title } : x)));
       setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, title } : x)) });
-      onChanged();
+      changed();
     },
     onDeleted: (id) => {
       list.setItems((prev) => prev.filter((x) => x.id !== id));
       setSearch((prev) => prev && { ...prev, hits: prev.hits.filter((x) => x.id !== id) });
+      ownBumps.current++;
       onDeleted(id);
     },
     onShared: (id, shared) => {
       list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, shared } : x)));
       setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, shared } : x)) });
-      onChanged();
+      changed();
     },
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import ThreadsPage, { mark, snippet, when } from "./ThreadsPage";
@@ -105,6 +105,32 @@ describe("ThreadsPage", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("asks for a failed page once, not on every tick the foot stays in view", async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        calls++;
+        const cursor = new URL(String(input), "http://x").searchParams.get("cursor");
+        if (cursor === null) {
+          return { ok: true, status: 200, json: async () => ({ items: [row("a", "First")], next_cursor: "page1" }) };
+        }
+        return { ok: false, status: 500, json: async () => ({}) };
+      }),
+    );
+    page();
+    await screen.findByText("First");
+    act(reveal);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    const afterFailure = calls;
+    // The sentinel is still in view and the observer keeps saying so.
+    act(reveal);
+    act(reveal);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls).toBe(afterFailure);
+    expect(screen.getByText("First")).toBeTruthy();
+  });
+
   it("says so when there is nothing yet", async () => {
     api({ pages: [[]] });
     page();
@@ -168,6 +194,41 @@ describe("ThreadsPage", () => {
     expect(screen.getByText("Second")).toBeTruthy();
     expect(calls).toContain("DELETE /api/threads/a");
     expect(onDeleted).toHaveBeenCalledWith("a");
+  });
+
+  it("keeps its place when a row is renamed here, and reloads when the rail changes", async () => {
+    const calls = api({ pages: [[row("a", "First")], [row("b", "Second")]] });
+    const onChanged = vi.fn();
+    const { rerender } = render(
+      <ThreadsPage activeId={null} version={0} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+    );
+    await screen.findByText("First");
+    act(reveal);
+    await screen.findByText("Second");
+    const user = userEvent.setup();
+
+    // A rename on this page: patched in place, the rail told, no reload.
+    await user.click(screen.getByRole("button", { name: "Actions for Second" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    await user.clear(within(screen.getByRole("dialog")).getByRole("textbox"));
+    await user.type(within(screen.getByRole("dialog")).getByRole("textbox"), "Renamed");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await screen.findByText("Renamed");
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    const before = calls.filter((c) => c.startsWith("/api/threads?")).length;
+    rerender(
+      <ThreadsPage activeId={null} version={1} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByText("Renamed")).toBeTruthy());
+    expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(before);
+    expect(screen.getByText("First")).toBeTruthy();
+
+    // A change made elsewhere: page one again.
+    rerender(
+      <ThreadsPage activeId={null} version={2} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+    );
+    await waitFor(() => expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(before + 1));
+    await waitFor(() => expect(screen.queryByText("Renamed")).toBe(null));
   });
 
   it("reports when the list cannot be fetched", async () => {

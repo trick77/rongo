@@ -47,3 +47,26 @@ CREATE TRIGGER message_fts_au AFTER UPDATE OF question, answer ON messages BEGIN
     INSERT INTO message_fts (rowid, thread_id, question, answer)
     VALUES (new.rowid, new.thread_id, new.question, new.answer);
 END;
+
+-- thread_fts: the same index over titles, so a title and an answer are found
+-- by the same rule. LIKE folds case for ASCII only and never folds accents:
+-- "Übersicht" would answer to ubersicht in an answer and not in a title.
+CREATE VIRTUAL TABLE thread_fts USING fts5(
+    title,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+INSERT INTO thread_fts (rowid, title) SELECT rowid, title FROM threads;
+
+CREATE TRIGGER thread_fts_ai AFTER INSERT ON threads BEGIN
+    INSERT INTO thread_fts (rowid, title) VALUES (new.rowid, new.title);
+END;
+
+CREATE TRIGGER thread_fts_ad AFTER DELETE ON threads BEGIN
+    DELETE FROM thread_fts WHERE rowid = old.rowid;
+END;
+
+CREATE TRIGGER thread_fts_au AFTER UPDATE OF title ON threads BEGIN
+    DELETE FROM thread_fts WHERE rowid = old.rowid;
+    INSERT INTO thread_fts (rowid, title) VALUES (new.rowid, new.title);
+END;

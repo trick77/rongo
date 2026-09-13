@@ -59,8 +59,12 @@ export function useInfiniteList<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, resetKeys);
 
+  // Not after a failure: the sentinel is still in view when a page fails
+  // to load, and without this guard the observer would ask for it again the
+  // moment the effect below re-observes, a request per tick until the reader
+  // scrolled away. The next reset (a search, a mutation) clears the failure.
   const loadMore = useCallback(() => {
-    if (loadingMore || !hasMore || cursor === null) return;
+    if (loadingMore || failed || !hasMore || cursor === null) return;
     const seq = requestSeq.current;
     setLoadingMore(true);
     fetchPageRef
@@ -77,7 +81,7 @@ export function useInfiniteList<T>(
       .finally(() => {
         if (seq === requestSeq.current) setLoadingMore(false);
       });
-  }, [cursor, hasMore, loadingMore]);
+  }, [cursor, failed, hasMore, loadingMore]);
 
   // One observer per sentinel node, routed through a ref so it always calls
   // the latest loadMore, which closes over the current cursor.
@@ -107,13 +111,13 @@ export function useInfiniteList<T>(
   // next page. Re-observing keeps filling until the viewport is covered or
   // there is nothing more.
   useEffect(() => {
-    if (loadingMore || !hasMore) return;
+    if (loadingMore || failed || !hasMore) return;
     const node = nodeRef.current;
     const observer = observerRef.current;
     if (node === null || observer === null) return;
     observer.unobserve(node);
     observer.observe(node);
-  }, [loadingMore, hasMore, items.length]);
+  }, [loadingMore, failed, hasMore, items.length]);
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 

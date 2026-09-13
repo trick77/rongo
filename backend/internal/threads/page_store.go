@@ -150,10 +150,17 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	if limit <= 0 || limit > MaxSearchResults {
 		limit = MaxSearchResults
 	}
+	// Titles through the same index and tokenizer as the messages, so one
+	// rule finds both: LIKE folds case for ASCII only and never folds an
+	// accent, and "Übersicht" would have answered to ubersicht in an answer but
+	// not in a title. List order rather than rank: a title either says the
+	// word or does not.
+	match := ftsPrefixQuery(query)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, public_id, title, title_settled, created_at FROM threads
-		WHERE user_subject = ? AND title LIKE ? ESCAPE '\' ORDER BY id DESC LIMIT ?`,
-		subject, "%"+escapeLike(query)+"%", limit)
+		SELECT t.id, t.public_id, t.title, t.title_settled, t.created_at
+		FROM thread_fts JOIN threads t ON t.rowid = thread_fts.rowid
+		WHERE thread_fts MATCH ? AND t.user_subject = ? ORDER BY t.id DESC LIMIT ?`,
+		match, subject, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search titles: %w", err)
 	}
@@ -181,7 +188,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 		JOIN threads t ON t.id = message_fts.thread_id
 		WHERE message_fts MATCH ? AND t.user_subject = ?
 		ORDER BY bm25(message_fts) LIMIT ?`,
-		ftsPrefixQuery(query), subject, limit*4)
+		match, subject, limit*4)
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}
@@ -259,13 +266,6 @@ func (s *Store) markShared(ctx context.Context, subject string, items []Thread) 
 		items[i].Shared = shared[items[i].ID]
 	}
 	return nil
-}
-
-// escapeLike makes a search term literal inside LIKE: a reader typing "%"
-// or "_" means the character, not a wildcard.
-func escapeLike(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return r.Replace(s)
 }
 
 // ftsPrefixQuery turns what was typed into an FTS5 MATCH expression: every

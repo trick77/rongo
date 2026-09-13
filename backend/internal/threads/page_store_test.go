@@ -213,18 +213,20 @@ func TestSearch_prefixMatchesEveryTermAndIsPerReader(t *testing.T) {
 	}
 }
 
-func TestSearch_wildcardsAndOperatorsAreCharacters(t *testing.T) {
+func TestSearch_operatorsArePunctuationAndTitlesFoldLikeAnswers(t *testing.T) {
 	s := NewStore(threadDB(t))
 	ctx := context.Background()
 	seedThreads(t, s, testSubject, 1, "plain")
-	odd, err := s.Create(ctx, testSubject, "100% done_")
+	odd, err := s.Create(ctx, testSubject, "100% done_ on the Übersicht")
 	if err != nil {
 		t.Fatal(err)
 	}
 	m, _ := s.AddQuestion(ctx, odd.ID, "dev", "en", "what about foo-bar: \"quoted\"", 0)
 	_ = s.Finish(ctx, m.ID, "", nil)
 
-	for _, q := range []string{"%", "_", "100% done"} {
+	// Case and accents fold in a title as they do in an answer, and a "%" or
+	// a "_" is punctuation the tokenizer drops, not a wildcard.
+	for _, q := range []string{"100 done", "ubersicht", "ÜBERSICHT", "foo bar"} {
 		hits, err := s.Search(ctx, testSubject, q, 0)
 		if err != nil {
 			t.Fatalf("%q: %v", q, err)
@@ -233,14 +235,34 @@ func TestSearch_wildcardsAndOperatorsAreCharacters(t *testing.T) {
 			t.Errorf("%q matched %+v, want the one odd title", q, hits)
 		}
 	}
-	// Bare-word FTS syntax, which would be a parse error unquoted.
-	for _, q := range []string{"foo-bar:", `"quoted"`, "NOT"} {
+	// Bare-word FTS syntax, which would be a parse error unquoted, and
+	// terms that tokenize to nothing at all.
+	for _, q := range []string{"foo-bar:", `"quoted"`, "NOT", "%", "_"} {
 		if _, err := s.Search(ctx, testSubject, q, 0); err != nil {
 			t.Errorf("%q: %v", q, err)
 		}
 	}
 	if hits, _ := s.Search(ctx, testSubject, "   ", 0); len(hits) != 0 {
 		t.Errorf("blank search = %+v, want nothing", hits)
+	}
+}
+
+func TestThreadFTS_followsTheTitle(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	if _, err := s.Rename(ctx, testSubject, th, "The kettle question"); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := s.Search(ctx, testSubject, "kettle", 0); len(hits) != 1 {
+		t.Errorf("renamed title not found: %+v", hits)
+	}
+	if hits, _ := s.Search(ctx, testSubject, "frage", 0); len(hits) != 0 {
+		t.Errorf("the old title is still found: %+v", hits)
+	}
+	if _, err := s.Delete(ctx, testSubject, th); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := s.Search(ctx, testSubject, "kettle", 0); len(hits) != 0 {
+		t.Errorf("a deleted thread is still found: %+v", hits)
 	}
 }
 
