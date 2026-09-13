@@ -97,7 +97,7 @@ func TestSet_mentioned(t *testing.T) {
 		"how often is the digest sent in production?":          {"prod"},
 		"Wie oft wird der Digest in der Produktion verschickt": {"prod"},
 		"and on intg, and prod?":                               {"intg", "prod"},
-		"how is the payment integration done":                    nil,
+		"how is the payment integration done":                  nil,
 		"the productive path through the code":                 nil,
 		"how often is the digest sent":                         nil,
 	}

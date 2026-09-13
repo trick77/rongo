@@ -67,11 +67,11 @@ variable).
 `TestFlowGathered`, flow corpus re-indexed with property tokens (46 of
 them, 14 shared across repositories, none crossing more than four):
 
-| arm | with property tokens (three re-indexes) | without (two re-indexes) | documented 2026-09-11 |
+| arm | with property tokens (three re-indexes) | without (three re-indexes) | documented 2026-09-11 |
 |---|---|---|---|
 | symbol walk | 20/30 | 20/30 | 20/30 |
-| symbol walk + crossings | 25, 26, 25 /30 | 27, 25 /30 | 26, 27 /30 |
-| **+ reranker (the product)** | **28, 27, 27 /30** | 27, 27 /30 | 28/30 |
+| symbol walk + crossings | 25, 26, 25 /30 | 27, 25, 25 /30 | 26, 27 /30 |
+| **+ reranker (the product)** | **28, 27, 27 /30** | 27, 27, 28 /30 | 28/30 |
 
 The crossing arm moves between 25 and 27 whether property tokens exist or
 not: the walk's budget cut falls on a different chunk after every re-index
