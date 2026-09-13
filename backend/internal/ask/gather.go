@@ -216,8 +216,41 @@ symbols:
 	// hop. It does not count against MaxHops — a crossing is bounded by the
 	// spread ceiling and lands on a single chunk, where a symbol hop fans out
 	// — and it runs under the FULL budget, which is what the reserve is for.
+	//
+	// Two passes over the same starts: routes and destinations from every
+	// file first, property keys from every file second. The reserve was
+	// measured with the first two kinds alone, and a property key is a
+	// weaker link — spring.application.name is set in every service's
+	// properties, and one interceptor reading it lands on three of them.
+	// Taken in file order those landings spent the reserve before the
+	// configuration class three files later got to cross on its routes, and
+	// the flow corpus lost a part. A kind that came later may only add after
+	// the measured ones have had the whole reserve.
+	//
+	// land takes one landing and its one in-repo hop on the far side, and
+	// reports false when the budget is spent — and stopping means stopping,
+	// for the reason take gives.
+	land := func(landing, from Source) (bool, error) {
+		if seen[landing.ChunkID] {
+			return true, nil
+		}
+		if !take(landing, from.Hop+1, g.opts.TokenBudget) {
+			return false, nil
+		}
+		inland, err := g.referenced(ctx, landing)
+		if err != nil {
+			return false, err
+		}
+		for _, ref := range mechanismFirst(inland) {
+			if !take(ref, from.Hop+2, g.opts.TokenBudget) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
 	crossed := map[string]bool{}
 	starts := append([]Source{}, out...)
+	var later []crossing
 	for _, from := range starts {
 		key := from.Repo + "\x00" + from.Path
 		if crossed[key] {
@@ -230,24 +263,40 @@ symbols:
 			return nil, err
 		}
 		for _, landing := range mechanismFirst(within(far, stage)) {
-			if seen[landing.ChunkID] {
+			if isPropertyEdge(landing.Reason) {
+				later = append(later, crossing{from: from, landing: landing})
 				continue
 			}
-			if !take(landing, from.Hop+1, g.opts.TokenBudget) {
-				return out, nil
-			}
-			inland, err := g.referenced(ctx, landing)
+			more, err := land(landing, from)
 			if err != nil {
 				return nil, err
 			}
-			for _, ref := range mechanismFirst(inland) {
-				if !take(ref, from.Hop+2, g.opts.TokenBudget) {
-					return out, nil
-				}
+			if !more {
+				return out, nil
 			}
 		}
 	}
+	for _, c := range later {
+		more, err := land(c.landing, c.from)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			return out, nil
+		}
+	}
 	return out, nil
+}
+
+// crossing is a landing held back for the second pass, with the source it
+// was reached from, so its hop is counted from the right place.
+type crossing struct {
+	from, landing Source
+}
+
+// isPropertyEdge reports a landing reached over a property key.
+func isPropertyEdge(reason string) bool {
+	return strings.HasPrefix(reason, "edge:"+string(edges.KindProperty)+" ")
 }
 
 // crossingReserve is the share of the token budget the symbol walk leaves

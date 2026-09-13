@@ -240,6 +240,41 @@ func TestGatherWithin_landsOnlyInTheAskedStage(t *testing.T) {
 	}
 }
 
+// TestGather_propertyCrossingsWaitForEveryRouteCrossing: the first gathered
+// file crosses on a property key, a later one on a route, and the budget
+// holds one landing. The route landing must be the one taken, whichever
+// file came first — the reserve was measured for routes and destinations.
+func TestGather_propertyCrossingsWaitForEveryRouteCrossing(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "a")
+	seedRepo(t, db, "b")
+	first := seedChunkIn(t, db, "a", "Interceptor.java", 0, 1, 10, "Interceptor", `"${spring.application.name}"`)
+	seedTokenIn(t, db, "a", "Interceptor.java", "property", "spring.application.name", 1)
+	second := seedChunkIn(t, db, "a", "Config.java", 0, 1, 10, "Config", `"/paymentAuth"`)
+	seedTokenIn(t, db, "a", "Config.java", "route", "/paymentAuth", 1)
+	seedChunkIn(t, db, "b", "application.properties", 0, 1, 10, "", "spring.application.name=b")
+	seedTokenIn(t, db, "b", "application.properties", "property", "spring.application.name", 1)
+	seedChunkIn(t, db, "b", "transport.go", 0, 1, 10, "MakeHandler", `r.Path("/paymentAuth")`)
+	seedTokenIn(t, db, "b", "transport.go", "route", "/paymentAuth", 1)
+
+	// The two hits cost a handful of tokens each; the budget leaves room for
+	// one more chunk and no second.
+	hits := []retrieve.Hit{hitInFor(t, db, first), hitInFor(t, db, second)}
+	budget := estimateTokens(hits[0].RawText) + estimateTokens(hits[1].RawText) + estimateTokens(`r.Path("/paymentAuth")`)
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 0, TokenBudget: budget}).
+		Gather(context.Background(), hits)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	if _, ok := sourceIn(got, "b", "transport.go"); !ok {
+		t.Errorf("sources = %v, want the route landing taken ahead of the property landing", repoPaths(got))
+	}
+	if _, ok := sourceIn(got, "b", "application.properties"); ok {
+		t.Errorf("sources = %v: the property landing spent the reserve the route needed", repoPaths(got))
+	}
+}
+
 func TestCrossings_orderRoutesAndDestinationsBeforeProperties(t *testing.T) {
 	// The reserve was measured with routes and destinations alone; a file
 	// naming twenty properties must not spend it before a queue's far side
