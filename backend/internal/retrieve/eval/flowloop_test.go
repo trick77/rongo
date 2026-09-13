@@ -488,8 +488,8 @@ func runFlowQuestion(ctx context.Context, t *testing.T, env *flowEnv, wire *llmw
 // rate: WHERE a loop lost the thread is the finding, not how many it got.
 func TestFlowLoopDiagnostic(t *testing.T) {
 	requireEval(t)
-	if os.Getenv("BACKEND_CHAT_BASE_URL") == "" {
-		t.Skip("BACKEND_CHAT_BASE_URL is not set")
+	if os.Getenv("LLMWIRE_MIMO_BASE_URL") == "" {
+		t.Skip("LLMWIRE_MIMO_BASE_URL is not set")
 	}
 	dim := embedDim(t)
 	db := evalDB(t, dim)

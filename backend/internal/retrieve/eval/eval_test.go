@@ -6,7 +6,7 @@
 // endpoint and a real corpus, which no ordinary test may touch. Run it as:
 //
 //	BACKEND_EVAL=1 \
-//	BACKEND_EMBED_BASE_URL=... BACKEND_EMBED_API_KEY=... \
+//	LLMWIRE_OPENAI_BASE_URL=... LLMWIRE_OPENAI_API_KEY=... \
 //	BACKEND_EMBED_MODEL=text-embedding-3-small BACKEND_EMBED_DIM=1536 \
 //	BACKEND_EVAL_DB=/tmp/rongo-eval-small.db \
 //	BACKEND_REPOS_FILE=../../../../repos.yaml BACKEND_REPO_ROOT=/tmp/rongo-eval-repos \

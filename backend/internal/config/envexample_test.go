@@ -49,8 +49,8 @@ func endpointEnv(t *testing.T) map[string]bool {
 		if err != nil {
 			t.Fatalf("profile %s: %v", id, err)
 		}
-		names[p.BaseURLEnv] = true
-		names[p.APIKeyEnv] = true
+		names[p.BaseURLEnv()] = true
+		names[p.APIKeyEnv()] = true
 	}
 	return names
 }

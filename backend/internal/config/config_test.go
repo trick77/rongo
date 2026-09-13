@@ -27,12 +27,12 @@ var allBackendEnvVars = []string{
 	"BACKEND_INDEX_EXCLUDE",
 	"BACKEND_REPOS_FILE",
 	"BACKEND_FORGE_TOKEN_GITHUB",
-	"BACKEND_EMBED_BASE_URL",
-	"BACKEND_EMBED_API_KEY",
+	"LLMWIRE_OPENAI_BASE_URL",
+	"LLMWIRE_OPENAI_API_KEY",
 	"BACKEND_EMBED_MODEL",
 	"BACKEND_EMBED_DIM",
-	"BACKEND_CHAT_BASE_URL",
-	"BACKEND_CHAT_API_KEY",
+	"LLMWIRE_MIMO_BASE_URL",
+	"LLMWIRE_MIMO_API_KEY",
 	"BACKEND_CHAT_EMULATE_OPENCODE",
 	"BACKEND_MODULE_MIN_CHUNKS",
 	"BACKEND_MODULE_MAX_CHUNKS",
@@ -51,13 +51,13 @@ var allBackendEnvVars = []string{
 // defaults. setEnv seeds them so a test about something else doesn't have to
 // repeat them; a test about one of them overrides it with "".
 var mandatoryEnv = map[string]string{
-	"BACKEND_SESSION_SECRET": validSecret,
-	"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-	"BACKEND_EMBED_API_KEY":  "embed-key",
-	"BACKEND_CHAT_BASE_URL":  "http://models.invalid/v1",
-	"BACKEND_CHAT_API_KEY":   "llm-key",
+	"BACKEND_SESSION_SECRET":  validSecret,
+	"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+	"LLMWIRE_OPENAI_API_KEY":  "embed-key",
+	"LLMWIRE_MIMO_BASE_URL":   "http://models.invalid/v1",
+	"LLMWIRE_MIMO_API_KEY":    "llm-key",
 	// Mandatory rather than defaulted: which client string the endpoint wants
-	// depends on which host is behind BACKEND_CHAT_BASE_URL.
+	// depends on which host is behind LLMWIRE_MIMO_BASE_URL.
 	"BACKEND_CHAT_EMULATE_OPENCODE": "true",
 }
 
@@ -77,8 +77,8 @@ func setEnv(t *testing.T, kv map[string]string) {
 func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_SESSION_SECRET":  validSecret,
+		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
 	})
 
 	// When
@@ -127,7 +127,7 @@ func TestLoad_turnMaxTokens(t *testing.T) {
 			// Given
 			setEnv(t, map[string]string{
 				"BACKEND_SESSION_SECRET":  validSecret,
-				"BACKEND_EMBED_BASE_URL":  "http://embeddings.invalid/v1",
+				"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
 				"BACKEND_TURN_MAX_TOKENS": tc.env,
 			})
 
@@ -261,9 +261,9 @@ func TestLoad_rejectsAMalformedEmbedDim(t *testing.T) {
 	// mismatch on every insert.
 	for _, bad := range []string{"0", "-1", "3O72", "big"} {
 		setEnv(t, map[string]string{
-			"BACKEND_SESSION_SECRET": validSecret,
-			"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-			"BACKEND_EMBED_DIM":      bad,
+			"BACKEND_SESSION_SECRET":  validSecret,
+			"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+			"BACKEND_EMBED_DIM":       bad,
 		})
 
 		// When
@@ -279,9 +279,9 @@ func TestLoad_rejectsAMalformedEmbedDim(t *testing.T) {
 func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_EMBED_DIM":      "3072",
+		"BACKEND_SESSION_SECRET":  validSecret,
+		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_EMBED_DIM":       "3072",
 	})
 
 	// When
@@ -299,8 +299,8 @@ func TestLoad_acceptsAnExplicitEmbedDim(t *testing.T) {
 func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_SESSION_SECRET":  validSecret,
+		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
 	})
 
 	// When
@@ -318,9 +318,9 @@ func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 func TestLoad_acceptsAnExplicitRouteMargin(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_ROUTE_MARGIN":   "0.4",
+		"BACKEND_SESSION_SECRET":  validSecret,
+		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_ROUTE_MARGIN":    "0.4",
 	})
 
 	// When
@@ -340,10 +340,10 @@ func TestLoad_trimsAdminToken(t *testing.T) {
 	// an env file) must authenticate the same as one without, or every
 	// correct-looking Bearer request gets a silent 401.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_EMBED_BASE_URL": "http://embeddings.invalid/v1",
-		"BACKEND_AUTH_MODE":      "token",
-		"BACKEND_ADMIN_TOKEN":    "s3cret-token\n",
+		"BACKEND_SESSION_SECRET":  validSecret,
+		"LLMWIRE_OPENAI_BASE_URL": "http://embeddings.invalid/v1",
+		"BACKEND_AUTH_MODE":       "token",
+		"BACKEND_ADMIN_TOKEN":     "s3cret-token\n",
 	})
 
 	cfg, err := Load()
@@ -404,7 +404,7 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"LLMWIRE_OPENAI_BASE_URL":    "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
@@ -450,7 +450,7 @@ func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
-		"BACKEND_EMBED_BASE_URL":     "https://api.example.com/v1",
+		"LLMWIRE_OPENAI_BASE_URL":    "https://api.example.com/v1",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",

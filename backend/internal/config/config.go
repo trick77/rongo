@@ -78,8 +78,8 @@ type Config struct {
 	// sweep, pending a fix to the candidate layer (phase 4c). The number to
 	// beat is 0.803: a router that never asks anything at all.
 	RouteMargin float64
-	// The MiMo endpoint is not here: BACKEND_CHAT_BASE_URL and
-	// BACKEND_CHAT_API_KEY are named by the deployment's llmwire profile and
+	// The MiMo endpoint is not here: LLMWIRE_MIMO_BASE_URL and
+	// LLMWIRE_MIMO_API_KEY are named by the deployment's llmwire profile and
 	// read by llmwire itself when internal/llm builds its client, so a
 	// missing one is a boot error there. The two deployment NAMES are
 	// hardcoded in internal/llm and deliberately not settings: a deployment
@@ -90,7 +90,7 @@ type Config struct {
 	// its User-Agent and session header pair. MiMo's token-plan host is sold
 	// as that client's backend; an endpoint that does not care ignores the
 	// headers. Mandatory and explicit, because a default either way is a
-	// guess about which host is behind BACKEND_CHAT_BASE_URL.
+	// guess about which host is behind LLMWIRE_MIMO_BASE_URL.
 	ChatEmulateOpenCode bool
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
@@ -101,8 +101,8 @@ type Config struct {
 	// heaviest on record 83k, and the default sits three times above that so
 	// normal operation never meets it. Zero turns it off.
 	TurnMaxTokens int
-	// Embedding model. Its endpoint, BACKEND_EMBED_BASE_URL and
-	// BACKEND_EMBED_API_KEY, is read by llmwire the same way as the chat one.
+	// Embedding model. Its endpoint, LLMWIRE_OPENAI_BASE_URL and
+	// LLMWIRE_OPENAI_API_KEY, is read by llmwire the same way as the chat one.
 	// EmbedDim is also the width the vec0 table is built with, so changing it
 	// means a new database, not a restart — store.BuiltDim makes a mismatch a
 	// loud failure rather than a wrong answer.

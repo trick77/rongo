@@ -115,7 +115,7 @@ func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string
 
 // llmClientForRouting builds the model client the routing arms share. Skips —
 // never fails — when no endpoint is configured, exactly like
-// TestExpandQuestions: a routing arm without BACKEND_CHAT_BASE_URL cannot call
+// TestExpandQuestions: a routing arm without LLMWIRE_MIMO_BASE_URL cannot call
 // the judge at all.
 func llmClientForRouting(t *testing.T) *llm.Client {
 	t.Helper()
