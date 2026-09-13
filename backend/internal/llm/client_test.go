@@ -298,7 +298,10 @@ type captured struct {
 	Thinking            *struct {
 		Type string `json:"type"`
 	} `json:"thinking"`
-	Temperature *float64 `json:"temperature"`
+	Temperature    *float64 `json:"temperature"`
+	ResponseFormat *struct {
+		Type string `json:"type"`
+	} `json:"response_format"`
 }
 
 // fakeUpstream answers one chat completion and records what it was asked.
@@ -732,5 +735,27 @@ func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
 	var me *llmwire.MissingEnvError
 	if !errors.As(err, &me) || me.Var != "LLMWIRE_MIMO_BASE_URL" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestWithJSONObject_asksForAJSONObjectAndIsOtherwiseAbsent(t *testing.T) {
+	// Given a call that does not ask for it
+	c, got := fakeUpstream(t, "x")
+	ask(t, c)
+	if got.ResponseFormat != nil {
+		t.Errorf("response_format = %+v, want it absent unless a call asks for one", got.ResponseFormat)
+	}
+
+	// When a call does
+	c2, got2 := fakeUpstream(t, "x")
+	ask(t, c2, WithJSONObject())
+
+	// Then the endpoint is asked for an object, and nothing else about the
+	// call moves: same deployment, thinking untouched.
+	if got2.ResponseFormat == nil || got2.ResponseFormat.Type != "json_object" {
+		t.Errorf("response_format = %+v, want json_object", got2.ResponseFormat)
+	}
+	if got2.Model != ProDeployment || got2.Thinking != nil {
+		t.Errorf("model = %q thinking = %+v, want the call otherwise unchanged", got2.Model, got2.Thinking)
 	}
 }
