@@ -435,6 +435,16 @@ describe("App, the rail on a phone", () => {
     await screen.findByRole("heading", { name: "Projects" });
   });
 
+  it("closes on Shared", async () => {
+    await renderSignedIn();
+    const user = await openDrawer();
+    const shared = screen.getByRole("button", { name: "Shared" });
+    await user.click(shared);
+    expect(rail().className).toContain("-translate-x-full");
+    expect(shared.getAttribute("aria-current")).toBe("page");
+    await screen.findByRole("heading", { name: "Shared threads" });
+  });
+
   // The rail rows are disabled mid-turn; the way back to the rail must not be.
   // With the drawer shut and the toggle dead there would be no navigation at
   // all while an answer is being written.
