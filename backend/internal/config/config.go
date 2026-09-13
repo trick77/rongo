@@ -84,7 +84,7 @@ type Config struct {
 	// name in the environment lets a misconfigured host answer with a model
 	// nobody chose.
 	//
-	// ChatEmulateOpenCode presents every model call as the opencode client:
+	// ChatEmulateOpenCode presents every chat call as the opencode client:
 	// its User-Agent and session header pair. The provider entry in
 	// llmwire's profiles.yaml switches it on for MiMo's token-plan host by
 	// itself; this is the operator's switch for a host llmwire does not
