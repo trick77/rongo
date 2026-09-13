@@ -65,6 +65,13 @@ type Understanding struct {
 	// It is the reader's own permission to answer across the corpus, so it is
 	// read from the question and never inferred from the hits.
 	AllRepos bool `json:"all_repos"`
+	// Stage is the deployment stage the question asks about, as one of the
+	// names the prompt offered, or empty. Not a guess the way Repos is: the
+	// prompt lists the declared names, and anything outside the list is
+	// dropped by the pipeline. It covers what the reader's own words cannot
+	// — "in the integration environment" for a stage called intg — because
+	// the ordinary word is refused as an alias.
+	Stage string `json:"stage"`
 }
 
 // SearchTexts assembles what the retriever should search for. The raw question
@@ -107,6 +114,11 @@ Fields:
   all_repos   true when the question asks for every repository, or for several
               without naming them ("in all repos", "across all products",
               "in multiple repositories"), else false
+  stage       the deployment stage the question asks about, written exactly as
+              one of the names listed below, else "". A question that names
+              no environment, or asks how something is integrated or tested
+              rather than about the integration or test environment, has
+              no stage.
 
 A question may arrive with the previous turn of the conversation above it. That
 material is there for ONE purpose: to resolve what the current question leaves
@@ -176,9 +188,9 @@ func recall(question string, t Thread) string {
 // reads, so the expensive queue would buy nothing. Thinking is disabled as a
 // SEPARATE decision, for a reason of its own — MiMo's reasoning channel can
 // bleed into the content, and here the content has to parse as JSON.
-func (u *Understander) Understand(ctx context.Context, question string, t Thread) (Understanding, error) {
+func (u *Understander) Understand(ctx context.Context, question string, t Thread, stageNames []string) (Understanding, error) {
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
-		{Role: "system", Content: understandSystem},
+		{Role: "system", Content: understandSystem + stageList(stageNames)},
 		{Role: "user", Content: recall(question, t)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
@@ -194,4 +206,14 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 		return Understanding{}, fmt.Errorf("understand the question: reply was not JSON: %w", err)
 	}
 	return got, nil
+}
+
+// stageList closes the system prompt with the declared stage names, or with
+// the statement that there are none — so the model has a list to copy from
+// and never a word to invent.
+func stageList(names []string) string {
+	if len(names) == 0 {
+		return "\n\nDeclared stages: none. stage is always \"\"."
+	}
+	return "\n\nDeclared stages: " + strings.Join(names, ", ") + "."
 }

@@ -62,7 +62,7 @@ func TestExpandFlowQuestions(t *testing.T) {
 		var got ask.Understanding
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
-			got, last = u.Understand(context.Background(), q.Text, ask.Thread{})
+			got, last = u.Understand(context.Background(), q.Text, ask.Thread{}, nil)
 			if last == nil {
 				break
 			}

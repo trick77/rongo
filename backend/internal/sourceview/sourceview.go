@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/trick77/rongo/internal/redact"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -144,6 +145,10 @@ func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error
 	if bytes.IndexByte(body, 0) >= 0 {
 		return File{}, ErrBinary
 	}
+	// The same redaction the indexer applied before chunking. The chunk a
+	// citation points at never held the credential; a viewer reading git
+	// directly must not be the way round that.
+	body = redact.Redact(path, body)
 	return File{Repo: repo, Branch: branch, Path: path, SHA: sha, Content: string(body)}, nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/embed"
@@ -86,11 +87,18 @@ type countingEmbedder struct {
 	dim   int
 	texts int
 	calls int
+	// sent is every text handed over, joined: what a real endpoint would
+	// have received, for a test asserting that a credential never did.
+	sent strings.Builder
 }
 
 func (e *countingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	e.calls++
 	e.texts += len(texts)
+	for _, tx := range texts {
+		e.sent.WriteString(tx)
+		e.sent.WriteByte(0)
+	}
 	out := make([][]float32, len(texts))
 	for i, tx := range texts {
 		v := make([]float32, e.dim)
@@ -309,6 +317,55 @@ func TestIndexRepo_excludedPathIsRecordedNotEmbedded(t *testing.T) {
 	}
 	if counts.Files != 2 {
 		t.Errorf("Counts.Files = %d, want 2 — the excluded file is recorded, not omitted", counts.Files)
+	}
+}
+
+const stageProperties = "# stage values\nacme.cron.send-digest=0 0 * ? * * *\ndb.password=ENC(fixture-cipher-value)\nacme.api-token=${API_TOKEN}\n"
+
+func TestIndexRepo_aConfigurationFileIsIndexedRedacted(t *testing.T) {
+	// Given: a stage properties file with a cron value worth answering from
+	// and a jasypt-encrypted password on the line below it.
+	h := newHarnessFiles(t, map[string]string{
+		"src/shop/cart/AbandonedCartJob.java": cartJava,
+		"prod/application.properties":         stageProperties,
+	}, nil)
+	st := h.stateOf(t)
+	sha := h.head(t)
+
+	// When
+	if _, err := h.ix.IndexRepo(context.Background(), st, sha, nil); err != nil {
+		t.Fatalf("IndexRepo() err = %v, want nil", err)
+	}
+
+	// Then: the file is indexed, the cron line is searchable, the credential
+	// is nowhere — not in a chunk, not in the FTS mirror, not in what the
+	// embedder was handed — and the key line survived with the marker.
+	var reason string
+	if err := h.db.QueryRow(`SELECT skip_reason FROM files WHERE path = 'prod/application.properties'`).Scan(&reason); err != nil {
+		t.Fatalf("the properties file was not recorded: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("skip_reason = %q, want the file indexed", reason)
+	}
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM chunks WHERE text LIKE '%fixture-cipher%' OR raw_text LIKE '%fixture-cipher%'`,
+		`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH '"fixture-cipher"'`,
+	} {
+		if n := countOf(t, h.db, q); n != 0 {
+			t.Errorf("%d rows hold the credential: %s", n, q)
+		}
+	}
+	if strings.Contains(h.embedder.sent.String(), "fixture-cipher") {
+		t.Error("the credential was handed to the embedding endpoint")
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks WHERE raw_text LIKE '%db.password=<redacted>%'`); n != 1 {
+		t.Errorf("%d chunks carry the redacted key line, want 1", n)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks WHERE raw_text LIKE '%acme.api-token=${API_TOKEN}%'`); n != 1 {
+		t.Errorf("%d chunks keep the placeholder, want 1", n)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH '"send" "digest"'`); n != 1 {
+		t.Errorf("%d chunks match the cron key, want 1", n)
 	}
 }
 

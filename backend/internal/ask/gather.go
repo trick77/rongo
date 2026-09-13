@@ -90,6 +90,15 @@ func NewGatherer(db *sql.DB, o GatherOptions) *Gatherer {
 // caller reports with the terms it tried; inventing a starting point here would
 // produce a confident answer about whatever happened to be nearby.
 func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, error) {
+	return g.GatherWithin(ctx, hits, nil)
+}
+
+// GatherWithin is Gather with a crossing landing only where stage allows: a
+// repository declaring stages is entered only under the asked stage's
+// directory, the same restriction the search ran under. Without it the
+// search would honour "in production" and the crossing would land on every
+// stage's line anyway, with the answer then reporting them all.
+func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage retrieve.StagePrefixes) ([]Source, error) {
 	if len(hits) == 0 {
 		return nil, nil
 	}
@@ -207,8 +216,50 @@ symbols:
 	// hop. It does not count against MaxHops — a crossing is bounded by the
 	// spread ceiling and lands on a single chunk, where a symbol hop fans out
 	// — and it runs under the FULL budget, which is what the reserve is for.
+	//
+	// Two passes over the same starts: routes and destinations from every
+	// file first, property keys from every file second. The reserve was
+	// measured with the first two kinds alone, and a property key is a
+	// weaker link — spring.application.name is set in every service's
+	// properties, and one interceptor reading it lands on three of them.
+	// Taken in file order those landings spent the reserve before the
+	// configuration class three files later got to cross on its routes, and
+	// the flow corpus lost a part. A kind that came later may only add after
+	// the measured ones have had the whole reserve.
+	//
+	// land takes one landing and its one in-repo hop on the far side, and
+	// reports false when the budget is spent — and stopping means stopping,
+	// for the reason take gives.
+	land := func(landing, from Source) (bool, error) {
+		if seen[landing.ChunkID] {
+			return true, nil
+		}
+		if !take(landing, from.Hop+1, g.opts.TokenBudget) {
+			return false, nil
+		}
+		if isPropertyEdge(landing.Reason) {
+			// A properties file is the far side, and it references no
+			// symbol; the words in it join whatever happens to be called
+			// "processor" or "cleanup" and spend the reserve on that. One
+			// stage's line costs one chunk, which is what lets every stage
+			// fit: the first run took intg's chunk plus its "references"
+			// and had no room left for prod.
+			return true, nil
+		}
+		inland, err := g.referenced(ctx, landing)
+		if err != nil {
+			return false, err
+		}
+		for _, ref := range mechanismFirst(inland) {
+			if !take(ref, from.Hop+2, g.opts.TokenBudget) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
 	crossed := map[string]bool{}
 	starts := append([]Source{}, out...)
+	var later []crossing
 	for _, from := range starts {
 		key := from.Repo + "\x00" + from.Path
 		if crossed[key] {
@@ -220,25 +271,41 @@ symbols:
 		if err != nil {
 			return nil, err
 		}
-		for _, landing := range mechanismFirst(far) {
-			if seen[landing.ChunkID] {
+		for _, landing := range mechanismFirst(within(far, stage)) {
+			if isPropertyEdge(landing.Reason) {
+				later = append(later, crossing{from: from, landing: landing})
 				continue
 			}
-			if !take(landing, from.Hop+1, g.opts.TokenBudget) {
-				return out, nil
-			}
-			inland, err := g.referenced(ctx, landing)
+			more, err := land(landing, from)
 			if err != nil {
 				return nil, err
 			}
-			for _, ref := range mechanismFirst(inland) {
-				if !take(ref, from.Hop+2, g.opts.TokenBudget) {
-					return out, nil
-				}
+			if !more {
+				return out, nil
 			}
 		}
 	}
+	for _, c := range later {
+		more, err := land(c.landing, c.from)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			return out, nil
+		}
+	}
 	return out, nil
+}
+
+// crossing is a landing held back for the second pass, with the source it
+// was reached from, so its hop is counted from the right place.
+type crossing struct {
+	from, landing Source
+}
+
+// isPropertyEdge reports a landing reached over a property key.
+func isPropertyEdge(reason string) bool {
+	return strings.HasPrefix(reason, "edge:"+string(edges.KindProperty)+" ")
 }
 
 // crossingReserve is the share of the token budget the symbol walk leaves
@@ -344,6 +411,12 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 	if err != nil {
 		return nil, fmt.Errorf("cross from %s/%s: %w", from.Repo, from.Path, err)
 	}
+	// Routes and destinations before properties. The reserve was measured
+	// with the first two alone (docs/measurements/2026-09-11-edges-in-
+	// gather.md), and a file reading twenty properties would otherwise
+	// spend it on configuration lines before the queue's far side is
+	// reached. A newer kind may only add after the measured ones.
+	sort.SliceStable(ns, func(i, j int) bool { return kindRank(ns[i].Kind) < kindRank(ns[j].Kind) })
 	var out []Source
 	for _, n := range ns {
 		var s Source
@@ -506,4 +579,34 @@ func estimateTokens(s string) int {
 		return 0
 	}
 	return (n + 3) / 4
+}
+
+// within keeps the landings the stage restriction allows, for the crossing.
+// A repository absent from the restriction is not narrowed; one present
+// keeps only paths under its prefix.
+func within(landings []Source, stage retrieve.StagePrefixes) []Source {
+	if len(stage) == 0 {
+		return landings
+	}
+	var out []Source
+	for _, s := range landings {
+		if prefix, ok := stage[s.Repo]; ok && !strings.HasPrefix(s.Path, prefix) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// kindRank orders the edge kinds a crossing follows: the two the reserve was
+// measured with first, then property keys.
+func kindRank(k edges.Kind) int {
+	switch k {
+	case edges.KindRoute:
+		return 0
+	case edges.KindDestination:
+		return 1
+	default:
+		return 2
+	}
 }

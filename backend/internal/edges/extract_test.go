@@ -178,3 +178,106 @@ func TestExtractDeduplicatesWithinAFile(t *testing.T) {
 		t.Fatalf("expected one route, got %d: %+v", n, got)
 	}
 }
+
+func TestExtractFindsAPropertyPlaceholderInJVMCode(t *testing.T) {
+	// Given: a Spring job whose schedule is a property, and a value with a
+	// default. The key is the literal the deployed configuration repeats.
+	testee := []byte(`
+@Component
+public class JobSendDigest {
+    @Scheduled(cron = "${acme.cron.send-digest}")
+    public void run() {}
+
+    @Value("${acme.mail.retries:3}")
+    private int retries;
+}
+`)
+
+	// When
+	toks := Extract("src/main/java/acme/JobSendDigest.java", testee)
+
+	// Then
+	got := values(toks, KindProperty)
+	if !has(got, "acme.cron.send-digest") {
+		t.Errorf("placeholder key not recorded: %v", got)
+	}
+	if !has(got, "acme.mail.retries") {
+		t.Errorf("key with default not recorded, or recorded with its default: %v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %v, want exactly the two keys", got)
+	}
+	for _, tk := range toks {
+		if tk.Value == "acme.cron.send-digest" && tk.Line != 4 {
+			t.Errorf("line = %d, want 4", tk.Line)
+		}
+	}
+}
+
+func TestExtractReadsThePropertyKeysOfAPropertiesFile(t *testing.T) {
+	// Given: a stage's properties, with a comment, a blank, a placeholder
+	// value and a redacted one. Every key is a token; comments are not.
+	testee := []byte(`# Cron
+acme.cron.send-digest=0 0 * ? * * *
+
+acme.mail.retries = 5
+db.password=<redacted>
+! old-style comment=x
+acme.mail.host: mail.example.invalid
+`)
+
+	// When
+	toks := Extract("prod/intranet/application.properties", testee)
+
+	// Then
+	got := values(toks, KindProperty)
+	want := []string{"acme.cron.send-digest", "acme.mail.retries", "db.password", "acme.mail.host"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("token %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+	for _, tk := range toks {
+		if tk.Value == "acme.mail.retries" && tk.Line != 4 {
+			t.Errorf("line = %d, want 4", tk.Line)
+		}
+	}
+	if n := len(values(toks, KindRoute)) + len(values(toks, KindDestination)); n != 0 {
+		t.Errorf("a properties file yielded %d route or destination tokens", n)
+	}
+}
+
+func TestExtractDoesNotReadTemplateInterpolationAsAProperty(t *testing.T) {
+	// Given: TypeScript with a template literal and a Go file with a shell
+	// style placeholder. Neither is a Spring property, and recording one
+	// would join a front-end to whatever repository has a "cart.id" key.
+	for _, c := range []struct{ path, body string }{
+		{"ui/src/cart.ts", "const url = `${base}/carts/${cart.id}/merge`;\nfetch(url);\n"},
+		{"cmd/x/main.go", "s := \"${acme.cron.send-digest}\"\n"},
+		{"src/Order.kt", "log.info(\"order ${order.id} created\")\n"},
+		{"src/Order.scala", "val s = s\"order ${order.id}\"\n"},
+		{"README.md", "Set `${acme.cron.send-digest}` to change the schedule.\n"},
+		{"values.yaml", "acme.cron.send-digest: 0 0 * ? * * *\n"},
+	} {
+		if got := values(Extract(c.path, []byte(c.body)), KindProperty); len(got) != 0 {
+			t.Errorf("%s: recorded %v as properties", c.path, got)
+		}
+	}
+}
+
+func TestExtractIgnoresAPlaceholderWithoutADotOrDash(t *testing.T) {
+	// Given: "${id}" inside a Java string is far more often a message
+	// template than a property; a property key has at least one segment.
+	testee := []byte(`String s = "${id}"; String t = "${PORT}";`)
+
+	// When
+	got := values(Extract("A.java", testee), KindProperty)
+
+	// Then
+	if len(got) != 0 {
+		t.Errorf("got %v, want none", got)
+	}
+}

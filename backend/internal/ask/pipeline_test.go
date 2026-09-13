@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/stages"
 	"github.com/trick77/rongo/internal/units"
 )
 
@@ -118,6 +119,8 @@ type fakeRouter struct {
 	// repository name. Nil is a repository of one build.
 	units    map[string][]units.Unit
 	unitDeps map[string][]units.Dep
+	// stages is the declared stage set this turn sees.
+	stages stages.Set
 }
 
 func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
@@ -136,6 +139,11 @@ func (f *fakeRouter) Projects(context.Context) (projects.Map, error) {
 // Units returns what the test declared for the repository, or nothing.
 func (f *fakeRouter) Units(_ context.Context, repo string) ([]units.Unit, []units.Dep, error) {
 	return f.units[repo], f.unitDeps[repo], nil
+}
+
+// Stages returns whatever the test declared; nil by default.
+func (f *fakeRouter) Stages(_ context.Context) (stages.Set, error) {
+	return f.stages, nil
 }
 
 // pipelineFakes is what newTestPipeline wires by default; an option overrides

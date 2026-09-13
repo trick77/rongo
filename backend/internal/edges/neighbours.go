@@ -32,7 +32,9 @@ const spreadCeiling = 3
 // Same-repository matches are excluded on purpose. Inside one repository the
 // symbol walk and the keyword lane already connect a caller to its callee; the
 // gap this closes is the one that has no symbol, no import and no type in
-// common, which only appears across a repository boundary.
+// common, which only appears across a repository boundary. The one exception
+// is a property key: the code's default sits in a properties file of the same
+// repository, which no symbol reaches, so that kind may land at home too.
 func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour, error) {
 	return NeighboursWith(ctx, db, repo, path, Match{})
 }
@@ -74,7 +76,21 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		-- reference walk in internal/ask.
 		JOIN repo_state other_r ON other_r.name = other_f.repo AND other_r.enabled = 1
 		WHERE me.repo = ? AND me.path = ?
-		  AND other_f.repo <> me.repo
+		  -- Other repositories only, except for a property key read by
+		  -- CODE: the file that sets a key's default is a properties file
+		  -- in the SAME repository as the code reading it, and a properties
+		  -- file has no symbol the in-repo walk could follow. From a
+		  -- properties file the exception does not apply — two stage files
+		  -- of one infrastructure repository share every key, and joining
+		  -- them to each other would spend the crossing reserve on nothing.
+		  -- And the far side at home is a properties file, never a sibling
+		  -- class reading the same key: the walk reaches those, and each
+		  -- would cost a chunk of the reserve. The file itself is never its
+		  -- own neighbour.
+		  AND (other_f.repo <> me.repo
+		       OR (mine.kind = 'property' AND other_f.path <> me.path
+		           AND me.path NOT LIKE '%.properties'
+		           AND other_f.path LIKE '%.properties'))
 		  AND (
 		    SELECT COUNT(DISTINCT f2.repo)
 		    FROM integration_tokens t2

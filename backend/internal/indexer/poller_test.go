@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,6 +106,40 @@ func TestPollOnce_fullIndexOnFirstSight(t *testing.T) {
 	}
 	if rec.calls[0].Paths != nil {
 		t.Errorf("Paths = %v, want nil for a first full index", rec.calls[0].Paths)
+	}
+}
+
+func TestPollOnce_aDeclaredStageWithNoFilesLandsOnTheReposPage(t *testing.T) {
+	// Given: a repository declaring a stage whose directory the checkout does
+	// not have. The index runs fine; the entry is what is wrong.
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true,
+			Stages: []repos.Stage{{Name: "prod", Prefix: "prod/"}}},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+
+	// When
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("PollOnce() err = %v", err)
+	}
+
+	// Then: the sha moved AND the page says which stage is empty.
+	var sha, lastErr string
+	if err := db.QueryRow(`SELECT last_sha, last_error FROM repo_state WHERE name = 'fixture'`).Scan(&sha, &lastErr); err != nil {
+		t.Fatal(err)
+	}
+	if sha == "" {
+		t.Error("last_sha empty: the warning must not stop the index from being recorded")
+	}
+	if !strings.Contains(lastErr, "prod") || !strings.Contains(lastErr, "repos.yaml") {
+		t.Errorf("last_error = %q, want the empty stage named and the file to fix", lastErr)
 	}
 }
 

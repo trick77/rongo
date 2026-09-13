@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
@@ -156,6 +157,7 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 			attrs = append(attrs, "total_files", res.Counts.Files,
 				"total_chunks", res.Counts.Chunks, "took", took(repoStart))
 			p.log.Info("repository indexed", attrs...)
+			p.warnEmptyStages(ctx, st.Name)
 		default:
 			unchanged++
 			// Debug: at a thirty-minute interval this is most lines most of the
@@ -164,6 +166,10 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 			// is for.
 			p.log.Debug("repository unchanged", "repo", st.Name,
 				"sha", gitrepo.ShortSHA(res.SHA), "took", took(repoStart))
+			// After MarkChecked cleared last_error, so the warning survives
+			// an unchanged HEAD and a stage declared after the last index is
+			// checked without waiting for a push.
+			p.warnEmptyStages(ctx, st.Name)
 		}
 	}
 
@@ -405,4 +411,26 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 	}
 	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts}
 	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
+}
+
+// warnEmptyStages puts a declared stage that no indexed path lies under on
+// the Repos page, after every poll of the repository — an index run or an
+// unchanged HEAD alike, because MarkChecked clears last_error and the entry
+// is still wrong. The index is fine; the repos.yaml entry names a directory
+// the checkout does not have, and a question narrowed to that stage would
+// find nothing and say so as though the corpus were the reason.
+func (p *Poller) warnEmptyStages(ctx context.Context, name string) {
+	empty, err := p.state.EmptyStages(ctx, name)
+	if err != nil {
+		p.log.Warn("checking declared stages failed", "repo", name, "err", err)
+		return
+	}
+	if len(empty) == 0 {
+		return
+	}
+	msg := "declared stage " + strings.Join(empty, ", ") + " matches no indexed path: check the stage's path in repos.yaml"
+	p.log.Warn("declared stage has no files", "repo", name, "stages", empty)
+	if err := p.state.MarkError(ctx, name, msg); err != nil {
+		p.log.Error("recording the stage warning failed", "repo", name, "err", err)
+	}
 }

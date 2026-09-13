@@ -50,6 +50,56 @@ func TestSyncSpecs_insertsAndUpdates(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_writesStagesAndEmptyStagesNamesTheOnesNoFileIsUnder(t *testing.T) {
+	// Given: an infrastructure repository declaring two stages, and an
+	// index holding a file under only one of them.
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "acme-infra", CloneURL: "/tmp/acme-infra", Enabled: true, Stages: []repos.Stage{
+		{Name: "prod", Prefix: "prod/", Aliases: []string{"production"}},
+		{Name: "intg", Prefix: "intg/"},
+	}}
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('acme-infra', 'prod/app.properties', 'x'), ('acme-infra', 'production/other.yaml', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	empty, err := s.EmptyStages(ctx, "acme-infra")
+
+	// Then
+	if err != nil {
+		t.Fatalf("EmptyStages() err = %v", err)
+	}
+	if len(empty) != 1 || empty[0] != "intg" {
+		t.Errorf("EmptyStages = %v, want [intg]: prod has a file, and production/ is not prod/", empty)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repo_stages WHERE repo = 'acme-infra'`).Scan(&n); err != nil || n != 2 {
+		t.Errorf("repo_stages rows = %d (%v), want 2", n, err)
+	}
+
+	// A stage edit is a structure edit: re-syncing without intg drops it
+	// and leaves last_sha alone.
+	if _, err := db.Exec(`UPDATE repo_state SET last_sha = 'abc' WHERE name = 'acme-infra'`); err != nil {
+		t.Fatal(err)
+	}
+	spec.Stages = spec.Stages[:1]
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	var sha string
+	if err := db.QueryRow(`SELECT last_sha FROM repo_state WHERE name = 'acme-infra'`).Scan(&sha); err != nil || sha != "abc" {
+		t.Errorf("last_sha = %q (%v), want abc untouched", sha, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repo_stages WHERE repo = 'acme-infra'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("repo_stages rows = %d (%v), want 1", n, err)
+	}
+}
+
 func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
 	// Omitting `branch:` means "the remote's default", which is resolved once
 	// and recorded. The next sync — every boot, every reload of the list — must

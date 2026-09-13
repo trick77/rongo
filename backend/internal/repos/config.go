@@ -65,6 +65,27 @@ type Spec struct {
 	// require. Coupling across projects is repo_deps' business, read from a
 	// manifest rather than declared by hand.
 	Uses []string
+	// Stages are the deployment stages an infrastructure repository holds,
+	// each a directory of the checkout. Declared, never inferred from the
+	// tree: which directories are stages and what a reader calls them is
+	// not a fact the files carry. Empty for every ordinary repository.
+	Stages []Stage
+}
+
+// Stage is one deployment stage of an infrastructure repository: a name the
+// reader can ask for, the directory its files live under, and the other
+// words the reader may use for it.
+type Stage struct {
+	// Name is the stage as its directory calls it and as the answer names
+	// it: prod, intg.
+	Name string
+	// Prefix is the repo-relative directory, with a trailing slash: "prod/".
+	// Every path under it is that stage's; a path under none is no stage's.
+	Prefix string
+	// Aliases are other whole words that name this stage, lower-cased:
+	// production, produktion. A question containing one narrows to the
+	// stage, so an ordinary word is refused here.
+	Aliases []string
 }
 
 type file struct {
@@ -87,15 +108,22 @@ type rawProject struct {
 // rawSpec exists so Enabled can default to true. A plain bool would default to
 // false and silently disable every entry that omits the field.
 type rawSpec struct {
-	Name        string   `yaml:"name"`
-	CloneURL    string   `yaml:"clone_url"`
-	Branch      string   `yaml:"branch"`
-	TokenEnv    string   `yaml:"token_env"`
-	Enabled     *bool    `yaml:"enabled"`
-	Snapshot    bool     `yaml:"snapshot"`
-	Part        string   `yaml:"part"`
-	Description string   `yaml:"description"`
-	Uses        []string `yaml:"uses"`
+	Name        string     `yaml:"name"`
+	CloneURL    string     `yaml:"clone_url"`
+	Branch      string     `yaml:"branch"`
+	TokenEnv    string     `yaml:"token_env"`
+	Enabled     *bool      `yaml:"enabled"`
+	Snapshot    bool       `yaml:"snapshot"`
+	Part        string     `yaml:"part"`
+	Description string     `yaml:"description"`
+	Uses        []string   `yaml:"uses"`
+	Stages      []rawStage `yaml:"stages"`
+}
+
+type rawStage struct {
+	Name    string   `yaml:"name"`
+	Path    string   `yaml:"path"`
+	Aliases []string `yaml:"aliases"`
 }
 
 // Load reads and validates the repository list, returning the first problem it
@@ -196,6 +224,10 @@ func Load(path string) ([]Spec, error) {
 			if r.Enabled != nil && !*r.Enabled {
 				enabled = false
 			}
+			stages, err := loadStages(r.Name, r.Stages)
+			if err != nil {
+				return nil, err
+			}
 			specs = append(specs, Spec{
 				Name:        r.Name,
 				CloneURL:    strings.TrimSpace(r.CloneURL),
@@ -207,6 +239,7 @@ func Load(path string) ([]Spec, error) {
 				Part:        strings.TrimSpace(r.Part),
 				Description: strings.TrimSpace(r.Description),
 				Uses:        trimAll(r.Uses),
+				Stages:      stages,
 			})
 		}
 	}
@@ -217,7 +250,96 @@ func Load(path string) ([]Spec, error) {
 	if err := validateProjects(specs); err != nil {
 		return nil, err
 	}
+	if err := validateStageWords(specs); err != nil {
+		return nil, err
+	}
 	return specs, nil
+}
+
+// stageStopWords are words a stage may not be called or aliased, because a
+// question containing one narrows the whole turn to that stage. "How is the
+// X integration done" is a question about code, and answering it from the
+// intg directory alone — saying the other stages were not looked at — is a
+// wrong answer rather than a missed one. A stage called intg is still
+// reachable by that name, and the understanding step maps "the integration
+// environment" onto it; only the bare word is refused as a trigger.
+var stageStopWords = map[string]bool{
+	"system": true, "integration": true, "test": true, "testing": true,
+	"development": true, "dev": true, "staging": true, "stage": true,
+	"local": true, "live": true,
+}
+
+// loadStages validates one entry's stage block: every stage named, under a
+// relative directory, each name and alias once within the entry.
+func loadStages(repo string, raw []rawStage) ([]Stage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var out []Stage
+	for i, r := range raw {
+		name := strings.ToLower(strings.TrimSpace(r.Name))
+		if name == "" {
+			return nil, fmt.Errorf("%s: stage %d is a stage with no name", repo, i)
+		}
+		if stageStopWords[name] {
+			return nil, fmt.Errorf("%s: stage %q is an ordinary word, which would narrow every question containing it to that stage", repo, name)
+		}
+		prefix := strings.TrimSpace(r.Path)
+		prefix = strings.TrimSuffix(prefix, "**")
+		prefix = strings.TrimSuffix(prefix, "/") + "/"
+		if prefix == "/" {
+			return nil, fmt.Errorf("%s: stage %q has no path", repo, name)
+		}
+		if strings.HasPrefix(prefix, "/") || strings.Contains(prefix, "..") {
+			return nil, fmt.Errorf("%s: stage %q path %q must be relative to the repository root", repo, name, r.Path)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("%s: stage %q is named twice", repo, name)
+		}
+		seen[name] = true
+		var aliases []string
+		for _, a := range r.Aliases {
+			a = strings.ToLower(strings.TrimSpace(a))
+			if a == "" {
+				continue
+			}
+			if stageStopWords[a] {
+				return nil, fmt.Errorf("%s: stage %q alias %q is an ordinary word, which would narrow every question containing it to that stage", repo, name, a)
+			}
+			if seen[a] {
+				return nil, fmt.Errorf("%s: stage %q alias %q names a stage twice", repo, name, a)
+			}
+			seen[a] = true
+			aliases = append(aliases, a)
+		}
+		out = append(out, Stage{Name: name, Prefix: prefix, Aliases: aliases})
+	}
+	return out, nil
+}
+
+// validateStageWords needs the whole list: a stage name or alias that is also
+// a repository or project name would mean two things in one question.
+func validateStageWords(specs []Spec) error {
+	repo := map[string]bool{}
+	project := map[string]bool{}
+	for _, s := range specs {
+		repo[strings.ToLower(s.Name)] = true
+		project[strings.ToLower(s.Project)] = true
+	}
+	for _, s := range specs {
+		for _, st := range s.Stages {
+			for _, w := range append([]string{st.Name}, st.Aliases...) {
+				if repo[w] {
+					return fmt.Errorf("%s: stage word %q is also the name of a repository", s.Name, w)
+				}
+				if project[w] {
+					return fmt.Errorf("%s: stage word %q is also the name of a project", s.Name, w)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // trimAll copies a YAML string list with each entry trimmed, dropping empties.

@@ -100,6 +100,30 @@ func TestSelect_decisionTable(t *testing.T) {
 			body: "GH_TOKEN=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\n",
 			want: SkipSecret,
 		},
+		{
+			name: "a sealed secret manifest is a secret whole",
+			path: "prod/intranet/masterkey.yaml",
+			body: "apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nspec:\n  encryptedData:\n    masterkey: AgBx\n",
+			want: SkipSecret,
+		},
+		{
+			name: "a plain secret manifest is a secret whole",
+			path: "base/db-secret.yml",
+			body: "apiVersion: v1\nkind: Secret\ndata:\n  password: aHVudGVyMg==\n",
+			want: SkipSecret,
+		},
+		{
+			name: "a properties file with encrypted values is included, redacted",
+			path: "prod/application.properties",
+			body: "db.url=jdbc:postgresql://db/app\ndb.password=ENC(abc)\n",
+			want: Include,
+		},
+		{
+			name: "a properties token line matching a hard shape is included once redacted",
+			path: "prod/application.properties",
+			body: "forge.token=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\n",
+			want: Include,
+		},
 	}
 
 	s := NewSelector(DefaultSelectOptions())
@@ -114,6 +138,21 @@ func TestSelect_decisionTable(t *testing.T) {
 				t.Error("a skipped file must carry a reason, so the answer layer can say why it was not indexed")
 			}
 		})
+	}
+}
+
+func TestSelectBody_returnsTheRedactedBody(t *testing.T) {
+	s := NewSelector(DefaultSelectOptions())
+	got, _, body := s.SelectBody("prod/application.properties", []byte("db.password=ENC(abc)\nx=1\n"))
+	if got != Include {
+		t.Fatalf("decision = %v, want include", got)
+	}
+	if string(body) != "db.password=<redacted>\nx=1\n" {
+		t.Fatalf("body = %q", body)
+	}
+	_, _, same := s.SelectBody("Main.java", []byte("class Main {}\n"))
+	if string(same) != "class Main {}\n" {
+		t.Fatalf("a source file came back changed: %q", same)
 	}
 }
 

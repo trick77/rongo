@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/stages"
 )
 
 // Audience is the altitude the answer is written at. It affects THIS step only:
@@ -189,6 +190,9 @@ You are given numbered sources. The rules, without exception:
   source names that in the sentence that makes it - what the document states,
   not what the system does - and says the code for it is not among the
   sources.
+- <redacted> in a source marks a credential removed before indexing. Say that
+  the key exists and where it is set; never guess, reconstruct or describe
+  the value.
 - Only use markers that exist. An invented number is worse than no marker.
 - One marker per bracket: a claim resting on two sources reads [1][2], never
   [1, 2].
@@ -319,6 +323,39 @@ this question. Report what the documents state, attributed to them, and say in
 one sentence that the code was not among the sources - so what they describe is
 the intent on record, not verified behaviour. Make no claim about how the code
 actually works, and do not present a document's description as the mechanism.`
+
+// answerStages is added when a source lies under a declared stage directory
+// of an infrastructure repository. Without it the model reads three
+// properties files as three claims about one value and picks one; with it
+// the code's placeholder and default are the default and each stage file is
+// the value deployed there, which is the shape the question has.
+const answerStages = `
+
+Sources marked "(stage X)" are deployed configuration: a file under a stage
+directory of an infrastructure repository holds the value that stage runs
+with. The code's placeholder ("${key:default}") and the repository's own
+default properties are the DEFAULT, which a stage file overrides. Answer with
+the default first, then the value for every stage by its name, each from its
+own source, and say when two stages share a value rather than reporting one
+value as the value. Every value is copied character for character from the
+line that sets it - a cron expression is quoted as written, never
+paraphrased or reassembled from memory.`
+
+// answerStageAsked replaces answerStages' last sentence when the question
+// named a stage: the search and the crossing were narrowed to it, so the
+// sources hold that stage alone, and the answer has to say so rather than
+// present its value as the value everywhere.
+const answerStageAsked = `
+
+Sources marked "(stage X)" are deployed configuration: a file under a stage
+directory of an infrastructure repository holds the value that stage runs
+with. The code's placeholder ("${key:default}") and the repository's own
+default properties are the DEFAULT, which a stage file overrides. The
+question was asked for the stage %s and the sources were narrowed to it:
+answer with the default and that stage's value, name the stage, and say in
+one sentence that the other stages were not looked at. Every value is copied
+character for character from the line that sets it - a cron expression is
+quoted as written, never paraphrased or reassembled from memory.`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
@@ -511,6 +548,16 @@ type Scope struct {
 	// which is what a re-index does to sources too, and better than a second
 	// stored blob that can rot.
 	Structure string `json:"-"`
+	// Stage is the deployment stage the question asked about, as a declared
+	// stage name, or empty. Part of the record: a resume or re-explain
+	// searches and labels under the same stage the first turn did. Per turn,
+	// never inherited from the thread — a stage is a view of the same
+	// subject, and "and on intg?" is a follow-up, not a widening.
+	Stage string `json:"stage,omitempty"`
+	// Stages are the declared stages of the live repos.yaml, for labelling a
+	// source under a stage directory and narrowing the crossing. Derived per
+	// turn like Structure, never persisted, for the same reason.
+	Stages stages.Set `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -852,6 +899,15 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if DocsOnly(sources) {
 		system += answerDocsOnly
 	}
+	// From the sources too: a stage label is a fact about a path and the
+	// live declarations, and a re-explained turn carries the same.
+	if staged(sources, scope.Stages) {
+		if scope.Stage != "" {
+			system += fmt.Sprintf(answerStageAsked, scope.Stage)
+		} else {
+			system += answerStages
+		}
+	}
 	system += answerDiagram
 	// Said twice, first and at the end: the sources in between are code and
 	// comments in whatever language the repository uses, and a model that has
@@ -881,7 +937,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// because the headers, paths and separators renderSources writes are part
 	// of what the sources cost, and attributing them to the question would
 	// flatter the figure that matters.
-	user := renderSources(question, sources)
+	user := renderSources(question, sources, scope.Stages)
 	asked := estimateTokens(question)
 	parts := PromptParts{
 		System:   estimateTokens(system),
@@ -934,10 +990,20 @@ func reachedVia(reason string) string {
 	return "reached via " + strings.TrimPrefix(reason, "reference:")
 }
 
+// staged reports whether any source lies under a declared stage directory.
+func staged(sources []Source, declared stages.Set) bool {
+	for _, s := range sources {
+		if declared.Of(s.Repo, s.Path) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // renderSources numbers the gathered material. The number IS the citation
 // marker the model writes, so it never has to invent an identifier for a
 // file; the renumberer turns it into the reader's number on the way out.
-func renderSources(question string, sources []Source) string {
+func renderSources(question string, sources []Source, declared stages.Set) string {
 	var b strings.Builder
 	b.WriteString("Question: ")
 	b.WriteString(question)
@@ -946,6 +1012,11 @@ func renderSources(question string, sources []Source) string {
 		fmt.Fprintf(&b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
+		}
+		// The stage from the declared prefix, never from the model: a label
+		// the answer rule keys on has to be a fact about the path.
+		if st := declared.Of(s.Repo, s.Path); st != "" {
+			fmt.Fprintf(&b, " (stage %s)", st)
 		}
 		if s.Reason != "" && s.Reason != "hit" {
 			fmt.Fprintf(&b, " [%s]", reachedVia(s.Reason))

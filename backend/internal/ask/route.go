@@ -18,6 +18,7 @@ import (
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/stages"
 	"github.com/trick77/rongo/internal/units"
 )
 
@@ -596,6 +597,14 @@ func (r *Router) Units(ctx context.Context, repo string) ([]units.Unit, []units.
 		return nil, nil, nil
 	}
 	return units.Load(ctx, r.db, repo)
+}
+
+// Stages is the declared stage set, read fresh per turn.
+func (r *Router) Stages(ctx context.Context) (stages.Set, error) {
+	if r.db == nil {
+		return nil, nil
+	}
+	return stages.Load(ctx, r.db)
 }
 
 // Judge asks the model whether cs are independent alternatives or parts of one

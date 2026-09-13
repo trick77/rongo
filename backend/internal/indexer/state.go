@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/stages"
 )
 
 // Counts is what one indexing run produced.
@@ -40,6 +41,9 @@ type RepoState struct {
 	Part        string
 	Description string
 	Uses        []string
+	// Stages are the deployment stages the entry declares, by name; empty
+	// for every ordinary repository.
+	Stages []string
 }
 
 // Snapshot reports whether this is a hand-extracted source drop rather than a
@@ -162,11 +166,43 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 				return nil, fmt.Errorf("insert repo_uses for %s: %w", spec.Name, err)
 			}
 		}
+		// Stages are structure too: replaced per repository from the file,
+		// and a stage edit leaves last_sha and the checkout alone.
+		if err := stages.Sync(ctx, tx, spec.Name, spec.Stages); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return purged, nil
+}
+
+// EmptyStages names the declared stages of a repository that no indexed path
+// lies under. A stage whose directory does not exist narrows a question to
+// nothing while the file says it is there — a typo in repos.yaml that must be
+// loud on the Repos page rather than a silent "nothing found".
+func (s *StateStore) EmptyStages(ctx context.Context, name string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT st.name FROM repo_stages st
+		WHERE st.repo = ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM files f
+		    WHERE f.repo = st.repo AND substr(f.path, 1, length(st.prefix)) = st.prefix)
+		ORDER BY st.name`, name)
+	if err != nil {
+		return nil, fmt.Errorf("empty stages of %s: %w", name, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // ResetRepo drops a repository's indexed content but KEEPS its row, so the next
@@ -311,7 +347,37 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return out, s.attachUses(ctx, out)
+	if err := s.attachUses(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, s.attachStages(ctx, out)
+}
+
+// attachStages hands each repository the names of the stages it declares,
+// one query for the table, like attachUses.
+func (s *StateStore) attachStages(ctx context.Context, states []RepoState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	at := make(map[string]int, len(states))
+	for i, r := range states {
+		at[r.Name] = i
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT repo, name FROM repo_stages ORDER BY repo, name`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var repo, name string
+		if err := rows.Scan(&repo, &name); err != nil {
+			return err
+		}
+		if i, ok := at[repo]; ok {
+			states[i].Stages = append(states[i].Stages, name)
+		}
+	}
+	return rows.Err()
 }
 
 // attachUses reads every edge in one query and hands each repository its own.
