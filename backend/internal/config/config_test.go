@@ -1,8 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -31,7 +29,6 @@ var allBackendEnvVars = []string{
 	"LLMWIRE_OPENAI_API_KEY",
 	"LLMWIRE_MIMO_BASE_URL",
 	"LLMWIRE_MIMO_API_KEY",
-	"BACKEND_CHAT_EMULATE_OPENCODE",
 	"BACKEND_MODULE_MIN_CHUNKS",
 	"BACKEND_MODULE_MAX_CHUNKS",
 	"BACKEND_ROUTE_MARGIN",
@@ -52,9 +49,6 @@ var mandatoryEnv = map[string]string{
 	"BACKEND_SESSION_SECRET": validSecret,
 	"LLMWIRE_OPENAI_API_KEY": "embed-key",
 	"LLMWIRE_MIMO_API_KEY":   "llm-key",
-	// Mandatory rather than defaulted: which client string the endpoint wants
-	// depends on which host serves the deployment.
-	"BACKEND_CHAT_EMULATE_OPENCODE": "true",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
@@ -201,46 +195,6 @@ func TestLoad_rejectsShortSessionSecret(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Load() err = nil, want a refusal of a secret under 16 characters")
-	}
-}
-
-func TestLoad_requiresTheOpencodeFlagToBeABoolean(t *testing.T) {
-	for _, v := range []string{"", "maybe", "yes please"} {
-		t.Run(fmt.Sprintf("%q", v), func(t *testing.T) {
-			// Given
-			setEnv(t, map[string]string{"BACKEND_CHAT_EMULATE_OPENCODE": v})
-
-			// When
-			_, err := Load()
-
-			// Then
-			if err == nil || !strings.Contains(err.Error(), "BACKEND_CHAT_EMULATE_OPENCODE") {
-				t.Fatalf("Load() err = %v, want a demand for BACKEND_CHAT_EMULATE_OPENCODE", err)
-			}
-		})
-	}
-}
-
-func TestLoad_readsTheOpencodeFlag(t *testing.T) {
-	for _, tc := range []struct {
-		v    string
-		want bool
-	}{{"true", true}, {"false", false}, {"1", true}, {"0", false}} {
-		t.Run(tc.v, func(t *testing.T) {
-			// Given
-			setEnv(t, map[string]string{"BACKEND_CHAT_EMULATE_OPENCODE": tc.v})
-
-			// When
-			cfg, err := Load()
-
-			// Then
-			if err != nil {
-				t.Fatalf("Load() err = %v", err)
-			}
-			if cfg.ChatEmulateOpenCode != tc.want {
-				t.Errorf("ChatEmulateOpenCode = %v, want %v", cfg.ChatEmulateOpenCode, tc.want)
-			}
-		})
 	}
 }
 

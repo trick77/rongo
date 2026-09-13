@@ -441,9 +441,8 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 		return nil, nil, err
 	}
 	models, err := llm.NewClient(llm.Config{
-		Timeout:         15 * time.Minute,
-		TurnMaxTokens:   cfg.TurnMaxTokens,
-		EmulateOpenCode: cfg.ChatEmulateOpenCode,
+		Timeout:       15 * time.Minute,
+		TurnMaxTokens: cfg.TurnMaxTokens,
 	}, nil)
 	if err != nil {
 		return nil, nil, err

@@ -84,12 +84,8 @@ type Config struct {
 	// name in the environment lets a misconfigured host answer with a model
 	// nobody chose.
 	//
-	// ChatEmulateOpenCode presents every model call as the opencode client:
-	// its User-Agent and session header pair. MiMo's token-plan host is sold
-	// as that client's backend; an endpoint that does not care ignores the
-	// headers. Mandatory and explicit, because a default either way is a
-	// guess about which host serves the deployment.
-	ChatEmulateOpenCode bool
+	// No opencode flag either: the identity follows the host, and both are
+	// llmwire's provider entry.
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -129,11 +125,6 @@ type Config struct {
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
-	emulate, err := envBool("BACKEND_CHAT_EMULATE_OPENCODE")
-	if err != nil {
-		return Config{}, err
-	}
-
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
 		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
@@ -141,21 +132,20 @@ func Load() (Config, error) {
 		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
-		IndexMaxFileBytes:   envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
-		IndexEnabled:        envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:       envBoolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:        envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		ModuleMinChunks:     envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:     envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:         envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
-		ChatEmulateOpenCode: emulate,
-		GatherMaxHops:       envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget:   envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:       envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		AuthMode:            AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:          strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		SessionSecret:       strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:            envOr("BACKEND_LOG_LEVEL", "info"),
+		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
+		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.

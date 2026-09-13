@@ -42,6 +42,7 @@ import (
 
 	"github.com/trick77/llmwire"
 
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -397,13 +398,14 @@ func atoiOr(s string, def int) int {
 func flowWire(t *testing.T) *llmwire.Client {
 	t.Helper()
 	cfg := evalLLMConfig(t, 5*time.Minute)
-	return llmwire.New(llmwire.Config{
-		BaseURL:         cfg.BaseURL,
-		APIKey:          cfg.APIKey,
-		HeaderTimeout:   cfg.Timeout,
-		CallTimeout:     cfg.Timeout,
-		EmulateOpenCode: cfg.EmulateOpenCode,
+	wire, err := llmwire.FromEnv(llm.ProDeployment, llmwire.Config{
+		HeaderTimeout: cfg.Timeout,
+		CallTimeout:   cfg.Timeout,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
 }
 
 // flowChat posts one chat-completions request with tools.
