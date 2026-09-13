@@ -452,26 +452,8 @@ export default function App() {
               </span>
               Threads
             </button>
-            <button
-              type="button"
-              aria-current={page === "projects" ? "page" : undefined}
-              onClick={() => {
-                go({ view: "projects" });
-                setNavOpen(false);
-              }}
-              className={railRow + " " + (page === "projects" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
-            >
-              {/* The same 20px slot as the plus disc above. The Icon glyph is
-                  text, so its box is whatever advance width the font gives it
-                  — 21px here — and without the slot the two labels start a
-                  pixel apart. */}
-              <span className="grid h-5 w-5 shrink-0 place-items-center">
-                <Icon name="code" size="21px" className="text-ink-dim" />
-              </span>
-              Projects
-            </button>
-            {/* The audit view for the links this reader has handed out. Under
-                Repos rather than in a settings modal Rongo does not have: a
+            {/* The audit view for the links this reader has handed out. On
+                the rail rather than in a settings modal Rongo does not have: a
                 live link is a place, and it has to be somewhere you can go. */}
             <button
               type="button"
@@ -482,10 +464,28 @@ export default function App() {
               }}
               className={railRow + " " + (page === "shared" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
             >
+              {/* The same 20px slot as the plus disc above. The Icon glyph is
+                  text, so its box is whatever advance width the font gives it
+                  — 21px here — and without the slot the two labels start a
+                  pixel apart. */}
               <span className="grid h-5 w-5 shrink-0 place-items-center">
                 <Icon name="upload" size="21px" className="text-ink-dim" />
               </span>
               Shared
+            </button>
+            <button
+              type="button"
+              aria-current={page === "projects" ? "page" : undefined}
+              onClick={() => {
+                go({ view: "projects" });
+                setNavOpen(false);
+              }}
+              className={railRow + " " + (page === "projects" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="code" size="21px" className="text-ink-dim" />
+              </span>
+              Projects
             </button>
           </div>
           {/* No heading over the list: everything below the two actions is

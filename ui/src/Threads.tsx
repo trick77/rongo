@@ -273,13 +273,13 @@ export default function Threads({
                           the rail that a conversation is readable by people
                           who are not here. A dot, not a word — the row is 28px
                           of pitch on a 362px rail, and a "Shared" pill would
-                          eat the title. The index status line's own green, so
-                          it reads as "live" rather than as a colour of its
-                          own. */}
+                          eat the title. The accent orange, not the status
+                          line's green: green on the rail reads as "indexed",
+                          and a link handed out is a different fact. */}
                       {t.shared && (
                         <span
                           title="Shared with a link"
-                          className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-online"
+                          className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-accent-strong"
                         >
                           <span className="sr-only">Shared</span>
                         </span>
