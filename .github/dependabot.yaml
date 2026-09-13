@@ -42,6 +42,14 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # First matching group wins, so the specific group comes first and the
+      # catch-all stays last. vite, its react plugin, vitest and its coverage
+      # provider are one dependency family: vitest pins a vite major range and
+      # @vitest/coverage-v8 pins vitest's exact version, so bumping any one
+      # alone fails npm ci on ERESOLVE (or nests a second vite). They always
+      # travel together.
+      vite-and-vitest:
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*"]
       npm-minor-and-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
