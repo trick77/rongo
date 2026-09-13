@@ -95,6 +95,8 @@ services:
       # hosts are llmwire's, carried by its profiles.
       LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:?set it in .env, the key for MiMo's token-plan host}
       LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for OpenAI's /embeddings}
+      # Read by llmwire itself, never by rongo: forwarded so it reaches it.
+      LLMWIRE_EMULATE_OPENCODE: ${LLMWIRE_EMULATE_OPENCODE:-}
       # Forge tokens for private repositories, named by token_env in repos.yaml.
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.
