@@ -19,6 +19,7 @@ const base: Repo = {
   branch: "main",
   last_sha: "611255ac0ffee11",
   last_run_at: "2026-08-17T09:30:00Z",
+  last_indexed_at: "2026-08-17T09:30:00Z",
   files: 100,
   chunks: 500,
   modules: 4,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store"
@@ -642,6 +643,51 @@ func TestPollRepo_readsTheTokenByItsEnvironmentVariableName(t *testing.T) {
 	tokenFor(active[0])
 	if len(asked) != 1 || asked[0] != "BACKEND_FORGE_TOKEN" {
 		t.Errorf("the poller asked for %v, want [BACKEND_FORGE_TOKEN]", asked)
+	}
+}
+
+func TestLastIndexedAt_movesOnlyWhenTheIndexIsWritten(t *testing.T) {
+	// Given: a repository indexed once. A quiet poll and a failed poll both
+	// move last_run_at, which the page used to read as "indexed": the column
+	// that answers that question must sit still through both.
+	db := newDB(t)
+	state := NewStateStore(db)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "shop", CloneURL: "https://forge.invalid/a.git", Branch: "main", Enabled: true}
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+	before, _ := state.All(ctx)
+	if !before[0].LastIndexedAt.IsZero() {
+		t.Fatalf("LastIndexedAt = %v before any run, want zero", before[0].LastIndexedAt)
+	}
+	if err := state.MarkIndexed(ctx, "shop", "abc1234", Counts{Files: 3, Chunks: 9}); err != nil {
+		t.Fatalf("MarkIndexed: %v", err)
+	}
+	indexed, _ := state.All(ctx)
+	at := indexed[0].LastIndexedAt
+	if at.IsZero() {
+		t.Fatal("LastIndexedAt not set by MarkIndexed")
+	}
+	if _, err := db.Exec(`UPDATE repo_state SET last_indexed_at = ? WHERE name = 'shop'`, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	// When: a quiet poll, then a failed one.
+	if err := state.MarkChecked(ctx, "shop"); err != nil {
+		t.Fatalf("MarkChecked: %v", err)
+	}
+	if err := state.MarkError(ctx, "shop", "dial tcp: i/o timeout"); err != nil {
+		t.Fatalf("MarkError: %v", err)
+	}
+
+	// Then
+	after, _ := state.All(ctx)
+	if got := after[0].LastIndexedAt.UTC().Format(time.RFC3339); got != "2026-01-01T00:00:00Z" {
+		t.Errorf("LastIndexedAt = %s after a check and an error, want the index time untouched", got)
+	}
+	if after[0].LastRunAt.Before(at) {
+		t.Errorf("LastRunAt = %v, want refreshed by the polls", after[0].LastRunAt)
 	}
 }
 

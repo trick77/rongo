@@ -20,6 +20,7 @@ const peeq = {
   branch: "master",
   last_sha: "611255ac0ffee11",
   last_run_at: "2026-08-17T09:30:00Z",
+  last_indexed_at: "2026-08-15T06:00:00Z",
   files: 412,
   chunks: 3120,
   modules: 34,
@@ -106,21 +107,65 @@ describe("RepoList", () => {
 
   // Seven columns do not fit a phone. Without its own scroller the table
   // overflowed the page's, dragging the whole Repos page sideways.
-  it("scrolls the table inside its own box, name column pinned", async () => {
-    respondWith(200, [peeq]);
+  it("keeps every column inside the panel, the name cell the only one that flexes", async () => {
+    respondWith(200, [{ ...peeq, name: "peeq-workflow-engine-intranet-service", part: "workflow" }]);
 
     render(<RepoList />);
     await screen.findByRole("heading", { name: "peeq" });
 
     const table = screen.getByRole("table");
-    expect(table.className).toContain("min-w-[720px]");
+    // No minimum width: the eight-column table had one, and with a long
+    // name it scrolled the numbers off the right edge of the panel.
+    expect(table.className).not.toContain("min-w-");
     expect(table.parentElement!.className).toContain("overflow-x-auto");
-    // The pinned column carries the error stripe, so an error stays in sight
-    // however far the row is scrolled.
-    const name = within(screen.getByRole("table")).getByText("peeq").closest("td")!;
-    expect(name.className).toContain("sticky");
-    expect(name.className).toContain("left-0");
-    expect(name.className).toContain("bg-panel");
+    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(["Repository", "State", "Indexed", "Files", "Chunks", "Modules"]);
+    // Part and branch sit under the name rather than in columns of their own.
+    const name = within(table).getByText("peeq-workflow-engine-intranet-service").closest("td")!;
+    expect(within(name).getByText("workflow")).toBeTruthy();
+    expect(within(name).getByText("master")).toBeTruthy();
+    expect(name.className).not.toContain("whitespace-nowrap");
+    // Every other cell is sized to its content.
+    const cells = within(table).getAllByRole("cell");
+    for (const cell of cells.slice(1)) {
+      expect(cell.className).toContain("w-px");
+      expect(cell.className).toContain("whitespace-nowrap");
+    }
+    // The error stripe still sits on the name cell.
+    expect(name.className).not.toContain("shadow-[inset_3px");
+  });
+
+  it("shows when the index was written, not when the poller last looked", async () => {
+    // Polled at 09:30 on the 17th, indexed at 06:00 on the 15th: the row says
+    // the 15th, the top stat says the 17th, and neither is called "last run".
+    vi.useFakeTimers({ now: new Date("2026-08-17T10:00:00Z"), toFake: ["Date"] });
+    try {
+      respondWith(200, [peeq]);
+      render(<RepoList />);
+      await screen.findByRole("heading", { name: "peeq" });
+
+      const row = screen.getByText("peeq", { selector: "span" }).closest("tr")!;
+      const indexed = within(row).getByText("2 d ago").closest("td")!;
+      expect(within(indexed).getByText("611255a")).toBeTruthy();
+      expect(indexed.getAttribute("title")).toContain("Last poll");
+      expect(within(row).queryByText("1 h ago")).toBeNull();
+
+      expect(screen.getByText("Last poll")).toBeTruthy();
+      expect(screen.queryByText("Last run")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("writes the project name in the mono face and its repositories muted", async () => {
+    respondWith(200, [peeq]);
+    render(<RepoList />);
+    const heading = await screen.findByRole("heading", { name: "peeq" });
+    expect(heading.className).toContain("font-mono");
+    const name = screen.getByText("peeq", { selector: "span" });
+    expect(name.className).toContain("font-mono");
+    expect(name.className).toContain("text-muted");
+    expect(name.className).not.toContain("font-medium");
   });
 
   it("stacks the stats two-up on a phone", async () => {
@@ -245,7 +290,7 @@ describe("the Projects page", () => {
     render(<RepoList />);
 
     const cell = (await screen.findByText(/Turns a codebase/)).closest("td")!;
-    expect(cell.getAttribute("colspan")).toBe("8");
+    expect(cell.getAttribute("colspan")).toBe("6");
     // And it is no longer inside the cell that carries the repository name.
     expect(cell.textContent).not.toContain("peeq");
   });

@@ -14,13 +14,16 @@ import (
 type RepoStatus struct {
 	Name   string
 	Branch string
-	// LastSHA is the commit the index was built from. Together with LastRunAt
-	// it answers "how current is what rongo tells me".
-	LastSHA   string
-	LastRunAt time.Time
-	Files     int
-	Chunks    int
-	Modules   int
+	// LastSHA is the commit the index was built from. Together with
+	// LastIndexedAt it answers "how current is what rongo tells me";
+	// LastRunAt is the last poll of any outcome, which answers "is the poller
+	// alive" and nothing about the index.
+	LastSHA       string
+	LastRunAt     time.Time
+	LastIndexedAt time.Time
+	Files         int
+	Chunks        int
+	Modules       int
 	// Snapshot is true for a hand-extracted source drop rather than a clone.
 	// The page says so because a snapshot's LastSHA never moves on its own:
 	// without the word, a correct one-off index is indistinguishable from a
@@ -76,26 +79,30 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]map[string]any, 0, len(list))
 	for _, st := range list {
-		var lastRun any
+		var lastRun, lastIndexed any
 		if !st.LastRunAt.IsZero() {
 			lastRun = st.LastRunAt.UTC().Format(time.RFC3339)
 		}
+		if !st.LastIndexedAt.IsZero() {
+			lastIndexed = st.LastIndexedAt.UTC().Format(time.RFC3339)
+		}
 		out = append(out, map[string]any{
-			"name":        st.Name,
-			"branch":      st.Branch,
-			"last_sha":    st.LastSHA,
-			"last_run_at": lastRun,
-			"files":       st.Files,
-			"chunks":      st.Chunks,
-			"modules":     st.Modules,
-			"enabled":     st.Enabled,
-			"snapshot":    st.Snapshot,
-			"last_error":  st.LastError,
-			"project":     st.Project,
-			"part":        st.Part,
-			"description": st.Description,
-			"uses":        uses(st.Uses),
-			"stages":      uses(st.Stages),
+			"name":            st.Name,
+			"branch":          st.Branch,
+			"last_sha":        st.LastSHA,
+			"last_run_at":     lastRun,
+			"last_indexed_at": lastIndexed,
+			"files":           st.Files,
+			"chunks":          st.Chunks,
+			"modules":         st.Modules,
+			"enabled":         st.Enabled,
+			"snapshot":        st.Snapshot,
+			"last_error":      st.LastError,
+			"project":         st.Project,
+			"part":            st.Part,
+			"description":     st.Description,
+			"uses":            uses(st.Uses),
+			"stages":          uses(st.Stages),
 		})
 	}
 	// no-store, because this is a STATUS page and a cached status page lies.
