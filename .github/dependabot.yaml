@@ -1,0 +1,65 @@
+version: 2
+updates:
+  # Go backend
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+    groups:
+      go-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # PINNED AT v0.23.3 BY sqlite-vec-go-bindings, NOT BY PREFERENCE.
+      #
+      # rongo uses sqlite-vec for semantic search, and its Go bindings are welded
+      # to this driver's older API and host-function ABI. Two distinct breakages,
+      # both verified against the real suite in peeq (peeq PR #2; same driver
+      # and bindings versions here):
+      #
+      #   >= v0.33.0  compile error: sqlite-vec-go-bindings/ncruces/init.go
+      #               references sqlite3.Binary, removed in v0.33.0. (Present
+      #               through v0.32.0, absent from v0.33.0 on.)
+      #
+      #   == v0.32.0  COMPILES, then fails at runtime with
+      #               `ping sqlite: "go_final" is not exported in module "env"`,
+      #               a wazero host-ABI mismatch. This is the dangerous one:
+      #               `go build` passes, so a version-only review would call it
+      #               safe and ship a backend that cannot open a database.
+      #
+      # No fix is available upstream: sqlite-vec-go-bindings' latest release is
+      # v0.1.7-alpha.2, which is exactly what backend/go.mod already pins.
+      #
+      # TO REVISIT: when sqlite-vec-go-bindings publishes a release above
+      # v0.1.7-alpha.2, drop this ignore and let Dependabot retry. Verify with
+      # `CGO_ENABLED=1 go test -race ./...`, never with `go build` alone; see
+      # the v0.32.0 case above for why.
+      - dependency-name: github.com/ncruces/go-sqlite3
+
+  # React frontend
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Container base image (backend/Containerfile).
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+    groups:
+      docker:
+        patterns: ["*"]
