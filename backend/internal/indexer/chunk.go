@@ -322,7 +322,7 @@ var cStyleStripPrefixes = []string{"//", "/*", "*/"}
 // directive, and treating it as prose deletes every #include in the corpus.
 var hashCommentExts = map[string]bool{
 	".py": true, ".rb": true, ".sh": true, ".bash": true, ".zsh": true,
-	".yaml": true, ".yml": true, ".toml": true, ".cfg": true, ".ini": true,
+	".yaml": true, ".yml": true, ".toml": true, ".cfg": true, ".ini": true, ".properties": true,
 	".pl": true, ".r": true, ".tf": true, ".dockerfile": true, ".mk": true,
 }
 

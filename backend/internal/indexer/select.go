@@ -6,6 +6,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/trick77/rongo/internal/redact"
 )
 
 // Decision is what the selector concluded about one file.
@@ -205,36 +207,57 @@ var secretPatterns = []*regexp.Regexp{
 // layer can say "that file exists but was not indexed" — the "never invent"
 // invariant applied to the index itself.
 func (s *Selector) Select(p string, body []byte) (Decision, string) {
+	d, reason, _ := s.SelectBody(p, body)
+	return d, reason
+}
+
+// SelectBody is Select returning the body the pipeline must index: for a
+// configuration file that is the REDACTED body, with credential values
+// replaced by redact.Marker. Every consumer downstream — ctags, the chunker,
+// the embedding, the edge extractor, the content hash — reads this one, so
+// what is stored, embedded and later shown is the same bytes; the source
+// viewer applies the same function on its own read.
+func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) {
 	// The two cheap, certain verdicts go first. Both are decided in one pass or
 	// none, while the secret scan runs eight regexes over the WHOLE body — so
 	// putting it first meant fully scanning a 500 MB blob only to skip it as
 	// too_large anyway, and labelling a binary that happened to match a pattern
 	// "secret" when "binary" is the true reason.
 	if len(body) > s.opts.MaxBytes {
-		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated"
+		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated", body
 	}
 	if isBinary(body) {
-		return SkipBinary, "contains NUL bytes"
+		return SkipBinary, "contains NUL bytes", body
 	}
+	// A Kubernetes Secret is nothing but its data; redacted it would be a
+	// shell of metadata around a marker, so it is skipped whole.
+	if redact.SecretManifest(p, body) {
+		return SkipSecret, "is a Secret or SealedSecret manifest", body
+	}
+	// Redaction before the credential scan, so a configuration file whose
+	// values are all placeholders and markers is INDEXED rather than dropped
+	// for the shape of one value, and after the size check, so the line pass
+	// never runs over a blob that is about to be refused anyway.
+	body = redact.Redact(p, body)
 	// Secrets next, and ahead of every remaining verdict: those are about
 	// usefulness, this one is about not shipping a credential to a third-party
 	// embedding endpoint, so it wins regardless of where the file lives.
 	if pat := matchSecret(body); pat != "" {
-		return SkipSecret, "matches a credential pattern (" + pat + ")"
+		return SkipSecret, "matches a credential pattern (" + pat + ")", body
 	}
 	// The operator's list before the built-in ones: a document under an
 	// excluded directory is reported as excluded, whichever other rule would
 	// also have caught it.
 	if pat, ok := s.Excluded(p); ok {
-		return SkipExcluded, "matches exclusion pattern " + pat
+		return SkipExcluded, "matches exclusion pattern " + pat, body
 	}
 	if seg := vendoredSegment(p); seg != "" {
-		return SkipVendored, "lives under " + seg + "/"
+		return SkipVendored, "lives under " + seg + "/", body
 	}
 	if reason := generatedReason(p, body); reason != "" {
-		return SkipGenerated, reason
+		return SkipGenerated, reason, body
 	}
-	return Include, ""
+	return Include, "", body
 }
 
 func matchSecret(body []byte) string {
@@ -320,7 +343,7 @@ var extLang = map[string]string{
 	".cs": "cs", ".kt": "kt", ".scala": "scala", ".rs": "rs",
 	".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp",
 	".php": "php", ".sh": "sh", ".sql": "sql", ".md": "md",
-	".yaml": "yaml", ".yml": "yaml", ".json": "json", ".xml": "xml",
+	".yaml": "yaml", ".yml": "yaml", ".json": "json", ".xml": "xml", ".properties": "properties",
 	".html": "html", ".css": "css", ".scss": "scss",
 }
 

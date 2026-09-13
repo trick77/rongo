@@ -268,7 +268,10 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		return nil
 	}
 	lang := LanguageOf(path)
-	decision, detail := ix.selector.Select(path, body)
+	// body from here on is the selector's: redacted where the file is
+	// configuration, so no credential value reaches ctags, a chunk, the
+	// embedding endpoint or the edge table.
+	decision, detail, body := ix.selector.SelectBody(path, body)
 	if decision != Include {
 		// The stored reason is the DECISION, which the answer layer renders;
 		// the detail (which vendored directory, which secret pattern) is a

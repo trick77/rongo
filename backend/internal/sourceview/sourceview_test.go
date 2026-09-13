@@ -75,7 +75,8 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 	second := commit(t, dir, "internal/a.go", []byte("package a\n\n// moved\nfunc One() {}\n"), "two")
 	commit(t, dir, "img.png", []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe}, "binary")
 	commit(t, dir, "notes.txt", []byte("caf\xe9 latin-1\n"), "latin1")
-	head := commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
+	commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
+	head := commit(t, dir, "prod/application.properties", []byte("acme.cron.send-digest=0 0 * ? * * *\ndb.password=ENC(fixture-cipher)\nacme.key=${MASTER_KEY}\n"), "config")
 
 	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -93,6 +94,7 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 		{"img.png", head, ""},
 		{"notes.txt", head, ""},
 		{"config/prod.env", head, "secret"},
+		{"prod/application.properties", head, ""},
 	} {
 		if _, err := db.Exec(`INSERT INTO files (repo, path, sha, skip_reason) VALUES ('peeq', ?, ?, ?)`, row.path, row.sha, row.skip); err != nil {
 			t.Fatal(err)
@@ -150,6 +152,29 @@ func TestRead_textIsWhatTheIndexerCallsText(t *testing.T) {
 	}
 	if !strings.Contains(got.Content, "latin-1") {
 		t.Fatalf("content = %q", got.Content)
+	}
+}
+
+func TestRead_aConfigurationFileIsServedRedacted(t *testing.T) {
+	// Given: a properties file the indexer took, whose password line it
+	// redacted before chunking. The viewer reads git, not the chunk, so it
+	// has to apply the same redaction or a citation is one click from the
+	// value the index never held.
+	f := newFixture(t, 1<<20)
+
+	// When
+	got, err := f.svc.Read(context.Background(), "peeq", "prod/application.properties", "")
+
+	// Then
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if strings.Contains(got.Content, "fixture-cipher") {
+		t.Fatalf("the viewer served the credential:\n%s", got.Content)
+	}
+	want := "acme.cron.send-digest=0 0 * ? * * *\ndb.password=<redacted>\nacme.key=${MASTER_KEY}\n"
+	if got.Content != want {
+		t.Fatalf("content = %q, want %q", got.Content, want)
 	}
 }
 

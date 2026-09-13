@@ -16,7 +16,7 @@ import (
 // sixty-five times — which the reference walk then follows, spending a token
 // budget it stops on rather than trims, so every name after them goes
 // unfollowed.
-var dataLanguages = map[string]bool{"json": true, "yaml": true, "xml": true}
+var dataLanguages = map[string]bool{"json": true, "yaml": true, "xml": true, "properties": true}
 
 // nonDefinitionKinds are the ctags kinds to skip, per language.
 //
