@@ -17,7 +17,7 @@ const plainEntry = entry + " text-elevated-ink enabled:hover:bg-elevated-hover";
  * entry that cannot be taken back, and the only place danger is a ground
  * rather than a word.
  */
-const dangerEntry = entry + " text-danger-ink hover:bg-danger-fill hover:text-white";
+const dangerEntry = entry + " text-danger-ink enabled:hover:bg-danger-fill enabled:hover:text-white";
 
 /**
  * Finds the nearest scrollable ancestor, so "is there room below" is asked of

@@ -77,12 +77,14 @@
   /* What sits ON the elevated surface, ../loom's menu values under ../peeq's
      names: an entry's text and its hover ground, which is lighter than the
      menu rather than darker, so a row lights up under the pointer. The
-     danger pair is claude.ai's: a light red word at rest, the solid fill only
-     once the pointer is on it. */
+     danger three are claude.ai's: a light red word at rest, the solid fill
+     once the pointer is on it or as a confirm button, and the fill's own
+     lift under the pointer. */
   --color-elevated-ink: #f3f0e8;
   --color-elevated-hover: #3f3f3a;
   --color-danger-ink: #ec7e7e;
   --color-danger-fill: #d03b3b;
+  --color-danger-fill-hover: #e34948;
   /* The rail's own four, ../loom's sidebar values. They are separate tokens
      rather than the shared muted/active/ink because the sidebar is the one
      surface where loom inverts the selection: the chosen row is darker than
