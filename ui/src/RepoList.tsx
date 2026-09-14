@@ -456,7 +456,22 @@ function ProjectPanel({ project }: { project: Project }) {
                           {r.part}
                         </span>
                       )}
-                      <span>{r.branch}</span>
+                      {/* A snapshot has no branch anyone chose: rongo made
+                          one up to have something to commit to. Where the
+                          branch would stand, the line says how the code got
+                          here instead, which is the question a branch answers
+                          for a clone. It is not under State because a snapshot
+                          is not an outcome of the last run. */}
+                      {r.snapshot ? (
+                        <span
+                          className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim"
+                          title="Extracted by hand into the repository root. There is no remote, so this commit only changes when the archive is extracted again."
+                        >
+                          Snapshot
+                        </span>
+                      ) : (
+                        <span>{r.branch}</span>
+                      )}
                     </div>
                     {r.last_error && (
                       <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>
@@ -485,17 +500,6 @@ function ProjectPanel({ project }: { project: Project }) {
                       {!r.enabled && (
                         <span className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted">
                           Disabled
-                        </span>
-                      )}
-                      {/* Independent of both again: a snapshot is how the code
-                          got here, not how the last run went. It sits last so
-                          the run's own outcome reads first. */}
-                      {r.snapshot && (
-                        <span
-                          className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
-                          title="Extracted by hand into the repository root. There is no remote, so this commit only changes when the archive is extracted again."
-                        >
-                          Snapshot
                         </span>
                       )}
                     </span>
