@@ -238,11 +238,11 @@ export default function ThreadsPage({
                   aria-label={"Actions for " + t.title}
                   onClick={() => setOpenMenu(menuOpen ? null : t.id)}
                   className={
-                    "grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-ink " +
+                    "grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-ink " +
                     (menuOpen ? "" : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
                   }
                 >
-                  <Icon name="moreVertical" size="17px" />
+                  <Icon name="moreVertical" size="18px" />
                 </button>
               </div>
               {menuOpen && (
