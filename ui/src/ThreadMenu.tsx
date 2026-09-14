@@ -4,18 +4,20 @@ import { Icon, type IconName } from "./Icon";
 
 /**
  * The row actions menu, ../loom's: an inset entry whose hover ground floats
- * inside the menu rather than running to its edges. The grey fill is baked
- * into the class so no entry can be added without it.
+ * inside the menu rather than running to its edges, and lights up under the
+ * pointer rather than dimming. The fill is baked into the class so no entry
+ * can be added without it; `enabled:` keeps a disabled entry flat, which
+ * only matches on a <button>, so entries stay buttons.
  */
 const entry =
-  "mx-1 flex min-h-[30px] w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-ui-sm px-3 py-1 text-left text-sm/5 transition-colors";
-const plainEntry = entry + " text-ink hover:bg-rail-hover";
+  "mx-1 flex min-h-[30px] w-[calc(100%-0.5rem)] items-start gap-2.5 rounded-md px-3 py-1 text-left text-sm/5 transition-colors";
+const plainEntry = entry + " text-elevated-ink enabled:hover:bg-elevated-hover";
 /**
- * Delete is muted red at rest and a solid red fill on hover — the one entry
- * that cannot be taken back, and the only place the danger token is a ground
+ * Delete is a light red word at rest and a solid red fill on hover — the one
+ * entry that cannot be taken back, and the only place danger is a ground
  * rather than a word.
  */
-const dangerEntry = entry + " text-danger hover:bg-danger hover:text-ink";
+const dangerEntry = entry + " text-danger-ink enabled:hover:bg-danger-fill enabled:hover:text-white";
 
 /**
  * Finds the nearest scrollable ancestor, so "is there room below" is asked of
@@ -75,8 +77,8 @@ function useMenuPlacement(): {
 
 function MenuIcon({ name }: { name: IconName }) {
   return (
-    <span aria-hidden="true" className="grid h-[21px] w-[21px] shrink-0 place-items-center">
-      <Icon name={name} size="17px" />
+    <span aria-hidden="true" className="grid h-[21px] w-[21px] shrink-0 place-items-center text-[19px] leading-none">
+      <Icon name={name} size="19px" />
     </span>
   );
 }
@@ -103,7 +105,7 @@ export default function ThreadMenu({
       aria-label="Thread actions"
       className={
         "absolute right-1 left-auto z-20 w-[168px] overflow-hidden rounded-ui border border-elevated-border " +
-        "bg-elevated py-1 shadow-panel " +
+        "bg-elevated py-1 shadow-menu " +
         verticalClass
       }
     >

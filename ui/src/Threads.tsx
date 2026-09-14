@@ -310,7 +310,7 @@ export default function Threads({
                               : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
                           }
                         >
-                          <Icon name="moreVertical" size="17px" />
+                          <Icon name="moreVertical" size="18px" />
                         </button>
                       )}
                     </div>

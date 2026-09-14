@@ -74,6 +74,17 @@
   --color-ochre-wash: rgba(214, 161, 90, 0.14);
   --color-elevated: #363632;
   --color-elevated-border: #454540;
+  /* What sits ON the elevated surface, ../loom's menu values under ../peeq's
+     names: an entry's text and its hover ground, which is lighter than the
+     menu rather than darker, so a row lights up under the pointer. The
+     danger three are claude.ai's: a light red word at rest, the solid fill
+     once the pointer is on it or as a confirm button, and the fill's own
+     lift under the pointer. */
+  --color-elevated-ink: #f3f0e8;
+  --color-elevated-hover: #3f3f3a;
+  --color-danger-ink: #ec7e7e;
+  --color-danger-fill: #d03b3b;
+  --color-danger-fill-hover: #e34948;
   /* The rail's own four, ../loom's sidebar values. They are separate tokens
      rather than the shared muted/active/ink because the sidebar is the one
      surface where loom inverts the selection: the chosen row is darker than
@@ -89,6 +100,8 @@
   --radius-ui-sm: 8px;
   --radius-ui-lg: 12px;
   --shadow-panel: 0 24px 60px -18px rgba(0, 0, 0, 0.6);
+  /* A menu hangs a few rows deep, not a whole panel: ../loom's tighter cast. */
+  --shadow-menu: 0 18px 32px rgba(0, 0, 0, 0.38);
 }
 
 html {
