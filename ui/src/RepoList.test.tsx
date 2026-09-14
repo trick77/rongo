@@ -323,9 +323,11 @@ describe("the Projects page", () => {
     expect(screen.queryByText(/Parked, kept/)).toBeNull();
   });
 
-  it("marks a snapshot, and says so beside Indexed rather than instead of it", async () => {
+  it("marks a snapshot where the branch would be, and keeps Indexed as its state", async () => {
     // A snapshot's commit never moves on its own, so a correct one-off index
-    // looks exactly like a poller that stopped. The word is the difference.
+    // looks exactly like a poller that stopped. The word is the difference,
+    // and it stands in for the branch: the made-up ref "snapshot" is not a
+    // branch anyone chose, and a snapshot is not an outcome of the last run.
     respondWith(200, [
       { ...peeq, name: "acme-core", project: "acme", snapshot: true, branch: "snapshot" },
     ]);
@@ -333,8 +335,11 @@ describe("the Projects page", () => {
     render(<RepoList />);
 
     const row = (await screen.findByText("acme-core")).closest("tr")!;
-    expect(within(row).getByText("Snapshot")).toBeTruthy();
-    expect(within(row).getByText("Indexed")).toBeTruthy();
+    const [name, state] = within(row).getAllByRole("cell");
+    expect(within(name).getByText("Snapshot")).toBeTruthy();
+    expect(within(name).queryByText("snapshot")).toBeNull();
+    expect(within(state).getByText("Indexed")).toBeTruthy();
+    expect(within(state).queryByText("Snapshot")).toBeNull();
   });
 
   it("draws no snapshot chip for a cloned repository", async () => {
@@ -342,8 +347,9 @@ describe("the Projects page", () => {
 
     render(<RepoList />);
 
-    await screen.findByText("acme-core");
+    const row = (await screen.findByText("acme-core")).closest("tr")!;
     expect(screen.queryByText("Snapshot")).toBeNull();
+    expect(within(row).getByText("master")).toBeTruthy();
   });
 
   it("adds no row at all when there is no description", async () => {
