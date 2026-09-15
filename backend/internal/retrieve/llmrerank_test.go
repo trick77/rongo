@@ -184,6 +184,85 @@ func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
 			t.Errorf("excerpt = %q, want the whole trimmed text", got)
 		}
 	})
+	t.Run("the byte walk agrees with the rune slice", func(t *testing.T) {
+		for _, s := range excerptCorpus {
+			for _, n := range []int{0, 1, 2, 3, 7, 10, 23, 240} {
+				if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+					t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+				}
+			}
+		}
+	})
+}
+
+// excerptCorpus is mixed ASCII, umlauts and line breaks, including a cut that
+// would land inside a rune and one where the only newline sits in the front
+// half of the window.
+var excerptCorpus = []string{
+	"",
+	"short",
+	"ä",
+	strings.Repeat("ä", 50),
+	strings.Repeat("äb\n", 40),
+	"ab\n" + strings.Repeat("c", 300),
+	strings.Repeat("a", 6) + "\n" + strings.Repeat("ü", 300),
+	"füüf\nlines\nof\ntext\nhere\n" + strings.Repeat("x", 500),
+	strings.Repeat("Umlaut ö line\n", 40),
+	"\n\n\n" + strings.Repeat("ß", 300),
+}
+
+// excerptByRuneSlice is the implementation excerpt replaced, kept as the
+// reference the byte walk is checked against.
+func excerptByRuneSlice(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cutAt := n
+	for i := n - 1; i >= n/2; i-- {
+		if r[i] == '\n' {
+			cutAt = i
+			break
+		}
+	}
+	return string(r[:cutAt]) + "…"
+}
+
+func FuzzExcerpt(f *testing.F) {
+	for _, s := range excerptCorpus {
+		f.Add(s, 10)
+	}
+	f.Fuzz(func(t *testing.T, s string, n int) {
+		// Invalid UTF-8 is where the two deliberately differ: the rune slice
+		// substitutes U+FFFD for a stray byte, the byte walk passes the
+		// file's own bytes through. Chunk text is a file's bytes, so passing
+		// them through is the better half of that pair; either way the cut
+		// still lands on a rune boundary.
+		if n < 0 || n > 1000 || !utf8.ValidString(s) {
+			t.Skip()
+		}
+		if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+			t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+		}
+	})
+}
+
+// TestHead_cutsATroubledReplyWithoutBackingOff: the warning about a reply that
+// is not JSON must show the malformed fragment, which sits AFTER the prose
+// line — a cut backing off to the line break would log the prose alone.
+func TestHead_cutsATroubledReplyWithoutBackingOff(t *testing.T) {
+	reply := "prose line\n{\"relevant\": [1, 2, oops" + strings.Repeat(" trailing", 40)
+	got := head(reply, 120)
+	if !strings.Contains(got, `{"relevant": [1, 2, oops`) {
+		t.Errorf("head dropped the malformed fragment: %q", got)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "…")); n != 120 {
+		t.Errorf("head kept %d runes, want 120", n)
+	}
+	if got := head("äü\nok", 120); got != "äü\nok" {
+		t.Errorf("head = %q, want a short reply whole", got)
+	}
 }
 
 // TestLLMRerank_headerCarriesTheStartLine: two chunks of one file differ by

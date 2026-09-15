@@ -106,6 +106,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		return cut(hits, k), nil
 	}
 	var b strings.Builder
+	width := r.excerptWidth()
 	fmt.Fprintf(&b, "Question: %s\n\nResults:\n", question)
 	for i, h := range hits {
 		fmt.Fprintf(&b, "\n[%d] %s %s", i+1, h.Repo, h.Path)
@@ -118,7 +119,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(excerpt(h.RawText, r.excerptWidth()))
+		b.WriteString(excerpt(h.RawText, width))
 		b.WriteString("\n")
 	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
@@ -140,7 +141,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	}
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
-		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", excerpt(out, 120))
+		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", head(out, 120))
 		return cut(hits, k), nil
 	}
 	taken := make([]bool, len(hits))
@@ -167,22 +168,56 @@ func cut(hits []Hit, k int) []Hit {
 	return hits
 }
 
-// excerpt is the first n RUNES of s, cut back to the last line break in the
-// back half of the window so the model reads whole lines. Runes, not bytes: a
-// byte cut splits an umlaut and hands the model a broken rune. The back-half
-// floor is what keeps a long first line from yielding nothing at all.
-func excerpt(s string, n int) string {
+// head is the first n RUNES of s, cut where the window ends and nowhere else.
+// Runes, not bytes: a byte cut splits an umlaut and hands the reader a broken
+// rune.
+func head(s string, n int) string {
 	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) <= n {
+	_, end := runeOffsets(s, n)
+	if end < 0 {
 		return s
 	}
-	cutAt := n
-	for i := n - 1; i >= n/2; i-- {
-		if r[i] == '\n' {
-			cutAt = i
+	return s[:end] + "…"
+}
+
+// excerpt is head backed off to the last line break in the back half of the
+// window, so the model reads whole lines. The back-half floor is what keeps a
+// long first line from yielding nothing at all. A warning logs with head
+// instead: a malformed reply's broken JSON sits after the prose line, and
+// backing off would log the prose alone.
+//
+// It walks bytes rather than building a []rune: a chunk runs to a few
+// thousand runes and a pool to a hundred of them, so the slice was one
+// allocation per hit for a prefix of a few hundred.
+func excerpt(s string, n int) string {
+	s = strings.TrimSpace(s)
+	half, end := runeOffsets(s, n)
+	if end < 0 {
+		return s
+	}
+	cutAt := end
+	// A newline is one byte and cannot hide inside a multi-byte rune, so the
+	// byte search over the window is the rune search over it.
+	if nl := strings.LastIndexByte(s[half:end], '\n'); nl >= 0 {
+		cutAt = half + nl
+	}
+	return s[:cutAt] + "…"
+}
+
+// runeOffsets reports the byte offsets of rune n/2 and rune n in s. end is -1
+// when s holds n runes or fewer, which is the whole-text case.
+func runeOffsets(s string, n int) (half, end int) {
+	half, end = 0, -1
+	i := 0
+	for off := range s {
+		if i == n/2 {
+			half = off
+		}
+		if i == n {
+			end = off
 			break
 		}
+		i++
 	}
-	return string(r[:cutAt]) + "…"
+	return half, end
 }

@@ -234,8 +234,11 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	retriever := retrieve.New(db, evalEmbedder(t))
 	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
 	// measures the fused order the product ran before the reranker shipped.
+	rerank := "off (fused order)"
 	if envOr("BACKEND_EVAL_RERANK", "1") != "0" {
-		retriever.Reranker = evalReranker(t, c)
+		rr := evalReranker(t, c)
+		retriever.Reranker = rr
+		rerank = fmt.Sprintf("pool %d, %d-rune excerpts", rr.Pool, rr.Excerpt)
 	}
 	opts := gatherOpts(t)
 	mo := modules.Opts{MinChunks: envIntOr(t, "BACKEND_MODULE_MIN_CHUNKS", 8), MaxChunks: envIntOr(t, "BACKEND_MODULE_MAX_CHUNKS", 150)}
@@ -261,7 +264,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
 		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed int
-		t.Logf("\n=== run %d of %d, audience %s ===", run, runs, audience)
+		t.Logf("\n=== run %d of %d, audience %s, rerank %s ===", run, runs, audience, rerank)
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {
