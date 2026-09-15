@@ -28,6 +28,12 @@ func TestDescribeProjectsAppendsWhatANarrowedRepositoryIsBuiltFrom(t *testing.T)
 		`Repository "svc" is built from 2 parts:`,
 		"claims-intranet-service uses claims-persistence.",
 		"This is configuration, not code.",
+		// Which parts EXIST is settled by the block, not by the retrieval
+		// cut: a source set holding one of the two parts is partial, and
+		// reporting the other as absent or not indexed is a false claim about
+		// the corpus made from a partial view of it.
+		"the block is complete and the source is partial",
+		"never that they are absent or not indexed",
 	} {
 		if !strings.Contains(got.Structure, want) {
 			t.Errorf("structure lacks %q:\n%s", want, got.Structure)

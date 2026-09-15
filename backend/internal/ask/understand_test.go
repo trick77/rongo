@@ -46,6 +46,38 @@ const appleTVReply = `{
   "repos": ["peeq"]
 }`
 
+// TestUnderstand_theIntentIsNormalisedOnce: everything downstream compares the
+// intent to a word — the answer prompt looks it up in a table — so the
+// spelling the model happened to use is settled here and nowhere else.
+func TestUnderstand_theIntentIsNormalisedOnce(t *testing.T) {
+	c, _, _ := modelUpstream(t, `{"intent":"Where ","terms":["t"],"code_terms":["c"],"repos":[]}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "Wo?", Thread{}, nil)
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+
+	if got.Intent != "where" {
+		t.Errorf("Intent = %q, want it lower-cased and trimmed", got.Intent)
+	}
+}
+
+// TestUnderstand_anUnknownIntentIsLeftAlone: normalising is spelling, not
+// judgement. A word the prompt never offered still reaches the trace, where a
+// reader sees what the model actually said.
+func TestUnderstand_anUnknownIntentIsLeftAlone(t *testing.T) {
+	c, _, _ := modelUpstream(t, `{"intent":"sideways","terms":["t"],"code_terms":["c"],"repos":[]}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "Was?", Thread{}, nil)
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+
+	if got.Intent != "sideways" {
+		t.Errorf("Intent = %q, want the model's own word", got.Intent)
+	}
+}
+
 func TestUnderstand_returnsTermsAndGuessedCodeVocabulary(t *testing.T) {
 	// The whole point of this step: the question says "Apple TV", the code says
 	// "AirPlay". A fake that echoed the question's own words back would measure

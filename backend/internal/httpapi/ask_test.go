@@ -114,10 +114,13 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 
 // Resume answers from the candidate's own hits — it never searches, which is
 // the whole point of a resumed turn.
-func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language,
+	_ []retrieve.Hit, gotScope ask.Scope, t ask.Thread, ev ask.Events) (ask.Answer, error) {
+
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	f.gotThread = t
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}
@@ -140,11 +143,12 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 // repository again rather than replaying stored hits, so the fake records
 // which repository it was handed.
 func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understanding, repos []string,
-	aud ask.Audience, lang ask.Language, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+	aud ask.Audience, lang ask.Language, gotScope ask.Scope, t ask.Thread, ev ask.Events) (ask.Answer, error) {
 
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	f.gotThread = t
 	f.resumedRepos = repos
 	f.resumedRepo = ""
 	if len(repos) > 0 {
@@ -267,6 +271,21 @@ func doStatus(t *testing.T, srv *Server, path, body string) int {
 	return rec.Code
 }
 
+// moduleCard is the two-module clarification these tests resume from: each
+// entry carries its own hits, which is what makes it a module card rather
+// than a repository one.
+func moduleCard() ask.Clarification {
+	return ask.Clarification{
+		Understanding: ask.Understanding{CodeTerms: []string{"auth"}},
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
+				Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
+			{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
+				Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
+		},
+	}
+}
+
 // seedClarification seeds a thread, its question and the clarification it
 // ended with, owned by testSubject.
 func seedClarification(t *testing.T, store *threads.Store) (msgID, clarID int64) {
@@ -285,15 +304,7 @@ func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
-	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
-		Understanding: ask.Understanding{CodeTerms: []string{"auth"}},
-		Candidates: []ask.Candidate{
-			{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
-				Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
-			{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
-				Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
-		},
-	})
+	clarID, err = store.Clarify(ctx, msg.ID, moduleCard())
 	if err != nil {
 		t.Fatalf("clarify: %v", err)
 	}
@@ -1232,6 +1243,51 @@ func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 		t.Errorf("new turn records candidate %d, want 1", last.FromCandidateIdx)
 	}
 	_ = clarID
+}
+
+// TestAResumedTurnKnowsWhatItFollows: a follow-up answered through a
+// clarification card is still a follow-up. The card's own turn wrote no
+// answer, so what the resumed turn points at is the question answered BELOW
+// the card — not the thread's newest answered turn, because a card need not be
+// the newest thing in its thread: a reader can leave it open and ask something
+// else, and answering the card afterwards must not follow that.
+func TestAResumedTurnKnowsWhatItFollows(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "wie wird die Anmeldung gemacht?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	answer := func(question, text string) threads.Message {
+		t.Helper()
+		m, err := store.AddQuestion(ctx, th.ID, "ba", "de", question, 0)
+		if err != nil {
+			t.Fatalf("add question: %v", err)
+		}
+		if text != "" {
+			if err := store.Finish(ctx, m.ID, text, nil); err != nil {
+				t.Fatalf("finish: %v", err)
+			}
+		}
+		return m
+	}
+
+	answer("wie wird die Anmeldung gemacht?", "Über OAuth.")
+	card := answer("und wo wird das entschieden?", "")
+	if _, err := store.Clarify(ctx, card.ID, moduleCard()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	// Asked past the open card, and answered: the newest answered turn of the
+	// thread is now this one, which the card's own turn never saw.
+	answer("was kostet ein Turn?", "Tokens mal Listenpreis.")
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"und wo wird das entschieden?","clarification_message_id":%d,"choice":1}`, card.ID))
+
+	if asker.gotThread.Question != "wie wird die Anmeldung gemacht?" {
+		t.Errorf("followed up on %q, want the turn answered below the card", asker.gotThread.Question)
+	}
 }
 
 // TestChoosingARepositorySearchesItAgainRatherThanReplayingHits: a repository
