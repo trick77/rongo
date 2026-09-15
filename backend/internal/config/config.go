@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -419,7 +420,7 @@ func envOptionalFloat(key string, fallback float64) (*float64, error) {
 		return nil, nil
 	}
 	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f < 0 {
+	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
 		return nil, fmt.Errorf("%s=%q is not a temperature; want a number >= 0, or default", key, v)
 	}
 	return &f, nil

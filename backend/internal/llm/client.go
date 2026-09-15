@@ -457,6 +457,11 @@ func checkReasoning(reg *llmwire.Registry, model, variable, value string) error 
 	}
 	r := p.Reasoning
 	if !r.Supported {
+		// A model that never reasons already satisfies "do not reason", and
+		// llmwire sends nothing for it; only a level asks for what is not there.
+		if value == ReasoningOff {
+			return nil
+		}
 		return fmt.Errorf("llm: %s=%q, but %s has no reasoning control; use %s", variable, value, model, ReasoningDefault)
 	}
 	if value == ReasoningOff {

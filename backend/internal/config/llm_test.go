@@ -50,6 +50,8 @@ func TestLoad_llmPolicyValues(t *testing.T) {
 func TestLoad_llmPolicyRefusesMalformed(t *testing.T) {
 	for name, env := range map[string]map[string]string{
 		"temperature": {"BACKEND_LLM_GATE_TEMPERATURE": "zero"},
+		"nan":         {"BACKEND_LLM_GATE_TEMPERATURE": "NaN"},
+		"inf":         {"BACKEND_LLM_GATE_TEMPERATURE": "+Inf"},
 		"negative":    {"BACKEND_LLM_GATE_TEMPERATURE": "-1"},
 		"timeout":     {"BACKEND_LLM_TIMEOUT": "15"},
 	} {
