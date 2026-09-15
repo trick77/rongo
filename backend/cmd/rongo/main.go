@@ -482,13 +482,20 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// The lanes are profile ids; llm.NewClient refuses one the registry does
+	// not know, and a pair that would live on two hosts, before the database
+	// is touched. Logged here whether set or not: which model answers is the
+	// first thing anyone reading a quality complaint wants to know.
 	models, err := llm.NewClient(llm.Config{
 		Timeout:       15 * time.Minute,
 		TurnMaxTokens: cfg.TurnMaxTokens,
+		Pro:           cfg.LLMModel,
+		ShortGate:     cfg.LLMGateModel,
 	}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	slog.Info("model lanes", "pro", models.Deployment(llm.ProDeployment), "gate", models.Deployment(llm.ShortGateDeployment))
 	return embedder, models, nil
 }
 

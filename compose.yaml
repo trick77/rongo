@@ -102,6 +102,14 @@ services:
       LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for OpenAI's /embeddings}
       # Read by llmwire itself, never by rongo: forwarded so it reaches it.
       LLMWIRE_EMULATE_OPENCODE: ${LLMWIRE_EMULATE_OPENCODE:-}
+      # Which models answer, by llmwire profile id; empty is MiMo. And a
+      # self-hosted gateway in front of them, llmwire's variables, passed
+      # through so a deployment behind one is a .env edit; see .env.example.
+      BACKEND_LLM_MODEL: ${BACKEND_LLM_MODEL:-}
+      BACKEND_LLM_GATE_MODEL: ${BACKEND_LLM_GATE_MODEL:-}
+      LLMWIRE_LITELLM_BASE_URL: ${LLMWIRE_LITELLM_BASE_URL:-}
+      LLMWIRE_LITELLM_API_KEY: ${LLMWIRE_LITELLM_API_KEY:-}
+      LLMWIRE_LITELLM_MODELS: ${LLMWIRE_LITELLM_MODELS:-}
       # Forge tokens for private repositories, named by token_env in repos.yaml.
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.

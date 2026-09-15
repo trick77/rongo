@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/trick77/llmwire"
@@ -27,10 +28,13 @@ import (
 	"github.com/trick77/rongo/internal/usage"
 )
 
-// The two deployments are hardcoded, never configurable. rongo targets MiMo
-// specifically; a deployment name in an environment variable would let a
-// misconfigured host answer with a model nobody chose, and the failure would
-// look like a quality problem rather than a configuration one.
+// The two default deployments. rongo is built and measured against MiMo;
+// BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL replace them for a deployment
+// that has a different model (Config.Pro, Config.ShortGate), and the name
+// must be one llmwire's registry knows, checked at boot. A free-form host
+// would let a misconfigured endpoint answer with a model nobody chose, and
+// the failure would look like a quality problem rather than a configuration
+// one; a profile id cannot, because llmwire validates every call against it.
 //
 // ShortGateDeployment is the SAME reasoning family as Pro. It is picked because
 // it queues less, not because it cannot think — see ShortGate.
@@ -62,12 +66,11 @@ type Config struct {
 	IdleTimeout time.Duration
 	Logger      *slog.Logger
 	// Pro and ShortGate, when set, replace the two deployment names on the
-	// wire. The PRODUCT never sets them — its deployments are the constants
-	// above, and config.Load reads no variable for them. They exist for the
-	// evaluation harness alone, whose job includes asking whether the next
-	// model answers better than this one, and which can only ask that by
-	// running the same pipeline against another name. The name must be one
-	// llmwire's registry knows; an unknown one fails the first call.
+	// wire: the product from BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the
+	// evaluation harness from its own variables when it asks whether the
+	// next model answers better than this one. The name must be one llmwire's
+	// registry knows, and both lanes must be served by the one host the
+	// client is built for; NewClient refuses anything else.
 	Pro       string
 	ShortGate string
 	// TurnMaxTokens is the most a single turn may spend across all of its
@@ -288,6 +291,9 @@ type Client struct {
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
 	turnMaxTokens  int
+	// demoted records the features warn has already reported, keyed by
+	// feature name; see warn.
+	demoted sync.Map
 }
 
 // underBudget refuses the next call once the turn's meter has reached the
@@ -308,6 +314,10 @@ func (c *Client) underBudget(ctx context.Context) error {
 	return nil
 }
 
+// Deployment reports which profile a lane (ProDeployment or
+// ShortGateDeployment) is served by, override applied.
+func (c *Client) Deployment(lane string) string { return c.deployment(lane) }
+
 // deployment maps a lane to the name sent on the wire.
 func (c *Client) deployment(lane string) string {
 	switch {
@@ -324,14 +334,25 @@ func (c *Client) deployment(lane string) string {
 // body reads too and would cut a long answer mid-stream, which is what the
 // named timeouts in Config exist to prevent.
 //
-// The error is a missing LLMWIRE_MIMO_API_KEY, named. Both lanes live on the
-// one host, so the Pro profile's key serves the gate as well.
+// The error is a missing key variable, named. The client is built for the
+// Pro lane's profile, whose host and key then serve the gate lane as well:
+// one client, one host. A gate profile that llmwire would reach through a
+// different host is refused here, at boot, because the alternative is a gate
+// call that leaves for the Pro host under the gate's name and comes back as
+// an unknown-model 400 on the first question.
 func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
 	}
-	wire, err := llmwire.FromEnv(ProDeployment, llmwire.Config{
+	pro, gate := ProDeployment, ShortGateDeployment
+	if cfg.Pro != "" {
+		pro = cfg.Pro
+	}
+	if cfg.ShortGate != "" {
+		gate = cfg.ShortGate
+	}
+	wire, err := llmwire.FromEnv(pro, llmwire.Config{
 		BaseURL:       cfg.BaseURL,
 		APIKey:        cfg.APIKey,
 		HeaderTimeout: cfg.Timeout,
@@ -342,6 +363,16 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An explicit BaseURL is one host by construction (a test fake, a
+	// stand-in endpoint), so the provider comparison would only ever send
+	// its author to a variable that is not in play.
+	if cfg.BaseURL == "" {
+		if err := sameHost(wire.Registry(), pro, gate); err != nil {
+			return nil, err
+		}
+	} else if _, err := wire.Registry().Lookup(gate); err != nil {
+		return nil, err
+	}
 	return &Client{
 		wire:          wire,
 		log:           log,
@@ -349,6 +380,27 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 		shortGate:     cfg.ShortGate,
 		turnMaxTokens: cfg.TurnMaxTokens,
 	}, nil
+}
+
+// sameHost checks that both lanes are served by the provider the client was
+// built for. A provider is one host in llmwire, so equal providers is the
+// whole test; a model routed through the gateway by LLMWIRE_LITELLM_MODELS
+// shows up here as the gateway's provider, which is what makes "both lanes
+// through the gateway" and "both lanes at the vendor" pass and a mix fail.
+func sameHost(reg *llmwire.Registry, pro, gate string) error {
+	p, err := reg.Lookup(pro)
+	if err != nil {
+		return err
+	}
+	g, err := reg.Lookup(gate)
+	if err != nil {
+		return err
+	}
+	if p.Provider != g.Provider {
+		return fmt.Errorf("llm: %s is served by %q and %s by %q; both lanes must share one host (list both in %s, or neither)",
+			pro, p.Provider, gate, g.Provider, llmwire.GatewayModelsEnv)
+	}
+	return nil
 }
 
 func resolve(opts []Option) callOptions {
@@ -366,12 +418,22 @@ func resolve(opts []Option) callOptions {
 // default — on — unless the call switched it off; temperature is omitted
 // unless a call names one, so the endpoint's own default keeps applying to
 // everything that does not care.
+//
+// Those two knobs are preferences, not requirements: a gate call pins
+// temperature for repeatability and skips thinking for speed, and a model
+// that refuses either (the gpt-5 series answers any temperature but its
+// default with a 400; some models cannot stop thinking) is still the model
+// the deployment chose. BestEffort tells llmwire to send the nearest request
+// it accepts, with a warning that warn logs, instead of failing the call
+// before it leaves. It is set only when one of the two is present, so a call
+// that asks for nothing special keeps llmwire's strict validation.
 func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	req := llmwire.ChatRequest{
 		Model:       c.deployment(o.model),
 		Messages:    make([]llmwire.Message, 0, len(msgs)),
 		MaxTokens:   &o.maxTokens,
 		Temperature: o.temperature,
+		BestEffort:  o.temperature != nil || o.thinkingOff,
 	}
 	for _, m := range msgs {
 		req.Messages = append(req.Messages, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
@@ -389,6 +451,17 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 // here is a request the wire coerced and still sent, not a failed call.
 func (c *Client) warn(ws []llmwire.Warning) {
 	for _, w := range ws {
+		// A knob the model refused and BestEffort rewrote is the one warning
+		// that changes what the model was asked: a gate call pinned at 0 ran
+		// at the model's forced value, or thought when it was told not to.
+		// Once per model and feature at Warn, so a deployment whose model
+		// does that is told at the first question and not on every line.
+		if w.Kind == llmwire.WarnUnsupported {
+			if _, seen := c.demoted.LoadOrStore(w.Feature, true); !seen {
+				c.log.Warn("llm: request knob refused by the model, sent without it", "feature", w.Feature, "details", w.Details)
+			}
+			continue
+		}
 		c.log.Debug("llm: wire warning", "kind", w.Kind, "feature", w.Feature, "details", w.Details)
 	}
 }

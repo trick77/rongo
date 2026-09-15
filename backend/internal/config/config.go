@@ -91,13 +91,16 @@ type Config struct {
 	// sweep, pending a fix to the candidate layer (phase 4c). The number to
 	// beat is 0.803: a router that never asks anything at all.
 	RouteMargin float64
-	// The MiMo endpoint is not here: the host is carried by the deployment's
-	// llmwire profile, and LLMWIRE_MIMO_API_KEY, which that profile names, is
-	// read by llmwire itself when internal/llm builds its client, so a
-	// missing key is a boot error there. The two deployment NAMES are
-	// hardcoded in internal/llm and deliberately not settings: a deployment
-	// name in the environment lets a misconfigured host answer with a model
-	// nobody chose.
+	// No model endpoint is here: hosts and keys are llmwire's, carried by
+	// each model's profile and the LLMWIRE_* variables llmwire reads itself
+	// when internal/llm builds its client, so a missing key is a boot error
+	// there. What a deployment may choose is the MODEL, by llmwire profile
+	// id: LLMModel answers, LLMGateModel is the cheap lane (routing,
+	// follow-ups, titles). Empty means internal/llm's MiMo defaults. Checked
+	// against llmwire's registry in main, not here: config stays a
+	// stdlib-only leaf.
+	LLMModel     string
+	LLMGateModel string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -164,6 +167,8 @@ func Load() (Config, error) {
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
+		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
