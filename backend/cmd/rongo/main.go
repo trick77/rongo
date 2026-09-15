@@ -147,7 +147,9 @@ func main() {
 
 	// Built before the list is synced: a repository that left the list is purged
 	// from the database, and its checkout has to go with it.
-	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot)
+	gitClient := gitrepo.New(tools.Git, cfg.RepoRoot).WithAuth(gitrepo.Auth{
+		SSHKey: cfg.GitSSHKey, SSHKnownHosts: cfg.GitSSHKnownHosts, CAFile: cfg.GitCAFile,
+	})
 
 	// An INVALID repos.yaml stops the server. A MISSING one does not.
 	//

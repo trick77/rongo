@@ -36,8 +36,15 @@ type Spec struct {
 	// which is NOT necessarily master — this corpus mixes master and main.
 	Branch string
 	// TokenEnv names the environment variable holding the access token for this
-	// repository's forge. The value never appears in the YAML.
+	// repository's forge. The value never appears in the YAML. It only applies
+	// to an https remote: an ssh remote authenticates with a key, and naming a
+	// token on one is refused rather than silently ignored.
 	TokenEnv string
+	// TokenUser is the basic-auth username sent alongside the token. Empty
+	// means x-access-token, which GitHub accepts. Bitbucket Data Center
+	// checks it: a personal HTTP access token goes with the user's own name,
+	// a project or repository token with x-token-auth. It is not a secret.
+	TokenUser string
 	// Enabled defaults to true; set it false to stop indexing without deleting.
 	Enabled bool
 	// Project names the product this repository is part of. It is not written
@@ -112,6 +119,7 @@ type rawSpec struct {
 	CloneURL    string     `yaml:"clone_url"`
 	Branch      string     `yaml:"branch"`
 	TokenEnv    string     `yaml:"token_env"`
+	TokenUser   string     `yaml:"token_user"`
 	Enabled     *bool      `yaml:"enabled"`
 	Snapshot    bool       `yaml:"snapshot"`
 	Part        string     `yaml:"part"`
@@ -218,6 +226,8 @@ func Load(path string) ([]Spec, error) {
 				}
 			} else if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
 				return nil, err
+			} else if err := validateToken(r); err != nil {
+				return nil, err
 			}
 
 			enabled := projectEnabled
@@ -234,6 +244,7 @@ func Load(path string) ([]Spec, error) {
 				Snapshot:    r.Snapshot,
 				Branch:      strings.TrimSpace(r.Branch),
 				TokenEnv:    strings.TrimSpace(r.TokenEnv),
+				TokenUser:   strings.TrimSpace(r.TokenUser),
 				Enabled:     enabled,
 				Project:     name,
 				Part:        strings.TrimSpace(r.Part),
@@ -447,6 +458,7 @@ func validateSnapshot(r rawSpec) error {
 		{"clone_url", r.CloneURL},
 		{"branch", r.Branch},
 		{"token_env", r.TokenEnv},
+		{"token_user", r.TokenUser},
 	} {
 		if strings.TrimSpace(f.value) != "" {
 			return fmt.Errorf(
@@ -479,6 +491,37 @@ func errCredential(name string) error {
 		name)
 }
 
+// validateToken refuses a token declaration that could not do anything. A
+// token_env on an ssh remote never reached git — authURL injects into https
+// only — so a private repository over ssh looked configured and fetched with
+// whatever key the process had. A token_user without a token_env is the same
+// shape: declared, and doing nothing.
+func validateToken(r rawSpec) error {
+	tokenEnv := strings.TrimSpace(r.TokenEnv)
+	tokenUser := strings.TrimSpace(r.TokenUser)
+	if tokenEnv != "" && !isHTTPRemote(r.CloneURL) {
+		return fmt.Errorf(
+			"%s: token_env only applies to an https remote; an ssh remote authenticates with the key named by BACKEND_GIT_SSH_KEY",
+			r.Name)
+	}
+	if tokenUser != "" && tokenEnv == "" {
+		return fmt.Errorf("%s: token_user needs a token_env to go with it", r.Name)
+	}
+	// The username is not a secret, but a token pasted where the username
+	// goes would be, and it would end up in a diff of this file.
+	if looksLikeCredential(tokenUser) {
+		return errCredential(r.Name)
+	}
+	return nil
+}
+
+// isHTTPRemote reports whether the clone URL is one authURL can carry a
+// token on. Scheme only: a bare host or scp-style remote has none.
+func isHTTPRemote(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
+}
+
 // validateCloneURL refuses credentials embedded in the URL.
 //
 // net/url.Parse is deliberately NOT used to classify this: a string like
@@ -505,8 +548,9 @@ func validateCloneURL(name, raw string) error {
 	}
 
 	// No colon: structurally this is scp-style "user@host" (e.g.
-	// git@github.com:acme/repo.git), which is a legitimate ssh remote and must
-	// stay accepted. Still reject it when the "user" looks like a token rather
+	// git@github.com:acme/repo.git) or a full ssh URL
+	// (ssh://git@bitbucket.example.com:7999/proj/repo.git), both legitimate
+	// ssh remotes that must stay accepted. Still reject it when the "user" looks like a token rather
 	// than a username. This is a heuristic backstop, not a guarantee —
 	// "token@host" is structurally indistinguishable from "user@host", so the
 	// real protection is token_env, not this check.

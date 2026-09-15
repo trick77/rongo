@@ -60,6 +60,15 @@ type Config struct {
 	// Already-indexed matches are swept at the next start; removing a pattern
 	// takes effect for a file when it next changes.
 	IndexExclude []string
+	// GitSSHKey and GitSSHKnownHosts are the private key and host-key file git
+	// uses for an ssh remote. Both or neither: the container has no home
+	// directory to fall back on, and a bare host that leaves them unset keeps
+	// its own agent and ~/.ssh. BACKEND_GIT_SSH_KEY, BACKEND_GIT_SSH_KNOWN_HOSTS.
+	GitSSHKey        string
+	GitSSHKnownHosts string
+	// GitCAFile is a PEM bundle git trusts for https remotes in place of the
+	// system store, for a forge behind an internal CA. BACKEND_GIT_CA_FILE.
+	GitCAFile string
 	// ModuleMinChunks and ModuleMaxChunks are the module cut: below the first a
 	// directory is folded into its parent, above the second it is split again.
 	// Calibrated against the real corpus and recorded in the measurement
@@ -133,6 +142,9 @@ func Load() (Config, error) {
 		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
 		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
 		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		GitSSHKey:         strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
+		GitSSHKnownHosts:  strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
+		GitCAFile:         strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
 		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
 		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
 		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
@@ -211,6 +223,31 @@ func Load() (Config, error) {
 	}
 
 	cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
+
+	// A file named here that is not there fails the boot. ssh would report
+	// it too, but only at the first poll of the first ssh remote, as a
+	// per-repository error on the Repos page, which reads as that
+	// repository's problem rather than this deployment's. A key without a
+	// known_hosts is refused for the same reason: strict host-key checking
+	// against no file fails every ssh remote.
+	if cfg.GitSSHKey != "" && cfg.GitSSHKnownHosts == "" {
+		return Config{}, fmt.Errorf("BACKEND_GIT_SSH_KEY requires BACKEND_GIT_SSH_KNOWN_HOSTS; ssh-keyscan the forge into it")
+	}
+	if cfg.GitSSHKnownHosts != "" && cfg.GitSSHKey == "" {
+		return Config{}, fmt.Errorf("BACKEND_GIT_SSH_KNOWN_HOSTS requires BACKEND_GIT_SSH_KEY")
+	}
+	for _, f := range []struct{ name, path string }{
+		{"BACKEND_GIT_SSH_KEY", cfg.GitSSHKey},
+		{"BACKEND_GIT_SSH_KNOWN_HOSTS", cfg.GitSSHKnownHosts},
+		{"BACKEND_GIT_CA_FILE", cfg.GitCAFile},
+	} {
+		if f.path == "" {
+			continue
+		}
+		if _, err := os.Stat(f.path); err != nil {
+			return Config{}, fmt.Errorf("%s: %w", f.name, err)
+		}
+	}
 
 	return cfg, nil
 }

@@ -49,7 +49,8 @@ OpenAI-compatible `/embeddings` endpoint.
 
 Projects are listed in `repos.yaml`, each holding the repositories it is built
 from; credentials never are, they come from `BACKEND_*` environment variables,
-one per forge host.
+one per forge host. Any git remote works: GitHub and Bitbucket Data Center are
+the ones exercised, over https with a token or over ssh with a mounted key.
 
 ## Running it
 

@@ -396,6 +396,31 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_carriesTheTokenUser(t *testing.T) {
+	// Given: the poller rebuilds its Spec from this table, so a username the
+	// forge insists on has to survive the round trip or the fetch goes out
+	// as x-access-token and is refused.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+
+	// When
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop", CloneURL: "https://bitbucket.example.invalid/scm/shop/shop.git", Enabled: true,
+			TokenEnv: "BACKEND_FORGE_TOKEN_BITBUCKET", TokenUser: "x-token-auth"},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// Then
+	active, err := s.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active() err = %v", err)
+	}
+	if got := active[0].TokenUser; got != "x-token-auth" {
+		t.Errorf("TokenUser = %q, want x-token-auth", got)
+	}
+}
+
 func TestActive_dropsAnEdgeToADisabledSibling(t *testing.T) {
 	// The edge is still declared, and All still reports it. Active is what the
 	// page and the prompt are built from, and neither carries the disabled

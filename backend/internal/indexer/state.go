@@ -26,7 +26,10 @@ type RepoState struct {
 	// TokenEnv names the environment variable holding this repository's forge
 	// token. The name travels; the value is read at fetch time and never
 	// persisted.
-	TokenEnv  string
+	TokenEnv string
+	// TokenUser is the basic-auth username the token is sent with; see
+	// repos.Spec. Empty means x-access-token.
+	TokenUser string
 	Enabled   bool
 	LastSHA   string
 	LastError string
@@ -115,8 +118,8 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 			enabled = 1
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, project, part, description)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, token_user, project, part, description)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				clone_url = excluded.clone_url,
 				-- An omitted branch: means "the remote's default", which is
@@ -143,6 +146,7 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 					ELSE repo_state.branch END,
 				enabled   = excluded.enabled,
 				token_env = excluded.token_env,
+				token_user = excluded.token_user,
 				-- Structure is copied over unconditionally, and deliberately
 				-- NOT next to the branch rule above: it is written by hand in
 				-- repos.yaml and never resolved from a remote, so there is no
@@ -152,7 +156,7 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 				project     = excluded.project,
 				part        = excluded.part,
 				description = excluded.description`,
-			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv,
+			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv, spec.TokenUser,
 			spec.Project, spec.Part, spec.Description,
 		); err != nil {
 			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
@@ -320,12 +324,12 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 }
 
 // states is Active and All less their one differing word. They read the same
-// nine columns plus the structure and attach the same edges, and keeping two
+// same columns plus the structure and attach the same edges, and keeping two
 // copies of that is how one of them ends up a column behind the other.
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       last_indexed_at, file_count, chunk_count, token_env, project, part, description
+		       last_indexed_at, file_count, chunk_count, token_env, token_user, project, part, description
 		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -338,7 +342,7 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 		var enabled int
 		var lastRun, lastIndexed string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
-			&r.LastError, &lastRun, &lastIndexed, &r.Files, &r.Chunks, &r.TokenEnv,
+			&r.LastError, &lastRun, &lastIndexed, &r.Files, &r.Chunks, &r.TokenEnv, &r.TokenUser,
 			&r.Project, &r.Part, &r.Description); err != nil {
 			return nil, err
 		}

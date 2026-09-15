@@ -30,12 +30,39 @@ var ErrBranchGone = errors.New("configured branch not found")
 type Client struct {
 	git  string
 	root string
+	auth Auth
+}
+
+// Auth is what git needs beyond a token to reach a remote. Every field is
+// optional and empty means "git's own defaults": on a bare host that is the
+// user's ssh-agent and ~/.ssh/config, which must keep working. In the
+// container there is no home to speak of, so an ssh remote needs the key
+// and known_hosts named here, and a forge behind an internal CA needs the
+// CA file.
+type Auth struct {
+	// SSHKey is the private key ssh presents, in the process's filesystem.
+	SSHKey string
+	// SSHKnownHosts holds the remote's host key. Required with SSHKey: the
+	// checking is strict, because a first-connection prompt has nobody to
+	// answer it and a silent accept would trust whatever answered.
+	SSHKnownHosts string
+	// CAFile is a PEM bundle git trusts for https, in place of the system
+	// store. Read by git itself, never by rongo.
+	CAFile string
 }
 
 // New builds a Client. gitBin comes from exttools.Resolve, which has already
 // verified the binary exists.
 func New(gitBin, root string) *Client {
 	return &Client{git: gitBin, root: root}
+}
+
+// WithAuth sets what every command from here on hands git for reaching a
+// remote. Separate from New because only the server configures it: tests
+// and the eval harness run against local fixtures and public remotes.
+func (c *Client) WithAuth(auth Auth) *Client {
+	c.auth = auth
+	return c
 }
 
 // Dir is where a repository's checkout lives. repos.Load has already validated
@@ -54,7 +81,7 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return fmt.Errorf("create repository root: %w", err)
 	}
-	if _, err := c.run(ctx, c.root, "clone", "--quiet", authURL(spec.CloneURL, token), dir); err != nil {
+	if _, err := c.run(ctx, c.root, "clone", "--quiet", authURL(spec.CloneURL, spec.TokenUser, token), dir); err != nil {
 		return err
 	}
 	// git PERSISTS the clone URL as remote.origin.url, credentials and all, so
@@ -276,7 +303,7 @@ func (c *Client) RemoveCheckout(name string) error {
 // anonymously: without it, an entry that omits `branch:` could never resolve
 // one and would never be indexed at all.
 func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token string) (string, error) {
-	out, err := c.run(ctx, c.root, "ls-remote", "--symref", authURL(spec.CloneURL, token), "HEAD")
+	out, err := c.run(ctx, c.root, "ls-remote", "--symref", authURL(spec.CloneURL, spec.TokenUser, token), "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -295,7 +322,7 @@ func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token strin
 // Fetch updates the remote-tracking refs.
 func (c *Client) Fetch(ctx context.Context, spec repos.Spec, token string) error {
 	_, err := c.run(ctx, c.Dir(spec), "fetch", "--quiet", "--prune",
-		authURL(spec.CloneURL, token), "+refs/heads/*:refs/remotes/origin/*")
+		authURL(spec.CloneURL, spec.TokenUser, token), "+refs/heads/*:refs/remotes/origin/*")
 	return err
 }
 
@@ -455,6 +482,7 @@ func (c *Client) run(ctx context.Context, dir string, args ...string) (string, e
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Env, c.auth.env()...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -466,9 +494,44 @@ func (c *Client) run(ctx context.Context, dir string, args ...string) (string, e
 	return stdout.String(), nil
 }
 
+// env is what run adds to git's environment for the remote. Nothing when
+// nothing is configured, so a bare host keeps git's own defaults.
+//
+// GIT_TERMINAL_PROMPT=0 does not reach ssh, so the ssh command carries its
+// own: BatchMode refuses every prompt instead of hanging on one, strict
+// host-key checking against the named file means a host not in it fails
+// with "Host key verification failed" rather than being trusted on first
+// sight, and IdentitiesOnly keeps an agent on the host from offering keys
+// this configuration never named.
+func (a Auth) env() []string {
+	var env []string
+	if a.SSHKey != "" {
+		env = append(env, "GIT_SSH_COMMAND="+strings.Join([]string{
+			"ssh",
+			"-i", shellQuote(a.SSHKey),
+			"-o", "UserKnownHostsFile=" + shellQuote(a.SSHKnownHosts),
+			"-o", "StrictHostKeyChecking=yes",
+			"-o", "BatchMode=yes",
+			"-o", "IdentitiesOnly=yes",
+		}, " "))
+	}
+	if a.CAFile != "" {
+		env = append(env, "GIT_SSL_CAINFO="+a.CAFile)
+	}
+	return env
+}
+
+// shellQuote wraps a path for GIT_SSH_COMMAND, which git hands to a shell:
+// a space in a mount path would otherwise split into two arguments.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // authURL injects the token into an https remote for the duration of one
-// command. It is never written to disk and never logged.
-func authURL(raw, token string) string {
+// command. It is never written to disk and never logged. The username is
+// the entry's token_user, or x-access-token when it names none: GitHub
+// ignores it, Bitbucket Data Center does not.
+func authURL(raw, user, token string) string {
 	if token == "" {
 		return raw
 	}
@@ -476,7 +539,10 @@ func authURL(raw, token string) string {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
 		return raw
 	}
-	u.User = url.UserPassword("x-access-token", token)
+	if user == "" {
+		user = "x-access-token"
+	}
+	u.User = url.UserPassword(user, token)
 	return u.String()
 }
 
