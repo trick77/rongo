@@ -109,8 +109,9 @@ type Deps struct {
 	// auth.Service.CreateSessionFromClaims.
 	OIDCAdminGroup string
 	// CookieSecure marks the session cookie Secure. It comes from the OIDC
-	// redirect URL, because behind a TLS-terminating proxy the process only
-	// ever sees plain HTTP and nothing about the request says otherwise.
+	// redirect URL or, in password mode, BACKEND_COOKIE_SECURE, because
+	// behind a TLS-terminating proxy the process only ever sees plain HTTP
+	// and nothing about the request says otherwise.
 	CookieSecure bool
 	// Repos backs the Repos page. Nil means this deployment cannot report
 	// repository status, which its endpoint says with a 503 rather than an
@@ -175,6 +176,7 @@ func (s *Server) routes() {
 	// Logout does not, because revoking a session needs one.
 	s.mux.HandleFunc("GET /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("GET /api/auth/callback", s.handleAuthCallback)
+	s.mux.HandleFunc("POST /api/auth/password", s.handleAuthPassword)
 	s.mux.Handle("POST /api/auth/logout", s.requireAuth(http.HandlerFunc(s.handleAuthLogout)))
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
