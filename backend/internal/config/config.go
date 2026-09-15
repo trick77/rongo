@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -101,6 +102,17 @@ type Config struct {
 	// stdlib-only leaf.
 	LLMModel     string
 	LLMGateModel string
+	// The call policy, measured on MiMo and therefore a setting once the
+	// model is: what a pinned gate call sends as temperature (nil = none),
+	// what a gate call and the answer lane send as reasoning ("off",
+	// "default" or an effort level the model accepts, checked in internal/llm
+	// at boot), and how long one call may take. Malformed values fail the
+	// boot: a typo here changes every routing decision, and is not a tunable
+	// that may quietly fall back.
+	LLMGateTemperature *float64
+	LLMGateReasoning   string
+	LLMReasoning       string
+	LLMTimeout         time.Duration
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	GatherMaxHops     int
@@ -169,6 +181,8 @@ func Load() (Config, error) {
 		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
 		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
 		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
+		LLMGateReasoning:  envOr("BACKEND_LLM_GATE_REASONING", "off"),
+		LLMReasoning:      envOr("BACKEND_LLM_REASONING", "default"),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
@@ -183,6 +197,13 @@ func Load() (Config, error) {
 		OIDCClientSecret: strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_SECRET")),
 		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
 		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
+	}
+	var err error
+	if cfg.LLMGateTemperature, err = envOptionalFloat("BACKEND_LLM_GATE_TEMPERATURE", 0); err != nil {
+		return Config{}, err
+	}
+	if cfg.LLMTimeout, err = envDurationOr("BACKEND_LLM_TIMEOUT", 15*time.Minute); err != nil {
+		return Config{}, err
 	}
 	// SessionSecret is currently unused — sessions are 256-bit random tokens
 	// stored as unsalted SHA-256, no signing involved yet. It is still
@@ -384,6 +405,37 @@ func envBoolOr(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+// envOptionalFloat reads a float setting that may also be switched off:
+// "default" (or "none") returns nil, meaning "send nothing". Malformed is an
+// error, not a fallback: see Config.LLMGateTemperature.
+func envOptionalFloat(key string, fallback float64) (*float64, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(v) {
+	case "":
+		return &fallback, nil
+	case "default", "none":
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 {
+		return nil, fmt.Errorf("%s=%q is not a temperature; want a number >= 0, or default", key, v)
+	}
+	return &f, nil
+}
+
+// envDurationOr reads a Go duration ("15m", "90s"). Malformed is an error.
+func envDurationOr(key string, fallback time.Duration) (time.Duration, error) {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("%s=%q is not a duration; want e.g. 15m or 90s", key, v)
+	}
+	return d, nil
 }
 
 func envOr(key, fallback string) string {

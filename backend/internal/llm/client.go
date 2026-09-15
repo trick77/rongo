@@ -73,6 +73,9 @@ type Config struct {
 	// client is built for; NewClient refuses anything else.
 	Pro       string
 	ShortGate string
+	// Policy is what the call sites' intents mean on the wire for the models
+	// in use. Zero value = DefaultPolicy, the one rongo was measured with.
+	Policy Policy
 	// TurnMaxTokens is the most a single turn may spend across all of its
 	// calls, prompt and completion, read off the usage meter on the context
 	// before each request. A tripwire, not a budget: the turn is a fixed
@@ -80,6 +83,38 @@ type Config struct {
 	// says so out loud once a loop or a retry that nobody bounded appears.
 	// Zero turns it off. A context without a meter is never checked.
 	TurnMaxTokens int
+}
+
+// The two reasoning values that are not an effort level. Anything else a
+// Policy carries is a level the lane's profile must accept.
+const (
+	// ReasoningDefault leaves the field out: the model does what it does
+	// when nobody asks.
+	ReasoningDefault = "default"
+	// ReasoningOff switches thinking off, however the model spells that.
+	ReasoningOff = "off"
+)
+
+// Policy is how a deployment answers the two questions every call site
+// asks in MiMo's terms. It is configuration (BACKEND_LLM_GATE_TEMPERATURE,
+// BACKEND_LLM_GATE_REASONING, BACKEND_LLM_REASONING), because the answers
+// were measured on MiMo and a different model has different ones.
+type Policy struct {
+	// GateTemperature is what a call that pins its temperature sends. nil
+	// sends none, which leaves the endpoint's default.
+	GateTemperature *float64
+	// GateReasoning is what a gate call (WithoutThinking) sends: ReasoningOff,
+	// ReasoningDefault or an effort level.
+	GateReasoning string
+	// ProReasoning is what every other call sends. Same values.
+	ProReasoning string
+}
+
+// DefaultPolicy is what rongo was measured with: gate calls pinned at 0 with
+// thinking off, the answer lane at the model's own default.
+func DefaultPolicy() Policy {
+	zero := 0.0
+	return Policy{GateTemperature: &zero, GateReasoning: ReasoningOff, ProReasoning: ReasoningDefault}
 }
 
 // ErrTurnBudget is why a call was refused when the turn had already spent
@@ -290,6 +325,7 @@ type Client struct {
 	log  *slog.Logger
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
+	policy         Policy
 	turnMaxTokens  int
 	// demoted records the features warn has already reported, keyed by
 	// feature name; see warn.
@@ -373,13 +409,62 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	} else if _, err := wire.Registry().Lookup(gate); err != nil {
 		return nil, err
 	}
+	pol := cfg.Policy
+	if pol == (Policy{}) {
+		pol = DefaultPolicy()
+	}
+	if pol.GateReasoning == "" {
+		pol.GateReasoning = ReasoningOff
+	}
+	if pol.ProReasoning == "" {
+		pol.ProReasoning = ReasoningDefault
+	}
+	// Reasoning is checked here, not left to BestEffort per call: a level
+	// the model does not have is a configuration error with a known answer
+	// (the levels it has), and a deployment should hear that at boot, not
+	// run for a week with every gate call silently demoted.
+	if err := checkReasoning(wire.Registry(), gate, "BACKEND_LLM_GATE_REASONING", pol.GateReasoning); err != nil {
+		return nil, err
+	}
+	if err := checkReasoning(wire.Registry(), pro, "BACKEND_LLM_REASONING", pol.ProReasoning); err != nil {
+		return nil, err
+	}
 	return &Client{
 		wire:          wire,
 		log:           log,
 		pro:           cfg.Pro,
 		shortGate:     cfg.ShortGate,
+		policy:        pol,
 		turnMaxTokens: cfg.TurnMaxTokens,
 	}, nil
+}
+
+// checkReasoning refuses a reasoning setting the lane's model cannot honour.
+// ReasoningDefault always passes: it sends nothing. ReasoningOff on a model
+// that cannot stop thinking, and a level outside the model's set, name the
+// variable and what the model accepts.
+func checkReasoning(reg *llmwire.Registry, model, variable, value string) error {
+	if value == ReasoningDefault {
+		return nil
+	}
+	p, err := reg.Lookup(model)
+	if err != nil {
+		return err
+	}
+	r := p.Reasoning
+	if !r.Supported {
+		return fmt.Errorf("llm: %s=%q, but %s has no reasoning control; use %s", variable, value, model, ReasoningDefault)
+	}
+	if value == ReasoningOff {
+		if !r.CanBeDisabled {
+			return fmt.Errorf("llm: %s=%s, but %s cannot stop thinking; use %s or one of %v", variable, value, model, ReasoningDefault, r.EffortValues)
+		}
+		return nil
+	}
+	if !r.Accepts(value) {
+		return fmt.Errorf("llm: %s=%q is not a level %s accepts; it takes %v, %s or %s", variable, value, model, r.EffortValues, ReasoningOff, ReasoningDefault)
+	}
+	return nil
 }
 
 // sameHost checks that both lanes are served by the provider the client was
@@ -414,33 +499,44 @@ func resolve(opts []Option) callOptions {
 	return o
 }
 
-// request renders what one call sends. Thinking is left at the deployment's
-// default — on — unless the call switched it off; temperature is omitted
-// unless a call names one, so the endpoint's own default keeps applying to
-// everything that does not care.
+// request renders what one call sends. A call site says what it means: a
+// pinned temperature is "a re-roll here is a defect", thinking off is "this
+// is a gate call, the output is an id or a label". What that means on the
+// wire is the Policy's to say, because it was tuned on MiMo (pin at 0, no
+// thought) and another model has other answers: the policy may send a
+// different pin, no pin, an effort level, or leave the model's default.
 //
-// Those two knobs are preferences, not requirements: a gate call pins
-// temperature for repeatability and skips thinking for speed, and a model
-// that refuses either (the gpt-5 series answers any temperature but its
-// default with a 400; some models cannot stop thinking) is still the model
-// the deployment chose. BestEffort tells llmwire to send the nearest request
-// it accepts, with a warning that warn logs, instead of failing the call
-// before it leaves. It is set only when one of the two is present, so a call
-// that asks for nothing special keeps llmwire's strict validation.
+// Those knobs are preferences, not requirements: a model that refuses one
+// (the gpt-5 series answers any temperature but its default with a 400; some
+// models cannot stop thinking) is still the model the deployment chose.
+// BestEffort tells llmwire to send the nearest request it accepts, with a
+// warning that warn logs, instead of failing the call before it leaves. It
+// is set only when a knob is present, so a call that asks for nothing
+// special keeps llmwire's strict validation.
 func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	req := llmwire.ChatRequest{
-		Model:       c.deployment(o.model),
-		Messages:    make([]llmwire.Message, 0, len(msgs)),
-		MaxTokens:   &o.maxTokens,
-		Temperature: o.temperature,
-		BestEffort:  o.temperature != nil || o.thinkingOff,
+		Model:     c.deployment(o.model),
+		Messages:  make([]llmwire.Message, 0, len(msgs)),
+		MaxTokens: &o.maxTokens,
 	}
 	for _, m := range msgs {
 		req.Messages = append(req.Messages, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
 	}
-	if o.thinkingOff {
-		req.Reasoning = llmwire.ReasoningOff()
+	if o.temperature != nil {
+		req.Temperature = c.policy.GateTemperature
 	}
+	reasoning := c.policy.ProReasoning
+	if o.thinkingOff {
+		reasoning = c.policy.GateReasoning
+	}
+	switch reasoning {
+	case ReasoningDefault:
+	case ReasoningOff:
+		req.Reasoning = llmwire.ReasoningOff()
+	default:
+		req.Reasoning = llmwire.ReasoningEffort(reasoning)
+	}
+	req.BestEffort = req.Temperature != nil || req.Reasoning != nil
 	if o.jsonObject {
 		req.ResponseFormat = llmwire.ResponseFormat{Kind: llmwire.FormatJSONObject}
 	}

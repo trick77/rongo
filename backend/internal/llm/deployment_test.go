@@ -31,7 +31,10 @@ func TestConfigOverridesReplaceTheLaneNamesOnTheWire(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c := mustClient(t, Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash"}, srv.Client())
+	// glm cannot stop thinking, so the default gate policy (off) is refused
+	// at boot; a deployment on it has to say what a gate call does instead.
+	c := mustClient(t, Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash",
+		Policy: Policy{GateReasoning: "low", ProReasoning: ReasoningDefault}}, srv.Client())
 	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}}); err != nil {
 		t.Fatal(err)
 	}

@@ -487,15 +487,27 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 	// is touched. Logged here whether set or not: which model answers is the
 	// first thing anyone reading a quality complaint wants to know.
 	models, err := llm.NewClient(llm.Config{
-		Timeout:       15 * time.Minute,
+		Timeout:       cfg.LLMTimeout,
 		TurnMaxTokens: cfg.TurnMaxTokens,
 		Pro:           cfg.LLMModel,
 		ShortGate:     cfg.LLMGateModel,
+		Policy: llm.Policy{
+			GateTemperature: cfg.LLMGateTemperature,
+			GateReasoning:   cfg.LLMGateReasoning,
+			ProReasoning:    cfg.LLMReasoning,
+		},
 	}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	slog.Info("model lanes", "pro", models.Deployment(llm.ProDeployment), "gate", models.Deployment(llm.ShortGateDeployment))
+	gateTemp := "default"
+	if cfg.LLMGateTemperature != nil {
+		gateTemp = fmt.Sprint(*cfg.LLMGateTemperature)
+	}
+	slog.Info("model lanes",
+		"pro", models.Deployment(llm.ProDeployment), "gate", models.Deployment(llm.ShortGateDeployment),
+		"gate_temperature", gateTemp, "gate_reasoning", cfg.LLMGateReasoning, "reasoning", cfg.LLMReasoning,
+		"timeout", cfg.LLMTimeout)
 	return embedder, models, nil
 }
 

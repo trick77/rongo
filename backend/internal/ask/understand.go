@@ -40,6 +40,10 @@ const understandMaxTokens = 512
 // the same thing as "ask twice, get a card once and an answer the other time".
 //
 // The answer call is NOT pinned. A person reads that one.
+//
+// The value is the intent, not the wire: llm.Policy (BACKEND_LLM_GATE_TEMPERATURE)
+// decides what a pinned call actually sends, because 0 was measured on MiMo
+// and another model may refuse it or want none.
 const gateTemperature = 0
 
 // Understanding is what the first step produces. Nobody reads it — it exists to
