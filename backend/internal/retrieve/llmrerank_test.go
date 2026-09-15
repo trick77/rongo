@@ -285,29 +285,30 @@ func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
 	}
 }
 
-// TestLLMRerank_excerptWidthIsAField: the harness widens what the model reads;
-// a line past the default window is invisible at 240 and visible at 800.
+// TestLLMRerank_excerptWidthIsAField: the field is what the model reads by; a
+// line past rune 600 is invisible at 240 and visible at the shipped 800.
 func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
 	body := strings.Repeat("filler line\n", 50) + "THE MARKER\n" + strings.Repeat("tail line\n", 50)
 	hits := []Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: body}, {ChunkID: 2}}
 
 	var narrow rerankSeen
 	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &narrow), 60)
+	r.Excerpt = 240
 	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(narrow.prompt, "THE MARKER") {
-		t.Errorf("the default width already reaches the marker; the test proves nothing")
+		t.Errorf("Excerpt = 240 already reaches the marker; the test proves nothing")
 	}
 
+	// The shipped width, left to the default.
 	var wide rerankSeen
 	r = NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &wide), 60)
-	r.Excerpt = 800
 	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(wide.prompt, "THE MARKER") {
-		t.Errorf("Excerpt = 800 did not widen what the model was shown:\n%s", wide.prompt)
+		t.Errorf("the default width did not reach the marker:\n%s", wide.prompt)
 	}
 }
 

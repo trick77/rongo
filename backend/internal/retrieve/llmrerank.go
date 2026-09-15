@@ -67,9 +67,12 @@ when its code, comment or path is about what the question asks, not when it
 merely shares a word with it. Do not explain.`
 
 // rerankExcerpt is how much of each chunk the model sees by default, in
-// runes: the header and the opening lines, which is where a doc comment and a
-// signature sit.
-const rerankExcerpt = 240
+// runes. Eight hundred, not the 240 this shipped with: a signature and its
+// doc comment are regularly longer than 240, so the model was ranking on a
+// truncated first line. Measured twice on the pinned Go corpus, unique
+// gathered 39/42 at 240 against 41/42 at 800, MRR 0.72 against 0.81 and 0.83
+// (docs/measurements/2026-09-16-rerank-excerpt.md).
+const rerankExcerpt = 800
 
 // rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
 // what each result in the pool adds on top. The floor covers a short list; the
