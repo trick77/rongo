@@ -43,9 +43,10 @@ does it and shows the code inline.
 
 One Go binary, one SQLite file (FTS5 for text, sqlite-vec for embeddings), React UI
 embedded in the binary. Symbols come from universal-ctags, search from ripgrep,
-checkouts from git. Chat goes to an OpenAI-compatible endpoint serving the MiMo
-deployments named in `backend/internal/llm/client.go`, embeddings to any
-OpenAI-compatible `/embeddings` endpoint.
+checkouts from git. Chat goes to the models named by `BACKEND_LLM_MODEL` and
+`BACKEND_LLM_GATE_MODEL` (MiMo by default), embeddings to `text-embedding-3-small`;
+hosts, keys and an optional LiteLLM gateway in front are llmwire's variables,
+see `.env.example`.
 
 Projects are listed in `repos.yaml`, each holding the repositories it is built
 from; credentials never are, they come from `BACKEND_*` environment variables,

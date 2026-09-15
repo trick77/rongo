@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/trick77/llmwire"
@@ -27,10 +28,13 @@ import (
 	"github.com/trick77/rongo/internal/usage"
 )
 
-// The two deployments are hardcoded, never configurable. rongo targets MiMo
-// specifically; a deployment name in an environment variable would let a
-// misconfigured host answer with a model nobody chose, and the failure would
-// look like a quality problem rather than a configuration one.
+// The two default deployments. rongo is built and measured against MiMo;
+// BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL replace them for a deployment
+// that has a different model (Config.Pro, Config.ShortGate), and the name
+// must be one llmwire's registry knows, checked at boot. A free-form host
+// would let a misconfigured endpoint answer with a model nobody chose, and
+// the failure would look like a quality problem rather than a configuration
+// one; a profile id cannot, because llmwire validates every call against it.
 //
 // ShortGateDeployment is the SAME reasoning family as Pro. It is picked because
 // it queues less, not because it cannot think — see ShortGate.
@@ -62,14 +66,16 @@ type Config struct {
 	IdleTimeout time.Duration
 	Logger      *slog.Logger
 	// Pro and ShortGate, when set, replace the two deployment names on the
-	// wire. The PRODUCT never sets them — its deployments are the constants
-	// above, and config.Load reads no variable for them. They exist for the
-	// evaluation harness alone, whose job includes asking whether the next
-	// model answers better than this one, and which can only ask that by
-	// running the same pipeline against another name. The name must be one
-	// llmwire's registry knows; an unknown one fails the first call.
+	// wire: the product from BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the
+	// evaluation harness from its own variables when it asks whether the
+	// next model answers better than this one. The name must be one llmwire's
+	// registry knows, and both lanes must be served by the one host the
+	// client is built for; NewClient refuses anything else.
 	Pro       string
 	ShortGate string
+	// Policy is what the call sites' intents mean on the wire for the models
+	// in use. Zero value = DefaultPolicy, the one rongo was measured with.
+	Policy Policy
 	// TurnMaxTokens is the most a single turn may spend across all of its
 	// calls, prompt and completion, read off the usage meter on the context
 	// before each request. A tripwire, not a budget: the turn is a fixed
@@ -77,6 +83,38 @@ type Config struct {
 	// says so out loud once a loop or a retry that nobody bounded appears.
 	// Zero turns it off. A context without a meter is never checked.
 	TurnMaxTokens int
+}
+
+// The two reasoning values that are not an effort level. Anything else a
+// Policy carries is a level the lane's profile must accept.
+const (
+	// ReasoningDefault leaves the field out: the model does what it does
+	// when nobody asks.
+	ReasoningDefault = "default"
+	// ReasoningOff switches thinking off, however the model spells that.
+	ReasoningOff = "off"
+)
+
+// Policy is how a deployment answers the two questions every call site
+// asks in MiMo's terms. It is configuration (BACKEND_LLM_GATE_TEMPERATURE,
+// BACKEND_LLM_GATE_REASONING, BACKEND_LLM_REASONING), because the answers
+// were measured on MiMo and a different model has different ones.
+type Policy struct {
+	// GateTemperature is what a call that pins its temperature sends. nil
+	// sends none, which leaves the endpoint's default.
+	GateTemperature *float64
+	// GateReasoning is what a gate call (WithoutThinking) sends: ReasoningOff,
+	// ReasoningDefault or an effort level.
+	GateReasoning string
+	// ProReasoning is what every other call sends. Same values.
+	ProReasoning string
+}
+
+// DefaultPolicy is what rongo was measured with: gate calls pinned at 0 with
+// thinking off, the answer lane at the model's own default.
+func DefaultPolicy() Policy {
+	zero := 0.0
+	return Policy{GateTemperature: &zero, GateReasoning: ReasoningOff, ProReasoning: ReasoningDefault}
 }
 
 // ErrTurnBudget is why a call was refused when the turn had already spent
@@ -287,7 +325,11 @@ type Client struct {
 	log  *slog.Logger
 	// pro and shortGate are the wire names for the two lanes; see Config.
 	pro, shortGate string
+	policy         Policy
 	turnMaxTokens  int
+	// demoted records the features warn has already reported, keyed by
+	// feature name; see warn.
+	demoted sync.Map
 }
 
 // underBudget refuses the next call once the turn's meter has reached the
@@ -308,6 +350,10 @@ func (c *Client) underBudget(ctx context.Context) error {
 	return nil
 }
 
+// Deployment reports which profile a lane (ProDeployment or
+// ShortGateDeployment) is served by, override applied.
+func (c *Client) Deployment(lane string) string { return c.deployment(lane) }
+
 // deployment maps a lane to the name sent on the wire.
 func (c *Client) deployment(lane string) string {
 	switch {
@@ -324,14 +370,25 @@ func (c *Client) deployment(lane string) string {
 // body reads too and would cut a long answer mid-stream, which is what the
 // named timeouts in Config exist to prevent.
 //
-// The error is a missing LLMWIRE_MIMO_API_KEY, named. Both lanes live on the
-// one host, so the Pro profile's key serves the gate as well.
+// The error is a missing key variable, named. The client is built for the
+// Pro lane's profile, whose host and key then serve the gate lane as well:
+// one client, one host. A gate profile that llmwire would reach through a
+// different host is refused here, at boot, because the alternative is a gate
+// call that leaves for the Pro host under the gate's name and comes back as
+// an unknown-model 400 on the first question.
 func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
 	}
-	wire, err := llmwire.FromEnv(ProDeployment, llmwire.Config{
+	pro, gate := ProDeployment, ShortGateDeployment
+	if cfg.Pro != "" {
+		pro = cfg.Pro
+	}
+	if cfg.ShortGate != "" {
+		gate = cfg.ShortGate
+	}
+	wire, err := llmwire.FromEnv(pro, llmwire.Config{
 		BaseURL:       cfg.BaseURL,
 		APIKey:        cfg.APIKey,
 		HeaderTimeout: cfg.Timeout,
@@ -342,13 +399,102 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An explicit BaseURL is one host by construction (a test fake, a
+	// stand-in endpoint), so the provider comparison would only ever send
+	// its author to a variable that is not in play.
+	if cfg.BaseURL == "" {
+		if err := sameHost(wire.Registry(), pro, gate); err != nil {
+			return nil, err
+		}
+	} else if _, err := wire.Registry().Lookup(gate); err != nil {
+		return nil, err
+	}
+	pol := cfg.Policy
+	if pol == (Policy{}) {
+		pol = DefaultPolicy()
+	}
+	if pol.GateReasoning == "" {
+		pol.GateReasoning = ReasoningOff
+	}
+	if pol.ProReasoning == "" {
+		pol.ProReasoning = ReasoningDefault
+	}
+	// Reasoning is checked here, not left to BestEffort per call: a level
+	// the model does not have is a configuration error with a known answer
+	// (the levels it has), and a deployment should hear that at boot, not
+	// run for a week with every gate call silently demoted. Both settings
+	// against both models: WithoutThinking is a property of the call, not
+	// of the lane, so a Pro call may be a gate call and receive GateReasoning.
+	for _, model := range []string{pro, gate} {
+		if err := checkReasoning(wire.Registry(), model, "BACKEND_LLM_GATE_REASONING", pol.GateReasoning); err != nil {
+			return nil, err
+		}
+		if err := checkReasoning(wire.Registry(), model, "BACKEND_LLM_REASONING", pol.ProReasoning); err != nil {
+			return nil, err
+		}
+	}
 	return &Client{
 		wire:          wire,
 		log:           log,
 		pro:           cfg.Pro,
 		shortGate:     cfg.ShortGate,
+		policy:        pol,
 		turnMaxTokens: cfg.TurnMaxTokens,
 	}, nil
+}
+
+// checkReasoning refuses a reasoning setting the lane's model cannot honour.
+// ReasoningDefault always passes: it sends nothing. ReasoningOff on a model
+// that cannot stop thinking, and a level outside the model's set, name the
+// variable and what the model accepts.
+func checkReasoning(reg *llmwire.Registry, model, variable, value string) error {
+	if value == ReasoningDefault {
+		return nil
+	}
+	p, err := reg.Lookup(model)
+	if err != nil {
+		return err
+	}
+	r := p.Reasoning
+	if !r.Supported {
+		// A model that never reasons already satisfies "do not reason", and
+		// llmwire sends nothing for it; only a level asks for what is not there.
+		if value == ReasoningOff {
+			return nil
+		}
+		return fmt.Errorf("llm: %s=%q, but %s has no reasoning control; use %s", variable, value, model, ReasoningDefault)
+	}
+	if value == ReasoningOff {
+		if !r.CanBeDisabled {
+			return fmt.Errorf("llm: %s=%s, but %s cannot stop thinking; use %s or one of %v", variable, value, model, ReasoningDefault, r.EffortValues)
+		}
+		return nil
+	}
+	if !r.Accepts(value) {
+		return fmt.Errorf("llm: %s=%q is not a level %s accepts; it takes %v, %s or %s", variable, value, model, r.EffortValues, ReasoningOff, ReasoningDefault)
+	}
+	return nil
+}
+
+// sameHost checks that both lanes are served by the provider the client was
+// built for. A provider is one host in llmwire, so equal providers is the
+// whole test; a model routed through the gateway by LLMWIRE_LITELLM_MODELS
+// shows up here as the gateway's provider, which is what makes "both lanes
+// through the gateway" and "both lanes at the vendor" pass and a mix fail.
+func sameHost(reg *llmwire.Registry, pro, gate string) error {
+	p, err := reg.Lookup(pro)
+	if err != nil {
+		return err
+	}
+	g, err := reg.Lookup(gate)
+	if err != nil {
+		return err
+	}
+	if p.Provider != g.Provider {
+		return fmt.Errorf("llm: %s is served by %q and %s by %q; both lanes must share one host (list both in %s, or neither)",
+			pro, p.Provider, gate, g.Provider, llmwire.GatewayModelsEnv)
+	}
+	return nil
 }
 
 func resolve(opts []Option) callOptions {
@@ -362,23 +508,44 @@ func resolve(opts []Option) callOptions {
 	return o
 }
 
-// request renders what one call sends. Thinking is left at the deployment's
-// default — on — unless the call switched it off; temperature is omitted
-// unless a call names one, so the endpoint's own default keeps applying to
-// everything that does not care.
+// request renders what one call sends. A call site says what it means: a
+// pinned temperature is "a re-roll here is a defect", thinking off is "this
+// is a gate call, the output is an id or a label". What that means on the
+// wire is the Policy's to say, because it was tuned on MiMo (pin at 0, no
+// thought) and another model has other answers: the policy may send a
+// different pin, no pin, an effort level, or leave the model's default.
+//
+// Those knobs are preferences, not requirements: a model that refuses one
+// (the gpt-5 series answers any temperature but its default with a 400; some
+// models cannot stop thinking) is still the model the deployment chose.
+// BestEffort tells llmwire to send the nearest request it accepts, with a
+// warning that warn logs, instead of failing the call before it leaves. It
+// is set only when a knob is present, so a call that asks for nothing
+// special keeps llmwire's strict validation.
 func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	req := llmwire.ChatRequest{
-		Model:       c.deployment(o.model),
-		Messages:    make([]llmwire.Message, 0, len(msgs)),
-		MaxTokens:   &o.maxTokens,
-		Temperature: o.temperature,
+		Model:     c.deployment(o.model),
+		Messages:  make([]llmwire.Message, 0, len(msgs)),
+		MaxTokens: &o.maxTokens,
 	}
 	for _, m := range msgs {
 		req.Messages = append(req.Messages, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
 	}
-	if o.thinkingOff {
-		req.Reasoning = llmwire.ReasoningOff()
+	if o.temperature != nil {
+		req.Temperature = c.policy.GateTemperature
 	}
+	reasoning := c.policy.ProReasoning
+	if o.thinkingOff {
+		reasoning = c.policy.GateReasoning
+	}
+	switch reasoning {
+	case ReasoningDefault:
+	case ReasoningOff:
+		req.Reasoning = llmwire.ReasoningOff()
+	default:
+		req.Reasoning = llmwire.ReasoningEffort(reasoning)
+	}
+	req.BestEffort = req.Temperature != nil || req.Reasoning != nil
 	if o.jsonObject {
 		req.ResponseFormat = llmwire.ResponseFormat{Kind: llmwire.FormatJSONObject}
 	}
@@ -387,8 +554,19 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 
 // warn logs what llmwire could not send as asked. Debug, because a warning
 // here is a request the wire coerced and still sent, not a failed call.
-func (c *Client) warn(ws []llmwire.Warning) {
+func (c *Client) warn(model string, ws []llmwire.Warning) {
 	for _, w := range ws {
+		// A knob the model refused and BestEffort rewrote is the one warning
+		// that changes what the model was asked: a gate call pinned at 0 ran
+		// at the model's forced value, or thought when it was told not to.
+		// Once per model and feature at Warn, so a deployment whose model
+		// does that is told at the first question and not on every line.
+		if w.Kind == llmwire.WarnUnsupported {
+			if _, seen := c.demoted.LoadOrStore(model+"\x00"+w.Feature, true); !seen {
+				c.log.Warn("llm: request knob refused by the model, sent without it", "model", model, "feature", w.Feature, "details", w.Details)
+			}
+			continue
+		}
 		c.log.Debug("llm: wire warning", "kind", w.Kind, "feature", w.Feature, "details", w.Details)
 	}
 }
@@ -404,7 +582,7 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	// generating.
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
-	c.warn(warnings)
+	c.warn(c.deployment(o.model), warnings)
 	if err != nil {
 		return "", Usage{}, err
 	}
@@ -431,7 +609,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
-	c.warn(warnings)
+	c.warn(c.deployment(o.model), warnings)
 	if err != nil {
 		return Usage{}, err
 	}
