@@ -129,8 +129,11 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 			return fmt.Errorf("index %s/%s chunk %d: SearchText is empty while RawText is not; "+
 				"the keyword lane would silently index the unstripped source", repo, path, c.Ordinal)
 		}
+		// AuxText rides along in the second column: the header and the words
+		// inside the identifiers, derived from SearchText, so a stripped
+		// comment cannot reach the lane through it either.
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?, ?)`, id, c.SearchText); err != nil {
+			`INSERT INTO chunks_fts (rowid, raw_text, aux) VALUES (?, ?, ?)`, id, c.SearchText, c.AuxText); err != nil {
 			return fmt.Errorf("index %s/%s chunk %d keywords: %w", repo, path, c.Ordinal, err)
 		}
 	}

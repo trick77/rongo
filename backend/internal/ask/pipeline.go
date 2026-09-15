@@ -289,7 +289,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if len(pin) > 0 {
 		scopedQuestion = ""
 	}
-	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known, declared.Prefixes(stage))
+	hits, err := p.searchScoped(ctx, scopedQuestion, texts, u.CodeText(), known, declared.Prefixes(stage))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -724,16 +724,16 @@ func gatherDetail(sources []Source, budget int) map[string]any {
 // searchK per repository, not searchK divided among them: each side gets the
 // same depth it would have got as the only named one, and gather applies no
 // cap to hits by design.
-func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
-		return p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: question, K: searchK, Stage: stage})
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, K: searchK, Stage: stage})
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
 		// Question is left out on purpose: it names every one of these
 		// repositories, and knownRepos would union them all back in, undoing
 		// the one-repository-at-a-time cut this exists for.
-		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK, Stage: stage})
+		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, K: searchK, Stage: stage})
 		if err != nil {
 			return nil, err
 		}
@@ -821,14 +821,14 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// question is left out for the reason the single-repository search
 		// left it out — knownRepos would union the other repositories back in
 		// and undo the choice.
-		hits, err = p.searchScoped(ctx, "", texts, known, stage)
+		hits, err = p.searchScoped(ctx, "", texts, u.CodeText(), known, stage)
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
 	} else {
 		ev.status("searching")
 		var err error
-		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Question: question, K: searchK, Stage: stage})
+		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, K: searchK, Stage: stage})
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}

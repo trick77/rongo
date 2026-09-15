@@ -112,6 +112,39 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// auxWeightFromEnv reads BACKEND_EVAL_FTS_AUX, the harness-only switch for the
+// keyword lane's aux column: "0" restricts every MATCH to the source column,
+// which is the lane exactly as it was before the column existed, and anything
+// above zero is the bm25 weight aux counts at. Unset is the shipped value, so
+// an arm that says nothing measures the product.
+//
+// A harness toggle, deliberately not a BACKEND_* deployment setting: the value
+// this names is decided by the measurement, and until it is decided nobody
+// should be able to change the lane by exporting a variable.
+func auxWeightFromEnv(t *testing.T) float64 {
+	t.Helper()
+	v := os.Getenv("BACKEND_EVAL_FTS_AUX")
+	if v == "" {
+		return retrieve.DefaultAuxWeight
+	}
+	w, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		t.Fatalf("BACKEND_EVAL_FTS_AUX = %q, want a number", v)
+	}
+	return w
+}
+
+// evalRetriever is the product's retriever under the harness's aux switch, so
+// every arm in this package can be run with the column on or off and the two
+// tables are comparable. Arms that configure more — a reranker, a decay — set
+// it on top of this.
+func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
+	t.Helper()
+	r := retrieve.New(db, evalEmbedder(t))
+	r.AuxWeight = auxWeightFromEnv(t)
+	return r
+}
+
 // embedDim is the product's: embed.Model's width from its profile. The
 // harness has no model of its own to pick.
 func embedDim(t *testing.T) int {

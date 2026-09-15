@@ -126,7 +126,7 @@ func TestFlowGathered(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	retriever := retrieve.New(db, evalEmbedder(t))
+	retriever := evalRetriever(t, db)
 	expansions := loadFlowExpansions(t)
 	questions := loadFlowQuestions(t)
 	deployed := gatherOpts(t)
@@ -142,7 +142,7 @@ func TestFlowGathered(t *testing.T) {
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
 	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
-		reranked = retrieve.New(db, evalEmbedder(t))
+		reranked = evalRetriever(t, db)
 		reranked.Candidates = 60
 		reranked.Reranker = evalReranker(t, evalLLM(t, 2*time.Minute))
 		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})

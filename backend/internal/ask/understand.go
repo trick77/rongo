@@ -96,6 +96,18 @@ func (u Understanding) SearchTexts(question string) []string {
 	return texts
 }
 
+// CodeText is the guessed code vocabulary as one text, which is the entry
+// SearchTexts puts last. It is handed to the retriever by name so the keyword
+// lane can weigh a rung over guessed IDENTIFIERS differently from the same rung
+// over the question's prose; empty when the step guessed none.
+func (u Understanding) CodeText() string {
+	code := strings.Join(u.CodeTerms, " ")
+	if strings.TrimSpace(code) == "" {
+		return ""
+	}
+	return code
+}
+
 // Understander runs the first step.
 type Understander struct {
 	llm *llm.Client

@@ -18,7 +18,6 @@ func TestEvalMeasureRerank(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 	client := llmClientForRouting(t)
-	embedder := evalEmbedder(t)
 	expansions := loadExpansions(t)
 	opts := gatherOpts(t)
 	g := ask.NewGatherer(db, opts)
@@ -27,8 +26,8 @@ func TestEvalMeasureRerank(t *testing.T) {
 		name string
 		r    *retrieve.Retriever
 	}
-	plain := retrieve.New(db, embedder)
-	reranked := retrieve.New(db, embedder)
+	plain := evalRetriever(t, db)
+	reranked := evalRetriever(t, db)
 	reranked.Candidates = 60
 	reranked.Reranker = evalReranker(t, client)
 	arms := []arm{{"fused order (the product)", plain}, {"fused order + short-gate rerank over 60", reranked}}

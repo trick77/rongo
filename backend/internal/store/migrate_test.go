@@ -114,6 +114,71 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 	}
 }
 
+// TestMigrate_0024RebuildsTheKeywordLaneWithAnAuxColumn walks 0024 over a
+// database that already holds indexed content, which is the only state it has
+// to be right in. A fresh database applies it to an empty chunks table and
+// proves nothing about the backfill or about the forced re-index.
+//
+// The pre-0024 state is rebuilt by hand rather than by pinning the runner to a
+// version: Migrate has no "up to here", and a test that could stop halfway
+// would be a second, untested code path in the runner.
+func TestMigrate_0024RebuildsTheKeywordLaneWithAnAuxColumn(t *testing.T) {
+	// Given: the schema as it stood before 0024 — one FTS column, a chunk in
+	// it, and a repository parked at an indexed commit.
+	db := openTemp(t)
+	if err := Migrate(db, 1536); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, stmt := range []string{
+		`DELETE FROM schema_migrations WHERE version = '0024_fts_aux.sql'`,
+		`DROP TABLE chunks_fts`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(raw_text)`,
+		`INSERT INTO repo_state (name, clone_url, last_sha) VALUES ('shop', 'file:///shop', 'deadbeef')`,
+		`INSERT INTO files (repo, path, sha, lang) VALUES ('shop', 'src/A.java', 'deadbeef', 'java')`,
+		`INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
+			VALUES (1, 0, 1, 3, 'run', 'enriched', 'void run() { sender.send(); }', 5, 'h1')`,
+		`INSERT INTO chunks_fts (rowid, raw_text) SELECT id, raw_text FROM chunks`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("rebuild the pre-0024 state (%s): %v", stmt, err)
+		}
+	}
+
+	// When
+	if err := Migrate(db, 1536); err != nil {
+		t.Fatalf("migrate 0024: %v", err)
+	}
+
+	// Then: the second column exists ...
+	var cols int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('chunks_fts') WHERE name = 'aux'`).Scan(&cols); err != nil {
+		t.Fatalf("pragma chunks_fts: %v", err)
+	}
+	if cols != 1 {
+		t.Error("chunks_fts has no aux column after 0024")
+	}
+
+	// ... the row survived the rebuild, so the keyword lane is not silently
+	// empty between the migration and the next poll ...
+	var found int
+	if err := db.QueryRow(`SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH 'sender'`).Scan(&found); err != nil {
+		t.Fatalf("match the rebuilt row: %v", err)
+	}
+	if found != 1 {
+		t.Errorf("the rebuilt lane matches %d rows, want the backfilled chunk", found)
+	}
+
+	// ... and every repository is back at "nothing indexed yet", because aux
+	// cannot be derived in SQL and only a full run can write it.
+	var sha string
+	if err := db.QueryRow(`SELECT last_sha FROM repo_state WHERE name = 'shop'`).Scan(&sha); err != nil {
+		t.Fatalf("read last_sha: %v", err)
+	}
+	if sha != "" {
+		t.Errorf("last_sha = %q, want it cleared — an incremental poll never re-chunks an unchanged file", sha)
+	}
+}
+
 func TestOpen_enablesWALAndForeignKeys(t *testing.T) {
 	db := openTemp(t)
 
