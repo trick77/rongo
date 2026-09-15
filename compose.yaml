@@ -101,6 +101,13 @@ services:
       # Passed through even when unset so adding a private repo later is a
       # .env edit, not a compose edit.
       BACKEND_FORGE_TOKEN_GITHUB: ${BACKEND_FORGE_TOKEN_GITHUB:-}
+      BACKEND_FORGE_TOKEN_BITBUCKET: ${BACKEND_FORGE_TOKEN_BITBUCKET:-}
+      # An ssh remote's key and known_hosts, and a CA for a forge behind an
+      # internal one. Passed through verbatim, so the values in .env are
+      # paths INSIDE the container: ./git-auth is mounted at /git-auth below.
+      BACKEND_GIT_SSH_KEY: ${BACKEND_GIT_SSH_KEY:-}
+      BACKEND_GIT_SSH_KNOWN_HOSTS: ${BACKEND_GIT_SSH_KNOWN_HOSTS:-}
+      BACKEND_GIT_CA_FILE: ${BACKEND_GIT_CA_FILE:-}
       # Repo-relative globs kept out of the index; see .env.example.
       BACKEND_INDEX_EXCLUDE: ${BACKEND_INDEX_EXCLUDE:-docs/plans/**}
       BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
@@ -113,6 +120,12 @@ services:
       # is simply a missing file. Read-only keeps rongo from ever rewriting
       # what an operator maintains by hand; the list carries no secrets.
       - ./conf:/conf:ro
+      # Same shape for the same reason: the key, known_hosts and CA bundle
+      # named by BACKEND_GIT_* live here, and a missing one is a missing file.
+      # The key must be readable by uid 1000 and nobody else (chmod 600), or
+      # ssh refuses it; known_hosts comes from
+      # `ssh-keyscan -p 7999 bitbucket.example.com > git-auth/known_hosts`.
+      - ./git-auth:/git-auth:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/rongo", "-healthcheck"]
       interval: 30s

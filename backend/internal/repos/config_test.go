@@ -614,3 +614,129 @@ func TestLoad_theExampleFileLoads(t *testing.T) {
 		t.Errorf("specs[0].CloneURL = %q, want the public remote", specs[0].CloneURL)
 	}
 }
+
+func TestLoad_acceptsAFullSSHURLWithAPort(t *testing.T) {
+	// Given: Bitbucket Data Center serves ssh on 7999, so its remote is a
+	// full ssh:// URL rather than the scp-style form. The port after the
+	// host must not read as a userinfo colon.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "ssh://git@bitbucket.example.invalid:7999/shop/backend.git"
+`)
+
+	specs, err := Load(path)
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil for an ssh:// remote with a port", err)
+	}
+	if len(specs) != 1 {
+		t.Fatalf("len(specs) = %d, want 1", len(specs))
+	}
+}
+
+func TestLoad_carriesTokenUserForAnHTTPSRemote(t *testing.T) {
+	// Given: a Bitbucket project token, which the forge only accepts under
+	// the username x-token-auth.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://bitbucket.example.invalid/scm/shop/backend.git
+        token_env: BACKEND_FORGE_TOKEN_BITBUCKET
+        token_user: " x-token-auth "
+`)
+
+	specs, err := Load(path)
+
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if specs[0].TokenUser != "x-token-auth" {
+		t.Errorf("TokenUser = %q, want %q", specs[0].TokenUser, "x-token-auth")
+	}
+}
+
+func TestLoad_rejectsTokenEnvOnAnSSHRemote(t *testing.T) {
+	// Given: a token is only ever injected into an https URL, so on an ssh
+	// remote token_env was a silent no-op: the entry looked configured and
+	// fetched with whatever key the process had.
+	for _, url := range []string{
+		"ssh://git@bitbucket.example.invalid:7999/shop/backend.git",
+		"git@github.com:acme/repo.git",
+	} {
+		path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: "`+url+`"
+        token_env: BACKEND_FORGE_TOKEN
+`)
+
+		_, err := Load(path)
+
+		if err == nil {
+			t.Errorf("Load() err = nil for %s, want a refusal of token_env on an ssh remote", url)
+		}
+	}
+}
+
+func TestLoad_rejectsTokenUserWithoutTokenEnv(t *testing.T) {
+	// Given: a username with no token to send it with is declared and does
+	// nothing, the same shape KnownFields refuses one level up.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://bitbucket.example.invalid/scm/shop/backend.git
+        token_user: x-token-auth
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of token_user without token_env")
+	}
+}
+
+func TestLoad_rejectsATokenPastedAsTokenUser(t *testing.T) {
+	// Given: the username field is the one place left on the entry where a
+	// pasted secret would be accepted as text.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://bitbucket.example.invalid/scm/shop/backend.git
+        token_env: BACKEND_FORGE_TOKEN
+        token_user: ghp_realtokenvalue
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of a token in token_user")
+	}
+}
+
+func TestLoad_rejectsTokenUserOnASnapshot(t *testing.T) {
+	path := writeYAML(t, `
+projects:
+  - name: acme
+    repositories:
+      - name: acme-core
+        snapshot: true
+        token_user: x-token-auth
+`)
+
+	_, err := Load(path)
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of token_user on a snapshot")
+	}
+}

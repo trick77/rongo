@@ -92,6 +92,26 @@ projects:
   #      clone_url: https://github.com/trick77/peeq.git
   #      token_env: BACKEND_FORGE_TOKEN_GITHUB
 
+  # Bitbucket Data Center over https. Unlike GitHub it checks the username
+  # the token comes with: a project or repository HTTP access token is only
+  # accepted as x-token-auth, a personal one as the user's own name. Omitted,
+  # it is x-access-token, which GitHub takes and Bitbucket refuses.
+  #- name: billing
+  #  repositories:
+  #    - name: billing
+  #      clone_url: https://bitbucket.example.invalid/scm/bill/billing.git
+  #      token_env: BACKEND_FORGE_TOKEN_BITBUCKET
+  #      token_user: x-token-auth
+
+  # The same over ssh, on the 7999 Bitbucket Data Center serves it on. No
+  # token_env: an ssh remote authenticates with the key and known_hosts named
+  # by BACKEND_GIT_SSH_KEY and BACKEND_GIT_SSH_KNOWN_HOSTS, and naming a
+  # token here is refused rather than silently ignored.
+  #- name: billing
+  #  repositories:
+  #    - name: billing
+  #      clone_url: ssh://git@bitbucket.example.invalid:7999/bill/billing.git
+
   # Deliberately NOT listed, so the "the boundary is named" invariant is
   # exercised in daily use and not only in tests:
   #   asg017/sqlite-vec

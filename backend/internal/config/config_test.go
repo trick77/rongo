@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +28,10 @@ var allBackendEnvVars = []string{
 	"BACKEND_INDEX_EXCLUDE",
 	"BACKEND_REPOS_FILE",
 	"BACKEND_FORGE_TOKEN_GITHUB",
+	"BACKEND_FORGE_TOKEN_BITBUCKET",
+	"BACKEND_GIT_SSH_KEY",
+	"BACKEND_GIT_SSH_KNOWN_HOSTS",
+	"BACKEND_GIT_CA_FILE",
 	"LLMWIRE_OPENAI_BASE_URL",
 	"LLMWIRE_OPENAI_API_KEY",
 	"LLMWIRE_MIMO_BASE_URL",
@@ -434,5 +441,61 @@ func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Load() err = nil, want an error about an unknown auth mode")
+	}
+}
+
+func TestLoad_gitAuthFilesMustExist(t *testing.T) {
+	// Given: a key, a known_hosts and a CA that are all there. The check is
+	// at boot rather than at the first ssh fetch, where a missing file reads
+	// as one repository's error instead of the deployment's.
+	dir := t.TempDir()
+	for _, name := range []string{"key", "known_hosts", "ca.pem"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setEnv(t, map[string]string{
+		"BACKEND_GIT_SSH_KEY":         filepath.Join(dir, "key"),
+		"BACKEND_GIT_SSH_KNOWN_HOSTS": filepath.Join(dir, "known_hosts"),
+		"BACKEND_GIT_CA_FILE":         filepath.Join(dir, "ca.pem"),
+	})
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil with every file present", err)
+	}
+	if cfg.GitSSHKey != filepath.Join(dir, "key") || cfg.GitCAFile != filepath.Join(dir, "ca.pem") {
+		t.Errorf("git auth paths not carried: %+v", cfg)
+	}
+
+	// And: one of them gone fails the boot by name.
+	setEnv(t, map[string]string{
+		"BACKEND_GIT_SSH_KEY":         filepath.Join(dir, "key"),
+		"BACKEND_GIT_SSH_KNOWN_HOSTS": filepath.Join(dir, "missing"),
+	})
+
+	_, err = Load()
+
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_GIT_SSH_KNOWN_HOSTS") {
+		t.Fatalf("Load() err = %v, want a refusal naming BACKEND_GIT_SSH_KNOWN_HOSTS", err)
+	}
+}
+
+func TestLoad_sshKeyAndKnownHostsComeTogether(t *testing.T) {
+	// Given: a key alone. Host-key checking is strict against the named
+	// file, so a key with no known_hosts fails every ssh remote later.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "key"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setEnv(t, map[string]string{
+		"BACKEND_GIT_SSH_KEY": filepath.Join(dir, "key"),
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal of a key without known_hosts")
 	}
 }

@@ -49,6 +49,9 @@ backend/web/dist/*
 # secrets and is re-included.
 .env.*
 !.env.example
+# The ssh key, known_hosts and CA bundle compose mounts for git. The key is
+# a credential in the plainest sense.
+/git-auth/
 
 # ---------- Test & coverage output ----------
 coverage/

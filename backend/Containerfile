@@ -28,10 +28,14 @@ RUN CGO_ENABLED=0 go build \
 # Deliberately NOT distroless: rongo shells out to git, ripgrep and
 # universal-ctags, all of which need a real userland.
 FROM debian:13-slim
+# The passwd entry is for ssh, which looks its own uid up and exits 255 ("No
+# user exists for uid 1000") when nothing is there, even though the key and
+# known_hosts are named explicitly and the home directory is never read.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates git ripgrep universal-ctags \
- && rm -rf /var/lib/apt/lists/*
+      ca-certificates git openssh-client ripgrep universal-ctags \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 1000 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin rongo
 COPY --from=build /out/rongo /usr/local/bin/rongo
 USER 1000:1000
 EXPOSE 8080
