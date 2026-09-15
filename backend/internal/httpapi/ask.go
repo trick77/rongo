@@ -28,15 +28,18 @@ type Asker interface {
 	// narrowed to, and the last question it answered. Zero for a first turn.
 	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 	// Resume continues a turn from the hits one clarification candidate was
-	// built from — no search, no routing.
-	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+	// built from — no search, no routing. followingUp is the question this
+	// thread answered last: a turn answered through a card is still a turn of
+	// the thread, and a follow-up knows what it follows.
+	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language,
+		hits []retrieve.Hit, scope ask.Scope, followingUp string, ev ask.Events) (ask.Answer, error)
 	// ResumeRepo continues a turn after the reader chose a REPOSITORY off a
 	// card, searching that repository at full depth — or, for an empty repo,
 	// the whole corpus. The one resume path that searches again; see
 	// ask.Pipeline.ResumeRepo for why a repository card cannot replay stored
 	// hits.
 	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repos []string,
-		audience ask.Audience, lang ask.Language, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+		audience ask.Audience, lang ask.Language, scope ask.Scope, followingUp string, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
 	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, scope ask.Scope, ev ask.Events) (ask.Answer, error)
@@ -413,6 +416,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// in — the reader is still in the same conversation, just answering
 		// a question rongo asked.
 		thread = threads.Thread{ID: resume.ThreadID}
+		// And a turn of that conversation can be a follow-up: the card's own
+		// turn wrote no answer, so the last ANSWERED turn is the one the new
+		// question points at. Only the question — the answer prompt never
+		// sees prior prose. A read that fails is logged and treated as no
+		// previous turn, the way the fresh path treats it.
+		if last, ok, err := s.deps.Threads.LastTurn(ctx, u.Subject, resume.ThreadID); err != nil {
+			slog.Error("read last turn failed", "err", err)
+		} else if ok {
+			prior.Question = last.Question
+		}
 	case retryHead != nil:
 		// A retry continues the thread the question was asked in, read off the
 		// turn it retries rather than off the request: the row is what says
@@ -617,9 +630,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		var answer ask.Answer
 		var err error
 		if resumeRepoChoice {
-			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepos, audience, lang, resumeScope, events)
+			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepos, audience, lang, resumeScope, prior.Question, events)
 		} else {
-			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
+			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, prior.Question, events)
 		}
 		if err != nil {
 			turnStopped(ctx, "resumed turn failed", thread.ID, err)

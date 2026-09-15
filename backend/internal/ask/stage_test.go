@@ -111,7 +111,7 @@ func TestResumeRepoSearchesUnderTheCardsStage(t *testing.T) {
 	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{stages: declaredStages})
 
 	_, err := p.ResumeRepo(context.Background(), "q", Understanding{Terms: []string{"t"}}, []string{"acme-infra"},
-		AudienceBA, LanguageEN, Scope{Known: []string{"acme-infra"}, Stage: "intg"}, Events{})
+		AudienceBA, LanguageEN, Scope{Known: []string{"acme-infra"}, Stage: "intg"}, "", Events{})
 	if err != nil {
 		t.Fatalf("ResumeRepo: %v", err)
 	}

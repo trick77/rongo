@@ -261,7 +261,11 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		allDenied = all
 		all = false
 	}
-	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all, Stage: stage}
+	// The intent travels in the scope rather than as an argument of its own:
+	// it is part of the record, so a resumed turn reads it off the stored
+	// clarification and a re-explained one off the stored row.
+	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all,
+		Stage: stage, Intent: u.Intent}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -760,8 +764,16 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 // candidate's own hits ARE the search result now — and gathers only from
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
-func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
-	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, "", ev)
+//
+// followingUp is the question this thread answered last, empty when there is
+// none. A turn that went through a card is still a turn of the thread, and
+// the reader who typed "und wo wird das entschieden?" gets it answered by a
+// clarification and then by an answer: without this the answer prompt loses
+// the rule that says what "das" points at.
+func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language,
+	hits []retrieve.Hit, scope Scope, followingUp string, ev Events) (Answer, error) {
+
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, followingUp, ev)
 }
 
 // ResumeRepo continues a turn after the reader chose a REPOSITORY off a
@@ -785,8 +797,10 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // back in there because knownRepos may narrow on what it names; in the scoped
 // case it is left out for the reason searchScoped gives, or the other
 // repositories would be unioned straight back in.
+// followingUp is what Resume's is: the question this thread answered last,
+// empty when there is none.
 func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repos []string,
-	audience Audience, lang Language, scope Scope, ev Events) (Answer, error) {
+	audience Audience, lang Language, scope Scope, followingUp string, ev Events) (Answer, error) {
 
 	texts := u.SearchTexts(question)
 	stage := p.declaredStages(ctx).Prefixes(scope.Stage)
@@ -847,7 +861,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
 	}
 
-	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
+	return p.answer(ctx, question, audience, lang, sources, scope, followingUp, ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -867,5 +881,9 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	// the project structure missing — the two-backends disambiguation present
 	// in the first answer and gone from the second.
 	scope = p.describeProjects(ctx, scope)
+	// No follow-up rule, on purpose: a re-explain answers the SAME question
+	// again for the other audience, and the first answer is right above it in
+	// the thread. Telling the model not to restate what was already explained
+	// would forbid the one thing this path exists to do.
 	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
 }

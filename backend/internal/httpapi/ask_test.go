@@ -37,6 +37,9 @@ type fakeAsker struct {
 	// test can check the handler carried it over from the stored message
 	// rather than starting the turn with none.
 	gotScope ask.Scope
+	// gotFollowingUp is the previous question a resumed turn was handed, so a
+	// test can check the follow-up rule survives a clarification card.
+	gotFollowingUp string
 	// calls is what the fake "pays for" before it decides how the turn ends,
 	// recorded into the meter on the context the way the real clients do.
 	calls []usage.Call
@@ -114,10 +117,13 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 
 // Resume answers from the candidate's own hits — it never searches, which is
 // the whole point of a resumed turn.
-func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []retrieve.Hit, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang ask.Language,
+	_ []retrieve.Hit, gotScope ask.Scope, followingUp string, ev ask.Events) (ask.Answer, error) {
+
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	f.gotFollowingUp = followingUp
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}
@@ -140,11 +146,12 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 // repository again rather than replaying stored hits, so the fake records
 // which repository it was handed.
 func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understanding, repos []string,
-	aud ask.Audience, lang ask.Language, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+	aud ask.Audience, lang ask.Language, gotScope ask.Scope, followingUp string, ev ask.Events) (ask.Answer, error) {
 
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	f.gotFollowingUp = followingUp
 	f.resumedRepos = repos
 	f.resumedRepo = ""
 	if len(repos) > 0 {
@@ -1232,6 +1239,49 @@ func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 		t.Errorf("new turn records candidate %d, want 1", last.FromCandidateIdx)
 	}
 	_ = clarID
+}
+
+// TestAResumedTurnKnowsWhatItFollows: a follow-up answered through a
+// clarification card is still a follow-up. The card's own turn wrote no
+// answer, so the previous ANSWERED question is the one the resumed turn points
+// at — without it the answer prompt loses the rule that says what "das" means,
+// and the reader gets an answer to the four words they typed.
+func TestAResumedTurnKnowsWhatItFollows(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "wie wird die Anmeldung gemacht?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	first, err := store.AddQuestion(ctx, th.ID, "ba", "de", "wie wird die Anmeldung gemacht?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := store.Finish(ctx, first.ID, "Über OAuth.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	second, err := store.AddQuestion(ctx, th.ID, "ba", "de", "und wo wird das entschieden?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := store.Clarify(ctx, second.ID, ask.Clarification{
+		Candidates: []ask.Candidate{
+			{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
+				Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
+			{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
+				Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
+		},
+	}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"und wo wird das entschieden?","clarification_message_id":%d,"choice":1}`, second.ID))
+
+	if asker.gotFollowingUp != "wie wird die Anmeldung gemacht?" {
+		t.Errorf("followingUp = %q, want the last ANSWERED question of the thread", asker.gotFollowingUp)
+	}
 }
 
 // TestChoosingARepositorySearchesItAgainRatherThanReplayingHits: a repository
