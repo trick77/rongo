@@ -6,6 +6,7 @@ package eval
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -29,9 +30,13 @@ func TestEvalMeasureRerank(t *testing.T) {
 	}
 	plain := retrieve.New(db, embedder)
 	reranked := retrieve.New(db, embedder)
-	reranked.Candidates = 60
-	reranked.Reranker = evalReranker(t, client)
-	arms := []arm{{"fused order (the product)", plain}, {"fused order + short-gate rerank over 60", reranked}}
+	// The pool is the reranker's; searchTexts lifts the lanes to it.
+	rr := evalReranker(t, client)
+	reranked.Reranker = rr
+	arms := []arm{
+		{"fused order (the product)", plain},
+		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts", rr.Pool, rr.Excerpt), reranked},
+	}
 
 	questions := loadQuestions(t)
 	for _, a := range arms {
