@@ -209,6 +209,11 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 		// expansion did not help" rather than as "the expansion never ran".
 		return Understanding{}, fmt.Errorf("understand the question: reply was not JSON: %w", err)
 	}
+	// Normalised once, here, because everything downstream compares it to a
+	// word: the answer prompt looks the intent up in a table, and "Where " is
+	// the same reading as "where". A word the table does not carry is left
+	// alone — it reaches the trace, where a reader sees what the model said.
+	got.Intent = strings.ToLower(strings.TrimSpace(got.Intent))
 	return got, nil
 }
 

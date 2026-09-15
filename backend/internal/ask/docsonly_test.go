@@ -182,7 +182,7 @@ func TestResumedTurnSaysItStoodOnDocumentationAlone(t *testing.T) {
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
 	got, err := p.Resume(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
-		docOnlyHits(), Scope{}, "", Events{OnNotice: func(text string) { notices = append(notices, text) }})
+		docOnlyHits(), Scope{}, Thread{}, Events{OnNotice: func(text string) { notices = append(notices, text) }})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
