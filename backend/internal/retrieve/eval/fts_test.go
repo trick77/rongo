@@ -84,12 +84,24 @@ func TestEvalMeasureFTS(t *testing.T) {
 	// The code rung is a second, independent change: it reweighs the OR floor
 	// of the code-terms text. Measured only when asked for, so the column's own
 	// number is never read off a run that moved two things.
+	//
+	// And it gets BOTH arms when it runs, aux off and aux on. The first run
+	// measured the column alone as a wash (r@5, r@20 and the gathered rate
+	// unmoved, mean rank 2.72 -> 2.92) and the pair as a gain of one at 20, one
+	// gathered and one ambiguous pair — which the pair alone cannot attribute:
+	// the rung on its own is the arm that says whether the column contributed
+	// anything to that at all.
 	codeLane := envOr("BACKEND_EVAL_CODE_LANE", "0") == "1"
 	if codeLane {
+		code := retrieve.New(db, evalEmbedder(t))
+		code.AuxWeight = 0
+		code.CodeWeight = retrieve.WeightKeywordCode
 		both := retrieve.New(db, evalEmbedder(t))
 		both.AuxWeight = retrieve.DefaultAuxWeight
 		both.CodeWeight = retrieve.WeightKeywordCode
-		arms = append(arms, ftsArm{"aux 0.5 + code rung 0.8", both})
+		arms = append(arms,
+			ftsArm{"aux off + code rung 0.8", code},
+			ftsArm{"aux 0.5 + code rung 0.8", both})
 	}
 
 	ranks := make([]map[string]int, len(arms))
@@ -151,6 +163,10 @@ func TestEvalMeasureFTS(t *testing.T) {
 						compAll++
 					}
 				}
+				// Per question here too, not just in the unique cohort: a gain
+				// of one ambiguous pair is a claim about ONE question, and
+				// without the line nothing in the output says which.
+				t.Logf("  %-9s %d/%d gathered %s", q.Resolution, found, len(q.Candidates), short(q.Text))
 				continue
 			}
 
