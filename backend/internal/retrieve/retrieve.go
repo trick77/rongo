@@ -88,11 +88,6 @@ type Retriever struct {
 	// DocDecay cuts a documentation hit's fused score; see DefaultDocDecay.
 	// Reads its zero the way TestDecay does.
 	DocDecay float64
-	// AuxWeight is how far below the source column the keyword lane's aux
-	// column counts; see DefaultAuxWeight. Zero — and so a struct-literal
-	// Retriever — restricts every MATCH to the source column, which is the
-	// lane exactly as it was before aux existed.
-	AuxWeight float64
 	// CodeWeight, when above zero, gives the OR rung of the CODE-TERMS text a
 	// weight of its own instead of the prose floor; see WeightKeywordCode.
 	// Zero is off, which is what ships until the measurement names a value.
@@ -113,7 +108,6 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		RepoDecay:   DefaultRepoDecay,
 		TestDecay:   DefaultTestDecay,
 		DocDecay:    DefaultDocDecay,
-		AuxWeight:   DefaultAuxWeight,
 	}
 }
 
@@ -616,16 +610,20 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 	// queries against a single file.
 	for _, text := range usable {
 		for _, tier := range BuildFTSQueries(text) {
-			weight := tier.Weight
+			weight, name := tier.Weight, laneName(tier.Weight)
 			// The OR floor of the code-terms text is not the same claim as the
 			// OR floor of the question's prose: "one of these words appears
 			// here" says more when the words are guessed identifiers. Only the
 			// floor — the rungs above it already require every term, and there
 			// the source of the words changes nothing.
+			//
+			// The label is set HERE, not derived from the weight afterwards: a
+			// swept CodeWeight of 0.7 would otherwise report itself as the
+			// prefix rung and a sweep would read as four rungs moving.
 			if text == code && weight == WeightKeywordAny && r.CodeWeight > 0 {
-				weight = r.CodeWeight
+				weight, name = r.CodeWeight, "keyword:code"
 			}
-			hits, err := r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage, r.AuxWeight)
+			hits, err := r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage)
 			if err != nil {
 				return nil, err
 			}
@@ -633,7 +631,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 				continue
 			}
 			lanes = append(lanes, Lane{
-				Name:   laneName(weight),
+				Name:   name,
 				Hits:   hits,
 				Weight: weight,
 			})
@@ -657,6 +655,10 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 // laneName labels a keyword rung by what it means, so a result can explain
 // itself: "this chunk contains every word you typed" is a different claim from
 // "this chunk contains one of them".
+//
+// Only the four fixed rungs. The code rung is named where it is built, because
+// its weight is a configured value under a sweep and a switch on the number
+// would relabel the rung whenever the sweep passed another rung's constant.
 func laneName(weight float64) string {
 	switch weight {
 	case WeightKeywordStrict:
@@ -665,8 +667,6 @@ func laneName(weight float64) string {
 		return "keyword:content"
 	case WeightKeywordPrefix:
 		return "keyword:prefix"
-	case WeightKeywordCode:
-		return "keyword:code"
 	default:
 		return "keyword:any"
 	}

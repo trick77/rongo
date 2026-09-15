@@ -19,6 +19,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 	opts := gatherOpts(t)
 	g := ask.NewGatherer(db, opts)
 
@@ -52,7 +53,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 			if !ok {
 				t.Fatalf("no expansion for %q", q.Text)
 			}
-			hits, err := a.r.Search(ctx, retrieve.Query{Texts: texts, Code: codeTextOf(texts), Question: q.Text, K: gatherSearchK})
+			hits, err := a.r.Search(ctx, retrieve.Query{Texts: texts, Code: codes[q.Text], Question: q.Text, K: gatherSearchK})
 			if err != nil {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}

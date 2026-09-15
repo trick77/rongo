@@ -28,16 +28,7 @@ type Chunk struct {
 	// SearchText is what the keyword lane indexes. It equals RawText unless
 	// comments were stripped, in which case RawText still holds the untouched
 	// source: a citation must quote the real file, never a doctored one.
-	SearchText string
-	// AuxText is the keyword lane's second column: the repo/path header, the
-	// symbol breadcrumb and the words inside this chunk's identifiers. None of
-	// it is in SearchText — the header lived only in the embedded text, and
-	// unicode61 never splits AbandonedCartJob — so without it the lane cannot
-	// find a chunk by its path or by the words its identifiers are made of.
-	//
-	// Derived, never written by a model, and NOT part of ContentHash: it does
-	// not change what is embedded, so adding it re-embeds nothing.
-	AuxText     string
+	SearchText  string
 	TokenCount  int
 	ContentHash string
 }
@@ -173,7 +164,6 @@ func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, op
 					Text:        text,
 					RawText:     part,
 					SearchText:  searchPart,
-					AuxText:     auxText(repo, path, chain, searchPart),
 					TokenCount:  estimateTokens(text),
 					ContentHash: contentHash(repo, path, chain, searchPart),
 				})
@@ -490,44 +480,6 @@ func enrich(repo, path string, chain []chainPart, raw string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString(raw)
-	return b.String()
-}
-
-// auxText builds the keyword lane's second column:
-//
-//	shop-backend/src/shop/cart/AbandonedCartJob.java
-//	class AbandonedCartJob > method run
-//	abandoned cart job run send sender ...
-//
-// Lines one and two are what enrich puts in front of the EMBEDDED text: they
-// exist nowhere in the keyword lane, so "which file is shop-backend's cart
-// job" could not be answered by it at all. Line three is every identifier of
-// the chunk broken into its words, because the default tokenizer does not.
-//
-// The source of line three is the file name, the breadcrumb names and the
-// SEARCH text — never RawText. Under BACKEND_INDEX_COMMENTS a stripped
-// comment must stay out of every keyword column, or the lane answers from
-// prose through a side door.
-func auxText(repo, path string, chain []chainPart, searchPart string) string {
-	var b strings.Builder
-	b.WriteString(repo)
-	b.WriteString("/")
-	b.WriteString(path)
-	b.WriteString("\n")
-	rendered := renderChain(chain)
-	if rendered != "" {
-		b.WriteString(rendered)
-		b.WriteString("\n")
-	}
-	var words strings.Builder
-	words.WriteString(filepath.Base(path))
-	for _, p := range chain {
-		words.WriteString(" ")
-		words.WriteString(p.name)
-	}
-	words.WriteString(" ")
-	words.WriteString(searchPart)
-	b.WriteString(strings.Join(splitIdentifiers(words.String()), " "))
 	return b.String()
 }
 

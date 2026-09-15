@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/trick77/rongo/internal/store"
@@ -192,43 +191,21 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 // bm25() must name the FTS5 table itself, never the query alias — SQLite
 // resolves it as a hidden column on the virtual table, where aliases are not
 // recognised.
-// The aux column is left out: a caller with no opinion gets the lane as it
-// shipped before aux existed.
 func (s *Store) SearchKeyword(ctx context.Context, match string, n int, repos []string) ([]Hit, error) {
-	return s.SearchKeywordIn(ctx, match, n, repos, nil, 0)
+	return s.SearchKeywordIn(ctx, match, n, repos, nil)
 }
 
-// SearchKeywordIn is SearchKeyword under a stage restriction and with the aux
-// column switched on or off.
-//
-// auxWeight <= 0 restricts the MATCH to raw_text, which is the lane exactly as
-// it was before the column existed — that is what the measurement's baseline
-// arm has to be, not an approximation of it. Above zero the MATCH is
-// unrestricted and bm25 weights the two columns, source first, so a chunk that
-// literally contains the word still outranks one that only has it inside an
-// identifier or in its path.
-//
-// The weight is formatted into the SQL rather than bound: bm25's column weights
-// are function arguments, and SQLite will not take a parameter there. It is a
-// constant of ours and never reaches this from user input.
-func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos []string, stage StagePrefixes, auxWeight float64) ([]Hit, error) {
+// SearchKeywordIn is SearchKeyword under a stage restriction as well.
+func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
 	if strings.TrimSpace(match) == "" {
 		return nil, nil
 	}
 	if n <= 0 {
 		n = 10
 	}
-	// The alias-qualified hidden column is the whole-table MATCH: a bare `x
-	// MATCH ?` is "no such column", and the unaliased table name is out of
-	// reach once the FROM clause renamed it.
-	lhs, order := "x.raw_text", "bm25(chunks_fts)"
-	if auxWeight > 0 {
-		lhs = "x.chunks_fts"
-		order = "bm25(chunks_fts, 1.0, " + strconv.FormatFloat(auxWeight, 'f', -1, 64) + ")"
-	}
 	q := `SELECT ` + hitColumns + `
 		FROM chunks_fts x` + fmt.Sprintf(hitJoins, "x") + `
-		WHERE ` + lhs + ` MATCH ?`
+		WHERE x.raw_text MATCH ?`
 	args := []any{match}
 	if len(repos) > 0 {
 		q += " AND f.repo IN (" + placeholders(len(repos)) + ")"
@@ -237,7 +214,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	stageQ, stageArgs := stage.clause("f")
 	q += stageQ
 	args = append(args, stageArgs...)
-	q += "\n\t\tORDER BY " + order + " LIMIT ?"
+	q += "\n\t\tORDER BY bm25(chunks_fts) LIMIT ?"
 	args = append(args, n)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)

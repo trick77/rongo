@@ -36,6 +36,35 @@ type expansion struct {
 	// is what keeps the phase 2, 3 and 4a numbers comparable. See
 	// TestExpandQuestionRepos.
 	Repos []string `json:"repos,omitempty"`
+	// Code is the understanding's guessed code vocabulary as one text — the
+	// entry SearchTexts puts last — recorded by name so the code rung's input
+	// is a field rather than a position. Optional, like Repos, because the file
+	// predates it: a record frozen before this falls back to reading the third
+	// text, which is what that position meant.
+	Code string `json:"code,omitempty"`
+}
+
+// code is the frozen code text of a record, or the position it used to live at.
+func (e expansion) code() string {
+	if e.Code != "" {
+		return e.Code
+	}
+	return codeTextOf(e.Texts)
+}
+
+// codeTextOf reads the guessed CODE VOCABULARY out of a frozen record's texts,
+// for the records written before the Code field existed.
+//
+// Understanding.SearchTexts emits the raw question, the business-language
+// restatement and the code terms, in that order and dropping a blank one — so
+// three texts means the last is the code terms, and anything shorter means the
+// step guessed none that the texts alone can tell apart from the restatement.
+// Such a question contributes no code rung rather than a guessed one.
+func codeTextOf(texts []string) string {
+	if len(texts) != 3 {
+		return ""
+	}
+	return texts[2]
 }
 
 // readExpansions parses the frozen file, or skips the arm if it is not there.
@@ -57,6 +86,18 @@ func loadExpansions(t *testing.T) map[string][]string {
 	out := map[string][]string{}
 	for _, e := range readExpansions(t) {
 		out[e.Question] = e.Texts
+	}
+	return out
+}
+
+// loadExpansionCodes returns the frozen code text per question, which is what
+// Query.Code carries. A question whose record has none maps to "", the same
+// meaning an Understanding that guessed no identifiers has in pipeline.go.
+func loadExpansionCodes(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, e := range readExpansions(t) {
+		out[e.Question] = e.code()
 	}
 	return out
 }
@@ -121,11 +162,12 @@ func TestExpandQuestions(t *testing.T) {
 			continue
 		}
 		var texts []string
+		var code string
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
 			got, err := u.Understand(context.Background(), q.Text, ask.Thread{}, nil)
 			if err == nil {
-				texts = got.SearchTexts(q.Text)
+				texts, code = got.SearchTexts(q.Text), got.CodeText()
 				break
 			}
 			last = err
@@ -146,7 +188,7 @@ func TestExpandQuestions(t *testing.T) {
 			continue
 		}
 		t.Logf("EXPANDED %-60s -> %v", short(q.Text), texts[1:])
-		out = append(out, refreshTexts(previous[q.Text], q.Text, texts))
+		out = append(out, refreshTexts(previous[q.Text], q.Text, texts, code))
 	}
 
 	body, err := json.MarshalIndent(out, "", "  ")
@@ -198,9 +240,10 @@ func expandOnlyMissing() bool {
 // point of this being a function: Repos is frozen by a separate arm and a
 // rebuild would drop it silently, because "no restriction recorded" and "this
 // question names no repository" look the same to every reader of the file.
-func refreshTexts(prev expansion, question string, texts []string) expansion {
+func refreshTexts(prev expansion, question string, texts []string, code string) expansion {
 	prev.Question = question
 	prev.Texts = texts
+	prev.Code = code
 	return prev
 }
 
@@ -240,7 +283,7 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 		Repos:    []string{"peeq"},
 	}
 
-	got := refreshTexts(prev, prev.Question, []string{"new", "also new"})
+	got := refreshTexts(prev, prev.Question, []string{"new", "also new"}, "PromoMailJob")
 
 	if len(got.Repos) != 1 || got.Repos[0] != "peeq" {
 		t.Errorf("Repos = %v, want the frozen restriction carried forward", got.Repos)
@@ -252,11 +295,38 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 		t.Errorf("Question = %q, want it unchanged", got.Question)
 	}
 
+	if got.Code != "PromoMailJob" {
+		t.Errorf("Code = %q, want the fresh code text", got.Code)
+	}
+
 	// A question that never had a restriction still has none — an empty Repos
 	// must not become a phantom entry.
-	fresh := refreshTexts(expansion{}, "new question", []string{"x"})
+	fresh := refreshTexts(expansion{}, "new question", []string{"x"}, "")
 	if len(fresh.Repos) != 0 {
 		t.Errorf("Repos = %v, want none for a record that never had one", fresh.Repos)
+	}
+	if fresh.Code != "" {
+		t.Errorf("Code = %q, want none when the step guessed no identifiers", fresh.Code)
+	}
+}
+
+// TestExpansionCodeFallsBackToTheThirdText runs WITHOUT an endpoint. The frozen
+// file predates the Code field and is not re-frozen for this, so a record
+// without one has to keep meaning what its third text meant — otherwise the
+// rung silently has no input on every question measured so far.
+func TestExpansionCodeFallsBackToTheThirdText(t *testing.T) {
+	old := expansion{Texts: []string{"question", "restatement", "PromoMailJob dispatchRetry"}}
+	if got := old.code(); got != "PromoMailJob dispatchRetry" {
+		t.Errorf("code() = %q, want the third text of a record frozen before the field", got)
+	}
+	fresh := expansion{Texts: []string{"question", "restatement", "stale position"}, Code: "PromoMailJob"}
+	if got := fresh.code(); got != "PromoMailJob" {
+		t.Errorf("code() = %q, want the recorded field to win over the position", got)
+	}
+	for _, texts := range [][]string{nil, {"question"}, {"question", "restatement"}} {
+		if got := (expansion{Texts: texts}).code(); got != "" {
+			t.Errorf("code() of %v = %q, want no code rung", texts, got)
+		}
 	}
 }
 

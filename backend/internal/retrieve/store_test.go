@@ -173,7 +173,7 @@ func TestSearch_stageRestrictionNarrowsOnlyTheRepositoriesDeclaringIt(t *testing
 			return NewStore(db).SearchVectorIn(context.Background(), queryVec, 10, DefaultMaxDistance, nil, prefixes)
 		},
 		"keyword": func() ([]Hit, error) {
-			return NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, prefixes, 0)
+			return NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, prefixes)
 		},
 		"pipeline": func() ([]Hit, error) {
 			return New(db, fixedEmbedder{vec: queryVec}).Search(context.Background(),
@@ -225,7 +225,7 @@ func TestSearchVector_stageRestrictionIsAPreFilter(t *testing.T) {
 
 func TestSearch_noStageMeansNoRestriction(t *testing.T) {
 	db := stageFixture(t)
-	hits, err := NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, nil, 0)
+	hits, err := NewStore(db).SearchKeywordIn(context.Background(), `"acme" "cron"`, 10, nil, nil)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}

@@ -85,12 +85,16 @@ type Understanding struct {
 // Each text becomes its own semantic lane in retrieve.searchTexts, and the
 // lanes are fused — so an expansion that adds nothing costs a lane, while one
 // that lands pulls its file up through a lane of its own.
+//
+// The last entry is CodeText's, the same string Query.Code carries: the keyword
+// lane finds the code rung by comparing the two, and building the text twice
+// would make that equality a coincidence rather than a fact.
 func (u Understanding) SearchTexts(question string) []string {
 	texts := []string{question}
 	if terms := strings.Join(u.Terms, " "); strings.TrimSpace(terms) != "" {
 		texts = append(texts, terms)
 	}
-	if code := strings.Join(u.CodeTerms, " "); strings.TrimSpace(code) != "" {
+	if code := u.CodeText(); code != "" {
 		texts = append(texts, code)
 	}
 	return texts

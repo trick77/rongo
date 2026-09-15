@@ -1,37 +1,25 @@
-// The identifier arm: does giving the keyword lane a second column — the
-// repo/path header, the symbol breadcrumb and every identifier of the chunk
-// split into words — find code the lane could not reach, and does it cost
-// anything where the lane already worked?
+// The code-rung arm: the keyword lane's recall floor over the GUESSED
+// IDENTIFIERS is a stronger claim than the same floor over the question's
+// prose — "one of these words appears here" says more when the words are
+// PromoMailJob and dispatchRetry than when they are "mail" and "sent". Does
+// weighing it accordingly find code the fused list was missing, and does it
+// cost anything where the lane already worked?
 //
 //	hack/run-eval.sh 'TestEvalMeasureFTS$'
 //
 // Deterministic by construction: no reranker, no model call, one database. The
-// arms differ in a bm25 column weight and a lane weight, nothing else.
+// arms differ in one lane weight, nothing else.
 package eval
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
 )
-
-// codeTextOf picks the guessed CODE VOCABULARY out of a frozen expansion.
-//
-// Understanding.SearchTexts emits the raw question, the business-language
-// restatement and the code terms, in that order and dropping a blank one — so
-// three texts means the last is the code terms and anything shorter means the
-// step guessed none that the frozen file can tell apart from the restatement.
-// Read positionally because the frozen file records Texts alone; a question
-// with two texts contributes no code rung rather than a guessed one.
-func codeTextOf(texts []string) string {
-	if len(texts) != 3 {
-		return ""
-	}
-	return texts[2]
-}
 
 // ftsArm is one configuration of the keyword lane.
 type ftsArm struct {
@@ -42,7 +30,8 @@ type ftsArm struct {
 // TestEvalMeasureFTS reports, per arm, recall@5, recall@20, MRR and how much
 // of the material an answer is written from the gatherer actually reaches —
 // plus the two cohorts that stop a recall win from hiding a loss, and the
-// doc-led axis, because aux carries a path and a README's path is all header.
+// doc-led axis, because a rung that weighs identifiers up weighs prose down
+// relative to it, and a question only a document answers has none.
 //
 // Ranks are kept per arm and the mean is taken over the questions EVERY arm
 // ranks, for the reason the documentation sweep gives: averaging each arm's own
@@ -55,52 +44,20 @@ func TestEvalMeasureFTS(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	// The aux column is written by the indexer, not derivable in SQL: 0024
-	// backfills the source column and empties last_sha so the next full run
-	// fills aux. An arm run before that run would measure an empty column and
-	// report the baseline twice.
-	var withAux int
-	if err := db.QueryRow(`SELECT count(*) FROM chunks_fts WHERE aux <> ''`).Scan(&withAux); err != nil {
-		t.Fatalf("count the aux column: %v", err)
-	}
-	if withAux == 0 {
-		t.Fatal("no chunk has an aux column yet: run TestEvalIndex first")
-	}
-	t.Logf("chunks with an aux column: %d", withAux)
-
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 	g := ask.NewGatherer(db, gatherOpts(t))
 
-	off := retrieve.New(db, evalEmbedder(t))
-	off.AuxWeight = 0
-	on := retrieve.New(db, evalEmbedder(t))
-	on.AuxWeight = retrieve.DefaultAuxWeight
+	// Both arms in the same run, the reason repoDecays keeps its own 1.0 arm:
+	// an arm compared against a remembered baseline measures the memory.
+	plain := retrieve.New(db, evalEmbedder(t))
+	rung := retrieve.New(db, evalEmbedder(t))
+	rung.CodeWeight = retrieve.WeightKeywordCode
 	arms := []ftsArm{
-		{"aux off (today's lane)", off},
-		{"aux 0.5", on},
-	}
-	// The code rung is a second, independent change: it reweighs the OR floor
-	// of the code-terms text. Measured only when asked for, so the column's own
-	// number is never read off a run that moved two things.
-	//
-	// And it gets BOTH arms when it runs, aux off and aux on. The first run
-	// measured the column alone as a wash (r@5, r@20 and the gathered rate
-	// unmoved, mean rank 2.72 -> 2.92) and the pair as a gain of one at 20, one
-	// gathered and one ambiguous pair — which the pair alone cannot attribute:
-	// the rung on its own is the arm that says whether the column contributed
-	// anything to that at all.
-	if codeLaneOn() {
-		code := retrieve.New(db, evalEmbedder(t))
-		code.AuxWeight = 0
-		code.CodeWeight = retrieve.WeightKeywordCode
-		both := retrieve.New(db, evalEmbedder(t))
-		both.AuxWeight = retrieve.DefaultAuxWeight
-		both.CodeWeight = retrieve.WeightKeywordCode
-		arms = append(arms,
-			ftsArm{"aux off + code rung 0.8", code},
-			ftsArm{"aux 0.5 + code rung 0.8", both})
+		{"today's lane", plain},
+		{fmt.Sprintf("code rung %.1f", retrieve.WeightKeywordCode), rung},
 	}
 
 	ranks := make([]map[string]int, len(arms))
@@ -119,7 +76,7 @@ func TestEvalMeasureFTS(t *testing.T) {
 			}
 			hits, err := a.r.Search(ctx, retrieve.Query{
 				Texts:    texts,
-				Code:     codeTextOf(texts),
+				Code:     expansionCodes[q.Text],
 				Repos:    expansionRepos[q.Text],
 				Question: q.Text,
 				K:        gatherSearchK,
@@ -232,41 +189,5 @@ func TestEvalMeasureFTS(t *testing.T) {
 			mean = float64(sum) / float64(len(common))
 		}
 		t.Logf("  %-28s %.2f", a.name, mean)
-	}
-}
-
-// TestAuxWeightFromEnvIsAHarnessSwitch runs WITHOUT an endpoint. "0" has to
-// mean the column off and not "unset, use the shipped value", or the baseline
-// arm silently measures the arm — two identical tables and nothing in the
-// output saying why.
-func TestAuxWeightFromEnvIsAHarnessSwitch(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		want  float64
-	}{
-		{"", retrieve.DefaultAuxWeight},
-		{"0", 0},
-		{"0.5", 0.5},
-		{"1", 1},
-	} {
-		t.Setenv("BACKEND_EVAL_FTS_AUX", tc.value)
-		if got := auxWeightFromEnv(t); got != tc.want {
-			t.Errorf("auxWeightFromEnv() with BACKEND_EVAL_FTS_AUX=%q = %v, want %v", tc.value, got, tc.want)
-		}
-	}
-}
-
-// TestCodeTextOfReadsTheThirdExpansion runs WITHOUT an endpoint. The frozen
-// file records Texts alone, so the code rung's input is positional — and a
-// question the step guessed no identifiers for must contribute no rung rather
-// than the business-language restatement under a code weight.
-func TestCodeTextOfReadsTheThirdExpansion(t *testing.T) {
-	if got := codeTextOf([]string{"question", "restatement", "PromoMailJob dispatchRetry"}); got != "PromoMailJob dispatchRetry" {
-		t.Errorf("codeTextOf(...) = %q, want the code terms", got)
-	}
-	for _, texts := range [][]string{nil, {"question"}, {"question", "restatement"}} {
-		if got := codeTextOf(texts); got != "" {
-			t.Errorf("codeTextOf(%v) = %q, want no code rung", texts, got)
-		}
 	}
 }

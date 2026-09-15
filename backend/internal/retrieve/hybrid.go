@@ -35,19 +35,13 @@ const (
 	// runs as its own lane. The understanding step's guessed identifiers are a
 	// narrower thing than the question's prose: "one of these words appears
 	// here" says more when the words are PromoMailJob and dispatchRetry than
-	// when they are "mail" and "sent". A distinct value, because laneName reads
-	// the weight to label the lane.
+	// when they are "mail" and "sent".
+	//
+	// It is a starting value under a sweep, not a landmark: the lane is named
+	// where it is built, never derived from this number, so moving it to 0.7 or
+	// 0.9 cannot make the rung report itself as the prefix or the prose rung.
 	WeightKeywordCode = 0.8
 )
-
-// DefaultAuxWeight is how far below the source column the aux column counts in
-// bm25. Source first: a chunk that literally contains the word is stronger
-// evidence than one that only has it in its path or inside an identifier, and
-// half is enough to keep a header-only match behind a body match while still
-// letting it into the list at all. The zero value is off, the way TestDecay and
-// DocDecay read theirs, so a struct-literal Retriever keeps the lane that
-// shipped before the column existed.
-const DefaultAuxWeight = 0.5
 
 // DefaultMaxDistance is the L2 cutoff past which a semantic hit is treated as
 // "not actually about this" and dropped before ranking.
