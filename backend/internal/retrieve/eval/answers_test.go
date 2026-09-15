@@ -7,7 +7,9 @@
 // claims it must not make, and the files it has to cite. It is what a change
 // upstream of the answer call is measured by, and it is the model-swap test:
 // BACKEND_EVAL_PRO_MODEL and BACKEND_EVAL_GATE_MODEL point the two lanes at
-// another deployment for the harness alone. The judge runs on its own client
+// another deployment for the harness alone, BACKEND_EVAL_GATE_REASONING and
+// BACKEND_EVAL_REASONING set that model's policy per lane. The judge runs on
+// its own client
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
@@ -86,6 +88,11 @@ func answerLLM(t *testing.T) *llm.Client {
 	cfg := evalLLMConfig(t, 15*time.Minute)
 	cfg.Pro = os.Getenv("BACKEND_EVAL_PRO_MODEL")
 	cfg.ShortGate = os.Getenv("BACKEND_EVAL_GATE_MODEL")
+	// The policy per lane for the swapped model, the values
+	// BACKEND_LLM_GATE_REASONING and BACKEND_LLM_REASONING take in the
+	// product; unset keeps the default policy.
+	cfg.Policy.GateReasoning = os.Getenv("BACKEND_EVAL_GATE_REASONING")
+	cfg.Policy.ProReasoning = os.Getenv("BACKEND_EVAL_REASONING")
 	return mustLLM(t, cfg)
 }
 
