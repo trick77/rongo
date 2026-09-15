@@ -16,8 +16,8 @@ import (
 // report the baseline as the reranked arm.
 func evalReranker(t *testing.T, c *llm.Client) *retrieve.LLMReranker {
 	t.Helper()
-	pool := envIntOr(t, "BACKEND_EVAL_RERANK_POOL", 60)
-	excerpt := envIntOr(t, "BACKEND_EVAL_RERANK_EXCERPT", 240)
+	pool := envIntOr(t, "BACKEND_EVAL_RERANK_POOL", retrieve.DefaultRerankPool)
+	excerpt := envIntOr(t, "BACKEND_EVAL_RERANK_EXCERPT", retrieve.DefaultRerankExcerpt)
 	// A zero would be silently replaced by the default while the arm's label
 	// still read "0-rune excerpts" — a measurement reporting the wrong arm.
 	if pool <= 0 || excerpt <= 0 {
@@ -36,8 +36,10 @@ func TestEvalReranker_readsPoolAndExcerptFromEnv(t *testing.T) {
 	// A sweep exporting the knobs must not make the defaults half fail.
 	t.Setenv("BACKEND_EVAL_RERANK_POOL", "")
 	t.Setenv("BACKEND_EVAL_RERANK_EXCERPT", "")
-	if got := evalReranker(t, nil); got.Pool != 60 || got.Excerpt != 240 {
-		t.Errorf("defaults = pool %d, excerpt %d, want 60 and 240", got.Pool, got.Excerpt)
+	// The default arm is the product's, whatever the product currently ships.
+	if got := evalReranker(t, nil); got.Pool != retrieve.DefaultRerankPool || got.Excerpt != retrieve.DefaultRerankExcerpt {
+		t.Errorf("defaults = pool %d, excerpt %d, want the product's %d and %d",
+			got.Pool, got.Excerpt, retrieve.DefaultRerankPool, retrieve.DefaultRerankExcerpt)
 	}
 	t.Setenv("BACKEND_EVAL_RERANK_POOL", "100")
 	t.Setenv("BACKEND_EVAL_RERANK_EXCERPT", "800")

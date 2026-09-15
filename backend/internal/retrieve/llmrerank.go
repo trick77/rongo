@@ -35,7 +35,7 @@ type LLMReranker struct {
 	// where the rank diagnostic put every reachable miss.
 	Pool int
 	// Excerpt is how many runes of each chunk the model reads; zero means
-	// rerankExcerpt. The harness sweeps it, the product keeps the default.
+	// DefaultRerankExcerpt. The harness sweeps it, the product keeps the default.
 	Excerpt int
 	// Log receives the warning when the fused order is kept; nil means the
 	// default logger.
@@ -53,7 +53,7 @@ func (r *LLMReranker) logger() *slog.Logger {
 // NewLLMReranker builds a reranker over the short-gate lane.
 func NewLLMReranker(c *llm.Client, pool int) *LLMReranker {
 	if pool <= 0 {
-		pool = 60
+		pool = DefaultRerankPool
 	}
 	return &LLMReranker{llm: c, Pool: pool}
 }
@@ -66,13 +66,20 @@ first, at most %d of them. Leave out results that do not help. A result helps
 when its code, comment or path is about what the question asks, not when it
 merely shares a word with it. Do not explain.`
 
-// rerankExcerpt is how much of each chunk the model sees by default, in
+// DefaultRerankExcerpt is how much of each chunk the model sees by default, in
 // runes. Eight hundred, not the 240 this shipped with: a signature and its
 // doc comment are regularly longer than 240, so the model was ranking on a
 // truncated first line. Measured twice on the pinned Go corpus, unique
 // gathered 39/42 at 240 against 41/42 at 800, MRR 0.72 against 0.81 and 0.83
 // (docs/measurements/2026-09-16-rerank-excerpt.md).
-const rerankExcerpt = 800
+//
+// DefaultRerankPool is how deep the fused list goes. Both are exported so the
+// eval harness measures the product by default rather than a literal that has
+// since moved.
+const (
+	DefaultRerankExcerpt = 800
+	DefaultRerankPool    = 60
+)
 
 // rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
 // what each result in the pool adds on top. The floor covers a short list; the
@@ -96,7 +103,7 @@ func (r *LLMReranker) excerptWidth() int {
 	if r.Excerpt > 0 {
 		return r.Excerpt
 	}
-	return rerankExcerpt
+	return DefaultRerankExcerpt
 }
 
 // Rerank returns hits reordered: the ones the model called relevant first, in
