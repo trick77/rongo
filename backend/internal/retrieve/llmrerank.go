@@ -34,6 +34,9 @@ type LLMReranker struct {
 	// Pool is how deep the fused list goes before the model sees it. Sixty is
 	// where the rank diagnostic put every reachable miss.
 	Pool int
+	// Excerpt is how many runes of each chunk the model reads; zero means
+	// rerankExcerpt. The harness sweeps it, the product keeps the default.
+	Excerpt int
 	// Log receives the warning when the fused order is kept; nil means the
 	// default logger.
 	Log *slog.Logger
@@ -63,12 +66,27 @@ first, at most %d of them. Leave out results that do not help. A result helps
 when its code, comment or path is about what the question asks, not when it
 merely shares a word with it. Do not explain.`
 
-// rerankExcerpt is how much of each chunk the model sees: the header and the
-// opening lines, which is where a doc comment and a signature sit.
+// rerankExcerpt is how much of each chunk the model sees by default, in
+// runes: the header and the opening lines, which is where a doc comment and a
+// signature sit.
 const rerankExcerpt = 240
 
-// rerankMaxTokens caps the reply. A list of at most sixty numbers.
-const rerankMaxTokens = 256
+// rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
+// what each result in the pool adds on top. A pool deeper than sixty would
+// otherwise end with finish_reason=length, which is an error, a warning and
+// the fused order — the reranker doing nothing while looking like it ran.
+const (
+	rerankMaxTokens    = 256
+	rerankTokensPerHit = 4
+)
+
+// excerptWidth is Excerpt, or the default when none was set.
+func (r *LLMReranker) excerptWidth() int {
+	if r.Excerpt > 0 {
+		return r.Excerpt
+	}
+	return rerankExcerpt
+}
 
 // Rerank returns hits reordered: the ones the model called relevant first, in
 // the model's order, then everything else in the fused order, cut to k. A
@@ -83,17 +101,22 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	fmt.Fprintf(&b, "Question: %s\n\nResults:\n", question)
 	for i, h := range hits {
 		fmt.Fprintf(&b, "\n[%d] %s %s", i+1, h.Repo, h.Path)
+		// Two chunks of one file differ by where they start, and a header
+		// without the line cannot tell them apart.
+		if h.StartLine > 0 {
+			fmt.Fprintf(&b, ":%d", h.StartLine)
+		}
 		if h.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(excerpt(h.RawText, rerankExcerpt))
+		b.WriteString(excerpt(h.RawText, r.excerptWidth()))
 		b.WriteString("\n")
 	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(rerankSystem, k)},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(rerankMaxTokens), llm.WithStep("rerank"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(max(rerankMaxTokens, 64+rerankTokensPerHit*len(hits))), llm.WithStep("rerank"))
 	if err != nil {
 		if ctx.Err() != nil {
 			// The reader left; there is no turn to keep an order for.
@@ -136,10 +159,22 @@ func cut(hits []Hit, k int) []Hit {
 	return hits
 }
 
+// excerpt is the first n RUNES of s, cut back to the last line break in the
+// back half of the window so the model reads whole lines. Runes, not bytes: a
+// byte cut splits an umlaut and hands the model a broken rune. The back-half
+// floor is what keeps a long first line from yielding nothing at all.
 func excerpt(s string, n int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	cutAt := n
+	for i := n - 1; i >= n/2; i-- {
+		if r[i] == '\n' {
+			cutAt = i
+			break
+		}
+	}
+	return string(r[:cutAt]) + "…"
 }

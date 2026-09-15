@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/llm"
 )
@@ -130,6 +131,137 @@ func TestLLMRerank_reportsACancelledContextAsSuch(t *testing.T) {
 	r := NewLLMReranker(fakeLLM(t, srv), 60)
 	if _, err := r.Rerank(ctx, "q", []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}, 1); err == nil {
 		t.Fatal("a cancelled context was answered with the fused order")
+	}
+}
+
+// TestExcerpt_isRuneSafeAndCutsAtALineBreak: the excerpt is measured in runes,
+// so a cut never splits an umlaut, and it prefers the last line break in the
+// back half of the window so the model reads whole lines.
+func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
+	t.Run("a cut never splits a rune", func(t *testing.T) {
+		got := excerpt(strings.Repeat("ä", 50), 10)
+		if !utf8.ValidString(got) {
+			t.Fatalf("excerpt cut inside a rune: %q", got)
+		}
+		if got != strings.Repeat("ä", 10)+"…" {
+			t.Errorf("excerpt = %q, want ten runes and the ellipsis", got)
+		}
+	})
+	t.Run("a line break in the back half wins", func(t *testing.T) {
+		s := strings.Repeat("a", 6) + "\n" + strings.Repeat("b", 20)
+		got := excerpt(s, 10)
+		if got != strings.Repeat("a", 6)+"…" {
+			t.Errorf("excerpt = %q, want the cut at the newline", got)
+		}
+	})
+	t.Run("a line break in the front half loses", func(t *testing.T) {
+		s := "ab\n" + strings.Repeat("c", 30)
+		got := excerpt(s, 10)
+		if got != "ab\n"+strings.Repeat("c", 7)+"…" {
+			t.Errorf("excerpt = %q, want the full window", got)
+		}
+	})
+	t.Run("a single overlong line cuts at n", func(t *testing.T) {
+		got := excerpt(strings.Repeat("x", 100), 10)
+		if got != strings.Repeat("x", 10)+"…" {
+			t.Errorf("excerpt = %q, want ten runes and the ellipsis", got)
+		}
+	})
+	t.Run("text that fits comes back whole", func(t *testing.T) {
+		if got := excerpt("  füüf\nlines  ", 10); got != "füüf\nlines" {
+			t.Errorf("excerpt = %q, want the whole trimmed text", got)
+		}
+	})
+}
+
+// TestLLMRerank_headerCarriesTheStartLine: two chunks of one file differ by
+// where they start, and the model cannot tell them apart without it.
+func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
+	var prompt string
+	hits := []Hit{
+		{ChunkID: 1, Repo: "peeq", Path: "a.go", Symbol: "a", StartLine: 42, RawText: "func a()"},
+		{ChunkID: 2, Repo: "peeq", Path: "b.go", RawText: "func b()"},
+	}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &prompt), 60)
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, "[1] peeq a.go:42 (a)") {
+		t.Errorf("the start line is missing from the header:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "[2] peeq b.go\n") {
+		t.Errorf("a chunk starting at line zero got a colon:\n%s", prompt)
+	}
+}
+
+// TestLLMRerank_excerptWidthIsAField: the harness widens what the model reads;
+// a line past the default window is invisible at 240 and visible at 800.
+func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
+	body := strings.Repeat("filler line\n", 50) + "THE MARKER\n" + strings.Repeat("tail line\n", 50)
+	hits := []Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: body}, {ChunkID: 2}}
+
+	var narrow string
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &narrow), 60)
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(narrow, "THE MARKER") {
+		t.Errorf("the default width already reaches the marker; the test proves nothing")
+	}
+
+	var wide string
+	r = NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &wide), 60)
+	r.Excerpt = 800
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wide, "THE MARKER") {
+		t.Errorf("Excerpt = 800 did not widen what the model was shown:\n%s", wide)
+	}
+}
+
+// TestLLMRerank_replyCapGrowsWithThePool: a pool of a hundred needs more than
+// the 256-token floor, or the reply ends with finish_reason=length, which is
+// an error, a warning and the fused order.
+func TestLLMRerank_replyCapGrowsWithThePool(t *testing.T) {
+	var capSeen float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		// The gate profile names its own spelling of the cap parameter.
+		for _, key := range []string{"max_completion_tokens", "max_tokens"} {
+			if v, ok := body[key].(float64); ok {
+				capSeen = v
+				break
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]any{"content": `{"relevant":[1]}`}, "finish_reason": "stop"}},
+			"usage":   map[string]int{},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	hits := make([]Hit, 100)
+	for i := range hits {
+		hits[i] = Hit{ChunkID: int64(i + 1), Repo: "peeq", Path: "a.go"}
+	}
+	r := NewLLMReranker(fakeLLM(t, srv), 100)
+	if _, err := r.Rerank(context.Background(), "q", hits, 20); err != nil {
+		t.Fatal(err)
+	}
+	if capSeen < 464 {
+		t.Errorf("reply cap = %v for a pool of 100, want at least 464", capSeen)
+	}
+
+	small := []Hit{{ChunkID: 1}, {ChunkID: 2}}
+	r = NewLLMReranker(fakeLLM(t, srv), 60)
+	if _, err := r.Rerank(context.Background(), "q", small, 2); err != nil {
+		t.Fatal(err)
+	}
+	if capSeen != rerankMaxTokens {
+		t.Errorf("reply cap = %v for two hits, want the floor %d", capSeen, rerankMaxTokens)
 	}
 }
 
