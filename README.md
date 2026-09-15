@@ -62,7 +62,10 @@ startup).
 
 `compose.yaml` runs it in production behind a TLS-terminating reverse proxy with
 OIDC login, which is how the rest of the company gets in. The comment at the top of
-that file covers the first run.
+that file covers the first run. Without an identity provider,
+`BACKEND_AUTH_MODE=password` signs one admin in through a login form; the
+password is stored as a bcrypt hash made with `rongo -hash-password`, see
+`.env.example`.
 
 ## Development
 

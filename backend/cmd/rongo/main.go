@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 	"github.com/trick77/rongo/internal/threads"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // sweepExcluded applies BACKEND_INDEX_EXCLUDE to every repository's existing
@@ -61,7 +63,40 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 	}
 }
 
+// hashPassword reads a password from stdin and prints its bcrypt hash, the
+// value BACKEND_ADMIN_PASSWORD_HASH wants. Stdin, not an argument, so the
+// plaintext never lands in a shell history or a process list.
+func hashPassword(in io.Reader, out io.Writer) error {
+	raw, err := io.ReadAll(io.LimitReader(in, 4096))
+	if err != nil {
+		return err
+	}
+	pw := strings.TrimRight(string(raw), "\r\n")
+	if pw == "" {
+		return errors.New("read an empty password from stdin")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, string(hash))
+	return err
+}
+
 func main() {
+	// Parsed before the config is read: hashing a password needs no
+	// environment, and an operator setting rongo up has none yet.
+	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit; used by the container healthcheck")
+	hashPw := flag.Bool("hash-password", false, "read a password from stdin, print its bcrypt hash for BACKEND_ADMIN_PASSWORD_HASH, and exit")
+	flag.Parse()
+	if *hashPw {
+		if err := hashPassword(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "hash-password: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		// Logging is not configured yet, so this goes to stderr directly.
@@ -77,8 +112,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit; used by the container healthcheck")
-	flag.Parse()
 	if *healthcheck {
 		resp, err := http.Get("http://" + cfg.Addr + "/healthz")
 		if err != nil || resp.StatusCode != http.StatusOK {
@@ -144,6 +177,9 @@ func main() {
 	}
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
+	if cfg.AuthMode == config.AuthModePassword {
+		authSvc.SetPasswordAccount(cfg.AdminUser, cfg.AdminPasswordHash)
+	}
 
 	// Built before the list is synced: a repository that left the list is purged
 	// from the database, and its checkout has to go with it.

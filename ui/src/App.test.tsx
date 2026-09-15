@@ -110,6 +110,76 @@ describe("App", () => {
     expect(href).not.toHaveBeenCalled();
   });
 
+  it("says only 'signed out' after a password-mode sign-out", async () => {
+    // No provider, so no "sign out there as well".
+    const href = vi.fn();
+    stubLocation(href, "?signed_out=local");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+
+    render(<App />);
+
+    await screen.findByRole("link", { name: "Sign in" });
+    expect(screen.getByText("Signed out.")).toBeTruthy();
+    expect(screen.queryByText(/provider/)).toBeNull();
+  });
+
+  describe("password login", () => {
+    function renderForm(status: number) {
+      const href = vi.fn();
+      stubLocation(href, "?login=password");
+      const fetchMock = vi.fn(async () => ({ ok: status < 300, status, json: async () => ({}) }));
+      vi.stubGlobal("fetch", fetchMock);
+      render(<App />);
+      return { href, fetchMock };
+    }
+
+    it("shows the form without asking /api/me first", async () => {
+      // /api/me would 401 and send the browser straight back to the login
+      // route: a loop with a form flashing in the middle.
+      const { href, fetchMock } = renderForm(204);
+
+      await screen.findByRole("form", { name: "Sign in" });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(href).not.toHaveBeenCalled();
+      expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    });
+
+    it("posts the credentials and reloads the app on success", async () => {
+      const { href, fetchMock } = renderForm(204);
+      const user = userEvent.setup();
+      await screen.findByRole("form", { name: "Sign in" });
+
+      await user.type(screen.getByLabelText("Username"), "admin");
+      await user.type(screen.getByLabelText("Password"), "hunter2");
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await waitFor(() => expect(href).toHaveBeenCalledWith("/"));
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/auth/password",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ username: "admin", password: "hunter2" }),
+        }),
+      );
+    });
+
+    it("shows one generic error on a 401 and stays on the form", async () => {
+      const { href } = renderForm(401);
+      const user = userEvent.setup();
+      await screen.findByRole("form", { name: "Sign in" });
+
+      await user.type(screen.getByLabelText("Username"), "admin");
+      await user.type(screen.getByLabelText("Password"), "wrong");
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await screen.findByRole("alert");
+      expect(screen.getByRole("alert").textContent).toBe("Wrong username or password.");
+      expect(href).not.toHaveBeenCalled();
+      expect(screen.getByRole("form", { name: "Sign in" })).toBeTruthy();
+    });
+  });
+
   it("does not show the signed-in app on a 5xx from /api/me", async () => {
     // A fully chromed app whose every panel then fails on its own tells the
     // user less than one clear message does.

@@ -64,6 +64,12 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
 			return
 
+		case "password":
+			// No header form: the only way in is the form posting to
+			// /api/auth/password, which sets the cookie checked above.
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+
 		case "oidc":
 			// The seam. Until the OIDC flow lands, an unauthenticated caller
 			// gets 401 rather than a misleading 500.

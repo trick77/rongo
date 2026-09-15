@@ -5,6 +5,7 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // SessionCookie is the cookie carrying the opaque session token.
@@ -30,12 +33,58 @@ type Service struct {
 	db         *sql.DB
 	mode       string
 	adminToken string
+	// The password-mode account. adminUser is compared in constant time,
+	// passwordHash is bcrypt.
+	adminUser    string
+	passwordHash []byte
 }
 
 // NewService builds the auth service. adminToken is only consulted in token
 // mode.
 func NewService(db *sql.DB, mode string, adminToken string) *Service {
 	return &Service{db: db, mode: mode, adminToken: adminToken}
+}
+
+// SetPasswordAccount installs the one account password mode signs in. The
+// hash is bcrypt; config has already refused anything else.
+func (s *Service) SetPasswordAccount(user, hash string) {
+	s.adminUser = user
+	s.passwordHash = []byte(hash)
+}
+
+// Mode reports the configured auth mode.
+func (s *Service) Mode() string { return s.mode }
+
+// passwordSubject is the fixed identity password mode signs in. Not the
+// username: renaming the account in the environment must not orphan the
+// threads that hang off users.subject.
+const passwordSubject = "admin-password"
+
+// ErrBadCredentials is the one answer a failed password login gets. Username
+// and password failures are indistinguishable from outside on purpose.
+var ErrBadCredentials = errors.New("bad credentials")
+
+// LoginPassword checks the form credentials and mints a session. The bcrypt
+// compare runs even when the username is wrong, so the response time does
+// not tell an attacker which half they got right.
+func (s *Service) LoginPassword(user, password string) (string, time.Time, error) {
+	if s.mode != "password" || len(s.passwordHash) == 0 {
+		return "", time.Time{}, ErrBadCredentials
+	}
+	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.adminUser)) == 1
+	pwErr := bcrypt.CompareHashAndPassword(s.passwordHash, []byte(password))
+	if !userOK || pwErr != nil {
+		return "", time.Time{}, ErrBadCredentials
+	}
+	u, err := s.UpsertUser(passwordSubject, "", true)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	token, err := s.CreateSession(u.ID, SessionTTL)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token, time.Now().Add(SessionTTL), nil
 }
 
 // UpsertUser inserts the subject or returns the existing row.

@@ -33,6 +33,7 @@ type Session =
   | { state: "checking" }
   | { state: "in"; me: Me }
   | { state: "out" }
+  | { state: "login" }
   | { state: "halted"; message: string };
 
 /**
@@ -49,6 +50,10 @@ type Session =
  */
 function haltReason(search: string): string | null {
   const params = new URLSearchParams(search);
+  // "local" is password mode: there is no provider to sign out of.
+  if (params.get("signed_out") === "local") {
+    return "Signed out.";
+  }
   if (params.has("signed_out")) {
     return "Signed out. The session at the provider is still live — sign out there as well to end it.";
   }
@@ -67,6 +72,13 @@ function useSession(): Session {
       const halt = haltReason(window.location.search);
       if (halt !== null) {
         setSession({ state: "halted", message: halt });
+        return;
+      }
+      // Password mode: /api/auth/login sent the browser back here with the
+      // marker, and the form is the whole sign-in. No /api/me first: it
+      // would 401 and send the browser to the login route again.
+      if (new URLSearchParams(window.location.search).get("login") === "password") {
+        setSession({ state: "login" });
         return;
       }
       let res: Response;
@@ -119,6 +131,86 @@ async function logout() {
     // decide, which is the only place that answer is authoritative.
     window.location.reload();
   }
+}
+
+/**
+ * The password-mode sign-in. A full navigation to "/" on success rather than
+ * a state change: the gate reads the cookie through /api/me, and a reload is
+ * the one path that runs it again from the top.
+ */
+function LoginForm() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (res.ok) {
+        window.location.href = "/";
+        return;
+      }
+      // One message for both halves: the server does not say which was
+      // wrong, and neither does the form.
+      setError(
+        res.status === 401
+          ? "Wrong username or password."
+          : `Sign-in failed (HTTP ${res.status}).`,
+      );
+    } catch {
+      setError("Sign-in failed: the server could not be reached.");
+    }
+    setBusy(false);
+  };
+
+  const field =
+    "mt-1 h-[38px] w-full rounded-ui-sm border border-border bg-bg px-3 text-ink outline-none focus:border-accent";
+  return (
+    <form onSubmit={submit} className="max-w-xs" aria-label="Sign in">
+      <label className="block text-sm text-muted">
+        Username
+        <input
+          name="username"
+          autoComplete="username"
+          autoFocus
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          className={field}
+        />
+      </label>
+      <label className="mt-3 block text-sm text-muted">
+        Password
+        <input
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className={field}
+        />
+      </label>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {error}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={busy || username === "" || password === ""}
+        className="mt-4 rounded-full bg-accent-fill px-4 py-2 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50"
+      >
+        Sign in
+      </button>
+    </form>
+  );
 }
 
 
@@ -281,11 +373,15 @@ export default function App() {
           reader tell "signed in" from "not yet", and repeating it here would
           make the gate screen indistinguishable from the app.
         */}
-        <p className="text-sm text-muted">
-          {session.state === "checking" && "Checking the session …"}
-          {session.state === "out" && "Redirecting to sign-in …"}
-          {session.state === "halted" && session.message}
-        </p>
+        {session.state === "login" ? (
+          <LoginForm />
+        ) : (
+          <p className="text-sm text-muted">
+            {session.state === "checking" && "Checking the session …"}
+            {session.state === "out" && "Redirecting to sign-in …"}
+            {session.state === "halted" && session.message}
+          </p>
+        )}
         {session.state === "halted" && (
           <a
             href="/api/auth/login"

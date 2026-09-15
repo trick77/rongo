@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthMode selects how rongo identifies a caller.
@@ -18,6 +20,10 @@ const (
 	AuthModeDev AuthMode = "dev"
 	// AuthModeToken gates every request on a shared bearer token.
 	AuthModeToken AuthMode = "token"
+	// AuthModePassword signs one admin in through a login form: the account
+	// is BACKEND_ADMIN_USER, the password is checked against the bcrypt hash
+	// in BACKEND_ADMIN_PASSWORD_HASH, and a session cookie carries the rest.
+	AuthModePassword AuthMode = "password"
 	// AuthModeOIDC is the production mode. The seam exists in phase 1; the
 	// implementation lands later.
 	AuthModeOIDC AuthMode = "oidc"
@@ -96,10 +102,15 @@ type Config struct {
 	// and its width embed.Dim comes from the llmwire profile. Its host is the
 	// profile's and its key, LLMWIRE_OPENAI_API_KEY, is read by llmwire the
 	// same way as the chat one.
-	AuthMode      AuthMode
-	AdminToken    string // required when AuthMode is token
-	SessionSecret string // reserved: not read by anything yet — see the check below
-	LogLevel      string
+	AuthMode   AuthMode
+	AdminToken string // required when AuthMode is token
+	// The password block, both required when AuthMode is password. The hash
+	// is bcrypt, produced by `rongo -hash-password`; the plaintext is never
+	// read from the environment.
+	AdminUser         string
+	AdminPasswordHash string
+	SessionSecret     string // reserved: not read by anything yet — see the check below
+	LogLevel          string
 	// The OIDC block, all required when AuthMode is oidc. The issuer carries no
 	// path and no trailing slash for Authelia (https://auth.trick77.com);
 	// anything else fails discovery.
@@ -112,10 +123,12 @@ type Config struct {
 	// truthful default while the only real gate is Authelia's
 	// authorization_policy.
 	OIDCAdminGroup string
-	// CookieSecure marks the session and nonce cookies Secure. Derived from
-	// OIDCRedirectURL: behind a TLS-terminating proxy the process only ever
-	// sees plain HTTP, and the redirect URL is the one setting that has to
-	// name the external origin anyway.
+	// CookieSecure marks the session and nonce cookies Secure. In oidc mode
+	// it is derived from OIDCRedirectURL: behind a TLS-terminating proxy the
+	// process only ever sees plain HTTP, and the redirect URL is the one
+	// setting that has to name the external origin anyway. Password mode has
+	// no such URL, so it reads BACKEND_COOKIE_SECURE, default true, and only
+	// a loopback listener may switch it off.
 	CookieSecure bool
 }
 
@@ -141,6 +154,8 @@ func Load() (Config, error) {
 		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
+		AdminPasswordHash: strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
 		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
 		// The issuer is trimmed of its trailing slash for the same reason the
@@ -180,6 +195,25 @@ func Load() (Config, error) {
 		if cfg.AdminToken == "" {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
+	case AuthModePassword:
+		if cfg.AdminUser == "" {
+			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=password requires BACKEND_ADMIN_USER")
+		}
+		if cfg.AdminPasswordHash == "" {
+			return Config{}, fmt.Errorf(
+				"BACKEND_AUTH_MODE=password requires BACKEND_ADMIN_PASSWORD_HASH; generate one with `rongo -hash-password`")
+		}
+		// A plaintext pasted here would fail every login with a generic 401
+		// and look like a typo in the password. Refusing to boot names it.
+		if _, err := bcrypt.Cost([]byte(cfg.AdminPasswordHash)); err != nil {
+			return Config{}, fmt.Errorf(
+				"BACKEND_ADMIN_PASSWORD_HASH is not a bcrypt hash; generate one with `rongo -hash-password`")
+		}
+		cfg.CookieSecure = envBoolOr("BACKEND_COOKIE_SECURE", true)
+		if !cfg.CookieSecure && !isLoopback(cfg.Addr) {
+			return Config{}, fmt.Errorf(
+				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
+		}
 	case AuthModeOIDC:
 		// Every one of these is fatal rather than a warning. A half-configured
 		// OIDC deployment starts, serves the SPA, and then refuses every login
@@ -207,10 +241,12 @@ func Load() (Config, error) {
 				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_OIDC_REDIRECT_URL, got %q; the session cookie's Secure flag is derived from it", cfg.OIDCRedirectURL)
 		}
 	default:
-		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token or oidc)", cfg.AuthMode)
+		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password or oidc)", cfg.AuthMode)
 	}
 
-	cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
+	if cfg.AuthMode == AuthModeOIDC {
+		cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
+	}
 
 	return cfg, nil
 }
