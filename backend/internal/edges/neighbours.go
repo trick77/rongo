@@ -39,6 +39,52 @@ func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour
 	return NeighboursWith(ctx, db, repo, path, Match{})
 }
 
+// Holders returns the files in ENABLED repositories that carry a token of this
+// kind with exactly this value — the value-keyed half of NeighboursWith, which
+// starts from a near side instead.
+//
+// It exists for a caller that has a name and no file to cross from: the gap
+// pass in internal/ask reads the gathered sources, is told a queue name the
+// mechanism uses, and has to find where that name is served. Same spread
+// ceiling and same enabled-only counting as NeighboursWith, so the two halves
+// of the table cannot disagree about which values are links; matching is
+// exact, because a spelled name is not a near side's literal and a loose rule
+// would land it on whatever route ends the same way.
+func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighbour, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT f.repo, f.path, t.kind, t.value, t.line
+		FROM integration_tokens t
+		JOIN files f ON f.id = t.file_id
+		-- Enabled only, in the COUNT as well as the join, for the reason
+		-- NeighboursWith gives: parked code influences nothing.
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+		WHERE t.kind = ? AND t.value = ?
+		  AND (
+		    SELECT COUNT(DISTINCT f2.repo)
+		    FROM integration_tokens t2
+		    JOIN files f2 ON f2.id = t2.file_id
+		    JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
+		    WHERE t2.kind = t.kind AND t2.value = t.value
+		  ) <= ?
+		ORDER BY f.repo, f.path, t.line`, string(kind), value, spreadCeiling)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Neighbour
+	for rows.Next() {
+		var n Neighbour
+		var k string
+		if err := rows.Scan(&n.Repo, &n.Path, &k, &n.Value, &n.Line); err != nil {
+			return nil, err
+		}
+		n.Kind = Kind(k)
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // Match says how two route tokens are compared.
 type Match struct {
 	// Suffix lets a route match another that ENDS in it at a segment

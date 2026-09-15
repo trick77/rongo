@@ -26,12 +26,38 @@ func TestEvalMeasureRerank(t *testing.T) {
 	type arm struct {
 		name string
 		r    *retrieve.Retriever
+		// g is the arm's gatherer, and gap says whether to run the pass over
+		// what it gathered. The Go corpus is one product plus its
+		// dependencies, so the pass has fewer boundaries to help across than
+		// the flow corpus has; measuring it here says what it costs where it
+		// is not needed.
+		g   *ask.Gatherer
+		gap bool
 	}
 	plain := retrieve.New(db, embedder)
 	reranked := retrieve.New(db, embedder)
 	reranked.Candidates = 60
 	reranked.Reranker = evalReranker(t, client)
-	arms := []arm{{"fused order (the product)", plain}, {"fused order + short-gate rerank over 60", reranked}}
+	arms := []arm{{name: "fused order (the product)", r: plain, g: g},
+		{name: "fused order + short-gate rerank over 60", r: reranked, g: g}}
+	if envOr("BACKEND_EVAL_GAP", "1") != "0" {
+		arms = append(arms, arm{name: "fused order + short-gate rerank over 60 + gap pass",
+			r: reranked, g: evalGatherer(t, db, opts, client), gap: true})
+	}
+
+	// gather is the reading step of one arm: the walk, and the gap pass over
+	// what it produced when the arm has one.
+	gather := func(a arm, question string, hits []retrieve.Hit) ([]ask.Source, error) {
+		sources, err := a.g.Gather(ctx, hits)
+		if err != nil || !a.gap {
+			return sources, err
+		}
+		sources, report, err := a.g.FillGaps(ctx, question, sources, nil)
+		if err == nil {
+			t.Logf("    gap landed %v unresolved %v %s", report.Landed, report.Unresolved, report.Skipped)
+		}
+		return sources, err
+	}
 
 	questions := loadQuestions(t)
 	for _, a := range arms {
@@ -52,7 +78,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}
 			if q.Resolution != ResolutionUnique {
-				sources, err := g.Gather(ctx, hits)
+				sources, err := gather(a, q.Text, hits)
 				if err != nil {
 					t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
 				}
@@ -91,7 +117,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 				at20++
 				mrr += 1 / float64(rank)
 			}
-			sources, err := g.Gather(ctx, hits)
+			sources, err := gather(a, q.Text, hits)
 			if err != nil {
 				t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
 			}

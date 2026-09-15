@@ -1017,6 +1017,12 @@ func reachedVia(reason string) string {
 	if rest, ok := strings.CutPrefix(reason, "edge:"); ok {
 		return "reached in another repository, which shares the " + rest
 	}
+	// The gap pass: not a hop from anything, so there is no near side to
+	// name. What the answer may say about it is that the code was fetched by
+	// name after the rest had been read.
+	if rest, ok := strings.CutPrefix(reason, "gap:"); ok {
+		return "looked up by name after reading the sources: " + rest
+	}
 	return "reached via " + strings.TrimPrefix(reason, "reference:")
 }
 

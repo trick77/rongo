@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/trick77/rongo/internal/edges"
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -71,6 +73,12 @@ type GatherOptions struct {
 type Gatherer struct {
 	db   *sql.DB
 	opts GatherOptions
+	// gap is the short-gate client the gap pass calls; nil is off, and off is
+	// what the product ships until the arm is measured. See gap.go.
+	gap *llm.Client
+	// Log receives the warning when the gap pass keeps the sources it was
+	// given; nil means the default logger.
+	Log *slog.Logger
 }
 
 // NewGatherer builds a Gatherer.
@@ -103,49 +111,41 @@ func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage 
 		return nil, nil
 	}
 
-	var out []Source
-	seen := map[int64]bool{}
-	spent := 0
+	a := &admitter{seen: map[int64]bool{}}
 
 	for _, h := range hits {
-		if seen[h.ChunkID] {
+		if a.seen[h.ChunkID] {
 			continue
 		}
-		seen[h.ChunkID] = true
-		out = append(out, Source{
+		a.seen[h.ChunkID] = true
+		a.out = append(a.out, Source{
 			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
 			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
 			SHA: h.SHA, Text: h.RawText, Reason: "hit", Hop: 0,
 		})
-		spent += estimateTokens(h.RawText)
+		a.spent += estimateTokens(h.RawText)
 	}
 
-	// take admits one reached chunk under a budget. It reports false when
-	// that budget is spent, and the caller then STOPS rather than trimming
-	// what is already gathered, so what the answer cites is always present —
-	// and stopping means stopping: continuing would keep querying the rest of
-	// the frontier for rows that can never be taken.
-	take := func(s Source, hop, budget int) bool {
-		if seen[s.ChunkID] {
-			return true
-		}
-		cost := estimateTokens(s.Text)
-		if spent+cost > budget {
-			return false
-		}
-		seen[s.ChunkID] = true
-		s.Hop = hop
-		spent += cost
-		out = append(out, s)
-		return true
-	}
-
-	// The symbol walk spends up to the budget less the crossing reserve; see
-	// crossingReserve for why the reserve exists and what it costs.
+	// The symbol walk spends up to the budget less the crossing reserve, and
+	// less the gap reserve when the gap pass is on; see crossingReserve and
+	// gapReserve for why each reserve exists and what it costs. The two are
+	// independent: an arm with crossings off and the gap pass on reserves for
+	// the gap pass alone.
 	symbolBudget := g.opts.TokenBudget
 	if !g.opts.NoCrossings {
 		symbolBudget -= g.opts.TokenBudget / crossingReserve
 	}
+	if g.gap != nil {
+		symbolBudget -= g.opts.TokenBudget / gapReserve
+	}
+	// The crossing runs under the full budget less the gap reserve — the
+	// crossing arm spends whatever it is given on the flow corpus, and a gap
+	// pass under the same ceiling would land nothing.
+	crossingBudget := g.opts.TokenBudget
+	if g.gap != nil {
+		crossingBudget -= g.opts.TokenBudget / gapReserve
+	}
+	a.budget = symbolBudget
 
 	// The rest of the file a hit sits in, before any symbol hop: the nearest
 	// explanation of a chunk is the chunk beside it, and the two unique
@@ -166,13 +166,13 @@ func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage 
 				return nil, err
 			}
 			for _, s := range more {
-				if !take(s, 0, symbolBudget) {
+				if !a.take(s, 0) {
 					break
 				}
 			}
 		}
 	}
-	frontier := out
+	frontier := a.out
 symbols:
 	for hop := 1; hop <= g.opts.MaxHops; hop++ {
 		var next []Source
@@ -182,10 +182,10 @@ symbols:
 				return nil, err
 			}
 			for _, ref := range mechanismFirst(refs) {
-				if seen[ref.ChunkID] {
+				if a.seen[ref.ChunkID] {
 					continue
 				}
-				if !take(ref, hop, symbolBudget) {
+				if !a.take(ref, hop) {
 					break symbols
 				}
 				next = append(next, ref)
@@ -197,8 +197,9 @@ symbols:
 		frontier = next
 	}
 	if g.opts.NoCrossings {
-		return out, nil
+		return a.out, nil
 	}
+	a.budget = crossingBudget
 
 	// The crossing, from EVERYTHING the walk gathered — hits and references
 	// alike. Measured on the flow corpus, every edge-only miss had the same
@@ -231,10 +232,10 @@ symbols:
 	// reports false when the budget is spent — and stopping means stopping,
 	// for the reason take gives.
 	land := func(landing, from Source) (bool, error) {
-		if seen[landing.ChunkID] {
+		if a.seen[landing.ChunkID] {
 			return true, nil
 		}
-		if !take(landing, from.Hop+1, g.opts.TokenBudget) {
+		if !a.take(landing, from.Hop+1) {
 			return false, nil
 		}
 		if isPropertyEdge(landing.Reason) {
@@ -251,14 +252,14 @@ symbols:
 			return false, err
 		}
 		for _, ref := range mechanismFirst(inland) {
-			if !take(ref, from.Hop+2, g.opts.TokenBudget) {
+			if !a.take(ref, from.Hop+2) {
 				return false, nil
 			}
 		}
 		return true, nil
 	}
 	crossed := map[string]bool{}
-	starts := append([]Source{}, out...)
+	starts := append([]Source{}, a.out...)
 	var later []crossing
 	for _, from := range starts {
 		key := from.Repo + "\x00" + from.Path
@@ -281,7 +282,7 @@ symbols:
 				return nil, err
 			}
 			if !more {
-				return out, nil
+				return a.out, nil
 			}
 		}
 	}
@@ -291,10 +292,44 @@ symbols:
 			return nil, err
 		}
 		if !more {
-			return out, nil
+			return a.out, nil
 		}
 	}
-	return out, nil
+	return a.out, nil
+}
+
+// admitter admits reached chunks under a token budget, keeping what has been
+// taken, what it cost and what was seen. It reports false when the budget is
+// spent, and the caller then STOPS rather than trimming what is already
+// gathered, so what the answer cites is always present — and stopping means
+// stopping: continuing would keep querying the rest of the frontier for rows
+// that can never be taken.
+//
+// budget is set by the phase rather than passed per call: the symbol walk,
+// the crossing and the gap pass each run under a different ceiling, and a
+// phase that changed it halfway would spend another phase's reserve.
+type admitter struct {
+	seen   map[int64]bool
+	spent  int
+	budget int
+	out    []Source
+}
+
+// take admits s at hop, or reports false when the budget cannot hold it. A
+// chunk already taken is not admitted twice and is not a refusal.
+func (a *admitter) take(s Source, hop int) bool {
+	if a.seen[s.ChunkID] {
+		return true
+	}
+	cost := estimateTokens(s.Text)
+	if a.spent+cost > a.budget {
+		return false
+	}
+	a.seen[s.ChunkID] = true
+	s.Hop = hop
+	a.spent += cost
+	a.out = append(a.out, s)
+	return true
 }
 
 // crossing is a landing held back for the second pass, with the source it
@@ -325,6 +360,18 @@ func isPropertyEdge(reason string) bool {
 // corpus is measured, not assumed: TestEvalMeasureGathered, in
 // internal/retrieve/eval.
 const crossingReserve = 6
+
+// gapReserve is the share of the token budget the symbol walk and the
+// crossing both leave untouched for the gap pass: one part in twelve, 2000 of
+// the default 24000 tokens, which is eight names at around 250 tokens each.
+//
+// Reserved only when the pass is on. The crossing arm spends whatever budget
+// it is given — on the flow corpus the walk and the crossings together reach
+// the ceiling — so a gap pass running under the same budget would resolve
+// names it could then never admit, and the arm would measure as doing
+// nothing. What the reserve costs the walk is the same kind of fact
+// crossingReserve's is, and it is measured by the harness arms, not assumed.
+const gapReserve = 12
 
 // wholeFile returns the chunks of a hit's file the answer should read
 // beside the hit: every other chunk when the file is small (at most
@@ -419,29 +466,41 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 	sort.SliceStable(ns, func(i, j int) bool { return kindRank(ns[i].Kind) < kindRank(ns[j].Kind) })
 	var out []Source
 	for _, n := range ns {
-		var s Source
-		err := g.db.QueryRowContext(ctx, `
-			SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
-			FROM files f
-			JOIN repo_state r ON r.name = f.repo
-			JOIN chunks c ON c.file_id = f.id
-			WHERE f.repo = ? AND f.path = ? AND ? BETWEEN c.start_line AND c.end_line
-			ORDER BY c.ordinal
-			LIMIT 1`, n.Repo, n.Path, n.Line).Scan(
-			&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text)
-		if err == sql.ErrNoRows {
-			// A token on a line no chunk covers — an overlong line that was
-			// split, or a file whose chunks moved since the token was written.
-			// Nothing to cite, so nothing to gather.
-			continue
-		}
+		s, ok, err := g.chunkAt(ctx, n.Repo, n.Path, n.Line)
 		if err != nil {
 			return nil, fmt.Errorf("read the far side of %s %q: %w", n.Kind, n.Value, err)
+		}
+		if !ok {
+			continue
 		}
 		s.Reason = fmt.Sprintf("edge:%s %s from %s/%s", n.Kind, n.Value, from.Repo, from.Path)
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// chunkAt is the chunk of repo/path covering line, with no reason set: what a
+// landing on a token's line is, whoever found the line. Reports false when no
+// chunk covers it — an overlong line that was split, or a file whose chunks
+// moved since the token was written. Nothing to cite, so nothing to gather.
+func (g *Gatherer) chunkAt(ctx context.Context, repo, path string, line int) (Source, bool, error) {
+	var s Source
+	err := g.db.QueryRowContext(ctx, `
+		SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
+		FROM files f
+		JOIN repo_state r ON r.name = f.repo
+		JOIN chunks c ON c.file_id = f.id
+		WHERE f.repo = ? AND f.path = ? AND ? BETWEEN c.start_line AND c.end_line
+		ORDER BY c.ordinal
+		LIMIT 1`, repo, path, line).Scan(
+		&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text)
+	if err == sql.ErrNoRows {
+		return Source{}, false, nil
+	}
+	if err != nil {
+		return Source{}, false, err
+	}
+	return s, true, nil
 }
 
 // referenced finds chunks defining a symbol that from's code actually mentions.
@@ -452,6 +511,25 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 // text would have nowhere to go.
 func (g *Gatherer) referenced(ctx context.Context, from Source) ([]Source, error) {
 	names := identifiers(from.Text)
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out, err := g.definers(ctx, names, from.Repo, from.Repo, from.Path)
+	if err != nil {
+		return nil, fmt.Errorf("follow references from %s: %w", from.Path, err)
+	}
+	return out, nil
+}
+
+// definers finds the chunks that DEFINE any of names, under the selectivity
+// ceiling, over enabled repositories only.
+//
+// home is the repository a name is resolved in when it defines it at all:
+// see the rule below. notRepo/notPath is the file the names were read from,
+// which never defines itself into its own result. All three empty is the
+// caller that has no near side — the gap pass, which has a name and no file
+// — and then every selective definer in the corpus is an answer.
+func (g *Gatherer) definers(ctx context.Context, names []string, home, notRepo, notPath string) ([]Source, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
@@ -513,15 +591,15 @@ WHERE NOT (f.repo = ? AND f.path = ?)
   AND (f.repo = ? OR s.name NOT IN (SELECT name FROM home))
 ORDER BY definers ASC, f.path, c.ordinal`
 
-	args := make([]any, 0, len(names)+4)
+	args := make([]any, 0, len(names)+5)
 	for _, n := range names {
 		args = append(args, n)
 	}
-	args = append(args, maxDefiners, from.Repo, from.Repo, from.Path, from.Repo)
+	args = append(args, maxDefiners, home, notRepo, notPath, home)
 
 	rows, err := g.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("follow references from %s: %w", from.Path, err)
+		return nil, fmt.Errorf("look up definers: %w", err)
 	}
 	defer rows.Close()
 
@@ -538,7 +616,7 @@ ORDER BY definers ASC, f.path, c.ordinal`
 		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read references from %s: %w", from.Path, err)
+		return nil, fmt.Errorf("read definers: %w", err)
 	}
 	return out, nil
 }

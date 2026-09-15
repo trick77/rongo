@@ -855,3 +855,33 @@ func TestResumeRepoFailsWhenOneOfTheChosenRepositoriesIsGone(t *testing.T) {
 		t.Error("a turn that cannot cover what it claims must not search at all")
 	}
 }
+
+// TestResumeRepoRunsTheGapPassToo: a resumed turn reads the code the same way
+// the first attempt would have. A pass the resume skipped would answer the
+// chosen repository's question from less code than the card's own turn had.
+func TestResumeRepoRunsTheGapPassToo(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() int { return unitPrice() * n }")
+	seedChunk(t, db, "price.go", 0, 5, 20, "unitPrice", "func unitPrice() int { return 3 }")
+	seedSymbol(t, db, "price.go", "unitPrice", 5)
+	// No symbol hop: what reaches price.go can only be the gap pass.
+	g := NewGatherer(db, GatherOptions{MaxHops: 0, TokenBudget: 5000}).
+		WithGapPass(gapLLM(t, missing(name("unitPrice", "symbol")), nil))
+	p := NewPipeline(twoStepUpstream(t, appleTVReply, "So [1] and [2]."),
+		&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}, g, &fakeRouter{})
+	details := map[string]map[string]any{}
+
+	answer, err := p.ResumeRepo(context.Background(), "How is the total computed?", Understanding{}, []string{"peeq"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"peeq"}},
+		Events{OnDetail: func(step string, d map[string]any) { details[step] = d }})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+
+	if !has(answer.Sources, "price.go") {
+		t.Errorf("sources = %v, want the definition the gap pass looked up", paths(answer.Sources))
+	}
+	if d := details["gathering"]; d == nil || d["gaps"] != 1 {
+		t.Errorf("gathering detail = %v, want one gap", d)
+	}
+}
