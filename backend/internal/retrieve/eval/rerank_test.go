@@ -30,8 +30,8 @@ func TestEvalMeasureRerank(t *testing.T) {
 	}
 	plain := retrieve.New(db, embedder)
 	reranked := retrieve.New(db, embedder)
+	// The pool is the reranker's; searchTexts lifts the lanes to it.
 	rr := evalReranker(t, client)
-	reranked.Candidates = rr.Pool
 	reranked.Reranker = rr
 	arms := []arm{
 		{"fused order (the product)", plain},

@@ -72,13 +72,21 @@ merely shares a word with it. Do not explain.`
 const rerankExcerpt = 240
 
 // rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
-// what each result in the pool adds on top. A pool deeper than sixty would
-// otherwise end with finish_reason=length, which is an error, a warning and
-// the fused order — the reranker doing nothing while looking like it ran.
+// what each result in the pool adds on top. The floor covers a short list; the
+// shipped pool of sixty is already past it and sends 304. Without the growth a
+// deeper pool would end with finish_reason=length, which is an error, a
+// warning and the fused order — the reranker doing nothing while looking like
+// it ran.
 const (
 	rerankMaxTokens    = 256
 	rerankTokensPerHit = 4
+	rerankTokensBase   = 64
 )
+
+// replyCap is how many tokens the reply may take for a pool of n results.
+func replyCap(n int) int {
+	return max(rerankMaxTokens, rerankTokensBase+rerankTokensPerHit*n)
+}
 
 // excerptWidth is Excerpt, or the default when none was set.
 func (r *LLMReranker) excerptWidth() int {
@@ -116,7 +124,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(rerankSystem, k)},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(max(rerankMaxTokens, 64+rerankTokensPerHit*len(hits))), llm.WithStep("rerank"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(replyCap(len(hits))), llm.WithStep("rerank"))
 	if err != nil {
 		if ctx.Err() != nil {
 			// The reader left; there is no turn to keep an order for.

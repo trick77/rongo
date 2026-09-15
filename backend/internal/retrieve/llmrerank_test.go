@@ -12,15 +12,27 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 )
 
-func rerankLLM(t *testing.T, reply string, saw *string) *llm.Client {
+// rerankSeen is what the fake read off the request: the prompt the model was
+// shown and the reply cap it was sent. The gate profile spells the cap
+// max_completion_tokens (llmwire profiles.yaml, mimo-v2.5).
+type rerankSeen struct {
+	prompt   string
+	replyCap int
+}
+
+func rerankLLM(t *testing.T, reply string, saw *rerankSeen) *llm.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Messages []struct{ Content string } `json:"messages"`
+			Messages            []struct{ Content string } `json:"messages"`
+			MaxCompletionTokens int                        `json:"max_completion_tokens"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if saw != nil && len(req.Messages) > 1 {
-			*saw = req.Messages[1].Content
+		if saw != nil {
+			saw.replyCap = req.MaxCompletionTokens
+			if len(req.Messages) > 1 {
+				saw.prompt = req.Messages[1].Content
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -62,14 +74,14 @@ func rerankLLMPicking(t *testing.T, path string, saw *string) *llm.Client {
 }
 
 func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
-	var prompt string
+	var seen rerankSeen
 	hits := []Hit{
 		{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: "func a()"},
 		{ChunkID: 2, Repo: "peeq", Path: "b.go", RawText: "func b()"},
 		{ChunkID: 3, Repo: "peeq", Path: "c.go", Symbol: "c", RawText: "// c is the answer\nfunc c()"},
 		{ChunkID: 4, Repo: "peeq", Path: "d.go", RawText: "func d()"},
 	}
-	r := NewLLMReranker(rerankLLM(t, "```json\n{\"relevant\":[3,1,9,3]}\n```", &prompt), 60)
+	r := NewLLMReranker(rerankLLM(t, "```json\n{\"relevant\":[3,1,9,3]}\n```", &seen), 60)
 	got, err := r.Rerank(context.Background(), "what is c?", hits, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -83,8 +95,8 @@ func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
 	if len(ids) != 3 || ids[0] != 3 || ids[1] != 1 || ids[2] != 2 {
 		t.Errorf("order = %v, want [3 1 2]", ids)
 	}
-	if !strings.Contains(prompt, "[3] peeq c.go (c)") || !strings.Contains(prompt, "// c is the answer") {
-		t.Errorf("the model was not shown the numbered headers and excerpts:\n%s", prompt)
+	if !strings.Contains(seen.prompt, "[3] peeq c.go (c)") || !strings.Contains(seen.prompt, "// c is the answer") {
+		t.Errorf("the model was not shown the numbered headers and excerpts:\n%s", seen.prompt)
 	}
 }
 
@@ -177,20 +189,20 @@ func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
 // TestLLMRerank_headerCarriesTheStartLine: two chunks of one file differ by
 // where they start, and the model cannot tell them apart without it.
 func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
-	var prompt string
+	var seen rerankSeen
 	hits := []Hit{
 		{ChunkID: 1, Repo: "peeq", Path: "a.go", Symbol: "a", StartLine: 42, RawText: "func a()"},
 		{ChunkID: 2, Repo: "peeq", Path: "b.go", RawText: "func b()"},
 	}
-	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &prompt), 60)
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 60)
 	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "[1] peeq a.go:42 (a)") {
-		t.Errorf("the start line is missing from the header:\n%s", prompt)
+	if !strings.Contains(seen.prompt, "[1] peeq a.go:42 (a)") {
+		t.Errorf("the start line is missing from the header:\n%s", seen.prompt)
 	}
-	if !strings.Contains(prompt, "[2] peeq b.go\n") {
-		t.Errorf("a chunk starting at line zero got a colon:\n%s", prompt)
+	if !strings.Contains(seen.prompt, "[2] peeq b.go\n") {
+		t.Errorf("a chunk starting at line zero got a colon:\n%s", seen.prompt)
 	}
 }
 
@@ -200,68 +212,56 @@ func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
 	body := strings.Repeat("filler line\n", 50) + "THE MARKER\n" + strings.Repeat("tail line\n", 50)
 	hits := []Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: body}, {ChunkID: 2}}
 
-	var narrow string
+	var narrow rerankSeen
 	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &narrow), 60)
 	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(narrow, "THE MARKER") {
+	if strings.Contains(narrow.prompt, "THE MARKER") {
 		t.Errorf("the default width already reaches the marker; the test proves nothing")
 	}
 
-	var wide string
+	var wide rerankSeen
 	r = NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &wide), 60)
 	r.Excerpt = 800
 	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(wide, "THE MARKER") {
-		t.Errorf("Excerpt = 800 did not widen what the model was shown:\n%s", wide)
+	if !strings.Contains(wide.prompt, "THE MARKER") {
+		t.Errorf("Excerpt = 800 did not widen what the model was shown:\n%s", wide.prompt)
 	}
 }
 
 // TestLLMRerank_replyCapGrowsWithThePool: a pool of a hundred needs more than
 // the 256-token floor, or the reply ends with finish_reason=length, which is
-// an error, a warning and the fused order.
+// an error, a warning and the fused order. The shipped pool of sixty is
+// already past the floor.
 func TestLLMRerank_replyCapGrowsWithThePool(t *testing.T) {
-	var capSeen float64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		// The gate profile names its own spelling of the cap parameter.
-		for _, key := range []string{"max_completion_tokens", "max_tokens"} {
-			if v, ok := body[key].(float64); ok {
-				capSeen = v
-				break
-			}
+	for _, c := range []struct {
+		hits, want int
+	}{
+		{2, 256},   // the floor
+		{60, 304},  // the shipped pool
+		{100, 464}, // the deep arm
+	} {
+		if got := replyCap(c.hits); got != c.want {
+			t.Errorf("replyCap(%d) = %d, want %d", c.hits, got, c.want)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": `{"relevant":[1]}`}, "finish_reason": "stop"}},
-			"usage":   map[string]int{},
-		})
-	}))
-	t.Cleanup(srv.Close)
+	}
 
+	// And the cap really reaches the wire, under the gate profile's own
+	// spelling of the parameter.
+	var seen rerankSeen
 	hits := make([]Hit, 100)
 	for i := range hits {
 		hits[i] = Hit{ChunkID: int64(i + 1), Repo: "peeq", Path: "a.go"}
 	}
-	r := NewLLMReranker(fakeLLM(t, srv), 100)
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 100)
 	if _, err := r.Rerank(context.Background(), "q", hits, 20); err != nil {
 		t.Fatal(err)
 	}
-	if capSeen < 464 {
-		t.Errorf("reply cap = %v for a pool of 100, want at least 464", capSeen)
-	}
-
-	small := []Hit{{ChunkID: 1}, {ChunkID: 2}}
-	r = NewLLMReranker(fakeLLM(t, srv), 60)
-	if _, err := r.Rerank(context.Background(), "q", small, 2); err != nil {
-		t.Fatal(err)
-	}
-	if capSeen != rerankMaxTokens {
-		t.Errorf("reply cap = %v for two hits, want the floor %d", capSeen, rerankMaxTokens)
+	if seen.replyCap < 464 {
+		t.Errorf("reply cap on the wire = %d for a pool of 100, want at least 464", seen.replyCap)
 	}
 }
 
