@@ -422,12 +422,16 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	// Reasoning is checked here, not left to BestEffort per call: a level
 	// the model does not have is a configuration error with a known answer
 	// (the levels it has), and a deployment should hear that at boot, not
-	// run for a week with every gate call silently demoted.
-	if err := checkReasoning(wire.Registry(), gate, "BACKEND_LLM_GATE_REASONING", pol.GateReasoning); err != nil {
-		return nil, err
-	}
-	if err := checkReasoning(wire.Registry(), pro, "BACKEND_LLM_REASONING", pol.ProReasoning); err != nil {
-		return nil, err
+	// run for a week with every gate call silently demoted. Both settings
+	// against both models: WithoutThinking is a property of the call, not
+	// of the lane, so a Pro call may be a gate call and receive GateReasoning.
+	for _, model := range []string{pro, gate} {
+		if err := checkReasoning(wire.Registry(), model, "BACKEND_LLM_GATE_REASONING", pol.GateReasoning); err != nil {
+			return nil, err
+		}
+		if err := checkReasoning(wire.Registry(), model, "BACKEND_LLM_REASONING", pol.ProReasoning); err != nil {
+			return nil, err
+		}
 	}
 	return &Client{
 		wire:          wire,
@@ -545,7 +549,7 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 
 // warn logs what llmwire could not send as asked. Debug, because a warning
 // here is a request the wire coerced and still sent, not a failed call.
-func (c *Client) warn(ws []llmwire.Warning) {
+func (c *Client) warn(model string, ws []llmwire.Warning) {
 	for _, w := range ws {
 		// A knob the model refused and BestEffort rewrote is the one warning
 		// that changes what the model was asked: a gate call pinned at 0 ran
@@ -553,8 +557,8 @@ func (c *Client) warn(ws []llmwire.Warning) {
 		// Once per model and feature at Warn, so a deployment whose model
 		// does that is told at the first question and not on every line.
 		if w.Kind == llmwire.WarnUnsupported {
-			if _, seen := c.demoted.LoadOrStore(w.Feature, true); !seen {
-				c.log.Warn("llm: request knob refused by the model, sent without it", "feature", w.Feature, "details", w.Details)
+			if _, seen := c.demoted.LoadOrStore(model+"\x00"+w.Feature, true); !seen {
+				c.log.Warn("llm: request knob refused by the model, sent without it", "model", model, "feature", w.Feature, "details", w.Details)
 			}
 			continue
 		}
@@ -573,7 +577,7 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	// generating.
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
-	c.warn(warnings)
+	c.warn(c.deployment(o.model), warnings)
 	if err != nil {
 		return "", Usage{}, err
 	}
@@ -600,7 +604,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
-	c.warn(warnings)
+	c.warn(c.deployment(o.model), warnings)
 	if err != nil {
 		return Usage{}, err
 	}

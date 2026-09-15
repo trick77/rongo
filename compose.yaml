@@ -38,8 +38,8 @@
 #      LLMWIRE_MIMO_*          endpoint and key that answer questions
 #      LLMWIRE_OPENAI_*        endpoint and key that build the index
 #
-#    Every one of those is mandatory: `up` stops with the message next to the
-#    variable rather than starting a container that cannot answer anything.
+#    The session secret is mandatory here: `up` stops with the message next to
+#    it. A missing model key stops rongo at boot, naming the variable.
 services:
   rongo:
     build:
@@ -95,11 +95,14 @@ services:
       # Empty means no group check — every user Authelia's authorization_policy
       # let through is an admin. Set it only once a second tier exists here.
       BACKEND_OIDC_ADMIN_GROUP: ${BACKEND_OIDC_ADMIN_GROUP:-}
-      # The model and embedding keys. Mandatory: without them the process
-      # refuses to start rather than answering every question with 503. The
-      # hosts are llmwire's, carried by its profiles.
-      LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:?set it in .env, the key for MiMo's token-plan host}
-      LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:?set it in .env, the key for OpenAI's /embeddings}
+      # The provider keys, one per host llmwire's profiles name. Which ones
+      # are needed follows from the models chosen below: MiMo and OpenAI by
+      # default, and the process refuses to start naming the missing one,
+      # rather than answering every question with 503. Every key is passed
+      # through so choosing another model is a .env edit.
+      LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:-}
+      LLMWIRE_OPENAI_API_KEY: ${LLMWIRE_OPENAI_API_KEY:-}
+      LLMWIRE_ZAI_API_KEY: ${LLMWIRE_ZAI_API_KEY:-}
       # Read by llmwire itself, never by rongo: forwarded so it reaches it.
       LLMWIRE_EMULATE_OPENCODE: ${LLMWIRE_EMULATE_OPENCODE:-}
       # Which models answer, by llmwire profile id; empty is MiMo. And a
