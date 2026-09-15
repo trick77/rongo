@@ -323,7 +323,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 	return s.states(ctx, "")
 }
 
-// states is Active and All less their one differing word. They read the same
+// states is Active and All less their one differing word. They read the
 // same columns plus the structure and attach the same edges, and keeping two
 // copies of that is how one of them ends up a column behind the other.
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {

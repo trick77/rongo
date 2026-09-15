@@ -70,7 +70,7 @@ func TestRun_handsGitTheConfiguredSSHCommandAndCA(t *testing.T) {
 	ssh := env["GIT_SSH_COMMAND"]
 	for _, want := range []string{
 		"-i '/git-auth/id_ed25519'",
-		"UserKnownHostsFile='/git-auth/known hosts'",
+		`'UserKnownHostsFile="/git-auth/known hosts"'`,
 		"StrictHostKeyChecking=yes",
 		"BatchMode=yes",
 		"IdentitiesOnly=yes",

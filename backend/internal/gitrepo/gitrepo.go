@@ -509,7 +509,11 @@ func (a Auth) env() []string {
 		env = append(env, "GIT_SSH_COMMAND="+strings.Join([]string{
 			"ssh",
 			"-i", shellQuote(a.SSHKey),
-			"-o", "UserKnownHostsFile=" + shellQuote(a.SSHKnownHosts),
+			// Quoted twice on purpose: the single quotes are for the shell
+			// git hands the command to, the double quotes for ssh, which
+			// splits an option value on whitespace again (`ssh -G -o
+			// "UserKnownHostsFile=/a b"` reads two files, /a and b).
+			"-o", shellQuote("UserKnownHostsFile=\"" + a.SSHKnownHosts + "\""),
 			"-o", "StrictHostKeyChecking=yes",
 			"-o", "BatchMode=yes",
 			"-o", "IdentitiesOnly=yes",
