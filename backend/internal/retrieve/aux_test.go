@@ -52,6 +52,34 @@ func TestSearchKeywordIn_auxOffIsTheLaneAsItShipped(t *testing.T) {
 	}
 }
 
+func TestSearchKeywordIn_auxOffNeverNamesTheAuxColumn(t *testing.T) {
+	// Given: a database whose keyword mirror has ONE column — what every index
+	// built before 0024 looks like. With the column off the lane must be
+	// runnable there, or "measure today's lane" needs a second database and
+	// stops being the same corpus.
+	db := testDB(t)
+	addRepo(t, db, "shop", "master")
+	addChunk(t, db, "shop", "src/A.java", "run", "void run() { sender.send(); }", nearVec)
+	for _, stmt := range []string{
+		`DROP TABLE chunks_fts`,
+		`CREATE VIRTUAL TABLE chunks_fts USING fts5(raw_text)`,
+		`INSERT INTO chunks_fts (rowid, raw_text) SELECT id, raw_text FROM chunks`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("build the pre-0024 mirror (%s): %v", stmt, err)
+		}
+	}
+
+	// When / Then
+	hits, err := NewStore(db).SearchKeywordIn(context.Background(), BuildFTSMatch("sender"), 10, nil, nil, 0)
+	if err != nil {
+		t.Fatalf("aux off against a one-column mirror: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Errorf("got %d hits, want the chunk; the off path must not reference aux", len(hits))
+	}
+}
+
 func TestSearchKeywordIn_theWeightKeepsABodyMatchAhead(t *testing.T) {
 	// Given: two chunks, one holding the word in its source and one only in its
 	// header. The aux column is the weaker evidence by construction — a path is

@@ -260,7 +260,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
 		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed int
-		t.Logf("\n=== run %d of %d, audience %s ===", run, runs, audience)
+		t.Logf("\n=== run %d of %d, audience %s%s ===", run, runs, audience, codeLaneLabel())
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {

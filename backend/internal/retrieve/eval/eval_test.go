@@ -134,14 +134,34 @@ func auxWeightFromEnv(t *testing.T) float64 {
 	return w
 }
 
-// evalRetriever is the product's retriever under the harness's aux switch, so
-// every arm in this package can be run with the column on or off and the two
-// tables are comparable. Arms that configure more — a reranker, a decay — set
-// it on top of this.
+// codeLaneOn reads BACKEND_EVAL_CODE_LANE, the harness-only switch for the code
+// rung: the OR floor of the code-terms text weighed as guessed identifiers
+// rather than as prose. Off unless it is exactly "1", so a typo runs the
+// product rather than an arm nobody asked for.
+func codeLaneOn() bool {
+	return envOr("BACKEND_EVAL_CODE_LANE", "0") == "1"
+}
+
+// codeLaneLabel is what the switch adds to an arm's name, so a table cannot be
+// read as the product's when it is not. Empty when the rung is off.
+func codeLaneLabel() string {
+	if !codeLaneOn() {
+		return ""
+	}
+	return fmt.Sprintf(" + code rung %.1f", retrieve.WeightKeywordCode)
+}
+
+// evalRetriever is the product's retriever under the harness's two keyword-lane
+// switches, so every arm in this package can be run with the aux column and the
+// code rung on or off and the tables are comparable. Arms that configure more —
+// a reranker, a decay — set it on top of this.
 func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
 	t.Helper()
 	r := retrieve.New(db, evalEmbedder(t))
 	r.AuxWeight = auxWeightFromEnv(t)
+	if codeLaneOn() {
+		r.CodeWeight = retrieve.WeightKeywordCode
+	}
 	return r
 }
 

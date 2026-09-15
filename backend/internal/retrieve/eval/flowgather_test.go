@@ -147,6 +147,12 @@ func TestFlowGathered(t *testing.T) {
 		reranked.Reranker = evalReranker(t, evalLLM(t, 2*time.Minute))
 		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
 	}
+	// Every arm here searches with the same keyword lane, so the rung belongs
+	// in every label: a table run with a lane the product does not have must
+	// not read as the product's.
+	for i := range arms {
+		arms[i].name += codeLaneLabel()
+	}
 
 	// Searched once per question and retriever, shared across the arms: the
 	// arms differ in gathering only, and a second embedding call per arm
@@ -159,7 +165,7 @@ func TestFlowGathered(t *testing.T) {
 			if !ok {
 				t.Fatalf("no frozen expansion for %q; run TestExpandFlowQuestions", q.Text)
 			}
-			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Repos: e.Repos, Question: q.Text, K: gatherSearchK})
+			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Code: codeTextOf(e.Texts), Repos: e.Repos, Question: q.Text, K: gatherSearchK})
 			if err != nil {
 				t.Fatalf("search %q: %v", q.Text, err)
 			}

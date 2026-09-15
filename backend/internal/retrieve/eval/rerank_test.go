@@ -30,7 +30,13 @@ func TestEvalMeasureRerank(t *testing.T) {
 	reranked := evalRetriever(t, db)
 	reranked.Candidates = 60
 	reranked.Reranker = evalReranker(t, client)
-	arms := []arm{{"fused order (the product)", plain}, {"fused order + short-gate rerank over 60", reranked}}
+	// The code rung travels in the label the way the pool does: a table run
+	// with a keyword lane the product does not have must not read as the
+	// product's.
+	arms := []arm{
+		{"fused order (the product)" + codeLaneLabel(), plain},
+		{"fused order + short-gate rerank over 60" + codeLaneLabel(), reranked},
+	}
 
 	questions := loadQuestions(t)
 	for _, a := range arms {
@@ -46,7 +52,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 			if !ok {
 				t.Fatalf("no expansion for %q", q.Text)
 			}
-			hits, err := a.r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: gatherSearchK})
+			hits, err := a.r.Search(ctx, retrieve.Query{Texts: texts, Code: codeTextOf(texts), Question: q.Text, K: gatherSearchK})
 			if err != nil {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}

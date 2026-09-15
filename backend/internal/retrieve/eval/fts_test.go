@@ -91,8 +91,7 @@ func TestEvalMeasureFTS(t *testing.T) {
 	// gathered and one ambiguous pair — which the pair alone cannot attribute:
 	// the rung on its own is the arm that says whether the column contributed
 	// anything to that at all.
-	codeLane := envOr("BACKEND_EVAL_CODE_LANE", "0") == "1"
-	if codeLane {
+	if codeLaneOn() {
 		code := retrieve.New(db, evalEmbedder(t))
 		code.AuxWeight = 0
 		code.CodeWeight = retrieve.WeightKeywordCode
