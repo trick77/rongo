@@ -34,24 +34,33 @@ var (
 	digraphWord = regexp.MustCompile(`[A-Za-zÄÖÜäöü]*(ae|oe|ue|Ae|Oe|Ue)[A-Za-zÄÖÜäöü]*`)
 )
 
-// legitimateStems are German words, and names German borrows, whose ae/oe/ue
-// is not a transliterated umlaut. Compared lowercase by prefix so that the
-// inflections (neue/neuen/neuer, aktuelle/aktuellen) ride along.
-var legitimateStems = []string{
-	"neue", "feuer", "steuer", "bauer", "dauer", "mauer", "trauer", "genau",
-	"aktuell", "eventuell", "individuell", "manuell", "virtuell", "sequenziell",
-	"quell", "bauen", "schauen", "israel", "michael", "poesie", "aloe", "oboe",
-	"aerosol", "kanaen", "queue", "request", "true", "value", "issue",
-}
-
+// legitimateDigraph says whether w carries its ae/oe/ue for a reason other
+// than a missing umlaut. One positional rule covers nearly every German case:
+// a "ue" after a, e or q (neue, Steuer, Vertrauen, Frequenz, Quelle) is never
+// a ü, because aü, eü and qü do not exist. What is left is a short list of
+// borrowings and names, compared lowercase by prefix so inflections ride
+// along.
 func legitimateDigraph(w string) bool {
 	lw := strings.ToLower(w)
+	if i := strings.Index(lw, "ue"); i > 0 && strings.ContainsRune("aeq", rune(lw[i-1])) {
+		return true
+	}
+	// -uell (aktuell, manuell, virtuell, individuell) is the Latin suffix.
+	if strings.Contains(lw, "uell") {
+		return true
+	}
 	for _, s := range legitimateStems {
 		if strings.HasPrefix(lw, s) {
 			return true
 		}
 	}
 	return false
+}
+
+var legitimateStems = []string{
+	"aerosol", "aero", "israel", "michael", "rafael", "poesie", "poet",
+	"koeffizient", "koexist", "aloe", "oboe", "kanaen",
+	"true", "value", "issue", "due", "request",
 }
 
 func TestGermanDigraphs(t *testing.T) {
@@ -63,6 +72,8 @@ func TestGermanDigraphs(t *testing.T) {
 		{"BAI sichert die Korrektheit der Rueckgabe [2].", []string{"Rueckgabe"}},
 		{"Die neue Steuer ist aktuell, der Bauer schaut genauer hin.", nil},
 		{"Der Wert ist true; die Queue liest den Request.", nil},
+		{"Vertrauen ist teuer, die Frequenz der Quelle ist bequem, Koeffizienten sind neu.", nil},
+		{"Der Kuenstler ueberprueft die Qualitaet.", []string{"Kuenstler", "ueberprueft", "Qualitaet"}},
 		{"Text vor dem Block.\n```java\nint fuer = 1;\n```\nDanach für.", nil},
 		{"Die Prüfung läuft, die Rückgabe stimmt.", nil},
 	}
