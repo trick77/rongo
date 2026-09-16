@@ -225,7 +225,6 @@ export default function Ask({
   // by sequence instead of by cleanup also settles the real race: switching
   // threads while a slower load is in the air.
   const loadSeq = useRef(0);
-  const bottom = useRef<HTMLDivElement>(null);
   // The scrolling column, and whether the view is currently following what
   // arrives into it. It follows from the moment a turn is asked and lets go
   // for the rest of that turn as soon as the reader touches the column —
@@ -482,8 +481,9 @@ export default function Ask({
   useEffect(() => {
     if (opened.current) return;
     following.current = true;
-    bottom.current?.scrollIntoView?.({ block: "end" });
-    if (view.current) selfTop.current = view.current.scrollTop;
+    // To the scroller's own end, not scrollIntoView on a marker: block "end"
+    // aligns with the scrollport's edge, which the stuck composer covers.
+    if (view.current) scrollSelf(view.current, view.current.scrollHeight);
   }, [turns.length]);
 
   // The answer grows downwards while it streams, so the view follows it —
@@ -1044,9 +1044,12 @@ export default function Ask({
           // No stacking context on the scroller, deliberately: the full-screen
           // diagram view is rendered from inside a card in this column, and
           // isolating the column would trap that overlay under the composer.
-          className="min-h-0 flex-1 overflow-auto"
+          // A flex column so the composer at its end is held at the foot while
+          // the thread is short; a stable gutter so the composer keeps its
+          // width when the thread grows a scrollbar.
+          className="flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]"
         >
-          <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
+          <div className="mx-auto w-full max-w-[900px] flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. That
                 rule is now a shared cap and a shared centring rather than a
@@ -1122,188 +1125,193 @@ export default function Ask({
                 }}
               />
             )}
-            <div ref={bottom} />
           </div>
+          {/* The composer lives INSIDE the scroller, stuck to its foot: the
+              scrollbar then runs the full height of the column instead of
+              stopping where the composer begins, and at the end of the thread
+              the form sits in flow, so the last line is wholly above it with
+              nothing to measure. Sticky only ever pushes up; the scroller's
+              flex column is what holds the form at the foot while the thread
+              is shorter than the window. z-10 against the diagram card's own
+              z-10 toolbar, settled by tree order in the form's favour.
+
+              w-full is not redundant beside max-w: a flex item with an auto
+              cross-axis margin loses align-items: stretch. Without it mx-auto
+              shrink-wraps the form to its controls and the composer comes out
+              a third of the column wide. ../loom writes the same three
+              classes together (ThreadPanel.tsx). pb-3 matches the footer's
+              mt-3 below, so the line under the composer sits with the same
+              gap above it as below it. */}
+          <form
+            onSubmit={submit}
+            className="sticky bottom-0 z-10 mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+            >
+            {/* The foot of the column, ../loom's way round: the composer is
+                opaque and the fade is a strip immediately above it, so prose
+                dissolves as it reaches the composer instead of being cut by it.
+                With the form stuck over the scrolled text the strip fades what
+                is actually passing under it.
+                h-8 against the column's pb-8, so the last line clears the strip
+                once the reader is at the foot. */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-full z-10 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
+            />
+            {/* The question gets the whole width; the controls sit under it in
+                their own row, so a long question and its settings never fight
+                for the same line. */}
+            <div className="rounded-ui-lg border border-border bg-panel px-3 pt-2 pb-2 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
+              {/* The pastes, each folded to a line, above the words they will
+                  follow. Before the textarea rather than after: the question
+                  is sent typed text first, and the composer reads in that
+                  order too. */}
+              {pastes.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 px-1 pt-1.5">
+                  {pastes.map((p, i) => (
+                    <PasteChip key={i} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
+                  ))}
+                </div>
+              )}
+              <textarea
+                value={question}
+                onChange={(e) => {
+                  setQuestion(e.target.value);
+                  setTooLong(false);
+                }}
+                onPaste={onPaste}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void submit();
+                  }
+                }}
+                ref={box}
+                rows={1}
+                aria-label="Question"
+                placeholder={(welcome[asking] ?? welcome.en).placeholder}
+                // 16px on a touch screen, and the same on the language select
+                // below: iOS Safari zooms the page in when a focused field
+                // renders under 16px and never zooms back out, leaving the app
+                // permanently wider than the viewport. Never an inline
+                // fontSize — it would out-specify the variant.
+                className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none pointer-coarse:text-base"
+              />
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
+                  {(["ba", "dev"] as const).map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      aria-pressed={audience === role}
+                      onClick={() => setAudience(role)}
+                      className={
+                        // pointer-coarse:text-base for the same reason the select
+                        // beside it carries one — not to stop a zoom, a button
+                        // never triggers that, but so the two pills stay the same
+                        // control on a touch screen instead of matching only on a
+                        // desktop.
+                        "rounded-full px-3 py-1 text-xs font-medium pointer-coarse:text-base " +
+                        (audience === role ? "bg-accent-fill text-ink" : "text-muted hover:text-ink")
+                      }
+                    >
+                      {roleName(role)}
+                    </button>
+                  ))}
+                </fieldset>
+                {/* Only while the choice is still open. A thread answers in the
+                    language of its first question, so from the second turn on
+                    this offered nothing: it stood there pinned and dimmed, a
+                    control that refused every hand laid on it. The turn's own
+                    pill above the answer already says which language the thread
+                    is in, and it says it where the answer is. */}
+                {/* Its box is the Role toggle's, off the same rule: the same
+                    border and radius, p-0.5 on the pill, py-1 text-xs on the
+                    control inside it. It used to carry a fixed h-9 sm:h-8 and
+                    stood taller than its neighbour at every width. Height is
+                    content-driven now, so the two agree wherever the text does —
+                    the pointer-coarse size included. */}
+                {!threadLanguage && (
+                  <label className="relative inline-flex items-center rounded-full border border-border bg-bg p-0.5 text-xs text-muted hover:border-elevated-border hover:text-ink">
+                    <span className="sr-only">Answer language</span>
+                    <select
+                      aria-label="Answer language"
+                      value={asking}
+                      onChange={(e) => {
+                        setLanguage(e.target.value);
+                        rememberLanguage(e.target.value);
+                      }}
+                      className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none focus-visible:ring-2 focus-visible:ring-accent-dim pointer-coarse:text-base"
+                    >
+                      {languages.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-2 rotate-90">
+                      <Chevron />
+                    </span>
+                  </label>
+                )}
+                {/* ml-auto belongs to the pair, not to the hint: the hint is not
+                    rendered below sm, and with the push on it the Ask button
+                    lost its right edge on exactly the width that needs it. */}
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="rounded-full bg-accent-fill px-4.5 py-1.5 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50 pointer-coarse:py-2.5"
+                  >
+                    Ask
+                  </button>
+                </div>
+              </div>
+              {/* The Ask button is dead here and the reason is somewhere else
+                  entirely — a turn still being written in another thread. A
+                  dimmed button with no explanation is the thing this whole
+                  change is about. Only when the answer is out of sight: in the
+                  thread being written, the running turn is right above. */}
+              {busy && liveThread.current !== shown.current && (
+                <p className="mt-2 px-1 text-xs text-muted">
+                  Another thread is still being answered — the next question waits for it.
+                </p>
+              )}
+              {/* Refused for weight, said where the refusal happened. The
+                  figure is the cap the server holds too, in the unit it
+                  counts: a paste this size is a file, not a question. */}
+              {tooLong && (
+                <p role="alert" className="mt-2 px-1 text-xs text-ochre">
+                  That is too much to ask at once — a question and its pasted text can be {MAX_QUESTION_BYTES / 1024} KB in all.
+                </p>
+              )}
+            </div>
+            {/* Under the composer, the way ../loom carries its own caveat. The
+                gap above it is the form's pb-3 and the gap below it is this
+                mt-3, so the line sits centred between the composer and the foot
+                of the window. Dropped where the window is short: the form
+                already halves its padding there, and this is the first thing
+                that can go. The version says which build answered, and it is
+                omitted rather than shown as "dev" when the binary was not
+                stamped — see App's Me. */}
+            <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
+              Rongo can make mistakes. Please double-check responses.
+              {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
+            </p>
+          </form>
         </div>
         {/* ../loom's transcript edges: prose dissolves into the background as
             it leaves the column rather than being cut off by it. This is the
-            head; the foot's strip rides above the composer, just below.
-            AFTER the scroller, not before it: at z-10 the strip ties with the
-            diagram card's own toolbar, and a tie is settled by tree order.
-            The height tracks the column's top padding at every breakpoint —
-            content has to clear the fade, or the first line sits half dimmed
-            with the column at rest. */}
+            head; the foot's strip rides above the composer, inside the
+            scroller. AFTER the scroller, not before it: at z-10 the strip
+            ties with the diagram card's own toolbar, and a tie is settled by
+            tree order. The height tracks the column's top padding at every
+            breakpoint — content has to clear the fade, or the first line sits
+            half dimmed with the column at rest. */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
         />
-
-        {/* w-full is not redundant beside max-w: the form is a flex item of the
-            column above, and a flex item with an auto cross-axis margin loses
-            align-items: stretch. Without it mx-auto shrink-wraps the form to
-            its controls and the composer comes out a third of the column wide.
-            ../loom writes the same three classes together (ThreadPanel.tsx).
-            pb-3 matches the footer's mt-3 below, so the line under the composer
-            sits with the same gap above it as below it. */}
-        <form
-          onSubmit={submit}
-          className="relative mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
-        >
-          {/* The foot of the column, ../loom's way round: the composer is
-              opaque and the fade is a strip immediately above it, so prose
-              dissolves as it reaches the composer instead of being cut by it.
-              The gradient that used to sit on the form itself could not do
-              this — the form is a flex sibling BELOW the scroller, not over
-              it, so its transparent-to-bg ramp painted bg on bg and faded
-              nothing.
-              h-8 against the column's pb-8, so the last line clears the strip
-              once the reader is at the foot. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-full z-10 h-8 bg-gradient-to-t from-bg to-transparent lg:h-10"
-          />
-          {/* The question gets the whole width; the controls sit under it in
-              their own row, so a long question and its settings never fight
-              for the same line. */}
-          <div className="rounded-ui-lg border border-border bg-panel px-3 pt-2 pb-2 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
-            {/* The pastes, each folded to a line, above the words they will
-                follow. Before the textarea rather than after: the question
-                is sent typed text first, and the composer reads in that
-                order too. */}
-            {pastes.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-1 pt-1.5">
-                {pastes.map((p, i) => (
-                  <PasteChip key={i} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
-                ))}
-              </div>
-            )}
-            <textarea
-              value={question}
-              onChange={(e) => {
-                setQuestion(e.target.value);
-                setTooLong(false);
-              }}
-              onPaste={onPaste}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              ref={box}
-              rows={1}
-              aria-label="Question"
-              placeholder={(welcome[asking] ?? welcome.en).placeholder}
-              // 16px on a touch screen, and the same on the language select
-              // below: iOS Safari zooms the page in when a focused field
-              // renders under 16px and never zooms back out, leaving the app
-              // permanently wider than the viewport. Never an inline
-              // fontSize — it would out-specify the variant.
-              className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none pointer-coarse:text-base"
-            />
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
-                {(["ba", "dev"] as const).map((role) => (
-                  <button
-                    key={role}
-                    type="button"
-                    aria-pressed={audience === role}
-                    onClick={() => setAudience(role)}
-                    className={
-                      // pointer-coarse:text-base for the same reason the select
-                      // beside it carries one — not to stop a zoom, a button
-                      // never triggers that, but so the two pills stay the same
-                      // control on a touch screen instead of matching only on a
-                      // desktop.
-                      "rounded-full px-3 py-1 text-xs font-medium pointer-coarse:text-base " +
-                      (audience === role ? "bg-accent-fill text-ink" : "text-muted hover:text-ink")
-                    }
-                  >
-                    {roleName(role)}
-                  </button>
-                ))}
-              </fieldset>
-              {/* Only while the choice is still open. A thread answers in the
-                  language of its first question, so from the second turn on
-                  this offered nothing: it stood there pinned and dimmed, a
-                  control that refused every hand laid on it. The turn's own
-                  pill above the answer already says which language the thread
-                  is in, and it says it where the answer is. */}
-              {/* Its box is the Role toggle's, off the same rule: the same
-                  border and radius, p-0.5 on the pill, py-1 text-xs on the
-                  control inside it. It used to carry a fixed h-9 sm:h-8 and
-                  stood taller than its neighbour at every width. Height is
-                  content-driven now, so the two agree wherever the text does —
-                  the pointer-coarse size included. */}
-              {!threadLanguage && (
-                <label className="relative inline-flex items-center rounded-full border border-border bg-bg p-0.5 text-xs text-muted hover:border-elevated-border hover:text-ink">
-                  <span className="sr-only">Answer language</span>
-                  <select
-                    aria-label="Answer language"
-                    value={asking}
-                    onChange={(e) => {
-                      setLanguage(e.target.value);
-                      rememberLanguage(e.target.value);
-                    }}
-                    className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none focus-visible:ring-2 focus-visible:ring-accent-dim pointer-coarse:text-base"
-                  >
-                    {languages.map((l) => (
-                      <option key={l.code} value={l.code}>
-                        {l.name}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="pointer-events-none absolute right-2 rotate-90">
-                    <Chevron />
-                  </span>
-                </label>
-              )}
-              {/* ml-auto belongs to the pair, not to the hint: the hint is not
-                  rendered below sm, and with the push on it the Ask button
-                  lost its right edge on exactly the width that needs it. */}
-              <div className="ml-auto flex items-center gap-2">
-                <span className="hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="rounded-full bg-accent-fill px-4.5 py-1.5 text-sm font-medium text-ink hover:bg-accent-strong disabled:opacity-50 pointer-coarse:py-2.5"
-                >
-                  Ask
-                </button>
-              </div>
-            </div>
-            {/* The Ask button is dead here and the reason is somewhere else
-                entirely — a turn still being written in another thread. A
-                dimmed button with no explanation is the thing this whole
-                change is about. Only when the answer is out of sight: in the
-                thread being written, the running turn is right above. */}
-            {busy && liveThread.current !== shown.current && (
-              <p className="mt-2 px-1 text-xs text-muted">
-                Another thread is still being answered — the next question waits for it.
-              </p>
-            )}
-            {/* Refused for weight, said where the refusal happened. The
-                figure is the cap the server holds too, in the unit it
-                counts: a paste this size is a file, not a question. */}
-            {tooLong && (
-              <p role="alert" className="mt-2 px-1 text-xs text-ochre">
-                That is too much to ask at once — a question and its pasted text can be {MAX_QUESTION_BYTES / 1024} KB in all.
-              </p>
-            )}
-          </div>
-          {/* Under the composer, the way ../loom carries its own caveat. The
-              gap above it is the form's pb-3 and the gap below it is this
-              mt-3, so the line sits centred between the composer and the foot
-              of the window. Dropped where the window is short: the form
-              already halves its padding there, and this is the first thing
-              that can go. The version says which build answered, and it is
-              omitted rather than shown as "dev" when the binary was not
-              stamped — see App's Me. */}
-          <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
-            Rongo can make mistakes. Please double-check responses.
-            {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
-          </p>
-        </form>
       </div>
 
       {showSources && (

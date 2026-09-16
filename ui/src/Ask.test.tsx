@@ -1643,13 +1643,18 @@ describe("Ask, the edges of the reading column", () => {
     expect(scroll.className).not.toContain("isolate");
     expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // The foot's strip belongs to the composer and sits immediately above it,
-    // because the composer is a sibling BELOW the scroller rather than an
-    // overlay on it — a gradient on the form itself fades nothing.
+    // The composer is the scroller's last child, stuck to its foot: the
+    // scrollbar runs the column's full height, and at the end of the thread
+    // the form sits in flow with the last line wholly above it. The foot's
+    // strip belongs to the composer and sits immediately above it.
+    const form = container.querySelector("form") as HTMLElement;
+    expect(scroll.contains(form)).toBe(true);
+    expect(form.className).toContain("sticky");
+    expect(form.className).toContain("bottom-0");
     const foot = container.querySelector(".bg-gradient-to-t") as HTMLElement;
     expect(foot.getAttribute("aria-hidden")).toBe("true");
     expect(foot.className).toContain("bottom-full");
-    expect(foot.closest("form")).toBeTruthy();
+    expect(foot.closest("form")).toBe(form);
   });
 });
 
