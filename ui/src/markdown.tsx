@@ -153,11 +153,16 @@ function text(src: string, key: string, hooks: MarkerHooks, fade = false): React
       // tablet there is no hover and no pane, and a chip that cannot be
       // tapped leaves the reader no way to a source but a collapsed list
       // under the answer. The brackets stay in the text either way.
+      //
+      // nowrap: the sr-only bracket after the button is a break opportunity,
+      // and a chip whose number fits the line but whose right padding does
+      // not gets split - the number at the end of one line, a 4px sliver of
+      // background at the start of the next.
       const open = known && hooks.onOpen;
       out.push(
         <sup
           key={`${key}-m${n++}`}
-          className="mx-px rounded bg-accent-dim px-1 font-mono text-[10px] font-semibold text-accent-strong"
+          className="mx-px whitespace-nowrap rounded bg-accent-dim px-1 font-mono text-[10px] font-semibold text-accent-strong"
           onMouseEnter={() => known && hooks.onHover?.(marker)}
           onMouseLeave={() => known && hooks.onHover?.(null)}
         >
