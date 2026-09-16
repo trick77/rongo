@@ -3,13 +3,23 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Threads from "./Threads";
 
-function threadList(list: unknown, ok = true) {
-  // The list comes in its envelope, as the API sends it.
-  const body = Array.isArray(list) ? { items: list, next_cursor: null } : list;
-  const fetchMock = vi.fn(async () => ({ ok, status: ok ? 200 : 500, json: async () => body }));
+function threadList(list: unknown, ok = true, starred: unknown[] = []) {
+  // The list comes in its envelope, as the API sends it. The rail reads two:
+  // the recent page and the starred list, told apart by the query.
+  const envelope = (l: unknown) => (Array.isArray(l) ? { items: l, next_cursor: null } : l);
+  const body = envelope(list);
+  const stars = envelope(starred);
+  const fetchMock = vi.fn(async (url: string) => ({
+    ok,
+    status: ok ? 200 : 500,
+    json: async () => (url.includes("starred=true") ? stars : body),
+  }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+
+/** The two loads the rail makes, so a count of the requests after them starts at 0. */
+const loads = 2;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -65,7 +75,7 @@ describe("Threads", () => {
     const { rerender } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
     await screen.findByText("How does shipping work?");
     rerender(<Threads activeId={null} onSelect={() => {}} version={1} />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2 * loads));
   });
 
   // A list that cannot be loaded is not an error banner: the rail keeps its
@@ -169,6 +179,70 @@ describe("Threads", () => {
     });
   });
 
+  // ../loom's sections: the starred threads first under their own heading,
+  // then the recent ones under "Recents". Starred is read separately, so a
+  // star holds on a thread the 30 newest no longer carry.
+  describe("sections", () => {
+    const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+    const older = { id: "1", title: "Asked long ago", created_at: days(40), starred: true };
+
+    it("heads the recent threads and files the starred ones above them", async () => {
+      threadList(two, true, [{ ...two[1], starred: true }, older]);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const nav = await screen.findByRole("navigation", { name: "Threads" });
+      const starred = within(nav).getByText("Starred");
+      const recents = within(nav).getByText("Recents");
+      expect(starred.compareDocumentPosition(recents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // The starred section carries the old thread the page does not.
+      const starredRows = within(starred.parentElement as HTMLElement).getAllByRole("button", { name: /^(?!Actions)/ });
+      expect(starredRows.map((b) => b.textContent)).toEqual(["Where does the token come from?", "Asked long ago"]);
+      // And a starred thread is not listed a second time under Recents.
+      const recentRows = within(recents.parentElement as HTMLElement).getAllByRole("button", { name: /^(?!Actions)/ });
+      expect(recentRows.map((b) => b.textContent)).toEqual(["How does shipping work?"]);
+    });
+
+    it("shows no Starred heading until there is a star", async () => {
+      threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByText("Recents");
+      expect(screen.queryByText("Starred")).toBeNull();
+    });
+
+    it("keeps the day groups under Recents, the first one on the heading's own gap", async () => {
+      threadList([
+        { id: "9", title: "Asked this morning", created_at: days(0) },
+        { id: "4", title: "Asked earlier in the week", created_at: days(3) },
+      ]);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByText("Recents");
+      expect(screen.queryByText("Today")).toBeNull();
+      expect(screen.getByText("This week").className).toContain("mt-5");
+
+      // With nothing from today, the first day label sits on the heading's
+      // 8px, not 20px further down.
+      threadList([{ id: "4", title: "Asked earlier in the week", created_at: days(3) }]);
+      render(<Threads activeId={null} onSelect={() => {}} version={1} />);
+      await waitFor(() => expect(screen.getAllByText("This week")).toHaveLength(2));
+      expect(screen.getAllByText("This week")[1].className).not.toContain("mt-5");
+    });
+
+    it("asks for every starred thread, not a page of them", async () => {
+      const fetchMock = threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByText("Recents");
+      expect(fetchMock).toHaveBeenCalledWith("/api/threads?starred=true&limit=1000");
+    });
+
+    it("reports the union of both lists upwards", async () => {
+      const onList = vi.fn();
+      threadList(two, true, [{ ...two[1], starred: true }, older]);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} onList={onList} />);
+      await screen.findByText("Starred");
+      expect(onList.mock.calls[0][0].map((t: { id: string }) => t.id)).toEqual(["7", "3", "1"]);
+    });
+  });
+
   describe("the row menu", () => {
     /** Opens the menu on one row and hands back the user-event session. */
     async function openMenu(title: string) {
@@ -176,6 +250,45 @@ describe("Threads", () => {
       await user.click(await screen.findByRole("button", { name: "Actions for " + title }));
       return user;
     }
+
+    it("offers Star first, and moves the row under Starred on the spot", async () => {
+      threadList(two);
+      const onStarred = vi.fn();
+      render(<Threads activeId={null} onSelect={() => {}} version={0} onStarred={onStarred} />);
+      const user = await openMenu("Where does the token come from?");
+      const items = screen.getAllByRole("menuitem");
+      expect(items[0]).toBe(screen.getByRole("menuitem", { name: "Star" }));
+
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      await user.click(items[0]);
+
+      expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", { method: "POST" });
+      expect(onStarred).toHaveBeenCalled();
+      const starred = await screen.findByText("Starred");
+      expect(within(starred.parentElement as HTMLElement).getByRole("button", { name: "Where does the token come from?" })).toBeTruthy();
+      // Once, not twice: the row left Recents.
+      expect(screen.getAllByRole("button", { name: "Where does the token come from?" })).toHaveLength(1);
+
+      // And back: the entry now reads Unstar and takes the row out again.
+      await openMenu("Where does the token come from?");
+      const unstar = screen.getAllByRole("menuitem")[0];
+      expect(unstar).toBe(screen.getByRole("menuitem", { name: "Unstar" }));
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      await user.click(unstar);
+      expect(fetch).toHaveBeenCalledWith("/api/threads/3/unstar", { method: "POST" });
+      await waitFor(() => expect(screen.queryByText("Starred")).toBeNull());
+      expect(screen.getByRole("button", { name: "Where does the token come from?" })).toBeTruthy();
+    });
+
+    it("leaves the star where it was when the server refuses", async () => {
+      threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const user = await openMenu("Where does the token come from?");
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 500 });
+      await user.click(screen.getByRole("menuitem", { name: "Star" }));
+      await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", { method: "POST" }));
+      expect(screen.queryByText("Starred")).toBeNull();
+    });
 
     it("offers rename and delete, and closes on a click outside", async () => {
       threadList(two);
@@ -246,7 +359,7 @@ describe("Threads", () => {
       const user = await openMenu("How does shipping work?");
 
       await user.click(screen.getByRole("menuitem", { name: "Delete" }));
-      expect(fetch).toHaveBeenCalledTimes(1); // the list load, and nothing more
+      expect(fetch).toHaveBeenCalledTimes(loads); // the list loads, and nothing more
 
       (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
       await user.click(screen.getByRole("button", { name: "Delete" }));

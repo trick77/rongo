@@ -868,3 +868,35 @@ func TestATurnResumedFromACardNarrowsToNothingItHasToRepeat(t *testing.T) {
 		t.Errorf("narrowed to %v, want nothing — the card names the choice itself", msgs[1].NarrowedTo)
 	}
 }
+
+func TestSetStarred_isTheReadersOwnMarkAndNobodyElses(t *testing.T) {
+	ctx := context.Background()
+	s := NewStore(threadDB(t))
+	th, _ := s.Create(ctx, "anna", "How does shipping work?")
+
+	ok, err := s.SetStarred(ctx, "anna", th.ID, true)
+	if err != nil || !ok {
+		t.Fatalf("star: ok=%v err=%v", ok, err)
+	}
+	got, _, _ := s.Get(ctx, "anna", th.ID)
+	if !got.Starred {
+		t.Error("the thread is not starred after SetStarred(true)")
+	}
+
+	// Someone else's thread is a miss, not an error, and leaves the star.
+	ok, err = s.SetStarred(ctx, "bruno", th.ID, false)
+	if err != nil || ok {
+		t.Errorf("bruno unstarred anna's thread: ok=%v err=%v", ok, err)
+	}
+	if list, _ := s.List(ctx, "anna"); !list[0].Starred {
+		t.Error("bruno's miss took the star off")
+	}
+
+	ok, err = s.SetStarred(ctx, "anna", th.ID, false)
+	if err != nil || !ok {
+		t.Fatalf("unstar: ok=%v err=%v", ok, err)
+	}
+	if got, _, _ := s.Get(ctx, "anna", th.ID); got.Starred {
+		t.Error("still starred after SetStarred(false)")
+	}
+}

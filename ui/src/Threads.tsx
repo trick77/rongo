@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
 import { railLabel, railRow } from "./rail";
+import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 
 /**
@@ -10,6 +11,11 @@ import { useThreadActions } from "./useThreadActions";
  * Threads page, which the foot of the list opens.
  */
 export const railLimit = 30;
+/**
+ * The starred list is not a page: every starred thread, however old, or a
+ * star stops doing its job at the 31st. The server's ceiling on one page.
+ */
+export const starredLimit = 1000;
 
 export type Thread = {
   /**
@@ -29,6 +35,8 @@ export type Thread = {
   created_at: string;
   /** True while a live link points at this thread. */
   shared?: boolean;
+  /** True while the reader's star is on it: the rail files it under Starred. */
+  starred?: boolean;
 };
 
 /** The day group a thread lands in, in the words the rail uses. */
@@ -58,9 +66,15 @@ export function pageItems(body: unknown): Thread[] {
 }
 
 /**
- * The thread list — the latest 30. Titles only: the conversation itself is a
- * record, and this is the way back into it after a reload. Everything older
- * is a click away on the Threads page, which the foot of the list opens.
+ * The thread list — every starred thread under "Starred", then the latest 30
+ * under "Recents". Titles only: the conversation itself is a record, and
+ * this is the way back into it after a reload. Everything older is a click
+ * away on the Threads page, which the foot of the list opens.
+ *
+ * Two reads, ../loom's sections with one difference: loom splits its 30 and
+ * a starred thread falls off the rail once 30 newer ones exist, which is the
+ * one thing a star is for. Here the starred section is its own query, so a
+ * star holds however old the thread gets.
  *
  * The list is reloaded whenever `version` changes rather than on a timer. Two
  * moments need it: the placeholder title appears the instant a question is
@@ -77,6 +91,7 @@ export default function Threads({
   onDeleted = () => {},
   onRenamed = () => {},
   onShared = () => {},
+  onStarred = () => {},
   onAllThreads = () => {},
 }: {
   activeId: string | null;
@@ -99,62 +114,74 @@ export default function Threads({
   onRenamed?: () => void;
   /** A link was made or taken back; the row markers are stale. */
   onShared?: () => void;
+  /** A star was put on or taken off; the shell's copy of the row is stale. */
+  onStarred?: () => void;
   /** The foot of the list: the page with every thread on it. */
   onAllThreads?: () => void;
 }) {
+  // The 30 newest, starred or not, and every starred thread. A row is patched
+  // in both, moved between them on a star, and the rail draws the starred
+  // list first and the rest of the recent one under it.
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [starred, setStarred] = useState<Thread[]>([]);
   // Which row's menu is open. An id rather than an object: the list reloads
   // underneath it.
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const patch = (id: string, change: Partial<Thread>) => (prev: Thread[]) =>
+    prev.map((x) => (x.id === id ? { ...x, ...change } : x));
   const actions = useThreadActions({
     onRenamed: (id, title) => {
-      setThreads((prev) => prev.map((x) => (x.id === id ? { ...x, title } : x)));
+      setThreads(patch(id, { title }));
+      setStarred(patch(id, { title }));
       onRenamed();
     },
     onDeleted: (id) => {
       setThreads((prev) => prev.filter((x) => x.id !== id));
+      setStarred((prev) => prev.filter((x) => x.id !== id));
       onDeleted(id);
     },
     onShared: (id, shared) => {
       // The row's marker follows the link, without waiting for a reload.
-      setThreads((prev) => prev.map((x) => (x.id === id ? { ...x, shared } : x)));
+      setThreads(patch(id, { shared }));
+      setStarred(patch(id, { shared }));
       onShared();
+    },
+    onStarred: (id, isStarred) => {
+      // The row changes section on the spot. Starred is newest first like
+      // the rest, so a row joining it is placed by its id's order among the
+      // rows already there — a reload would put it in the same place.
+      setThreads(patch(id, { starred: isStarred }));
+      setStarred((prev) => {
+        if (!isStarred) return prev.filter((x) => x.id !== id);
+        const row = threads.find((x) => x.id === id);
+        if (!row || prev.some((x) => x.id === id)) return prev;
+        const next = [...prev, { ...row, starred: true }];
+        next.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+        return next;
+      });
+      onStarred();
     },
   });
 
-  // The menu closes on a pointer anywhere but the menu itself and the kebabs
-  // — another row's title included, which switches thread and would otherwise
-  // leave the menu hanging off the row that was left. The kebabs are spared
-  // because their own click toggles, and closing here first would make the
-  // toggle reopen the menu that was just dismissed.
-  useEffect(() => {
-    if (openMenu === null) return;
-    function onPointerDown(e: PointerEvent) {
-      const target = e.target;
-      if (target instanceof Element && target.closest('[role="menu"], [aria-haspopup="menu"]')) return;
-      setOpenMenu(null);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpenMenu(null);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [openMenu]);
+  useMenuDismiss(openMenu !== null, () => setOpenMenu(null));
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/threads?limit=${railLimit}`);
-        if (!res.ok) return;
-        const list = pageItems(await res.json());
+        const [recent, marked] = await Promise.all([
+          fetch(`/api/threads?limit=${railLimit}`),
+          fetch(`/api/threads?starred=true&limit=${starredLimit}`),
+        ]);
+        if (!recent.ok) return;
+        const list = pageItems(await recent.json());
+        const stars = marked.ok ? pageItems(await marked.json()) : [];
         if (!cancelled) {
           setThreads(list);
-          onList(list);
+          setStarred(stars);
+          // The union, so the shell can name an open thread from either.
+          const ids = new Set(list.map((t) => t.id));
+          onList([...list, ...stars.filter((t) => !ids.has(t.id))]);
         }
       } catch {
         // A list that cannot be loaded is not worth an error banner: asking a
@@ -167,8 +194,12 @@ export default function Threads({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 
+  // Recents is the 30 less the starred ones, which sit in their own section
+  // above; the day groups split what is left.
+  const starredIds = new Set(starred.map((t) => t.id));
   const groups: { label: string; items: Thread[] }[] = [];
   for (const t of threads) {
+    if (starredIds.has(t.id)) continue;
     const label = group(t.created_at);
     const last = groups[groups.length - 1];
     if (last && last.label === label) last.items.push(t);
@@ -189,30 +220,7 @@ export default function Threads({
     // can be opened while an answer is being written elsewhere.
     "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5";
 
-  return (
-    <nav aria-label="Threads" className="flex flex-1 flex-col">
-      {/* No scroller of its own: the rail (App.tsx) scrolls as a whole. flex-1
-          stays so a short history still leaves the index line at the foot. */}
-      <div className="px-2 pb-4">
-        {groups.map((g) => (
-          // "Today" is not painted: it always heads the list, and naming the
-          // day a thread was asked on is only worth the line once the day is
-          // no longer this one. The group still exists, so tomorrow's threads
-          // split off it.
-          //
-          // Unpainted, it has to carry the gap from the actions above the
-          // scroller itself: mt-5, the 20px a rail section gets. A painted
-          // first group reaches the same 20 through its own h3, so the list
-          // starts on one rhythm whichever case a morning falls into.
-          <div key={g.label} className={g.label === "Today" ? "mt-5" : ""}>
-            {/* ../loom's SidebarSection metrics: 20px above a label, 8px
-                below. Its sections are Starred/Projects/Recents rather than
-                days, but the day groups are the same thing — a named run of
-                rows — and must read on the same rhythm. */}
-            {g.label !== "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>{g.label}</h3>}
-            {/* No gap: the 28px row pitch is the rhythm, as ../loom has it. */}
-            <ul className="flex flex-col">
-              {g.items.map((t) => {
+  const row = (t: Thread) => {
                 const active = t.id === activeId;
                 // The thread this turn is being written into. Its actions are
                 // the only ones a running turn withholds.
@@ -318,6 +326,11 @@ export default function Threads({
                     </div>
                     {menuOpen && (
                       <ThreadMenu
+                        starred={t.starred}
+                        onStar={() => {
+                          setOpenMenu(null);
+                          actions.startStar(t);
+                        }}
                         onShare={() => {
                           setOpenMenu(null);
                           actions.startShare(t);
@@ -334,10 +347,43 @@ export default function Threads({
                     )}
                   </li>
                 );
-              })}
-            </ul>
-          </div>
-        ))}
+  };
+
+  return (
+    <nav aria-label="Threads" className="flex flex-1 flex-col">
+      {/* No scroller of its own: the rail (App.tsx) scrolls as a whole. flex-1
+          stays so a short history still leaves the index line at the foot. */}
+      <div className="px-2 pb-4">
+        {/* ../loom's sections, on its SidebarSection metrics: 20px above a
+            label, 8px below, the label in the rail's 12/16. Starred only once
+            there is a star — a heading over nothing would promise a section
+            the reader has not made yet. */}
+        {starred.length > 0 && (
+          <section>
+            <h3 className={"mt-5 mb-2 " + railLabel}>Starred</h3>
+            {/* No gap: the 28px row pitch is the rhythm, as ../loom has it. */}
+            <ul className="flex flex-col">{starred.map(row)}</ul>
+          </section>
+        )}
+        {threads.length > starred.filter((s) => threads.some((t) => t.id === s.id)).length && (
+          <section>
+            <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>
+            {groups.map((g, i) => (
+              // "Today" is not painted: it always heads the list, and naming
+              // the day a thread was asked on is only worth the line once the
+              // day is no longer this one. The group still exists, so
+              // tomorrow's threads split off it.
+              //
+              // The first group under Recents sits on the heading's own 8px,
+              // painted or not: its label, when it has one, drops the 20px a
+              // later day label puts between itself and the rows above it.
+              <div key={g.label}>
+                {g.label !== "Today" && <h3 className={(i === 0 ? "mb-2 " : "mt-5 mb-2 ") + railLabel}>{g.label}</h3>}
+                <ul className="flex flex-col">{g.items.map(row)}</ul>
+              </div>
+            ))}
+          </section>
+        )}
         {/* The foot, ../loom's Sidebar: the way to every thread, painted like
             the actions at the top of the rail and never marked current — it
             is a door, not a place. Only once there is history to be more of:

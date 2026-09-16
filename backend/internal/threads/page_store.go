@@ -25,6 +25,10 @@ type ListOptions struct {
 	// page after it starts below that row. Empty for the first page. A public
 	// id and not a row number, because it stands in a URL.
 	Cursor string
+	// StarredOnly narrows the page to threads the reader starred. The rail's
+	// starred section reads with it, so a starred thread stays listed however
+	// many newer threads there are.
+	StarredOnly bool
 }
 
 // ThreadPage is one page of the list and, when there is one, the cursor the
@@ -72,14 +76,18 @@ func (s *Store) ListPage(ctx context.Context, subject string, opts ListOptions) 
 		rows *sql.Rows
 		err  error
 	)
+	starred := ""
+	if opts.StarredOnly {
+		starred = " AND starred = 1"
+	}
 	if after > 0 {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, public_id, title, title_settled, created_at FROM threads
-			WHERE user_subject = ? AND id < ? ORDER BY id DESC LIMIT ?`, subject, after, limit)
+			SELECT `+threadColumns+` FROM threads
+			WHERE user_subject = ? AND id < ?`+starred+` ORDER BY id DESC LIMIT ?`, subject, after, limit)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, public_id, title, title_settled, created_at FROM threads
-			WHERE user_subject = ? ORDER BY id DESC LIMIT ?`, subject, limit)
+			SELECT `+threadColumns+` FROM threads
+			WHERE user_subject = ?`+starred+` ORDER BY id DESC LIMIT ?`, subject, limit)
 	}
 	if err != nil {
 		return ThreadPage{}, fmt.Errorf("list threads: %w", err)
@@ -107,7 +115,7 @@ func (s *Store) ListPage(ctx context.Context, subject string, opts ListOptions) 
 // not carry. Not the owner's → not found, like every other read by address.
 func (s *Store) Get(ctx context.Context, subject string, threadID int64) (Thread, bool, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, public_id, title, title_settled, created_at FROM threads
+		SELECT `+threadColumns+` FROM threads
 		WHERE id = ? AND user_subject = ?`, threadID, subject)
 	if err != nil {
 		return Thread{}, false, fmt.Errorf("get thread: %w", err)
@@ -157,7 +165,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	// word or does not.
 	match := ftsPrefixQuery(query)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.public_id, t.title, t.title_settled, t.created_at
+		SELECT t.id, t.public_id, t.title, t.title_settled, t.created_at, t.starred
 		FROM thread_fts JOIN threads t ON t.rowid = thread_fts.rowid
 		WHERE thread_fts MATCH ? AND t.user_subject = ? ORDER BY t.id DESC LIMIT ?`,
 		match, subject, limit)
@@ -182,7 +190,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	// snippet() over column -1 picks whichever of question and answer the
 	// match is in.
 	content, err := s.db.QueryContext(ctx, `
-		SELECT t.id, t.public_id, t.title, t.title_settled, t.created_at,
+		SELECT t.id, t.public_id, t.title, t.title_settled, t.created_at, t.starred,
 		       snippet(message_fts, -1, '«', '»', '…', 32)
 		FROM message_fts
 		JOIN threads t ON t.id = message_fts.thread_id
@@ -201,7 +209,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 			settled bool
 			snippet string
 		)
-		if err := content.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created, &snippet); err != nil {
+		if err := content.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created, &t.Starred, &snippet); err != nil {
 			return nil, fmt.Errorf("scan hit: %w", err)
 		}
 		if seen[t.ID] {
@@ -235,14 +243,20 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	return hits, nil
 }
 
-// scanThreads reads the list's five columns off every row.
+// threadColumns is the list's six columns, in the order scanThreads reads
+// them. Every SELECT that feeds scanThreads names them through this, so a
+// column added here is added everywhere at once — the scan is positional and
+// a missing column fails at run time, not at compile time.
+const threadColumns = "id, public_id, title, title_settled, created_at, starred"
+
+// scanThreads reads threadColumns off every row.
 func scanThreads(rows *sql.Rows) ([]Thread, error) {
 	out := []Thread{}
 	for rows.Next() {
 		var t Thread
 		var created string
 		var settled bool
-		if err := rows.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created); err != nil {
+		if err := rows.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created, &t.Starred); err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
 		t.TitlePending = !settled

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -192,11 +193,12 @@ func TestThreadActions_withoutAStoreAnswer503(t *testing.T) {
 	db := askDB(t)
 	srv := NewServer(Deps{Auth: auth.NewService(db, "dev", "")})
 
-	for _, c := range []struct{ method, body string }{
-		{http.MethodDelete, ""},
-		{http.MethodPatch, `{"title":"x"}`},
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodDelete, "/api/threads/1", ""},
+		{http.MethodPatch, "/api/threads/1", `{"title":"x"}`},
+		{http.MethodPost, "/api/threads/1/star", ""},
 	} {
-		rec := act(srv, c.method, "/api/threads/1", c.body)
+		rec := act(srv, c.method, c.path, c.body)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("%s: status = %d, want 503", c.method, rec.Code)
 		}
@@ -355,5 +357,66 @@ func TestDeleteThread_someoneElsesTurnIsLeftAlone(t *testing.T) {
 	msgs, _ := st.Messages(context.Background(), testSubject, list[0].ID)
 	if len(msgs) != 1 || msgs[0].Answer != "The answer." {
 		t.Errorf("messages = %+v, want the answer recorded", msgs)
+	}
+}
+
+func TestStarThread_marksTheRowAndListsItApart(t *testing.T) {
+	// Given two threads of this reader's
+	ctx := context.Background()
+	srv, st := threadActions(t)
+	old, err := st.Create(ctx, testSubject, "How is sign-in done?")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := st.Create(ctx, testSubject, "Where is the cart?"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// When the older one is starred
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/star", old.PublicID), "")
+
+	// Then it is a 204 and the row carries the star
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d (%s), want 204", rec.Code, rec.Body.String())
+	}
+	got, _, _ := st.Get(ctx, testSubject, old.ID)
+	if !got.Starred {
+		t.Error("the thread is not starred")
+	}
+
+	// And the starred list is it alone, past a limit the plain list would cut it off at
+	rec = act(srv, http.MethodGet, "/api/threads?limit=1&starred=true", "")
+	var page listPage
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("body %s: %v", rec.Body.String(), err)
+	}
+	if len(page.Items) != 1 || page.Items[0]["id"] != old.PublicID || page.Items[0]["starred"] != true {
+		t.Errorf("starred page = %+v, want the starred thread alone", page.Items)
+	}
+
+	// And unstarring takes it back off
+	rec = act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/unstar", old.PublicID), "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("unstar status = %d, want 204", rec.Code)
+	}
+	if got, _, _ := st.Get(ctx, testSubject, old.ID); got.Starred {
+		t.Error("still starred after unstar")
+	}
+}
+
+func TestStarThread_someoneElsesIsNotFound(t *testing.T) {
+	ctx := context.Background()
+	srv, st := threadActions(t)
+	th, err := st.Create(ctx, otherSubject, "Theirs")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	rec := act(srv, http.MethodPost, fmt.Sprintf("/api/threads/%s/star", th.PublicID), "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got, _, _ := st.Get(ctx, otherSubject, th.ID); got.Starred {
+		t.Error("a 404 starred the thread")
 	}
 }

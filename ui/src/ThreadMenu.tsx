@@ -29,16 +29,24 @@ function MenuIcon({ name }: { name: IconName }) {
 /**
  * What a thread row can be told to do. Anchored to the row's right edge, not
  * pushed off the title as ../loom does it: the rail is 362px wide and a menu
- * offset past the title would run out of its scroller sideways.
+ * offset past the title would run out of its scroller sideways. `className`
+ * moves the anchor for the one place that is not a row, the header's chevron.
  */
 export default function ThreadMenu({
+  starred = false,
+  onStar,
   onShare,
   onRename,
   onDelete,
+  className = "right-1 left-auto",
 }: {
+  /** Whether the first entry reads Unstar rather than Star. */
+  starred?: boolean;
+  onStar: () => void;
   onShare: () => void;
   onRename: () => void;
   onDelete: () => void;
+  className?: string;
 }) {
   const { menuRef, verticalClass } = useMenuPlacement();
   return (
@@ -47,11 +55,19 @@ export default function ThreadMenu({
       role="menu"
       aria-label="Thread actions"
       className={
-        "absolute right-1 left-auto z-20 w-[168px] overflow-hidden rounded-ui border border-elevated-border " +
+        "absolute z-20 w-[168px] overflow-hidden rounded-ui border border-elevated-border " +
         "bg-elevated py-1 shadow-menu " +
+        className +
+        " " +
         verticalClass
       }
     >
+      {/* Star first, ../loom's order: the one entry that changes nothing
+          about the record, only where the rail files it. */}
+      <button type="button" role="menuitem" className={plainEntry} onClick={onStar}>
+        <MenuIcon name={starred ? "starOff" : "star"} />
+        {starred ? "Unstar" : "Star"}
+      </button>
       <button type="button" role="menuitem" className={plainEntry} onClick={onShare}>
         <MenuIcon name="upload" />
         Share

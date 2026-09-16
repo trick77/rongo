@@ -29,6 +29,7 @@ type Threads interface {
 	SetTitle(ctx context.Context, id int64, from, to string) error
 	Rename(ctx context.Context, subject string, id int64, title string) (bool, error)
 	Delete(ctx context.Context, subject string, id int64) (bool, error)
+	SetStarred(ctx context.Context, subject string, id int64, starred bool) (bool, error)
 	AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (threads.Message, error)
 	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
 	Fail(ctx context.Context, messageID int64, msg string) error
@@ -195,6 +196,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/threads/{id}/summary", s.requireAuth(http.HandlerFunc(s.handleThreadSummary)))
 	s.mux.Handle("PATCH /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleRenameThread)))
 	s.mux.Handle("DELETE /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteThread)))
+	s.mux.Handle("POST /api/threads/{id}/star", s.requireAuth(http.HandlerFunc(s.handleStarThread)))
+	s.mux.Handle("POST /api/threads/{id}/unstar", s.requireAuth(http.HandlerFunc(s.handleUnstarThread)))
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
