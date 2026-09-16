@@ -25,8 +25,8 @@ Two changes, two PRs. #174 adds a values paragraph: say what a value means in
 words, keep the literal once in parentheses after the words, out of the lead,
 and state the combined outcome of interacting settings as one figure. This
 one adds the role paragraph in front of it. The role paragraph restates
-`answerShape`'s one-sentence lead (or the list of wants lands in the opening
-sentence whole) and conditions the code/config/manual classification on the
+`answerShape`'s one-sentence lead (without it the list of wants lands in the
+opening sentence whole) and conditions the code/config/manual classification on the
 sources (`answerCommon` says invent nothing).
 
 The umlaut mixing in the same answer (Verzögerung beside stuendlich) is the

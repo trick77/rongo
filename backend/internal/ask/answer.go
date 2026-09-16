@@ -225,8 +225,8 @@ exactly as they are.`
 //
 // The first paragraph has to live with the blocks appended after it. The
 // things a reader wants are listed, so the lead rule from answerShape is
-// restated here: one of them opens, the rest follow, or the list lands in the
-// opening sentence whole. "Fixed in code, configuration or manual" is
+// restated here - one of them opens, the rest follow - because without it the
+// list lands in the opening sentence whole. "Fixed in code, configuration or manual" is
 // conditioned on the sources because answerCommon says invent nothing and an
 // unconditioned rule classifies without evidence. "Condition" and "edge case"
 // are told apart in the text because both words stay in the block. No domain
