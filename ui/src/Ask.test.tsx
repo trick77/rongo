@@ -1779,6 +1779,27 @@ describe("Ask, following the answer", () => {
     expect(view.scrollTop).toBe(600);
   });
 
+  // The composer sits inside the scrolling column now, so a click into it
+  // would reach the column's handlers: drafting the next question while the
+  // answer arrives is not leaving it.
+  it("keeps following when the reader clicks into the composer", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    view.scrollTop = 0;
+    const box = container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.pointerDown(box);
+    fireEvent.touchStart(box, { touches: [{ clientY: 300 }] });
+    fireEvent.touchMove(box, { touches: [{ clientY: 460 }] });
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(2000);
+  });
+
   it("stops following when a source is opened from the Sources pane", async () => {
     const stream = pushableStream();
     const { container } = render(<Ask />);

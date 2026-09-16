@@ -1141,9 +1141,18 @@ export default function Ask({
               a third of the column wide. ../loom writes the same three
               classes together (ThreadPanel.tsx). pb-3 matches the footer's
               mt-3 below, so the line under the composer sits with the same
-              gap above it as below it. */}
+              gap above it as below it.
+
+              Inside the scroller, the composer's pointer and touch events
+              would bubble to the column's own handlers: a click into the
+              textarea to draft the next question mid-stream is not the reader
+              leaving the answer, so they stop here. The wheel is not stopped:
+              a wheel over the stuck form genuinely scrolls the thread. */}
           <form
             onSubmit={submit}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
             className="sticky bottom-0 z-10 mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
             >
             {/* The foot of the column, ../loom's way round: the composer is
