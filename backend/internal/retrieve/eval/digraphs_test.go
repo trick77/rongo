@@ -61,6 +61,8 @@ var legitimateStems = []string{
 	"aerosol", "aero", "israel", "michael", "rafael", "poesie", "poet",
 	"koeffizient", "koexist", "aloe", "oboe", "kanaen",
 	"true", "value", "issue", "due", "request",
+	// zu-erst, zu-eigen: the prefix zu- before a vowel.
+	"zuerst", "zueigen",
 }
 
 func TestGermanDigraphs(t *testing.T) {
@@ -73,6 +75,7 @@ func TestGermanDigraphs(t *testing.T) {
 		{"Die neue Steuer ist aktuell, der Bauer schaut genauer hin.", nil},
 		{"Der Wert ist true; die Queue liest den Request.", nil},
 		{"Vertrauen ist teuer, die Frequenz der Quelle ist bequem, Koeffizienten sind neu.", nil},
+		{"Zuerst wird gelesen, zuerst geschrieben.", nil},
 		{"Der Kuenstler ueberprueft die Qualitaet.", []string{"Kuenstler", "ueberprueft", "Qualitaet"}},
 		{"Text vor dem Block.\n```java\nint fuer = 1;\n```\nDanach für.", nil},
 		{"Die Prüfung läuft, die Rückgabe stimmt.", nil},
