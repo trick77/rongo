@@ -216,7 +216,10 @@ type answerRecord struct {
 	CiteTotal int      `json:"cite_total"`
 	Tokens    int      `json:"tokens"`
 	Sources   int      `json:"sources"`
-	Err       string   `json:"err,omitempty"`
+	// Digraphs are the prose words of a German answer spelling an umlaut as
+	// ae/oe/ue (germanDigraphs); nil for the other languages.
+	Digraphs []string `json:"digraphs,omitempty"`
+	Err      string   `json:"err,omitempty"`
 }
 
 // TestEvalMeasureAnswers runs the product pipeline over the corpus's
@@ -268,7 +271,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	out := filepath.Join(os.TempDir(), fmt.Sprintf("rongo-answers-%s.json", time.Now().Format("20060102-150405")))
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
-		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed int
+		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs int
 		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s ===", run, runs, audience, rerank, codeLaneLabel())
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
@@ -293,6 +296,10 @@ func TestEvalMeasureAnswers(t *testing.T) {
 				continue
 			}
 			rec.Answer = a.Text
+			if lang == ask.LanguageDE {
+				rec.Digraphs = germanDigraphs(a.Text)
+				digraphs += len(rec.Digraphs)
+			}
 			rec.Tokens = a.Usage.Total
 			rec.Sources = len(a.Sources)
 			tokens += a.Usage.Total
@@ -337,12 +344,12 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			asserted += rec.Asserted
 			citeHit += rec.CiteHit
 			citeTotal += rec.CiteTotal
-			t.Logf("  %-70s rubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens",
-				short(q.Text), rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens)
+			t.Logf("  %-70s rubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v",
+				short(q.Text), rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs)
 			records = append(records, rec)
 		}
-		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d; failed %d; %d tokens",
-			run, present, must, contra, asserted, citeHit, citeTotal, asked, failed, tokens)
+		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d; failed %d; %d tokens; digraphs %d",
+			run, present, must, contra, asserted, citeHit, citeTotal, asked, failed, tokens, digraphs)
 	}
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
