@@ -253,15 +253,17 @@ func WithStep(name string) Option {
 }
 
 // record writes one call into the context's meter, if a turn is metering.
-// took is wall clock for the whole call, request to last byte.
-func record(ctx context.Context, o callOptions, u Usage, took time.Duration) {
+// took is wall clock for the whole call, request to last byte. model is the
+// name that went on the wire (deployment applied), not the lane: a turn served
+// by an override shows the model it actually paid for.
+func record(ctx context.Context, o callOptions, model string, u Usage, took time.Duration) {
 	step := o.step
 	if step == "" {
 		step = "llm"
 	}
 	c := usage.Call{
 		Step:       step,
-		Model:      o.model,
+		Model:      model,
 		Prompt:     u.Prompt,
 		Completion: u.Completion,
 		Ms:         usage.Int(int(took.Milliseconds())),
@@ -625,7 +627,7 @@ func (c *Client) complete(ctx context.Context, o callOptions, msgs []Message) (s
 		return "", Usage{}, err
 	}
 	u := usageFrom(resp.Usage)
-	record(ctx, o, u, time.Since(started))
+	record(ctx, o, c.deployment(o.model), u, time.Since(started))
 	// A reply cut at the cap is not a reply. Every caller here parses the
 	// content, and a truncated JSON body read as "unparseable" would hide
 	// that the budget was the cause.
@@ -695,7 +697,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	res, err := stream.Collect(onToken)
 	got := usageFrom(res.Usage)
 	if _, ok := res.Usage.Total(); ok {
-		record(ctx, o, got, time.Since(started))
+		record(ctx, o, c.deployment(o.model), got, time.Since(started))
 	}
 	if err != nil {
 		return got, res.Chars, err

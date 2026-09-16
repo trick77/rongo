@@ -120,6 +120,53 @@ func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
 	}
 }
 
+// TestRecord_namesTheDeploymentNotTheLane: with BACKEND_LLM_MODEL set, the
+// meter shows the model that answered, not the lane constant it was routed
+// through. The usage table read mimo-v2.5-pro for a gpt-5.4 deployment.
+func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
+	t.Run("complete", func(t *testing.T) {
+		srv, _ := wireRecorder(t)
+		c := mustClient(t, Config{BaseURL: srv.URL, Pro: "gpt-5.4", ShortGate: "gpt-5.4-mini"}, srv.Client())
+		m := usage.New()
+		ctx := usage.WithMeter(context.Background(), m)
+
+		if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, ShortGate()); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if _, _, err := c.Complete(ctx, []Message{{Role: "user", Content: "x"}}, Pro()); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+
+		calls := m.Calls()
+		if len(calls) != 2 {
+			t.Fatalf("recorded %d calls, want 2", len(calls))
+		}
+		if calls[0].Model != "gpt-5.4-mini" || calls[1].Model != "gpt-5.4" {
+			t.Errorf("models = %q, %q; want the overrides, not the lanes", calls[0].Model, calls[1].Model)
+		}
+	})
+	t.Run("stream", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			writeSSE(w, []string{"a"}, "", 1)
+		}))
+		t.Cleanup(srv.Close)
+		c := mustClient(t, Config{BaseURL: srv.URL, Pro: "gpt-5.4", ShortGate: "gpt-5.4-mini"}, srv.Client())
+		m := usage.New()
+		ctx := usage.WithMeter(context.Background(), m)
+
+		if _, err := c.Stream(ctx, []Message{{Role: "user", Content: "x"}}, func(string) {}); err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+
+		calls := m.Calls()
+		if len(calls) != 1 || calls[0].Model != "gpt-5.4" {
+			t.Errorf("calls = %+v; want one under gpt-5.4", calls)
+		}
+	})
+}
+
 func TestComplete_recordsTheCachedAndReasoningSharesAndHowLongItTook(t *testing.T) {
 	// Given an endpoint that reports both details objects, as MiMo does
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
