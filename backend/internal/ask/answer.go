@@ -512,6 +512,14 @@ var answerIntent = map[string]string{
 // no fence at all and the reader got JSON. The prompt is not the guard,
 // though - renumber.go recognises the spec by its content whatever the fence
 // says, because a prompt this one only ever holds most of the time.
+//
+// The label rule exists because the count cap alone did not keep a node
+// short: with nothing said about length the model wrote sentences ("RANK 1:
+// gefundene Code-Fragmente nach Relevanz zur Frage bewerten"), and the
+// renderer's box is fixed at about twenty columns by three lines, cutting
+// the rest with an ellipsis (ui/src/diagram.tsx, wrap). The reader then got
+// a diagram of half-sentences, seen 2026-09-16. The cut is deliberate on the
+// renderer's side, so the fix is here: a node is a title.
 const answerDiagram = `
 
 At most one diagram, and only where control flow or a call sequence carries
@@ -525,6 +533,14 @@ sources read "src":[6,25], never "src":[6][25] or "src":[6],[25] - the
 one-marker-per-bracket rule is about running text and does not reach inside
 the fence. At most 12 nodes, 5 actors, 12 steps. Labels follow the audience
 rules above and are written in the answer language; ids stay short ASCII.
+A label is a title, not a sentence: a noun phrase or an imperative of at
+most five words, about 40 characters - "Treffer bewerten", not "RANK 1:
+gefundene Code-Fragmente nach Relevanz zur Frage bewerten". No step
+numbers, no "RANK 1:" prefixes, no clauses: the box holds three short lines
+and cuts the rest with an ellipsis, so a long label reaches the reader
+truncated. An actor gets one line of about 15 characters, one or two words:
+"Indexer", not "Indexing Service Backend". What a node cannot say in five
+words goes in the prose.
 The prose still explains; the diagram is not a substitute.
 
 The block is a diagram, not source code: an audience rule that bars code,
