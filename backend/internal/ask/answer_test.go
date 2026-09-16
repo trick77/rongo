@@ -13,6 +13,36 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 )
 
+// writeDeltas streams the tokens and stops there, leaving the stream open. A
+// fake that means to break mid-answer writes these and nothing else.
+func writeDeltas(w http.ResponseWriter, tokens []string) {
+	fl := http.NewResponseController(w)
+	for _, tok := range tokens {
+		frame, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		_ = fl.Flush()
+	}
+}
+
+// writeSSE streams the tokens as content deltas, ends on finishReason when
+// there is one, and closes with [DONE]. Every fake answer endpoint in these
+// tests writes the same frames; what they differ in is which request gets
+// them.
+func writeSSE(w http.ResponseWriter, tokens []string, finishReason string) {
+	fl := http.NewResponseController(w)
+	writeDeltas(w, tokens)
+	if finishReason != "" {
+		end, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", end)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+	_ = fl.Flush()
+}
+
 // streamUpstream streams the given tokens and records the prompt it was sent.
 func streamUpstream(t *testing.T, tokens ...string) (*llm.Client, *string, *int) {
 	t.Helper()
@@ -38,22 +68,7 @@ func streamUpstreamEnding(t *testing.T, finishReason string, tokens []string) (*
 			prompt += m.Content + "\n"
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		fl := http.NewResponseController(w)
-		for _, tok := range tokens {
-			frame, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", frame)
-			_ = fl.Flush()
-		}
-		if finishReason != "" {
-			end, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", end)
-		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
-		_ = fl.Flush()
+		writeSSE(w, tokens, finishReason)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), &prompt, &calls
@@ -353,6 +368,56 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
 		if strings.Contains(p, "###") {
 			t.Errorf("the %s prompt asks for headings; they were left out on purpose", name)
+		}
+	}
+}
+
+// TestAnswer_theIntentSharpensTheOpeningSentence: the shape rule says to open
+// with one sentence that answers the question, and what that means is
+// different for a WHERE, a WHY and a yes/no question. Each intent adds its own
+// line, and nothing else changes.
+func TestAnswer_theIntentSharpensTheOpeningSentence(t *testing.T) {
+	for intent, want := range map[string]string{
+		"where":       "The question asks WHERE: open by saying every place the mechanism lives",
+		"why":         "The question asks WHY: state the condition or rule that decides it",
+		"conformance": "answer yes or no in the first sentence",
+	} {
+		c, prompt, _ := streamUpstream(t, "x")
+		if _, err := NewAnswerer(c).Answer(context.Background(), "Wo?", AudienceBA, LanguageEN, twoSources(),
+			Scope{Intent: intent}, "", nil); err != nil {
+			t.Fatalf("Answer: %v", err)
+		}
+		if !strings.Contains(*prompt, want) {
+			t.Errorf("the %q prompt does not carry its own rule:\n%s", intent, *prompt)
+		}
+		// It refines the shape rule, so it follows it, and it is not a
+		// special case appended after the conditional blocks.
+		if strings.Index(*prompt, want) < strings.Index(*prompt, "Open with ONE sentence") {
+			t.Errorf("the %q rule comes before the shape rules it refines", intent)
+		}
+		if strings.Index(*prompt, want) > strings.Index(*prompt, "```diagram") {
+			t.Errorf("the %q rule comes after the conditional blocks", intent)
+		}
+	}
+}
+
+// TestAnswer_anIntentWithNoRuleAddsNothing: "how" is what the shape rule was
+// written for, and the intent comes from a model — a word this prompt has no
+// rule for must leave it exactly as it was, never a line about the word.
+func TestAnswer_anIntentWithNoRuleAddsNothing(t *testing.T) {
+	base, basePrompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(base).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(),
+		Scope{}, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	for _, intent := range []string{"how", "sideways"} {
+		c, prompt, _ := streamUpstream(t, "x")
+		if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(),
+			Scope{Intent: intent}, "", nil); err != nil {
+			t.Fatalf("Answer: %v", err)
+		}
+		if *prompt != *basePrompt {
+			t.Errorf("intent %q changed the prompt; only where, why and conformance have a rule", intent)
 		}
 	}
 }

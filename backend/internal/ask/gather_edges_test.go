@@ -332,3 +332,178 @@ func TestCrossings_orderRoutesAndDestinationsBeforeProperties(t *testing.T) {
 		}
 	}
 }
+
+// Chunk windows overlap, so a token's line is covered by more than one of
+// them and the landing is a choice. It must follow from the ordinal — the
+// chunk's position in its file — and never from the order the chunks were
+// written: ids are handed out in index order, and a landing chosen on one
+// moves after a re-index that changed no code.
+func TestCrossings_landOnTheSameWindowWhateverTheWriteOrder(t *testing.T) {
+	type window struct {
+		ordinal, start, end int
+	}
+	early := window{0, 1, 20}
+	late := window{1, 11, 30}
+	for _, c := range []struct {
+		name  string
+		order []window
+	}{
+		{"the earlier window written first", []window{early, late}},
+		{"the later window written first", []window{late, early}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// Given: a route literal on line 15 of the far side, covered by
+			// both of that file's windows.
+			db := gatherDB(t)
+			seedRepo(t, db, "a")
+			seedRepo(t, db, "b")
+			fromID := seedChunkIn(t, db, "a", "Client.java", 0, 1, 10, "call", `get("/paymentAuth")`)
+			seedTokenIn(t, db, "a", "Client.java", "route", "/paymentAuth", 5)
+			for _, w := range c.order {
+				seedChunkIn(t, db, "b", "Routes.java", w.ordinal, w.start, w.end, "routes",
+					`register("/paymentAuth")`)
+			}
+			seedTokenIn(t, db, "b", "Routes.java", "route", "/paymentAuth", 15)
+			g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+
+			// When
+			far, err := g.crossings(context.Background(), Source{ChunkID: fromID, Repo: "a", Path: "Client.java"})
+
+			// Then
+			if err != nil {
+				t.Fatalf("crossings: %v", err)
+			}
+			if len(far) != 1 {
+				t.Fatalf("landings = %v, want exactly one", paths(far))
+			}
+			if far[0].StartLine != early.start {
+				t.Errorf("landed on lines %d-%d, want the lower-ordinal window (%d-%d) whatever the write order",
+					far[0].StartLine, far[0].EndLine, early.start, early.end)
+			}
+		})
+	}
+}
+
+// definer is one repository's definition of the walked symbol, so a test can
+// seed the same two definitions in either index order.
+type definer struct{ repo, path string }
+
+// seedDefiners builds the reference fixture: a caller in "src" naming a symbol
+// two OTHER repositories define, written in the given order.
+func seedDefiners(t *testing.T, order []definer) (*Gatherer, Source) {
+	t.Helper()
+	db := gatherDB(t)
+	seedRepo(t, db, "src")
+	from := Source{Repo: "src", Path: "Caller.java", Text: "Shipment.dispatch()"}
+	seedChunkIn(t, db, "src", "Caller.java", 0, 1, 10, "call", from.Text)
+	for _, d := range order {
+		seedRepo(t, db, d.repo)
+		seedChunkIn(t, db, d.repo, d.path, 0, 1, 10, "Shipment", "class Shipment { void dispatch() {} }")
+		seedSymbolIn(t, db, d.repo, d.path, "Shipment", 1)
+	}
+	return NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}), from
+}
+
+// The path decides ahead of the repository. Ordering by repository first would
+// regroup a multi-repository result by product, which changes which chunks the
+// budget admits — a ranking change, and not what a determinism fix may do.
+func TestReferenced_equalDefinersOrderByPathBeforeRepository(t *testing.T) {
+	// Given: two definitions at DIFFERENT paths, where the path order and the
+	// repository order disagree — ant/Zeta.java would come first if the
+	// repository decided.
+	first := definer{"bee", "Alpha.java"}
+	second := definer{"ant", "Zeta.java"}
+	for _, c := range []struct {
+		name  string
+		order []definer
+	}{
+		{"bee indexed first", []definer{first, second}},
+		{"ant indexed first", []definer{second, first}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g, from := seedDefiners(t, c.order)
+
+			// When
+			refs, err := g.referenced(context.Background(), from)
+
+			// Then
+			if err != nil {
+				t.Fatalf("referenced: %v", err)
+			}
+			if len(refs) != 2 {
+				t.Fatalf("references = %v, want both definitions", repoPaths(refs))
+			}
+			if refs[0].Path != "Alpha.java" || refs[1].Path != "Zeta.java" {
+				t.Errorf("reference order = %s, %s; want the paths in order, the repository only breaking a tie",
+					repoPaths(refs)[0], repoPaths(refs)[1])
+			}
+		})
+	}
+}
+
+// Inside one file the walk reads in FILE order. The symbol name is the last
+// resort, for two names landing on one chunk, and must not get in front of the
+// ordinal: a file would then be read out of order because of what its symbols
+// happen to be called.
+func TestReferenced_insideOneFileTheOrdinalDecidesBeforeTheSymbolName(t *testing.T) {
+	// Given: one file defining two equally selective names, the alphabetically
+	// LATER one in the file's first chunk. The later chunk is written first,
+	// so neither the name nor the rowid points at the answer.
+	db := gatherDB(t)
+	seedRepo(t, db, "src")
+	seedRepo(t, db, "bee")
+	from := Source{Repo: "src", Path: "Caller.java", Text: "Zebra.run(); Alpha.run()"}
+	seedChunkIn(t, db, "src", "Caller.java", 0, 1, 10, "call", from.Text)
+	seedChunkIn(t, db, "bee", "Shared.java", 4, 100, 110, "Alpha", "class Alpha { void run() {} }")
+	seedChunkIn(t, db, "bee", "Shared.java", 0, 1, 10, "Zebra", "class Zebra { void run() {} }")
+	seedSymbolIn(t, db, "bee", "Shared.java", "Alpha", 105)
+	seedSymbolIn(t, db, "bee", "Shared.java", "Zebra", 5)
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+
+	// When
+	refs, err := g.referenced(context.Background(), from)
+
+	// Then
+	if err != nil {
+		t.Fatalf("referenced: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("references = %v, want both chunks of the file", repoPaths(refs))
+	}
+	if refs[0].StartLine != 1 || refs[1].StartLine != 100 {
+		t.Errorf("reference order = lines %d then %d, want the file read in file order (1 then 100)",
+			refs[0].StartLine, refs[1].StartLine)
+	}
+}
+
+// Two repositories routinely hold the same path. That tie is what the
+// repository breaks, so the walk does not read whichever was indexed first.
+func TestReferenced_onePathInTwoRepositoriesOrdersByRepository(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		order []definer
+	}{
+		{"bee indexed first", []definer{{"bee", "Shared.java"}, {"ant", "Shared.java"}}},
+		{"ant indexed first", []definer{{"ant", "Shared.java"}, {"bee", "Shared.java"}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// Given
+			g, from := seedDefiners(t, c.order)
+
+			// When
+			refs, err := g.referenced(context.Background(), from)
+
+			// Then
+			if err != nil {
+				t.Fatalf("referenced: %v", err)
+			}
+			if len(refs) != 2 {
+				t.Fatalf("references = %v, want both repositories", repoPaths(refs))
+			}
+			if refs[0].Repo != "ant" || refs[1].Repo != "bee" {
+				t.Errorf("reference order = %s, %s; want ant then bee whatever the index order",
+					refs[0].Repo, refs[1].Repo)
+			}
+		})
+	}
+}

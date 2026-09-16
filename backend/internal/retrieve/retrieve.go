@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -33,6 +34,12 @@ type Query struct {
 	// The raw question belongs in here too, first. A model's guess is a guess,
 	// and a wrong one must not be able to replace what was actually asked.
 	Texts []string
+	// Code is the code-terms text out of Texts, named rather than positional:
+	// the keyword lane can then weigh "one of these identifiers appears here"
+	// differently from the same rung over the question's prose. Empty when the
+	// understanding step guessed no identifiers, and inert unless the
+	// Retriever's CodeWeight is set.
+	Code string
 	// Repos is the understanding step's GUESS at which repositories the
 	// question is about. It is not the restriction on its own: knownRepos
 	// unions it with the repositories Question names, so an empty Repos can
@@ -82,6 +89,11 @@ type Retriever struct {
 	// DocDecay cuts a documentation hit's fused score; see DefaultDocDecay.
 	// Reads its zero the way TestDecay does.
 	DocDecay float64
+	// CodeWeight, when above zero, gives the OR rung of the CODE-TERMS text a
+	// weight of its own instead of the prose floor; see WeightKeywordCode.
+	// New ships it at 0.8; zero — and so a struct-literal Retriever — is the
+	// prose floor, which is what the harness's baseline arm runs.
+	CodeWeight float64
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
 	// see LLMReranker. The product sets it; nil is the fused order as it has
 	// always been, and the eval harness's baseline.
@@ -98,6 +110,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		RepoDecay:   DefaultRepoDecay,
 		TestDecay:   DefaultTestDecay,
 		DocDecay:    DefaultDocDecay,
+		CodeWeight:  WeightKeywordCode,
 	}
 }
 
@@ -108,11 +121,29 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // would be indistinguishable from a broken database, and the answer layer would
 // have to guess which one it was looking at.
 func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
+	texts := q.texts()
+	// The rung is found by comparing the code text against the texts being
+	// searched, so a Code that is not one of them switches it off silently —
+	// and a caller that built the two separately would never notice. Says so
+	// once, rather than answering from a lane the operator thinks is running.
+	if q.Code != "" && !containsText(texts, q.Code) {
+		slog.Warn("code text is not among the query texts, the code rung is off for this search",
+			"code", q.Code, "texts", len(texts))
+	}
 	repos, err := r.knownRepos(ctx, q.Repos, q.Question)
 	if err != nil {
 		return nil, err
 	}
-	return r.searchTexts(ctx, q.texts(), repos, q.K, q.Stage)
+	return r.searchTexts(ctx, texts, q.Code, repos, q.K, q.Stage)
+}
+
+func containsText(texts []string, want string) bool {
+	for _, t := range texts {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveRepos sorts what a question said about repositories into the names
@@ -540,7 +571,11 @@ func nameRune(r rune) bool {
 // guessed code vocabulary, and each becomes its own semantic lane before fusion.
 // That arrived as another lane rather than as a reshaping of this function,
 // which is what the slice was for.
-func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []string, k int, stage StagePrefixes) ([]Hit, error) {
+//
+// code is the one of those phrasings that is guessed IDENTIFIERS rather than
+// prose, passed by name so the keyword rungs can tell it apart; empty means
+// there is none.
+func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string, repos []string, k int, stage StagePrefixes) ([]Hit, error) {
 	if k <= 0 {
 		k = 10
 	}
@@ -596,6 +631,19 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 	// queries against a single file.
 	for _, text := range usable {
 		for _, tier := range BuildFTSQueries(text) {
+			weight, name := tier.Weight, laneName(tier.Weight)
+			// The OR floor of the code-terms text is not the same claim as the
+			// OR floor of the question's prose: "one of these words appears
+			// here" says more when the words are guessed identifiers. Only the
+			// floor — the rungs above it already require every term, and there
+			// the source of the words changes nothing.
+			//
+			// The label is set HERE, not derived from the weight afterwards: a
+			// swept CodeWeight of 0.7 would otherwise report itself as the
+			// prefix rung and a sweep would read as four rungs moving.
+			if text == code && weight == WeightKeywordAny && r.CodeWeight > 0 {
+				weight, name = r.CodeWeight, "keyword:code"
+			}
 			hits, err := r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage)
 			if err != nil {
 				return nil, err
@@ -604,9 +652,9 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 				continue
 			}
 			lanes = append(lanes, Lane{
-				Name:   laneName(tier.Weight),
+				Name:   name,
 				Hits:   hits,
-				Weight: tier.Weight,
+				Weight: weight,
 			})
 		}
 	}
@@ -628,6 +676,10 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, repos []str
 // laneName labels a keyword rung by what it means, so a result can explain
 // itself: "this chunk contains every word you typed" is a different claim from
 // "this chunk contains one of them".
+//
+// Only the four fixed rungs. The code rung is named where it is built, because
+// its weight is a configured value under a sweep and a switch on the number
+// would relabel the rung whenever the sweep passed another rung's constant.
 func laneName(weight float64) string {
 	switch weight {
 	case WeightKeywordStrict:

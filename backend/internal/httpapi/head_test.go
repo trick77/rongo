@@ -160,3 +160,179 @@ func TestThreadMessagesCarryTheHeadLink(t *testing.T) {
 		t.Errorf("re-explain head_message_id = %d, want %d", msgs[1].HeadMessageID, head.ID)
 	}
 }
+
+// A retry is the same question asked again, so it is a full turn of its
+// thread: the pin the thread narrowed to and the turn it follows. Without them
+// a retry in a pinned thread widened back to the whole corpus and lost what
+// the question was pointing at.
+func TestAsk_aRetryInheritsThePinAndTheTurnItFollows(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}, scope: ask.Scope{Known: []string{"rongo"}}}
+	deps, st := askDeps(t, a)
+	ctx := context.Background()
+
+	// Given a thread that narrowed on its first turn and whose second turn
+	// failed.
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+	list, err := deps.Threads.List(ctx, testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	failed, err := st.AddQuestion(ctx, list[0].ID, "ba", "en", "Und wie schnell?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Fail(ctx, failed.ID, "kaputt"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	// When the reader presses retry on it.
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(
+		`{"thread_id":%q,"question":"Und wie schnell?","audience":"ba","head_message_id":%d}`,
+		list[0].PublicID, failed.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	if len(a.gotThread.Pin) != 1 || a.gotThread.Pin[0] != "rongo" {
+		t.Errorf("pin = %v, want the repository the thread narrowed to", a.gotThread.Pin)
+	}
+	if a.gotThread.Question != "How does rongo cite sources?" {
+		t.Errorf("question = %q, want the turn answered below the one being retried", a.gotThread.Question)
+	}
+}
+
+// Retrying a turn that is itself a continuation follows what its HEAD follows:
+// the answered turn below the row the reader typed, never the one the retried
+// row is still an attempt at.
+func TestAsk_aRetryOfAContinuationFollowsItsHead(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+	ctx := context.Background()
+
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+	list, err := deps.Threads.List(ctx, testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	id := list[0].PublicID
+	postAsk(t, deps, fmt.Sprintf(`{"question":"Und wie schnell?","audience":"ba","thread_id":%q}`, id))
+
+	msgs, err := st.Messages(ctx, testSubject, list[0].ID)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("messages: %v (%d)", err, len(msgs))
+	}
+	// A re-explain of the second turn, which failed.
+	failed, err := st.AddQuestion(ctx, list[0].ID, "dev", "en", "Und wie schnell?", msgs[1].ID)
+	if err != nil {
+		t.Fatalf("add re-explain: %v", err)
+	}
+	if err := st.Fail(ctx, failed.ID, "kaputt"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(
+		`{"thread_id":%q,"question":"Und wie schnell?","audience":"dev","head_message_id":%d}`,
+		id, failed.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	if a.gotThread.Question != "How does rongo cite sources?" {
+		t.Errorf("question = %q, want the turn answered below the head, not the one being retried", a.gotThread.Question)
+	}
+}
+
+// A turn that failed under a card is retried under that card's own scope, not
+// under whatever the thread narrowed to earlier: the reader's choice is what
+// the attempt is about. "All repositories" is such a choice, and it must not
+// be quietly replaced by an older pin.
+func TestAsk_aRetryOfAResumedRowKeepsTheRowsOwnScope(t *testing.T) {
+	cases := []struct {
+		name  string
+		scope ask.Scope
+		want  []string
+	}{
+		{"the card's all-repositories entry", ask.Scope{All: true}, nil},
+		{"a repository picked off the card", ask.Scope{Known: []string{"ledger"}}, []string{"ledger"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &fakeAsker{tokens: []string{"x"}, scope: ask.Scope{Known: []string{"rongo"}}}
+			deps, st := askDeps(t, a)
+			ctx := context.Background()
+
+			// Given a thread that narrowed to rongo on its first turn.
+			postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+			list, err := deps.Threads.List(ctx, testSubject)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("list threads: %v (%d)", err, len(list))
+			}
+			// And a later turn that ran under the card's scope and failed.
+			failed, err := st.AddQuestion(ctx, list[0].ID, "ba", "en", "Und wie schnell?", 0)
+			if err != nil {
+				t.Fatalf("add question: %v", err)
+			}
+			if err := st.SetScope(ctx, failed.ID, tc.scope); err != nil {
+				t.Fatalf("set scope: %v", err)
+			}
+			if err := st.Fail(ctx, failed.ID, "kaputt"); err != nil {
+				t.Fatalf("fail: %v", err)
+			}
+
+			a.gotThread = ask.Thread{}
+			rec := postAsk(t, deps, fmt.Sprintf(
+				`{"thread_id":%q,"question":"Und wie schnell?","audience":"ba","head_message_id":%d}`,
+				list[0].PublicID, failed.ID))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+			}
+
+			if len(a.gotThread.Pin) != len(tc.want) {
+				t.Fatalf("pin = %v, want %v", a.gotThread.Pin, tc.want)
+			}
+			for i, repo := range tc.want {
+				if a.gotThread.Pin[i] != repo {
+					t.Errorf("pin = %v, want %v", a.gotThread.Pin, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// A head row that cannot be read leaves the retry with no antecedent at all.
+// That is the safe end of the mistake: a turn answered without the previous
+// question has to be asked more fully, where one answered under the WRONG
+// previous question quietly followed something else.
+func TestAsk_aRetryWhoseHeadCannotBeReadFollowsNothing(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+	ctx := context.Background()
+
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+	list, err := deps.Threads.List(ctx, testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	// A row that says it continues a turn nobody can find.
+	failed, err := st.AddQuestion(ctx, list[0].ID, "ba", "en", "Und wie schnell?", 999999)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Fail(ctx, failed.ID, "kaputt"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(
+		`{"thread_id":%q,"question":"Und wie schnell?","audience":"ba","head_message_id":%d}`,
+		list[0].PublicID, failed.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	if a.gotThread.Question != "" {
+		t.Errorf("question = %q, want none — the bound could not be resolved", a.gotThread.Question)
+	}
+}

@@ -27,31 +27,24 @@ func TestEvalRankOfMisses(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	r := retrieve.New(db, evalEmbedder(t))
+	r := evalRetriever(t, db)
 	// The pool has to be as deep as the cut, or the cut is the pool.
 	r.Candidates = deepK
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 
 	var inPool, beyond, missing int
 	for _, q := range loadQuestions(t) {
 		if q.Resolution != ResolutionUnique {
 			continue
 		}
-		texts, ok := expansions[q.Text]
-		if !ok {
-			t.Fatalf("no expansion for %q", q.Text)
-		}
-		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: deepK})
+		hits, err := r.Search(ctx, retrieve.Query{
+			Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+			Question: q.Text, K: deepK})
 		if err != nil {
 			t.Fatalf("search %q: %v", q.Text, err)
 		}
-		rank := 0
-		for i, h := range hits {
-			if h.Repo == q.Candidates[0].Repo && contains(q.Candidates[0].Paths, h.Path) {
-				rank = i + 1
-				break
-			}
-		}
+		rank := firstCandidateRank(hits, q)
 		switch {
 		case rank == 0:
 			missing++
@@ -65,13 +58,4 @@ func TestEvalRankOfMisses(t *testing.T) {
 	}
 	t.Logf("unique questions: %d inside the top %d, %d between %d and %d, %d absent from the top %d",
 		inPool, gatherSearchK, beyond, gatherSearchK+1, deepK, missing, deepK)
-}
-
-func contains(paths []string, p string) bool {
-	for _, x := range paths {
-		if x == p {
-			return true
-		}
-	}
-	return false
 }

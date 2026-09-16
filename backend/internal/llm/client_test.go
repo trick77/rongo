@@ -473,33 +473,49 @@ func TestComplete_theApiKeyNeverReachesAnError(t *testing.T) {
 // The stream then ends the way the upstream says it did: finishReason, when
 // set, goes out on an empty delta; then the usage frame with the given
 // completion count (prompt 3, total 3+completion); then [DONE].
+// writeDeltas streams the tokens as content deltas and leaves the stream open,
+// one frame at a time with a pause between them so a reader sees them arrive
+// separately. A fake that means to break mid-answer writes these and nothing
+// else.
+func writeDeltas(w http.ResponseWriter, tokens []string) {
+	fl := http.NewResponseController(w)
+	for _, tok := range tokens {
+		frame, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		_ = fl.Flush()
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// writeSSE is a whole stream: the deltas, the finish frame when there is one,
+// the usage frame and [DONE]. Every fake streaming endpoint in these tests
+// writes the same frames; what they differ in is which request gets them.
+func writeSSE(w http.ResponseWriter, tokens []string, finishReason string, completion int) {
+	writeDeltas(w, tokens)
+	fl := http.NewResponseController(w)
+	if finishReason != "" {
+		end, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", end)
+	}
+	usage, _ := json.Marshal(map[string]any{
+		"choices": []any{},
+		"usage":   map[string]any{"prompt_tokens": 3, "completion_tokens": completion, "total_tokens": 3 + completion},
+	})
+	fmt.Fprintf(w, "data: %s\n\n", usage)
+	fmt.Fprint(w, "data: [DONE]\n\n")
+	_ = fl.Flush()
+}
+
 func streamingUpstream(t *testing.T, tokens []string, finishReason string, completion int) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fl := http.NewResponseController(w)
-		for _, tok := range tokens {
-			frame, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", frame)
-			_ = fl.Flush()
-			time.Sleep(2 * time.Millisecond)
-		}
-		if finishReason != "" {
-			end, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", end)
-		}
-		usage, _ := json.Marshal(map[string]any{
-			"choices": []any{},
-			"usage":   map[string]any{"prompt_tokens": 3, "completion_tokens": completion, "total_tokens": 3 + completion},
-		})
-		fmt.Fprintf(w, "data: %s\n\n", usage)
-		fmt.Fprint(w, "data: [DONE]\n\n")
-		_ = fl.Flush()
+		writeSSE(w, tokens, finishReason, completion)
 	}))
 	t.Cleanup(srv.Close)
 	return mustClient(t, Config{BaseURL: srv.URL, APIKey: "sk-secret"}, srv.Client())

@@ -130,10 +130,10 @@ func TestEvalMeasureGathered(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	client := evalEmbedder(t)
-	r := retrieve.New(db, client)
+	r := evalRetriever(t, db)
 	questions := loadQuestions(t)
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 	opts := gatherOpts(t)
 
 	arms := []gatherArm{
@@ -164,13 +164,15 @@ func TestEvalMeasureGathered(t *testing.T) {
 		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: opts.TokenBudget, NoCrossings: arm.noCrossings, WholeFileTokens: arm.wholeFile})
 		var out []gatherOutcome
 		for _, q := range questions {
+			// The raw arms search the question as typed: there is no
+			// expansion, so there are no guessed identifiers and the code rung
+			// has no text of its own. That is the lane before the understanding
+			// step, which is what those arms measure.
 			query := retrieve.Query{Text: q.Text, Question: q.Text, K: gatherSearchK}
 			if arm.expanded {
-				texts, ok := expansions[q.Text]
-				if !ok {
-					t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
-				}
-				query = retrieve.Query{Texts: texts, Question: q.Text, K: gatherSearchK}
+				query = retrieve.Query{
+					Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+					Question: q.Text, K: gatherSearchK}
 			}
 			hits, err := r.Search(ctx, query)
 			if err != nil {

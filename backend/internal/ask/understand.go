@@ -85,15 +85,31 @@ type Understanding struct {
 // Each text becomes its own semantic lane in retrieve.searchTexts, and the
 // lanes are fused — so an expansion that adds nothing costs a lane, while one
 // that lands pulls its file up through a lane of its own.
+//
+// The last entry is CodeText's, the same string Query.Code carries: the keyword
+// lane finds the code rung by comparing the two, and building the text twice
+// would make that equality a coincidence rather than a fact.
 func (u Understanding) SearchTexts(question string) []string {
 	texts := []string{question}
 	if terms := strings.Join(u.Terms, " "); strings.TrimSpace(terms) != "" {
 		texts = append(texts, terms)
 	}
-	if code := strings.Join(u.CodeTerms, " "); strings.TrimSpace(code) != "" {
+	if code := u.CodeText(); code != "" {
 		texts = append(texts, code)
 	}
 	return texts
+}
+
+// CodeText is the guessed code vocabulary as one text, which is the entry
+// SearchTexts puts last. It is handed to the retriever by name so the keyword
+// lane can weigh a rung over guessed IDENTIFIERS differently from the same rung
+// over the question's prose; empty when the step guessed none.
+func (u Understanding) CodeText() string {
+	code := strings.Join(u.CodeTerms, " ")
+	if strings.TrimSpace(code) == "" {
+		return ""
+	}
+	return code
 }
 
 // Understander runs the first step.
@@ -209,6 +225,14 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 		// expansion did not help" rather than as "the expansion never ran".
 		return Understanding{}, fmt.Errorf("understand the question: reply was not JSON: %w", err)
 	}
+	// Normalised once, here, because everything downstream compares it to a
+	// word: the answer prompt looks the intent up in a table, and `Where.`,
+	// `"where"` and `where` are one reading. The trimmed set is what a model
+	// asked for one word out of four actually returns — spacing, the quotes
+	// of a half-escaped string, and the full stop of a sentence that was
+	// never wanted. A word the table does not carry is left as it is: it
+	// reaches the trace, where a reader sees what the model said.
+	got.Intent = strings.Trim(strings.ToLower(got.Intent), " \t\n\"'`.,:;!?")
 	return got, nil
 }
 

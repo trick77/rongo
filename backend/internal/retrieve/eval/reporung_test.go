@@ -8,7 +8,6 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/projects"
-	"github.com/trick77/rongo/internal/retrieve"
 )
 
 // TestEvalMeasureRepoRungShape is a DIAGNOSTIC, not a scored arm. It exists
@@ -33,9 +32,9 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	embedder := evalEmbedder(t)
-	r := retrieve.New(db, embedder)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	margin := routeMargin(t)
 	router := ask.NewRouter(nil, db, margin, moduleOpts(t))
@@ -62,7 +61,7 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 
 	var rows []row
 	for _, q := range loadQuestions(t) {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 		if len(named) >= 1 {
 			continue // the named-repo rung settles these before the rung under test
 		}

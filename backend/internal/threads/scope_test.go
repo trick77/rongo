@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -43,33 +44,10 @@ func TestScopeSurvivesAReload(t *testing.T) {
 	}
 }
 
-func TestScopeOfAnOrdinaryTurnWritesNothing(t *testing.T) {
-	// Most questions name no repository, and a row full of empty JSON would
-	// make the column say something it does not know.
-	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does indexing work?", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-
-	if err := s.SetScope(ctx, msg.ID, ask.Scope{}); err != nil {
-		t.Fatalf("set scope: %v", err)
-	}
-
-	got, ok, err := s.Message(ctx, testSubject, msg.ID)
-	if err != nil || !ok {
-		t.Fatalf("read message: %v ok=%v", err, ok)
-	}
-	if len(got.Scope.Known) != 0 || len(got.Scope.Unknown) != 0 {
-		t.Errorf("scope = %+v, want the zero value", got.Scope)
-	}
-}
-
-func TestDocsOnlySurvivesAReloadWithoutANamedRepository(t *testing.T) {
-	// The ordinary documentation-only turn names no repository at all, so the
-	// "nothing to say, write nothing" shortcut above would drop the one thing
-	// it does have to say — and the reader would see the notice while the turn
-	// streamed and never again after a reload.
+func TestTheNoticeIsRenderedOffTheStoredScope(t *testing.T) {
+	// The notice is not a column: it is rendered from the scope every time the
+	// row is read, so this is what the reader gets back after a reload rather
+	// than only while the turn streamed.
 	s, ctx, threadID, _ := newThreadStore(t)
 	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "Which choices are locked?", 0)
 	if err != nil {
@@ -93,19 +71,19 @@ func TestDocsOnlySurvivesAReloadWithoutANamedRepository(t *testing.T) {
 	}
 }
 
-// TestScopeOfAnAllRepositoriesTurnIsWrittenEvenThoughItNamesNone is the same
-// shortcut seen from the other side: "every repository" names none and is
-// still a scope. Skipping it would leave a re-explain reading a zero scope,
-// and the reader would be asked which repository they meant after already
-// saying all of them.
-func TestScopeOfAnAllRepositoriesTurnIsWrittenEvenThoughItNamesNone(t *testing.T) {
+// TestScopeCarryingOnlyTheIntentIsStillWritten: a question that names no
+// repository can still have been read as a WHERE or a WHY, and that reading is
+// what the answer prompt was built from — a re-explain reading a zero scope
+// would answer the same question under a different prompt than the first
+// answer was written with.
+func TestScopeCarryingOnlyTheIntentIsStillWritten(t *testing.T) {
 	s, ctx, threadID, _ := newThreadStore(t)
-	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "in all repos, how are token costs calculated?", 0)
+	msg, err := s.AddQuestion(ctx, threadID, "ba", "en", "Where is the grant issued?", 0)
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
 
-	if err := s.SetScope(ctx, msg.ID, ask.Scope{All: true}); err != nil {
+	if err := s.SetScope(ctx, msg.ID, ask.Scope{Intent: "where"}); err != nil {
 		t.Fatalf("set scope: %v", err)
 	}
 
@@ -113,8 +91,8 @@ func TestScopeOfAnAllRepositoriesTurnIsWrittenEvenThoughItNamesNone(t *testing.T
 	if err != nil || !ok {
 		t.Fatalf("read message: %v ok=%v", err, ok)
 	}
-	if !got.Scope.All {
-		t.Errorf("scope = %+v, want the all-repositories permission kept", got.Scope)
+	if got.Scope.Intent != "where" {
+		t.Errorf("scope.Intent = %q after a reload, want the reading the answer was written under", got.Scope.Intent)
 	}
 }
 
@@ -279,7 +257,7 @@ func TestLastTurnIsWhatAFollowUpIsAFollowUpTo(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt)
 	if err != nil || !ok {
 		t.Fatalf("last turn: %v ok=%v", err, ok)
 	}
@@ -311,7 +289,7 @@ func TestLastTurnSkipsATurnThatNeverAnswered(t *testing.T) {
 		t.Fatalf("fail: %v", err)
 	}
 
-	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt)
 	if err != nil || !ok {
 		t.Fatalf("last turn: %v ok=%v", err, ok)
 	}
@@ -320,11 +298,49 @@ func TestLastTurnSkipsATurnThatNeverAnswered(t *testing.T) {
 	}
 }
 
+// TestLastTurnBeforeStopsAtTheOrdinalItIsGiven: a clarification card need not
+// be the newest turn of its thread — two can stand open, and a fresh question
+// can be asked past one. A turn resumed from the card follows what was
+// answered BELOW it, never whatever the thread has answered since.
+func TestLastTurnBeforeStopsAtTheOrdinalItIsGiven(t *testing.T) {
+	s, ctx, threadID, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, first.ID, "Every claim carries repo, file and line.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	card, err := s.AddQuestion(ctx, threadID, "ba", "en", "Und wo wird das entschieden?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	later, err := s.AddQuestion(ctx, threadID, "ba", "en", "Was kostet ein Turn?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, later.ID, "Tokens times the list rate.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, card.Ordinal)
+	if err != nil || !ok {
+		t.Fatalf("last turn before: %v ok=%v", err, ok)
+	}
+	if got.ID != first.ID {
+		t.Errorf("last turn = %d, want the turn answered below the card (%d)", got.ID, first.ID)
+	}
+	// Unbounded is still the thread's newest answered turn.
+	if got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt); err != nil || !ok || got.ID != later.ID {
+		t.Errorf("unbounded last turn = %+v ok=%v err=%v, want the newest answered turn", got.ID, ok, err)
+	}
+}
+
 // TestLastTurnOfAFreshOrForeignThreadIsNothing: nothing to point at, and a
 // thread belongs to the person who asked.
 func TestLastTurnOfAFreshOrForeignThreadIsNothing(t *testing.T) {
 	s, ctx, threadID, _ := newThreadStore(t)
-	if _, ok, err := s.LastTurn(ctx, testSubject, threadID); err != nil || ok {
+	if _, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt); err != nil || ok {
 		t.Errorf("fresh thread: ok=%v err=%v, want nothing to follow up on", ok, err)
 	}
 
@@ -335,7 +351,7 @@ func TestLastTurnOfAFreshOrForeignThreadIsNothing(t *testing.T) {
 	if err := s.Finish(ctx, msg.ID, "An answer.", nil); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	if _, ok, err := s.LastTurn(ctx, "someone-else", threadID); err != nil || ok {
+	if _, ok, err := s.LastTurnBefore(ctx, "someone-else", threadID, math.MaxInt); err != nil || ok {
 		t.Errorf("foreign thread: ok=%v err=%v, want nothing", ok, err)
 	}
 }

@@ -373,7 +373,7 @@ func main() {
 	// nothing; a call that fails or a reply it cannot read keeps the fused
 	// order, so the gate lane going down never fails a search.
 	retriever := retrieve.New(db, embedder)
-	retriever.Reranker = retrieve.NewLLMReranker(models, 60)
+	retriever.Reranker = retrieve.NewLLMReranker(models, retrieve.DefaultRerankPool)
 	deps.Ask = ask.NewPipeline(
 		models,
 		retriever,

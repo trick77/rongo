@@ -200,6 +200,27 @@ func TestExtract_ctagsFailureIsAnError(t *testing.T) {
 	}
 }
 
+// ctags is handed the bare file name, which it also parses as its own command
+// line: a file called "-x.js" reads as an option and the whole extraction
+// fails ("Unknown option"), losing the file's symbols to the line-window
+// fallback for a reason that has nothing to do with the code.
+func TestExtract_aNameStartingWithADashIsAFileNotAnOption(t *testing.T) {
+	// Given
+	testee := NewExtractor(realCtags(t))
+
+	// When
+	syms, err := testee.Extract(context.Background(), "scripts/-x.js",
+		[]byte("function parse(s) { return s; }\n"))
+
+	// Then
+	if err != nil {
+		t.Fatalf("Extract() err = %v, want the dash treated as part of the name", err)
+	}
+	if len(syms) == 0 {
+		t.Errorf("Extract() found nothing in a file whose name begins with a dash")
+	}
+}
+
 func TestExtract_ignoresPseudoTags(t *testing.T) {
 	// Given: ctags emits pseudo-tags as _type "ptag". They describe the run, not
 	// the code, and must never reach the symbol index.
@@ -216,6 +237,74 @@ printf '{"_type": "tag", "name": "Real", "line": 2, "kind": "func"}\n'`))
 	}
 	if len(syms) != 1 || syms[0].Name != "Real" {
 		t.Errorf("Extract() = %+v, want only the real tag", syms)
+	}
+}
+
+// isInvented reports whether ctags made this name up rather than reading it
+// out of the source. The spelling is the BUILD's, not the format's: 6.2.1
+// writes anonymousFunction<hash> and CI's build capitalises it, while C gets
+// __anon<hash>. Folded, so a test asserting that such names are stable does
+// not quietly find none and pass.
+func isInvented(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "anonymous") || strings.Contains(lower, "__anon")
+}
+
+// ctags names an anonymous function by hashing the file name it was HANDED,
+// so a temporary directory in that name makes the symbol, the enriched text
+// and therefore the chunk's embedding different on every index of unchanged
+// code. Measured on the flow corpus: two indexes disagreed on 286 chunks, and
+// the hits moved with them.
+func TestExtract_anonymousNamesAreTheSameOnASecondExtraction(t *testing.T) {
+	// Given: a file whose callbacks ctags has to invent names for, one of them
+	// nested inside another.
+	body := []byte(`hooks.before("/orders > POST", function (transaction, done) {
+  request.get(url, function (err, res) {
+    done();
+  });
+});
+hooks.after("/orders > GET", function (transaction, done) {
+  done();
+});
+`)
+	testee := NewExtractor(realCtags(t))
+
+	// When: the same body is extracted twice, as two index runs would.
+	first, err := testee.Extract(context.Background(), "api-spec/hooks.js", body)
+	if err != nil {
+		t.Fatalf("first Extract() err = %v", err)
+	}
+	second, err := testee.Extract(context.Background(), "api-spec/hooks.js", body)
+	if err != nil {
+		t.Fatalf("second Extract() err = %v", err)
+	}
+
+	// Then: the whole record, not the name alone. Chunking reads a nested
+	// symbol's scope back against its parent's name, so a fix that settled the
+	// name and left the scope moving would break nesting instead.
+	if len(first) != len(second) || len(first) == 0 {
+		t.Fatalf("Extract() returned %d then %d symbols", len(first), len(second))
+	}
+	anonymous := 0
+	for i := range first {
+		if first[i] != second[i] {
+			t.Errorf("symbol %d = %+v then %+v; ctags named the same code twice", i, first[i], second[i])
+		}
+		if isInvented(first[i].Name) {
+			anonymous++
+		}
+	}
+	if anonymous == 0 {
+		t.Fatalf("no anonymous symbol in %+v; the fixture stopped exercising the naming", first)
+	}
+
+	// And: the invented names still tell the file's callbacks apart.
+	seen := map[string]bool{}
+	for _, s := range first {
+		if seen[s.Name] && isInvented(s.Name) {
+			t.Errorf("anonymous name %q used twice in one file: %+v", s.Name, first)
+		}
+		seen[s.Name] = true
 	}
 }
 

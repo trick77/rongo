@@ -409,9 +409,12 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // without this it would read a zero scope and be asked which repository was
 // meant all over again.
 func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) error {
-	if len(sc.Known) == 0 && len(sc.Unknown) == 0 && !sc.DocsOnly && !sc.All {
-		return nil
-	}
+	// Written whatever it holds. The shortcut that skipped an "empty" scope
+	// had to be taught every new field — it already lost the intent and the
+	// stage, each of which decides what prompt a re-explain answers under —
+	// and it bought nothing: scanScope decodes any blob to the zero value,
+	// and ThreadScope reads Known after decoding, so a stored empty scope
+	// says exactly what an empty column says.
 	blob, err := json.Marshal(sc)
 	if err != nil {
 		return fmt.Errorf("encode scope: %w", err)
@@ -653,8 +656,9 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 	return nil, nil
 }
 
-// LastTurn is the most recent turn of this thread that actually answered, or
-// false when none has. It is what a follow-up is a follow-up TO.
+// LastTurnBefore is the most recent turn of this thread that actually
+// answered and sits below ordinal `before`, or false when there is none. It is
+// what a follow-up is a follow-up TO.
 //
 // "Kannst du das in einem Diagramm aufzeigen?" names no mechanism, no module
 // and no repository, because the reader named all three a turn ago. Without
@@ -664,7 +668,12 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 // An answer is the filter, not a row: a turn that failed writes `error` and a
 // turn that asked back writes a clarification, and neither is something a
 // later question can point at. Ownership is checked the way Message checks it.
-func (s *Store) LastTurn(ctx context.Context, subject string, threadID int64) (Message, bool, error) {
+//
+// `before` is a bound, not a row. A turn resumed from a clarification card
+// passes the ordinal of the turn the attempt joins, because the card need not
+// be the newest thing in the thread — two cards can stand open, and a fresh
+// turn can be asked past one.
+func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int64, before int) (Message, bool, error) {
 	var m Message
 	var created string
 	var fromClar sql.NullInt64
@@ -674,8 +683,9 @@ func (s *Store) LastTurn(ctx context.Context, subject string, threadID int64) (M
 		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ? AND m.answer != ''
+		  AND m.ordinal < ?
 		ORDER BY m.ordinal DESC
-		LIMIT 1`, threadID, subject).
+		LIMIT 1`, threadID, subject, before).
 		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
@@ -725,6 +735,26 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	}
 	m.Citations = cites
 	return m, true, nil
+}
+
+// MessageOrdinal is where one message sits in its thread, or false when the
+// id names no message of a thread owned by subject. It is Message's read with
+// everything the caller does not want left out: resolving what a continuation
+// follows needs a position, not a turn with its scope, its followups and its
+// citations.
+func (s *Store) MessageOrdinal(ctx context.Context, subject string, messageID int64) (int, bool, error) {
+	var ordinal int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.ordinal
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).Scan(&ordinal)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read message ordinal: %w", err)
+	}
+	return ordinal, true, nil
 }
 
 // Messages returns a thread's turns in order, with their citations.

@@ -261,7 +261,11 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		allDenied = all
 		all = false
 	}
-	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all, Stage: stage}
+	// The intent travels in the scope rather than as an argument of its own:
+	// it is part of the record, so a resumed turn reads it off the stored
+	// clarification and a re-explained one off the stored row.
+	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all,
+		Stage: stage, Intent: u.Intent}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -289,7 +293,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if len(pin) > 0 {
 		scopedQuestion = ""
 	}
-	hits, err := p.searchScoped(ctx, scopedQuestion, texts, known, declared.Prefixes(stage))
+	hits, err := p.searchScoped(ctx, scopedQuestion, texts, u.CodeText(), known, declared.Prefixes(stage))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -572,27 +576,40 @@ func (p *Pipeline) answer(ctx context.Context, question string, audience Audienc
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
 	if err == nil {
-		d := map[string]any{
-			"prompt_tokens":     answer.Usage.Prompt,
-			"completion_tokens": answer.Usage.Completion,
-			"cited":             len(answer.Citations),
-			"sources":           len(sources),
-			// The prompt by section, measured rather than billed — the split
-			// the endpoint never reports. The reader is told which is which
-			// where it is drawn.
-			"prompt_system":   answer.Prompt.System,
-			"prompt_sources":  answer.Prompt.Sources,
-			"prompt_question": answer.Prompt.Question,
-		}
-		// How much of the prompt the endpoint had read before and did not
-		// charge full price for again. Absent when the reply carried no
-		// details object: that is unknown, not zero.
-		if answer.Usage.PromptDetails != nil {
-			d["cached_tokens"] = answer.Usage.PromptDetails.Cached
-		}
-		ev.detail("writing", d)
+		ev.detail("writing", writingDetail(answer, len(sources)))
 	}
 	return answer, err
+}
+
+// writingDetail is what the writing step found: what the call cost, how many
+// of the sources in front of the model it cited, and how the stream itself
+// went. Facts the step already held — no second call is made to report them.
+func writingDetail(answer Answer, sources int) map[string]any {
+	d := map[string]any{
+		"prompt_tokens":     answer.Usage.Prompt,
+		"completion_tokens": answer.Usage.Completion,
+		"cited":             len(answer.Citations),
+		"sources":           sources,
+		// The prompt by section, measured rather than billed — the split
+		// the endpoint never reports. The reader is told which is which
+		// where it is drawn.
+		"prompt_system":   answer.Prompt.System,
+		"prompt_sources":  answer.Prompt.Sources,
+		"prompt_question": answer.Prompt.Question,
+	}
+	// Only past one: a turn that took a second call is worth a line in the
+	// timeline, and saying "1 attempt" on every other turn is noise. The
+	// client counts it, so every step could report it the same way.
+	if answer.Usage.Attempts > 1 {
+		d["attempts"] = answer.Usage.Attempts
+	}
+	// How much of the prompt the endpoint had read before and did not
+	// charge full price for again. Absent when the reply carried no
+	// details object: that is unknown, not zero.
+	if answer.Usage.PromptDetails != nil {
+		d["cached_tokens"] = answer.Usage.PromptDetails.Cached
+	}
+	return d
 }
 
 // understandingDetail is what the first step found: the phrasings the search
@@ -771,16 +788,16 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 // searchK per repository, not searchK divided among them: each side gets the
 // same depth it would have got as the only named one, and gather applies no
 // cap to hits by design.
-func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
-		return p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: question, K: searchK, Stage: stage})
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, K: searchK, Stage: stage})
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
 		// Question is left out on purpose: it names every one of these
 		// repositories, and knownRepos would union them all back in, undoing
 		// the one-repository-at-a-time cut this exists for.
-		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: searchK, Stage: stage})
+		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, K: searchK, Stage: stage})
 		if err != nil {
 			return nil, err
 		}
@@ -789,6 +806,9 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 	// Ordered best first across the repositories, as one search would be: the
 	// router ranks candidates by their best hit and the gatherer walks in
 	// order, and neither should see the repositories' turn order instead.
+	// Stable over an input each search already ordered by address, so an equal
+	// score falls back to the index's name order, the order knownRepos returns
+	// the repositories in, and never to a chunk id.
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
 	// Bounded whatever the understanding guessed. Gather never evicts a search
 	// hit — an answer cites what it was built on — so every hit here becomes a
@@ -807,8 +827,17 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 // candidate's own hits ARE the search result now — and gathers only from
 // them. That is what choosing means: a resumed turn must not go looking for
 // anything else.
-func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language, hits []retrieve.Hit, scope Scope, ev Events) (Answer, error) {
-	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, "", ev)
+//
+// t is what earlier turns of this thread left behind, the way Run takes it. A
+// turn that went through a card is still a turn of the thread, and the reader
+// who typed "und wo wird das entschieden?" gets it answered by a clarification
+// and then by an answer: without the thread the answer prompt loses the rule
+// that says what "das" points at. Only t.Question reaches the prompt — see
+// answerFollowUp for why the previous answer's text does not.
+func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language,
+	hits []retrieve.Hit, scope Scope, t Thread, ev Events) (Answer, error) {
+
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, t.Question, ev)
 }
 
 // ResumeRepo continues a turn after the reader chose a REPOSITORY off a
@@ -832,8 +861,10 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // back in there because knownRepos may narrow on what it names; in the scoped
 // case it is left out for the reason searchScoped gives, or the other
 // repositories would be unioned straight back in.
+//
+// t is what Resume's is: what earlier turns of this thread left behind.
 func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repos []string,
-	audience Audience, lang Language, scope Scope, ev Events) (Answer, error) {
+	audience Audience, lang Language, scope Scope, t Thread, ev Events) (Answer, error) {
 
 	texts := u.SearchTexts(question)
 	stage := p.declaredStages(ctx).Prefixes(scope.Stage)
@@ -868,14 +899,14 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// question is left out for the reason the single-repository search
 		// left it out — knownRepos would union the other repositories back in
 		// and undo the choice.
-		hits, err = p.searchScoped(ctx, "", texts, known, stage)
+		hits, err = p.searchScoped(ctx, "", texts, u.CodeText(), known, stage)
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
 	} else {
 		ev.status("searching")
 		var err error
-		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Question: question, K: searchK, Stage: stage})
+		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, K: searchK, Stage: stage})
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
@@ -892,7 +923,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
 	}
 
-	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
+	return p.answer(ctx, question, audience, lang, sources, scope, t.Question, ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -912,5 +943,9 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	// the project structure missing — the two-backends disambiguation present
 	// in the first answer and gone from the second.
 	scope = p.describeProjects(ctx, scope)
+	// No follow-up rule, on purpose: a re-explain answers the SAME question
+	// again for the other audience, and the first answer is right above it in
+	// the thread. Telling the model not to restate what was already explained
+	// would forbid the one thing this path exists to do.
 	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
 }

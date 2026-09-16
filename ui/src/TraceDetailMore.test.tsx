@@ -17,6 +17,19 @@ describe("Trace, the remaining step details", () => {
       />,
     );
     expect(screen.getByText(/26.3k tokens in · 897 tokens out · 10 of 155 sources cited/)).toBeTruthy();
+    expect(screen.queryByText(/retried/)).toBeNull();
+  });
+
+  it("says that the answer took a second call", () => {
+    const { container } = strict(
+      <Trace
+        steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 12000, completion_tokens: 800, cited: 3, sources: 12, attempts: 2 } }]}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 100}
+      />,
+    );
+    expect(container.querySelector(".trace-detail")?.textContent).toContain("3 of 12 sources cited · retried once");
   });
 
   it("names a pinned thread's scope, a corpus-wide ask, and the repositories left out", () => {

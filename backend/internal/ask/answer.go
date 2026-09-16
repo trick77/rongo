@@ -418,6 +418,33 @@ prose stays prose: never split a single line of reasoning into bullets, and
 never use a list where two sentences would do. Markers sit on the list item
 that makes the claim, exactly as they do in running text.`
 
+// answerIntent is the one-line refinement of the shape rule per intent, keyed
+// by Understanding.Intent and appended directly after answerShape.
+//
+// The shape rule says to open with ONE sentence that answers the question. On
+// its own that leaves the model to decide what answering means, and for three
+// of the four intents it decides wrong: a WHERE question comes back with one
+// place explained in depth and the other two mentioned in passing, a WHY
+// question comes back with the mechanism and never the rule that decides it,
+// and a yes/no question comes back with an explanation the reader has to grade
+// themselves.
+//
+// "how" is the intent the shape rule was written for, so it adds nothing, and
+// an unknown value adds nothing either: the intent comes from a model, and a
+// word this map does not carry must leave the prompt exactly as it was.
+//
+// The WHERE rule says "place" and "marker", never "file": an Analyst answer
+// carries no paths in running text (answerBA), and a rule naming files would
+// pull them back in.
+var answerIntent = map[string]string{
+	"where": "\n\nThe question asks WHERE: open by saying every place the mechanism lives, " +
+		"each with its marker, before explaining any of them.",
+	"why": "\n\nThe question asks WHY: state the condition or rule that decides it and the " +
+		"reason the code gives for it, then the mechanism.",
+	"conformance": "\n\nThe question asks whether the code does something: answer yes or no in " +
+		"the first sentence, then show what decides it.",
+}
+
 // answerDiagram follows the audience block, so "the audience rules above"
 // are the ones the model just read: a Developer diagram names functions and
 // files, an Analyst diagram speaks the domain. The fence is named literally,
@@ -525,6 +552,20 @@ type Scope struct {
 	// part of the record: a resumed or re-explained turn must answer under the
 	// same permission the first one had.
 	All bool `json:"All,omitempty"`
+	// Intent is what the understanding step read the question as asking for:
+	// how, why, where or conformance. Empty is "nothing said", and so is any
+	// value the answer prompt has no rule for.
+	//
+	// It reaches the answer prompt, which is the only place it changes an
+	// answer: the shape rules say to open with one sentence that answers the
+	// question, and what "answers the question" means is different for each
+	// of them. Part of the record for the reason Stage is — a resumed or
+	// re-explained turn answers the question that was asked, not a different
+	// reading of it.
+	//
+	// The column is a JSON blob, so a row written before this field decodes
+	// to the empty string and the prompt is the one it was written under.
+	Intent string `json:"intent,omitempty"`
 	// DocsOnly is true when every source the answer was written from is
 	// documentation. Not something the question said, but it belongs here for
 	// the same reason Unknown does: it is what the turn has to tell the reader
@@ -841,8 +882,19 @@ func StructureBlock(ps []projects.Project) string {
 // blocks and the units paragraphs are one class of input and one rule
 // covers them. describeProjects re-closes the block after the paragraphs
 // with this same constant.
+//
+// The last sentence settles which of the two inputs wins on WHICH PARTS EXIST.
+// The block is declared and complete; the sources are a retrieval cut and are
+// almost never complete. Without the sentence the model reads the gathered
+// code as the inventory and reports the parts it cannot see as absent or not
+// indexed, which is a false claim about the corpus made from a partial view of
+// it. It does not license a claim ABOUT those parts: their code is still not
+// in front of the model, and "never invent" is what covers that.
 const structureIsConfiguration = "\nThis is configuration, not code. It says which repository plays which part " +
-	"and which calls which. Never present it as something you read in the sources, and never cite it."
+	"and which calls which. Never present it as something you read in the sources, and never cite it." +
+	" When a source shows only some of the parts this block lists, the block is complete and the source is " +
+	"partial: say the parts exist and that their code is not among the sources, never that they are absent " +
+	"or not indexed."
 
 // Answer writes the answer for one turn, streaming it token by token.
 //
@@ -871,6 +923,10 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// shape rules are about the whole answer, so they must not read as though
 	// they applied only to the last special case that happened to be appended.
 	system += answerShape
+	// Directly after the shape rules it refines: what "one sentence that
+	// answers the question" means depends on what the question asked for.
+	// A missing or unknown intent adds nothing.
+	system += answerIntent[scope.Intent]
 	// After the audience block, so "cover every one of them" is read against
 	// the shape the audience block just set rather than before it.
 	//

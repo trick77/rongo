@@ -36,6 +36,27 @@ type expansion struct {
 	// is what keeps the phase 2, 3 and 4a numbers comparable. See
 	// TestExpandQuestionRepos.
 	Repos []string `json:"repos,omitempty"`
+	// Code is the understanding's guessed code vocabulary as one text — the
+	// entry SearchTexts puts last — recorded by name so the code rung's input
+	// is a field rather than a position. `omitempty` because a question the
+	// step guessed no identifiers for has none; every record in both frozen
+	// files was migrated to carry it, so a record with texts and no code is
+	// stale rather than code-less. See code().
+	Code string `json:"code,omitempty"`
+}
+
+// code is the frozen code text of a record.
+//
+// No fallback to the third text: the files were migrated once, and a silent
+// fallback would let a hand-edited or half-re-frozen record run the code rung
+// on whatever happens to sit at that position — the business-language
+// restatement, under a weight meant for identifiers.
+func (e expansion) code(t *testing.T) string {
+	t.Helper()
+	if e.Code == "" && len(e.Texts) > 0 {
+		t.Fatalf("stale expansion record for %q, re-freeze: texts but no code", e.Question)
+	}
+	return e.Code
 }
 
 // readExpansions parses the frozen file, or skips the arm if it is not there.
@@ -57,6 +78,30 @@ func loadExpansions(t *testing.T) map[string][]string {
 	out := map[string][]string{}
 	for _, e := range readExpansions(t) {
 		out[e.Question] = e.Texts
+	}
+	return out
+}
+
+// expansionTextsOf is the frozen texts of one question, or a fatal: every arm
+// that reads the file fails on a missing entry rather than searching the raw
+// question and reporting a number that measures a different query.
+func expansionTextsOf(t *testing.T, expansions map[string][]string, q Question) []string {
+	t.Helper()
+	texts, ok := expansions[q.Text]
+	if !ok {
+		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
+	}
+	return texts
+}
+
+// loadExpansionCodes returns the frozen code text per question, which is what
+// Query.Code carries. A question whose record has none maps to "", the same
+// meaning an Understanding that guessed no identifiers has in pipeline.go.
+func loadExpansionCodes(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, e := range readExpansions(t) {
+		out[e.Question] = e.code(t)
 	}
 	return out
 }
@@ -121,11 +166,12 @@ func TestExpandQuestions(t *testing.T) {
 			continue
 		}
 		var texts []string
+		var code string
 		var last error
 		for attempt := 1; attempt <= expandAttempts; attempt++ {
 			got, err := u.Understand(context.Background(), q.Text, ask.Thread{}, nil)
 			if err == nil {
-				texts = got.SearchTexts(q.Text)
+				texts, code = got.SearchTexts(q.Text), got.CodeText()
 				break
 			}
 			last = err
@@ -146,7 +192,7 @@ func TestExpandQuestions(t *testing.T) {
 			continue
 		}
 		t.Logf("EXPANDED %-60s -> %v", short(q.Text), texts[1:])
-		out = append(out, refreshTexts(previous[q.Text], q.Text, texts))
+		out = append(out, refreshTexts(previous[q.Text], q.Text, texts, code))
 	}
 
 	body, err := json.MarshalIndent(out, "", "  ")
@@ -198,9 +244,10 @@ func expandOnlyMissing() bool {
 // point of this being a function: Repos is frozen by a separate arm and a
 // rebuild would drop it silently, because "no restriction recorded" and "this
 // question names no repository" look the same to every reader of the file.
-func refreshTexts(prev expansion, question string, texts []string) expansion {
+func refreshTexts(prev expansion, question string, texts []string, code string) expansion {
 	prev.Question = question
 	prev.Texts = texts
+	prev.Code = code
 	return prev
 }
 
@@ -240,7 +287,7 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 		Repos:    []string{"peeq"},
 	}
 
-	got := refreshTexts(prev, prev.Question, []string{"new", "also new"})
+	got := refreshTexts(prev, prev.Question, []string{"new", "also new"}, "PromoMailJob")
 
 	if len(got.Repos) != 1 || got.Repos[0] != "peeq" {
 		t.Errorf("Repos = %v, want the frozen restriction carried forward", got.Repos)
@@ -252,11 +299,41 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 		t.Errorf("Question = %q, want it unchanged", got.Question)
 	}
 
+	if got.Code != "PromoMailJob" {
+		t.Errorf("Code = %q, want the fresh code text", got.Code)
+	}
+
 	// A question that never had a restriction still has none — an empty Repos
 	// must not become a phantom entry.
-	fresh := refreshTexts(expansion{}, "new question", []string{"x"})
+	fresh := refreshTexts(expansion{}, "new question", []string{"x"}, "")
 	if len(fresh.Repos) != 0 {
 		t.Errorf("Repos = %v, want none for a record that never had one", fresh.Repos)
+	}
+	if fresh.Code != "" {
+		t.Errorf("Code = %q, want none when the step guessed no identifiers", fresh.Code)
+	}
+}
+
+// TestFrozenExpansionsCarryTheirCodeText runs WITHOUT an endpoint. Both files
+// were migrated once; a record that lost its code, or a new one frozen by a
+// build that does not write it, would run the rung on nothing and the table
+// would simply read as "no gain".
+func TestFrozenExpansionsCarryTheirCodeText(t *testing.T) {
+	for _, e := range readExpansions(t) {
+		if e.Code == "" {
+			t.Errorf("%q has no code text in %s", e.Question, expansionsFile)
+		}
+	}
+	for _, e := range loadFlowExpansions(t) {
+		if e.Code == "" {
+			t.Errorf("%q has no code text in %s", e.Question, flowExpansionsFile())
+		}
+	}
+	if got := (expansion{Question: "q", Texts: []string{"q", "restatement", "PromoMailJob"}, Code: "PromoMailJob"}).code(t); got != "PromoMailJob" {
+		t.Errorf("code() = %q, want the recorded field", got)
+	}
+	if got := (expansion{Question: "q"}).code(t); got != "" {
+		t.Errorf("code() = %q, want none for an empty record", got)
 	}
 }
 
@@ -380,9 +457,9 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	client := evalEmbedder(t)
-	r := retrieve.New(db, client)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 	questions := loadQuestions(t)
 
 	type row struct {
@@ -394,15 +471,15 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	var rawMRR, expMRR float64
 
 	for _, q := range questions {
-		texts, ok := expansions[q.Text]
-		if !ok {
-			t.Fatalf("no expansion recorded for %q", q.Text)
-		}
+		// The raw arm is the question as typed, before the understanding step:
+		// no expansion, so no guessed identifiers and no code rung either.
 		raw, err := r.Search(ctx, retrieve.Query{Text: q.Text, Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("raw search: %v", err)
 		}
-		exp, err := r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: 20})
+		exp, err := r.Search(ctx, retrieve.Query{
+			Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+			Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("expanded search: %v", err)
 		}

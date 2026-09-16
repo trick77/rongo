@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -28,15 +29,18 @@ type Asker interface {
 	// narrowed to, and the last question it answered. Zero for a first turn.
 	Run(ctx context.Context, question string, audience ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error)
 	// Resume continues a turn from the hits one clarification candidate was
-	// built from — no search, no routing.
-	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language, hits []retrieve.Hit, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+	// built from — no search, no routing. t is what earlier turns left
+	// behind, as Run takes it: a turn answered through a card is still a turn
+	// of the thread, and a follow-up knows what it follows.
+	Resume(ctx context.Context, question string, audience ask.Audience, lang ask.Language,
+		hits []retrieve.Hit, scope ask.Scope, t ask.Thread, ev ask.Events) (ask.Answer, error)
 	// ResumeRepo continues a turn after the reader chose a REPOSITORY off a
 	// card, searching that repository at full depth — or, for an empty repo,
 	// the whole corpus. The one resume path that searches again; see
 	// ask.Pipeline.ResumeRepo for why a repository card cannot replay stored
 	// hits.
 	ResumeRepo(ctx context.Context, question string, u ask.Understanding, repos []string,
-		audience ask.Audience, lang ask.Language, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+		audience ask.Audience, lang ask.Language, scope ask.Scope, t ask.Thread, ev ask.Events) (ask.Answer, error)
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
 	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, scope ask.Scope, ev ask.Events) (ask.Answer, error)
@@ -235,6 +239,15 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	var headID int64
 	var resumeHits []retrieve.Hit
 	var resumeScope ask.Scope
+	// resumeMsg is the clarification's own row, kept so the resumed turn can
+	// be placed in the thread the same way every other continuation is.
+	var resumeMsg *threads.Message
+	// followUpBefore is the ordinal a resumed turn looks for its follow-up
+	// below: the ordinal of the turn this attempt JOINS, which is the card's
+	// head row when the card itself sat on a resumed one. A chain of cards is
+	// one attempt at one question, so every link of it follows what the first
+	// link followed.
+	var followUpBefore int
 	// resumeRepoChoice marks a card whose entries were repositories;
 	// resumeRepos are the ones chosen, empty for the card's "all
 	// repositories" entry. A card yields exactly one; the too-broad panel
@@ -361,6 +374,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// turn, which is the card's own head when the card was itself a
 			// resume.
 			headID = m.Head()
+			// And the whole chain follows what the head followed, which the
+			// switch below reads off this row: a card answered by another
+			// card leaves the second card sitting ABOVE the first one's turn,
+			// so the card's own ordinal would make the resumed turn follow a
+			// question it is still answering.
+			resumeMsg = &m
 		}
 		if resumeRepoChoice {
 			// The choice IS the scope now. Unknown carries over untouched: a
@@ -407,17 +426,51 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// answer, and the reader is told the scope either way.
 	var prior ask.Thread
 	var thread threads.Thread
+	// followUpIn is the thread whose last answered turn this one follows, 0
+	// for a turn that follows nothing.
+	var followUpIn int64
+	//
+	// The three shapes a turn can have — resumed from a card, a retry of a
+	// row, or typed into a thread — differ in which row they sit under and
+	// where the narrowing comes from, and in nothing else. Each branch says
+	// both, so the read below is one read for all of them.
 	switch {
 	case resume != nil:
 		// A resumed turn continues the thread the clarification was asked
 		// in — the reader is still in the same conversation, just answering
-		// a question rongo asked.
+		// a question rongo asked. And a turn of that conversation can be a
+		// follow-up: the card's own turn wrote no answer, so what the new
+		// question points at is the answered turn below the one it joins.
+		//
+		// Its narrowing is the card's own, already carried over above: the
+		// choice a reader made on the card is what this turn is about, and
+		// the thread's older scope must not widen or contradict it.
 		thread = threads.Thread{ID: resume.ThreadID}
+		followUpIn = resume.ThreadID
+		if resumeMsg != nil {
+			followUpBefore = s.headOrdinal(ctx, u.Subject, *resumeMsg)
+		}
+		prior.Pin = resumeScope.Known
 	case retryHead != nil:
 		// A retry continues the thread the question was asked in, read off the
 		// turn it retries rather than off the request: the row is what says
-		// where the attempt belongs.
+		// where the attempt belongs. It sits below the row it retries, never
+		// below itself, and a retry of a row that continues another follows
+		// what THAT row followed.
+		//
+		// Its narrowing is the retried row's own when the row recorded one —
+		// a turn that failed under a card is retried under that card's
+		// scope — and the thread's otherwise. Without either, a retry in a
+		// pinned thread widened back to the whole corpus and lost what "das"
+		// pointed at.
 		thread = threads.Thread{ID: retryHead.ThreadID}
+		followUpIn = retryHead.ThreadID
+		followUpBefore = s.headOrdinal(ctx, u.Subject, *retryHead)
+		if scope := retryHead.Scope; scope.All || len(scope.Known) > 0 {
+			prior.Pin = scope.Known
+		} else {
+			prior.Pin = s.threadPin(ctx, u.Subject, retryHead.ThreadID)
+		}
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
 		if errors.Is(err, errNotYours) {
@@ -434,19 +487,24 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		thread = t
 		if reqThreadID != 0 {
-			if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
-				slog.Error("read thread scope failed", "err", err)
-			} else {
-				prior.Pin = pin
-			}
-			// The last ANSWERED turn, which is what a follow-up points at:
-			// "kannst du das in einem Diagramm aufzeigen?" names no mechanism
-			// because the reader named it a turn ago.
-			if last, ok, err := s.deps.Threads.LastTurn(ctx, u.Subject, reqThreadID); err != nil {
-				slog.Error("read last turn failed", "err", err)
-			} else if ok {
-				prior.Question, prior.Answer = last.Question, last.Answer
-			}
+			// Typed under the newest thing in the thread, so nothing bounds
+			// the read from above.
+			followUpIn = reqThreadID
+			followUpBefore = math.MaxInt
+			prior.Pin = s.threadPin(ctx, u.Subject, reqThreadID)
+		}
+	}
+
+	// The last ANSWERED turn below that bound is what a follow-up points at,
+	// because "kannst du das in einem Diagramm aufzeigen?" names no mechanism
+	// — the reader named it a turn ago. A read that fails is logged and
+	// treated as no previous turn, the way an unreadable thread is.
+	if followUpIn != 0 {
+		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
+		if err != nil {
+			slog.Error("read last turn failed", "err", err)
+		} else if ok {
+			prior.Question, prior.Answer = last.Question, last.Answer
 		}
 	}
 
@@ -617,9 +675,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		var answer ask.Answer
 		var err error
 		if resumeRepoChoice {
-			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepos, audience, lang, resumeScope, events)
+			answer, err = s.deps.Ask.ResumeRepo(ctx, req.Question, resume.Understanding, resumeRepos, audience, lang, resumeScope, prior, events)
 		} else {
-			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, events)
+			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, prior, events)
 		}
 		if err != nil {
 			turnStopped(ctx, "resumed turn failed", thread.ID, err)
@@ -1091,6 +1149,41 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record sources failed", err)
 	}
 	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeRecord)
+}
+
+// headOrdinal is the ordinal a turn continuing m has to stay below: m's own,
+// or its head's when m is itself a continuation. A card answered by another
+// card, or a retry of a re-explain, leaves the row ABOVE the turn it belongs
+// to, and its own ordinal would make the new turn follow a question that is
+// still being answered.
+//
+// A head that cannot be read yields 0, which is no antecedent at all. That is
+// the safe end of the mistake: a turn answered without the previous question
+// is a turn that has to be asked more fully, where one answered under the
+// WRONG previous question is a turn that quietly followed something else.
+func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) int {
+	head := m.Head()
+	if head == 0 || head == m.ID {
+		return m.Ordinal
+	}
+	ordinal, ok, err := s.deps.Threads.MessageOrdinal(ctx, subject, head)
+	if err != nil || !ok {
+		slog.Error("resolve head ordinal failed", "err", err, "head", head)
+		return 0
+	}
+	return ordinal
+}
+
+// threadPin is what earlier turns of this thread narrowed to. A read that
+// fails is an un-narrowed turn, which is worse than a narrowed one and better
+// than no answer.
+func (s *Server) threadPin(ctx context.Context, subject string, threadID int64) []string {
+	pin, err := s.deps.Threads.ThreadScope(ctx, subject, threadID)
+	if err != nil {
+		slog.Error("read thread scope failed", "err", err)
+		return nil
+	}
+	return pin
 }
 
 // thread returns the thread this turn belongs to, creating one when the request
