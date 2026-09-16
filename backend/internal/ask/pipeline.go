@@ -714,14 +714,13 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	for _, s := range sources {
 		tokens += estimateTokens(s.Text)
 		repos[s.Repo] = true
-		kind, value, isEdge := edgeVia(s.Reason)
+		kind, value, from, isEdge := edgeVia(s.Reason)
 		switch {
 		case s.Reason == "hit":
 			hits++
 		case isEdge:
 			crossings++
 			via := kind + " " + value
-			_, from, _ := strings.Cut(s.Reason, " from ")
 			fromRepo, _, _ := strings.Cut(from, "/")
 			key := fromRepo + "->" + s.Repo + " " + via
 			if !seenCrossing[key] {

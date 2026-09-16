@@ -243,19 +243,48 @@ func TestFillGaps_landsADestinationAndAProperty(t *testing.T) {
 	}
 }
 
-// TestFillGaps_fallsBackToTheKeywordLaneUnderItsOwnLimit: a name the symbol
-// index and the edge table both miss is still looked up, strictly, and the
-// keyword lane's share of the pass is small on purpose — this is the one path
-// that stores the model's own spelling rather than the index's.
-func TestFillGaps_fallsBackToTheKeywordLaneUnderItsOwnLimit(t *testing.T) {
+// TestFillGaps_reportsANameTheIndexDoesNotKnowAsUnresolved: a name the
+// symbols table and the edge table both miss is a gap this pass cannot fill.
+// It is reported, never guessed at by matching the word in raw text: every
+// landing carries the INDEX's spelling, so there is no path left that stores
+// the model's.
+func TestFillGaps_reportsANameTheIndexDoesNotKnowAsUnresolved(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() {}")
+	// Three files mentioning the word, none defining it.
 	for _, p := range []string{"a.go", "b.go", "c.go"} {
 		seedChunk(t, db, p, 0, 1, 10, "", "// the checkout is described here")
 	}
 	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("checkout", "symbol")))
+	sources := []Source{sourceOf(t, db, hitID)}
 
-	got, report, err := g.FillGaps(context.Background(), "how does checkout work?", []Source{sourceOf(t, db, hitID)}, nil)
+	got, report, err := g.FillGaps(context.Background(), "how does checkout work?", sources, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if len(got) != len(sources) {
+		t.Errorf("sources = %v, want nothing fetched by matching the word", paths(got))
+	}
+	if len(report.Unresolved) != 1 || report.Unresolved[0] != "checkout" {
+		t.Errorf("report = %+v, want the name reported unresolved", report)
+	}
+}
+
+// TestFillGaps_landsOneChunkPerDefiningFile: a name defined twice in one file
+// — an overload, or a chunk window that covers the definition twice — is one
+// place, and admitting both spends the reserve on the same file. Same rule as
+// the token landings.
+func TestFillGaps_landsOneChunkPerDefiningFile(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { Close() }")
+	seedChunk(t, db, "a.go", 0, 1, 10, "Close", "func Close() {}")
+	seedChunk(t, db, "a.go", 1, 20, 30, "Close", "func Close(n int) {}")
+	seedSymbol(t, db, "a.go", "Close", 1)
+	seedSymbol(t, db, "a.go", "Close", 25)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("Close", "symbol")))
+
+	got, report, err := g.FillGaps(context.Background(), "how is it closed?", []Source{sourceOf(t, db, hitID)}, nil)
 	if err != nil {
 		t.Fatalf("FillGaps: %v", err)
 	}
@@ -264,16 +293,100 @@ func TestFillGaps_fallsBackToTheKeywordLaneUnderItsOwnLimit(t *testing.T) {
 	for _, s := range got {
 		if strings.HasPrefix(s.Reason, "gap:") {
 			landed++
-			if s.Reason != "gap:checkout" {
-				t.Errorf("reason = %q", s.Reason)
-			}
 		}
 	}
-	if landed != gapFTSLimit {
-		t.Errorf("landed %d chunks from the keyword lane, want %d", landed, gapFTSLimit)
+	if landed != 1 {
+		t.Errorf("landed %d chunks of one file, want one: %v", landed, paths(got))
 	}
 	if len(report.Landed) != 1 {
 		t.Errorf("report = %+v", report)
+	}
+}
+
+// TestFillGaps_admitsADefiningTestFileLast: a test defining the name is a
+// definition and a poor one to spend the last of the reserve on, so the
+// landings are ordered the way every other hop's candidates are.
+func TestFillGaps_admitsADefiningTestFileLast(t *testing.T) {
+	db := gatherDB(t)
+	body := "func Close() { " + strings.Repeat("x ", 20) + " }"
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { Close() }")
+	// a_test.go sorts FIRST by path, so an unordered admission would spend
+	// the room on it and refuse a mechanism file.
+	for _, p := range []string{"a_test.go", "b.go", "c.go"} {
+		seedChunk(t, db, p, 0, 1, 10, "Close", body)
+		seedSymbol(t, db, p, "Close", 1)
+	}
+	sources := []Source{sourceOf(t, db, hitID)}
+	// Room for the hit and exactly two of the three landings.
+	budget := estimateTokens(sources[0].Text) + 2*estimateTokens(body)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: budget}, missing(name("Close", "symbol")))
+
+	got, _, err := g.FillGaps(context.Background(), "how is it closed?", sources, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !has(got, "b.go") || !has(got, "c.go") {
+		t.Errorf("sources = %v, want both mechanism files", paths(got))
+	}
+	if has(got, "a_test.go") {
+		t.Errorf("sources = %v, want the test file left to last", paths(got))
+	}
+}
+
+// TestFillGaps_reportsAHalfAdmittedNameAsRefused: the answer reads a name's
+// landings together, and a report calling half of them a landing says the
+// definition is in front of the model when part of it is not.
+func TestFillGaps_reportsAHalfAdmittedNameAsRefused(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { Close() }")
+	seedChunk(t, db, "a.go", 0, 1, 10, "Close", "func Close() {}")
+	seedSymbol(t, db, "a.go", "Close", 1)
+	seedChunk(t, db, "b.go", 0, 1, 10, "Close", "func Close() { "+strings.Repeat("x ", 400)+" }")
+	seedSymbol(t, db, "b.go", "Close", 1)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 120}, missing(name("Close", "symbol")))
+
+	got, report, err := g.FillGaps(context.Background(), "how is it closed?", []Source{sourceOf(t, db, hitID)}, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !has(got, "a.go") || has(got, "b.go") {
+		t.Errorf("sources = %v, want the first definer and not the oversized one", paths(got))
+	}
+	if len(report.Landed) != 0 {
+		t.Errorf("landed = %v, want a half-admitted name reported refused", report.Landed)
+	}
+	if len(report.Refused) != 1 || report.Refused[0] != "Close" {
+		t.Errorf("refused = %v, want the name whose landings did not all fit", report.Refused)
+	}
+}
+
+// TestFillGaps_readsASymbolAndATokenOfTheSameNameApart: "orders" is a queue
+// and a method, and a source defining the method says nothing about where the
+// queue is served. The kind is part of the name, in the filter and in the
+// duplicate check both.
+func TestFillGaps_readsASymbolAndATokenOfTheSameNameApart(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "queue-master")
+	hitID := seedChunk(t, db, "send.go", 0, 1, 10, "orders", "func orders() { publish(q) }")
+	seedChunkIn(t, db, "queue-master", "listen.go", 0, 1, 10, "listen", `subscribe("orders")`)
+	seedTokenIn(t, db, "queue-master", "listen.go", "destination", "orders", 5)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000},
+		missing(name("orders", "symbol"), name("orders", "destination")))
+
+	got, report, err := g.FillGaps(context.Background(), "what consumes the orders queue?",
+		[]Source{sourceOf(t, db, hitID)}, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	// The source's symbol is "orders"; it is the method, not the queue.
+	if len(report.Asked) != 1 || report.Asked[0].Kind != "destination" {
+		t.Fatalf("asked = %+v, want the queue asked and the method dropped", report.Asked)
+	}
+	if !hasIn(got, "queue-master", "listen.go") {
+		t.Errorf("sources = %v, want the consumer of the queue", repoPaths(got))
 	}
 }
 
@@ -283,8 +396,7 @@ func TestFillGaps_fallsBackToTheKeywordLaneUnderItsOwnLimit(t *testing.T) {
 func TestFillGaps_obeysTheSelectivityCeilings(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "hit.go", 0, 1, 10, "target", "func target() {}")
-	// Five files define Close; their text never spells it, so the keyword
-	// fallback cannot find them either.
+	// Five files define Close, one past what the walk will follow.
 	for _, p := range []string{"aa.go", "ab.go", "ac.go", "ad.go", "ae.go"} {
 		seedChunk(t, db, p, 0, 1, 10, "", "func x() {}")
 		seedSymbol(t, db, p, "Close", 1)
@@ -490,9 +602,10 @@ func TestFillGaps_reportsANameRefusedWhileAnotherLanded(t *testing.T) {
 	}
 }
 
-// TestFillGaps_stopsLookingUpOnceTheBudgetRefused: a refusal means the reserve
-// is spent, and every lookup after it queries the index for a chunk nothing
-// can hold.
+// TestFillGaps_stopsLookingUpOnceTheBudgetRefused: a refusal means the
+// reserve is spent. Every lookup after it queries the index for a chunk the
+// admitter has already said it cannot hold, and a later name that happens to
+// be small enough would be admitted out of the model's own order.
 func TestFillGaps_stopsLookingUpOnceTheBudgetRefused(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { unitPrice(); vat() }")
@@ -502,7 +615,7 @@ func TestFillGaps_stopsLookingUpOnceTheBudgetRefused(t *testing.T) {
 	seedChunk(t, db, "vat.go", 0, 1, 10, "vat", "func vat() {}")
 	seedSymbol(t, db, "vat.go", "vat", 1)
 	sources := []Source{sourceOf(t, db, hitID)}
-	budget := estimateTokens(sources[0].Text) + gapExcerptMin/4 - 10
+	budget := estimateTokens(sources[0].Text) + estimateTokens("func vat() {}") + 1
 	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: budget},
 		missing(name("unitPrice", "symbol"), name("vat", "symbol")))
 

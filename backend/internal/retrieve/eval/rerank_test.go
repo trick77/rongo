@@ -45,7 +45,9 @@ func TestEvalMeasureRerank(t *testing.T) {
 		{name: "fused order (baseline)" + codeLaneLabel(), r: plain, g: g},
 		{name: fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts%s", rr.Pool, rr.Excerpt, codeLaneLabel()), r: reranked, g: g},
 	}
-	if envOr("BACKEND_EVAL_GAP", "1") != "0" {
+	// The gap pass is harness-only, so it is off unless asked for:
+	// BACKEND_EVAL_GAP=1 is the arm, as in TestEvalMeasureAnswers.
+	if envOr("BACKEND_EVAL_GAP", "0") == "1" {
 		arms = append(arms, arm{
 			name: fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts + gap pass%s", rr.Pool, rr.Excerpt, codeLaneLabel()),
 			r:    reranked, g: evalGatherer(t, db, opts, client),

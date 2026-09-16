@@ -18,8 +18,8 @@ import (
 // The gap pass: after the symbol walk and the crossings, ONE short-gate call
 // reads what was gathered and lists the names the mechanism depends on whose
 // definition is not among the sources. Every name it returns is then resolved
-// DETERMINISTICALLY — the symbols table, the edge table, and the keyword lane
-// as a last resort — and the landing chunks are added to the sources.
+// DETERMINISTICALLY, against the symbols table or the edge table, and the
+// landing chunks are added to the sources.
 //
 // Why a model at all: the walk follows what the TEXT of a gathered chunk
 // spells, and the two things it cannot see are a name spelled nowhere in the
@@ -28,14 +28,16 @@ import (
 // against the question is the judgement a developer makes before opening one
 // more file, and it is the only step here that has it.
 //
+// Those two lookups and no third: a name the index knows as neither a symbol
+// nor a token is Unresolved. Matching the word in raw text landed on chunks
+// that merely mention it (docs/measurements/2026-09-16-gap-pass.md), and it
+// was also the one path that had no index row to correct the spelling with.
+//
 // What it stores: the names are used to look code up and are gone with the
-// turn, which keeps the pass outside the rule against model-written text
-// about code — the same footing as the routing judge and the reranker. The
-// one exception is the keyword fallback: no index row was matched to correct
-// the spelling, so its landing carries the MODEL's string in the source's
-// reason, and the turn writes that to message_sources.reason. It is a trace
-// line — never indexed, never embedded, never read back as code — and it is
-// why that lookup is the narrowest of the three.
+// turn. Every landing's reason carries the INDEX's spelling — symbols.name or
+// integration_tokens.value — never the model's, which keeps the pass outside
+// the rule against model-written text about code, the same footing as the
+// routing judge and the reranker.
 //
 // What it may never do: fail a turn, or be worse than not running. A call
 // that errors or a reply that cannot be read leaves the sources exactly as
@@ -54,16 +56,11 @@ const gapPromptChars = 60000
 
 // gapExcerptMin is the floor under a source's share of that budget: the
 // header plus the opening lines, which is where a signature and a doc comment
-// sit. Same reasoning, and same value, as retrieve's rerankExcerpt.
+// sit.
 const gapExcerptMin = 240
 
-// gapFTSLimit is how many chunks the keyword fallback may contribute per
-// name. It is the weakest of the three lookups — a name matched as a word in
-// raw text, not as a definition — so it lands a couple of chunks or none.
-const gapFTSLimit = 2
-
-// gapMaxLandings caps the landings one token value may contribute, one per
-// file: a property key is set once per stage, and four stages is a report.
+// gapMaxLandings caps the landings one name may contribute, one per file: a
+// property key is set once per stage, and four stages is a report.
 const gapMaxLandings = 4
 
 // gapNameRunes is the longest name worth looking up. Past it the reply is a
@@ -166,7 +163,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	}
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
-		g.logger().Warn("gap reply was not JSON; the gathered sources kept", "reply", gapExcerpt(out, 120))
+		g.logger().Warn("gap reply was not JSON; the gathered sources kept", "reply", llmwire.Truncate(out, 120))
 		return sources, GapReport{Skipped: "not json"}, nil
 	}
 
@@ -185,17 +182,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	}
 	a.out = append(a.out, sources...)
 
-	refused := false
 	for i, n := range report.Asked {
-		// Once the reserve has refused a landing, what is left cannot hold
-		// even a source's smallest share of the prompt, and every further
-		// lookup queries the index for a chunk nothing can admit.
-		if refused && a.budget-a.spent < gapExcerptMin/4 {
-			for _, rest := range report.Asked[i:] {
-				report.Refused = append(report.Refused, rest.Name)
-			}
-			break
-		}
 		landings, err := g.resolve(ctx, n, sources, stage)
 		if err != nil {
 			return sources, GapReport{}, err
@@ -212,44 +199,52 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 		noRoom := false
 		for _, l := range landings {
 			if !a.take(l, g.opts.MaxHops+1) {
-				noRoom, refused = true, true
+				noRoom = true
+				break
 			}
+		}
+		if noRoom {
+			// The reserve is spent. A name half admitted is not a landing —
+			// the answer reads a definition's places together — and every
+			// name after it is refused without a lookup, because the
+			// admitter has already said what it cannot hold and a later
+			// small one would be admitted out of the model's own order.
+			for _, rest := range report.Asked[i:] {
+				report.Refused = append(report.Refused, rest.Name)
+			}
+			break
 		}
 		// Landed means something NEW was admitted: a name resolved onto
 		// chunks the model was already reading cost the pass a lookup and
 		// gained the answer nothing.
-		switch {
-		case len(a.out) > before:
+		if len(a.out) > before {
 			report.Landed = append(report.Landed, n.Name)
-		case noRoom:
-			report.Refused = append(report.Refused, n.Name)
 		}
 	}
 	return a.out, report, nil
 }
 
-// resolve turns one name into landings, deterministically. The first lookup
-// that yields a chunk wins; a name none of them resolves is reported, never
-// guessed at.
+// resolve turns one name into landings, deterministically: the kind says
+// which index holds it, and a name that index does not know is reported,
+// never guessed at.
 func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, stage retrieve.StagePrefixes) ([]Source, error) {
-	var landings []Source
-	var err error
 	switch edges.Kind(n.Kind) {
 	case edges.KindRoute, edges.KindDestination, edges.KindProperty:
-		landings, err = g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, stage)
+		return g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, stage)
 	default:
-		landings, err = g.symbolLandings(ctx, n.Name, sources)
+		return g.symbolLandings(ctx, n.Name, sources)
 	}
-	if err != nil || len(landings) > 0 {
-		return landings, err
-	}
-	return g.keywordLandings(ctx, n.Name, stage)
 }
 
 // symbolLandings finds where a name is DEFINED, under the same selectivity
 // ceiling the walk follows, and prefers a repository the answer is already
 // being written about: sibling products define the same identifiers byte for
 // byte, and a lookup by name alone would cite whichever path sorts first.
+//
+// One chunk per file and at most gapMaxLandings files, the way the token
+// landings are capped, with tests last: an overload lands twice in one file,
+// and a name four files define would otherwise spend the whole reserve on one
+// entry of the reply.
 func (g *Gatherer) symbolLandings(ctx context.Context, name string, sources []Source) ([]Source, error) {
 	// No home and no near side: the caller has a name and no file, so every
 	// selective definer over the enabled repositories is a candidate.
@@ -260,9 +255,14 @@ func (g *Gatherer) symbolLandings(ctx context.Context, name string, sources []So
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	rows = atHome(rows, sources)
-	out := make([]Source, 0, len(rows))
-	for _, s := range rows {
+	var out []Source
+	files := map[string]bool{}
+	for _, s := range mechanismFirst(atHome(rows, sources)) {
+		key := s.Repo + "\x00" + s.Path
+		if files[key] || len(out) >= gapMaxLandings {
+			continue
+		}
+		files[key] = true
 		// The index's own spelling, from symbols.name, not the model's.
 		s.Reason = "gap:" + strings.TrimPrefix(s.Reason, "reference:")
 		out = append(out, s)
@@ -341,30 +341,6 @@ func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name stri
 	return out, nil
 }
 
-// keywordLandings is the last resort: the name as a strict FTS term. This is
-// the ONE path whose Reason carries the model's own string — no index row
-// was matched to correct the spelling — so it is deliberately the narrowest,
-// at gapFTSLimit chunks.
-func (g *Gatherer) keywordLandings(ctx context.Context, name string, stage retrieve.StagePrefixes) ([]Source, error) {
-	match := retrieve.BuildFTSMatch(name)
-	if match == "" {
-		return nil, nil
-	}
-	hits, err := retrieve.NewStore(g.db).SearchKeywordIn(ctx, match, gapFTSLimit, nil, stage)
-	if err != nil {
-		return nil, fmt.Errorf("look up %q in the keyword lane: %w", name, err)
-	}
-	out := make([]Source, 0, len(hits))
-	for _, h := range hits {
-		out = append(out, Source{
-			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
-			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
-			SHA: h.SHA, Text: h.RawText, Reason: "gap:" + name,
-		})
-	}
-	return out, nil
-}
-
 // gapNames filters the reply before anything is looked up: nothing empty,
 // nothing sentence-shaped, nothing twice, and nothing the sources already
 // carry. Filtered first and capped afterwards, so junk does not eat the
@@ -380,13 +356,17 @@ func gapNames(got []GapName, sources []Source) []GapName {
 		default:
 			n.Kind = "symbol"
 		}
-		if n.Name == "" || len([]rune(n.Name)) > gapNameRunes || seen[n.Name] {
+		// Keyed by kind AND name: "orders" the queue and "orders" the method
+		// are two lookups in two indexes, and one is not the other's
+		// duplicate.
+		key := n.Kind + " " + n.Name
+		if n.Name == "" || len([]rune(n.Name)) > gapNameRunes || seen[key] {
 			continue
 		}
 		if strings.IndexFunc(n.Name, unicode.IsSpace) >= 0 {
 			continue
 		}
-		seen[n.Name] = true
+		seen[key] = true
 		if amongSources(n, sources) {
 			continue
 		}
@@ -402,16 +382,22 @@ func gapNames(got []GapName, sources []Source) []GapName {
 // in front of the model: a source defining it, a symbol hop that named it, or
 // a crossing that followed it.
 //
-// The crossing is compared by kind and value, never as a substring of the
-// reason: a crossing on "/orders/123/items" is not the route "/orders", and
-// reading it as one drops the name the model asked for.
+// Each check answers for its own kind. A source's symbol and a symbol hop's
+// reason are answers about a DEFINITION, and a file defining a method called
+// "orders" says nothing about where the queue "orders" is served. The
+// crossing is compared by kind and value, never as a substring of the reason:
+// a crossing on "/orders/123/items" is not the route "/orders", and reading
+// it as one drops the name the model asked for.
 func amongSources(n GapName, sources []Source) bool {
+	// gapNames has already read an unknown kind as a symbol, so this is the
+	// whole of the symbol case.
+	symbol := n.Kind == "symbol"
 	values := gapValues(edges.Kind(n.Kind), n.Name)
 	for _, s := range sources {
-		if s.Symbol == n.Name || s.Reason == "reference:"+n.Name {
+		if symbol && (s.Symbol == n.Name || s.Reason == "reference:"+n.Name) {
 			return true
 		}
-		kind, value, ok := edgeVia(s.Reason)
+		kind, value, _, ok := edgeVia(s.Reason)
 		if !ok || kind != n.Kind {
 			continue
 		}
@@ -451,20 +437,8 @@ func gapPrompt(question string, sources []Source) string {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(gapExcerpt(s.Text, share))
+		b.WriteString(retrieve.Excerpt(s.Text, share))
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-// gapExcerpt cuts s to at most n RUNES, marker included, so a share counted
-// in runes is never overrun by one — and so a cut never lands inside a
-// multi-byte character and hands the model a replacement glyph.
-func gapExcerpt(s string, n int) string {
-	s = strings.TrimSpace(s)
-	r := []rune(s)
-	if len(r) <= n || n < 1 {
-		return s
-	}
-	return string(r[:n-1]) + "…"
 }

@@ -338,31 +338,32 @@ type crossing struct {
 	from, landing Source
 }
 
-// edgeVia reads a crossing's reason, "edge:<kind> <value> from <repo>/<path>",
-// and reports false for a reason of any other shape.
+// edgeVia reads a crossing's reason, "edge:<kind> <value> from <repo>/<path>":
+// the token that crossed, and the near side it was followed from. It reports
+// false for a reason of any other shape.
 //
 // One parser, because the grammar has a value in the middle of it: a reader
 // matching "route /orders" as a substring also matches the crossing that
 // landed on "/orders/123/items", and calls a route nobody followed followed.
-func edgeVia(reason string) (kind, value string, ok bool) {
+func edgeVia(reason string) (kind, value, from string, ok bool) {
 	rest, ok := strings.CutPrefix(reason, "edge:")
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
-	via, _, ok := strings.Cut(rest, " from ")
+	via, from, ok := strings.Cut(rest, " from ")
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	kind, value, ok = strings.Cut(via, " ")
 	if !ok || kind == "" || value == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return kind, value, true
+	return kind, value, from, true
 }
 
 // isPropertyEdge reports a landing reached over a property key.
 func isPropertyEdge(reason string) bool {
-	kind, _, ok := edgeVia(reason)
+	kind, _, _, ok := edgeVia(reason)
 	return ok && kind == string(edges.KindProperty)
 }
 
