@@ -240,6 +240,16 @@ printf '{"_type": "tag", "name": "Real", "line": 2, "kind": "func"}\n'`))
 	}
 }
 
+// isInvented reports whether ctags made this name up rather than reading it
+// out of the source. The spelling is the BUILD's, not the format's: 6.2.1
+// writes anonymousFunction<hash> and CI's build capitalises it, while C gets
+// __anon<hash>. Folded, so a test asserting that such names are stable does
+// not quietly find none and pass.
+func isInvented(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "anonymous") || strings.Contains(lower, "__anon")
+}
+
 // ctags names an anonymous function by hashing the file name it was HANDED,
 // so a temporary directory in that name makes the symbol, the enriched text
 // and therefore the chunk's embedding different on every index of unchanged
@@ -280,7 +290,7 @@ hooks.after("/orders > GET", function (transaction, done) {
 		if first[i] != second[i] {
 			t.Errorf("symbol %d = %+v then %+v; ctags named the same code twice", i, first[i], second[i])
 		}
-		if strings.Contains(first[i].Name, "anonymous") || strings.Contains(first[i].Name, "__anon") {
+		if isInvented(first[i].Name) {
 			anonymous++
 		}
 	}
@@ -291,7 +301,7 @@ hooks.after("/orders > GET", function (transaction, done) {
 	// And: the invented names still tell the file's callbacks apart.
 	seen := map[string]bool{}
 	for _, s := range first {
-		if seen[s.Name] && (strings.Contains(s.Name, "anonymous") || strings.Contains(s.Name, "__anon")) {
+		if seen[s.Name] && isInvented(s.Name) {
 			t.Errorf("anonymous name %q used twice in one file: %+v", s.Name, first)
 		}
 		seen[s.Name] = true
