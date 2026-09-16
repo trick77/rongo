@@ -1049,6 +1049,21 @@ export default function Ask({
           // width when the thread grows a scrollbar.
           className="flex min-h-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]"
         >
+          {/* ../loom's transcript edges: prose dissolves into the background as
+              it leaves the column rather than being cut off by it. This is the
+              head; the foot's strip rides above the composer, further down.
+              INSIDE the scroller, stuck to its top, like the composer at the
+              foot: laid over the scroller from outside, the strip spanned the
+              scrollbar gutter too and dimmed the top of the thumb. Sticky
+              takes a row of flow, so the negative margin gives it back and
+              the column's own top padding is what clears the fade — content
+              has to clear it, or the first line sits half dimmed with the
+              column at rest. z-20 over the diagram card's z-10 toolbar: first
+              in tree order, so a tie would be settled against it. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none sticky top-0 z-20 h-5 shrink-0 -mb-5 bg-gradient-to-b from-bg to-transparent lg:h-8 lg:-mb-8 [@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3"
+          />
           <div className="mx-auto w-full max-w-[900px] flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. That
@@ -1289,18 +1304,6 @@ export default function Ask({
             </p>
           </form>
         </div>
-        {/* ../loom's transcript edges: prose dissolves into the background as
-            it leaves the column rather than being cut off by it. This is the
-            head; the foot's strip rides above the composer, inside the
-            scroller. AFTER the scroller, not before it: at z-10 the strip
-            ties with the diagram card's own toolbar, and a tie is settled by
-            tree order. The height tracks the column's top padding at every
-            breakpoint — content has to clear the fade, or the first line sits
-            half dimmed with the column at rest. */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-bg to-transparent lg:h-8 [@media(max-height:500px)]:h-3"
-        />
       </div>
 
       {showSources && (

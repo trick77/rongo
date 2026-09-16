@@ -1641,15 +1641,22 @@ describe("Ask, the edges of the reading column", () => {
     expect(head.getAttribute("aria-hidden")).toBe("true");
     expect(head.className).toContain("top-0");
     expect(head.className).toContain("pointer-events-none");
-    // z-10 ties with the diagram card's toolbar inside the column, and a tie
-    // is settled by tree order — so the strip has to come AFTER the scroller.
+    // Inside the scroller, stuck to its top: laid over the scroller from
+    // outside, the strip spanned the scrollbar gutter and dimmed the top of
+    // the thumb. First in tree order, so it needs to out-rank the diagram
+    // card's z-10 toolbar rather than tie with it. Sticky takes a row of
+    // flow, and the negative margin gives it back at every height.
     // The scroller itself must NOT isolate: the full-screen diagram view is
     // rendered from inside a card in it, and a stacking context here would
     // trap that overlay under the composer.
-    expect(head.className).toContain("z-10");
+    expect(head.className).toContain("sticky");
+    expect(head.className).toContain("z-20");
+    expect(head.className).toContain("h-5 shrink-0 -mb-5");
+    expect(head.className).toContain("lg:h-8 lg:-mb-8");
+    expect(head.className).toContain("[@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3");
     const scroll = container.querySelector(".overflow-auto") as HTMLElement;
     expect(scroll.className).not.toContain("isolate");
-    expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scroll.firstElementChild).toBe(head);
 
     // The composer is the scroller's last child, stuck to its foot: the
     // scrollbar runs the column's full height, and at the end of the thread
