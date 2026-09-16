@@ -1256,6 +1256,9 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	page, err := s.deps.Threads.ListPage(r.Context(), u.Subject, threads.ListOptions{
 		Limit:  limit,
 		Cursor: r.URL.Query().Get("cursor"),
+		// ?starred=true is the rail's starred section: every starred thread,
+		// however old. Anything else is the plain list.
+		StarredOnly: r.URL.Query().Get("starred") == "true",
 	})
 	if err != nil {
 		slog.Error("list threads failed", "err", err)
@@ -1449,6 +1452,36 @@ func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 	// a turn that may still be streaming into them, which would run its model
 	// calls to completion and be paid for.
 	s.turns.cancel(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleStarThread and handleUnstarThread are ../loom's pair: two verbs
+// rather than a PATCH body field, so a rename's "title is required" stays
+// what it is. No body, 204 like rename and delete — the browser knows what
+// it asked for and patches its own row.
+func (s *Server) handleStarThread(w http.ResponseWriter, r *http.Request) {
+	s.handleSetThreadStarred(w, r, true)
+}
+
+func (s *Server) handleUnstarThread(w http.ResponseWriter, r *http.Request) {
+	s.handleSetThreadStarred(w, r, false)
+}
+
+func (s *Server) handleSetThreadStarred(w http.ResponseWriter, r *http.Request, starred bool) {
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return
+	}
+	found, err := s.deps.Threads.SetStarred(r.Context(), u.Subject, id, starred)
+	if err != nil {
+		slog.Error("star thread failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

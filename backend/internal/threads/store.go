@@ -43,6 +43,9 @@ type Thread struct {
 	// rail marks a row with; the link itself is not sent with the list,
 	// because the rail has nothing to do with it.
 	Shared bool `json:"shared,omitempty"`
+	// Starred is the reader's own mark: the rail lists starred threads in a
+	// section of their own, above the recent ones.
+	Starred bool `json:"starred,omitempty"`
 }
 
 // Message is one ANSWER ATTEMPT: a question and what came of it. It is not
@@ -304,6 +307,23 @@ func (s *Store) Rename(ctx context.Context, subject string, id int64, title stri
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("rename thread: %w", err)
+	}
+	return n > 0, nil
+}
+
+// SetStarred marks or unmarks a thread as the reader's own. Reports whether a
+// row matched, like Rename: a thread that is gone, or was never this
+// reader's, is a 404 at the edge, and starring one twice is a no-op that
+// still matched.
+func (s *Store) SetStarred(ctx context.Context, subject string, id int64, starred bool) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE threads SET starred = ? WHERE id = ? AND user_subject = ?`, starred, id, subject)
+	if err != nil {
+		return false, fmt.Errorf("star thread: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("star thread: %w", err)
 	}
 	return n > 0, nil
 }
@@ -639,7 +659,7 @@ func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
 // need the whole set.
 func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, public_id, title, title_settled, created_at FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
+		`SELECT `+threadColumns+` FROM threads WHERE user_subject = ? ORDER BY id DESC`, subject)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}

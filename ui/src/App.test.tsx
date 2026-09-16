@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { routeFromPath } from "./routing";
@@ -309,13 +309,20 @@ const addr = "v76BBy2b1nMYOFl2Lnm9JQ";
 /** A second one, for the address that leads nowhere. */
 const noSuchAddr = "AAAAAAAAAAAAAAAAAAAAAA";
 
-/** Answers the thread list and one thread's turns separately. */
-function apiFetch(threads: unknown, messages: unknown) {
+/**
+ * Answers the thread list, one thread's turns, and the starred list, which
+ * is empty unless given: the rail reads it beside the page.
+ */
+function apiFetch(threads: unknown, messages: unknown, starred: unknown[] = []) {
   const mock = vi.fn(async (url: string) => ({
     ok: true,
     status: 200,
-    json: async () =>
-      String(url).startsWith("/api/threads/") ? messages : { items: threads, next_cursor: null },
+    json: async () => {
+      const u = String(url);
+      if (u.startsWith("/api/threads/")) return messages;
+      if (u.includes("starred=true")) return { items: starred, next_cursor: null };
+      return { items: threads, next_cursor: null };
+    },
   }));
   vi.stubGlobal("fetch", mock);
   return mock;
@@ -561,5 +568,79 @@ describe("App, the rail on a phone", () => {
     expect(h1.textContent).toBe("Rongo");
     expect(h1.className).toContain("sr-only");
     expect(h1.className).toContain("sm:not-sr-only");
+  });
+});
+
+// ../loom's chevron beside the title: the row's menu, reachable from the
+// header, for a thread whose row may be nowhere on the rail. Last in the
+// row, after the usage, and only once there is a title to act on.
+describe("App, the header's thread menu", () => {
+  it("is absent on the unasked question and present on an open thread, after the title", async () => {
+    atPath("/new");
+    apiFetch(oneThread, oneTurn);
+    const { unmount } = render(<StrictMode><App /></StrictMode>);
+    await screen.findByRole("heading", { level: 1 });
+    expect(within(screen.getByRole("banner")).queryByRole("button", { name: /^Actions for/ })).toBeNull();
+    unmount();
+
+    atPath("/thread/" + addr);
+    apiFetch(oneThread, oneTurn);
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByText(/Through a job/);
+    const banner = screen.getByRole("banner");
+    const chevron = within(banner).getByRole("button", { name: "Actions for How does shipping work?" });
+    expect(chevron.getAttribute("aria-haspopup")).toBe("menu");
+    const title = within(banner).getByText("How does shipping work?");
+    expect(title.compareDocumentPosition(chevron) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("opens the same menu, Star first, and turns the chevron towards it", async () => {
+    atPath("/thread/" + addr);
+    const mock = apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByText(/Through a job/);
+    const banner = screen.getByRole("banner");
+    const chevron = within(banner).getByRole("button", { name: "Actions for How does shipping work?" });
+    const glyph = chevron.querySelector("[aria-hidden]") as HTMLElement;
+    expect(glyph.className).not.toContain("rotate-90");
+
+    await user.click(chevron);
+    expect(chevron.getAttribute("aria-expanded")).toBe("true");
+    expect(glyph.className).toContain("rotate-90");
+    const menu = within(banner).getByRole("menu", { name: "Thread actions" });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items).toHaveLength(4);
+    expect(items[0]).toBe(within(menu).getByRole("menuitem", { name: "Star" }));
+    expect(items[3]).toBe(within(menu).getByRole("menuitem", { name: "Delete" }));
+
+    mock.mockResolvedValueOnce({ ok: true, status: 204, json: async () => null });
+    await user.click(within(menu).getByRole("menuitem", { name: "Star" }));
+    expect(mock).toHaveBeenCalledWith("/api/threads/" + addr + "/star", { method: "POST" });
+    expect(within(banner).queryByRole("menu")).toBeNull();
+  });
+
+  it("reads Unstar for a thread the rail does not carry but the summary says is starred", async () => {
+    atPath("/thread/" + addr);
+    const starredSummary = { ...oneThread[0], starred: true };
+    const mock = vi.fn(async (url: string) => {
+      const u = String(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => {
+          if (u.endsWith("/summary")) return starredSummary;
+          if (u.startsWith("/api/threads/")) return oneTurn;
+          return { items: [], next_cursor: null };
+        },
+      };
+    });
+    vi.stubGlobal("fetch", mock);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByText(/Through a job/);
+    const banner = screen.getByRole("banner");
+    await user.click(await within(banner).findByRole("button", { name: "Actions for How does shipping work?" }));
+    expect(within(banner).getByRole("menuitem", { name: "Unstar" })).toBeTruthy();
   });
 });

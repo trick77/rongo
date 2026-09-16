@@ -5,7 +5,10 @@ import type { ThreadTotal } from "./turns";
 import { Icon } from "./Icon";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
+import ThreadMenu from "./ThreadMenu";
 import ThreadsPage from "./ThreadsPage";
+import { useMenuDismiss } from "./useMenuDismiss";
+import { useThreadActions } from "./useThreadActions";
 import { railRow } from "./rail";
 import SharedLinks from "./share/SharedLinks";
 import { PlusIcon } from "./icons";
@@ -343,6 +346,22 @@ export default function App() {
 
   const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
 
+  // The header's own menu, ../loom's chevron beside the title: the same
+  // actions the row offers, for a thread opened by its address whose row
+  // may be nowhere on the rail. The rail hears of every change through
+  // threadsVersion, and the summary read is keyed on it too.
+  const [headerMenu, setHeaderMenu] = useState(false);
+  useMenuDismiss(headerMenu, () => setHeaderMenu(false));
+  const headerActions = useThreadActions({
+    onRenamed: refreshThreads,
+    onDeleted: () => {
+      closeDeadThread();
+      refreshThreads();
+    },
+    onShared: refreshThreads,
+    onStarred: refreshThreads,
+  });
+
   const inRail = threadId !== null && threads.some((t) => t.id === threadId);
   useEffect(() => {
     if (threadId === null || inRail) {
@@ -466,6 +485,54 @@ export default function App() {
                 {openTitle ?? "New question"}
               </span>
               {total && <ThreadUsageBadge total={total} onOpen={() => setThreadStats(true)} />}
+              {/* Last in the row, after the usage: the title is what the
+                  reader came for and the figure is what it cost, so the
+                  handle on the record comes after both. Withheld, like the
+                  row's kebab, while the answer is still being written into
+                  this thread. self-center: the row aligns its baselines and
+                  a glyph has none worth sitting on. */}
+              {openThread && openTitle !== null && !(busy && busyThread === threadId) && (
+                <span className="relative self-center">
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={headerMenu}
+                    aria-label={"Actions for " + openTitle}
+                    onClick={() => setHeaderMenu((open) => !open)}
+                    className="grid h-6 w-6 place-items-center rounded-md text-muted transition-colors hover:bg-active hover:text-ink"
+                  >
+                    {/* One glyph, turned towards what it opened: down onto
+                        the menu below it. Never a swap. */}
+                    <Icon
+                      name="chevronRight"
+                      size="16px"
+                      className={"transition-transform " + (headerMenu ? "rotate-90" : "")}
+                    />
+                  </button>
+                  {headerMenu && (
+                    <ThreadMenu
+                      className="right-0"
+                      starred={openThread.starred}
+                      onStar={() => {
+                        setHeaderMenu(false);
+                        headerActions.startStar(openThread);
+                      }}
+                      onShare={() => {
+                        setHeaderMenu(false);
+                        headerActions.startShare(openThread);
+                      }}
+                      onRename={() => {
+                        setHeaderMenu(false);
+                        headerActions.startRename(openThread);
+                      }}
+                      onDelete={() => {
+                        setHeaderMenu(false);
+                        headerActions.startDelete(openThread);
+                      }}
+                    />
+                  )}
+                </span>
+              )}
             </>
           ) : page === "threads" ? (
             <span className="font-serif text-[19px] font-medium text-accent-strong">Threads</span>
@@ -753,6 +820,9 @@ export default function App() {
           )}
         </main>
       </div>
+      {/* The header menu's dialogs. The rail and the Threads page carry
+          their own. */}
+      {headerActions.dialogs}
     </div>
   );
 }

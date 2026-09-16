@@ -112,6 +112,16 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 			t.Errorf("messages.%s missing", col)
 		}
 	}
+
+	// The reader's star, 0026: a flag on the thread row, not a side table.
+	var n int
+	if err := db.QueryRow(
+		`SELECT count(*) FROM pragma_table_info('threads') WHERE name='starred'`).Scan(&n); err != nil {
+		t.Fatalf("pragma threads: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("threads.starred missing")
+	}
 }
 
 func TestOpen_enablesWALAndForeignKeys(t *testing.T) {

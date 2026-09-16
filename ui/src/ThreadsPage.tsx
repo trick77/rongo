@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import ThreadMenu from "./ThreadMenu";
 import { pageItems, type Thread } from "./Threads";
 import { useInfiniteList, type Page } from "./useInfiniteList";
+import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 
 /** A thread the search found and, when found by a message, the passage. */
@@ -20,8 +21,10 @@ export const searchDebounceMs = 250;
 
 /**
  * Every thread, searchable — what the rail's 30 are a cut of. ../loom's
- * ThreadsPage without its select mode, stars and projects: rongo's threads
- * have none of those.
+ * ThreadsPage without its select mode and projects: rongo's threads have
+ * neither. Stars are toggled from the row menu and stay where the row is —
+ * the list is paged by cursor, so it cannot file starred rows apart the way
+ * the rail does.
  *
  * Two lists share the surface. With the box empty it is the whole history,
  * newest first, fifty at a time as the reader scrolls. With a term in it, it
@@ -138,27 +141,14 @@ export default function ThreadsPage({
       setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, shared } : x)) });
       changed();
     },
+    onStarred: (id, starred) => {
+      list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, starred } : x)));
+      setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, starred } : x)) });
+      changed();
+    },
   });
 
-  // A menu closes on a pointer anywhere but itself and the kebabs, as the
-  // rail's does.
-  useEffect(() => {
-    if (openMenu === null) return;
-    function onPointerDown(e: PointerEvent) {
-      const target = e.target;
-      if (target instanceof Element && target.closest('[role="menu"], [aria-haspopup="menu"]')) return;
-      setOpenMenu(null);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpenMenu(null);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [openMenu]);
+  useMenuDismiss(openMenu !== null, () => setOpenMenu(null));
 
   // The search's answer is only shown once it is for the term in the box:
   // until then the previous list would flash under a term it has nothing to
@@ -247,6 +237,11 @@ export default function ThreadsPage({
               </div>
               {menuOpen && (
                 <ThreadMenu
+                  starred={t.starred}
+                  onStar={() => {
+                    setOpenMenu(null);
+                    actions.startStar(t);
+                  }}
                   onShare={() => {
                     setOpenMenu(null);
                     actions.startShare(t);

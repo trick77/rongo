@@ -26,6 +26,9 @@ const CODEPOINTS = {
   messages: 0xe039,
   allThreads: 0xe060,
   search: 0xe0d3,
+  star: 0xe0e7,
+  starOff: 0xe0e9,
+  chevronRight: 0xe02a,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;

@@ -317,3 +317,54 @@ func TestMessageFTS_followsTheRecord(t *testing.T) {
 		t.Errorf("%d index rows outlive the deleted thread", left)
 	}
 }
+
+func TestListPage_starredOnlyReachesPastThePage(t *testing.T) {
+	s := NewStore(threadDB(t))
+	ctx := context.Background()
+	all := seedThreads(t, s, testSubject, 12, "")
+	// The two oldest: both older than a page of 10.
+	for _, th := range []Thread{all[0], all[1]} {
+		if _, err := s.SetStarred(ctx, testSubject, th.ID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page, err := s.ListPage(ctx, testSubject, ListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, th := range page.Items {
+		if th.Starred {
+			t.Errorf("%q starred on the plain page, want the 10 newest unmarked", th.Title)
+		}
+	}
+
+	starred, err := s.ListPage(ctx, testSubject, ListOptions{Limit: 10, StarredOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(starred.Items) != 2 || !starred.Items[0].Starred || !starred.Items[1].Starred {
+		t.Fatalf("starred page = %+v, want the two starred rows", starred.Items)
+	}
+	if starred.Items[0].ID != all[1].ID || starred.Items[1].ID != all[0].ID {
+		t.Errorf("order = %v, want newest first", []int64{starred.Items[0].ID, starred.Items[1].ID})
+	}
+	if starred.NextCursor != nil {
+		t.Error("a short starred page announced another")
+	}
+
+	// Search carries the star too, on both lanes.
+	hits, err := s.Search(ctx, testSubject, "thread", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, h := range hits {
+		if h.Starred {
+			marked++
+		}
+	}
+	if marked != 2 {
+		t.Errorf("search marked %d starred hits, want 2", marked)
+	}
+}

@@ -6,7 +6,7 @@ import ShareDialog from "./share/ShareDialog";
 import { shareFor, type Share } from "./share/api";
 
 /**
- * The three actions a thread row offers — share, rename, delete — and the
+ * The actions a thread row offers — star, share, rename, delete — and the
  * dialogs they open. The rail and the Threads page both list threads with the
  * same kebab, and this is the one place the requests and their dialogs live;
  * each list keeps its own rows and hears back through the callbacks.
@@ -20,11 +20,14 @@ export function useThreadActions({
   onRenamed,
   onDeleted,
   onShared,
+  onStarred,
 }: {
   onRenamed: (id: string, title: string) => void;
   onDeleted: (id: string) => void;
   /** A link was made or taken back; `shared` is what the row should show. */
   onShared: (id: string, shared: boolean) => void;
+  /** The star was put on or taken off; `starred` is what the row should show. */
+  onStarred: (id: string, starred: boolean) => void;
 }) {
   // Which thread a dialog is asking about. Objects rather than ids only for
   // the title the dialog shows; the list may reload underneath them.
@@ -35,6 +38,23 @@ export function useThreadActions({
   // someone whose thread is already shared.
   const [sharing, setSharing] = useState<{ thread: Thread; share: Share | null } | null>(null);
   const [pending, setPending] = useState(false);
+
+  /**
+   * No dialog: a star is one click and one click takes it back. 204 like
+   * the rest, so the row is patched from what was asked for. A failure is
+   * silent for the same reason a failed rename is: the row still shows what
+   * is stored.
+   */
+  async function star(t: Thread) {
+    const starred = !t.starred;
+    try {
+      const res = await fetch(`/api/threads/${t.id}/${starred ? "star" : "unstar"}`, { method: "POST" });
+      if (!res.ok) return;
+      onStarred(t.id, starred);
+    } catch {
+      // The row keeps the star it had.
+    }
+  }
 
   async function rename(t: Thread, title: string) {
     setPending(true);
@@ -119,6 +139,7 @@ export function useThreadActions({
   );
 
   return {
+    startStar: (t: Thread) => void star(t),
     startShare: (t: Thread) => void share(t),
     startRename: setRenaming,
     startDelete: setDeleting,

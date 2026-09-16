@@ -196,6 +196,24 @@ describe("ThreadsPage", () => {
     expect(onDeleted).toHaveBeenCalledWith("a");
   });
 
+  it("stars from the row's menu and keeps the row where it is", async () => {
+    const calls = api({ pages: [[row("a", "First"), row("b", "Second")]] });
+    const onChanged = vi.fn();
+    page({ onChanged });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Actions for First" }));
+    await user.click(screen.getByRole("menuitem", { name: "Star" }));
+
+    await waitFor(() => expect(calls).toContain("POST /api/threads/a/star"));
+    expect(onChanged).toHaveBeenCalled();
+    // No sections here: the list is paged by cursor. The row stays, and its
+    // menu now offers the way back.
+    const titles = screen.getAllByRole("button", { name: /^(First|Second)$/ }).map((b) => b.textContent);
+    expect(titles).toEqual(["First", "Second"]);
+    await user.click(screen.getByRole("button", { name: "Actions for First" }));
+    expect(screen.getByRole("menuitem", { name: "Unstar" })).toBeTruthy();
+  });
+
   it("keeps its place when a row is renamed here, and reloads when the rail changes", async () => {
     const calls = api({ pages: [[row("a", "First")], [row("b", "Second")]] });
     const onChanged = vi.fn();
