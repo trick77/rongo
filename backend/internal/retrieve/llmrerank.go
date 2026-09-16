@@ -34,8 +34,8 @@ type LLMReranker struct {
 	// Pool is how deep the fused list goes before the model sees it. Sixty is
 	// where the rank diagnostic put every reachable miss.
 	Pool int
-	// Excerpt is how many runes of each chunk the model reads; zero means
-	// DefaultRerankExcerpt. The harness sweeps it, the product keeps the default.
+	// Excerpt is how many runes of each chunk the model reads. The harness
+	// sweeps it; the product keeps what the constructor set.
 	Excerpt int
 	// Log receives the warning when the fused order is kept; nil means the
 	// default logger.
@@ -55,7 +55,7 @@ func NewLLMReranker(c *llm.Client, pool int) *LLMReranker {
 	if pool <= 0 {
 		pool = DefaultRerankPool
 	}
-	return &LLMReranker{llm: c, Pool: pool}
+	return &LLMReranker{llm: c, Pool: pool, Excerpt: DefaultRerankExcerpt}
 }
 
 const rerankSystem = `You rank code search results for a question. Answer with JSON ONLY:
@@ -82,28 +82,21 @@ const (
 )
 
 // rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
-// what each result in the pool adds on top. The floor covers a short list; the
-// shipped pool of sixty is already past it and sends 304. Without the growth a
-// deeper pool would end with finish_reason=length, which is an error, a
-// warning and the fused order — the reranker doing nothing while looking like
-// it ran.
+// what each number the reply may name adds on top. The prompt bounds the list
+// at k, not at the pool, so the floor covers every k up to 48 and the shipped
+// call (k = 20) sends it. A caller asking for a longer list gets the room:
+// without it the reply would end with finish_reason=length, which is an error,
+// a warning and the fused order — the reranker doing nothing while looking
+// like it ran.
 const (
 	rerankMaxTokens    = 256
 	rerankTokensPerHit = 4
 	rerankTokensBase   = 64
 )
 
-// replyCap is how many tokens the reply may take for a pool of n results.
-func replyCap(n int) int {
-	return max(rerankMaxTokens, rerankTokensBase+rerankTokensPerHit*n)
-}
-
-// excerptWidth is Excerpt, or the default when none was set.
-func (r *LLMReranker) excerptWidth() int {
-	if r.Excerpt > 0 {
-		return r.Excerpt
-	}
-	return DefaultRerankExcerpt
+// replyCap is how many tokens a reply naming at most k results may take.
+func replyCap(k int) int {
+	return max(rerankMaxTokens, rerankTokensBase+rerankTokensPerHit*k)
 }
 
 // Rerank returns hits reordered: the ones the model called relevant first, in
@@ -116,7 +109,6 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		return cut(hits, k), nil
 	}
 	var b strings.Builder
-	width := r.excerptWidth()
 	fmt.Fprintf(&b, "Question: %s\n\nResults:\n", question)
 	for i, h := range hits {
 		fmt.Fprintf(&b, "\n[%d] %s %s", i+1, h.Repo, h.Path)
@@ -129,13 +121,13 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(excerpt(h.RawText, width))
+		b.WriteString(excerpt(h.RawText, r.Excerpt))
 		b.WriteString("\n")
 	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(rerankSystem, k)},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(replyCap(len(hits))), llm.WithStep("rerank"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(replyCap(k)), llm.WithStep("rerank"))
 	if err != nil {
 		if ctx.Err() != nil {
 			// The reader left; there is no turn to keep an order for.
@@ -151,7 +143,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	}
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
-		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", head(out, 120))
+		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", llmwire.Truncate(out, 120))
 		return cut(hits, k), nil
 	}
 	taken := make([]bool, len(hits))
@@ -178,23 +170,13 @@ func cut(hits []Hit, k int) []Hit {
 	return hits
 }
 
-// head is the first n RUNES of s, cut where the window ends and nowhere else.
-// Runes, not bytes: a byte cut splits an umlaut and hands the reader a broken
-// rune.
-func head(s string, n int) string {
-	s = strings.TrimSpace(s)
-	_, end := runeOffsets(s, n)
-	if end < 0 {
-		return s
-	}
-	return s[:end] + "…"
-}
-
-// excerpt is head backed off to the last line break in the back half of the
-// window, so the model reads whole lines. The back-half floor is what keeps a
-// long first line from yielding nothing at all. A warning logs with head
-// instead: a malformed reply's broken JSON sits after the prose line, and
-// backing off would log the prose alone.
+// excerpt is the first n RUNES of s, backed off to the last line break in the
+// back half of the window so the model reads whole lines. The back-half floor
+// is what keeps a long first line from yielding nothing at all. Runes, not
+// bytes: a byte cut splits an umlaut and hands the model a broken rune. The
+// warning about an unreadable reply cuts with llmwire.Truncate instead, which
+// does not back off: the broken JSON sits after the prose line, and the
+// back-off would log the prose alone.
 //
 // It walks bytes rather than building a []rune: a chunk runs to a few
 // thousand runes and a pool to a hundred of them, so the slice was one

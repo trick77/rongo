@@ -18,10 +18,16 @@ func evalReranker(t *testing.T, c *llm.Client) *retrieve.LLMReranker {
 	t.Helper()
 	pool := envIntOr(t, "BACKEND_EVAL_RERANK_POOL", retrieve.DefaultRerankPool)
 	excerpt := envIntOr(t, "BACKEND_EVAL_RERANK_EXCERPT", retrieve.DefaultRerankExcerpt)
-	// A zero would be silently replaced by the default while the arm's label
-	// still read "0-rune excerpts" — a measurement reporting the wrong arm.
-	if pool <= 0 || excerpt <= 0 {
-		t.Fatalf("BACKEND_EVAL_RERANK_POOL = %d, BACKEND_EVAL_RERANK_EXCERPT = %d, want both above zero", pool, excerpt)
+	// A zero would be silently replaced while the arm's label still read
+	// "0-rune excerpts" — a measurement reporting the wrong arm. So would a
+	// pool at or below the search K: retrieve deepens the cut only when the
+	// pool is deeper than K, so a pool of ten reranks twenty under the label
+	// ten.
+	if excerpt <= 0 {
+		t.Fatalf("BACKEND_EVAL_RERANK_EXCERPT = %d, want a width above zero", excerpt)
+	}
+	if pool <= gatherSearchK {
+		t.Fatalf("BACKEND_EVAL_RERANK_POOL = %d, want a pool deeper than the search K of %d", pool, gatherSearchK)
 	}
 	r := retrieve.NewLLMReranker(c, pool)
 	r.Excerpt = excerpt

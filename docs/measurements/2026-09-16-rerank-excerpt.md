@@ -10,7 +10,7 @@
 
 - The excerpt is counted in runes and cut back to the last line break in the second half of the window, so the model reads whole lines; a single overlong line is cut at the width.
 - The header carries the chunk's start line (`[n] repo path:line (symbol)`), so two chunks of one file are distinguishable.
-- The reply cap grows with the pool (`max(256, 64 + 4 * pool)`), so a deeper pool cannot end in `finish_reason=length`.
+- The reply cap grows with the number of results asked for (`max(256, 64 + 4 * k)`), so a longer list cannot end in `finish_reason=length`.
 - `Excerpt` and the pool are harness knobs (`BACKEND_EVAL_RERANK_EXCERPT`, `BACKEND_EVAL_RERANK_POOL`); the product default moves to 800.
 
 The raw question stays the only query text the reranker sees.

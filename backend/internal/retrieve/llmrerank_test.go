@@ -248,23 +248,6 @@ func FuzzExcerpt(f *testing.F) {
 	})
 }
 
-// TestHead_cutsATroubledReplyWithoutBackingOff: the warning about a reply that
-// is not JSON must show the malformed fragment, which sits AFTER the prose
-// line — a cut backing off to the line break would log the prose alone.
-func TestHead_cutsATroubledReplyWithoutBackingOff(t *testing.T) {
-	reply := "prose line\n{\"relevant\": [1, 2, oops" + strings.Repeat(" trailing", 40)
-	got := head(reply, 120)
-	if !strings.Contains(got, `{"relevant": [1, 2, oops`) {
-		t.Errorf("head dropped the malformed fragment: %q", got)
-	}
-	if n := utf8.RuneCountInString(strings.TrimSuffix(got, "…")); n != 120 {
-		t.Errorf("head kept %d runes, want 120", n)
-	}
-	if got := head("äü\nok", 120); got != "äü\nok" {
-		t.Errorf("head = %q, want a short reply whole", got)
-	}
-}
-
 // TestLLMRerank_headerCarriesTheStartLine: two chunks of one file differ by
 // where they start, and the model cannot tell them apart without it.
 func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
@@ -312,20 +295,20 @@ func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
 	}
 }
 
-// TestLLMRerank_replyCapGrowsWithThePool: a pool of a hundred needs more than
-// the 256-token floor, or the reply ends with finish_reason=length, which is
-// an error, a warning and the fused order. The shipped pool of sixty is
-// already past the floor.
-func TestLLMRerank_replyCapGrowsWithThePool(t *testing.T) {
+// TestLLMRerank_replyCapGrowsWithTheListAskedFor: the prompt bounds the reply
+// at k numbers, so the cap is keyed to k. A long list past the floor must get
+// the room, or the reply ends with finish_reason=length, which is an error, a
+// warning and the fused order.
+func TestLLMRerank_replyCapGrowsWithTheListAskedFor(t *testing.T) {
 	for _, c := range []struct {
-		hits, want int
+		k, want int
 	}{
-		{2, 256},   // the floor
-		{60, 304},  // the shipped pool
-		{100, 464}, // the deep arm
+		{20, 256},  // the shipped call, inside the floor
+		{60, 304},  // past the floor
+		{100, 464}, // a caller asking for a hundred
 	} {
-		if got := replyCap(c.hits); got != c.want {
-			t.Errorf("replyCap(%d) = %d, want %d", c.hits, got, c.want)
+		if got := replyCap(c.k); got != c.want {
+			t.Errorf("replyCap(%d) = %d, want %d", c.k, got, c.want)
 		}
 	}
 
@@ -337,11 +320,11 @@ func TestLLMRerank_replyCapGrowsWithThePool(t *testing.T) {
 		hits[i] = Hit{ChunkID: int64(i + 1), Repo: "peeq", Path: "a.go"}
 	}
 	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 100)
-	if _, err := r.Rerank(context.Background(), "q", hits, 20); err != nil {
+	if _, err := r.Rerank(context.Background(), "q", hits, 100); err != nil {
 		t.Fatal(err)
 	}
-	if seen.replyCap < 464 {
-		t.Errorf("reply cap on the wire = %d for a pool of 100, want at least 464", seen.replyCap)
+	if seen.replyCap != 464 {
+		t.Errorf("reply cap on the wire = %d for k = 100, want 464", seen.replyCap)
 	}
 }
 

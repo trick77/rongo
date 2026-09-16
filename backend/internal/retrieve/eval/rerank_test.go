@@ -34,7 +34,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 	rr := evalReranker(t, client)
 	reranked.Reranker = rr
 	arms := []arm{
-		{"fused order (the product)", plain},
+		{"fused order (baseline)", plain},
 		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts", rr.Pool, rr.Excerpt), reranked},
 	}
 
