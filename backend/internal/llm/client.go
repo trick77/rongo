@@ -146,6 +146,11 @@ type Usage struct {
 	// CostNanoUSD is what llmwire priced the call at from its own table, in
 	// billionths of a dollar; nil when it had no rate for the model.
 	CostNanoUSD *int64
+	// Attempts is how many requests this call took, 1 or 2. A second one
+	// happens only when the first delivered nothing. It is not billing: both
+	// attempts are recorded in the turn's meter, and these are the figures of
+	// the one that came back.
+	Attempts int
 }
 
 // PromptDetails is how much of the prompt the upstream did not have to read
@@ -572,11 +577,26 @@ func (c *Client) warn(model string, ws []llmwire.Warning) {
 }
 
 // Complete runs one non-streaming call and returns the assistant's content.
+//
+// A call that came back with no content at all is made once more when it is
+// worth it; see retry.go for what "worth it" means. The attempt count rides
+// on the Usage so a step can report it.
 func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (string, Usage, error) {
 	o := resolve(opts)
 	if err := c.underBudget(ctx); err != nil {
 		return "", Usage{}, err
 	}
+	content, u, err := c.complete(ctx, o, msgs)
+	u.Attempts = 1
+	if content == "" && c.worthAnother(ctx, o, err, u) {
+		content, u, err = c.complete(ctx, o, msgs)
+		u.Attempts = 2
+	}
+	return content, u, err
+}
+
+// complete is one attempt.
+func (c *Client) complete(ctx context.Context, o callOptions, msgs []Message) (string, Usage, error) {
 	// Timed from before the request so the figure is what a reader waited
 	// for, queueing at the endpoint included, not what the endpoint spent
 	// generating.
@@ -605,6 +625,30 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	if err := c.underBudget(ctx); err != nil {
 		return Usage{}, err
 	}
+	// A stream is retried only while NOTHING has reached the caller. Once a
+	// delta is out it is on a reader's screen, and a second call would write a
+	// different answer over the one being read; what to do with the fragment
+	// is the caller's decision.
+	var delivered bool
+	watched := func(tok string) {
+		if tok != "" {
+			delivered = true
+		}
+		if onToken != nil {
+			onToken(tok)
+		}
+	}
+	u, err := c.stream(ctx, o, msgs, watched)
+	u.Attempts = 1
+	if !delivered && c.worthAnother(ctx, o, err, u) {
+		u, err = c.stream(ctx, o, msgs, watched)
+		u.Attempts = 2
+	}
+	return u, err
+}
+
+// stream is one attempt.
+func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onToken func(string)) (Usage, error) {
 	// Timed from before the request, closed when the last frame is read: for
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()

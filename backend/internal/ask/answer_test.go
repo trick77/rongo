@@ -13,6 +13,36 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 )
 
+// writeDeltas streams the tokens and stops there, leaving the stream open. A
+// fake that means to break mid-answer writes these and nothing else.
+func writeDeltas(w http.ResponseWriter, tokens []string) {
+	fl := http.NewResponseController(w)
+	for _, tok := range tokens {
+		frame, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", frame)
+		_ = fl.Flush()
+	}
+}
+
+// writeSSE streams the tokens as content deltas, ends on finishReason when
+// there is one, and closes with [DONE]. Every fake answer endpoint in these
+// tests writes the same frames; what they differ in is which request gets
+// them.
+func writeSSE(w http.ResponseWriter, tokens []string, finishReason string) {
+	fl := http.NewResponseController(w)
+	writeDeltas(w, tokens)
+	if finishReason != "" {
+		end, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
+		})
+		fmt.Fprintf(w, "data: %s\n\n", end)
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+	_ = fl.Flush()
+}
+
 // streamUpstream streams the given tokens and records the prompt it was sent.
 func streamUpstream(t *testing.T, tokens ...string) (*llm.Client, *string, *int) {
 	t.Helper()
@@ -38,22 +68,7 @@ func streamUpstreamEnding(t *testing.T, finishReason string, tokens []string) (*
 			prompt += m.Content + "\n"
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		fl := http.NewResponseController(w)
-		for _, tok := range tokens {
-			frame, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", frame)
-			_ = fl.Flush()
-		}
-		if finishReason != "" {
-			end, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": finishReason}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", end)
-		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
-		_ = fl.Flush()
+		writeSSE(w, tokens, finishReason)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), &prompt, &calls

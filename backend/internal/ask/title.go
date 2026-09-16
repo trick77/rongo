@@ -82,11 +82,14 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		if title != "" {
 			return title
 		}
-		if replied {
-			nudge = []llm.Message{{Role: "user", Content: titleRetryNudge}}
-		} else {
-			nudge = nil
+		if !replied {
+			// The call itself failed, and llm.Client has already made it
+			// twice under the one retry policy every call runs under. A third
+			// request here would be a second policy stacked on that one, and
+			// the placeholder is a fine answer for a deployment that is down.
+			return ""
 		}
+		nudge = []llm.Message{{Role: "user", Content: titleRetryNudge}}
 		if ctx.Err() != nil {
 			return ""
 		}

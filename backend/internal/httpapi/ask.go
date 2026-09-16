@@ -374,14 +374,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// answered by another card leaves the second card sitting ABOVE
 			// the first one's turn, so the card's own ordinal would make the
 			// resumed turn follow a question it is still answering.
-			followUpBefore = m.Ordinal
-			if headID != m.ID {
-				if h, ok, err := s.deps.Threads.Message(ctx, u.Subject, headID); err != nil {
-					slog.Error("resolve resumed head failed", "err", err)
-				} else if ok {
-					followUpBefore = h.Ordinal
-				}
-			}
+			followUpBefore = s.headOrdinal(ctx, u.Subject, m)
 		}
 		if resumeRepoChoice {
 			// The choice IS the scope now. Unknown carries over untouched: a
@@ -445,30 +438,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// turn it retries rather than off the request: the row is what says
 		// where the attempt belongs.
 		//
-		// And it is a full turn of that thread: a retry of a failed question
-		// is the same question asked again, so it gets the pin the thread
-		// narrowed to and the turn it follows. Without them a retry in a
-		// pinned thread widened back to the whole corpus and lost what "das"
-		// pointed at — the funnel undone by pressing a button.
+		// And it carries that thread's pin and antecedent, because it is the
+		// same question asked again. Without them a retry in a pinned thread
+		// widened back to the whole corpus and lost what "das" pointed at.
+		// Only those two: a retry replays no card choice, and a turn that
+		// failed under one is retried as the question it was.
 		thread = threads.Thread{ID: retryHead.ThreadID}
 		followUpIn = retryHead.ThreadID
 		// Below the row it retries, never below itself: the answered turn a
-		// retry follows is the one under the failed attempt. A retry of a
-		// resumed turn takes its head's ordinal, the way the resume branch
-		// does — the card's own turn sits above the answer it followed.
-		followUpBefore = retryHead.Ordinal
-		if headID != retryHead.ID {
-			if h, ok, err := s.deps.Threads.Message(ctx, u.Subject, headID); err != nil {
-				slog.Error("resolve retried head failed", "err", err)
-			} else if ok {
-				followUpBefore = h.Ordinal
-			}
-		}
-		if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
-			slog.Error("read thread scope failed", "err", err)
-		} else {
-			prior.Pin = pin
-		}
+		// retry follows is the one under the failed attempt, and a retry of a
+		// row that continues another follows what THAT row followed.
+		followUpBefore = s.headOrdinal(ctx, u.Subject, *retryHead)
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
 		if errors.Is(err, errNotYours) {
@@ -485,12 +465,19 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		thread = t
 		if reqThreadID != 0 {
-			if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
-				slog.Error("read thread scope failed", "err", err)
-			} else {
-				prior.Pin = pin
-			}
 			followUpIn = reqThreadID
+		}
+	}
+
+	// What the thread narrowed to, for every turn that continues one. A
+	// resumed turn is the exception and reads none on purpose: its scope is
+	// the card's, stored with the clarification and already carried over
+	// above.
+	if resume == nil && followUpIn != 0 {
+		if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, followUpIn); err != nil {
+			slog.Error("read thread scope failed", "err", err)
+		} else {
+			prior.Pin = pin
 		}
 	}
 
@@ -1160,6 +1147,28 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record sources failed", err)
 	}
 	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeRecord)
+}
+
+// headOrdinal is the ordinal a turn continuing m has to stay below: m's own,
+// or its head's when m is itself a continuation. A card answered by another
+// card, or a retry of a re-explain, leaves the row ABOVE the turn it belongs
+// to, and its own ordinal would make the new turn follow a question that is
+// still being answered. A read that fails falls back to m's ordinal, which is
+// the bound the record can always justify.
+func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) int {
+	head := m.Head()
+	if head == 0 || head == m.ID {
+		return m.Ordinal
+	}
+	h, ok, err := s.deps.Threads.Message(ctx, subject, head)
+	if err != nil {
+		slog.Error("resolve head ordinal failed", "err", err)
+		return m.Ordinal
+	}
+	if !ok {
+		return m.Ordinal
+	}
+	return h.Ordinal
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

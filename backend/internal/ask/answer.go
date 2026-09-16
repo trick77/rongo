@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
-	"unicode/utf8"
 
-	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -135,13 +132,6 @@ type Answer struct {
 	// with, so they will not add up to Usage.Prompt exactly — the total is
 	// billed, the split is measured, and the reader is told which is which.
 	Prompt PromptParts
-	// Attempts is how many times the stream call was made, 1 or 2. A second
-	// one happens only while nothing has been streamed yet.
-	Attempts int
-	// Kept says the stream broke after text had reached the reader and that
-	// text is the answer. The turn succeeded and the answer stops before its
-	// end, which is a different thing from both a whole answer and a failure.
-	Kept bool
 }
 
 // PromptParts is the answer prompt by section, in estimated tokens. System is
@@ -1014,11 +1004,10 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 
 	// Every token passes the renumberer before it reaches the reader or the
 	// record, so the two are the same text; what it holds back is flushed
-	// once the stream ends, cut short or not. The renumberer is per attempt:
-	// a second call writes the answer from the top, so the markers it resolves
-	// must be the ones it wrote.
+	// once the stream ends, cut short or not.
 	var text strings.Builder
-	var rn *renumberer
+	rn := newRenumberer(len(sources))
+	rn.docs = docMask(sources)
 	emit := func(s string) {
 		if s == "" {
 			return
@@ -1041,86 +1030,30 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Sources:  max(estimateTokens(user)-asked, 0),
 		Question: asked,
 	}
-	msgs := []llm.Message{
+	usage, err := a.llm.Stream(ctx, []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
+	}, func(tok string) { emit(rn.feed(tok)) }, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
+	emit(rn.flush())
+	var cut *llm.FinishError
+	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {
+		// The upstream cut the answer short, but what arrived is what the
+		// reader watched being written. It is kept, as it was before the finish
+		// reason was read at all; failing the turn here would drop the text
+		// from the record while the browser still shows it. The cut is logged
+		// with the number that says whether the budget was the cause.
+		slog.Warn("answer cut short", "finish_reason", cut.Reason, "completion_tokens", cut.Completion)
+		err = nil
 	}
-
-	// At most two attempts, and the second one only while NOTHING has reached
-	// the reader. A stream idle, a dropped connection, a reply with no
-	// response headers and an empty completion are all transient, and one of
-	// ten answer turns on a run ended on one — recorded as a failed turn where
-	// a second call would have written the answer. Once tokens are on screen
-	// the attempt is spent: a second call writes a different answer from the
-	// top, and the reader watching the first one must not have it replaced.
-	var usage llm.Usage
-	var kept bool
-	var attempts int
-	for attempt := 1; ; attempt++ {
-		attempts = attempt
-		text.Reset()
-		rn = newRenumberer(len(sources))
-		rn.docs = docMask(sources)
-		u, err := a.llm.Stream(ctx, msgs, func(tok string) { emit(rn.feed(tok)) },
-			llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
-		emit(rn.flush())
-		usage = u
-		written := strings.TrimSpace(text.String()) != ""
-		var cut *llm.FinishError
-
-		switch {
-		case err != nil && ctx.Err() != nil:
-			// The reader went away or the turn ran out of time. Nothing about
-			// that is transient, and a second call would be paid for by a
-			// context that is already over.
-			return Answer{}, fmt.Errorf("write the answer: %w", err)
-
-		case written && errors.As(err, &cut):
-			// The upstream cut the answer short, but what arrived is what the
-			// reader watched being written. It is kept, as it was before the
-			// finish reason was read at all; failing the turn here would drop
-			// the text from the record while the browser still shows it. The
-			// cut is logged with the number that says whether the budget was
-			// the cause.
-			slog.Warn("answer cut short", "finish_reason", cut.Reason, "completion_tokens", cut.Completion)
-
-		case written && err != nil:
-			// The stream broke after text, which is the same situation a
-			// length cut is in: those tokens are on screen. Kept for the same
-			// reason, and marked, so the record and the trace say the answer
-			// stops before its end rather than presenting it as whole.
-			slog.Warn("answer stream broke, text kept", "err", err, "chars", utf8.RuneCountInString(text.String()))
-			kept = true
-
-		case written:
-			// The whole answer, which is the ordinary turn.
-
-		case attempt == 1 && retriable(err):
-			wait := retryWait(err)
-			slog.Warn("answer retried", "reason", retryReason(err), "wait", wait)
-			if wait > 0 {
-				timer := time.NewTimer(wait)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return Answer{}, fmt.Errorf("write the answer: %w", ctx.Err())
-				case <-timer.C:
-				}
-			}
-			continue
-
-		case err != nil:
-			return Answer{}, fmt.Errorf("write the answer: %w", err)
-
-		default:
-			// A clean stream with nothing in it is not an answer. Stored as
-			// one, it was a finished turn with an empty body and no log line:
-			// the reader saw a Done mark over nothing. The usage goes into the
-			// error because the completion count is what says whether the
-			// budget was the cause.
-			return Answer{}, fmt.Errorf("write the answer: the model returned no answer text (%d completion tokens)", usage.Completion)
-		}
-		break
+	if err != nil {
+		return Answer{}, fmt.Errorf("write the answer: %w", err)
+	}
+	if strings.TrimSpace(text.String()) == "" {
+		// A clean stream with nothing in it is not an answer. Stored as one, it
+		// was a finished turn with an empty body and no log line: the reader
+		// saw a Done mark over nothing. The usage goes into the error because
+		// the completion count is what says whether the budget was the cause.
+		return Answer{}, fmt.Errorf("write the answer: the model returned no answer text (%d completion tokens)", usage.Completion)
 	}
 	return Answer{
 		Text:      text.String(),
@@ -1128,72 +1061,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Usage:     usage,
 		Sources:   sources,
 		Prompt:    parts,
-		Attempts:  attempts,
-		Kept:      kept,
 	}, nil
-}
-
-// retriable reports whether a stream that emitted nothing is worth one more
-// call. err nil is the empty completion, which is exactly the failure this
-// exists for.
-//
-// A 4xx names a request the host refused — a rejected parameter, an unknown
-// model, a key — and rongo sends the same request twice, so a second call buys
-// a second refusal. Same for the turn's own token ceiling: it is this
-// process's arithmetic, and it is no smaller a moment later. A finish reason
-// with no text is the model spending the whole completion budget thinking, and
-// a second call spends it the same way for the same nothing.
-//
-// A 429 is the exception among the 4xx: it says come back, not no. Everything
-// else is the transport or the upstream, and that is transient.
-func retriable(err error) bool {
-	if err == nil {
-		return true
-	}
-	if errors.Is(err, llm.ErrTurnBudget) {
-		return false
-	}
-	var fin *llm.FinishError
-	if errors.As(err, &fin) {
-		return false
-	}
-	var rl *llmwire.RateLimitError
-	if errors.As(err, &rl) {
-		return true
-	}
-	var api *llmwire.APIError
-	if errors.As(err, &api) && api.StatusCode >= 400 && api.StatusCode < 500 {
-		return false
-	}
-	return true
-}
-
-// retryAfterCap bounds the wait a rate-limited answer call honours. The reader
-// is sitting in front of a turn that has written nothing, so a host asking for
-// a minute is asking for more than there is: past the cap the second attempt
-// goes out anyway and fails on its own.
-const retryAfterCap = 10 * time.Second
-
-// retryWait is how long to hold before the second attempt. Only a 429 that
-// carried a usable Retry-After asks for one; every other failure is retried at
-// once, and a zero Retry-After means the host sent no hint rather than "wait
-// nothing special".
-func retryWait(err error) time.Duration {
-	var rl *llmwire.RateLimitError
-	if !errors.As(err, &rl) || rl.RetryAfter <= 0 {
-		return 0
-	}
-	return min(rl.RetryAfter, retryAfterCap)
-}
-
-// retryReason is what the warn line says the first attempt died of. A nil
-// error is the stream that ended cleanly with no content at all, which has no
-// message of its own.
-func retryReason(err error) string {
-	if err == nil {
-		return "empty completion"
-	}
-	return err.Error()
 }
 
 // reachedVia says, for the answer prompt, how a source that the search did

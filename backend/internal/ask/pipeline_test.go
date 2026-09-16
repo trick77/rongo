@@ -213,16 +213,7 @@ func twoStepUpstream(t *testing.T, understanding string, answerTokens ...string)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		fl := http.NewResponseController(w)
-		for _, tok := range answerTokens {
-			frame, _ := json.Marshal(map[string]any{
-				"choices": []any{map[string]any{"delta": map[string]any{"content": tok}}},
-			})
-			fmt.Fprintf(w, "data: %s\n\n", frame)
-			_ = fl.Flush()
-		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
-		_ = fl.Flush()
+		writeSSE(w, answerTokens, "")
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv)
