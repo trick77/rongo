@@ -8,7 +8,7 @@ import Ask, { languages } from "./Ask";
 // the row is clicked, as the reader does it.
 async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
   const name = languages.find((l) => l.code === code)?.name ?? code;
-  await user.click(screen.getByRole("button", { name: "Answer language" }));
+  await user.click(screen.getByRole("combobox", { name: "Answer language" }));
   await user.click(screen.getByRole("option", { name }));
 }
 

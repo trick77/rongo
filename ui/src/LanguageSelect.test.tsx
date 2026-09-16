@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import LanguageSelect from "./LanguageSelect";
 
 function pill() {
-  return screen.getByRole("button", { name: "Answer language" });
+  return screen.getByRole("combobox", { name: "Answer language" });
 }
 
 describe("LanguageSelect", () => {
@@ -45,6 +45,45 @@ describe("LanguageSelect", () => {
     await user.keyboard("{ArrowUp}{Enter}");
     expect(onChange).toHaveBeenCalledWith("de");
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("is a combobox whose value is the language and whose name is the label", () => {
+    render(<LanguageSelect value="it" onChange={() => {}} />);
+    const box = pill();
+    expect(box.getAttribute("role")).toBe("combobox");
+    expect(box.textContent).toBe("Italiano");
+    expect(box.getAttribute("aria-activedescendant")).toBeNull();
+  });
+
+  it("opens and picks on Space without a second toggle", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<LanguageSelect value="en" onChange={onChange} />);
+    pill().focus();
+    await user.keyboard(" ");
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    await user.keyboard("{ArrowDown} ");
+    expect(onChange).toHaveBeenCalledWith("de");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("closes when focus leaves by Tab, without choosing", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <div>
+        <LanguageSelect value="en" onChange={onChange} />
+        <input aria-label="next" />
+      </div>,
+    );
+    await user.click(pill());
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByLabelText("next"));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    // The Escape listener went with the list: it must not pull focus back.
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(screen.getByLabelText("next"));
   });
 
   it("closes on Escape and on a pointer outside, without choosing", async () => {
