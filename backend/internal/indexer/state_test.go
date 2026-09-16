@@ -421,6 +421,30 @@ func TestSyncSpecs_carriesTheTokenUser(t *testing.T) {
 	}
 }
 
+func TestSyncSpecs_carriesTheTokenAuth(t *testing.T) {
+	// Given: same round trip as token_user; a bearer entry that came back as
+	// basic auth would be refused by the forge with no hint in the YAML.
+	ctx := context.Background()
+	s := NewStateStore(newDB(t))
+
+	// When
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "shop", CloneURL: "https://bitbucket.example.invalid/scm/shop/shop.git", Enabled: true,
+			TokenEnv: "BACKEND_FORGE_TOKEN_BITBUCKET", TokenAuth: "bearer"},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+
+	// Then
+	active, err := s.Active(ctx)
+	if err != nil {
+		t.Fatalf("Active() err = %v", err)
+	}
+	if got := active[0].TokenAuth; got != "bearer" {
+		t.Errorf("TokenAuth = %q, want bearer", got)
+	}
+}
+
 func TestActive_dropsAnEdgeToADisabledSibling(t *testing.T) {
 	// The edge is still declared, and All still reports it. Active is what the
 	// page and the prompt are built from, and neither carries the disabled

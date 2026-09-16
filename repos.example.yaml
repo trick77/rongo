@@ -92,16 +92,19 @@ projects:
   #      clone_url: https://github.com/trick77/peeq.git
   #      token_env: BACKEND_FORGE_TOKEN_GITHUB
 
-  # Bitbucket Data Center over https. Unlike GitHub it checks the username
-  # the token comes with: a project or repository HTTP access token is only
-  # accepted as x-token-auth, a personal one as the user's own name. Omitted,
-  # it is x-access-token, which GitHub takes and Bitbucket refuses.
+  # Bitbucket Data Center over https. token_auth: bearer sends the token as
+  # an Authorization header, which Bitbucket takes for a personal token and
+  # a project or repository token alike; no username to get right. Without
+  # it the token goes as basic auth, and Bitbucket checks the username: a
+  # project or repository HTTP access token only as token_user x-token-auth,
+  # a personal one as the user's own name. Omitted, it is x-access-token,
+  # which GitHub takes and Bitbucket refuses.
   #- name: billing
   #  repositories:
   #    - name: billing
   #      clone_url: https://bitbucket.example.invalid/scm/bill/billing.git
   #      token_env: BACKEND_FORGE_TOKEN_BITBUCKET
-  #      token_user: x-token-auth
+  #      token_auth: bearer
 
   # The same over ssh, on the 7999 Bitbucket Data Center serves it on. No
   # token_env: an ssh remote authenticates with the key and known_hosts named

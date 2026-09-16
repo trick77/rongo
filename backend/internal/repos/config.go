@@ -45,6 +45,11 @@ type Spec struct {
 	// checks it: a personal HTTP access token goes with the user's own name,
 	// a project or repository token with x-token-auth. It is not a secret.
 	TokenUser string
+	// TokenAuth is how the token travels: "" (basic auth, the token as the
+	// password of TokenUser) or "bearer" (an Authorization: Bearer header,
+	// no username at all). Bitbucket Data Center takes bearer for every
+	// token kind, which spares the operator the username question.
+	TokenAuth string
 	// Enabled defaults to true; set it false to stop indexing without deleting.
 	Enabled bool
 	// Project names the product this repository is part of. It is not written
@@ -120,6 +125,7 @@ type rawSpec struct {
 	Branch      string     `yaml:"branch"`
 	TokenEnv    string     `yaml:"token_env"`
 	TokenUser   string     `yaml:"token_user"`
+	TokenAuth   string     `yaml:"token_auth"`
 	Enabled     *bool      `yaml:"enabled"`
 	Snapshot    bool       `yaml:"snapshot"`
 	Part        string     `yaml:"part"`
@@ -245,6 +251,7 @@ func Load(path string) ([]Spec, error) {
 				Branch:      strings.TrimSpace(r.Branch),
 				TokenEnv:    strings.TrimSpace(r.TokenEnv),
 				TokenUser:   strings.TrimSpace(r.TokenUser),
+				TokenAuth:   strings.TrimSpace(r.TokenAuth),
 				Enabled:     enabled,
 				Project:     name,
 				Part:        strings.TrimSpace(r.Part),
@@ -459,6 +466,7 @@ func validateSnapshot(r rawSpec) error {
 		{"branch", r.Branch},
 		{"token_env", r.TokenEnv},
 		{"token_user", r.TokenUser},
+		{"token_auth", r.TokenAuth},
 	} {
 		if strings.TrimSpace(f.value) != "" {
 			return fmt.Errorf(
@@ -506,6 +514,20 @@ func validateToken(r rawSpec) error {
 	}
 	if tokenUser != "" && tokenEnv == "" {
 		return fmt.Errorf("%s: token_user needs a token_env to go with it", r.Name)
+	}
+	switch tokenAuth := strings.TrimSpace(r.TokenAuth); tokenAuth {
+	case "":
+	case "bearer":
+		if tokenEnv == "" {
+			return fmt.Errorf("%s: token_auth needs a token_env to go with it", r.Name)
+		}
+		// A bearer header carries no username; one written here would be
+		// silently ignored, which reads as "configured" while doing nothing.
+		if tokenUser != "" {
+			return fmt.Errorf("%s: token_auth: bearer sends no username, drop token_user", r.Name)
+		}
+	default:
+		return fmt.Errorf("%s: token_auth %q is not one of: bearer (or omit it for basic auth)", r.Name, tokenAuth)
 	}
 	// The username is not a secret, but a token pasted where the username
 	// goes would be, and it would end up in a diff of this file.
