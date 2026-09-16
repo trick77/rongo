@@ -104,10 +104,12 @@ export default function SourceView({
   }, [source, endpoint]);
 
   // Once the file is there, the cited range comes into view with a little
-  // context above it. Guarded like the thread's own scroll: jsdom has no
-  // scrollIntoView.
+  // context above it. inline "start" is not the default: "nearest" leaves a
+  // sheet that is already scrolled sideways where it is, and the viewer
+  // opened on the tails of the lines with the line numbers out of sight.
+  // Guarded like the thread's own scroll: jsdom has no scrollIntoView.
   useEffect(() => {
-    if (loaded.state === "ready") anchor.current?.scrollIntoView?.({ block: "start" });
+    if (loaded.state === "ready") anchor.current?.scrollIntoView?.({ block: "start", inline: "start" });
   }, [loaded.state]);
 
   const slash = source.path.lastIndexOf("/");
@@ -144,7 +146,10 @@ export default function SourceView({
         role="dialog"
         aria-modal="true"
         aria-label={`Source ${source.marker}: ${source.path}`}
-        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
+        // minmax(0,1fr), not the implicit auto column: the column can never
+        // be wider than the sheet, so nothing in the header can end up past
+        // its edge and pull the sheet sideways when it takes focus.
+        className="grid h-full w-full max-w-[1100px] grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
       >
         <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3.5 sm:px-4.5 sm:py-3">
           <span className="font-mono font-semibold text-accent-strong">{source.marker}</span>

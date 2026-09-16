@@ -58,6 +58,28 @@ describe("SourceView", () => {
     expect(dialog.textContent).toContain("lines 3–4");
   });
 
+  // The viewer used to open on the tails of long lines now and then, header
+  // and line numbers scrolled out of sight to the left: scrollIntoView's
+  // inline default of "nearest" leaves a sheet that is already scrolled
+  // sideways alone. The scroll asks for the left edge outright, and the
+  // sheet's one grid column is pinned so nothing inside can widen it.
+  it("opens at the left edge of the cited lines", async () => {
+    serve(200, { content: "package sched\n\nfunc One() {}\nfunc Two() {}\n", sha: "0123abcdef", branch: "master" });
+    // jsdom has no scrollIntoView; the stub goes away again so the other
+    // tests keep exercising the guard.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      render(<SourceView source={source} onClose={() => {}} />);
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", inline: "start" });
+      expect(screen.getByRole("dialog").className).toContain("grid-cols-[minmax(0,1fr)]");
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
   it("shows the server's reason when the file cannot be shown", async () => {
     serve(404, "This file is not in Rongo's checkout at the cited commit.");
 
