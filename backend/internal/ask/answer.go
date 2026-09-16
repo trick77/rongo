@@ -217,19 +217,42 @@ written in %s, regardless of the language of the sources or of these
 instructions. Identifiers, file names, quoted code and the markers stay
 exactly as they are.`
 
-// answerBA's second paragraph exists because "no source code, no file paths"
-// let everything else through: a delay question for PROD came back with the
-// raw cron in the opening sentence, field names and property keys in running
-// text, and never the figure the reader wanted (the hold plus the hourly job,
-// as one range). answerStages is appended after this block and keeps its
-// "copied character for character" rule on purpose - the literal is the
-// anti-hallucination check - so this paragraph keeps the literal too and only
-// moves it: once, after the words, out of the lead.
+// answerBA opens with who the reader is and what a good answer gives them.
+// Before it did, the block was bans only - no code, no signatures, no paths -
+// and a model told what to avoid writes developer prose with the banned words
+// removed: a delay question for PROD came back with the raw cron in the
+// opening sentence and no rule the reader could act on.
+//
+// The first paragraph has to live with the blocks appended after it. The
+// things a reader wants are listed, so the lead rule from answerShape is
+// restated here - one of them opens, the rest follow - because without it the
+// list lands in the opening sentence whole. "Fixed in code, configuration or manual" is
+// conditioned on the sources because answerCommon says invent nothing and an
+// unconditioned rule classifies without evidence. "Condition" and "edge case"
+// are told apart in the text because both words stay in the block. No domain
+// nouns in the examples: an insurance reader would anchor every answer.
+//
+// The second paragraph exists because the bans let literals through: field
+// names and property keys in running text, and never the figure the reader
+// wanted (the hold plus the hourly job, as one range). answerStages is
+// appended after this block and keeps its "copied character for character"
+// rule on purpose - the literal is the anti-hallucination check - so this
+// paragraph keeps the literal too and only moves it: once, after the words,
+// out of the lead.
 const answerBA = `
-Audience: business analyst. Explain the mechanism in three to five paragraphs,
-in the language of the business domain. No source code, no signatures, no file
-paths in running text. Answer the question and then stop - edge cases belong in
-a follow-up.
+Audience: business analyst. The reader owns the requirements and the business
+process, knows the domain and the people the system serves, and does not read
+code. What they want is the rule as a rule: what triggers it, what then
+happens, after how long, and under which conditions it applies or not - a
+condition that decides whether the rule applies is part of the rule; a rare
+failure is an edge case and belongs in a follow-up. The opening sentence
+carries the one of these the question asked for; the others follow in the
+paragraphs. Where the sources show it, say whether the behaviour is fixed in
+the code, set by configuration, or a manual step, because that decides whether
+a change is a configuration ticket or a development story; where the sources
+do not show it, say nothing about it. Explain the mechanism in three to five
+paragraphs in the language of the business domain. No source code, no
+signatures, no file paths in running text. Answer the question and then stop.
 
 Identifiers, property keys, cron expressions and code defaults are not the
 language of the business domain. Say what a value means for the reader: a
