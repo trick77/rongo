@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -256,7 +257,7 @@ func TestLastTurnIsWhatAFollowUpIsAFollowUpTo(t *testing.T) {
 		t.Fatalf("finish: %v", err)
 	}
 
-	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt)
 	if err != nil || !ok {
 		t.Fatalf("last turn: %v ok=%v", err, ok)
 	}
@@ -288,7 +289,7 @@ func TestLastTurnSkipsATurnThatNeverAnswered(t *testing.T) {
 		t.Fatalf("fail: %v", err)
 	}
 
-	got, ok, err := s.LastTurn(ctx, testSubject, threadID)
+	got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt)
 	if err != nil || !ok {
 		t.Fatalf("last turn: %v ok=%v", err, ok)
 	}
@@ -330,7 +331,7 @@ func TestLastTurnBeforeStopsAtTheOrdinalItIsGiven(t *testing.T) {
 		t.Errorf("last turn = %d, want the turn answered below the card (%d)", got.ID, first.ID)
 	}
 	// Unbounded is still the thread's newest answered turn.
-	if got, ok, err := s.LastTurn(ctx, testSubject, threadID); err != nil || !ok || got.ID != later.ID {
+	if got, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt); err != nil || !ok || got.ID != later.ID {
 		t.Errorf("unbounded last turn = %+v ok=%v err=%v, want the newest answered turn", got.ID, ok, err)
 	}
 }
@@ -339,7 +340,7 @@ func TestLastTurnBeforeStopsAtTheOrdinalItIsGiven(t *testing.T) {
 // thread belongs to the person who asked.
 func TestLastTurnOfAFreshOrForeignThreadIsNothing(t *testing.T) {
 	s, ctx, threadID, _ := newThreadStore(t)
-	if _, ok, err := s.LastTurn(ctx, testSubject, threadID); err != nil || ok {
+	if _, ok, err := s.LastTurnBefore(ctx, testSubject, threadID, math.MaxInt); err != nil || ok {
 		t.Errorf("fresh thread: ok=%v err=%v, want nothing to follow up on", ok, err)
 	}
 
@@ -350,7 +351,7 @@ func TestLastTurnOfAFreshOrForeignThreadIsNothing(t *testing.T) {
 	if err := s.Finish(ctx, msg.ID, "An answer.", nil); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
-	if _, ok, err := s.LastTurn(ctx, "someone-else", threadID); err != nil || ok {
+	if _, ok, err := s.LastTurnBefore(ctx, "someone-else", threadID, math.MaxInt); err != nil || ok {
 		t.Errorf("foreign thread: ok=%v err=%v, want nothing", ok, err)
 	}
 }

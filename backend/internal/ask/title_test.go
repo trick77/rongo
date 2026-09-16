@@ -122,8 +122,24 @@ func TestTitle_aReplyThatIsNotATitleIsRetried(t *testing.T) {
 	}
 }
 
+// An upstream that is simply down costs two requests: the client's own retry,
+// and then nothing. The shape loop is for a model that answered with the wrong
+// thing, and a deployment that answers nothing is not that.
 func TestTitle_theRetriesAreCapped(t *testing.T) {
 	c, up := titleLLM(t)
+	if got := Title(context.Background(), c, "How does shipping work?", LanguageEN); got != "" {
+		t.Fatalf("title = %q, want empty so the placeholder stands", got)
+	}
+	if up.count() != 2 {
+		t.Fatalf("calls = %d, want 2", up.count())
+	}
+}
+
+// A model that keeps answering with a paragraph is the case the shape loop
+// exists for, and that loop is what titleAttempts bounds.
+func TestTitle_theShapeRetriesAreCapped(t *testing.T) {
+	prose := titleReply{status: http.StatusOK, content: "Here is a title for you:\n\nShipping, end to end"}
+	c, up := titleLLM(t, prose, prose, prose)
 	if got := Title(context.Background(), c, "How does shipping work?", LanguageEN); got != "" {
 		t.Fatalf("title = %q, want empty so the placeholder stands", got)
 	}
@@ -151,5 +167,22 @@ func TestTitle_aCancelledTurnStopsRetrying(t *testing.T) {
 	}
 	if up.count() > 1 {
 		t.Fatalf("calls = %d, want no retry after the cancel", up.count())
+	}
+}
+
+// An empty reply is a shape the nudge could fix, once. Twice in a row is the
+// client's own retry already having asked again, and that is the deployment
+// rather than a shape: the placeholder stands after two requests, not six.
+func TestTitle_anEmptyReplyTwiceIsNotReAsked(t *testing.T) {
+	c, up := titleLLM(t,
+		titleReply{status: http.StatusOK, content: ""},
+		titleReply{status: http.StatusOK, content: ""},
+		titleReply{status: http.StatusOK, content: "Shipping, end to end"},
+	)
+	if got := Title(context.Background(), c, "How does shipping work?", LanguageEN); got != "" {
+		t.Fatalf("title = %q, want empty so the placeholder stands", got)
+	}
+	if up.count() != 2 {
+		t.Fatalf("calls = %d, want 2", up.count())
 	}
 }

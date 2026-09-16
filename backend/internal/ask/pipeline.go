@@ -556,27 +556,40 @@ func (p *Pipeline) answer(ctx context.Context, question string, audience Audienc
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
 	if err == nil {
-		d := map[string]any{
-			"prompt_tokens":     answer.Usage.Prompt,
-			"completion_tokens": answer.Usage.Completion,
-			"cited":             len(answer.Citations),
-			"sources":           len(sources),
-			// The prompt by section, measured rather than billed — the split
-			// the endpoint never reports. The reader is told which is which
-			// where it is drawn.
-			"prompt_system":   answer.Prompt.System,
-			"prompt_sources":  answer.Prompt.Sources,
-			"prompt_question": answer.Prompt.Question,
-		}
-		// How much of the prompt the endpoint had read before and did not
-		// charge full price for again. Absent when the reply carried no
-		// details object: that is unknown, not zero.
-		if answer.Usage.PromptDetails != nil {
-			d["cached_tokens"] = answer.Usage.PromptDetails.Cached
-		}
-		ev.detail("writing", d)
+		ev.detail("writing", writingDetail(answer, len(sources)))
 	}
 	return answer, err
+}
+
+// writingDetail is what the writing step found: what the call cost, how many
+// of the sources in front of the model it cited, and how the stream itself
+// went. Facts the step already held — no second call is made to report them.
+func writingDetail(answer Answer, sources int) map[string]any {
+	d := map[string]any{
+		"prompt_tokens":     answer.Usage.Prompt,
+		"completion_tokens": answer.Usage.Completion,
+		"cited":             len(answer.Citations),
+		"sources":           sources,
+		// The prompt by section, measured rather than billed — the split
+		// the endpoint never reports. The reader is told which is which
+		// where it is drawn.
+		"prompt_system":   answer.Prompt.System,
+		"prompt_sources":  answer.Prompt.Sources,
+		"prompt_question": answer.Prompt.Question,
+	}
+	// Only past one: a turn that took a second call is worth a line in the
+	// timeline, and saying "1 attempt" on every other turn is noise. The
+	// client counts it, so every step could report it the same way.
+	if answer.Usage.Attempts > 1 {
+		d["attempts"] = answer.Usage.Attempts
+	}
+	// How much of the prompt the endpoint had read before and did not
+	// charge full price for again. Absent when the reply carried no
+	// details object: that is unknown, not zero.
+	if answer.Usage.PromptDetails != nil {
+		d["cached_tokens"] = answer.Usage.PromptDetails.Cached
+	}
+	return d
 }
 
 // understandingDetail is what the first step found: the phrasings the search

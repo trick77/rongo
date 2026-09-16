@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -657,12 +656,6 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 	return nil, nil
 }
 
-// LastTurn is the most recent turn of this thread that actually answered, or
-// false when none has.
-func (s *Store) LastTurn(ctx context.Context, subject string, threadID int64) (Message, bool, error) {
-	return s.LastTurnBefore(ctx, subject, threadID, math.MaxInt)
-}
-
 // LastTurnBefore is the most recent turn of this thread that actually
 // answered and sits below ordinal `before`, or false when there is none. It is
 // what a follow-up is a follow-up TO.
@@ -742,6 +735,26 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	}
 	m.Citations = cites
 	return m, true, nil
+}
+
+// MessageOrdinal is where one message sits in its thread, or false when the
+// id names no message of a thread owned by subject. It is Message's read with
+// everything the caller does not want left out: resolving what a continuation
+// follows needs a position, not a turn with its scope, its followups and its
+// citations.
+func (s *Store) MessageOrdinal(ctx context.Context, subject string, messageID int64) (int, bool, error) {
+	var ordinal int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.ordinal
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).Scan(&ordinal)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read message ordinal: %w", err)
+	}
+	return ordinal, true, nil
 }
 
 // Messages returns a thread's turns in order, with their citations.
