@@ -68,25 +68,20 @@ func languageName(lang Language) string {
 //
 // The umlauts are spelled out because the ß rule alone was over-applied: a
 // model told to drop one non-ASCII letter drops the rest as well, and a card
-// came back offering "Sequenzdiagramm fuer Geschaeftsprozesse".
+// came back offering "Sequenzdiagramm fuer Geschaeftsprozesse". That is not
+// Swiss, it is not German, and it is what a person reads.
 //
-// Forbidding ae/oe/ue was not enough either. The sources are ASCII German -
-// identifiers like pruefeBetrag, comments saying "Rueckgabe" - and the answer
-// prompt has just told the model that identifiers keep their spelling and
-// that the Analyst writes in the language of the business domain. Read next
-// to those sources, that licensed "die Korrektheit der Rueckgabe" in running
-// text while the diagram labels of the same answer said "Prüfen". So the note
-// names the source case: a word the code spells with a digraph is written
-// with its umlaut in prose, and only code keeps the code's spelling.
+// Measured 2026-09-16 (docs/measurements/2026-09-16-swiss-digraphs.md): on
+// gpt-5.4-mini no wording of this note moves the count, gpt-5.4 is worse
+// and MiMo Pro writes none. The digraphs are the model's own function words,
+// sampled mid-sentence next to correct umlauts; the lever is the model, not
+// the note. The answers harness counts them.
 const swissGerman = `
 
 Swiss orthography: standard written German, never the letter ß - always ss
-(ausser, grösser, heisst, Strasse). Umlauts are letters: ä ö ü, in every
-sentence of the answer, never ae/oe/ue. Code cannot carry umlauts, so the
-sources spell words like "Rueckgabe" or pruefeBetrag with a digraph; in your
-running text that word is written with its umlaut - Rückgabe, prüfen,
-Geschäftsprozess, für. Only identifiers, file names and quoted code keep the
-source's spelling. Not dialect.`
+(ausser, grösser, heisst, Strasse). Keep every umlaut as an umlaut: ä ö ü,
+never ae/oe/ue - "für" not "fuer", "Geschäftsprozess" not
+"Geschaeftsprozess". Not dialect.`
 
 // languageStyle is the orthography note for lang, empty where there is none.
 func languageStyle(lang Language) string {

@@ -44,12 +44,6 @@ func TestTheGermanStyleNoteKeepsTheUmlauts(t *testing.T) {
 			t.Errorf("the German note never shows %q, so the rule is abstract:\n%s", u, note)
 		}
 	}
-	// The forbidding alone was not enough: an ASCII source ("Rueckgabe") was
-	// copied into prose as domain vocabulary. The note has to say what happens
-	// to a source word spelled with a digraph.
-	if !strings.Contains(note, "Rueckgabe") || !strings.Contains(note, "Rückgabe") {
-		t.Errorf("the German note never shows a source digraph becoming an umlaut in prose:\n%s", note)
-	}
 	if languageStyle(LanguageEN) != "" {
 		t.Error("only German carries an orthography note")
 	}
