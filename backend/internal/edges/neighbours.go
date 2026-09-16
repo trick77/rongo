@@ -51,6 +51,10 @@ func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour
 // exact, because a spelled name is not a near side's literal and a loose rule
 // would land it on whatever route ends the same way.
 func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighbour, error) {
+	// The kind and the value are bound into the spread count rather than
+	// correlated on t: the pair is the caller's, the same for every row, so
+	// the count is one uncorrelated subquery evaluated once instead of per
+	// candidate row.
 	rows, err := db.QueryContext(ctx, `
 		SELECT f.repo, f.path, t.kind, t.value, t.line
 		FROM integration_tokens t
@@ -59,27 +63,41 @@ func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighb
 		-- NeighboursWith gives: parked code influences nothing.
 		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 		WHERE t.kind = ? AND t.value = ?
-		  AND (
-		    SELECT COUNT(DISTINCT f2.repo)
-		    FROM integration_tokens t2
-		    JOIN files f2 ON f2.id = t2.file_id
-		    JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
-		    WHERE t2.kind = t.kind AND t2.value = t.value
-		  ) <= ?
-		ORDER BY f.repo, f.path, t.line`, string(kind), value, spreadCeiling)
+		  AND `+spreadCount("?", "?")+` <= ?
+		ORDER BY f.repo, f.path, t.line`,
+		string(kind), value, string(kind), value, spreadCeiling)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanNeighbours(rows)
+}
 
+// spreadCount is the number of ENABLED repositories carrying one kind/value
+// pair, as a subquery over the expressions naming that pair. Both halves of
+// the table count the same way, or they would disagree about which values are
+// links — see spreadCeiling.
+func spreadCount(kind, value string) string {
+	return `(
+		SELECT COUNT(DISTINCT f2.repo)
+		FROM integration_tokens t2
+		JOIN files f2 ON f2.id = t2.file_id
+		JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
+		WHERE t2.kind = ` + kind + ` AND t2.value = ` + value + `
+	)`
+}
+
+// scanNeighbours reads the repo, path, kind, value, line shape both queries
+// select.
+func scanNeighbours(rows *sql.Rows) ([]Neighbour, error) {
 	var out []Neighbour
 	for rows.Next() {
 		var n Neighbour
-		var k string
-		if err := rows.Scan(&n.Repo, &n.Path, &k, &n.Value, &n.Line); err != nil {
+		var kind string
+		if err := rows.Scan(&n.Repo, &n.Path, &kind, &n.Value, &n.Line); err != nil {
 			return nil, err
 		}
-		n.Kind = Kind(k)
+		n.Kind = Kind(kind)
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -137,28 +155,11 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		       OR (mine.kind = 'property' AND other_f.path <> me.path
 		           AND me.path NOT LIKE '%.properties'
 		           AND other_f.path LIKE '%.properties'))
-		  AND (
-		    SELECT COUNT(DISTINCT f2.repo)
-		    FROM integration_tokens t2
-		    JOIN files f2 ON f2.id = t2.file_id
-		    JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
-		    WHERE t2.kind = mine.kind AND t2.value = mine.value
-		  ) <= ?
+		  AND `+spreadCount("mine.kind", "mine.value")+` <= ?
 		ORDER BY other_f.repo, other_f.path, other.line`, repo, path, spreadCeiling)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var out []Neighbour
-	for rows.Next() {
-		var n Neighbour
-		var kind string
-		if err := rows.Scan(&n.Repo, &n.Path, &kind, &n.Value, &n.Line); err != nil {
-			return nil, err
-		}
-		n.Kind = Kind(kind)
-		out = append(out, n)
-	}
-	return out, rows.Err()
+	return scanNeighbours(rows)
 }

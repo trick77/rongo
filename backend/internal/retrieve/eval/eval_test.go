@@ -572,7 +572,8 @@ func measureArm(t *testing.T, ctx context.Context, name string, g *ask.Gatherer,
 			t.Fatalf("%s: fill gaps %q: %v", name, q.Text, err)
 		}
 		if gaps.Skipped != "off" {
-			t.Logf("    gap landed %v unresolved %v %s", gaps.Landed, gaps.Unresolved, gaps.Skipped)
+			t.Logf("    gap landed %v unresolved %v refused %v %s",
+				gaps.Landed, gaps.Unresolved, gaps.Refused, gaps.Skipped)
 		}
 
 		if q.Resolution != ResolutionUnique {

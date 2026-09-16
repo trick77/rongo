@@ -28,12 +28,14 @@ import (
 // against the question is the judgement a developer makes before opening one
 // more file, and it is the only step here that has it.
 //
-// What it stores: nothing. The names are used to look code up and are gone
-// with the turn, which keeps the pass outside the rule against model-written
-// text about code — the same footing as the routing judge and the reranker.
-// The one exception is the keyword fallback, whose Reason carries the model's
-// own spelling because no index row was matched to correct it; it is a
-// per-turn trace line, never indexed and never embedded.
+// What it stores: the names are used to look code up and are gone with the
+// turn, which keeps the pass outside the rule against model-written text
+// about code — the same footing as the routing judge and the reranker. The
+// one exception is the keyword fallback: no index row was matched to correct
+// the spelling, so its landing carries the MODEL's string in the source's
+// reason, and the turn writes that to message_sources.reason. It is a trace
+// line — never indexed, never embedded, never read back as code — and it is
+// why that lookup is the narrowest of the three.
 //
 // What it may never do: fail a turn, or be worse than not running. A call
 // that errors or a reply that cannot be read leaves the sources exactly as
@@ -76,16 +78,23 @@ type GapName struct {
 }
 
 // GapReport is what the pass did, for the trace: what it asked for, what it
-// found, what it could not resolve, and why it did nothing at all.
+// found, what it could not resolve, what the budget refused, and why it did
+// nothing at all.
 type GapReport struct {
 	// Asked is the reply after filtering, in the model's own order.
 	Asked []GapName
-	// Landed and Unresolved are the asked names that did and did not reach
-	// the sources.
+	// Landed is the asked names that put a chunk in front of the answer that
+	// was not there before. Unresolved is those no lookup resolved, this
+	// turn's stage included. Refused is those whose landings the reserve
+	// could not hold, the names after the refusal among them.
+	//
+	// A name that resolved onto chunks the sources already carry is in none
+	// of the three: nothing was added, nothing was missing, nothing refused.
 	Landed     []string
 	Unresolved []string
+	Refused    []string
 	// Skipped is "" when the pass ran, else why it did not:
-	// "off", "no sources", "call failed", "not json", "no room".
+	// "off", "no sources", "call failed", "not json".
 	Skipped string
 }
 
@@ -177,29 +186,44 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	a.out = append(a.out, sources...)
 
 	refused := false
-	for _, n := range report.Asked {
+	for i, n := range report.Asked {
+		// Once the reserve has refused a landing, what is left cannot hold
+		// even a source's smallest share of the prompt, and every further
+		// lookup queries the index for a chunk nothing can admit.
+		if refused && a.budget-a.spent < gapExcerptMin/4 {
+			for _, rest := range report.Asked[i:] {
+				report.Refused = append(report.Refused, rest.Name)
+			}
+			break
+		}
 		landings, err := g.resolve(ctx, n, sources, stage)
 		if err != nil {
 			return sources, GapReport{}, err
 		}
+		// The stage restriction before the emptiness check: a name only
+		// another stage holds is one this turn could not resolve, and
+		// dropping it silently would leave the report short a name.
+		landings = within(landings, stage)
 		if len(landings) == 0 {
 			report.Unresolved = append(report.Unresolved, n.Name)
 			continue
 		}
-		took := false
-		for _, l := range within(landings, stage) {
-			if a.take(l, g.opts.MaxHops+1) {
-				took = true
-				continue
+		before := len(a.out)
+		noRoom := false
+		for _, l := range landings {
+			if !a.take(l, g.opts.MaxHops+1) {
+				noRoom, refused = true, true
 			}
-			refused = true
 		}
-		if took {
+		// Landed means something NEW was admitted: a name resolved onto
+		// chunks the model was already reading cost the pass a lookup and
+		// gained the answer nothing.
+		switch {
+		case len(a.out) > before:
 			report.Landed = append(report.Landed, n.Name)
+		case noRoom:
+			report.Refused = append(report.Refused, n.Name)
 		}
-	}
-	if len(report.Landed) == 0 && refused {
-		report.Skipped = "no room"
 	}
 	return a.out, report, nil
 }
@@ -212,7 +236,7 @@ func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, sta
 	var err error
 	switch edges.Kind(n.Kind) {
 	case edges.KindRoute, edges.KindDestination, edges.KindProperty:
-		landings, err = g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name)
+		landings, err = g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, stage)
 	default:
 		landings, err = g.symbolLandings(ctx, n.Name, sources)
 	}
@@ -276,21 +300,24 @@ func atHome(rows []Source, sources []Source) []Source {
 }
 
 // tokenLandings finds the chunk at every line carrying the token, one per
-// file and at most gapMaxLandings of them. A route the model spelled without
-// the leading slash every indexed route carries is tried both ways.
-func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name string) ([]Source, error) {
-	values := []string{name}
-	if kind == edges.KindRoute && !strings.HasPrefix(name, "/") {
-		values = append(values, "/"+name)
-	}
+// file and at most gapMaxLandings of them.
+//
+// The stage restriction is applied BEFORE the cap: a property key is set once
+// per stage, and counting the stages the turn did not ask about towards the
+// cap spends it on landings that are then filtered away — a turn narrowed to
+// production would lose the one file it was allowed to read.
+func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name string, stage retrieve.StagePrefixes) ([]Source, error) {
 	var out []Source
 	files := map[string]bool{}
-	for _, v := range values {
+	for _, v := range gapValues(kind, name) {
 		ns, err := edges.Holders(ctx, g.db, kind, v)
 		if err != nil {
 			return nil, fmt.Errorf("look up the holders of %s %q: %w", kind, v, err)
 		}
 		for _, h := range ns {
+			if !inStage(h.Repo, h.Path, stage) {
+				continue
+			}
 			key := h.Repo + "\x00" + h.Path
 			if files[key] || len(out) >= gapMaxLandings {
 				continue
@@ -374,16 +401,37 @@ func gapNames(got []GapName, sources []Source) []GapName {
 // amongSources reports a name whose definition, handler or value is already
 // in front of the model: a source defining it, a symbol hop that named it, or
 // a crossing that followed it.
+//
+// The crossing is compared by kind and value, never as a substring of the
+// reason: a crossing on "/orders/123/items" is not the route "/orders", and
+// reading it as one drops the name the model asked for.
 func amongSources(n GapName, sources []Source) bool {
+	values := gapValues(edges.Kind(n.Kind), n.Name)
 	for _, s := range sources {
 		if s.Symbol == n.Name || s.Reason == "reference:"+n.Name {
 			return true
 		}
-		if strings.Contains(s.Reason, n.Kind+" "+n.Name) {
-			return true
+		kind, value, ok := edgeVia(s.Reason)
+		if !ok || kind != n.Kind {
+			continue
+		}
+		for _, v := range values {
+			if value == v {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// gapValues is the spellings of one name worth matching: a route the model
+// spelled without the leading slash every indexed route carries is tried both
+// ways, whether the name is being looked up or compared.
+func gapValues(kind edges.Kind, name string) []string {
+	if kind == edges.KindRoute && !strings.HasPrefix(name, "/") {
+		return []string{name, "/" + name}
+	}
+	return []string{name}
 }
 
 // gapPrompt renders the question and the sources in renderSources' shape, so

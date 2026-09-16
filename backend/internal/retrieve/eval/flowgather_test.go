@@ -228,8 +228,8 @@ func TestFlowGathered(t *testing.T) {
 				for _, n := range report.Asked {
 					asked = append(asked, n.Name+" ("+n.Kind+")")
 				}
-				t.Logf("    gap asked %v landed %v unresolved %v %s",
-					asked, report.Landed, report.Unresolved, report.Skipped)
+				t.Logf("    gap asked %v landed %v unresolved %v refused %v %s",
+					asked, report.Landed, report.Unresolved, report.Refused, report.Skipped)
 			}
 			parts := q.parts()
 			reached := 0

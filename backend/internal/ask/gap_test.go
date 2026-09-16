@@ -449,8 +449,211 @@ func TestFillGaps_neverExceedsTheBudget(t *testing.T) {
 	if len(got) != len(sources) {
 		t.Errorf("sources = %v, want the oversized landing refused", repoPaths(got))
 	}
-	if report.Skipped != "no room" {
-		t.Errorf("skipped = %q, want the budget reported", report.Skipped)
+	// A name the budget refused is reported as refused, not skipped: the pass
+	// ran, asked and resolved, and only the room was missing.
+	if report.Skipped != "" {
+		t.Errorf("skipped = %q, want the pass reported as having run", report.Skipped)
+	}
+	if len(report.Refused) != 1 || report.Refused[0] != "unitPrice" {
+		t.Errorf("report = %+v, want the name the budget refused", report)
+	}
+}
+
+// TestFillGaps_reportsANameRefusedWhileAnotherLanded: the report is
+// bookkeeping over the asked names, so a name refused for room while another
+// one landed may not vanish from it.
+func TestFillGaps_reportsANameRefusedWhileAnotherLanded(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { unitPrice(); vat() }")
+	seedChunk(t, db, "vat.go", 0, 1, 10, "vat", "func vat() int { return 8 }")
+	seedSymbol(t, db, "vat.go", "vat", 1)
+	seedChunk(t, db, "price.go", 0, 5, 20, "unitPrice", "func unitPrice() int { "+strings.Repeat("x ", 400)+" }")
+	seedSymbol(t, db, "price.go", "unitPrice", 5)
+	// Room for the small definition and nothing like enough for the big one.
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 120},
+		missing(name("vat", "symbol"), name("unitPrice", "symbol")))
+	sources := []Source{sourceOf(t, db, hitID)}
+
+	got, report, err := g.FillGaps(context.Background(), "how is the total computed?", sources, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !has(got, "vat.go") || has(got, "price.go") {
+		t.Errorf("sources = %v, want the small landing and not the big one", paths(got))
+	}
+	if len(report.Landed) != 1 || report.Landed[0] != "vat" {
+		t.Errorf("landed = %v, want the name that fitted", report.Landed)
+	}
+	if len(report.Refused) != 1 || report.Refused[0] != "unitPrice" {
+		t.Errorf("refused = %v, want the name the budget could not hold", report.Refused)
+	}
+}
+
+// TestFillGaps_stopsLookingUpOnceTheBudgetRefused: a refusal means the reserve
+// is spent, and every lookup after it queries the index for a chunk nothing
+// can hold.
+func TestFillGaps_stopsLookingUpOnceTheBudgetRefused(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() { unitPrice(); vat() }")
+	seedChunk(t, db, "price.go", 0, 5, 20, "unitPrice", "func unitPrice() int { "+strings.Repeat("x ", 400)+" }")
+	seedSymbol(t, db, "price.go", "unitPrice", 5)
+	// Small enough to fit in what is left, and it must still not be fetched.
+	seedChunk(t, db, "vat.go", 0, 1, 10, "vat", "func vat() {}")
+	seedSymbol(t, db, "vat.go", "vat", 1)
+	sources := []Source{sourceOf(t, db, hitID)}
+	budget := estimateTokens(sources[0].Text) + gapExcerptMin/4 - 10
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: budget},
+		missing(name("unitPrice", "symbol"), name("vat", "symbol")))
+
+	got, report, err := g.FillGaps(context.Background(), "how is the total computed?", sources, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if len(got) != len(sources) {
+		t.Errorf("sources = %v, want nothing admitted under a spent budget", paths(got))
+	}
+	if len(report.Refused) != 2 || report.Refused[1] != "vat" {
+		t.Errorf("refused = %v, want the name after the refusal reported too", report.Refused)
+	}
+	if len(report.Landed) != 0 || len(report.Unresolved) != 0 {
+		t.Errorf("report = %+v, want the rest of the reply refused", report)
+	}
+}
+
+// TestFillGaps_landsOnlyWhenSomethingNewIsAdmitted: a name whose definition
+// resolves onto a chunk the sources already carry added nothing, and a report
+// calling that a landing would read as the pass having earned its reserve.
+func TestFillGaps_landsOnlyWhenSomethingNewIsAdmitted(t *testing.T) {
+	db := gatherDB(t)
+	// One chunk, holding both the caller and the definition, so the lookup
+	// resolves to the chunk that is already in front of the model.
+	hitID := seedChunk(t, db, "cart.go", 0, 1, 20, "total",
+		"func total() int { return unitPrice() }\nfunc unitPrice() int { return 3 }")
+	seedSymbol(t, db, "cart.go", "unitPrice", 2)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("unitPrice", "symbol")))
+	sources := []Source{sourceOf(t, db, hitID)}
+
+	got, report, err := g.FillGaps(context.Background(), "how is the total computed?", sources, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if len(got) != len(sources) {
+		t.Errorf("sources = %v, want the one chunk it already had", repoPaths(got))
+	}
+	if len(report.Landed) != 0 {
+		t.Errorf("landed = %v, want nothing: no new chunk was admitted", report.Landed)
+	}
+	if len(report.Refused) != 0 {
+		t.Errorf("refused = %v, want nothing: the budget refused nothing", report.Refused)
+	}
+}
+
+// TestFillGaps_asksForARouteACrossingOnlyLandedNear: the sources carry a
+// crossing on "/orders/123/items", which is not the route "/orders" the model
+// asked for. Reading the reason as a substring drops the name and the handler
+// is never fetched.
+func TestFillGaps_asksForARouteACrossingOnlyLandedNear(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "orders")
+	hitID := seedChunk(t, db, "client.go", 0, 1, 10, "fetch", "get(ordersUrl + id + \"/items\")")
+	itemsID := seedChunkIn(t, db, "orders", "Items.java", 0, 1, 10, "items", `@GetMapping("/orders/{id}/items")`)
+	seedChunkIn(t, db, "orders", "Orders.java", 0, 1, 10, "orders", `@GetMapping("/orders")`)
+	seedTokenIn(t, db, "orders", "Orders.java", "route", "/orders", 1)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("/orders", "route")))
+	near := sourceOf(t, db, hitID)
+	crossing := sourceOf(t, db, itemsID)
+	crossing.Reason = "edge:route /orders/123/items from peeq/client.go"
+
+	got, report, err := g.FillGaps(context.Background(), "what does the orders route serve?",
+		[]Source{near, crossing}, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !hasIn(got, "orders", "Orders.java") {
+		t.Errorf("sources = %v, want the handler of the route asked for", repoPaths(got))
+	}
+	if len(report.Landed) != 1 {
+		t.Errorf("report = %+v, want the route landed", report)
+	}
+}
+
+// TestFillGaps_skipsARouteACrossingAlreadyFollowed is the other half of the
+// same rule, including the leading slash every indexed route carries and the
+// model leaves off.
+func TestFillGaps_skipsARouteACrossingAlreadyFollowed(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "payment")
+	hitID := seedChunkIn(t, db, "payment", "transport.go", 0, 1, 10, "handler", `Path("/paymentAuth")`)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("paymentAuth", "route")))
+	crossing := sourceOf(t, db, hitID)
+	crossing.Reason = "edge:route /paymentAuth from orders/Client.java"
+
+	_, report, err := g.FillGaps(context.Background(), "how is a payment authorised?", []Source{crossing}, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if len(report.Asked) != 0 {
+		t.Errorf("asked = %+v, want the route the crossing already followed dropped", report.Asked)
+	}
+}
+
+// TestFillGaps_landsInTheAskedStageWhenItSortsLast: the landing cap is per
+// name, and applying it before the stage restriction spends it on the stages
+// the turn did not ask about — the asked one then never lands at all.
+func TestFillGaps_landsInTheAskedStageWhenItSortsLast(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-infra")
+	hitID := seedChunk(t, db, "Job.java", 0, 1, 10, "Job", `@Scheduled("${acme.cron.send-digest}")`)
+	for _, stage := range []string{"dev", "intg", "perf", "pre", "prod"} {
+		p := stage + "/application.properties"
+		seedChunkIn(t, db, "acme-infra", p, 0, 1, 10, "", "acme.cron.send-digest=0 0 * ? * * *")
+		seedTokenIn(t, db, "acme-infra", p, "property", "acme.cron.send-digest", 1)
+	}
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("acme.cron.send-digest", "property")))
+
+	got, report, err := g.FillGaps(context.Background(), "when does the digest run in production?",
+		[]Source{sourceOf(t, db, hitID)}, retrieve.StagePrefixes{"acme-infra": "prod/"})
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !hasIn(got, "acme-infra", "prod/application.properties") {
+		t.Errorf("sources = %v, want the asked stage past the landing cap", repoPaths(got))
+	}
+	if len(report.Landed) != 1 {
+		t.Errorf("report = %+v, want the key landed", report)
+	}
+}
+
+// TestFillGaps_readsANameOnlyOtherStagesHoldAsUnresolved: the stage
+// restriction is applied before a name is called empty, so a key this turn
+// may not read is reported as one it could not resolve, never dropped.
+func TestFillGaps_readsANameOnlyOtherStagesHoldAsUnresolved(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-infra")
+	// The key is not spelled in the gathered code — this is the pass's own
+	// case — so the keyword fallback has nothing at home to land on either.
+	hitID := seedChunk(t, db, "Job.java", 0, 1, 10, "Job", "@Scheduled(digestCron)")
+	seedChunkIn(t, db, "acme-infra", "intg/application.properties", 0, 1, 10, "", "acme.cron.send-digest=0 0 * ? * * *")
+	seedTokenIn(t, db, "acme-infra", "intg/application.properties", "property", "acme.cron.send-digest", 1)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("acme.cron.send-digest", "property")))
+
+	got, report, err := g.FillGaps(context.Background(), "when does the digest run in production?",
+		[]Source{sourceOf(t, db, hitID)}, retrieve.StagePrefixes{"acme-infra": "prod/"})
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if hasIn(got, "acme-infra", "intg/application.properties") {
+		t.Errorf("sources = %v, want the other stage left out", repoPaths(got))
+	}
+	if len(report.Unresolved) != 1 || report.Unresolved[0] != "acme.cron.send-digest" {
+		t.Errorf("report = %+v, want the key reported unresolved", report)
 	}
 }
 

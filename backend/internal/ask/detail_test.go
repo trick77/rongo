@@ -110,7 +110,7 @@ func TestPipeline_saysNothingAboutAGapPassThatIsOff(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, k := range []string{"gap_asked", "gap_landed", "gap_unresolved", "gap_skipped"} {
+	for _, k := range []string{"gaps", "gap_asked", "gap_landed", "gap_unresolved", "gap_refused", "gap_skipped"} {
 		if _, ok := details["gathering"][k]; ok {
 			t.Errorf("%s reported for a pass that is off: %v", k, details["gathering"])
 		}

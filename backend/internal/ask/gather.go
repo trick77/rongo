@@ -338,9 +338,32 @@ type crossing struct {
 	from, landing Source
 }
 
+// edgeVia reads a crossing's reason, "edge:<kind> <value> from <repo>/<path>",
+// and reports false for a reason of any other shape.
+//
+// One parser, because the grammar has a value in the middle of it: a reader
+// matching "route /orders" as a substring also matches the crossing that
+// landed on "/orders/123/items", and calls a route nobody followed followed.
+func edgeVia(reason string) (kind, value string, ok bool) {
+	rest, ok := strings.CutPrefix(reason, "edge:")
+	if !ok {
+		return "", "", false
+	}
+	via, _, ok := strings.Cut(rest, " from ")
+	if !ok {
+		return "", "", false
+	}
+	kind, value, ok = strings.Cut(via, " ")
+	if !ok || kind == "" || value == "" {
+		return "", "", false
+	}
+	return kind, value, true
+}
+
 // isPropertyEdge reports a landing reached over a property key.
 func isPropertyEdge(reason string) bool {
-	return strings.HasPrefix(reason, "edge:"+string(edges.KindProperty)+" ")
+	kind, _, ok := edgeVia(reason)
+	return ok && kind == string(edges.KindProperty)
 }
 
 // crossingReserve is the share of the token budget the symbol walk leaves
@@ -674,19 +697,24 @@ func estimateTokens(s string) int {
 	return (n + 3) / 4
 }
 
+// inStage reports whether the stage restriction allows this path. A
+// repository absent from the restriction is not narrowed; one present keeps
+// only paths under its prefix.
+func inStage(repo, path string, stage retrieve.StagePrefixes) bool {
+	prefix, ok := stage[repo]
+	return !ok || strings.HasPrefix(path, prefix)
+}
+
 // within keeps the landings the stage restriction allows, for the crossing.
-// A repository absent from the restriction is not narrowed; one present
-// keeps only paths under its prefix.
 func within(landings []Source, stage retrieve.StagePrefixes) []Source {
 	if len(stage) == 0 {
 		return landings
 	}
 	var out []Source
 	for _, s := range landings {
-		if prefix, ok := stage[s.Repo]; ok && !strings.HasPrefix(s.Path, prefix) {
-			continue
+		if inStage(s.Repo, s.Path, stage) {
+			out = append(out, s)
 		}
-		out = append(out, s)
 	}
 	return out
 }

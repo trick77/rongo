@@ -714,14 +714,14 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	for _, s := range sources {
 		tokens += estimateTokens(s.Text)
 		repos[s.Repo] = true
+		kind, value, isEdge := edgeVia(s.Reason)
 		switch {
 		case s.Reason == "hit":
 			hits++
-		case strings.HasPrefix(s.Reason, "edge:"):
+		case isEdge:
 			crossings++
-			// "edge:<kind> <value> from <repo>/<path>"
-			rest := strings.TrimPrefix(s.Reason, "edge:")
-			via, from, _ := strings.Cut(rest, " from ")
+			via := kind + " " + value
+			_, from, _ := strings.Cut(s.Reason, " from ")
 			fromRepo, _, _ := strings.Cut(from, "/")
 			key := fromRepo + "->" + s.Repo + " " + via
 			if !seenCrossing[key] {
@@ -739,7 +739,6 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	d["hits"] = hits
 	d["references"] = refs
 	d["crossings"] = crossings
-	d["gaps"] = gapped
 	d["tokens"] = tokens
 	if budget > 0 {
 		d["budget"] = budget
@@ -748,12 +747,13 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	if len(crossed) > 0 {
 		d["crossed"] = crossed
 	}
-	// Nothing about a pass that is switched off. The trace is stored per
-	// message, and "gap_skipped: off" on every turn of a deployment that
-	// never had the pass would be a record of an absence.
+	// Nothing about a pass that is switched off, the count of what it landed
+	// included. The trace is stored per message, and "gaps: 0" on every turn
+	// of a deployment that never had the pass would be a record of an absence.
 	if gaps.Skipped == "off" {
 		return d
 	}
+	d["gaps"] = gapped
 	if len(gaps.Asked) > 0 {
 		asked := make([]string, 0, len(gaps.Asked))
 		for _, n := range gaps.Asked {
@@ -766,6 +766,9 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	}
 	if len(gaps.Unresolved) > 0 {
 		d["gap_unresolved"] = gaps.Unresolved
+	}
+	if len(gaps.Refused) > 0 {
+		d["gap_refused"] = gaps.Refused
 	}
 	if gaps.Skipped != "" {
 		d["gap_skipped"] = gaps.Skipped
