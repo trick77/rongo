@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
@@ -14,6 +15,18 @@ import (
 // requireAuth on purpose: a caller who has to sign in has no session yet, and a
 // 401 here would be a redirect loop.
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if s.proxyMode() {
+		// The proxy signed the browser in before this request got here; the
+		// app root is where the session already works. Unless the proxy did
+		// not say who: then the root would 401 and land here again, a loop
+		// with no message. The marker halts the SPA on a message instead.
+		if strings.TrimSpace(r.Header.Get(auth.ProxyUserHeader)) == "" {
+			http.Redirect(w, r, "/?auth_error=proxy", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
 	if s.passwordMode() {
 		// The SPA lands here on every 401 without knowing the mode. In
 		// password mode the "provider" is its own form, so send it back with
@@ -31,6 +44,12 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 // passwordMode reports whether the login form is the way in.
 func (s *Server) passwordMode() bool {
 	return s.deps.Auth != nil && s.deps.Auth.Mode() == "password"
+}
+
+// proxyMode reports whether a reverse proxy in front of the process does the
+// login and identifies the caller by header.
+func (s *Server) proxyMode() bool {
+	return s.deps.Auth != nil && s.deps.Auth.Mode() == "proxy"
 }
 
 // handleAuthPassword takes the form's credentials and mints the session.
@@ -119,6 +138,11 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	target := "/?signed_out=1"
 	if s.passwordMode() {
 		target = "/?signed_out=local"
+	}
+	if s.proxyMode() {
+		// The proxy owns the login; its sign-out clears its own cookie and
+		// lands on its sign-in page, which is the visible signed-out state.
+		target = "/oauth/sign_out"
 	}
 	_ = json.NewEncoder(w).Encode(map[string]string{"redirect_url": target})
 }

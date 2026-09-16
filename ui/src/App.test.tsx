@@ -180,6 +180,30 @@ describe("App", () => {
     });
   });
 
+  it("reloads in place when an authenticating proxy answers /api/me with its sign-in page", async () => {
+    // oauth-proxy in front of rongo: an expired proxy cookie turns every
+    // request into a 403 HTML page. Only a navigation can show that page,
+    // and reloading this URL rather than going to the root is what lets the
+    // proxy return the user to where they were.
+    const href = vi.fn();
+    stubLocation(href, "");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        json: async () => ({}),
+      })),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
+    expect(href).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
   it("does not show the signed-in app on a 5xx from /api/me", async () => {
     // A fully chromed app whose every panel then fails on its own tells the
     // user less than one clear message does.

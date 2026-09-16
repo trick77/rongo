@@ -299,6 +299,39 @@ func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 	}
 }
 
+func TestLoad_proxyModeRefusesNonLoopbackAddr(t *testing.T) {
+	// Given: proxy mode believes X-Forwarded-User. On 0.0.0.0 anyone who can
+	// reach the port writes that header themselves.
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_AUTH_MODE":      "proxy",
+		"BACKEND_ADDR":           "0.0.0.0:8080",
+	})
+
+	_, err := Load()
+
+	if err == nil {
+		t.Fatal("Load() err = nil, want a refusal to run proxy auth on a non-loopback address")
+	}
+}
+
+func TestLoad_proxyModeAcceptsLoopback(t *testing.T) {
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_AUTH_MODE":      "proxy",
+		"BACKEND_ADDR":           "127.0.0.1:8080",
+	})
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.AuthMode != AuthModeProxy {
+		t.Errorf("AuthMode = %q, want %q", cfg.AuthMode, AuthModeProxy)
+	}
+}
+
 func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_SESSION_SECRET": validSecret,
