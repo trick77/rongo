@@ -564,6 +564,17 @@ func measureArm(t *testing.T, ctx context.Context, name string, g *ask.Gatherer,
 		if err != nil {
 			t.Fatalf("%s: gather %q: %v", name, q.Text, err)
 		}
+		// The gap pass is the arm's second reading step. A gatherer without
+		// one says "off" and changes nothing, so every arm shares this loop
+		// rather than a second copy of it.
+		sources, gaps, err := g.FillGaps(ctx, q.Text, sources, nil)
+		if err != nil {
+			t.Fatalf("%s: fill gaps %q: %v", name, q.Text, err)
+		}
+		if gaps.Skipped != "off" {
+			t.Logf("    gap landed %v unresolved %v refused %v %s",
+				gaps.Landed, gaps.Unresolved, gaps.Refused, gaps.Skipped)
+		}
 
 		if q.Resolution != ResolutionUnique {
 			found := 0

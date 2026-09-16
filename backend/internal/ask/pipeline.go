@@ -508,6 +508,28 @@ func withParts(structure, parts string) string {
 	return strings.TrimSuffix(structure, structureIsConfiguration) + parts + structureIsConfiguration
 }
 
+// gather is the reading step every entry point runs: the walk and the
+// crossings, then the gap pass over what they produced, reported as one step
+// because a reader is told what was read, not how many lookups it took.
+//
+// One function rather than two copies: the gap pass has to run on a resumed
+// turn as well, and a step a resume skips is a turn answered from less code
+// than the same question answered a minute earlier.
+func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, ev Events) ([]Source, error) {
+	ev.status("gathering")
+	stage := scope.Stages.Prefixes(scope.Stage)
+	sources, err := p.gatherer.GatherWithin(ctx, hits, stage)
+	if err != nil {
+		return nil, err
+	}
+	sources, report, err := p.gatherer.FillGaps(ctx, question, sources, stage)
+	if err != nil {
+		return nil, err
+	}
+	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget, report))
+	return sources, nil
+}
+
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
 // what the turn has to say about its own footing, and answer under that.
 //
@@ -525,12 +547,10 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 
 	scope = p.describeProjects(ctx, scope)
 
-	ev.status("gathering")
-	sources, err := p.gatherer.GatherWithin(ctx, hits, scope.Stages.Prefixes(scope.Stage))
+	sources, err := p.gather(ctx, question, hits, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
-	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget))
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, terms), Scope: scope}, nil
 	}
@@ -685,29 +705,32 @@ func routingDetail(dec Decision) map[string]any {
 // gatherDetail is what reached the answer and how: hits, symbol references,
 // crossings on a queue or route, the repositories they span, the budget
 // used, and each boundary crossed with the token that crossed it.
-func gatherDetail(sources []Source, budget int) map[string]any {
+func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	d := map[string]any{"sources": len(sources)}
-	var hits, refs, crossings, tokens int
+	var hits, refs, crossings, gapped, tokens int
 	repos := map[string]bool{}
 	var crossed []map[string]string
 	seenCrossing := map[string]bool{}
 	for _, s := range sources {
 		tokens += estimateTokens(s.Text)
 		repos[s.Repo] = true
+		kind, value, from, isEdge := edgeVia(s.Reason)
 		switch {
 		case s.Reason == "hit":
 			hits++
-		case strings.HasPrefix(s.Reason, "edge:"):
+		case isEdge:
 			crossings++
-			// "edge:<kind> <value> from <repo>/<path>"
-			rest := strings.TrimPrefix(s.Reason, "edge:")
-			via, from, _ := strings.Cut(rest, " from ")
+			via := kind + " " + value
 			fromRepo, _, _ := strings.Cut(from, "/")
 			key := fromRepo + "->" + s.Repo + " " + via
 			if !seenCrossing[key] {
 				seenCrossing[key] = true
 				crossed = append(crossed, map[string]string{"from": fromRepo, "to": s.Repo, "via": via})
 			}
+		case strings.HasPrefix(s.Reason, "gap:"):
+			// Counted apart from the references: a chunk fetched by name
+			// after the walk had stopped is not something the walk reached.
+			gapped++
 		default:
 			refs++
 		}
@@ -722,6 +745,32 @@ func gatherDetail(sources []Source, budget int) map[string]any {
 	d["repos"] = len(repos)
 	if len(crossed) > 0 {
 		d["crossed"] = crossed
+	}
+	// Nothing about a pass that is switched off, the count of what it landed
+	// included. The trace is stored per message, and "gaps: 0" on every turn
+	// of a deployment that never had the pass would be a record of an absence.
+	if gaps.Skipped == "off" {
+		return d
+	}
+	d["gaps"] = gapped
+	if len(gaps.Asked) > 0 {
+		asked := make([]string, 0, len(gaps.Asked))
+		for _, n := range gaps.Asked {
+			asked = append(asked, n.Name+" ("+n.Kind+")")
+		}
+		d["gap_asked"] = asked
+	}
+	if len(gaps.Landed) > 0 {
+		d["gap_landed"] = gaps.Landed
+	}
+	if len(gaps.Unresolved) > 0 {
+		d["gap_unresolved"] = gaps.Unresolved
+	}
+	if len(gaps.Refused) > 0 {
+		d["gap_refused"] = gaps.Refused
+	}
+	if gaps.Skipped != "" {
+		d["gap_skipped"] = gaps.Skipped
 	}
 	return d
 }
@@ -868,12 +917,10 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	ev.detail("searching", searchDetail(hits))
 	scope = p.describeProjects(ctx, scope)
 
-	ev.status("gathering")
-	sources, err := p.gatherer.GatherWithin(ctx, hits, scope.Stages.Prefixes(scope.Stage))
+	sources, err := p.gather(ctx, question, hits, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
-	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget))
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
 	}

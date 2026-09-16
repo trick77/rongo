@@ -240,8 +240,14 @@ func TestEvalMeasureAnswers(t *testing.T) {
 		rerank = fmt.Sprintf("pool %d, %d-rune excerpts", rr.Pool, rr.Excerpt)
 	}
 	opts := gatherOpts(t)
+	// The gap pass is harness-only until it is measured, so it is off unless
+	// asked for: BACKEND_EVAL_GAP=1 is the arm.
+	gatherer := ask.NewGatherer(db, opts)
+	if envOr("BACKEND_EVAL_GAP", "0") == "1" {
+		gatherer = evalGatherer(t, db, opts, c)
+	}
 	mo := modules.Opts{MinChunks: envIntOr(t, "BACKEND_MODULE_MIN_CHUNKS", 8), MaxChunks: envIntOr(t, "BACKEND_MODULE_MAX_CHUNKS", 150)}
-	pipeline := ask.NewPipeline(c, retriever, ask.NewGatherer(db, opts), ask.NewRouter(c, db, routeMargin(t), mo))
+	pipeline := ask.NewPipeline(c, retriever, gatherer, ask.NewRouter(c, db, routeMargin(t), mo))
 	// The product's process listing (main.go): the model files are read from
 	// the checkouts the index arm cloned. BACKEND_EVAL_PROCESSES=0 measures
 	// the answer without it.

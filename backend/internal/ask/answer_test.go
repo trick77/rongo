@@ -535,6 +535,24 @@ func TestAnswer_aRefusalThatEnumeratesEveryMarkerIsStillResolved(t *testing.T) {
 	}
 }
 
+// TestReachedVia_namesHowEachSourceArrived: the prompt says how a source got
+// there, and the three ways are told apart. A chunk the gap pass fetched was
+// reached from no file at all, so it names the lookup instead of a near side
+// the answer could otherwise claim called it.
+func TestReachedVia_namesHowEachSourceArrived(t *testing.T) {
+	for _, c := range []struct{ reason, want string }{
+		{"reference:NewGrant", "reached via NewGrant"},
+		{"edge:destination shipping-task from shipping/S.java",
+			"reached in another repository, which shares the destination shipping-task from shipping/S.java"},
+		{"gap:unitPrice", "looked up by name after reading the sources: unitPrice"},
+		{"gap:/paymentAuth", "looked up by name after reading the sources: /paymentAuth"},
+	} {
+		if got := reachedVia(c.reason); got != c.want {
+			t.Errorf("reachedVia(%q) = %q, want %q", c.reason, got, c.want)
+		}
+	}
+}
+
 // fakeLLM is the model client pointed at a test server. With BaseURL set,
 // llm.NewClient consults no environment variable, so the only way this can
 // fail is a bug in the constructor.

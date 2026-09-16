@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -114,6 +115,10 @@ type flowGatherArm struct {
 	routeSuffix bool
 	wholeFile   int
 	rerank      bool
+	// gap turns the directed gap pass on: one short-gate call per question,
+	// after the walk and the crossings, whose landings are resolved without a
+	// second call. BACKEND_EVAL_GAP=0 leaves the gap arms out.
+	gap bool
 }
 
 // TestFlowGathered reports, per arm and per question, which parts of the flow
@@ -141,6 +146,7 @@ func TestFlowGathered(t *testing.T) {
 	// The reranker reorders the search itself, so it is an arm over a second
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
+	var gapClient *llm.Client
 	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
 		reranked = evalRetriever(t, db)
 		// The pool is the reranker's; searchTexts lifts the lanes to it.
@@ -150,6 +156,17 @@ func TestFlowGathered(t *testing.T) {
 			name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings", rr.Pool, rr.Excerpt),
 			hops: deployed.MaxHops, rerank: true,
 		})
+		// The gap arms, on both hit lists: the pass reads what was gathered,
+		// so what it is worth depends on what the search put in front of it.
+		if envOr("BACKEND_EVAL_GAP", "1") != "0" {
+			gapClient = evalLLM(t, 2*time.Minute)
+			arms = append(arms,
+				flowGatherArm{
+					name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings + gap pass", rr.Pool, rr.Excerpt),
+					hops: deployed.MaxHops, rerank: true, gap: true,
+				},
+				flowGatherArm{name: "symbol walk + crossings + gap pass", hops: deployed.MaxHops, gap: true})
+		}
 	}
 	// Every arm here searches with the same keyword lane, so the rung belongs
 	// in every label: a table run with a lane the product does not have must
@@ -188,14 +205,31 @@ func TestFlowGathered(t *testing.T) {
 		if arm.rerank {
 			hitsFor = rerankedHits
 		}
-		g := ask.NewGatherer(db, ask.GatherOptions{MaxHops: arm.hops, TokenBudget: deployed.TokenBudget,
-			NoCrossings: arm.noCrossings, RouteSuffix: arm.routeSuffix, WholeFileTokens: arm.wholeFile})
+		opts := ask.GatherOptions{MaxHops: arm.hops, TokenBudget: deployed.TokenBudget,
+			NoCrossings: arm.noCrossings, RouteSuffix: arm.routeSuffix, WholeFileTokens: arm.wholeFile}
+		g := ask.NewGatherer(db, opts)
+		if arm.gap {
+			g = evalGatherer(t, db, opts, gapClient)
+		}
 		var totalParts, totalReached, totalSources, whole int
 		t.Logf("\n=== arm: %s", arm.name)
 		for _, q := range questions {
 			sources, err := g.Gather(ctx, hitsFor[q.Text])
 			if err != nil {
 				t.Fatalf("gather %q: %v", q.Text, err)
+			}
+			if arm.gap {
+				var report ask.GapReport
+				sources, report, err = g.FillGaps(ctx, q.Text, sources, nil)
+				if err != nil {
+					t.Fatalf("fill gaps %q: %v", q.Text, err)
+				}
+				asked := make([]string, 0, len(report.Asked))
+				for _, n := range report.Asked {
+					asked = append(asked, n.Name+" ("+n.Kind+")")
+				}
+				t.Logf("    gap asked %v landed %v unresolved %v refused %v %s",
+					asked, report.Landed, report.Unresolved, report.Refused, report.Skipped)
 			}
 			parts := q.parts()
 			reached := 0
@@ -248,6 +282,8 @@ func reasonKind(reason string) string {
 		return "hit"
 	case strings.HasPrefix(reason, "edge:"):
 		return "crossing"
+	case strings.HasPrefix(reason, "gap:"):
+		return "gap"
 	default:
 		return "reference"
 	}

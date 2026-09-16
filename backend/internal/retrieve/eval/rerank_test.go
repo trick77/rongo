@@ -27,6 +27,11 @@ func TestEvalMeasureRerank(t *testing.T) {
 	type arm struct {
 		name string
 		r    *retrieve.Retriever
+		// g is the arm's own gatherer, so an arm can read with the gap pass
+		// on. The Go corpus is one product plus its dependencies, so the pass
+		// has fewer boundaries to help across than the flow corpus has;
+		// measuring it here says what it costs where it is not needed.
+		g *ask.Gatherer
 	}
 	plain := evalRetriever(t, db)
 	reranked := evalRetriever(t, db)
@@ -37,8 +42,16 @@ func TestEvalMeasureRerank(t *testing.T) {
 	// do: a table run with a lane the product does not have must not read as
 	// the product's.
 	arms := []arm{
-		{"fused order (baseline)" + codeLaneLabel(), plain},
-		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts%s", rr.Pool, rr.Excerpt, codeLaneLabel()), reranked},
+		{name: "fused order (baseline)" + codeLaneLabel(), r: plain, g: g},
+		{name: fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts%s", rr.Pool, rr.Excerpt, codeLaneLabel()), r: reranked, g: g},
+	}
+	// The gap pass is harness-only, so it is off unless asked for:
+	// BACKEND_EVAL_GAP=1 is the arm, as in TestEvalMeasureAnswers.
+	if envOr("BACKEND_EVAL_GAP", "0") == "1" {
+		arms = append(arms, arm{
+			name: fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts + gap pass%s", rr.Pool, rr.Excerpt, codeLaneLabel()),
+			r:    reranked, g: evalGatherer(t, db, opts, client),
+		})
 	}
 
 	// The same reading as every other arm in the package — measureArm — so a
@@ -47,7 +60,7 @@ func TestEvalMeasureRerank(t *testing.T) {
 	questions := loadQuestions(t)
 	for _, a := range arms {
 		t.Logf("\n=== %s ===", a.name)
-		m := measureArm(t, ctx, a.name, g, questions, func(q Question) []retrieve.Hit {
+		m := measureArm(t, ctx, a.name, a.g, questions, func(q Question) []retrieve.Hit {
 			hits, err := a.r.Search(ctx, retrieve.Query{
 				Texts:    expansionTextsOf(t, expansions, q),
 				Code:     codes[q.Text],

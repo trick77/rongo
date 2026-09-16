@@ -151,7 +151,7 @@ func TestLLMRerank_reportsACancelledContextAsSuch(t *testing.T) {
 // back half of the window so the model reads whole lines.
 func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
 	t.Run("a cut never splits a rune", func(t *testing.T) {
-		got := excerpt(strings.Repeat("ä", 50), 10)
+		got := Excerpt(strings.Repeat("ä", 50), 10)
 		if !utf8.ValidString(got) {
 			t.Fatalf("excerpt cut inside a rune: %q", got)
 		}
@@ -161,34 +161,34 @@ func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
 	})
 	t.Run("a line break in the back half wins", func(t *testing.T) {
 		s := strings.Repeat("a", 6) + "\n" + strings.Repeat("b", 20)
-		got := excerpt(s, 10)
+		got := Excerpt(s, 10)
 		if got != strings.Repeat("a", 6)+"…" {
 			t.Errorf("excerpt = %q, want the cut at the newline", got)
 		}
 	})
 	t.Run("a line break in the front half loses", func(t *testing.T) {
 		s := "ab\n" + strings.Repeat("c", 30)
-		got := excerpt(s, 10)
+		got := Excerpt(s, 10)
 		if got != "ab\n"+strings.Repeat("c", 7)+"…" {
 			t.Errorf("excerpt = %q, want the full window", got)
 		}
 	})
 	t.Run("a single overlong line cuts at n", func(t *testing.T) {
-		got := excerpt(strings.Repeat("x", 100), 10)
+		got := Excerpt(strings.Repeat("x", 100), 10)
 		if got != strings.Repeat("x", 10)+"…" {
 			t.Errorf("excerpt = %q, want ten runes and the ellipsis", got)
 		}
 	})
 	t.Run("text that fits comes back whole", func(t *testing.T) {
-		if got := excerpt("  füüf\nlines  ", 10); got != "füüf\nlines" {
+		if got := Excerpt("  füüf\nlines  ", 10); got != "füüf\nlines" {
 			t.Errorf("excerpt = %q, want the whole trimmed text", got)
 		}
 	})
 	t.Run("the byte walk agrees with the rune slice", func(t *testing.T) {
 		for _, s := range excerptCorpus {
 			for _, n := range []int{0, 1, 2, 3, 7, 10, 23, 240} {
-				if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
-					t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+				if got, want := Excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+					t.Errorf("Excerpt(%q, %d) = %q, want %q", s, n, got, want)
 				}
 			}
 		}
@@ -242,8 +242,8 @@ func FuzzExcerpt(f *testing.F) {
 		if n < 0 || n > 1000 || !utf8.ValidString(s) {
 			t.Skip()
 		}
-		if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
-			t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+		if got, want := Excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+			t.Errorf("Excerpt(%q, %d) = %q, want %q", s, n, got, want)
 		}
 	})
 }

@@ -21,6 +21,14 @@
 #   hack/run-flow-eval.sh TestFlowGathered           # what reaches the answer
 #   hack/run-flow-eval.sh 'TestFlowEdgeReach$'       # the edge walk on its own
 #   hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'  # the answers, judged
+#
+# BACKEND_EVAL_GAP switches the directed gap pass — one short-gate call after
+# the walk and the crossings, whose names are then resolved without a second
+# call. It is harness-only until it is measured, so the answer arm has it OFF
+# and BACKEND_EVAL_GAP=1 turns it on:
+#   BACKEND_EVAL_GAP=1 hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+# TestFlowGathered reports the gap arms beside the others by default;
+# BACKEND_EVAL_GAP=0 leaves them out and saves one call per question.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

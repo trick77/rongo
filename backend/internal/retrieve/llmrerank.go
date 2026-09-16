@@ -121,7 +121,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(excerpt(h.RawText, r.Excerpt))
+		b.WriteString(Excerpt(h.RawText, r.Excerpt))
 		b.WriteString("\n")
 	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
@@ -170,8 +170,10 @@ func cut(hits []Hit, k int) []Hit {
 	return hits
 }
 
-// excerpt is the first n RUNES of s, backed off to the last line break in the
-// back half of the window so the model reads whole lines. The back-half floor
+// Excerpt is the first n RUNES of s, backed off to the last line break in the
+// back half of the window so the model reads whole lines. Exported because
+// every step that shows a model a chunk cuts it the same way — the reranker's
+// pool and the gap pass's prompt — and two cuts would drift. The back-half floor
 // is what keeps a long first line from yielding nothing at all. Runes, not
 // bytes: a byte cut splits an umlaut and hands the model a broken rune. The
 // warning about an unreadable reply cuts with llmwire.Truncate instead, which
@@ -181,7 +183,7 @@ func cut(hits []Hit, k int) []Hit {
 // It walks bytes rather than building a []rune: a chunk runs to a few
 // thousand runes and a pool to a hundred of them, so the slice was one
 // allocation per hit for a prefix of a few hundred.
-func excerpt(s string, n int) string {
+func Excerpt(s string, n int) string {
 	s = strings.TrimSpace(s)
 	half, end := runeOffsets(s, n)
 	if end < 0 {
