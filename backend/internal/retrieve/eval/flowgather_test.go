@@ -169,7 +169,7 @@ func TestFlowGathered(t *testing.T) {
 			if !ok {
 				t.Fatalf("no frozen expansion for %q; run TestExpandFlowQuestions", q.Text)
 			}
-			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Code: e.code(), Repos: e.Repos, Question: q.Text, K: gatherSearchK})
+			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Code: e.code(t), Repos: e.Repos, Question: q.Text, K: gatherSearchK})
 			if err != nil {
 				t.Fatalf("search %q: %v", q.Text, err)
 			}

@@ -8,7 +8,8 @@
     ],
     "repos": [
       "peeq"
-    ]
+    ],
+    "code": "diskSpace freeSpace availableSpace downloadManager storageCheck diskUsage canDownload insufficientSpace"
   },
   {
     "question": "What happens when many videos fail with extractor errors one after another?",
@@ -16,7 +17,8 @@
       "What happens when many videos fail with extractor errors one after another?",
       "video extraction error handling consecutive extractor failures failure cascade during playback extractor exception handling",
       "Extractor ExoPlayer MediaSource PlaybackException onPlayerError MediaCodecRenderer DefaultRenderersFactory ExtractorMediaSource"
-    ]
+    ],
+    "code": "Extractor ExoPlayer MediaSource PlaybackException onPlayerError MediaCodecRenderer DefaultRenderersFactory ExtractorMediaSource"
   },
   {
     "question": "In which format does yt-dlp expect the cookie file?",
@@ -27,7 +29,8 @@
     ],
     "repos": [
       "yt-dlp"
-    ]
+    ],
+    "code": "cookies cookie_file load_cookies parse_cookies Netscape Mozilla cookie_jar http_cookie"
   },
   {
     "question": "Can an API token be shown again after it has been created once?",
@@ -35,7 +38,8 @@
       "Can an API token be shown again after it has been created once?",
       "API token display token visibility token shown once token redisplay",
       "api_token token secret credential access_token display_token show_token token_response"
-    ]
+    ],
+    "code": "api_token token secret credential access_token display_token show_token token_response"
   },
   {
     "question": "How does an Apple TV get at the media file without signing in?",
@@ -43,7 +47,8 @@
       "How does an Apple TV get at the media file without signing in?",
       "unauthenticated media access streaming to a set-top box direct media file delivery playback without sign-in",
       "AirPlay AVPlayer MediaServer HTTPStreaming Bonjour NSNetService AVAssetResourceLoader handleAuthenticationChallenge"
-    ]
+    ],
+    "code": "AirPlay AVPlayer MediaServer HTTPStreaming Bonjour NSNetService AVAssetResourceLoader handleAuthenticationChallenge"
   },
   {
     "question": "After how many scans does peeq unsubscribe itself from a deleted channel?",
@@ -51,7 +56,8 @@
       "After how many scans does peeq unsubscribe itself from a deleted channel?",
       "automatic unsubscribe from a deleted channel scan threshold dead channel detection",
       "peeq channel scan delete unsubscribe timeout counter threshold"
-    ]
+    ],
+    "code": "peeq channel scan delete unsubscribe timeout counter threshold"
   },
   {
     "question": "DeadScanThreshold",
@@ -59,7 +65,8 @@
       "DeadScanThreshold",
       "dead scan threshold constant",
       "DeadScanThreshold deadScanThreshold DEAD_SCAN_THRESHOLD scanThreshold threshold deadScan scanConfig thresholdConfig"
-    ]
+    ],
+    "code": "DeadScanThreshold deadScanThreshold DEAD_SCAN_THRESHOLD scanThreshold threshold deadScan scanConfig thresholdConfig"
   },
   {
     "question": "How are yt-dlp's availability values translated into peeq's own values?",
@@ -67,7 +74,8 @@
       "How are yt-dlp's availability values translated into peeq's own values?",
       "availability value mapping upstream status translation availability state conversion",
       "availability yt_dlp peeqs Availability map_availability translate_availability availability_map convert_availability"
-    ]
+    ],
+    "code": "availability yt_dlp peeqs Availability map_availability translate_availability availability_map convert_availability"
   },
   {
     "question": "Why do the background loops have a random share in their interval?",
@@ -75,7 +83,8 @@
       "Why do the background loops have a random share in their interval?",
       "jitter in background loop intervals randomised scheduling thundering herd avoidance",
       "backgroundLoop randomInterval jitter backoff timer dispatch sleep delay"
-    ]
+    ],
+    "code": "backgroundLoop randomInterval jitter backoff timer dispatch sleep delay"
   },
   {
     "question": "How are vector hits and full-text hits merged into one result list?",
@@ -83,7 +92,8 @@
       "How are vector hits and full-text hits merged into one result list?",
       "hybrid search fusion combining vector and keyword results rank fusion into one result list",
       "mergeResults hybridSearch vectorScore fullTextScore rankFusion combineHits searchResults relevanceRanking"
-    ]
+    ],
+    "code": "mergeResults hybridSearch vectorScore fullTextScore rankFusion combineHits searchResults relevanceRanking"
   },
   {
     "question": "FuseWeighted",
@@ -91,7 +101,8 @@
       "FuseWeighted",
       "weighted fusion of result lists",
       "FuseWeighted fuse weighted combine merge aggregate weight fuseWeighted"
-    ]
+    ],
+    "code": "FuseWeighted fuse weighted combine merge aggregate weight fuseWeighted"
   },
   {
     "question": "How is the token count of a chunk estimated without downloading a tokenizer?",
@@ -99,7 +110,8 @@
       "How is the token count of a chunk estimated without downloading a tokenizer?",
       "token count estimation without a tokenizer heuristic token counting chunk size estimate",
       "token_count estimate_tokens chunk_size tokenizer encode tokenize approximate count_tokens"
-    ]
+    ],
+    "code": "token_count estimate_tokens chunk_size tokenizer encode tokenize approximate count_tokens"
   },
   {
     "question": "How many texts go into a single embedding request at most?",
@@ -107,7 +119,8 @@
       "How many texts go into a single embedding request at most?",
       "embedding request batch size maximum texts per request batching limit",
       "max_batch_size embedding_request batch_size max_texts input_limit chunk_limit"
-    ]
+    ],
+    "code": "max_batch_size embedding_request batch_size max_texts input_limit chunk_limit"
   },
   {
     "question": "How is a channel filter kept from taking effect only after the neighbour search?",
@@ -115,7 +128,8 @@
       "How is a channel filter kept from taking effect only after the neighbour search?",
       "filter pushdown before nearest neighbour search pre-filtering of vector search channel restriction in the query",
       "ChannelFilter NeighborDiscovery filterPriority applyFilter channelFilter neighborSearch filterOrder preDiscoveryFilter"
-    ]
+    ],
+    "code": "ChannelFilter NeighborDiscovery filterPriority applyFilter channelFilter neighborSearch filterOrder preDiscoveryFilter"
   },
   {
     "question": "Which PRAGMAs does peeq set when opening the database?",
@@ -126,7 +140,8 @@
     ],
     "repos": [
       "peeq"
-    ]
+    ],
+    "code": "PRAGMA sqlite3_exec openDatabase configureDatabase setPragmas WAL journal_mode foreign_keys"
   },
   {
     "question": "How does peeq tell that a migration has already been applied?",
@@ -137,7 +152,8 @@
     ],
     "repos": [
       "peeq"
-    ]
+    ],
+    "code": "Migration applied status check version schema database migrate"
   },
   {
     "question": "Which words are removed from a question before the keyword search runs?",
@@ -145,7 +161,8 @@
       "Which words are removed from a question before the keyword search runs?",
       "stopword removal before keyword search function word filtering query cleanup",
       "stopwords filter keywords search query preprocess tokens remove"
-    ]
+    ],
+    "code": "stopwords filter keywords search query preprocess tokens remove"
   },
   {
     "question": "How do you back up a running SQLite database online?",
@@ -153,7 +170,8 @@
       "How do you back up a running SQLite database online?",
       "online backup of a live SQLite database hot backup while writes continue",
       "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_remaining sqlite3_backup_pagecount SQLITE_OPEN_READWRITE SQLITE_OPEN_READONLY sqlite3_backup"
-    ]
+    ],
+    "code": "sqlite3_backup_init sqlite3_backup_step sqlite3_backup_finish sqlite3_backup_remaining sqlite3_backup_pagecount SQLITE_OPEN_READWRITE SQLITE_OPEN_READONLY sqlite3_backup"
   },
   {
     "question": "ZeroBlob",
@@ -161,7 +179,8 @@
       "ZeroBlob",
       "zero-filled blob allocation",
       "ZeroBlob Blob zeroBlob emptyBlob blobSize isZeroBlob blobLength nullBlob"
-    ]
+    ],
+    "code": "ZeroBlob Blob zeroBlob emptyBlob blobSize isZeroBlob blobLength nullBlob"
   },
   {
     "question": "Which SponsorBlock categories does peeq store, and which explicitly not?",
@@ -172,7 +191,8 @@
     ],
     "repos": [
       "peeq"
-    ]
+    ],
+    "code": "SponsorBlock Category SegmentType Peek PeekPlayer SponsorBlockManager SponsorBlockService SponsorBlockCategory"
   },
   {
     "question": "How does peeq tell that an audio track holds music rather than speech?",
@@ -180,7 +200,8 @@
       "How does peeq tell that an audio track holds music rather than speech?",
       "audio analysis music detection speech detection audio classification",
       "AudioAnalyzer MusicDetector SpeechDetector AudioClassifier analyzeAudio isMusic isSpeech AudioFeatureExtractor"
-    ]
+    ],
+    "code": "AudioAnalyzer MusicDetector SpeechDetector AudioClassifier analyzeAudio isMusic isSpeech AudioFeatureExtractor"
   },
   {
     "question": "How often may a video parked as unavailable be checked again?",
@@ -188,7 +209,8 @@
       "How often may a video parked as unavailable be checked again?",
       "retry limit for unavailable videos re-check attempts parked video recheck budget",
       "availabilityCheck retryCount maxRetries contentAvailability videoStatus parkedContent refreshInterval checkAvailability"
-    ]
+    ],
+    "code": "availabilityCheck retryCount maxRetries contentAvailability videoStatus parkedContent refreshInterval checkAvailability"
   },
   {
     "question": "How many parked videos may a single scan run re-check?",
@@ -196,7 +218,8 @@
       "How many parked videos may a single scan run re-check?",
       "per-scan recheck limit parked video batch size scan run budget",
       "maxVideos scanLimit parkedVideos scanBatchSize videoLimit scanQueue maxItems"
-    ]
+    ],
+    "code": "maxVideos scanLimit parkedVideos scanBatchSize videoLimit scanQueue maxItems"
   },
   {
     "question": "From when on does a video count as old material rather than a new arrival?",
@@ -204,7 +227,8 @@
       "From when on does a video count as old material rather than a new arrival?",
       "backlog cutoff age threshold for new arrivals old material classification",
       "Video Asset Age Threshold Archive New Date Created Published"
-    ]
+    ],
+    "code": "Video Asset Age Threshold Archive New Date Created Published"
   },
   {
     "question": "Why may the call for the key points spend more tokens than the one for the summary?",
@@ -212,7 +236,8 @@
       "Why may the call for the key points spend more tokens than the one for the summary?",
       "token budget per prompt key points versus summary max tokens choice",
       "maxTokens tokenLimit summaryTokens keyPointsTokens tokenBudget maxOutputTokens tokenCount"
-    ]
+    ],
+    "code": "maxTokens tokenLimit summaryTokens keyPointsTokens tokenBudget maxOutputTokens tokenCount"
   },
   {
     "question": "How does the download queue tell that nobody is waiting for a job?",
@@ -220,7 +245,8 @@
       "How does the download queue tell that nobody is waiting for a job?",
       "abandoned job detection no waiting consumer download queue orphan job",
       "DownloadQueue isIdle hasWaitingClients pendingTasks activeDownloads queueStatus waitingCount isProcessing"
-    ]
+    ],
+    "code": "DownloadQueue isIdle hasWaitingClients pendingTasks activeDownloads queueStatus waitingCount isProcessing"
   },
   {
     "question": "How long may the metadata pre-check before a download take?",
@@ -228,7 +254,8 @@
       "How long may the metadata pre-check before a download take?",
       "metadata probe timeout pre-download check duration",
       "metadata precheck timeout duration limit validation download pre_download"
-    ]
+    ],
+    "code": "metadata precheck timeout duration limit validation download pre_download"
   },
   {
     "question": "How do you create a Bloom filter table in SQLite?",
@@ -236,7 +263,8 @@
       "How do you create a Bloom filter table in SQLite?",
       "Bloom filter table creation in SQLite probabilistic membership index",
       "CREATE TABLE bloom_filter sqlite3 CREATE VIRTUAL TABLE bloom sqlite3_bloom_filter"
-    ]
+    ],
+    "code": "CREATE TABLE bloom_filter sqlite3 CREATE VIRTUAL TABLE bloom sqlite3_bloom_filter"
   },
   {
     "question": "How do you pass a Go slice to a SQL query as a table?",
@@ -244,7 +272,8 @@
       "How do you pass a Go slice to a SQL query as a table?",
       "passing a Go slice as a table valued parameter array binding in SQL",
       "sql.In sqlx.In IN (?) []interface{} strings.Join Rebind NamedExec"
-    ]
+    ],
+    "code": "sql.In sqlx.In IN (?) []interface{} strings.Join Rebind NamedExec"
   },
   {
     "question": "How do you read a CSV file directly as a SQL table?",
@@ -252,7 +281,8 @@
       "How do you read a CSV file directly as a SQL table?",
       "reading a CSV file as a SQL table virtual table over CSV",
       "LOAD DATA INFILE COPY CREATE EXTERNAL TABLE CSV SQL IMPORT TABLE FILE"
-    ]
+    ],
+    "code": "LOAD DATA INFILE COPY CREATE EXTERNAL TABLE CSV SQL IMPORT TABLE FILE"
   },
   {
     "question": "How do you write into a blob without loading all of it into memory?",
@@ -260,7 +290,8 @@
       "How do you write into a blob without loading all of it into memory?",
       "streaming blob write partial blob write incremental blob write without loading",
       "Blob BlobOutputStream write upload stream put createWriteStream BlobServiceClient"
-    ]
+    ],
+    "code": "Blob BlobOutputStream write upload stream put createWriteStream BlobServiceClient"
   },
   {
     "question": "How are texts cut into chunks for the search?",
@@ -268,7 +299,8 @@
       "How are texts cut into chunks for the search?",
       "text segmentation for full-text search chunking strategy for the search index splitting documents into search blocks tokenisation and segmentation for indexing",
       "TextChunker DocumentSplitter IndexTokenizer ChunkingStrategy splitText createChunks TextSegment SearchIndex"
-    ]
+    ],
+    "code": "TextChunker DocumentSplitter IndexTokenizer ChunkingStrategy splitText createChunks TextSegment SearchIndex"
   },
   {
     "question": "Which PRAGMAs are set when the SQLite file is opened?",
@@ -276,7 +308,8 @@
       "Which PRAGMAs are set when the SQLite file is opened?",
       "PRAGMA settings on opening the SQLite file connection configuration",
       "PRAGMA sqlite3_open sqlite3_exec SQLITE_OPEN_READWRITE SQLITE_OPEN_CREATE sqlite3_db_config journal_mode foreign_keys"
-    ]
+    ],
+    "code": "PRAGMA sqlite3_open sqlite3_exec SQLITE_OPEN_READWRITE SQLITE_OPEN_CREATE sqlite3_db_config journal_mode foreign_keys"
   },
   {
     "question": "How is it recognised that a migration has already run?",
@@ -284,7 +317,8 @@
       "How is it recognised that a migration has already run?",
       "detecting an already applied migration migration state bookkeeping",
       "Migration hasRun isMigrated migrationVersion appliedMigrations migrationStatus checkMigration migrationHistory"
-    ]
+    ],
+    "code": "Migration hasRun isMigrated migrationVersion appliedMigrations migrationStatus checkMigration migrationHistory"
   },
   {
     "question": "Which header keeps an upstream proxy from buffering the event stream?",
@@ -292,7 +326,8 @@
       "Which header keeps an upstream proxy from buffering the event stream?",
       "response header against proxy buffering server-sent events streaming header",
       "Cache-Control no-store no-cache X-Accel-Buffering Transfer-Encoding chunked text/event-stream Connection"
-    ]
+    ],
+    "code": "Cache-Control no-store no-cache X-Accel-Buffering Transfer-Encoding chunked text/event-stream Connection"
   },
   {
     "question": "How is a session token stored in the database?",
@@ -300,7 +335,8 @@
       "How is a session token stored in the database?",
       "session token storage session persistence hashed token record",
       "SessionToken TokenRepository saveToken session_tokens TokenStorage persistToken TokenService createSession"
-    ]
+    ],
+    "code": "SessionToken TokenRepository saveToken session_tokens TokenStorage persistToken TokenService createSession"
   },
   {
     "question": "What does the server answer to a request without a valid session?",
@@ -308,7 +344,8 @@
       "What does the server answer to a request without a valid session?",
       "unauthenticated request response status code without a session",
       "Session validate authenticate HTTP 401 Unauthorized InvalidSessionException sessionToken checkSession"
-    ]
+    ],
+    "code": "Session validate authenticate HTTP 401 Unauthorized InvalidSessionException sessionToken checkSession"
   },
   {
     "question": "On which port does the service listen when nothing is configured?",
@@ -316,7 +353,8 @@
       "On which port does the service listen when nothing is configured?",
       "default listen port fallback address configuration default",
       "defaultPort port listen serverPort config DEFAULT_PORT portNumber bind"
-    ]
+    ],
+    "code": "defaultPort port listen serverPort config DEFAULT_PORT portNumber bind"
   },
   {
     "question": "How long may a single line in the model's answer stream be at most?",
@@ -324,7 +362,8 @@
       "How long may a single line in the model's answer stream be at most?",
       "maximum line length in the model stream scanner buffer limit",
       "max_line_length MAX_LINE_LENGTH line_limit stream_limit max_chars_per_line output_line_length"
-    ]
+    ],
+    "code": "max_line_length MAX_LINE_LENGTH line_limit stream_limit max_chars_per_line output_line_length"
   },
   {
     "question": "How much of the embedding service's error text is read at most?",
@@ -332,7 +371,8 @@
       "How much of the embedding service's error text is read at most?",
       "bounded read of an upstream error body error message size limit",
       "embedding error message read max length response"
-    ]
+    ],
+    "code": "embedding error message read max length response"
   },
   {
     "question": "How is a vector encoded as text so that sqlite-vec accepts it?",
@@ -343,7 +383,8 @@
     ],
     "repos": [
       "sqlite-vec"
-    ]
+    ],
+    "code": "sqlite3_bind_blob vec0 vec_distance vec_length vec_from_json vec_to_json BLOB REAL"
   },
   {
     "question": "What happens when two writes in peeq hit the database at the same time?",
@@ -354,7 +395,8 @@
     ],
     "repos": [
       "peeq"
-    ]
+    ],
+    "code": "Database write transaction lock concurrent queue synchronized peeq"
   },
   {
     "question": "Who registers the driver rongo addresses with sql.Open(\"sqlite3\", ...)?",
@@ -362,7 +404,8 @@
       "Who registers the driver rongo addresses with sql.Open(\"sqlite3\", ...)?",
       "SQL driver registration driver name binding database driver init",
       "sql.Open sqlite3 Register driver sql.DB database/sql init Driver"
-    ]
+    ],
+    "code": "sql.Open sqlite3 Register driver sql.DB database/sql init Driver"
   },
   {
     "question": "How does journal_mode=wal get from the connection URL into the database?",
@@ -370,7 +413,8 @@
       "How does journal_mode=wal get from the connection URL into the database?",
       "connection URL pragma parameters WAL journal mode from the DSN",
       "journal_mode wal connection_string parse_url query_parameters sqlite3 PRAGMA setJournalMode"
-    ]
+    ],
+    "code": "journal_mode wal connection_string parse_url query_parameters sqlite3 PRAGMA setJournalMode"
   },
   {
     "question": "How long does rongo wait when the database file is currently locked?",
@@ -378,7 +422,8 @@
       "How long does rongo wait when the database file is currently locked?",
       "busy timeout on a locked database lock wait duration",
       "lock timeout retry busy database file wait interval"
-    ]
+    ],
+    "code": "lock timeout retry busy database file wait interval"
   },
   {
     "question": "Are foreign key constraints active, and who turns them on?",
@@ -386,7 +431,8 @@
       "Are foreign key constraints active, and who turns them on?",
       "foreign key enforcement pragma foreign_keys who enables constraints",
       "ForeignKey referentialIntegrity enableConstraints PRAGMA foreign_keys setForeignKeyConstraintsEnabled isForeignKeyConstraintsEnabled DatabaseConfiguration"
-    ]
+    ],
+    "code": "ForeignKey referentialIntegrity enableConstraints PRAGMA foreign_keys setForeignKeyConstraintsEnabled isForeignKeyConstraintsEnabled DatabaseConfiguration"
   },
   {
     "question": "Why is a heavily used helper not in every answer, although the code calls it everywhere?",
@@ -394,7 +440,8 @@
       "Why is a heavily used helper not in every answer, although the code calls it everywhere?",
       "down-ranking of ubiquitous helpers common utility penalty ranking of widely used code",
       "Helper Utility Response ResponseBuilder Serializer exclude transient internal"
-    ]
+    ],
+    "code": "Helper Utility Response ResponseBuilder Serializer exclude transient internal"
   },
   {
     "question": "How many options may a follow-up question offer at most?",
@@ -402,7 +449,8 @@
       "How many options may a follow-up question offer at most?",
       "maximum number of candidates in a follow-up question choice limit",
       "maxOptions maxChoices MAX_OPTIONS MAX_CHOICES maxAnswers MAX_ANSWERS maxSuggestions MAX_SUGGESTIONS"
-    ]
+    ],
+    "code": "maxOptions maxChoices MAX_OPTIONS MAX_CHOICES maxAnswers MAX_ANSWERS maxSuggestions MAX_SUGGESTIONS"
   },
   {
     "question": "How often is a repository checked for changes?",
@@ -410,7 +458,8 @@
       "How often is a repository checked for changes?",
       "repository poll interval change detection frequency refresh schedule",
       "poll check update interval repository sync refresh fetch"
-    ]
+    ],
+    "code": "poll check update interval repository sync refresh fetch"
   },
   {
     "question": "How does the service know which branch is meant when none was configured?",
@@ -418,7 +467,8 @@
       "How does the service know which branch is meant when none was configured?",
       "default branch resolution branch fallback head detection",
       "defaultBranch branch getBranch resolveBranch fallback HEAD currentBranch branchName"
-    ]
+    ],
+    "code": "defaultBranch branch getBranch resolveBranch fallback HEAD currentBranch branchName"
   },
   {
     "question": "What happens when the configured branch was deleted on the far side?",
@@ -426,7 +476,8 @@
       "What happens when the configured branch was deleted on the far side?",
       "missing remote branch handling deleted upstream branch",
       "branch remote delete fetch prune tracking origin"
-    ]
+    ],
+    "code": "branch remote delete fetch prune tracking origin"
   },
   {
     "question": "Why does startup abort when the wrong variant of a tool is installed?",
@@ -434,7 +485,8 @@
       "Why does startup abort when the wrong variant of a tool is installed?",
       "startup precondition check external tool variant validation fail fast on wrong binary",
       "ToolVariant ToolVersion Startup Installation Compatibility ToolManager ToolProvider VersionCheck"
-    ]
+    ],
+    "code": "ToolVariant ToolVersion Startup Installation Compatibility ToolManager ToolProvider VersionCheck"
   },
   {
     "question": "Where do the credentials for a private repository live, if not in the configuration file?",
@@ -442,7 +494,8 @@
       "Where do the credentials for a private repository live, if not in the configuration file?",
       "credentials for private repositories token from the environment secret handling outside config",
       "credentials token auth keychain env config secrets gitconfig"
-    ]
+    ],
+    "code": "credentials token auth keychain env config secrets gitconfig"
   },
   {
     "question": "From which size on does a directory stop counting as a building block of its own?",
@@ -450,7 +503,8 @@
       "From which size on does a directory stop counting as a building block of its own?",
       "module size threshold directory clustering cut minimum module size",
       "MAX_DIR_SIZE MODULE_THRESHOLD COMPONENT_SIZE_LIMIT DIR_SIZE_THRESHOLD isLargeDirectory shouldSplit MAX_MODULE_SIZE DIRECTORY_SIZE_LIMIT"
-    ]
+    ],
+    "code": "MAX_DIR_SIZE MODULE_THRESHOLD COMPONENT_SIZE_LIMIT DIR_SIZE_THRESHOLD isLargeDirectory shouldSplit MAX_MODULE_SIZE DIRECTORY_SIZE_LIMIT"
   },
   {
     "question": "How is it recognised that one repository uses another?",
@@ -458,7 +512,8 @@
       "How is it recognised that one repository uses another?",
       "cross repository dependency detection inter-repo usage links",
       "dependency import require submodule package.json requirements.txt Podfile build.gradle"
-    ]
+    ],
+    "code": "dependency import require submodule package.json requirements.txt Podfile build.gradle"
   },
   {
     "question": "Which files never make it into the index in the first place?",
@@ -466,7 +521,8 @@
       "Which files never make it into the index in the first place?",
       "indexing exclusions skipped files ignore rules",
       "index exclude filter ignore skip file path pattern"
-    ]
+    ],
+    "code": "index exclude filter ignore skip file path pattern"
   },
   {
     "question": "How far from a search hit may code sit and still make it into an answer?",
@@ -474,7 +530,8 @@
       "How far from a search hit may code sit and still make it into an answer?",
       "neighbourhood around a hit context window for gathering distance from the match",
       "fuzzy threshold distance levenshtein similarity score match tolerance"
-    ]
+    ],
+    "code": "fuzzy threshold distance levenshtein similarity score match tolerance"
   },
   {
     "question": "What happens to the gathered material once its budget is reached?",
@@ -482,7 +539,8 @@
       "What happens to the gathered material once its budget is reached?",
       "gathering budget exhaustion truncation of collected sources context limit",
       "budget limit collection material stop exceed threshold quota"
-    ]
+    ],
+    "code": "budget limit collection material stop exceed threshold quota"
   },
   {
     "question": "What happens to the index when a repository disappears from the configuration?",
@@ -490,7 +548,8 @@
       "What happens to the index when a repository disappears from the configuration?",
       "index cleanup on removed repository purging stale rows",
       "Repository Index Configuration removeRepository updateIndex cleanup delete purge"
-    ]
+    ],
+    "code": "Repository Index Configuration removeRepository updateIndex cleanup delete purge"
   },
   {
     "question": "How does a question in domain language become a search that actually hits the code?",
@@ -498,7 +557,8 @@
       "How does a question in domain language become a search that actually hits the code?",
       "query expansion from domain language to identifiers understanding step bridging vocabulary",
       "search query terminology mapping domain implementation identifier"
-    ]
+    ],
+    "code": "search query terminology mapping domain implementation identifier"
   },
   {
     "question": "How do peeq and rongo each space their background loops apart?",
@@ -506,7 +566,8 @@
       "How do peeq and rongo each space their background loops apart?",
       "background loop spacing in peeq background loop timing in rongo interval between background loops in peeq and rongo",
       "peeq rongo backgroundLoop loopInterval timer dispatchQueue asyncAfter sleep"
-    ]
+    ],
+    "code": "peeq rongo backgroundLoop loopInterval timer dispatchQueue asyncAfter sleep"
   },
   {
     "question": "How does peeq open its SQLite database compared to rongo?",
@@ -514,7 +575,8 @@
       "How does peeq open its SQLite database compared to rongo?",
       "peeq SQLite database opening method rongo SQLite database opening method comparison of SQLite database initialization",
       "peeq rongo SQLite open database connection initialization"
-    ]
+    ],
+    "code": "peeq rongo SQLite open database connection initialization"
   },
   {
     "question": "Which technical choices in rongo are locked and must not be changed without agreement?",
@@ -522,7 +584,8 @@
       "Which technical choices in rongo are locked and must not be changed without agreement?",
       "locked technical choices in rongo unchangeable technical decisions in rongo technical constraints in rongo requiring agreement",
       "rongo technical choices locked agreement constraints decisions"
-    ]
+    ],
+    "code": "rongo technical choices locked agreement constraints decisions"
   },
   {
     "question": "What has to be installed on the machine before rongo's development environment will start?",
@@ -530,7 +593,8 @@
       "What has to be installed on the machine before rongo's development environment will start?",
       "prerequisites for rongo development environment required software for rongo dev setup dependencies to install before rongo dev environment",
       "rongo development environment setup install dependencies prerequisites"
-    ]
+    ],
+    "code": "rongo development environment setup install dependencies prerequisites"
   },
   {
     "question": "Which attribute key does peeq use when it logs an error?",
@@ -538,6 +602,7 @@
       "Which attribute key does peeq use when it logs an error?",
       "attribute key for error logging in peeq error log attribute key used by peeq peeq error logging attribute key",
       "peeq error log attribute key logging errorLog"
-    ]
+    ],
+    "code": "peeq error log attribute key logging errorLog"
   }
 ]

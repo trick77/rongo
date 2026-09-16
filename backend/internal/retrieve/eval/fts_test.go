@@ -14,7 +14,6 @@ package eval
 import (
 	"context"
 	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -60,23 +59,16 @@ func TestEvalMeasureFTS(t *testing.T) {
 		{"prose floor only (the lane before the rung)", plain},
 		{fmt.Sprintf("code rung %.1f (the product)", retrieve.WeightKeywordCode), retrieve.New(db, evalEmbedder(t))},
 	}
+	// Both arms always run: this test IS the comparison, so the switch every
+	// other arm in the package reads would only let one half of it disappear.
+	t.Logf("both arms, the switch does not apply here: BACKEND_EVAL_CODE_LANE is for the arms that measure something else")
 
 	ranks := make([]map[string]int, len(arms))
 	for i, a := range arms {
-		ranks[i] = map[string]int{}
-		var n, at5, at20, gathered int
-		var mrr float64
-		var ambN, ambBoth, compN, compAll int
-		var docN, docAt20 int
 		t.Logf("\n=== %s ===", a.name)
-
-		for _, q := range questions {
-			texts, ok := expansions[q.Text]
-			if !ok {
-				t.Fatalf("no expansion for %q", q.Text)
-			}
+		m := measureArm(t, ctx, a.name, g, questions, func(q Question) []retrieve.Hit {
 			hits, err := a.r.Search(ctx, retrieve.Query{
-				Texts:    texts,
+				Texts:    expansionTextsOf(t, expansions, q),
 				Code:     expansionCodes[q.Text],
 				Repos:    expansionRepos[q.Text],
 				Question: q.Text,
@@ -85,111 +77,16 @@ func TestEvalMeasureFTS(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}
-
-			// The doc-led axis, read off the same hit lists: weighing a rung of
-			// guessed identifiers up weighs prose down against it, and a
-			// question only a document answers has no identifiers. A win on
-			// code that takes the documents with it has changed which questions
-			// rongo can answer, not improved retrieval.
-			if docLedQuestion(q) {
-				docN++
-				if rankOfExpected(hits, q) > 0 {
-					docAt20++
-				}
-			}
-
-			if q.Resolution != ResolutionUnique {
-				sources, err := g.Gather(ctx, hits)
-				if err != nil {
-					t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
-				}
-				found := 0
-				for _, c := range q.Candidates {
-					if hopOfCandidate(sources, c) >= 0 {
-						found++
-					}
-				}
-				switch q.Resolution {
-				case ResolutionAmbiguous:
-					ambN++
-					if found >= 2 {
-						ambBoth++
-					}
-				case ResolutionComposition:
-					compN++
-					if found == len(q.Candidates) {
-						compAll++
-					}
-				}
-				// Per question here too, not just in the unique cohort: a gain
-				// of one ambiguous pair is a claim about ONE question, and
-				// without the line nothing in the output says which.
-				t.Logf("  %-9s %d/%d gathered %s", q.Resolution, found, len(q.Candidates), short(q.Text))
-				continue
-			}
-
-			n++
-			rank := 0
-			for i, h := range hits {
-				if h.Repo == q.Candidates[0].Repo && contains(q.Candidates[0].Paths, h.Path) {
-					rank = i + 1
-					break
-				}
-			}
-			if rank > 0 && rank <= 5 {
-				at5++
-			}
-			if rank > 0 {
-				at20++
-				mrr += 1 / float64(rank)
-				ranks[i][q.Text] = rank
-			}
-			sources, err := g.Gather(ctx, hits)
-			if err != nil {
-				t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
-			}
-			if hopOfCandidate(sources, q.Candidates[0]) >= 0 {
-				gathered++
-			}
-			t.Logf("  rank %3d gathered %-5v %s", rank, hopOfCandidate(sources, q.Candidates[0]) >= 0, short(q.Text))
-		}
-
-		t.Logf("  %s: unique n=%d recall@5 %.3f (%d) recall@20 %.3f (%d) MRR %.3f gathered %.3f (%d)",
-			a.name, n, float64(at5)/float64(n), at5, float64(at20)/float64(n), at20, mrr/float64(n),
-			float64(gathered)/float64(n), gathered)
-		t.Logf("  %s: ambiguous both alternatives gathered %d/%d; composition all parts gathered %d/%d",
-			a.name, ambBoth, ambN, compAll, compN)
-		t.Logf("  %s: doc-led recall@%d %s", a.name, gatherSearchK, frac(docAt20, docN))
+			return hits
+		})
+		m.log(t, a.name)
+		ranks[i] = m.ranks
 	}
 
-	// The common set: the questions every arm ranks, so the means below are the
-	// same questions moving rather than different ones being counted.
-	var common []string
-	for text := range ranks[0] {
-		in := true
-		for _, m := range ranks[1:] {
-			if _, ok := m[text]; !ok {
-				in = false
-				break
-			}
-		}
-		if in {
-			common = append(common, text)
-		}
-	}
-	sort.Strings(common)
-
+	common := commonRanked(ranks)
 	t.Logf("")
 	t.Logf("mean rank of the expected code over the %d questions every arm ranks", len(common))
 	for i, a := range arms {
-		sum := 0
-		for _, text := range common {
-			sum += ranks[i][text]
-		}
-		mean := 0.0
-		if len(common) > 0 {
-			mean = float64(sum) / float64(len(common))
-		}
-		t.Logf("  %-44s %.2f", a.name, mean)
+		t.Logf("  %-44s %.2f", a.name, meanRankOver(ranks[i], common))
 	}
 }

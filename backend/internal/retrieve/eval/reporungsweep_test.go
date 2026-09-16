@@ -7,7 +7,6 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/projects"
-	"github.com/trick77/rongo/internal/retrieve"
 )
 
 // repoRungTurn is one question with every paid rung already run, so the
@@ -71,9 +70,9 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t)
-	r := retrieve.New(db, embedder)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	margin := routeMargin(t)
 	router := ask.NewRouter(client, db, margin, moduleOpts(t))
@@ -81,7 +80,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	var turns []repoRungTurn
 	judgeCalls := 0
 	for _, q := range loadQuestions(t) {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 		ranked, err := router.Rank(ctx, hits)
 		if err != nil {
 			t.Fatalf("rank %q: %v", q.Text, err)

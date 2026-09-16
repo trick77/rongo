@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"sort"
 	"testing"
 
 	"github.com/trick77/rongo/internal/retrieve"
@@ -54,8 +53,8 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	embedder := evalEmbedder(t)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 
@@ -85,13 +84,13 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 	ranks := make([]map[string]int, len(docDecays))
 
 	for i, decay := range docDecays {
-		r := retrieve.New(db, embedder)
+		r := evalRetriever(t, db)
 		r.DocDecay = decay
 		ranks[i] = map[string]int{}
 
 		var codeHit, codeTop5, docHit int
 		for _, q := range codeLed {
-			rank := rankOfExpected(docHits(t, ctx, r, expansions, expansionRepos, q), q)
+			rank := rankOfExpected(docHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q), q)
 			if rank > 0 {
 				codeHit++
 				ranks[i][q.Text] = rank
@@ -101,7 +100,7 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 			}
 		}
 		for _, q := range docLed {
-			if rankOfExpected(docHits(t, ctx, r, expansions, expansionRepos, q), q) > 0 {
+			if rankOfExpected(docHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q), q) > 0 {
 				docHit++
 			}
 		}
@@ -112,33 +111,12 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 
 	// The common set: the questions every arm ranks, so the means below are
 	// the same questions moving, not different ones being counted.
-	var common []string
-	for text := range ranks[0] {
-		in := true
-		for _, m := range ranks[1:] {
-			if _, ok := m[text]; !ok {
-				in = false
-				break
-			}
-		}
-		if in {
-			common = append(common, text)
-		}
-	}
-	sort.Strings(common)
+	common := commonRanked(ranks)
 
 	t.Logf("")
 	t.Logf("mean rank of the expected code over the %d questions every arm ranks", len(common))
 	for i, decay := range docDecays {
-		sum := 0
-		for _, text := range common {
-			sum += ranks[i][text]
-		}
-		mean := 0.0
-		if len(common) > 0 {
-			mean = float64(sum) / float64(len(common))
-		}
-		t.Logf("%-7.2f %.2f", decay, mean)
+		t.Logf("%-7.2f %.2f", decay, meanRankOver(ranks[i], common))
 	}
 }
 
@@ -163,13 +141,11 @@ func docLedQuestion(q Question) bool {
 // docHits searches with the retriever's own doc decay, at the routing cut.
 // Kept separate from diverseHits so a change to either measurement's depth
 // cannot move the other one.
-func docHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) []retrieve.Hit {
+func docHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
 	t.Helper()
-	texts, ok := expansions[q.Text]
-	if !ok {
-		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
-	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], Question: q.Text, K: docK})
+	hits, err := r.Search(ctx, retrieve.Query{
+		Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+		Repos: repos[q.Text], Question: q.Text, K: docK})
 	if err != nil {
 		t.Fatalf("search %q: %v", q.Text, err)
 	}

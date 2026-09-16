@@ -40,8 +40,8 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	embedder := evalEmbedder(t)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 
@@ -50,7 +50,7 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 	t.Logf("%-7s %-14s %-14s %-14s %s", "decay", "ambig all", "ambig parts", "unique r@20", "composition all")
 
 	for _, decay := range repoDecays {
-		r := retrieve.New(db, embedder)
+		r := evalRetriever(t, db)
 		r.RepoDecay = decay
 
 		var ambigAll, ambigN, ambigParts, ambigPartsN int
@@ -58,7 +58,7 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 		var compAll, compN int
 
 		for _, q := range questions {
-			hits := diverseHits(t, ctx, r, expansions, expansionRepos, q)
+			hits := diverseHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 			found := candidatesFound(hits, q)
 
 			switch q.Resolution {
@@ -94,13 +94,11 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 // diverseHits searches with the retriever's own decay. It is hitsFor with the
 // diversity cut rather than the routing one, kept separate so a change to the
 // routing arm's depth cannot silently move this measurement.
-func diverseHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) []retrieve.Hit {
+func diverseHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
 	t.Helper()
-	texts, ok := expansions[q.Text]
-	if !ok {
-		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
-	}
-	hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: repos[q.Text], Question: q.Text, K: diversityK})
+	hits, err := r.Search(ctx, retrieve.Query{
+		Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+		Repos: repos[q.Text], Question: q.Text, K: diversityK})
 	if err != nil {
 		t.Fatalf("search %q: %v", q.Text, err)
 	}

@@ -1,7 +1,9 @@
 package retrieve
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,44 @@ func TestSearch_theCodeTextsFloorCarriesItsOwnWeight(t *testing.T) {
 	}
 	if lanes := strings.Join(hits[0].Lanes, ","); !strings.Contains(lanes, "keyword:code") {
 		t.Errorf("lanes = %s, want the code text's floor labelled as its own rung", lanes)
+	}
+}
+
+func TestSearch_saysSoWhenTheCodeTextIsNotOneOfTheTexts(t *testing.T) {
+	// The rung is found by comparing Code against the texts, so a Code built
+	// separately from them turns the rung off and nothing downstream can tell.
+	// Loud once, because the operator would otherwise read a table as a lane
+	// that never ran.
+	db := testDB(t)
+	addRepo(t, db, "shop", "master")
+	addChunk(t, db, "shop", "src/Promo.java", "send", "promoMailer dispatch of the nightly batch", nearVec)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	r := New(db, fixedEmbedder{vec: queryVec})
+	if _, err := r.Search(context.Background(), Query{
+		Texts: []string{"how is the teaser mail sent", "promoMailer dispatchRetry"},
+		Code:  "promoMailer dispatchRetry",
+		K:     5,
+	}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if strings.Contains(buf.String(), "code rung is off") {
+		t.Errorf("warned about a code text that IS one of the texts:\n%s", buf.String())
+	}
+
+	if _, err := r.Search(context.Background(), Query{
+		Texts: []string{"how is the teaser mail sent"},
+		Code:  "promoMailer dispatchRetry",
+		K:     5,
+	}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if !strings.Contains(buf.String(), "code rung is off") {
+		t.Errorf("no warning for a code text that is not among the texts:\n%s", buf.String())
 	}
 }
 

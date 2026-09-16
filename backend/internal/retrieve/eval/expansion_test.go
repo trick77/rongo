@@ -38,33 +38,25 @@ type expansion struct {
 	Repos []string `json:"repos,omitempty"`
 	// Code is the understanding's guessed code vocabulary as one text — the
 	// entry SearchTexts puts last — recorded by name so the code rung's input
-	// is a field rather than a position. Optional, like Repos, because the file
-	// predates it: a record frozen before this falls back to reading the third
-	// text, which is what that position meant.
+	// is a field rather than a position. `omitempty` because a question the
+	// step guessed no identifiers for has none; every record in both frozen
+	// files was migrated to carry it, so a record with texts and no code is
+	// stale rather than code-less. See code().
 	Code string `json:"code,omitempty"`
 }
 
-// code is the frozen code text of a record, or the position it used to live at.
-func (e expansion) code() string {
-	if e.Code != "" {
-		return e.Code
-	}
-	return codeTextOf(e.Texts)
-}
-
-// codeTextOf reads the guessed CODE VOCABULARY out of a frozen record's texts,
-// for the records written before the Code field existed.
+// code is the frozen code text of a record.
 //
-// Understanding.SearchTexts emits the raw question, the business-language
-// restatement and the code terms, in that order and dropping a blank one — so
-// three texts means the last is the code terms, and anything shorter means the
-// step guessed none that the texts alone can tell apart from the restatement.
-// Such a question contributes no code rung rather than a guessed one.
-func codeTextOf(texts []string) string {
-	if len(texts) != 3 {
-		return ""
+// No fallback to the third text: the files were migrated once, and a silent
+// fallback would let a hand-edited or half-re-frozen record run the code rung
+// on whatever happens to sit at that position — the business-language
+// restatement, under a weight meant for identifiers.
+func (e expansion) code(t *testing.T) string {
+	t.Helper()
+	if e.Code == "" && len(e.Texts) > 0 {
+		t.Fatalf("stale expansion record for %q, re-freeze: texts but no code", e.Question)
 	}
-	return texts[2]
+	return e.Code
 }
 
 // readExpansions parses the frozen file, or skips the arm if it is not there.
@@ -90,6 +82,18 @@ func loadExpansions(t *testing.T) map[string][]string {
 	return out
 }
 
+// expansionTextsOf is the frozen texts of one question, or a fatal: every arm
+// that reads the file fails on a missing entry rather than searching the raw
+// question and reporting a number that measures a different query.
+func expansionTextsOf(t *testing.T, expansions map[string][]string, q Question) []string {
+	t.Helper()
+	texts, ok := expansions[q.Text]
+	if !ok {
+		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
+	}
+	return texts
+}
+
 // loadExpansionCodes returns the frozen code text per question, which is what
 // Query.Code carries. A question whose record has none maps to "", the same
 // meaning an Understanding that guessed no identifiers has in pipeline.go.
@@ -97,7 +101,7 @@ func loadExpansionCodes(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	for _, e := range readExpansions(t) {
-		out[e.Question] = e.code()
+		out[e.Question] = e.code(t)
 	}
 	return out
 }
@@ -310,23 +314,26 @@ func TestRefreshTextsKeepsTheFrozenRepoRestriction(t *testing.T) {
 	}
 }
 
-// TestExpansionCodeFallsBackToTheThirdText runs WITHOUT an endpoint. The frozen
-// file predates the Code field and is not re-frozen for this, so a record
-// without one has to keep meaning what its third text meant — otherwise the
-// rung silently has no input on every question measured so far.
-func TestExpansionCodeFallsBackToTheThirdText(t *testing.T) {
-	old := expansion{Texts: []string{"question", "restatement", "PromoMailJob dispatchRetry"}}
-	if got := old.code(); got != "PromoMailJob dispatchRetry" {
-		t.Errorf("code() = %q, want the third text of a record frozen before the field", got)
-	}
-	fresh := expansion{Texts: []string{"question", "restatement", "stale position"}, Code: "PromoMailJob"}
-	if got := fresh.code(); got != "PromoMailJob" {
-		t.Errorf("code() = %q, want the recorded field to win over the position", got)
-	}
-	for _, texts := range [][]string{nil, {"question"}, {"question", "restatement"}} {
-		if got := (expansion{Texts: texts}).code(); got != "" {
-			t.Errorf("code() of %v = %q, want no code rung", texts, got)
+// TestFrozenExpansionsCarryTheirCodeText runs WITHOUT an endpoint. Both files
+// were migrated once; a record that lost its code, or a new one frozen by a
+// build that does not write it, would run the rung on nothing and the table
+// would simply read as "no gain".
+func TestFrozenExpansionsCarryTheirCodeText(t *testing.T) {
+	for _, e := range readExpansions(t) {
+		if e.Code == "" {
+			t.Errorf("%q has no code text in %s", e.Question, expansionsFile)
 		}
+	}
+	for _, e := range loadFlowExpansions(t) {
+		if e.Code == "" {
+			t.Errorf("%q has no code text in %s", e.Question, flowExpansionsFile())
+		}
+	}
+	if got := (expansion{Question: "q", Texts: []string{"q", "restatement", "PromoMailJob"}, Code: "PromoMailJob"}).code(t); got != "PromoMailJob" {
+		t.Errorf("code() = %q, want the recorded field", got)
+	}
+	if got := (expansion{Question: "q"}).code(t); got != "" {
+		t.Errorf("code() = %q, want none for an empty record", got)
 	}
 }
 
@@ -450,9 +457,9 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	client := evalEmbedder(t)
-	r := retrieve.New(db, client)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 	questions := loadQuestions(t)
 
 	type row struct {
@@ -464,15 +471,15 @@ func TestEvalMeasureExpansion(t *testing.T) {
 	var rawMRR, expMRR float64
 
 	for _, q := range questions {
-		texts, ok := expansions[q.Text]
-		if !ok {
-			t.Fatalf("no expansion recorded for %q", q.Text)
-		}
+		// The raw arm is the question as typed, before the understanding step:
+		// no expansion, so no guessed identifiers and no code rung either.
 		raw, err := r.Search(ctx, retrieve.Query{Text: q.Text, Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("raw search: %v", err)
 		}
-		exp, err := r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: 20})
+		exp, err := r.Search(ctx, retrieve.Query{
+			Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],
+			Question: q.Text, K: 20})
 		if err != nil {
 			t.Fatalf("expanded search: %v", err)
 		}

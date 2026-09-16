@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -120,11 +121,29 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 // would be indistinguishable from a broken database, and the answer layer would
 // have to guess which one it was looking at.
 func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
+	texts := q.texts()
+	// The rung is found by comparing the code text against the texts being
+	// searched, so a Code that is not one of them switches it off silently —
+	// and a caller that built the two separately would never notice. Says so
+	// once, rather than answering from a lane the operator thinks is running.
+	if q.Code != "" && !containsText(texts, q.Code) {
+		slog.Warn("code text is not among the query texts, the code rung is off for this search",
+			"code", q.Code, "texts", len(texts))
+	}
 	repos, err := r.knownRepos(ctx, q.Repos, q.Question)
 	if err != nil {
 		return nil, err
 	}
-	return r.searchTexts(ctx, q.texts(), q.Code, repos, q.K, q.Stage)
+	return r.searchTexts(ctx, texts, q.Code, repos, q.K, q.Stage)
+}
+
+func containsText(texts []string, want string) bool {
+	for _, t := range texts {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveRepos sorts what a question said about repositories into the names
