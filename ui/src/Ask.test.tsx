@@ -1643,13 +1643,18 @@ describe("Ask, the edges of the reading column", () => {
     expect(scroll.className).not.toContain("isolate");
     expect(scroll.compareDocumentPosition(head) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // The foot's strip belongs to the composer and sits immediately above it,
-    // because the composer is a sibling BELOW the scroller rather than an
-    // overlay on it — a gradient on the form itself fades nothing.
+    // The composer is the scroller's last child, stuck to its foot: the
+    // scrollbar runs the column's full height, and at the end of the thread
+    // the form sits in flow with the last line wholly above it. The foot's
+    // strip belongs to the composer and sits immediately above it.
+    const form = container.querySelector("form") as HTMLElement;
+    expect(scroll.contains(form)).toBe(true);
+    expect(form.className).toContain("sticky");
+    expect(form.className).toContain("bottom-0");
     const foot = container.querySelector(".bg-gradient-to-t") as HTMLElement;
     expect(foot.getAttribute("aria-hidden")).toBe("true");
     expect(foot.className).toContain("bottom-full");
-    expect(foot.closest("form")).toBeTruthy();
+    expect(foot.closest("form")).toBe(form);
   });
 });
 
@@ -1772,6 +1777,27 @@ describe("Ask, following the answer", () => {
     await stream.push(ev("token", { text: "Two. " }));
     await screen.findByText(/Two/);
     expect(view.scrollTop).toBe(600);
+  });
+
+  // The composer sits inside the scrolling column now, so a click into it
+  // would reach the column's handlers: drafting the next question while the
+  // answer arrives is not leaving it.
+  it("keeps following when the reader clicks into the composer", async () => {
+    const stream = pushableStream();
+    const { container } = render(<Ask />);
+    await askInto(container);
+    const view = scroller(container);
+
+    await stream.push(ev("token", { text: "One. " }));
+    view.scrollTop = 0;
+    const box = container.querySelector("textarea") as HTMLTextAreaElement;
+    fireEvent.pointerDown(box);
+    fireEvent.touchStart(box, { touches: [{ clientY: 300 }] });
+    fireEvent.touchMove(box, { touches: [{ clientY: 460 }] });
+
+    await stream.push(ev("token", { text: "Two. " }));
+    await screen.findByText(/Two/);
+    expect(view.scrollTop).toBe(2000);
   });
 
   it("stops following when a source is opened from the Sources pane", async () => {

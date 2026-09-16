@@ -190,8 +190,10 @@ export default function Threads({
     "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5";
 
   return (
-    <nav aria-label="Threads" className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-4">
+    <nav aria-label="Threads" className="flex flex-1 flex-col">
+      {/* No scroller of its own: the rail (App.tsx) scrolls as a whole. flex-1
+          stays so a short history still leaves the index line at the foot. */}
+      <div className="px-2 pb-4">
         {groups.map((g) => (
           // "Today" is not painted: it always heads the list, and naming the
           // day a thread was asked on is only worth the line once the day is
