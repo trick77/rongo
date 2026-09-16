@@ -200,6 +200,27 @@ func TestExtract_ctagsFailureIsAnError(t *testing.T) {
 	}
 }
 
+// ctags is handed the bare file name, which it also parses as its own command
+// line: a file called "-x.js" reads as an option and the whole extraction
+// fails ("Unknown option"), losing the file's symbols to the line-window
+// fallback for a reason that has nothing to do with the code.
+func TestExtract_aNameStartingWithADashIsAFileNotAnOption(t *testing.T) {
+	// Given
+	testee := NewExtractor(realCtags(t))
+
+	// When
+	syms, err := testee.Extract(context.Background(), "scripts/-x.js",
+		[]byte("function parse(s) { return s; }\n"))
+
+	// Then
+	if err != nil {
+		t.Fatalf("Extract() err = %v, want the dash treated as part of the name", err)
+	}
+	if len(syms) == 0 {
+		t.Errorf("Extract() found nothing in a file whose name begins with a dash")
+	}
+}
+
 func TestExtract_ignoresPseudoTags(t *testing.T) {
 	// Given: ctags emits pseudo-tags as _type "ptag". They describe the run, not
 	// the code, and must never reach the symbol index.

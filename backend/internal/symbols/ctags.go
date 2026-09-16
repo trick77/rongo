@@ -92,9 +92,18 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 		return nil, fmt.Errorf("ctags temp dir: %w", err)
 	}
 	defer os.RemoveAll(dir)
-	tmp := filepath.Join(dir, filepath.Base(path))
-	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+	name := filepath.Base(path)
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
 		return nil, fmt.Errorf("ctags temp file: %w", err)
+	}
+	// A name beginning with a dash is an OPTION to ctags, which then fails the
+	// whole file with "Unknown option" and costs it its symbols. "./" in front
+	// makes it an argument again. Only for those names: the name ctags is
+	// handed is hashed into every anonymous symbol, so prefixing every file
+	// would rename and re-embed the whole corpus once for nothing.
+	arg := name
+	if strings.HasPrefix(name, "-") {
+		arg = "./" + name
 	}
 
 	// --fields=+neKzS: line numbers, end lines, long kind names, the kind key
@@ -114,7 +123,7 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 	// language is inferred from anyway, so ctags sees exactly what it needs
 	// and nothing that changes per run.
 	cmd := exec.CommandContext(ctx, e.ctags,
-		"--output-format=json", "--fields=+neKzS", "--sort=no", "-f", "-", filepath.Base(path))
+		"--output-format=json", "--fields=+neKzS", "--sort=no", "-f", "-", arg)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -28,6 +28,12 @@ type Hit struct {
 	RawText   string
 	StartLine int
 	EndLine   int
+	// Ordinal is the chunk's position in its file. It completes the address:
+	// an overlong line is split into sibling chunks that START on the same
+	// line, so the repository, path and start line do not tell those apart and
+	// only the ordinal keeps the file in file order. It is a file position and
+	// not an id, so it says the same thing after a re-index.
+	Ordinal int
 	// SHA is the commit the file was indexed at. A citation carries it so the
 	// cited lines can be shown as they were when the answer was written, not
 	// as the branch has moved on since.
@@ -48,7 +54,7 @@ const vecKMax = 4096
 
 // hitColumns is the projection both lanes share, so a hit means the same thing
 // whichever lane produced it.
-const hitColumns = `c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line, f.sha`
+const hitColumns = `c.id, f.repo, r.branch, f.path, c.symbol, c.raw_text, c.start_line, c.end_line, c.ordinal, f.sha`
 
 // The repo_state join carries enabled = 1: a repository parked with
 // `enabled: false` in the YAML keeps its index and its checkout, but it answers
@@ -170,7 +176,7 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	// boundary is its decision — a chunk cut there is not reachable from here
 	// whatever this clause says.
 	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ?
-		ORDER BY distance, repo, path, start_line`
+		ORDER BY distance, repo, path, start_line, ordinal`
 	args = append(args, maxDistance, maxDistance)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -182,7 +188,7 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	for rows.Next() {
 		var h Hit
 		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.SHA, &h.Distance); err != nil {
+			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA, &h.Distance); err != nil {
 			return nil, fmt.Errorf("vector search: %w", err)
 		}
 		out = append(out, h)
@@ -227,7 +233,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	// Address after bm25, for the reason SearchVector gives: two chunks the
 	// ranking cannot separate must not be separated by their rowids, which
 	// are index order.
-	q += "\n\t\tORDER BY bm25(chunks_fts), f.repo, f.path, c.start_line LIMIT ?"
+	q += "\n\t\tORDER BY bm25(chunks_fts), f.repo, f.path, c.start_line, c.ordinal LIMIT ?"
 	args = append(args, n)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -239,7 +245,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	for rows.Next() {
 		var h Hit
 		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.SHA); err != nil {
+			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
 			return nil, fmt.Errorf("keyword search: %w", err)
 		}
 		out = append(out, h)

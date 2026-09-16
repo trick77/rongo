@@ -441,6 +441,41 @@ func TestReferenced_equalDefinersOrderByPathBeforeRepository(t *testing.T) {
 	}
 }
 
+// Inside one file the walk reads in FILE order. The symbol name is the last
+// resort, for two names landing on one chunk, and must not get in front of the
+// ordinal: a file would then be read out of order because of what its symbols
+// happen to be called.
+func TestReferenced_insideOneFileTheOrdinalDecidesBeforeTheSymbolName(t *testing.T) {
+	// Given: one file defining two equally selective names, the alphabetically
+	// LATER one in the file's first chunk. The later chunk is written first,
+	// so neither the name nor the rowid points at the answer.
+	db := gatherDB(t)
+	seedRepo(t, db, "src")
+	seedRepo(t, db, "bee")
+	from := Source{Repo: "src", Path: "Caller.java", Text: "Zebra.run(); Alpha.run()"}
+	seedChunkIn(t, db, "src", "Caller.java", 0, 1, 10, "call", from.Text)
+	seedChunkIn(t, db, "bee", "Shared.java", 4, 100, 110, "Alpha", "class Alpha { void run() {} }")
+	seedChunkIn(t, db, "bee", "Shared.java", 0, 1, 10, "Zebra", "class Zebra { void run() {} }")
+	seedSymbolIn(t, db, "bee", "Shared.java", "Alpha", 105)
+	seedSymbolIn(t, db, "bee", "Shared.java", "Zebra", 5)
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+
+	// When
+	refs, err := g.referenced(context.Background(), from)
+
+	// Then
+	if err != nil {
+		t.Fatalf("referenced: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("references = %v, want both chunks of the file", repoPaths(refs))
+	}
+	if refs[0].StartLine != 1 || refs[1].StartLine != 100 {
+		t.Errorf("reference order = lines %d then %d, want the file read in file order (1 then 100)",
+			refs[0].StartLine, refs[1].StartLine)
+	}
+}
+
 // Two repositories routinely hold the same path. That tie is what the
 // repository breaks, so the walk does not read whichever was indexed first.
 func TestReferenced_onePathInTwoRepositoriesOrdersByRepository(t *testing.T) {

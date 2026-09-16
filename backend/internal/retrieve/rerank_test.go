@@ -215,37 +215,3 @@ func TestRerankByModule_sameRepoBoundaryIsRespected(t *testing.T) {
 		t.Errorf("order = %v, want peeq's module first — loom's paths are not peeq's module", paths(got))
 	}
 }
-
-// The blend sorts individual hits on one key, so an equal blend must fall to
-// the address and not to the incoming order, which two different score and
-// boost pairs can reach from either side.
-func TestRerankByModule_equalBlendsOrderByAddressNotByID(t *testing.T) {
-	for _, c := range []struct {
-		name            string
-		earlyID, lateID int64
-	}{
-		{"the earlier address holds the higher id", 99, 1},
-		{"the ids swapped, the order does not", 1, 99},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			// Given: two hits in no module, so each stands alone and takes no
-			// corroboration bonus, scored identically and listed with the
-			// later address first.
-			hits := []Hit{
-				{ChunkID: c.lateID, Repo: "peeq", Path: "z.go", StartLine: 1, Score: 0.5},
-				{ChunkID: c.earlyID, Repo: "peeq", Path: "a.go", StartLine: 1, Score: 0.5},
-			}
-
-			// When
-			got := RerankByModule(hits, nil, RerankOpts{Score: ScoreBlend, Alpha: 0.3})
-
-			// Then
-			if len(got) != 2 {
-				t.Fatalf("reranked %d hits, want 2", len(got))
-			}
-			if got[0].Path != "a.go" {
-				t.Errorf("blended order = %v, want a.go first — the tie broke on the chunk id", paths(got))
-			}
-		})
-	}
-}

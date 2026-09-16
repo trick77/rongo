@@ -331,8 +331,8 @@ func penalised(h Hit, taken map[string]int, decay float64) float64 {
 }
 
 // lessByAddress orders two hits by the chunk's ADDRESS — repository, then
-// path, then start line — and only falls back to the chunk id when two hits
-// share all three.
+// path, then start line, then the chunk's ordinal in its file — and only falls
+// back to the chunk id when two hits share all four.
 //
 // It is the tie-breaker every ranking in this package uses, and the reason is
 // that a chunk id is assigned in index order. Breaking a tie on one (or on the
@@ -348,6 +348,11 @@ func lessByAddress(a, b Hit) bool {
 	}
 	if a.StartLine != b.StartLine {
 		return a.StartLine < b.StartLine
+	}
+	// The ordinal finishes the address: an overlong line is split into sibling
+	// chunks that start on the same line, and it is a file position, not an id.
+	if a.Ordinal != b.Ordinal {
+		return a.Ordinal < b.Ordinal
 	}
 	return a.ChunkID < b.ChunkID
 }

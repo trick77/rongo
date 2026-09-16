@@ -117,6 +117,17 @@ func TestFuseWeighted_noLanesIsEmptyNotNil(t *testing.T) {
 	}
 }
 
+// idOrders is the pair of ids any ranking test hands a tie: one way round and
+// then the other, so a result that matches the addresses by accident of the
+// ids fails the second case.
+var idOrders = []struct {
+	name            string
+	earlyID, lateID int64
+}{
+	{"the earlier address holds the higher id", 99, 1},
+	{"the ids swapped, the order does not", 1, 99},
+}
+
 // lessByAddress is what keeps a re-index from reordering a result: chunk ids
 // are handed out in index order, so a tie broken on one moves whenever the
 // corpus is indexed again. A chunk's address does not move.
@@ -135,6 +146,9 @@ func TestLessByAddress_ordersOnRepoThenPathThenLineThenID(t *testing.T) {
 		{"the start line decides inside a file",
 			Hit{Repo: "a", Path: "a.go", StartLine: 1, ChunkID: 9},
 			Hit{Repo: "a", Path: "a.go", StartLine: 9, ChunkID: 1}, true},
+		{"the ordinal decides between two chunks starting on one line",
+			Hit{Repo: "a", Path: "a.go", StartLine: 1, Ordinal: 0, ChunkID: 9},
+			Hit{Repo: "a", Path: "a.go", StartLine: 1, Ordinal: 1, ChunkID: 1}, true},
 		{"the id is the last resort",
 			Hit{Repo: "a", Path: "a.go", StartLine: 1, ChunkID: 1},
 			Hit{Repo: "a", Path: "a.go", StartLine: 1, ChunkID: 9}, true},
@@ -156,14 +170,7 @@ func TestLessByAddress_ordersOnRepoThenPathThenLineThenID(t *testing.T) {
 // the indexer happened to hand out their ids, so the answer moved after a
 // re-index that changed no code.
 func TestFuseWeightedDecayed_equalScoresOrderByAddressNotByID(t *testing.T) {
-	subtests := []struct {
-		name            string
-		earlyID, lateID int64
-	}{
-		{"the earlier address holds the higher id", 99, 1},
-		{"the ids swapped, the order does not", 1, 99},
-	}
-	for _, st := range subtests {
+	for _, st := range idOrders {
 		t.Run(st.name, func(t *testing.T) {
 			// Given: two chunks scored identically — each at rank 0 of one of
 			// two equally weighted lanes — in one order of ids and then the

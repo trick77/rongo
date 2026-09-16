@@ -521,11 +521,12 @@ WHERE NOT (f.repo = ? AND f.path = ?)
 -- regroup a multi-repository result by product and change which chunks the
 -- budget admits, which is a ranking change and not the ordering fix this is.
 -- The repository is only the tie-break two repositories holding one path
--- need, and s.name the one two selective names landing on a single chunk
--- need, so the Reason a source carries is fixed too. Left to the rowid, each
--- of those reads whichever was indexed first, which moves on a re-index that
--- changed no code.
-ORDER BY definers ASC, f.path, f.repo, s.name, c.ordinal`
+-- need. Inside a file the ordinal keeps it in FILE order, and s.name comes
+-- last of all, for two selective names landing on ONE chunk: it fixes the
+-- Reason that chunk carries without ever deciding which chunk comes first.
+-- Left to the rowid, each of those reads whichever was indexed first, which
+-- moves on a re-index that changed no code.
+ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 
 	args := make([]any, 0, len(names)+4)
 	for _, n := range names {
