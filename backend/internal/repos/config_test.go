@@ -660,6 +660,59 @@ projects:
 	}
 }
 
+func TestLoad_carriesTokenAuthBearer(t *testing.T) {
+	// Given: Bitbucket Data Center with the token as a header, which takes
+	// any token kind and needs no username.
+	path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://bitbucket.example.invalid/scm/shop/backend.git
+        token_env: BACKEND_FORGE_TOKEN_BITBUCKET
+        token_auth: bearer
+`)
+
+	specs, err := Load(path)
+
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if specs[0].TokenAuth != "bearer" {
+		t.Errorf("TokenAuth = %q, want %q", specs[0].TokenAuth, "bearer")
+	}
+}
+
+func TestLoad_rejectsTokenAuthMisuse(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown value": `
+        token_env: BACKEND_FORGE_TOKEN_BITBUCKET
+        token_auth: digest`,
+		"without a token": `
+        token_auth: bearer`,
+		"with a username": `
+        token_env: BACKEND_FORGE_TOKEN_BITBUCKET
+        token_auth: bearer
+        token_user: x-token-auth`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://bitbucket.example.invalid/scm/shop/backend.git`+body+`
+`)
+
+			_, err := Load(path)
+
+			if err == nil {
+				t.Fatal("Load() err = nil, want a refusal")
+			}
+		})
+	}
+}
+
 func TestLoad_rejectsTokenEnvOnAnSSHRemote(t *testing.T) {
 	// Given: a token is only ever injected into an https URL, so on an ssh
 	// remote token_env was a silent no-op: the entry looked configured and

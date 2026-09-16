@@ -234,7 +234,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 
 	spec := repos.Spec{
 		Name: st.Name, CloneURL: st.CloneURL, Branch: st.Branch,
-		TokenEnv: st.TokenEnv, TokenUser: st.TokenUser, Enabled: true,
+		TokenEnv: st.TokenEnv, TokenUser: st.TokenUser, TokenAuth: st.TokenAuth, Enabled: true,
 	}
 	// The ENVIRONMENT VARIABLE NAME, not the repository name: TokenFunc reads
 	// the environment, and passing the repository name here resolved every

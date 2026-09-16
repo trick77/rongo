@@ -81,7 +81,7 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	if err := os.MkdirAll(c.root, 0o755); err != nil {
 		return fmt.Errorf("create repository root: %w", err)
 	}
-	if _, err := c.run(ctx, c.root, "clone", "--quiet", authURL(spec.CloneURL, spec.TokenUser, token), dir); err != nil {
+	if _, err := c.runRemote(ctx, c.root, spec, token, "clone", "--quiet", remoteURL(spec, token), dir); err != nil {
 		return err
 	}
 	// git PERSISTS the clone URL as remote.origin.url, credentials and all, so
@@ -303,7 +303,7 @@ func (c *Client) RemoveCheckout(name string) error {
 // anonymously: without it, an entry that omits `branch:` could never resolve
 // one and would never be indexed at all.
 func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token string) (string, error) {
-	out, err := c.run(ctx, c.root, "ls-remote", "--symref", authURL(spec.CloneURL, spec.TokenUser, token), "HEAD")
+	out, err := c.runRemote(ctx, c.root, spec, token, "ls-remote", "--symref", remoteURL(spec, token), "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -321,8 +321,8 @@ func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token strin
 
 // Fetch updates the remote-tracking refs.
 func (c *Client) Fetch(ctx context.Context, spec repos.Spec, token string) error {
-	_, err := c.run(ctx, c.Dir(spec), "fetch", "--quiet", "--prune",
-		authURL(spec.CloneURL, spec.TokenUser, token), "+refs/heads/*:refs/remotes/origin/*")
+	_, err := c.runRemote(ctx, c.Dir(spec), spec, token, "fetch", "--quiet", "--prune",
+		remoteURL(spec, token), "+refs/heads/*:refs/remotes/origin/*")
 	return err
 }
 
@@ -477,12 +477,23 @@ func safeDirectory(dir string, args ...string) []string {
 }
 
 func (c *Client) run(ctx context.Context, dir string, args ...string) (string, error) {
+	return c.runEnv(ctx, dir, nil, args...)
+}
+
+// runRemote is run for a command that talks to the entry's remote: it adds
+// what the token needs beyond the URL, which today is the bearer header.
+func (c *Client) runRemote(ctx context.Context, dir string, spec repos.Spec, token string, args ...string) (string, error) {
+	return c.runEnv(ctx, dir, bearerEnv(spec, token), args...)
+}
+
+func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...)
 	cmd.Dir = dir
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.Env = append(cmd.Env, c.auth.env()...)
+	cmd.Env = append(cmd.Env, extra...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -529,6 +540,42 @@ func (a Auth) env() []string {
 // a space in a mount path would otherwise split into two arguments.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// remoteURL is the URL one command reaches the entry's remote at: with the
+// token as basic-auth credentials, or bare when the token rides in a
+// header instead (see bearerEnv).
+func remoteURL(spec repos.Spec, token string) string {
+	if spec.TokenAuth == "bearer" {
+		return spec.CloneURL
+	}
+	return authURL(spec.CloneURL, spec.TokenUser, token)
+}
+
+// bearerEnv hands git an Authorization: Bearer header for one command, the
+// way token_auth: bearer asks. Through git's environment config rather than
+// -c: an argument shows up in the process list, an environment variable
+// only to the same user. Nothing for basic auth or an ssh remote.
+//
+// Appended after whatever GIT_CONFIG_* the process already carries: the
+// count is one variable, and setting it to 1 would drop an operator's own
+// entries for exactly the bearer repositories.
+func bearerEnv(spec repos.Spec, token string) []string {
+	if spec.TokenAuth != "bearer" || token == "" || !isHTTPURL(spec.CloneURL) {
+		return nil
+	}
+	n, _ := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	i := strconv.Itoa(n)
+	return []string{
+		"GIT_CONFIG_COUNT=" + strconv.Itoa(n+1),
+		"GIT_CONFIG_KEY_" + i + "=http.extraHeader",
+		"GIT_CONFIG_VALUE_" + i + "=Authorization: Bearer " + token,
+	}
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http")
 }
 
 // authURL injects the token into an https remote for the duration of one

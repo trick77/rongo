@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/repos"
 )
 
 func TestAuthURL_defaultsTheUsernameToGitHubs(t *testing.T) {
@@ -25,6 +27,64 @@ func TestAuthURL_sendsTheNamedUsername(t *testing.T) {
 
 	if got != "https://x-token-auth:secret@bitbucket.example.invalid/scm/shop/backend.git" {
 		t.Errorf("authURL() = %q, want x-token-auth as the user", got)
+	}
+}
+
+func TestBearer_keepsTheTokenOutOfTheURL(t *testing.T) {
+	// Given: a Bitbucket Data Center entry that sends the token as a header,
+	// so no username has to be guessed.
+	spec := repos.Spec{
+		CloneURL:  "https://bitbucket.example.invalid/scm/shop/backend.git",
+		TokenAuth: "bearer",
+	}
+
+	// When
+	gotURL := remoteURL(spec, "secret")
+	gotEnv := bearerEnv(spec, "secret")
+
+	// Then
+	if gotURL != spec.CloneURL {
+		t.Errorf("remoteURL() = %q, want the bare clone URL", gotURL)
+	}
+	want := []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0=Authorization: Bearer secret",
+	}
+	if strings.Join(gotEnv, "\n") != strings.Join(want, "\n") {
+		t.Errorf("bearerEnv() = %q, want %q", gotEnv, want)
+	}
+}
+
+func TestBearer_appendsToAnExistingGitConfigCount(t *testing.T) {
+	// Given: the operator already hands git one config entry through the
+	// environment. Bearer must come after it, not replace it.
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	spec := repos.Spec{CloneURL: "https://bitbucket.example.invalid/scm/shop/backend.git", TokenAuth: "bearer"}
+
+	got := bearerEnv(spec, "secret")
+
+	want := []string{
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_1=http.extraHeader",
+		"GIT_CONFIG_VALUE_1=Authorization: Bearer secret",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("bearerEnv() = %q, want %q", got, want)
+	}
+}
+
+func TestBearer_isNothingForBasicAuthOrSSH(t *testing.T) {
+	basic := repos.Spec{CloneURL: "https://github.com/acme/repo.git", TokenUser: "x-access-token"}
+	if got := bearerEnv(basic, "secret"); got != nil {
+		t.Errorf("bearerEnv(basic) = %q, want nil", got)
+	}
+	if got := remoteURL(basic, "secret"); got != "https://x-access-token:secret@github.com/acme/repo.git" {
+		t.Errorf("remoteURL(basic) = %q, want the token in the URL", got)
+	}
+	ssh := repos.Spec{CloneURL: "ssh://git@bitbucket.example.invalid:7999/shop/backend.git", TokenAuth: "bearer"}
+	if got := bearerEnv(ssh, "secret"); got != nil {
+		t.Errorf("bearerEnv(ssh) = %q, want nil", got)
 	}
 }
 
