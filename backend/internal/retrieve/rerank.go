@@ -137,6 +137,10 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 		for i := range order {
 			order[i] = i
 		}
+		// Equal blends keep Search's order, which is this variant's contract:
+		// ScoreBlend "keeps Search's ordering of individual hits and only adds
+		// a corroboration bonus". Search's order is itself address-stable, so
+		// the stable sort inherits that and needs no tie-break of its own.
 		sort.SliceStable(order, func(a, b int) bool {
 			return blended[order[a]] > blended[order[b]]
 		})
@@ -157,6 +161,10 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 		}
 		// Equal standing is broken by which module Search ranked first, so the
 		// result stays deterministic instead of depending on map iteration.
+		// It must stay a per-MODULE key — an address comparison between two
+		// individual hits would order one pair of modules one way and another
+		// pair the other, and "every hit of a module comes first" would break.
+		// Search's order is itself address-stable, so this inherits that.
 		return first[ga] < first[gb]
 	})
 	return out

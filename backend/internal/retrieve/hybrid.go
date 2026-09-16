@@ -76,7 +76,7 @@ type Lane struct {
 // FuseWeighted merges pre-ranked hit lists via weighted Reciprocal Rank Fusion:
 // a hit's score is the sum over lanes of weight/(rrfK + rank). Hits are
 // identified across lanes by chunk id. Returns up to k hits, best first; ties
-// break by chunk id for determinism.
+// break on the chunk's ADDRESS, never on its id — see lessByAddress.
 //
 // A lane whose weight is zero or negative is MUTED rather than promoted to full
 // confidence — the one value a caller would reach for to silence a lane must
@@ -186,7 +186,8 @@ func FuseWeightedDecayed(lanes []Lane, k int, d Decays) []Hit {
 		}
 	}
 	// Demote BEFORE the sort, so a demoted hit loses its rank and its place in
-	// the cut rather than merely being labelled.
+	// the cut rather than merely being labelled. Map iteration order is
+	// irrelevant here: every entry is scaled independently of every other.
 	for _, a := range byID {
 		if f := supportingDecay(a.hit.Path, d); f < 1 {
 			a.score *= f
@@ -197,7 +198,7 @@ func FuseWeightedDecayed(lanes []Lane, k int, d Decays) []Hit {
 		if ai.score != aj.score {
 			return ai.score > aj.score
 		}
-		return order[i] < order[j]
+		return lessByAddress(ai.hit, aj.hit)
 	})
 	if k <= 0 {
 		k = 10
@@ -327,6 +328,33 @@ func diversifyByRepo(hits []Hit, decay float64) []Hit {
 // ordering did with it afterwards.
 func penalised(h Hit, taken map[string]int, decay float64) float64 {
 	return h.Score * math.Pow(decay, float64(taken[h.Repo]))
+}
+
+// lessByAddress orders two hits by the chunk's ADDRESS — repository, then
+// path, then start line, then the chunk's ordinal in its file — and only falls
+// back to the chunk id when two hits share all four.
+//
+// It is the tie-breaker every ranking in this package uses, and the reason is
+// that a chunk id is assigned in index order. Breaking a tie on one (or on the
+// rowid, by omitting an ORDER BY) means the result reorders after a re-index
+// that changed no code, which is measurable: the flow corpus moved by two
+// parts between runs of an unchanged corpus. An address does not move.
+func lessByAddress(a, b Hit) bool {
+	if a.Repo != b.Repo {
+		return a.Repo < b.Repo
+	}
+	if a.Path != b.Path {
+		return a.Path < b.Path
+	}
+	if a.StartLine != b.StartLine {
+		return a.StartLine < b.StartLine
+	}
+	// The ordinal finishes the address: an overlong line is split into sibling
+	// chunks that start on the same line, and it is a file position, not an id.
+	if a.Ordinal != b.Ordinal {
+		return a.Ordinal < b.Ordinal
+	}
+	return a.ChunkID < b.ChunkID
 }
 
 func contains(ss []string, s string) bool {

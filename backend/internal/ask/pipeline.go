@@ -746,6 +746,9 @@ func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []st
 	// Ordered best first across the repositories, as one search would be: the
 	// router ranks candidates by their best hit and the gatherer walks in
 	// order, and neither should see the repositories' turn order instead.
+	// Stable over an input each search already ordered by address, so an equal
+	// score falls back to the index's name order, the order knownRepos returns
+	// the repositories in, and never to a chunk id.
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Score > all[j].Score })
 	// Bounded whatever the understanding guessed. Gather never evicts a search
 	// hit — an answer cites what it was built on — so every hit here becomes a

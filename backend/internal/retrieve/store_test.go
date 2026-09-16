@@ -3,7 +3,9 @@ package retrieve
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/trick77/rongo/internal/store"
@@ -78,6 +80,39 @@ func addChunk(t *testing.T, db *sql.DB, repo, path, symbol, raw string, vec []fl
 		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
 		VALUES (?,?,?,?,?,?,?,?,?)`,
 		fileID, ordinal, 10+ordinal, 20+ordinal, symbol, "enriched "+raw, raw, 5, path+raw)
+	if err != nil {
+		t.Fatalf("insert chunk: %v", err)
+	}
+	id, _ := res.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO chunks_vec (rowid, embedding) VALUES (?,?)`, id, store.VecLiteral(vec)); err != nil {
+		t.Fatalf("insert vector: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO chunks_fts (rowid, raw_text) VALUES (?,?)`, id, raw); err != nil {
+		t.Fatalf("insert keywords: %v", err)
+	}
+	return id
+}
+
+// addChunkAt is addChunk with the ordinal and the line range spelled out, for
+// the cases where the address itself is what is under test: two files at one
+// line, or two chunks of one file starting on the same line.
+func addChunkAt(t *testing.T, db *sql.DB, repo, path string, ordinal, start, end int, symbol, raw string, vec []float32) int64 {
+	t.Helper()
+	var fileID int64
+	err := db.QueryRow(`SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
+	if err == sql.ErrNoRows {
+		res, err := db.Exec(`INSERT INTO files (repo, path, sha, lang) VALUES (?,?,?,?)`, repo, path, "sha", "java")
+		if err != nil {
+			t.Fatalf("insert file: %v", err)
+		}
+		fileID, _ = res.LastInsertId()
+	} else if err != nil {
+		t.Fatalf("lookup file: %v", err)
+	}
+	res, err := db.Exec(`
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
+		VALUES (?,?,?,?,?,?,?,?,?)`,
+		fileID, ordinal, start, end, symbol, "enriched "+raw, raw, 5, fmt.Sprintf("%s%s%d", path, raw, ordinal))
 	if err != nil {
 		t.Fatalf("insert chunk: %v", err)
 	}
@@ -260,6 +295,93 @@ func TestSearchKeyword_emptyMatchTouchesNothing(t *testing.T) {
 	// Then
 	if err != nil || len(hits) != 0 {
 		t.Errorf("SearchKeyword(\"\") = %v, %v; want no hits and no error", hits, err)
+	}
+}
+
+// TestSearch_equalRankingOrdersByAddress drives BOTH lanes over one fixture:
+// the two rankings are different functions, but "a tie is broken by the
+// address" has to mean the same thing in each, and a case added for one lane
+// must be answered by the other.
+//
+// What it guards: a chunk's rowid is index order, so a ranking that leaves a
+// tie to it returns a different order after a re-index that changed no code.
+func TestSearch_equalRankingOrdersByAddress(t *testing.T) {
+	const body = "public void dispatch() { promoMailer.send(); }"
+	cases := []struct {
+		name string
+		seed func(t *testing.T, db *sql.DB)
+		want []string
+	}{
+		{
+			// Two files the ranking cannot separate, written in one order and
+			// then the other. The path decides, not the writing.
+			name: "two files, the later path written first",
+			seed: func(t *testing.T, db *sql.DB) {
+				addChunkAt(t, db, "shop", "Zeta.java", 0, 10, 20, "dispatch", body, nearVec)
+				addChunkAt(t, db, "shop", "Alpha.java", 0, 10, 20, "dispatch", body, nearVec)
+			},
+			want: []string{"Alpha.java#0", "Zeta.java#0"},
+		},
+		{
+			name: "two files, the earlier path written first",
+			seed: func(t *testing.T, db *sql.DB) {
+				addChunkAt(t, db, "shop", "Alpha.java", 0, 10, 20, "dispatch", body, nearVec)
+				addChunkAt(t, db, "shop", "Zeta.java", 0, 10, 20, "dispatch", body, nearVec)
+			},
+			want: []string{"Alpha.java#0", "Zeta.java#0"},
+		},
+		{
+			// An overlong line is split into sibling chunks that START on the
+			// same line, so the address runs out at the start line and the
+			// ordinal is what keeps the file in file order.
+			name: "one file, two chunks starting on one line, the later written first",
+			seed: func(t *testing.T, db *sql.DB) {
+				addChunkAt(t, db, "shop", "Alpha.java", 1, 10, 10, "dispatch", body, nearVec)
+				addChunkAt(t, db, "shop", "Alpha.java", 0, 10, 10, "dispatch", body, nearVec)
+			},
+			want: []string{"Alpha.java#0", "Alpha.java#1"},
+		},
+	}
+	lanes := []struct {
+		name string
+		hits func(t *testing.T, db *sql.DB) []Hit
+	}{
+		{"keyword", func(t *testing.T, db *sql.DB) []Hit {
+			hits, err := NewStore(db).SearchKeyword(context.Background(), BuildFTSMatch("promoMailer"), 10, nil)
+			if err != nil {
+				t.Fatalf("SearchKeyword() err = %v", err)
+			}
+			return hits
+		}},
+		{"vector", func(t *testing.T, db *sql.DB) []Hit {
+			hits, err := NewStore(db).SearchVector(context.Background(), queryVec, 10, DefaultMaxDistance, nil)
+			if err != nil {
+				t.Fatalf("SearchVector() err = %v", err)
+			}
+			return hits
+		}},
+	}
+	for _, lane := range lanes {
+		for _, c := range cases {
+			t.Run(lane.name+"/"+c.name, func(t *testing.T) {
+				// Given
+				db := testDB(t)
+				addRepo(t, db, "shop", "master")
+				c.seed(t, db)
+
+				// When
+				hits := lane.hits(t, db)
+
+				// Then
+				got := make([]string, len(hits))
+				for i, h := range hits {
+					got[i] = fmt.Sprintf("%s#%d", h.Path, h.Ordinal)
+				}
+				if !slices.Equal(got, c.want) {
+					t.Errorf("%s order = %v, want %v whatever the writing order", lane.name, got, c.want)
+				}
+			})
+		}
 	}
 }
 
