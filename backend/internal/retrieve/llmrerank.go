@@ -34,6 +34,9 @@ type LLMReranker struct {
 	// Pool is how deep the fused list goes before the model sees it. Sixty is
 	// where the rank diagnostic put every reachable miss.
 	Pool int
+	// Excerpt is how many runes of each chunk the model reads. The harness
+	// sweeps it; the product keeps what the constructor set.
+	Excerpt int
 	// Log receives the warning when the fused order is kept; nil means the
 	// default logger.
 	Log *slog.Logger
@@ -50,9 +53,9 @@ func (r *LLMReranker) logger() *slog.Logger {
 // NewLLMReranker builds a reranker over the short-gate lane.
 func NewLLMReranker(c *llm.Client, pool int) *LLMReranker {
 	if pool <= 0 {
-		pool = 60
+		pool = DefaultRerankPool
 	}
-	return &LLMReranker{llm: c, Pool: pool}
+	return &LLMReranker{llm: c, Pool: pool, Excerpt: DefaultRerankExcerpt}
 }
 
 const rerankSystem = `You rank code search results for a question. Answer with JSON ONLY:
@@ -63,12 +66,38 @@ first, at most %d of them. Leave out results that do not help. A result helps
 when its code, comment or path is about what the question asks, not when it
 merely shares a word with it. Do not explain.`
 
-// rerankExcerpt is how much of each chunk the model sees: the header and the
-// opening lines, which is where a doc comment and a signature sit.
-const rerankExcerpt = 240
+// DefaultRerankExcerpt is how much of each chunk the model sees by default, in
+// runes. Eight hundred, not the 240 this shipped with: a signature and its
+// doc comment are regularly longer than 240, so the model was ranking on a
+// truncated first line. Measured twice on the pinned Go corpus, unique
+// gathered 39/42 at 240 against 41/42 at 800, MRR 0.72 against 0.81 and 0.83
+// (docs/measurements/2026-09-16-rerank-excerpt.md).
+//
+// DefaultRerankPool is how deep the fused list goes. Both are exported so the
+// eval harness measures the product by default rather than a literal that has
+// since moved.
+const (
+	DefaultRerankExcerpt = 800
+	DefaultRerankPool    = 60
+)
 
-// rerankMaxTokens caps the reply. A list of at most sixty numbers.
-const rerankMaxTokens = 256
+// rerankMaxTokens is the floor under the reply cap, and rerankTokensPerHit
+// what each number the reply may name adds on top. The prompt bounds the list
+// at k, not at the pool, so the floor covers every k up to 48 and the shipped
+// call (k = 20) sends it. A caller asking for a longer list gets the room:
+// without it the reply would end with finish_reason=length, which is an error,
+// a warning and the fused order — the reranker doing nothing while looking
+// like it ran.
+const (
+	rerankMaxTokens    = 256
+	rerankTokensPerHit = 4
+	rerankTokensBase   = 64
+)
+
+// replyCap is how many tokens a reply naming at most k results may take.
+func replyCap(k int) int {
+	return max(rerankMaxTokens, rerankTokensBase+rerankTokensPerHit*k)
+}
 
 // Rerank returns hits reordered: the ones the model called relevant first, in
 // the model's order, then everything else in the fused order, cut to k. A
@@ -83,17 +112,22 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	fmt.Fprintf(&b, "Question: %s\n\nResults:\n", question)
 	for i, h := range hits {
 		fmt.Fprintf(&b, "\n[%d] %s %s", i+1, h.Repo, h.Path)
+		// Two chunks of one file differ by where they start, and a header
+		// without the line cannot tell them apart.
+		if h.StartLine > 0 {
+			fmt.Fprintf(&b, ":%d", h.StartLine)
+		}
 		if h.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
 		}
 		b.WriteString("\n")
-		b.WriteString(excerpt(h.RawText, rerankExcerpt))
+		b.WriteString(excerpt(h.RawText, r.Excerpt))
 		b.WriteString("\n")
 	}
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(rerankSystem, k)},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(rerankMaxTokens), llm.WithStep("rerank"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(replyCap(k)), llm.WithStep("rerank"))
 	if err != nil {
 		if ctx.Err() != nil {
 			// The reader left; there is no turn to keep an order for.
@@ -109,7 +143,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	}
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
-		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", excerpt(out, 120))
+		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", llmwire.Truncate(out, 120))
 		return cut(hits, k), nil
 	}
 	taken := make([]bool, len(hits))
@@ -136,10 +170,46 @@ func cut(hits []Hit, k int) []Hit {
 	return hits
 }
 
+// excerpt is the first n RUNES of s, backed off to the last line break in the
+// back half of the window so the model reads whole lines. The back-half floor
+// is what keeps a long first line from yielding nothing at all. Runes, not
+// bytes: a byte cut splits an umlaut and hands the model a broken rune. The
+// warning about an unreadable reply cuts with llmwire.Truncate instead, which
+// does not back off: the broken JSON sits after the prose line, and the
+// back-off would log the prose alone.
+//
+// It walks bytes rather than building a []rune: a chunk runs to a few
+// thousand runes and a pool to a hundred of them, so the slice was one
+// allocation per hit for a prefix of a few hundred.
 func excerpt(s string, n int) string {
 	s = strings.TrimSpace(s)
-	if len(s) <= n {
+	half, end := runeOffsets(s, n)
+	if end < 0 {
 		return s
 	}
-	return s[:n] + "…"
+	cutAt := end
+	// A newline is one byte and cannot hide inside a multi-byte rune, so the
+	// byte search over the window is the rune search over it.
+	if nl := strings.LastIndexByte(s[half:end], '\n'); nl >= 0 {
+		cutAt = half + nl
+	}
+	return s[:cutAt] + "…"
+}
+
+// runeOffsets reports the byte offsets of rune n/2 and rune n in s. end is -1
+// when s holds n runes or fewer, which is the whole-text case.
+func runeOffsets(s string, n int) (half, end int) {
+	half, end = 0, -1
+	i := 0
+	for off := range s {
+		if i == n/2 {
+			half = off
+		}
+		if i == n {
+			end = off
+			break
+		}
+		i++
+	}
+	return half, end
 }

@@ -16,9 +16,43 @@ import (
 // report the baseline as the reranked arm.
 func evalReranker(t *testing.T, c *llm.Client) *retrieve.LLMReranker {
 	t.Helper()
-	r := retrieve.NewLLMReranker(c, 60)
+	pool := envIntOr(t, "BACKEND_EVAL_RERANK_POOL", retrieve.DefaultRerankPool)
+	excerpt := envIntOr(t, "BACKEND_EVAL_RERANK_EXCERPT", retrieve.DefaultRerankExcerpt)
+	// A zero would be silently replaced while the arm's label still read
+	// "0-rune excerpts" — a measurement reporting the wrong arm. So would a
+	// pool at or below the search K: retrieve deepens the cut only when the
+	// pool is deeper than K, so a pool of ten reranks twenty under the label
+	// ten.
+	if excerpt <= 0 {
+		t.Fatalf("BACKEND_EVAL_RERANK_EXCERPT = %d, want a width above zero", excerpt)
+	}
+	if pool <= gatherSearchK {
+		t.Fatalf("BACKEND_EVAL_RERANK_POOL = %d, want a pool deeper than the search K of %d", pool, gatherSearchK)
+	}
+	r := retrieve.NewLLMReranker(c, pool)
+	r.Excerpt = excerpt
 	r.Log = slog.New(failOnWarn{t: t})
 	return r
+}
+
+// TestEvalReranker_readsPoolAndExcerptFromEnv: the pool and the excerpt width
+// are the arm's knobs, so a sweep needs no recompile. No endpoint is touched;
+// the client is only used once Rerank calls it.
+func TestEvalReranker_readsPoolAndExcerptFromEnv(t *testing.T) {
+	// A sweep exporting the knobs must not make the defaults half fail.
+	t.Setenv("BACKEND_EVAL_RERANK_POOL", "")
+	t.Setenv("BACKEND_EVAL_RERANK_EXCERPT", "")
+	// The default arm is the product's, whatever the product currently ships.
+	if got := evalReranker(t, nil); got.Pool != retrieve.DefaultRerankPool || got.Excerpt != retrieve.DefaultRerankExcerpt {
+		t.Errorf("defaults = pool %d, excerpt %d, want the product's %d and %d",
+			got.Pool, got.Excerpt, retrieve.DefaultRerankPool, retrieve.DefaultRerankExcerpt)
+	}
+	t.Setenv("BACKEND_EVAL_RERANK_POOL", "100")
+	t.Setenv("BACKEND_EVAL_RERANK_EXCERPT", "800")
+	got := evalReranker(t, nil)
+	if got.Pool != 100 || got.Excerpt != 800 {
+		t.Errorf("from the environment = pool %d, excerpt %d, want 100 and 800", got.Pool, got.Excerpt)
+	}
 }
 
 // failOnWarn is a slog handler that turns a warning into a test failure.

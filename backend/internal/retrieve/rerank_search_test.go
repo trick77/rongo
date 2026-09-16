@@ -19,8 +19,7 @@ func TestSearch_withARerankerReordersADeeperPoolAndCutsToK(t *testing.T) {
 	r := New(db, fixedEmbedder{vec: queryVec})
 	r.Candidates = 2
 	// The model picks whichever result is Answer.java, by its number.
-	r.Reranker = NewLLMReranker(rerankLLM(t, "", &prompt), 3)
-	r.Reranker.llm = rerankLLMPicking(t, "Answer.java", &prompt)
+	r.Reranker = NewLLMReranker(rerankLLMPicking(t, "Answer.java", &prompt), 3)
 
 	hits, err := r.Search(context.Background(), Query{Text: "anything", K: 2})
 	if err != nil {

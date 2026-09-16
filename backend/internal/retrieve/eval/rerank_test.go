@@ -6,6 +6,7 @@ package eval
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -29,14 +30,15 @@ func TestEvalMeasureRerank(t *testing.T) {
 	}
 	plain := evalRetriever(t, db)
 	reranked := evalRetriever(t, db)
-	reranked.Candidates = 60
-	reranked.Reranker = evalReranker(t, client)
-	// The code rung travels in the label the way the pool does: a table run
-	// with a keyword lane the product does not have must not read as the
-	// product's.
+	// The pool is the reranker's; searchTexts lifts the lanes to it.
+	rr := evalReranker(t, client)
+	reranked.Reranker = rr
+	// The keyword lane travels in the label the way the pool and the excerpt
+	// do: a table run with a lane the product does not have must not read as
+	// the product's.
 	arms := []arm{
-		{"fused order (the product)" + codeLaneLabel(), plain},
-		{"fused order + short-gate rerank over 60" + codeLaneLabel(), reranked},
+		{"fused order (baseline)" + codeLaneLabel(), plain},
+		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts%s", rr.Pool, rr.Excerpt, codeLaneLabel()), reranked},
 	}
 
 	questions := loadQuestions(t)
