@@ -576,11 +576,12 @@ func writingDetail(answer Answer, sources int) map[string]any {
 		"prompt_system":   answer.Prompt.System,
 		"prompt_sources":  answer.Prompt.Sources,
 		"prompt_question": answer.Prompt.Question,
-		// How many calls the answer took. Always said: one is the normal
-		// turn, and a reader comparing two timings deserves to see which of
-		// them paid for a retry. The client counts it, so every step could
-		// report it the same way.
-		"attempts": answer.Usage.Attempts,
+	}
+	// Only past one: a turn that took a second call is worth a line in the
+	// timeline, and saying "1 attempt" on every other turn is noise. The
+	// client counts it, so every step could report it the same way.
+	if answer.Usage.Attempts > 1 {
+		d["attempts"] = answer.Usage.Attempts
 	}
 	// How much of the prompt the endpoint had read before and did not
 	// charge full price for again. Absent when the reply carried no

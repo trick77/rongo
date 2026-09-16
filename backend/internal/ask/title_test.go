@@ -169,3 +169,20 @@ func TestTitle_aCancelledTurnStopsRetrying(t *testing.T) {
 		t.Fatalf("calls = %d, want no retry after the cancel", up.count())
 	}
 }
+
+// An empty reply is a shape the nudge could fix, once. Twice in a row is the
+// client's own retry already having asked again, and that is the deployment
+// rather than a shape: the placeholder stands after two requests, not six.
+func TestTitle_anEmptyReplyTwiceIsNotReAsked(t *testing.T) {
+	c, up := titleLLM(t,
+		titleReply{status: http.StatusOK, content: ""},
+		titleReply{status: http.StatusOK, content: ""},
+		titleReply{status: http.StatusOK, content: "Shipping, end to end"},
+	)
+	if got := Title(context.Background(), c, "How does shipping work?", LanguageEN); got != "" {
+		t.Fatalf("title = %q, want empty so the placeholder stands", got)
+	}
+	if up.count() != 2 {
+		t.Fatalf("calls = %d, want 2", up.count())
+	}
+}

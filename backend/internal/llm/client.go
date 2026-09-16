@@ -218,6 +218,11 @@ type callOptions struct {
 	temperature *float64
 	step        string
 	jsonObject  bool
+	// attemptTimeout bounds ONE attempt, under whatever the caller's context
+	// already allows. Zero means the caller's ceiling is the only bound,
+	// which is what the answer call wants: there is one attempt worth making
+	// and a reader watching it.
+	attemptTimeout time.Duration
 }
 
 // WithJSONObject asks the endpoint for a JSON object and nothing else
@@ -230,6 +235,14 @@ type callOptions struct {
 // defined so the next person finds that table before re-measuring.
 func WithJSONObject() Option {
 	return func(o *callOptions) { o.jsonObject = true }
+}
+
+// WithAttemptTimeout bounds one attempt rather than the whole call, so a
+// stalled first attempt leaves the retry a window of its own. Without it a
+// caller that wants both has to wrap each attempt itself, and the retry lives
+// here now.
+func WithAttemptTimeout(d time.Duration) Option {
+	return func(o *callOptions) { o.attemptTimeout = d }
 }
 
 // WithStep labels the call for the usage meter: the word a reader sees next
@@ -586,17 +599,22 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, opts ...Option) (
 	if err := c.underBudget(ctx); err != nil {
 		return "", Usage{}, err
 	}
-	content, u, err := c.complete(ctx, o, msgs)
-	u.Attempts = 1
-	if content == "" && c.worthAnother(ctx, o, err, u) {
-		content, u, err = c.complete(ctx, o, msgs)
-		u.Attempts = 2
-	}
+	var content string
+	u, err := c.attempted(ctx, o,
+		func() (Usage, error) {
+			var u Usage
+			var err error
+			content, u, err = c.complete(ctx, o, msgs)
+			return u, err
+		},
+		func() bool { return content != "" })
 	return content, u, err
 }
 
 // complete is one attempt.
 func (c *Client) complete(ctx context.Context, o callOptions, msgs []Message) (string, Usage, error) {
+	ctx, cancel := c.attemptWindow(ctx, o)
+	defer cancel()
 	// Timed from before the request so the figure is what a reader waited
 	// for, queueing at the endpoint included, not what the endpoint spent
 	// generating.
@@ -628,34 +646,40 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, onToken func(string
 	// A stream is retried only while NOTHING has reached the caller. Once a
 	// delta is out it is on a reader's screen, and a second call would write a
 	// different answer over the one being read; what to do with the fragment
-	// is the caller's decision.
-	var delivered bool
-	watched := func(tok string) {
-		if tok != "" {
-			delivered = true
-		}
-		if onToken != nil {
-			onToken(tok)
-		}
-	}
-	u, err := c.stream(ctx, o, msgs, watched)
-	u.Attempts = 1
-	if !delivered && c.worthAnother(ctx, o, err, u) {
-		u, err = c.stream(ctx, o, msgs, watched)
-		u.Attempts = 2
-	}
-	return u, err
+	// is the caller's decision. llmwire counts the characters it handed over,
+	// which is the same fact without a flag beside the callback.
+	var delivered int64
+	return c.attempted(ctx, o,
+		func() (Usage, error) {
+			u, chars, err := c.stream(ctx, o, msgs, onToken)
+			delivered = chars
+			return u, err
+		},
+		func() bool { return delivered > 0 })
 }
 
-// stream is one attempt.
-func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onToken func(string)) (Usage, error) {
+// attemptWindow bounds one attempt when the call asked for a per-attempt
+// window, and hands the caller's own context back when it did not. The bound
+// is always under the caller's: a ceiling is a ceiling.
+func (c *Client) attemptWindow(ctx context.Context, o callOptions) (context.Context, context.CancelFunc) {
+	if o.attemptTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, o.attemptTimeout)
+}
+
+// stream is one attempt. It reports how many characters reached onToken, which
+// is what says whether this attempt delivered.
+func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onToken func(string)) (Usage, int64, error) {
+	ctx, cancel := c.attemptWindow(ctx, o)
+	defer cancel()
 	// Timed from before the request, closed when the last frame is read: for
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
 	c.warn(c.deployment(o.model), warnings)
 	if err != nil {
-		return Usage{}, err
+		return Usage{}, 0, err
 	}
 	defer stream.Close()
 
@@ -674,7 +698,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 		record(ctx, o, got, time.Since(started))
 	}
 	if err != nil {
-		return got, err
+		return got, res.Chars, err
 	}
 	// Anything but a normal stop is a failure the caller must hear about: a
 	// reasoning model that spends the whole completion budget thinking ends
@@ -682,7 +706,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	// once stored an empty answer as a finished turn. The usage frame follows
 	// the finish, which is why the count the error needs is only here.
 	if fr := res.FinishReason; fr != "" && fr != "stop" {
-		return got, &FinishError{Reason: fr, Completion: got.Completion}
+		return got, res.Chars, &FinishError{Reason: fr, Completion: got.Completion}
 	}
-	return got, nil
+	return got, res.Chars, nil
 }

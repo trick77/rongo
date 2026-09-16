@@ -81,8 +81,9 @@ func TestAnswer_aStreamThatBrokeAfterTextFailsTheTurn(t *testing.T) {
 	}
 }
 
-// A turn that went through in one call says so.
-func TestAnswer_anOrdinaryTurnReportsOneAttempt(t *testing.T) {
+// A turn that went through in one call says nothing about attempts: one is
+// what every turn takes, and a line saying so on all of them is noise.
+func TestAnswer_anOrdinaryTurnSaysNothingAboutAttempts(t *testing.T) {
 	c, _, _ := streamUpstream(t, "Stored in store.go [1].")
 
 	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
@@ -90,7 +91,7 @@ func TestAnswer_anOrdinaryTurnReportsOneAttempt(t *testing.T) {
 		t.Fatalf("Answer: %v", err)
 	}
 
-	if d := writingDetail(got, 2); d["attempts"] != 1 {
-		t.Errorf("attempts = %v, want one", d["attempts"])
+	if d := writingDetail(got, 2); d["attempts"] != nil {
+		t.Errorf("attempts = %v, want it absent on a turn that took one call", d["attempts"])
 	}
 }

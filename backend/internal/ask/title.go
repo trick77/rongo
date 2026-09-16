@@ -17,18 +17,20 @@ const titleMaxTokens = 48
 
 const (
 	// titleAttempts is how many times a title is asked for before the
-	// placeholder is accepted as the thread's name. A label of six words on the
-	// short-gate lane is the cheapest call rongo makes, and the placeholder is
-	// the question's first words — visibly a stand-in — so a hiccup upstream or
-	// one reply that came back as a paragraph is worth another try, not a
-	// thread named after its own question for good.
+	// placeholder is accepted as the thread's name. It counts REPLIES THAT
+	// WERE NOT TITLES — a paragraph, a preamble, an empty line — because that
+	// is the only failure this loop can do anything about: it re-asks with a
+	// correction. A call that failed on the wire was already made twice by
+	// llm.Client under the one retry policy, and the placeholder is a fine
+	// answer for a deployment that is down.
 	titleAttempts = 3
 	// titleAttemptTimeout bounds ONE attempt, and the caller's ceiling
 	// (`titleCallTimeout` in the HTTP layer) covers all of them together:
 	// without a per-attempt bound a single stalled call would spend the whole
-	// budget the retries need. It stays generous because the two failures look
-	// identical from here — a stalled call and a slow but healthy one — and
-	// cutting a title off at a few seconds would lose labels that were on
+	// budget the retries need. Passed to the client, which owns the window
+	// because it owns the retry. It stays generous because the two failures
+	// look identical from here — a stalled call and a slow but healthy one —
+	// and cutting a title off at a few seconds would lose labels that were on
 	// their way.
 	titleAttemptTimeout = 20 * time.Second
 	// titleRetryPause keeps a failing upstream from being hit three times in
@@ -41,12 +43,12 @@ const titleSystem = `Sum the question up in three to six words, as a title for a
 in %s. No quotation marks, no full stop at the end, no explanation - just the
 title.`
 
-// titleRetryNudge is what makes a retry worth paying for after a reply that
-// was not a title. The call is pinned to temperature 0 and the thread pins it
-// to one upstream node, so re-sending the same words would fetch the same
-// paragraph back twice; the model has to be told what was wrong with it. A
-// call that failed on the wire is retried unchanged — there was no reply to
-// correct.
+// titleRetryNudge is what makes a retry worth paying for, and the reason this
+// loop exists at all. The call is pinned to temperature 0 and the thread pins
+// it to one upstream node, so re-sending the same words would fetch the same
+// paragraph back twice; the model has to be told what was wrong with it. Every
+// attempt after the first carries it, because a reply that was not a title is
+// the only thing that gets here.
 const titleRetryNudge = `That was not a title. Answer with the title only: one
 line, three to six words, no preamble, no explanation.`
 
@@ -57,10 +59,12 @@ line, three to six words, no preamble, no explanation.`
 // bar for the cheap queue, and a reasoning channel bleeding into a six-word
 // title is worse than no title.
 //
-// A failed call and a reply that is not a title are both retried, up to
-// titleAttempts. The caller must never let this block the answer. An empty
-// string is still the normal end of a bad run: the placeholder made from the
-// question's first words stays, and nobody needs to be told.
+// A reply that was not a title is re-asked with a correction, up to
+// titleAttempts; a call that failed on the wire is not re-asked here, because
+// llm.Client already made it twice. The caller must never let this block the
+// answer. An empty string is still the normal end of a bad run: the
+// placeholder made from the question's first words stays, and nobody needs to
+// be told.
 func Title(ctx context.Context, c *llm.Client, question string, lang Language) string {
 	if c == nil {
 		return ""
@@ -69,28 +73,23 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		{Role: "system", Content: fmt.Sprintf(titleSystem, languageName(lang)) + languageStyle(lang)},
 		{Role: "user", Content: question},
 	}
-	// nudge carries the correction into the next attempt, and only after a
-	// reply that was not a title.
-	var nudge []llm.Message
 	for attempt := 0; attempt < titleAttempts; attempt++ {
-		if attempt > 0 && !sched.Sleep(ctx, titleRetryPause) {
-			// The caller's ceiling ran out mid-run. What is left of it is not
-			// worth another call.
-			return ""
+		asking := msgs
+		if attempt > 0 {
+			// Past the first attempt the reply was a paragraph, so the
+			// correction goes with the question.
+			if !sched.Sleep(ctx, titleRetryPause) {
+				// The caller's ceiling ran out mid-run. What is left of it is
+				// not worth another call.
+				return ""
+			}
+			asking = append(msgs, llm.Message{Role: "user", Content: titleRetryNudge})
 		}
-		title, replied := titleOnce(ctx, c, append(msgs, nudge...))
+		title, replied := titleOnce(ctx, c, asking)
 		if title != "" {
 			return title
 		}
 		if !replied {
-			// The call itself failed, and llm.Client has already made it
-			// twice under the one retry policy every call runs under. A third
-			// request here would be a second policy stacked on that one, and
-			// the placeholder is a fine answer for a deployment that is down.
-			return ""
-		}
-		nudge = []llm.Message{{Role: "user", Content: titleRetryNudge}}
-		if ctx.Err() != nil {
 			return ""
 		}
 	}
@@ -102,10 +101,9 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 // when the upstream answered and the answer was not a title, false when the
 // call itself failed.
 func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title string, replied bool) {
-	call, cancel := context.WithTimeout(ctx, titleAttemptTimeout)
-	defer cancel()
-	out, _, err := c.Complete(call, msgs,
-		llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(titleMaxTokens), llm.WithStep("title"))
+	out, u, err := c.Complete(ctx, msgs,
+		llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(titleMaxTokens),
+		llm.WithAttemptTimeout(titleAttemptTimeout), llm.WithStep("title"))
 	if err != nil {
 		// A completion cut off by the token cap is still a reply, and the
 		// wrong shape is exactly what the nudge addresses.
@@ -114,6 +112,11 @@ func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title st
 	}
 	title = strings.TrimSpace(out)
 	title = strings.Trim(title, "\"'“”.")
+	if title == "" && u.Attempts > 1 {
+		// Nothing came back twice in a row. That is the deployment, not a
+		// shape a correction could fix.
+		return "", false
+	}
 	// A model that answered with a paragraph did not write a title. Taking the
 	// first line of it would put half a sentence in the sidebar.
 	if strings.Contains(title, "\n") || len([]rune(title)) > 60 {

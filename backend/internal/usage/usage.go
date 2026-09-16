@@ -66,6 +66,11 @@ func Int(n int) *int { return &n }
 type Meter struct {
 	mu    sync.Mutex
 	calls []Call
+	// retryFailed says a retry in this turn has already come back failing.
+	// internal/llm sets it and reads it: one doubled call is a hiccup, and
+	// doubling every remaining call of the turn after that is an outage paid
+	// for twice.
+	retryFailed bool
 }
 
 // New makes an empty meter.
@@ -89,6 +94,20 @@ func (m *Meter) Total() int {
 		n += c.Prompt + c.Completion
 	}
 	return n
+}
+
+// MarkRetryFailed records that a retried call failed again.
+func (m *Meter) MarkRetryFailed() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retryFailed = true
+}
+
+// RetryFailed reports whether a retry in this turn has already failed.
+func (m *Meter) RetryFailed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.retryFailed
 }
 
 // Calls returns what was recorded so far, in order. Never nil.
