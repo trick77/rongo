@@ -217,11 +217,28 @@ written in %s, regardless of the language of the sources or of these
 instructions. Identifiers, file names, quoted code and the markers stay
 exactly as they are.`
 
+// answerBA's second paragraph exists because "no source code, no file paths"
+// let everything else through: a delay question for PROD came back with the
+// raw cron in the opening sentence, field names and property keys in running
+// text, and never the figure the reader wanted (the hold plus the hourly job,
+// as one range). answerStages is appended after this block and keeps its
+// "copied character for character" rule on purpose - the literal is the
+// anti-hallucination check - so this paragraph keeps the literal too and only
+// moves it: once, after the words, out of the lead.
 const answerBA = `
 Audience: business analyst. Explain the mechanism in three to five paragraphs,
 in the language of the business domain. No source code, no signatures, no file
 paths in running text. Answer the question and then stop - edge cases belong in
-a follow-up.`
+a follow-up.
+
+Identifiers, property keys, cron expressions and code defaults are not the
+language of the business domain. Say what a value means for the reader: a
+schedule in words ("hourly, on the hour"), a delay as its duration, a switch as
+what it turns on. The exact value still appears, copied character for
+character, once, in parentheses after the words that explain it - never on its
+own, never in the opening sentence. When two settings combine, state the
+outcome the reader experiences as one figure or range, not the settings
+separately.`
 
 // answerCompare is added when the question named two or more repositories the
 // index carries. It has to be explicit about covering every one of them
