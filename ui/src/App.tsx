@@ -686,6 +686,7 @@ export default function App() {
             busyId={busyThread}
             onList={setThreads}
             onShared={refreshThreads}
+            onStarred={refreshThreads}
             onDeleted={(id) => {
               // The thread on screen has just been deleted: close it, so the
               // view falls back to the empty ask page rather than holding a

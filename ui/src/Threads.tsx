@@ -11,6 +11,11 @@ import { useThreadActions } from "./useThreadActions";
  * Threads page, which the foot of the list opens.
  */
 export const railLimit = 30;
+/**
+ * The starred list is not a page: every starred thread, however old, or a
+ * star stops doing its job at the 31st. The server's ceiling on one page.
+ */
+export const starredLimit = 1000;
 
 export type Thread = {
   /**
@@ -166,7 +171,7 @@ export default function Threads({
       try {
         const [recent, marked] = await Promise.all([
           fetch(`/api/threads?limit=${railLimit}`),
-          fetch("/api/threads?starred=true"),
+          fetch(`/api/threads?starred=true&limit=${starredLimit}`),
         ]);
         if (!recent.ok) return;
         const list = pageItems(await recent.json());

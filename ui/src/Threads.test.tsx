@@ -227,6 +227,13 @@ describe("Threads", () => {
       expect(screen.getAllByText("This week")[1].className).not.toContain("mt-5");
     });
 
+    it("asks for every starred thread, not a page of them", async () => {
+      const fetchMock = threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByText("Recents");
+      expect(fetchMock).toHaveBeenCalledWith("/api/threads?starred=true&limit=1000");
+    });
+
     it("reports the union of both lists upwards", async () => {
       const onList = vi.fn();
       threadList(two, true, [{ ...two[1], starred: true }, older]);

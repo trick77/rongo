@@ -620,6 +620,55 @@ describe("App, the header's thread menu", () => {
     expect(within(banner).queryByRole("menu")).toBeNull();
   });
 
+  // Star from a rail row, then open the header menu: it must read Unstar,
+  // which it can only do if the rail's change reached the shell.
+  it("follows a star put on from the rail", async () => {
+    atPath("/thread/" + addr);
+    const mock = apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByText(/Through a job/);
+    const rail = screen.getByRole("navigation", { name: "Threads" });
+    await user.click(within(rail).getByRole("button", { name: "Actions for How does shipping work?" }));
+    mock.mockResolvedValueOnce({ ok: true, status: 204, json: async () => null });
+    // After the star the reload says the thread is starred.
+    const starredThread = { ...oneThread[0], starred: true };
+    mock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        const u = String(url);
+        if (u.startsWith("/api/threads/")) return oneTurn;
+        if (u.includes("starred=true")) return { items: [starredThread], next_cursor: null };
+        return { items: [starredThread], next_cursor: null };
+      },
+    }));
+    await user.click(within(rail).getByRole("menuitem", { name: "Star" }));
+
+    const banner = screen.getByRole("banner");
+    await user.click(within(banner).getByRole("button", { name: "Actions for How does shipping work?" }));
+    expect(await within(banner).findByRole("menuitem", { name: "Unstar" })).toBeTruthy();
+  });
+
+  // The header's chevron and the rail's kebabs are on screen together, and
+  // only one menu stands at a time.
+  it("closes when a rail kebab opens its own menu", async () => {
+    atPath("/thread/" + addr);
+    apiFetch(oneThread, oneTurn);
+    const user = userEvent.setup();
+    render(<StrictMode><App /></StrictMode>);
+    await screen.findByText(/Through a job/);
+    const banner = screen.getByRole("banner");
+    const rail = screen.getByRole("navigation", { name: "Threads" });
+    await user.click(within(banner).getByRole("button", { name: "Actions for How does shipping work?" }));
+    expect(within(banner).getByRole("menu")).toBeTruthy();
+
+    await user.click(within(rail).getByRole("button", { name: "Actions for How does shipping work?" }));
+
+    expect(within(banner).queryByRole("menu")).toBeNull();
+    expect(within(rail).getByRole("menu")).toBeTruthy();
+  });
+
   it("reads Unstar for a thread the rail does not carry but the summary says is starred", async () => {
     atPath("/thread/" + addr);
     const starredSummary = { ...oneThread[0], starred: true };
