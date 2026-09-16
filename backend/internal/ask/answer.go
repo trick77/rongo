@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/trick77/llmwire"
@@ -1095,7 +1096,17 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 			// The whole answer, which is the ordinary turn.
 
 		case attempt == 1 && retriable(err):
-			slog.Warn("answer retried", "reason", retryReason(err))
+			wait := retryWait(err)
+			slog.Warn("answer retried", "reason", retryReason(err), "wait", wait)
+			if wait > 0 {
+				timer := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return Answer{}, fmt.Errorf("write the answer: %w", ctx.Err())
+				case <-timer.C:
+				}
+			}
 			continue
 
 		case err != nil:
@@ -1127,10 +1138,14 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 // exists for.
 //
 // A 4xx names a request the host refused — a rejected parameter, an unknown
-// model, a key, a rate limit — and rongo sends the same request twice, so a
-// second call buys a second refusal. Same for the turn's own token ceiling:
-// it is this process's arithmetic, and it is no smaller a moment later.
-// Everything else is the transport or the upstream, and that is transient.
+// model, a key — and rongo sends the same request twice, so a second call buys
+// a second refusal. Same for the turn's own token ceiling: it is this
+// process's arithmetic, and it is no smaller a moment later. A finish reason
+// with no text is the model spending the whole completion budget thinking, and
+// a second call spends it the same way for the same nothing.
+//
+// A 429 is the exception among the 4xx: it says come back, not no. Everything
+// else is the transport or the upstream, and that is transient.
 func retriable(err error) bool {
 	if err == nil {
 		return true
@@ -1138,11 +1153,37 @@ func retriable(err error) bool {
 	if errors.Is(err, llm.ErrTurnBudget) {
 		return false
 	}
+	var fin *llm.FinishError
+	if errors.As(err, &fin) {
+		return false
+	}
+	var rl *llmwire.RateLimitError
+	if errors.As(err, &rl) {
+		return true
+	}
 	var api *llmwire.APIError
 	if errors.As(err, &api) && api.StatusCode >= 400 && api.StatusCode < 500 {
 		return false
 	}
 	return true
+}
+
+// retryAfterCap bounds the wait a rate-limited answer call honours. The reader
+// is sitting in front of a turn that has written nothing, so a host asking for
+// a minute is asking for more than there is: past the cap the second attempt
+// goes out anyway and fails on its own.
+const retryAfterCap = 10 * time.Second
+
+// retryWait is how long to hold before the second attempt. Only a 429 that
+// carried a usable Retry-After asks for one; every other failure is retried at
+// once, and a zero Retry-After means the host sent no hint rather than "wait
+// nothing special".
+func retryWait(err error) time.Duration {
+	var rl *llmwire.RateLimitError
+	if !errors.As(err, &rl) || rl.RetryAfter <= 0 {
+		return 0
+	}
+	return min(rl.RetryAfter, retryAfterCap)
 }
 
 // retryReason is what the warn line says the first attempt died of. A nil

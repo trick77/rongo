@@ -10,7 +10,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/trick77/llmwire"
 	"github.com/trick77/rongo/internal/llm"
 )
 
@@ -22,9 +24,13 @@ type upstreamAttempt struct {
 	status int
 	// tokens are the content deltas the stream sends.
 	tokens []string
+	// finish, when set, is the finish_reason the stream ends on.
+	finish string
 	// drop aborts the connection once the tokens are out, the way a reset
 	// arrives mid-answer.
 	drop bool
+	// retryAfter, when set, is the Retry-After header sent with status.
+	retryAfter string
 }
 
 // attemptsUpstream answers successive requests from the list, so a test can
@@ -42,6 +48,9 @@ func attemptsUpstream(t *testing.T, attempts ...upstreamAttempt) (*llm.Client, *
 		a := attempts[n-1]
 		if a.status != 0 {
 			w.Header().Set("Content-Type", "application/json")
+			if a.retryAfter != "" {
+				w.Header().Set("Retry-After", a.retryAfter)
+			}
 			w.WriteHeader(a.status)
 			fmt.Fprint(w, `{"error":{"message":"no","type":"invalid_request_error"}}`)
 			return
@@ -64,6 +73,12 @@ func attemptsUpstream(t *testing.T, attempts ...upstreamAttempt) (*llm.Client, *
 			// The tokens are on the wire and the stream stops there: no
 			// finish_reason, no [DONE], no usage frame.
 			panic(http.ErrAbortHandler)
+		}
+		if a.finish != "" {
+			end, _ := json.Marshal(map[string]any{
+				"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": a.finish}},
+			})
+			fmt.Fprintf(w, "data: %s\n\n", end)
 		}
 		fmt.Fprint(w, "data: [DONE]\n\n")
 		_ = fl.Flush()
@@ -238,6 +253,79 @@ func TestAnswer_retriesAnUpstreamFailure(t *testing.T) {
 	}
 	if n := calls.Load(); n != 2 {
 		t.Errorf("requests = %d, want two", n)
+	}
+}
+
+// A completion budget spent entirely on thinking is not transient: the second
+// call spends it the same way and writes the same nothing. It fails the turn
+// on the first attempt, the way it always did.
+func TestAnswer_aBudgetSpentThinkingIsNeverRetried(t *testing.T) {
+	c, calls := attemptsUpstream(t,
+		upstreamAttempt{finish: "length"},
+		upstreamAttempt{tokens: []string{"x [1]"}},
+	)
+
+	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
+
+	if err == nil || !strings.Contains(err.Error(), "finish_reason=length") {
+		t.Fatalf("err = %v, want the finish-reason failure", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("requests = %d, want one — a second call buys the same thinking", n)
+	}
+}
+
+// A 429 says come back, not no. It is the one 4xx worth another call, and the
+// host's own Retry-After is what says when.
+func TestAnswer_retriesARateLimitAfterTheWaitItWasAskedFor(t *testing.T) {
+	c, calls := attemptsUpstream(t,
+		upstreamAttempt{status: http.StatusTooManyRequests, retryAfter: "1"},
+		upstreamAttempt{tokens: []string{"Issued [2]."}},
+	)
+	records := captureLog(t)
+
+	started := time.Now()
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if got.Attempts != 2 || got.Text != "Issued [1]." {
+		t.Errorf("attempts = %d text = %q, want the second attempt's answer", got.Attempts, got.Text)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("requests = %d, want two", n)
+	}
+	if waited := time.Since(started); waited < time.Second {
+		t.Errorf("waited %s, want the second call held for the Retry-After the host sent", waited)
+	}
+	rec := only(t, records(), "answer retried")
+	if rec["wait"] != float64(time.Second) {
+		t.Errorf("logged wait = %v, want one second", rec["wait"])
+	}
+}
+
+// The reader is in front of a turn that has written nothing, so a host asking
+// for a minute is asking for more than there is. Past the cap the second
+// attempt goes out anyway.
+func TestRetryWait_boundsWhatAHostCanAskFor(t *testing.T) {
+	limited := func(after time.Duration) error {
+		return &llmwire.RateLimitError{APIError: &llmwire.APIError{StatusCode: 429}, RetryAfter: after}
+	}
+
+	if got := retryWait(limited(2 * time.Second)); got != 2*time.Second {
+		t.Errorf("wait = %s, want the hint honoured", got)
+	}
+	if got := retryWait(limited(time.Minute)); got != retryAfterCap {
+		t.Errorf("wait = %s, want it capped at %s", got, retryAfterCap)
+	}
+	// Zero is "no usable hint", not "wait nothing special" — and every other
+	// failure is retried at once.
+	if got := retryWait(limited(0)); got != 0 {
+		t.Errorf("wait = %s, want none", got)
+	}
+	if got := retryWait(errors.New("connection reset")); got != 0 {
+		t.Errorf("wait = %s, want none", got)
 	}
 }
 
