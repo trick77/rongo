@@ -445,10 +445,30 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// turn it retries rather than off the request: the row is what says
 		// where the attempt belongs.
 		//
-		// Pre-existing and left alone: a retry fills no prior at all, so a
-		// retried turn in a pinned thread reaches Run with neither the pin nor
-		// the question it follows.
+		// And it is a full turn of that thread: a retry of a failed question
+		// is the same question asked again, so it gets the pin the thread
+		// narrowed to and the turn it follows. Without them a retry in a
+		// pinned thread widened back to the whole corpus and lost what "das"
+		// pointed at — the funnel undone by pressing a button.
 		thread = threads.Thread{ID: retryHead.ThreadID}
+		followUpIn = retryHead.ThreadID
+		// Below the row it retries, never below itself: the answered turn a
+		// retry follows is the one under the failed attempt. A retry of a
+		// resumed turn takes its head's ordinal, the way the resume branch
+		// does — the card's own turn sits above the answer it followed.
+		followUpBefore = retryHead.Ordinal
+		if headID != retryHead.ID {
+			if h, ok, err := s.deps.Threads.Message(ctx, u.Subject, headID); err != nil {
+				slog.Error("resolve retried head failed", "err", err)
+			} else if ok {
+				followUpBefore = h.Ordinal
+			}
+		}
+		if pin, err := s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
+			slog.Error("read thread scope failed", "err", err)
+		} else {
+			prior.Pin = pin
+		}
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
 		if errors.Is(err, errNotYours) {
@@ -483,9 +503,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		var last threads.Message
 		var ok bool
 		var err error
-		if resume != nil {
-			// A resumed turn stops below the turn it joins; a fresh one takes
-			// the thread's newest answered turn, which is the one it was
+		if resume != nil || retryHead != nil {
+			// A resumed turn stops below the turn it joins, and so does a
+			// retry, which joins the row it is another attempt at; a fresh one
+			// takes the thread's newest answered turn, which is the one it was
 			// typed under.
 			last, ok, err = s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		} else {

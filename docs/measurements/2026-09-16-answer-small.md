@@ -29,4 +29,4 @@ Per question, the invoice-amount question went 3/3 in the branch's first run (2/
 
 - No regression on the flow corpus, and the two questions that moved, moved up. The judge noise band is one to two questions, so this is "holds", not "gains".
 - The intent and follow-up items are rule fixes, not tuning; they ship on their tests. The structure-block sentence is the one aimed at a measured failure and its corpus is absent; it stays prompt-only and is re-read on the private estate.
-- Pre-existing, not touched: a retried turn in a pinned thread reaches `Run` with no pin and no previous question (the retry branch never fills `prior`).
+- A retried turn in a pinned thread reached `Run` with no pin and no previous question (the retry branch never filled `prior`). Fixed on `feat/answer-retry`.
