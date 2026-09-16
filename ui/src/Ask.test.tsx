@@ -8,7 +8,7 @@ import Ask, { languages } from "./Ask";
 // the row is clicked, as the reader does it.
 async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
   const name = languages.find((l) => l.code === code)?.name ?? code;
-  await user.click(screen.getByRole("button", { name: "Answer language" }));
+  await user.click(screen.getByRole("combobox", { name: "Answer language" }));
   await user.click(screen.getByRole("option", { name }));
 }
 
@@ -1911,7 +1911,7 @@ describe("Ask, the answer language across a reload", () => {
 
     unmount();
     render(<Ask />);
-    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("Deutsch");
+    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("Deutsch");
   });
 
   // A code the backend's allowlist does not carry would be rejected on the
@@ -1919,7 +1919,7 @@ describe("Ask, the answer language across a reload", () => {
   it("falls back to English on a stored code that is not on the allowlist", () => {
     localStorage.setItem("rongo.language", "kl");
     render(<Ask />);
-    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("English");
+    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("English");
   });
 
   // Safari's private mode throws on storage access. A forgotten preference is
@@ -1929,7 +1929,7 @@ describe("Ask, the answer language across a reload", () => {
       throw new Error("denied");
     });
     render(<Ask />);
-    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("English");
+    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("English");
     get.mockRestore();
   });
 });
@@ -2017,7 +2017,7 @@ describe("Ask, a language the record decided", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await screen.findByRole("alert");
-    const pill = screen.getByRole("button", { name: "Answer language" });
+    const pill = screen.getByRole("combobox", { name: "Answer language" });
     expect((pill as HTMLButtonElement).disabled).toBe(false);
     await pickLanguage(user, "de");
     expect(pill.textContent).toBe("Deutsch");
@@ -2081,7 +2081,7 @@ describe("Ask, the composer on a phone", () => {
     // An inline fontSize would out-specify the variant and put the zoom back.
     // (The textarea does carry an inline height — that is the autosize.)
     expect((box as HTMLTextAreaElement).style.fontSize).toBe("");
-    const lang = screen.getByRole("button", { name: "Answer language" });
+    const lang = screen.getByRole("combobox", { name: "Answer language" });
     const word = lang.querySelector("span");
     expect(word?.className).toContain("pointer-coarse:text-base");
     expect((lang as HTMLButtonElement).style.fontSize).toBe("");
@@ -2698,7 +2698,7 @@ describe("the composer's own box", () => {
     const { container } = strict(<Ask />);
 
     const role = container.querySelector("fieldset");
-    const language = screen.getByRole("button", { name: "Answer language" });
+    const language = screen.getByRole("combobox", { name: "Answer language" });
     const select = language.querySelector("span");
     for (const cls of ["rounded-full", "border", "border-border", "bg-bg", "p-0.5"]) {
       expect(role?.className).toContain(cls);

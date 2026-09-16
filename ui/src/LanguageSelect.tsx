@@ -26,7 +26,10 @@ function LanguageList({
       ref={menuRef}
       id="lang-listbox"
       role="listbox"
-      aria-label="Answer language"
+      aria-labelledby="lang-label"
+      // A press on a row must not take focus off the pill: the pill's blur
+      // closes the list, and the click would land on rows already gone.
+      onMouseDown={(e) => e.preventDefault()}
       className={
         "absolute left-0 z-20 w-[168px] overflow-hidden rounded-ui border border-elevated-border bg-elevated py-1 shadow-menu " +
         verticalClass
@@ -119,30 +122,55 @@ export default function LanguageSelect({ value, onChange }: { value: string; onC
     } else if (e.key === "End" && open) {
       e.preventDefault();
       setActive(languages.length - 1);
-    } else if ((e.key === "Enter" || e.key === " ") && open) {
+    } else if (e.key === "Enter" && open) {
       e.preventDefault();
       choose(languages[active].code);
+    } else if (e.key === " ") {
+      // Space is handled here in full, and its keyup below is swallowed:
+      // Chromium clicks a button on Space's keyup, Firefox on keyup even when
+      // the keydown was cancelled, and either click would toggle the list a
+      // second time right after the choice.
+      e.preventDefault();
+      if (open) choose(languages[active].code);
+      else show();
     }
   }
 
+  // Tab out of the pill closes the list without a choice; the pointer on a row
+  // is not a focus change (see the list's onMouseDown), so this only fires when
+  // focus really left.
+  function onBlur(e: React.FocusEvent<HTMLDivElement>) {
+    if (open && !e.currentTarget.contains(e.relatedTarget)) setOpen(false);
+  }
+
   return (
-    <div className="relative">
+    <div className="relative" onBlur={onBlur}>
       {/* Its box is the Role toggle's, off the same rule: the same border and
           radius, p-0.5 on the pill, py-1 text-xs on the control inside it.
           Height is content-driven, so the two agree wherever the text does,
           the pointer-coarse size included. The arrow is drawn here. */}
+      {/* A select-only combobox, as ARIA's pattern has it: the pill holds
+          focus, its content is the value, the label is its name, and the
+          active row is announced from here, since the list never has focus.
+          aria-activedescendant is ignored on a plain button, and an aria-label
+          would replace the value with the name. */}
+      <span id="lang-label" className="sr-only">
+        Answer language
+      </span>
       <button
         ref={buttonRef}
         type="button"
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="Answer language"
-        // Focus stays on the pill while the list is out, so the active row
-        // is announced from here, not from the list that never has focus.
+        aria-labelledby="lang-label"
         aria-controls={open ? "lang-listbox" : undefined}
         aria-activedescendant={open ? "lang-option-" + languages[active].code : undefined}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
+        onKeyUp={(e) => {
+          if (e.key === " ") e.preventDefault();
+        }}
         className={
           "relative inline-flex cursor-pointer items-center rounded-full border border-border bg-bg p-0.5 text-xs " +
           "outline-none focus-visible:ring-2 focus-visible:ring-accent-dim " +
