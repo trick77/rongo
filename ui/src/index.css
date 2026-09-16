@@ -415,9 +415,10 @@ body {
   background-size: 35% 100%;
   background-repeat: no-repeat;
   animation: slide 1.3s ease-in-out infinite;
-  /* Above the head fade, which runs along this very same edge at z-10: the
-     bar is 2px, and the strip's opaque end would swallow it whole. */
-  z-index: 20;
+  /* Above the head fade, which runs along this very same edge at z-20 and
+     comes later in the tree: the bar is 2px, and the strip's opaque end
+     would swallow it whole. */
+  z-index: 30;
 }
 
 /* A streaming answer carries the `streaming` class for the text fade
