@@ -507,11 +507,15 @@ export default function App() {
           thread row. `lg:visible` puts it back where the rail is the layout.
           The visibility is transitioned discretely so it still slides out
           rather than blinking away.
+
+          The rail scrolls as one: the action block, the history and the index
+          line at the foot move together, so the list is never the only thing
+          that gives when the window is short.
         */}
         <aside
           id="nav-drawer"
           className={
-            "fixed inset-y-0 left-0 z-50 flex min-h-0 w-[300px] max-w-[85vw] flex-col border-r border-border bg-panel " +
+            "fixed inset-y-0 left-0 z-50 flex min-h-0 w-[300px] max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-panel " +
             "transition-[transform,visibility] transition-discrete duration-200 ease-out " +
             "lg:visible lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 " +
             (navOpen ? "visible translate-x-0" : "invisible -translate-x-full")
