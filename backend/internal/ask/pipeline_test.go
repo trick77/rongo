@@ -341,7 +341,7 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 
 	// When
 	answer, err := p.Resume(context.Background(), "frage", AudienceBA, LanguageEN,
-		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{}, Events{})
+		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{}, Thread{}, Events{})
 
 	// Then
 	if err != nil {
@@ -352,6 +352,81 @@ func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 	}
 	if len(answer.Sources) == 0 {
 		t.Error("the answer must carry what it was written from, so the turn can be re-explained later")
+	}
+}
+
+// TestRunCarriesTheIntentIntoTheScopeTheAnswererSees: the understanding step
+// reads the question as asking how, why, where or whether, and until now that
+// reading reached the trace and nothing else. The scope is what carries it,
+// because the scope is what a resumed or re-explained turn reads back.
+func TestRunCarriesTheIntentIntoTheScopeTheAnswererSees(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "backend/internal/playbackgrant/store.go", 0, 1, 20, "NewGrant", "func NewGrant() {}")
+	search := &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}
+	c := twoStepUpstream(t, `{"intent":"where","terms":["grant"],"code_terms":["NewGrant"]}`,
+		"It lives in the grant store [1].")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	got, _, err := p.Run(context.Background(), "Where is the grant issued?", AudienceBA, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The scope the answerer was handed is the scope the answer carries out:
+	// p.answer writes it onto the answer, and it is what the record keeps.
+	// What the prompt then does with it is answer_test.go's business.
+	if got.Scope.Intent != "where" {
+		t.Errorf("scope.Intent = %q, want the understanding's reading in the record", got.Scope.Intent)
+	}
+}
+
+// TestResumeCarriesTheFollowUpRule: a turn answered through a clarification
+// card is still a turn of its thread. Without the previous question the answer
+// prompt loses the rule that says what "that" points at, and the reader who
+// followed up gets an answer to the sentence they typed instead.
+func TestResumeCarriesTheFollowUpRule(t *testing.T) {
+	// A resumed turn runs no understanding step, so the answer call is the
+	// only one the upstream sees and streamUpstream records it.
+	c, prompt, _ := streamUpstream(t, "Answer [1].")
+	p := NewPipeline(c, searchFunc(func(retrieve.Query) ([]retrieve.Hit, error) {
+		t.Fatal("a resumed turn must not search again")
+		return nil, nil
+	}), NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	if _, err := p.Resume(context.Background(), "und wo wird das entschieden?", AudienceBA, LanguageEN,
+		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{},
+		Thread{Question: "wie wird die Anmeldung gemacht?"}, Events{}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "This is a follow-up to an earlier question") {
+		t.Errorf("a resumed follow-up lost the follow-up rule:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "wie wird die Anmeldung gemacht?") {
+		t.Errorf("the previous question never reached the prompt:\n%s", *prompt)
+	}
+}
+
+// TestResumeRepoCarriesTheFollowUpRule is the same for the repository card,
+// the resume that searches again.
+func TestResumeRepoCarriesTheFollowUpRule(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "Answer [1].")
+	search := indexedSearch{indexed: []string{"loom"}, searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
+		return []retrieve.Hit{{ChunkID: 1, Repo: "loom", Path: "a.go"}}, nil
+	}}
+	p := NewPipeline(c, search, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	if _, err := p.ResumeRepo(context.Background(), "und wo wird das entschieden?", Understanding{}, []string{"loom"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}},
+		Thread{Question: "wie wird die Anmeldung gemacht?"}, Events{}); err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+
+	if !strings.Contains(*prompt, "This is a follow-up to an earlier question") {
+		t.Errorf("a resumed follow-up lost the follow-up rule:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "wie wird die Anmeldung gemacht?") {
+		t.Errorf("the previous question never reached the prompt:\n%s", *prompt)
 	}
 }
 
@@ -369,7 +444,7 @@ func TestResumeRepoSearchesTheChosenRepositoryAtFullDepth(t *testing.T) {
 	}))
 
 	answer, err := p.ResumeRepo(context.Background(), "how are token costs calculated in $?",
-		Understanding{CodeTerms: []string{"pricing"}}, []string{"loom"}, AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+		Understanding{CodeTerms: []string{"pricing"}}, []string{"loom"}, AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
@@ -403,7 +478,7 @@ func TestResumeRepoWithNoRepositorySearchesTheWholeCorpus(t *testing.T) {
 	}))
 
 	if _, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, nil,
-		AudienceBA, LanguageEN, Scope{All: true}, Events{}); err != nil {
+		AudienceBA, LanguageEN, Scope{All: true}, Thread{}, Events{}); err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
 	if len(got.Repos) != 0 {
@@ -423,7 +498,7 @@ func TestResumeRepoSaysNothingFoundRatherThanAnswering(t *testing.T) {
 	}))
 
 	got, err := p.ResumeRepo(context.Background(), "frage", Understanding{CodeTerms: []string{"AirPlay"}}, []string{"loom"},
-		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
@@ -450,7 +525,7 @@ func TestResumeRepoRefusesWhenTheChosenRepositoryLeftTheIndex(t *testing.T) {
 	}))
 
 	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"loom"},
-		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Events{})
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}}, Thread{}, Events{})
 	if err == nil {
 		t.Fatal("want an error when the chosen repository is gone from the index")
 	}
@@ -789,7 +864,7 @@ func TestResumeRepoSearchesEveryChosenRepositorySeparately(t *testing.T) {
 
 	answer, err := p.ResumeRepo(context.Background(), "how is retry done?",
 		Understanding{CodeTerms: []string{"retry"}}, []string{"loom", "peeq"},
-		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Events{})
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("resume repo: %v", err)
 	}
@@ -847,7 +922,7 @@ func TestResumeRepoFailsWhenOneOfTheChosenRepositoriesIsGone(t *testing.T) {
 	}))
 
 	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"loom", "peeq"},
-		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Events{})
+		AudienceBA, LanguageEN, Scope{Known: []string{"loom", "peeq"}}, Thread{}, Events{})
 	if err == nil {
 		t.Fatal("want an error when one of the chosen repositories is gone from the index")
 	}

@@ -209,6 +209,14 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 		// expansion did not help" rather than as "the expansion never ran".
 		return Understanding{}, fmt.Errorf("understand the question: reply was not JSON: %w", err)
 	}
+	// Normalised once, here, because everything downstream compares it to a
+	// word: the answer prompt looks the intent up in a table, and `Where.`,
+	// `"where"` and `where` are one reading. The trimmed set is what a model
+	// asked for one word out of four actually returns — spacing, the quotes
+	// of a half-escaped string, and the full stop of a sentence that was
+	// never wanted. A word the table does not carry is left as it is: it
+	// reaches the trace, where a reader sees what the model said.
+	got.Intent = strings.Trim(strings.ToLower(got.Intent), " \t\n\"'`.,:;!?")
 	return got, nil
 }
 

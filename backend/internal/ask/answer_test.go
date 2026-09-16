@@ -357,6 +357,56 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	}
 }
 
+// TestAnswer_theIntentSharpensTheOpeningSentence: the shape rule says to open
+// with one sentence that answers the question, and what that means is
+// different for a WHERE, a WHY and a yes/no question. Each intent adds its own
+// line, and nothing else changes.
+func TestAnswer_theIntentSharpensTheOpeningSentence(t *testing.T) {
+	for intent, want := range map[string]string{
+		"where":       "The question asks WHERE: open by saying every place the mechanism lives",
+		"why":         "The question asks WHY: state the condition or rule that decides it",
+		"conformance": "answer yes or no in the first sentence",
+	} {
+		c, prompt, _ := streamUpstream(t, "x")
+		if _, err := NewAnswerer(c).Answer(context.Background(), "Wo?", AudienceBA, LanguageEN, twoSources(),
+			Scope{Intent: intent}, "", nil); err != nil {
+			t.Fatalf("Answer: %v", err)
+		}
+		if !strings.Contains(*prompt, want) {
+			t.Errorf("the %q prompt does not carry its own rule:\n%s", intent, *prompt)
+		}
+		// It refines the shape rule, so it follows it, and it is not a
+		// special case appended after the conditional blocks.
+		if strings.Index(*prompt, want) < strings.Index(*prompt, "Open with ONE sentence") {
+			t.Errorf("the %q rule comes before the shape rules it refines", intent)
+		}
+		if strings.Index(*prompt, want) > strings.Index(*prompt, "```diagram") {
+			t.Errorf("the %q rule comes after the conditional blocks", intent)
+		}
+	}
+}
+
+// TestAnswer_anIntentWithNoRuleAddsNothing: "how" is what the shape rule was
+// written for, and the intent comes from a model — a word this prompt has no
+// rule for must leave it exactly as it was, never a line about the word.
+func TestAnswer_anIntentWithNoRuleAddsNothing(t *testing.T) {
+	base, basePrompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(base).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(),
+		Scope{}, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	for _, intent := range []string{"how", "sideways"} {
+		c, prompt, _ := streamUpstream(t, "x")
+		if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(),
+			Scope{Intent: intent}, "", nil); err != nil {
+			t.Fatalf("Answer: %v", err)
+		}
+		if *prompt != *basePrompt {
+			t.Errorf("intent %q changed the prompt; only where, why and conformance have a rule", intent)
+		}
+	}
+}
+
 func TestAnswer_anEmptyCompletionIsAnErrorNotAnAnswer(t *testing.T) {
 	// An upstream that ends cleanly without one content delta must not become
 	// a finished turn with nothing in it: the reader would see a Done mark over
