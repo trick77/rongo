@@ -1,6 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-
 import { Icon, type IconName } from "./Icon";
+import { useMenuPlacement } from "./menuPlacement";
 
 /**
  * The row actions menu, ../loom's: an inset entry whose hover ground floats
@@ -18,62 +17,6 @@ const plainEntry = entry + " text-elevated-ink enabled:hover:bg-elevated-hover";
  * rather than a word.
  */
 const dangerEntry = entry + " text-danger-ink enabled:hover:bg-danger-fill enabled:hover:text-white";
-
-/**
- * Finds the nearest scrollable ancestor, so "is there room below" is asked of
- * the rail's own scroller rather than of the window.
- */
-function nearestScrollParent(el: HTMLElement): HTMLElement | null {
-  let parent = el.parentElement;
-  while (parent !== null) {
-    const overflowY = getComputedStyle(parent).overflowY;
-    if (overflowY === "auto" || overflowY === "scroll") return parent;
-    parent = parent.parentElement;
-  }
-  return null;
-}
-
-/**
- * Which way the menu opens, ../loom's hook. The rail clips its overflow, so a
- * menu opened on the last row would drop behind the end of the list. When
- * there is no room below and more above, it flips upward instead.
- */
-function useMenuPlacement(): {
-  menuRef: React.RefObject<HTMLDivElement | null>;
-  verticalClass: string;
-} {
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [dropUp, setDropUp] = useState(false);
-
-  const measure = useCallback(() => {
-    const el = menuRef.current;
-    const anchor = el?.offsetParent as HTMLElement | null;
-    if (el === null || anchor === null) return;
-    const bounds = nearestScrollParent(el)?.getBoundingClientRect();
-    const topLimit = Math.max(bounds?.top ?? 0, 0);
-    const bottomLimit = Math.min(bounds?.bottom ?? window.innerHeight, window.innerHeight);
-    const anchorRect = anchor.getBoundingClientRect();
-    const menuHeight = el.offsetHeight + 4;
-    const spaceBelow = bottomLimit - anchorRect.bottom;
-    const spaceAbove = anchorRect.top - topLimit;
-    setDropUp(spaceBelow < menuHeight && spaceAbove > spaceBelow);
-  }, []);
-
-  // Measured before paint so the menu never flashes downward first, and kept
-  // right while it is open: scrolling the rail moves the row it hangs off.
-  useLayoutEffect(() => {
-    measure();
-    // Capture catches an ancestor's scroll, not only the window's.
-    window.addEventListener("scroll", measure, true);
-    window.addEventListener("resize", measure);
-    return () => {
-      window.removeEventListener("scroll", measure, true);
-      window.removeEventListener("resize", measure);
-    };
-  }, [measure]);
-
-  return { menuRef, verticalClass: dropUp ? "top-auto bottom-full mb-1" : "top-full mt-1" };
-}
 
 function MenuIcon({ name }: { name: IconName }) {
   return (

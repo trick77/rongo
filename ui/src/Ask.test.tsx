@@ -2,7 +2,15 @@ import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Ask from "./Ask";
+import Ask, { languages } from "./Ask";
+
+// The language list is a listbox, not a native select: the pill opens it and
+// the row is clicked, as the reader does it.
+async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
+  const name = languages.find((l) => l.code === code)?.name ?? code;
+  await user.click(screen.getByRole("button", { name: "Answer language" }));
+  await user.click(screen.getByRole("option", { name }));
+}
 
 /**
  * Streams the given SSE frames one chunk at a time. A fake that returned the
@@ -69,10 +77,10 @@ describe("Ask", () => {
     render(<Ask />);
     expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     expect(screen.getByRole("heading", { name: "Frag den Code." })).toBeTruthy();
     expect(screen.queryByText(/Ask about the code/)).toBeNull();
-    await user.selectOptions(screen.getByLabelText("Answer language"), "en");
+    await pickLanguage(user, "en");
     expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
   });
 
@@ -84,7 +92,7 @@ describe("Ask", () => {
     const box = screen.getByLabelText("Question");
     expect(box.getAttribute("placeholder")).toBe("Ask about the code…");
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     expect(box.getAttribute("placeholder")).toBe("Frag den Code …");
   });
 
@@ -246,7 +254,7 @@ describe("Ask", () => {
     streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     await user.type(screen.getByLabelText("Question"), "Wie?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
@@ -1898,12 +1906,12 @@ describe("Ask, the answer language across a reload", () => {
   it("opens on the language last picked", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<Ask />);
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     expect(localStorage.getItem("rongo.language")).toBe("de");
 
     unmount();
     render(<Ask />);
-    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("de");
+    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("Deutsch");
   });
 
   // A code the backend's allowlist does not carry would be rejected on the
@@ -1911,7 +1919,7 @@ describe("Ask, the answer language across a reload", () => {
   it("falls back to English on a stored code that is not on the allowlist", () => {
     localStorage.setItem("rongo.language", "kl");
     render(<Ask />);
-    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("en");
+    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("English");
   });
 
   // Safari's private mode throws on storage access. A forgotten preference is
@@ -1921,7 +1929,7 @@ describe("Ask, the answer language across a reload", () => {
       throw new Error("denied");
     });
     render(<Ask />);
-    expect((screen.getByLabelText("Answer language") as HTMLSelectElement).value).toBe("en");
+    expect(screen.getByRole("button", { name: "Answer language" }).textContent).toBe("English");
     get.mockRestore();
   });
 });
@@ -1935,7 +1943,7 @@ describe("Ask, the language a thread is answered in", () => {
     streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     await user.type(screen.getByLabelText("Question"), "Wie?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
@@ -2009,10 +2017,10 @@ describe("Ask, a language the record decided", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await screen.findByRole("alert");
-    const select = screen.getByLabelText("Answer language") as HTMLSelectElement;
-    expect(select.disabled).toBe(false);
-    await user.selectOptions(select, "de");
-    expect(select.value).toBe("de");
+    const pill = screen.getByRole("button", { name: "Answer language" });
+    expect((pill as HTMLButtonElement).disabled).toBe(false);
+    await pickLanguage(user, "de");
+    expect(pill.textContent).toBe("Deutsch");
   });
 });
 
@@ -2073,9 +2081,10 @@ describe("Ask, the composer on a phone", () => {
     // An inline fontSize would out-specify the variant and put the zoom back.
     // (The textarea does carry an inline height — that is the autosize.)
     expect((box as HTMLTextAreaElement).style.fontSize).toBe("");
-    const lang = screen.getByLabelText("Answer language");
-    expect(lang.className).toContain("pointer-coarse:text-base");
-    expect((lang as HTMLSelectElement).style.fontSize).toBe("");
+    const lang = screen.getByRole("button", { name: "Answer language" });
+    const word = lang.querySelector("span");
+    expect(word?.className).toContain("pointer-coarse:text-base");
+    expect((lang as HTMLButtonElement).style.fontSize).toBe("");
   });
 
   it("wraps the controls instead of crushing them", () => {
@@ -2689,8 +2698,8 @@ describe("the composer's own box", () => {
     const { container } = strict(<Ask />);
 
     const role = container.querySelector("fieldset");
-    const language = screen.getByText("Answer language").closest("label");
-    const select = screen.getByLabelText("Answer language");
+    const language = screen.getByRole("button", { name: "Answer language" });
+    const select = language.querySelector("span");
     for (const cls of ["rounded-full", "border", "border-border", "bg-bg", "p-0.5"]) {
       expect(role?.className).toContain(cls);
       expect(language?.className).toContain(cls);
@@ -2701,7 +2710,7 @@ describe("the composer's own box", () => {
     expect(language?.className).not.toContain("h-8");
     for (const cls of ["py-1", "font-medium", "pointer-coarse:text-base"]) {
       expect(role?.querySelector("button")?.className).toContain(cls);
-      expect(select.className).toContain(cls);
+      expect(select?.className).toContain(cls);
     }
     expect(role?.querySelector("button")?.className).toContain("text-xs");
     expect(language?.className).toContain("text-xs");
