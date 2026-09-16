@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
@@ -16,7 +17,13 @@ import (
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if s.proxyMode() {
 		// The proxy signed the browser in before this request got here; the
-		// app root is where the session already works.
+		// app root is where the session already works. Unless the proxy did
+		// not say who: then the root would 401 and land here again, a loop
+		// with no message. The marker halts the SPA on a message instead.
+		if strings.TrimSpace(r.Header.Get(auth.ProxyUserHeader)) == "" {
+			http.Redirect(w, r, "/?auth_error=proxy", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}

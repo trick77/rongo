@@ -180,9 +180,11 @@ describe("App", () => {
     });
   });
 
-  it("reloads the root when an authenticating proxy answers /api/me with its sign-in page", async () => {
+  it("reloads in place when an authenticating proxy answers /api/me with its sign-in page", async () => {
     // oauth-proxy in front of rongo: an expired proxy cookie turns every
-    // request into a 403 HTML page. Only a navigation can show that page.
+    // request into a 403 HTML page. Only a navigation can show that page,
+    // and reloading this URL rather than going to the root is what lets the
+    // proxy return the user to where they were.
     const href = vi.fn();
     stubLocation(href, "");
     vi.stubGlobal(
@@ -197,7 +199,8 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => expect(href).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
+    expect(href).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 

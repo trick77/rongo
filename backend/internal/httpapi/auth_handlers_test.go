@@ -181,6 +181,26 @@ func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 	// Given: the proxy in front already signed the browser in.
 	svc := auth.NewService(authDB(t), "proxy", "")
 	srv := NewServer(Deps{Auth: svc})
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
+	req.Header.Set(auth.ProxyUserHeader, "jdoe")
+
+	// When
+	rec := do(srv, req)
+
+	// Then
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Errorf("Location = %q, want %q", loc, "/")
+	}
+}
+
+func TestAuthLogin_proxyModeHaltsWhenTheProxyNamesNobody(t *testing.T) {
+	// Given: a proxy that forwards without the user header. Sending the
+	// browser to the root would 401 and come straight back here.
+	svc := auth.NewService(authDB(t), "proxy", "")
+	srv := NewServer(Deps{Auth: svc})
 
 	// When
 	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/login", nil))
@@ -189,8 +209,8 @@ func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/" {
-		t.Errorf("Location = %q, want %q", loc, "/")
+	if loc := rec.Header().Get("Location"); loc != "/?auth_error=proxy" {
+		t.Errorf("Location = %q, want %q", loc, "/?auth_error=proxy")
 	}
 }
 

@@ -108,10 +108,11 @@ function useSession(): Session {
       if (res.status === 403 && !isJson(res)) {
         // An authenticating proxy in front of rongo whose cookie ran out:
         // it answers every request with its own HTML sign-in page and never
-        // lets this one through. rongo itself never sends a 403 here. The
-        // root is where that page renders as a page.
+        // lets this one through. rongo itself never sends a 403 here. A
+        // reload renders that page as a page, on this URL, so the proxy
+        // brings the user back to the thread they were on.
         setSession({ state: "out" });
-        window.location.href = "/";
+        window.location.reload();
         return;
       }
       if (!res.ok) {
