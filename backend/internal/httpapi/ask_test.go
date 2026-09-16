@@ -135,8 +135,9 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 		}
 	}
 	// A resumed turn always carries the sources it was written from, so the
-	// handler has something to persist for a later re-explain.
-	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
+	// handler has something to persist for a later re-explain — and the scope
+	// it answered under, which the real pipeline writes onto every answer.
+	return ask.Answer{Text: text, Scope: gotScope, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
 // ResumeRepo is the repository card's resume: it searches the chosen
@@ -168,7 +169,7 @@ func (f *fakeAsker) ResumeRepo(ctx context.Context, _ string, _ ask.Understandin
 			ev.OnToken(tok)
 		}
 	}
-	return ask.Answer{Text: text, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
+	return ask.Answer{Text: text, Scope: gotScope, Sources: []ask.Source{{ChunkID: 1, Reason: "hit"}}}, nil
 }
 
 func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, _ []ask.Source, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
@@ -197,15 +198,8 @@ func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, l
 // withAskerAsking makes Run end the turn with a two-candidate clarification.
 func withAskerAsking() func(*fakeAsker) {
 	return func(f *fakeAsker) {
-		f.clarification = &ask.Clarification{
-			Understanding: ask.Understanding{CodeTerms: []string{"auth"}},
-			Candidates: []ask.Candidate{
-				{Repo: "peeq", Branch: "master", ModuleKey: "oauth", Title: "Via OAuth", Summary: "s1",
-					Hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "a.go"}}},
-				{Repo: "peeq", Branch: "master", ModuleKey: "sso", Title: "Via SSO", Summary: "s2",
-					Hits: []retrieve.Hit{{ChunkID: 2, Repo: "peeq", Branch: "master", Path: "b.go"}}},
-			},
-		}
+		c := moduleCard()
+		f.clarification = &c
 	}
 }
 
@@ -1259,9 +1253,9 @@ func TestAResumedTurnKnowsWhatItFollows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	answer := func(question, text string) threads.Message {
+	answer := func(question, text string, head int64) threads.Message {
 		t.Helper()
-		m, err := store.AddQuestion(ctx, th.ID, "ba", "de", question, 0)
+		m, err := store.AddQuestion(ctx, th.ID, "ba", "de", question, head)
 		if err != nil {
 			t.Fatalf("add question: %v", err)
 		}
@@ -1273,20 +1267,70 @@ func TestAResumedTurnKnowsWhatItFollows(t *testing.T) {
 		return m
 	}
 
-	answer("wie wird die Anmeldung gemacht?", "Über OAuth.")
-	card := answer("und wo wird das entschieden?", "")
+	answer("wie wird die Anmeldung gemacht?", "Über OAuth.", 0)
+	card := answer("und wo wird das entschieden?", "", 0)
 	if _, err := store.Clarify(ctx, card.ID, moduleCard()); err != nil {
 		t.Fatalf("clarify: %v", err)
 	}
 	// Asked past the open card, and answered: the newest answered turn of the
 	// thread is now this one, which the card's own turn never saw.
-	answer("was kostet ein Turn?", "Tokens mal Listenpreis.")
+	answer("was kostet ein Turn?", "Tokens mal Listenpreis.", 0)
 
 	doSSE(t, srv, "/api/ask",
 		fmt.Sprintf(`{"question":"und wo wird das entschieden?","clarification_message_id":%d,"choice":1}`, card.ID))
 
 	if asker.gotThread.Question != "wie wird die Anmeldung gemacht?" {
 		t.Errorf("followed up on %q, want the turn answered below the card", asker.gotThread.Question)
+	}
+}
+
+// TestAChainedResumeFollowsWhatTheFirstCardFollowed: a card can sit on a row
+// that is itself a resume, because answering one card can end in another. The
+// whole chain is one attempt at one question, so every link follows what the
+// first link followed — the card's OWN ordinal would make the turn follow a
+// question asked while it was still open, or the one it is answering.
+func TestAChainedResumeFollowsWhatTheFirstCardFollowed(t *testing.T) {
+	var asker *fakeAsker
+	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
+	ctx := context.Background()
+	th, err := store.Create(ctx, testSubject, "wie wird die Anmeldung gemacht?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	answer := func(question, text string, head int64) threads.Message {
+		t.Helper()
+		m, err := store.AddQuestion(ctx, th.ID, "ba", "de", question, head)
+		if err != nil {
+			t.Fatalf("add question: %v", err)
+		}
+		if text != "" {
+			if err := store.Finish(ctx, m.ID, text, nil); err != nil {
+				t.Fatalf("finish: %v", err)
+			}
+		}
+		return m
+	}
+
+	first := answer("wie wird die Anmeldung gemacht?", "Über OAuth.", 0)
+	card := answer("und wo wird das entschieden?", "", 0)
+	if _, err := store.Clarify(ctx, card.ID, moduleCard()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	answer("was kostet ein Turn?", "Tokens mal Listenpreis.", 0)
+	// The resume of the first card ended in a second one: same question, same
+	// attempt, and its row joins the first card's turn.
+	second := answer("und wo wird das entschieden?", "", card.ID)
+	if _, err := store.Clarify(ctx, second.ID, moduleCard()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	answer("und wie lange dauert das?", "Ein paar Sekunden.", 0)
+
+	doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"und wo wird das entschieden?","clarification_message_id":%d,"choice":1}`, second.ID))
+
+	if asker.gotThread.Question != first.Question {
+		t.Errorf("followed up on %q, want %q — what the first card's turn followed",
+			asker.gotThread.Question, first.Question)
 	}
 }
 

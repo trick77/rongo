@@ -798,6 +798,7 @@ func (p *Pipeline) Resume(ctx context.Context, question string, audience Audienc
 // back in there because knownRepos may narrow on what it names; in the scoped
 // case it is left out for the reason searchScoped gives, or the other
 // repositories would be unioned straight back in.
+//
 // t is what Resume's is: what earlier turns of this thread left behind.
 func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understanding, repos []string,
 	audience Audience, lang Language, scope Scope, t Thread, ev Events) (Answer, error) {

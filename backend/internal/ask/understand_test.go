@@ -50,15 +50,17 @@ const appleTVReply = `{
 // intent to a word — the answer prompt looks it up in a table — so the
 // spelling the model happened to use is settled here and nowhere else.
 func TestUnderstand_theIntentIsNormalisedOnce(t *testing.T) {
-	c, _, _ := modelUpstream(t, `{"intent":"Where ","terms":["t"],"code_terms":["c"],"repos":[]}`)
+	for _, spelled := range []string{"Where ", "Where.", `\"Where\"`, "WHERE!"} {
+		c, _, _ := modelUpstream(t, `{"intent":"`+spelled+`","terms":["t"],"code_terms":["c"],"repos":[]}`)
 
-	got, err := NewUnderstander(c).Understand(context.Background(), "Wo?", Thread{}, nil)
-	if err != nil {
-		t.Fatalf("Understand: %v", err)
-	}
+		got, err := NewUnderstander(c).Understand(context.Background(), "Wo?", Thread{}, nil)
+		if err != nil {
+			t.Fatalf("Understand %q: %v", spelled, err)
+		}
 
-	if got.Intent != "where" {
-		t.Errorf("Intent = %q, want it lower-cased and trimmed", got.Intent)
+		if got.Intent != "where" {
+			t.Errorf("Intent = %q for %q, want it lower-cased and stripped", got.Intent, spelled)
+		}
 	}
 }
 

@@ -238,9 +238,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	var headID int64
 	var resumeHits []retrieve.Hit
 	var resumeScope ask.Scope
-	// resumeOrdinal is where the card sits in its thread. Negative is "no
-	// card", so a turn that is not a resume has no bound at all.
-	resumeOrdinal := -1
+	// followUpBefore is the ordinal a resumed turn looks for its follow-up
+	// below: the ordinal of the turn this attempt JOINS, which is the card's
+	// head row when the card itself sat on a resumed one. A chain of cards is
+	// one attempt at one question, so every link of it follows what the first
+	// link followed.
+	var followUpBefore int
 	// resumeRepoChoice marks a card whose entries were repositories;
 	// resumeRepos are the ones chosen, empty for the card's "all
 	// repositories" entry. A card yields exactly one; the too-broad panel
@@ -362,14 +365,23 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		if ok {
 			resumeScope = m.Scope
-			// Where the card sits in its thread, which is what bounds the
-			// search for the turn this one follows.
-			resumeOrdinal = m.Ordinal
 			// The resumed turn is not a second asking of the question: it is
 			// the same one, carried on past the card. It joins the card's
 			// turn, which is the card's own head when the card was itself a
 			// resume.
 			headID = m.Head()
+			// And the whole chain follows what the head followed. A card
+			// answered by another card leaves the second card sitting ABOVE
+			// the first one's turn, so the card's own ordinal would make the
+			// resumed turn follow a question it is still answering.
+			followUpBefore = m.Ordinal
+			if headID != m.ID {
+				if h, ok, err := s.deps.Threads.Message(ctx, u.Subject, headID); err != nil {
+					slog.Error("resolve resumed head failed", "err", err)
+				} else if ok {
+					followUpBefore = h.Ordinal
+				}
+			}
 		}
 		if resumeRepoChoice {
 			// The choice IS the scope now. Unknown carries over untouched: a
@@ -417,21 +429,17 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	var prior ask.Thread
 	var thread threads.Thread
 	// followUpIn is the thread whose last answered turn this one follows, 0
-	// for a turn that follows nothing, and followUpBefore bounds the search
-	// for it: negative is "the newest answered turn", and a resumed turn
-	// passes the CARD's ordinal, because a card need not be the newest thing
-	// in its thread.
+	// for a turn that follows nothing.
 	var followUpIn int64
-	followUpBefore := -1
 	switch {
 	case resume != nil:
 		// A resumed turn continues the thread the clarification was asked
 		// in — the reader is still in the same conversation, just answering
 		// a question rongo asked. And a turn of that conversation can be a
 		// follow-up: the card's own turn wrote no answer, so what the new
-		// question points at is the answered turn BELOW the card.
+		// question points at is the answered turn below the one it joins.
 		thread = threads.Thread{ID: resume.ThreadID}
-		followUpIn, followUpBefore = resume.ThreadID, resumeOrdinal
+		followUpIn = resume.ThreadID
 	case retryHead != nil:
 		// A retry continues the thread the question was asked in, read off the
 		// turn it retries rather than off the request: the row is what says
@@ -472,7 +480,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// ago. A read that fails is logged and treated as no previous turn, the
 	// way an unreadable thread is.
 	if followUpIn != 0 {
-		if last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore); err != nil {
+		var last threads.Message
+		var ok bool
+		var err error
+		if resume != nil {
+			// A resumed turn stops below the turn it joins; a fresh one takes
+			// the thread's newest answered turn, which is the one it was
+			// typed under.
+			last, ok, err = s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
+		} else {
+			last, ok, err = s.deps.Threads.LastTurn(ctx, u.Subject, followUpIn)
+		}
+		if err != nil {
 			slog.Error("read last turn failed", "err", err)
 		} else if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
