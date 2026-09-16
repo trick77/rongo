@@ -63,6 +63,10 @@ function haltReason(search: string): string | null {
   return null;
 }
 
+function isJson(res: Response): boolean {
+  return (res.headers?.get("content-type") ?? "").includes("application/json");
+}
+
 function useSession(): Session {
   const [session, setSession] = useState<Session>({ state: "checking" });
 
@@ -99,6 +103,15 @@ function useSession(): Session {
         // page and a redirect chain, neither of which a fetch can follow into
         // the address bar.
         window.location.href = "/api/auth/login";
+        return;
+      }
+      if (res.status === 403 && !isJson(res)) {
+        // An authenticating proxy in front of rongo whose cookie ran out:
+        // it answers every request with its own HTML sign-in page and never
+        // lets this one through. rongo itself never sends a 403 here. The
+        // root is where that page renders as a page.
+        setSession({ state: "out" });
+        window.location.href = "/";
         return;
       }
       if (!res.ok) {

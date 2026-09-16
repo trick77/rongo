@@ -176,3 +176,45 @@ func (f *fakeOIDC) HandleCallback(*http.Request) (auth.Claims, error) {
 }
 
 func (f *fakeOIDC) ClearTransientCookies(http.ResponseWriter) { f.cleared = true }
+
+func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
+	// Given: the proxy in front already signed the browser in.
+	svc := auth.NewService(authDB(t), "proxy", "")
+	srv := NewServer(Deps{Auth: svc})
+
+	// When
+	rec := do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/login", nil))
+
+	// Then
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Errorf("Location = %q, want %q", loc, "/")
+	}
+}
+
+func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
+	// Given
+	svc := auth.NewService(authDB(t), "proxy", "")
+	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.Header.Set(auth.ProxyUserHeader, "jdoe")
+
+	// When
+	rec := do(srv, req)
+
+	// Then
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	// rongo holds no session of its own in proxy mode; only the proxy's
+	// sign-out ends the login.
+	if body["redirect_url"] != "/oauth/sign_out" {
+		t.Errorf("redirect_url = %q, want %q", body["redirect_url"], "/oauth/sign_out")
+	}
+}

@@ -17,6 +17,13 @@ var userKey contextKey
 // on a non-loopback address, so this never reaches a network.
 const devSubject = "dev-user"
 
+// The headers proxy mode reads. They are what oauth-proxy and its relatives
+// set with pass-user-headers on.
+const (
+	ProxyUserHeader  = "X-Forwarded-User"
+	ProxyEmailHeader = "X-Forwarded-Email"
+)
+
 // UserFrom returns the authenticated user attached by Middleware.
 func UserFrom(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(userKey).(User)
@@ -58,6 +65,26 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			u, err := s.UpsertUser("admin-token", "", true)
 			if err != nil {
 				slog.Error("admin token login failed", "err", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			return
+
+		case "proxy":
+			// The proxy in front of the process did the login and says who it
+			// was. config allows this mode on a loopback listener only, so the
+			// header cannot come from anyone but the proxy. The email is what
+			// the proxy sends, which for OpenShift's oauth-proxy is a synthetic
+			// <user>@cluster.local, not a mailbox.
+			subject := strings.TrimSpace(r.Header.Get(ProxyUserHeader))
+			if subject == "" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			u, err := s.UpsertUser(subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)), true)
+			if err != nil {
+				slog.Error("proxy login failed", "err", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}

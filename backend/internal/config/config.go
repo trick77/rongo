@@ -29,6 +29,10 @@ const (
 	// AuthModeOIDC is the production mode. The seam exists in phase 1; the
 	// implementation lands later.
 	AuthModeOIDC AuthMode = "oidc"
+	// AuthModeProxy trusts X-Forwarded-User from an authenticating reverse
+	// proxy in front of the process (an oauth-proxy sidecar, for one).
+	// Loopback addresses only: the header is the whole credential.
+	AuthModeProxy AuthMode = "proxy"
 )
 
 // Config holds all runtime settings.
@@ -230,6 +234,13 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_AUTH_MODE=dev signs in an admin without credentials and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
 		}
+	case AuthModeProxy:
+		// Same door as dev mode: anyone who can reach the listener can write
+		// the header, so the only caller allowed is the proxy on localhost.
+		if !isLoopback(cfg.Addr) {
+			return Config{}, fmt.Errorf(
+				"BACKEND_AUTH_MODE=proxy trusts the X-Forwarded-User header and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
+		}
 	case AuthModeToken:
 		if cfg.AdminToken == "" {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
@@ -280,7 +291,7 @@ func Load() (Config, error) {
 				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_OIDC_REDIRECT_URL, got %q; the session cookie's Secure flag is derived from it", cfg.OIDCRedirectURL)
 		}
 	default:
-		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password or oidc)", cfg.AuthMode)
+		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password, oidc or proxy)", cfg.AuthMode)
 	}
 
 	if cfg.AuthMode == AuthModeOIDC {

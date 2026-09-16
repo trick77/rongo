@@ -51,6 +51,61 @@ func mustUser(t *testing.T, r *http.Request) (User, bool) {
 	return u, ok
 }
 
+func TestMiddleware_proxyModeSignsInTheForwardedUser(t *testing.T) {
+	// Given
+	svc := newService(t)
+	svc.mode = "proxy"
+	var got User
+	var reached bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, reached = mustUser(t, r)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set(ProxyUserHeader, "jdoe")
+	req.Header.Set(ProxyEmailHeader, "jdoe@cluster.local")
+	rec := httptest.NewRecorder()
+	svc.Middleware(handler).ServeHTTP(rec, req)
+
+	// Then
+	if !reached {
+		t.Fatalf("handler not reached, status %d; proxy mode should trust the header", rec.Code)
+	}
+	if got.Subject != "jdoe" {
+		t.Errorf("subject = %q, want %q", got.Subject, "jdoe")
+	}
+	if got.Email != "jdoe@cluster.local" {
+		t.Errorf("email = %q, want %q", got.Email, "jdoe@cluster.local")
+	}
+	if !got.IsAdmin {
+		t.Error("proxy user is not admin, want admin")
+	}
+}
+
+func TestMiddleware_proxyModeRejectsAMissingHeader(t *testing.T) {
+	// Given: a request that reached the process without the proxy's header,
+	// which is what a skip-auth path on the proxy forwards.
+	svc := newService(t)
+	svc.mode = "proxy"
+	var reached bool
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set(ProxyUserHeader, "   ")
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
+
+	// Then
+	if reached {
+		t.Fatal("handler reached without a forwarded user")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestMiddleware_tokenModeRejectsMissingToken(t *testing.T) {
 	// Given
 	svc := newService(t)
