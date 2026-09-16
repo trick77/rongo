@@ -3,6 +3,8 @@ import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Narrow from "./Narrow";
 import Question from "./Question";
+import PasteChip from "./PasteChip";
+import { strip } from "./pastes";
 import Trace from "./Trace";
 import { CheckIcon, CopyIcon } from "./icons";
 import {
@@ -226,6 +228,10 @@ export default function ThreadView({
     <>
             {groups.map((group, g) => {
               const asked = turns[group[0]];
+              // The typed words, with the pastes peeled off the tail to be
+              // drawn as chips. A block that is not where the fold put it
+              // stays in the prose and gets no chip.
+              const { typed, matched } = strip(asked.question, asked.pastes);
               return (
               <article
                 key={group[0]}
@@ -244,7 +250,17 @@ export default function ThreadView({
                     record carrying a copy of these words. Printing the copies
                     would say the reader typed the question again, which they
                     did not. */}
-                <Question text={asked.question} />
+                {typed && <Question text={typed} />}
+                {/* Each paste folded to a line under the words, the way it
+                    stood in the composer. Folded: the reader knows what
+                    they pasted, and the answer is what they came for. */}
+                {matched.some(Boolean) && (
+                  <div className="mt-2 flex max-w-[68ch] flex-wrap gap-1.5 border-l-2 border-elevated pl-4">
+                    {asked.pastes.map((p, i) =>
+                      matched[i] ? <PasteChip key={i} text={p.text} lines={p.lines} /> : null,
+                    )}
+                  </div>
+                )}
                 <div className="mt-2.5 flex items-center gap-1.5">
                   {asked.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(asked.askedAt)}</time>}
                   {/* Counted in questions, not in rows: a turn asked twice

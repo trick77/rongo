@@ -175,6 +175,8 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		// one turn cost, and a link's audience was sent an answer, not a
 		// machine room.
 		msgs[i].Steps = nil
+		// PastedTexts stays: it is the question's own fold, not machinery,
+		// and the text is on the link inside the question either way.
 	}
 	out := publicShare{
 		Title:    sh.Title,
