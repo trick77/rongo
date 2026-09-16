@@ -40,7 +40,6 @@ import (
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
-	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/sourceview"
 )
 
@@ -231,7 +230,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	ctx := context.Background()
 	c := answerLLM(t)
 	judge := judgeLLM(t)
-	retriever := retrieve.New(db, evalEmbedder(t))
+	retriever := evalRetriever(t, db)
 	// The product's retriever, reranker included (main.go). BACKEND_EVAL_RERANK=0
 	// measures the fused order the product ran before the reranker shipped.
 	rerank := "off (fused order)"
@@ -264,7 +263,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
 		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed int
-		t.Logf("\n=== run %d of %d, audience %s, rerank %s ===", run, runs, audience, rerank)
+		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s ===", run, runs, audience, rerank, codeLaneLabel())
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {

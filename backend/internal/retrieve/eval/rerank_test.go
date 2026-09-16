@@ -19,8 +19,8 @@ func TestEvalMeasureRerank(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 	client := llmClientForRouting(t)
-	embedder := evalEmbedder(t)
 	expansions := loadExpansions(t)
+	codes := loadExpansionCodes(t)
 	opts := gatherOpts(t)
 	g := ask.NewGatherer(db, opts)
 
@@ -28,86 +28,37 @@ func TestEvalMeasureRerank(t *testing.T) {
 		name string
 		r    *retrieve.Retriever
 	}
-	plain := retrieve.New(db, embedder)
-	reranked := retrieve.New(db, embedder)
+	plain := evalRetriever(t, db)
+	reranked := evalRetriever(t, db)
 	// The pool is the reranker's; searchTexts lifts the lanes to it.
 	rr := evalReranker(t, client)
 	reranked.Reranker = rr
+	// The keyword lane travels in the label the way the pool and the excerpt
+	// do: a table run with a lane the product does not have must not read as
+	// the product's.
 	arms := []arm{
-		{"fused order (baseline)", plain},
-		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts", rr.Pool, rr.Excerpt), reranked},
+		{"fused order (baseline)" + codeLaneLabel(), plain},
+		{fmt.Sprintf("fused order + short-gate rerank over %d, %d-rune excerpts%s", rr.Pool, rr.Excerpt, codeLaneLabel()), reranked},
 	}
 
+	// The same reading as every other arm in the package — measureArm — so a
+	// reorder that lifts the unique misses cannot be read as a win while it
+	// drops an ambiguous question's second alternative out of the cut.
 	questions := loadQuestions(t)
 	for _, a := range arms {
-		var n, at5, at20, gathered int
-		var mrr float64
-		// The other cohorts, so a reorder that lifts the unique misses is not
-		// read as a win while it drops an ambiguous question's second
-		// alternative or a composition's far half out of the cut.
-		var ambN, ambBoth, compN, compAll int
 		t.Logf("\n=== %s ===", a.name)
-		for _, q := range questions {
-			texts, ok := expansions[q.Text]
-			if !ok {
-				t.Fatalf("no expansion for %q", q.Text)
-			}
-			hits, err := a.r.Search(ctx, retrieve.Query{Texts: texts, Question: q.Text, K: gatherSearchK})
+		m := measureArm(t, ctx, a.name, g, questions, func(q Question) []retrieve.Hit {
+			hits, err := a.r.Search(ctx, retrieve.Query{
+				Texts:    expansionTextsOf(t, expansions, q),
+				Code:     codes[q.Text],
+				Question: q.Text,
+				K:        gatherSearchK,
+			})
 			if err != nil {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}
-			if q.Resolution != ResolutionUnique {
-				sources, err := g.Gather(ctx, hits)
-				if err != nil {
-					t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
-				}
-				found := 0
-				for _, c := range q.Candidates {
-					if hopOfCandidate(sources, c) >= 0 {
-						found++
-					}
-				}
-				switch q.Resolution {
-				case ResolutionAmbiguous:
-					ambN++
-					if found >= 2 {
-						ambBoth++
-					}
-				case ResolutionComposition:
-					compN++
-					if found == len(q.Candidates) {
-						compAll++
-					}
-				}
-				continue
-			}
-			n++
-			rank := 0
-			for i, h := range hits {
-				if h.Repo == q.Candidates[0].Repo && contains(q.Candidates[0].Paths, h.Path) {
-					rank = i + 1
-					break
-				}
-			}
-			if rank > 0 && rank <= 5 {
-				at5++
-			}
-			if rank > 0 {
-				at20++
-				mrr += 1 / float64(rank)
-			}
-			sources, err := g.Gather(ctx, hits)
-			if err != nil {
-				t.Fatalf("%s: gather %q: %v", a.name, q.Text, err)
-			}
-			if hopOfCandidate(sources, q.Candidates[0]) >= 0 {
-				gathered++
-			}
-			t.Logf("  rank %3d gathered %-5v %s", rank, hopOfCandidate(sources, q.Candidates[0]) >= 0, short(q.Text))
-		}
-		t.Logf("  %s: unique n=%d recall@5 %.3f (%d) recall@20 %.3f (%d) MRR %.3f gathered %.3f (%d)",
-			a.name, n, float64(at5)/float64(n), at5, float64(at20)/float64(n), at20, mrr/float64(n), float64(gathered)/float64(n), gathered)
-		t.Logf("  %s: ambiguous both alternatives gathered %d/%d; composition all parts gathered %d/%d",
-			a.name, ambBoth, ambN, compAll, compN)
+			return hits
+		})
+		m.log(t, a.name)
 	}
 }

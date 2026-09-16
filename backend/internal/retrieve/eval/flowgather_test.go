@@ -78,7 +78,7 @@ func TestExpandFlowQuestions(t *testing.T) {
 		}
 		texts := got.SearchTexts(q.Text)
 		t.Logf("EXPANDED %-60s -> %v repos=%v", short(q.Text), texts[1:], got.Repos)
-		out = append(out, expansion{Question: q.Text, Texts: texts, Repos: got.Repos})
+		out = append(out, expansion{Question: q.Text, Texts: texts, Repos: got.Repos, Code: got.CodeText()})
 	}
 	body, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestFlowGathered(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
-	retriever := retrieve.New(db, evalEmbedder(t))
+	retriever := evalRetriever(t, db)
 	expansions := loadFlowExpansions(t)
 	questions := loadFlowQuestions(t)
 	deployed := gatherOpts(t)
@@ -142,7 +142,7 @@ func TestFlowGathered(t *testing.T) {
 	// hit list; it needs a model and is skipped when none is configured.
 	var reranked *retrieve.Retriever
 	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
-		reranked = retrieve.New(db, evalEmbedder(t))
+		reranked = evalRetriever(t, db)
 		// The pool is the reranker's; searchTexts lifts the lanes to it.
 		rr := evalReranker(t, evalLLM(t, 2*time.Minute))
 		reranked.Reranker = rr
@@ -150,6 +150,12 @@ func TestFlowGathered(t *testing.T) {
 			name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings", rr.Pool, rr.Excerpt),
 			hops: deployed.MaxHops, rerank: true,
 		})
+	}
+	// Every arm here searches with the same keyword lane, so the rung belongs
+	// in every label: a table run with a lane the product does not have must
+	// not read as the product's.
+	for i := range arms {
+		arms[i].name += codeLaneLabel()
 	}
 
 	// Searched once per question and retriever, shared across the arms: the
@@ -163,7 +169,7 @@ func TestFlowGathered(t *testing.T) {
 			if !ok {
 				t.Fatalf("no frozen expansion for %q; run TestExpandFlowQuestions", q.Text)
 			}
-			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Repos: e.Repos, Question: q.Text, K: gatherSearchK})
+			hits, err := r.Search(ctx, retrieve.Query{Texts: e.Texts, Code: e.code(t), Repos: e.Repos, Question: q.Text, K: gatherSearchK})
 			if err != nil {
 				t.Fatalf("search %q: %v", q.Text, err)
 			}

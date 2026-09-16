@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/indexer"
@@ -110,6 +111,41 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// codeLaneOn reads BACKEND_EVAL_CODE_LANE, the harness-only switch for the code
+// rung: the OR floor of the code-terms text weighed as guessed identifiers
+// rather than as prose.
+//
+// The rung ships (2026-09-16-code-rung.md), so the switch reads the way
+// BACKEND_EVAL_RERANK does — "0" measures the lane without it and anything
+// else is the product. A harness toggle, deliberately not a BACKEND_*
+// deployment setting: the weight is a measured constant, not an operator's
+// choice.
+func codeLaneOn() bool {
+	return envOr("BACKEND_EVAL_CODE_LANE", "1") != "0"
+}
+
+// codeLaneLabel marks an arm that is NOT the product, so a table run without
+// the rung cannot be read as one run with it. Empty for the product.
+func codeLaneLabel() string {
+	if codeLaneOn() {
+		return ""
+	}
+	return fmt.Sprintf(" without the code rung %.1f", retrieve.WeightKeywordCode)
+}
+
+// evalRetriever is the product's retriever under the harness's keyword-lane
+// switch, so every arm in this package can be run with the code rung on or off
+// and the two tables are comparable. Arms that configure more — a reranker, a
+// decay — set it on top of this.
+func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
+	t.Helper()
+	r := retrieve.New(db, evalEmbedder(t))
+	if !codeLaneOn() {
+		r.CodeWeight = 0
+	}
+	return r
 }
 
 // embedDim is the product's: embed.Model's width from its profile. The
@@ -486,6 +522,141 @@ func rankOrLast(rank int) int {
 		return 1 << 30
 	}
 	return rank
+}
+
+// armMetrics is one arm's outcome over the whole question set: the unique
+// cohort read as recall and MRR, the other two read as "did the gatherer end up
+// with every place the question is about", and the doc-led axis.
+//
+// One struct and one loop for every arm that searches per question and gathers,
+// because two copies of this drift: a second reading of the ambiguous cohort
+// that counts one question differently stops two tables being comparable
+// without anything in the output saying so.
+type armMetrics struct {
+	n, at5, at20, gathered int
+	mrr                    float64
+	ambN, ambBoth          int
+	compN, compAll         int
+	docN, docAt20          int
+	// ranks is the unique cohort's found ranks by question text, for
+	// meanRankOver's shared set.
+	ranks map[string]int
+}
+
+// measureArm runs one arm over the questions and logs a line per question.
+// search is the caller's own query shape — the arms differ in what they search
+// with, never in how the result is read.
+func measureArm(t *testing.T, ctx context.Context, name string, g *ask.Gatherer,
+	questions []Question, search func(Question) []retrieve.Hit) armMetrics {
+	t.Helper()
+	m := armMetrics{ranks: map[string]int{}}
+	for _, q := range questions {
+		hits := search(q)
+
+		if docLedQuestion(q) {
+			m.docN++
+			if rankOfExpected(hits, q) > 0 {
+				m.docAt20++
+			}
+		}
+
+		sources, err := g.Gather(ctx, hits)
+		if err != nil {
+			t.Fatalf("%s: gather %q: %v", name, q.Text, err)
+		}
+
+		if q.Resolution != ResolutionUnique {
+			found := 0
+			for _, c := range q.Candidates {
+				if hopOfCandidate(sources, c) >= 0 {
+					found++
+				}
+			}
+			switch q.Resolution {
+			case ResolutionAmbiguous:
+				m.ambN++
+				if found >= 2 {
+					m.ambBoth++
+				}
+			case ResolutionComposition:
+				m.compN++
+				if found == len(q.Candidates) {
+					m.compAll++
+				}
+			}
+			// Per question here too: a gain of one ambiguous pair is a claim
+			// about ONE question, and without the line nothing says which.
+			t.Logf("  %-11s %d/%d gathered %s", q.Resolution, found, len(q.Candidates), short(q.Text))
+			continue
+		}
+
+		m.n++
+		rank := firstCandidateRank(hits, q)
+		if rank > 0 {
+			m.at20++
+			m.mrr += 1 / float64(rank)
+			m.ranks[q.Text] = rank
+			if rank <= 5 {
+				m.at5++
+			}
+		}
+		got := len(q.Candidates) > 0 && hopOfCandidate(sources, q.Candidates[0]) >= 0
+		if got {
+			m.gathered++
+		}
+		t.Logf("  rank %3d gathered %-5v %s", rank, got, short(q.Text))
+	}
+	return m
+}
+
+// log prints the three aggregate lines every arm reports.
+func (m armMetrics) log(t *testing.T, name string) {
+	t.Helper()
+	t.Logf("  %s: unique n=%d recall@5 %.3f (%d) recall@20 %.3f (%d) MRR %.3f gathered %.3f (%d)",
+		name, m.n, float64(m.at5)/float64(m.n), m.at5, float64(m.at20)/float64(m.n), m.at20,
+		m.mrr/float64(m.n), float64(m.gathered)/float64(m.n), m.gathered)
+	t.Logf("  %s: ambiguous both alternatives gathered %d/%d; composition all parts gathered %d/%d",
+		name, m.ambBoth, m.ambN, m.compAll, m.compN)
+	t.Logf("  %s: doc-led recall %s", name, frac(m.docAt20, m.docN))
+}
+
+// commonRanked is the questions EVERY arm ranked, sorted.
+//
+// Averaging each arm's own found set compares two different question sets: an
+// arm that admits one more question at rank 19 reports a worse mean while every
+// hit it shares with the previous arm sits exactly where it did, which reads as
+// a degradation that did not happen.
+func commonRanked(ranks []map[string]int) []string {
+	if len(ranks) == 0 {
+		return nil
+	}
+	var common []string
+	for text := range ranks[0] {
+		in := true
+		for _, m := range ranks[1:] {
+			if _, ok := m[text]; !ok {
+				in = false
+				break
+			}
+		}
+		if in {
+			common = append(common, text)
+		}
+	}
+	sort.Strings(common)
+	return common
+}
+
+// meanRankOver is one arm's mean rank over exactly those questions.
+func meanRankOver(ranks map[string]int, common []string) float64 {
+	if len(common) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, text := range common {
+		sum += ranks[text]
+	}
+	return float64(sum) / float64(len(common))
 }
 
 // rankOfExpected returns the 1-based rank of the first hit belonging to ANY of

@@ -156,18 +156,15 @@ func routeMargin(t *testing.T) float64 {
 // The search itself mirrors Pipeline.searchScoped: two or more named
 // repositories are searched one at a time, so neither side can be crowded out
 // of the cut by the other.
-func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions, repos map[string][]string, q Question) ([]retrieve.Hit, []string) {
+func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) ([]retrieve.Hit, []string) {
 	t.Helper()
-	texts, ok := expansions[q.Text]
-	if !ok {
-		t.Fatalf("no expansion recorded for %q — run TestExpandQuestions first", q.Text)
-	}
+	texts := expansionTextsOf(t, expansions, q)
 	known, _, err := r.ResolveRepos(ctx, repos[q.Text], q.Text)
 	if err != nil {
 		t.Fatalf("resolve repos %q: %v", q.Text, err)
 	}
 	if len(known) < 2 {
-		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: known, Question: q.Text, K: routeSearchK})
+		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Code: codes[q.Text], Repos: known, Question: q.Text, K: routeSearchK})
 		if err != nil {
 			t.Fatalf("search %q: %v", q.Text, err)
 		}
@@ -175,7 +172,7 @@ func hitsFor(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansion
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
-		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Repos: []string{repo}, K: routeSearchK})
+		hits, err := r.Search(ctx, retrieve.Query{Texts: texts, Code: codes[q.Text], Repos: []string{repo}, K: routeSearchK})
 		if err != nil {
 			t.Fatalf("search %q in %s: %v", q.Text, repo, err)
 		}
@@ -329,9 +326,9 @@ func TestEvalMeasureRouting(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t)
-	r := retrieve.New(db, embedder)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 	margin := routeMargin(t)
@@ -351,7 +348,7 @@ func TestEvalMeasureRouting(t *testing.T) {
 
 	var shortRows, proRows []routingRow
 	for _, q := range questions {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 		want := resolutionExpectsAsk(q.Resolution)
 
 		sAll, sRelated, sJudged := rankRoute(ctx, t, shortGate, q.Text, hits, []float64{margin}, len(named))
@@ -385,9 +382,9 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t)
-	r := retrieve.New(db, embedder)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	questions := loadQuestions(t)
 	mo := moduleOpts(t)
@@ -411,7 +408,7 @@ func TestEvalMeasureRoutingMarginSweep(t *testing.T) {
 	}
 	rows := make([]perQuestion, 0, len(questions))
 	for _, q := range questions {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 		all, related, judged := rankRoute(ctx, t, router, q.Text, hits, routeMargins, len(named))
 		rows = append(rows, perQuestion{all: all, related: related, judged: judged, named: len(named), want: resolutionExpectsAsk(q.Resolution), q: q})
 	}
@@ -449,9 +446,9 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	ctx := context.Background()
 	client := llmClientForRouting(t)
 
-	embedder := evalEmbedder(t)
-	r := retrieve.New(db, embedder)
+	r := evalRetriever(t, db)
 	expansions := loadExpansions(t)
+	expansionCodes := loadExpansionCodes(t)
 	expansionRepos := loadExpansionRepos(t)
 	mo := moduleOpts(t)
 	margin := routeMargin(t)
@@ -474,7 +471,7 @@ func TestEvalMeasureRoutingGrounding(t *testing.T) {
 	var rows []groundingRow
 	var grounded, groundedOfNotAsked, notAsked int
 	for _, q := range unique {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionRepos, q)
+		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
 		d, err := router.Route(ctx, q.Text, ask.AudienceDev, ask.LanguageEN, hits, named, false)
 		if err != nil {
 			t.Fatalf("route %q: %v", q.Text, err)
