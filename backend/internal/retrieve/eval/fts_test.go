@@ -51,13 +51,14 @@ func TestEvalMeasureFTS(t *testing.T) {
 	g := ask.NewGatherer(db, gatherOpts(t))
 
 	// Both arms in the same run, the reason repoDecays keeps its own 1.0 arm:
-	// an arm compared against a remembered baseline measures the memory.
+	// an arm compared against a remembered baseline measures the memory. The
+	// rung ships, so the baseline is the one that has to be configured: zero is
+	// the prose floor the lane had before it.
 	plain := retrieve.New(db, evalEmbedder(t))
-	rung := retrieve.New(db, evalEmbedder(t))
-	rung.CodeWeight = retrieve.WeightKeywordCode
+	plain.CodeWeight = 0
 	arms := []ftsArm{
-		{"today's lane", plain},
-		{fmt.Sprintf("code rung %.1f", retrieve.WeightKeywordCode), rung},
+		{"prose floor only (the lane before the rung)", plain},
+		{fmt.Sprintf("code rung %.1f (the product)", retrieve.WeightKeywordCode), retrieve.New(db, evalEmbedder(t))},
 	}
 
 	ranks := make([]map[string]int, len(arms))
@@ -85,10 +86,11 @@ func TestEvalMeasureFTS(t *testing.T) {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}
 
-			// The doc-led axis, read off the same hit lists: aux puts a path
-			// into the lane, and a document is mostly path. A win on code that
-			// takes the documents with it has changed which questions rongo can
-			// answer, not improved retrieval.
+			// The doc-led axis, read off the same hit lists: weighing a rung of
+			// guessed identifiers up weighs prose down against it, and a
+			// question only a document answers has no identifiers. A win on
+			// code that takes the documents with it has changed which questions
+			// rongo can answer, not improved retrieval.
 			if docLedQuestion(q) {
 				docN++
 				if rankOfExpected(hits, q) > 0 {
@@ -188,6 +190,6 @@ func TestEvalMeasureFTS(t *testing.T) {
 		if len(common) > 0 {
 			mean = float64(sum) / float64(len(common))
 		}
-		t.Logf("  %-28s %.2f", a.name, mean)
+		t.Logf("  %-44s %.2f", a.name, mean)
 	}
 }

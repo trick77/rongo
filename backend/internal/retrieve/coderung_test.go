@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-func TestNew_shipsTheCodeRungOff(t *testing.T) {
-	// The zero value is off, the way TestDecay and DocDecay read theirs: the
-	// weight is what the harness is measuring, and until it is decided nothing
-	// built by a struct literal or by New may have the rung.
-	if got := New(testDB(t), fixedEmbedder{vec: queryVec}).CodeWeight; got != 0 {
-		t.Errorf("New().CodeWeight = %v, want the code rung off until it is measured", got)
+func TestNew_shipsTheCodeRungOn(t *testing.T) {
+	// The product has the rung; the zero value is off, the way TestDecay and
+	// DocDecay read theirs, so the harness's baseline arm is a struct field
+	// left alone rather than a second constructor.
+	if got := New(testDB(t), fixedEmbedder{vec: queryVec}).CodeWeight; got != WeightKeywordCode {
+		t.Errorf("New().CodeWeight = %v, want %v", got, WeightKeywordCode)
 	}
 	if got := (&Retriever{}).CodeWeight; got != 0 {
 		t.Errorf("struct-literal CodeWeight = %v, want the rung off", got)
@@ -31,6 +31,7 @@ func TestSearch_theCodeTextsFloorCarriesItsOwnWeight(t *testing.T) {
 
 	// When: off, the floor is the prose floor ...
 	r := New(db, fixedEmbedder{vec: queryVec})
+	r.CodeWeight = 0
 	hits, err := r.Search(context.Background(), q)
 	if err != nil {
 		t.Fatalf("Search: %v", err)

@@ -114,23 +114,24 @@ func envOr(key, fallback string) string {
 
 // codeLaneOn reads BACKEND_EVAL_CODE_LANE, the harness-only switch for the code
 // rung: the OR floor of the code-terms text weighed as guessed identifiers
-// rather than as prose. Off unless it is exactly "1", so a typo runs the
-// product rather than an arm nobody asked for.
+// rather than as prose.
 //
-// A harness toggle, deliberately not a BACKEND_* deployment setting: the weight
-// it turns on is decided by the measurement, and until it is decided nobody
-// should be able to change the lane by exporting a variable.
+// The rung ships (2026-09-16-code-rung.md), so the switch reads the way
+// BACKEND_EVAL_RERANK does — "0" measures the lane without it and anything
+// else is the product. A harness toggle, deliberately not a BACKEND_*
+// deployment setting: the weight is a measured constant, not an operator's
+// choice.
 func codeLaneOn() bool {
-	return envOr("BACKEND_EVAL_CODE_LANE", "0") == "1"
+	return envOr("BACKEND_EVAL_CODE_LANE", "1") != "0"
 }
 
-// codeLaneLabel is what the switch adds to an arm's name, so a table cannot be
-// read as the product's when it is not. Empty when the rung is off.
+// codeLaneLabel marks an arm that is NOT the product, so a table run without
+// the rung cannot be read as one run with it. Empty for the product.
 func codeLaneLabel() string {
-	if !codeLaneOn() {
+	if codeLaneOn() {
 		return ""
 	}
-	return fmt.Sprintf(" + code rung %.1f", retrieve.WeightKeywordCode)
+	return fmt.Sprintf(" without the code rung %.1f", retrieve.WeightKeywordCode)
 }
 
 // evalRetriever is the product's retriever under the harness's keyword-lane
@@ -140,8 +141,8 @@ func codeLaneLabel() string {
 func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
 	t.Helper()
 	r := retrieve.New(db, evalEmbedder(t))
-	if codeLaneOn() {
-		r.CodeWeight = retrieve.WeightKeywordCode
+	if !codeLaneOn() {
+		r.CodeWeight = 0
 	}
 	return r
 }

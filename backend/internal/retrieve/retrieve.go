@@ -90,7 +90,8 @@ type Retriever struct {
 	DocDecay float64
 	// CodeWeight, when above zero, gives the OR rung of the CODE-TERMS text a
 	// weight of its own instead of the prose floor; see WeightKeywordCode.
-	// Zero is off, which is what ships until the measurement names a value.
+	// New ships it at 0.8; zero — and so a struct-literal Retriever — is the
+	// prose floor, which is what the harness's baseline arm runs.
 	CodeWeight float64
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
 	// see LLMReranker. The product sets it; nil is the fused order as it has
@@ -108,6 +109,7 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		RepoDecay:   DefaultRepoDecay,
 		TestDecay:   DefaultTestDecay,
 		DocDecay:    DefaultDocDecay,
+		CodeWeight:  WeightKeywordCode,
 	}
 }
 

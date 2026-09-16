@@ -37,9 +37,12 @@ const (
 	// here" says more when the words are PromoMailJob and dispatchRetry than
 	// when they are "mail" and "sent".
 	//
-	// It is a starting value under a sweep, not a landmark: the lane is named
-	// where it is built, never derived from this number, so moving it to 0.7 or
-	// 0.9 cannot make the rung report itself as the prefix or the prose rung.
+	// 0.8 measured: deterministic r@5 32 -> 33, r@20 36 -> 37, gathered 38 ->
+	// 39, mean rank 2.72 -> 2.42, and one more question inside twenty on the
+	// reranked path in both runs (2026-09-16-code-rung.md). Still a swept
+	// value, so the lane is named where it is built and never derived from this
+	// number: moving it to 0.7 or 0.9 must not make the rung report itself as
+	// the prefix or the prose rung.
 	WeightKeywordCode = 0.8
 )
 
