@@ -2,7 +2,15 @@ import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Ask from "./Ask";
+import Ask, { languages } from "./Ask";
+
+// The language list is a listbox, not a native select: the pill opens it and
+// the row is clicked, as the reader does it.
+async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
+  const name = languages.find((l) => l.code === code)?.name ?? code;
+  await user.click(screen.getByRole("button", { name: "Answer language" }));
+  await user.click(screen.getByRole("option", { name }));
+}
 
 /**
  * A finished answer offers what to ask next. The pills belong to the answer
@@ -57,7 +65,7 @@ async function ask(text: string, language?: string) {
       <Ask />
     </StrictMode>,
   );
-  if (language) await user.selectOptions(screen.getByLabelText("Answer language"), language);
+  if (language) await pickLanguage(user, language);
   await user.type(screen.getByLabelText("Question"), text);
   await user.click(screen.getByRole("button", { name: "Ask" }));
   return user;
@@ -92,7 +100,7 @@ describe("follow-up suggestions", () => {
       </StrictMode>,
     );
     await user.click(screen.getByRole("button", { name: "Developer" }));
-    await user.selectOptions(screen.getByLabelText("Answer language"), "de");
+    await pickLanguage(user, "de");
     await user.type(screen.getByLabelText("Question"), "Wie werden Zitate gespeichert?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByRole("navigation", { name: "Follow-up questions" });

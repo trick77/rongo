@@ -553,22 +553,6 @@ details[open] > summary .chev {
   transform: rotate(90deg);
 }
 
-/* Native select, styled as a pill: the arrow is drawn by the component.
-   The popup is the browser's, and Chromium on Windows paints it with the
-   select's own background and colour: transparent + muted text gave Edge a
-   see-through, unreadable list. The rows get a surface of their own; the
-   pill stays transparent. */
-.lang-select {
-  appearance: none;
-  -webkit-appearance: none;
-  color-scheme: dark;
-}
-
-.lang-select option {
-  background: var(--color-elevated);
-  color: var(--color-elevated-ink);
-}
-
 /* Login fields: Chromium paints its own autofill tint over bg-bg, and Edge
    adds a password-reveal eye drawn for a light field. */
 input:-webkit-autofill {

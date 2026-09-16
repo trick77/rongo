@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView from "./SourceView";
 import { StatsPane } from "./StatsPane";
-import { Chevron } from "./icons";
+import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
 import { MAX_QUESTION_BYTES, byteLength, fold, shouldCollapse, stagePaste, type PastedText } from "./pastes";
 import {
@@ -1233,34 +1233,14 @@ export default function Ask({
                     control that refused every hand laid on it. The turn's own
                     pill above the answer already says which language the thread
                     is in, and it says it where the answer is. */}
-                {/* Its box is the Role toggle's, off the same rule: the same
-                    border and radius, p-0.5 on the pill, py-1 text-xs on the
-                    control inside it. It used to carry a fixed h-9 sm:h-8 and
-                    stood taller than its neighbour at every width. Height is
-                    content-driven now, so the two agree wherever the text does —
-                    the pointer-coarse size included. */}
                 {!threadLanguage && (
-                  <label className="relative inline-flex items-center rounded-full border border-border bg-bg p-0.5 text-xs text-muted hover:border-elevated-border hover:text-ink">
-                    <span className="sr-only">Answer language</span>
-                    <select
-                      aria-label="Answer language"
-                      value={asking}
-                      onChange={(e) => {
-                        setLanguage(e.target.value);
-                        rememberLanguage(e.target.value);
-                      }}
-                      className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none focus-visible:ring-2 focus-visible:ring-accent-dim pointer-coarse:text-base"
-                    >
-                      {languages.map((l) => (
-                        <option key={l.code} value={l.code}>
-                          {l.name}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="pointer-events-none absolute right-2 rotate-90">
-                      <Chevron />
-                    </span>
-                  </label>
+                  <LanguageSelect
+                    value={asking}
+                    onChange={(code) => {
+                      setLanguage(code);
+                      rememberLanguage(code);
+                    }}
+                  />
                 )}
                 {/* ml-auto belongs to the pair, not to the hint: the hint is not
                     rendered below sm, and with the push on it the Ask button
