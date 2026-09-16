@@ -448,6 +448,29 @@ body {
   color: #8fc49a;
 }
 
+/* A pasted block folded to a line, in the composer and at the head of a turn.
+   The trace chip's box, sized for a control rather than a token. */
+.paste-chip {
+  display: inline-block;
+  max-width: 100%;
+  background: var(--color-active);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-ui-sm);
+}
+.paste-chip-pre {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--color-border-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-ink-dim);
+}
+
 .pulse {
   animation: pulse 1.2s ease-in-out infinite;
 }

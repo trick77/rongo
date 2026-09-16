@@ -3,12 +3,16 @@ import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./Threa
 import SourceView from "./SourceView";
 import { StatsPane } from "./StatsPane";
 import { Chevron } from "./icons";
+import PasteChip from "./PasteChip";
+import { MAX_QUESTION_BYTES, byteLength, fold, shouldCollapse, stagePaste, type PastedText } from "./pastes";
 import {
+  askBody,
   asMarkdown,
   freshTurn,
   headOf,
   languages,
   linkChosenCandidates,
+  pastedField,
   roleName,
   storedRetries,
   storedTurn,
@@ -158,6 +162,14 @@ export default function Ask({
   version?: string;
 }) {
   const [question, setQuestion] = useState("");
+  // The blocks pasted into the composer past the threshold, staged as chips
+  // beside the textarea rather than dropped into it. Sent folded onto the
+  // question's tail, and described again beside it so the turn can fold them
+  // back. See pastes.ts.
+  const [pastes, setPastes] = useState<PastedText[]>([]);
+  // Whether the last paste, or the last Ask, was refused for weight: the
+  // notice under the composer says so until the draft changes.
+  const [tooLong, setTooLong] = useState(false);
   const [audience, setAudience] = useState<Audience>("ba");
   const [language, setLanguage] = useState(storedLanguage);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -701,10 +713,52 @@ export default function Ask({
   // What the next question will actually be answered in.
   const asking = threadLanguage ?? language;
 
+  /**
+   * A paste past the threshold is a chip, not text. Native insertion is
+   * stopped, whatever the paste replaced is taken out of the draft — select
+   * all and paste is how a draft is replaced, and keeping the old one under
+   * the chip would send both — and the block is staged. Under the threshold
+   * nothing here runs and the browser pastes as it always has.
+   *
+   * Weighed before it is staged: a paste that would take the question past
+   * the cap is refused whole, with the notice, and the draft stands. The
+   * server would refuse it too; refusing here keeps the chips.
+   */
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const text = e.clipboardData.getData("text/plain");
+    if (!shouldCollapse(text)) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    const typed = end > start ? question.slice(0, start) + question.slice(end) : question;
+    const staged = stagePaste(text);
+    if (byteLength(fold(typed, [...pastes, staged])) > MAX_QUESTION_BYTES) {
+      setTooLong(true);
+      return;
+    }
+    if (typed !== question) setQuestion(typed);
+    setPastes((prev) => [...prev, staged]);
+    setTooLong(false);
+  }
+
+  function removePaste(i: number) {
+    setPastes((prev) => prev.filter((_, k) => k !== i));
+    setTooLong(false);
+  }
+
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    const q = question.trim();
-    if (!q || busy) return;
+    const typed = question.trim();
+    if ((!typed && pastes.length === 0) || busy) return;
+    // Weighed again here: typing after a large paste can cross the cap
+    // without another paste to catch it, and the server would answer the
+    // turn with a 400 nobody can act on.
+    const body = askBody(question, pastes, audience, asking, threadId.current ?? "");
+    if (byteLength(body.question) > MAX_QUESTION_BYTES) {
+      setTooLong(true);
+      return;
+    }
 
     // A thread load still in the air would replace the whole turn list when it
     // lands, dropping the turn appended just below — and every token after that
@@ -713,10 +767,12 @@ export default function Ask({
     // load is what the reader expects anyway: they have moved on.
     retireLoad();
 
-    appendTurn(freshTurn(q, audience, asking));
+    appendTurn(freshTurn(body.question, audience, asking, null, pastes));
     setQuestion("");
+    setPastes([]);
+    setTooLong(false);
 
-    await stream("/api/ask", { question: q, audience, language: asking, thread_id: threadId.current ?? "" });
+    await stream("/api/ask", body);
   }
 
   /**
@@ -737,7 +793,7 @@ export default function Ask({
 
     retireLoad();
     appendTurn(
-      freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
+      freshTurn(turn.question, turn.audience, turn.language, headOf(turn), turn.pastes),
       (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
     );
 
@@ -752,6 +808,7 @@ export default function Ask({
       language: turn.language,
       clarification_message_id: turn.clarification.messageId,
       choice: idx,
+      ...pastedField(turn.pastes),
     }, false);
     // A reader who has moved on gets the unlock from the record instead: the
     // choice is stored only when an answer lands, so the card they come back
@@ -777,7 +834,7 @@ export default function Ask({
 
     retireLoad();
     appendTurn(
-      freshTurn(turn.question, turn.audience, turn.language, headOf(turn)),
+      freshTurn(turn.question, turn.audience, turn.language, headOf(turn), turn.pastes),
       (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: -1, narrowedTo: repos } : t)),
     );
 
@@ -790,6 +847,7 @@ export default function Ask({
       language: turn.language,
       clarification_message_id: turn.clarification.messageId,
       repos,
+      ...pastedField(turn.pastes),
     }, false);
     if (!ok && shown.current === panelThread) {
       setTurns((prev) =>
@@ -811,7 +869,7 @@ export default function Ask({
     const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
     retireLoad();
-    appendTurn(freshTurn(turn.question, nextAudience, turn.language, headOf(turn)));
+    appendTurn(freshTurn(turn.question, nextAudience, turn.language, headOf(turn), turn.pastes));
 
     await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
   }
@@ -855,7 +913,7 @@ export default function Ask({
     const head = headOf(turn);
 
     retireLoad();
-    appendTurn(freshTurn(turn.question, turn.audience, turn.language, head));
+    appendTurn(freshTurn(turn.question, turn.audience, turn.language, head, turn.pastes));
 
     // The thread id is taken now, not from the stored body: the thread may
     // have been created by the very turn that failed, and a stored turn's
@@ -1108,9 +1166,24 @@ export default function Ask({
               their own row, so a long question and its settings never fight
               for the same line. */}
           <div className="rounded-ui-lg border border-border bg-panel px-3 pt-2 pb-2 shadow-panel focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-dim">
+            {/* The pastes, each folded to a line, above the words they will
+                follow. Before the textarea rather than after: the question
+                is sent typed text first, and the composer reads in that
+                order too. */}
+            {pastes.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 px-1 pt-1.5">
+                {pastes.map((p, i) => (
+                  <PasteChip key={i} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
+                ))}
+              </div>
+            )}
             <textarea
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
+              onChange={(e) => {
+                setQuestion(e.target.value);
+                setTooLong(false);
+              }}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
@@ -1207,6 +1280,14 @@ export default function Ask({
             {busy && liveThread.current !== shown.current && (
               <p className="mt-2 px-1 text-xs text-muted">
                 Another thread is still being answered — the next question waits for it.
+              </p>
+            )}
+            {/* Refused for weight, said where the refusal happened. The
+                figure is the cap the server holds too, in the unit it
+                counts: a paste this size is a file, not a question. */}
+            {tooLong && (
+              <p role="alert" className="mt-2 px-1 text-xs text-ochre">
+                That is too much to ask at once — a question and its pasted text can be {MAX_QUESTION_BYTES / 1024} KB in all.
               </p>
             )}
           </div>

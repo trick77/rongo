@@ -82,3 +82,30 @@ Checks:
    pills, and no `followups` row appears in the usage table.
 7. End a turn with a clarification card. No pills beside it, and the previous
    answer's pills are gone while the card is the newest turn.
+
+## Pasted text
+
+`make dev`; UI at `http://127.0.0.1:5173/`. Steps 1, 2 and 8 need no index
+and no model; the rest need an index with at least one repository in it.
+
+Checks:
+
+1. Paste a sentence into the composer. It lands in the textarea as before; no
+   chip.
+2. Paste a 30-line block (or one line of 2001+ characters). The textarea is
+   unchanged; a chip "Pasted text · 30 lines" stands above it. Its chevron
+   opens a scrollable mono preview under the chip and rotates down; the ×
+   takes the chip away.
+3. Send with an empty textarea and one chip. The turn shows the chip only, no
+   question prose above it, and the answer streams.
+4. Type a sentence and add a chip. The turn shows the sentence as prose and
+   the chip folded under it. Reload: the same. Nothing of the paste is on
+   screen until the chip is opened.
+5. Retry a failed paste turn, "Explain as ..." it, and resume a card on one.
+   Every new row groups under the one question, the chip drawn once.
+6. Share the thread. The public page shows the chip, folded, with no ×.
+7. "Copy as Markdown": the heading is the typed sentence and the paste is a
+   fenced block under it. "Copy the question" copies both, the paste last.
+8. Paste ~40 KB. The composer refuses it with the ochre notice and keeps the
+   draft and the chips it had. Stage a 32 KB paste, then type until the cap
+   is crossed and press Ask: the same notice, nothing sent.

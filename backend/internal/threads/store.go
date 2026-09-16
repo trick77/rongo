@@ -123,6 +123,20 @@ type Message struct {
 	// column existed; the page simply shows no trace for those, as it did for
 	// all of them before this was stored. A shared link never carries it.
 	Steps *timeline.Trace `json:"steps,omitempty"`
+	// PastedTexts are the trailing blocks of Question the reader pasted rather
+	// than typed. Render-only: the page folds each into a chip and shows the
+	// rest as prose. The text itself stays in Question, where every prompt
+	// reads it; nothing in the pipeline looks here. Absent on a turn that
+	// carried none. A shared link keeps it: the text is public either way, and
+	// a chip drawn as prose would misread as the reader's words.
+	PastedTexts []PastedText `json:"pasted_texts,omitempty"`
+}
+
+// PastedText is one pasted block as the browser staged it: the text, and its
+// line count so the chip can say "12 lines" without counting on every render.
+type PastedText struct {
+	Text  string `json:"text"`
+	Lines int    `json:"lines"`
 }
 
 // Clarification is the card a turn ended with: what rongo understood, and
@@ -443,6 +457,25 @@ func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string)
 	return nil
 }
 
+// SavePastedTexts records which trailing blocks of the question were pasted.
+// Written right after the question, on every row that copies it — a resume,
+// a retry, a re-explain — so whichever row heads a turn on screen can draw the
+// chips. Nothing to save writes nothing, and a failure here is never a turn
+// failure: the paste is still in the question, only the fold is lost.
+func (s *Store) SavePastedTexts(ctx context.Context, messageID int64, ps []PastedText) error {
+	if len(ps) == 0 {
+		return nil
+	}
+	blob, err := json.Marshal(ps)
+	if err != nil {
+		return fmt.Errorf("encode pasted texts: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET pasted_texts = ? WHERE id = ?`, string(blob), messageID); err != nil {
+		return fmt.Errorf("store pasted texts: %w", err)
+	}
+	return nil
+}
+
 // SaveSteps records the activity timeline the reader watched this turn
 // through. Written on every exit — answered, asked back, found nothing,
 // failed — because the trace of a turn that broke is the part worth keeping.
@@ -489,6 +522,19 @@ func scanFollowups(blob string) []string {
 		return nil
 	}
 	return qs
+}
+
+// scanPastedTexts decodes a stored pasted_texts column, on the same terms as
+// scanFollowups: unreadable JSON costs the chips, never the message.
+func scanPastedTexts(blob string) []PastedText {
+	if blob == "" || blob == "[]" {
+		return nil
+	}
+	var ps []PastedText
+	if err := json.Unmarshal([]byte(blob), &ps); err != nil || len(ps) == 0 {
+		return nil
+	}
+	return ps
 }
 
 // scanScope decodes a stored scope column. Unreadable JSON yields the zero
@@ -712,11 +758,12 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	var fromClar sql.NullInt64
 	var scope string
 	var followups string
+	var pasted string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
 	if err == sql.ErrNoRows {
 		return Message{}, false, nil
 	}
@@ -726,6 +773,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	m.FromClarificationID = fromClar.Int64
 	m.Scope = scanScope(scope)
 	m.Followups = scanFollowups(followups)
+	m.PastedTexts = scanPastedTexts(pasted)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.NarrowedTo = narrowedTo(m)
 	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
@@ -772,7 +820,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
 		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling)
@@ -788,13 +836,15 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		var fromClar sql.NullInt64
 		var scope string
 		var followups string
+		var pasted string
 		var steps string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.FromClarificationID = fromClar.Int64
 		m.Scope = scanScope(scope)
 		m.Followups = scanFollowups(followups)
+		m.PastedTexts = scanPastedTexts(pasted)
 		m.Steps = scanSteps(steps)
 		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 		m.NarrowedTo = narrowedTo(m)

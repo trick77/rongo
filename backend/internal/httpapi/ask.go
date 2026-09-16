@@ -118,7 +118,18 @@ type askRequest struct {
 	// is written — a browser naming a row is a browser that could graft an
 	// answer under a question nobody asked it for.
 	HeadMessageID int64 `json:"head_message_id"`
+	// PastedTexts are the trailing blocks of Question the reader pasted into
+	// the composer rather than typed, in order. Render-only: the text is
+	// already in Question, this only says which part folds into a chip.
+	PastedTexts []threads.PastedText `json:"pasted_texts"`
 }
+
+// maxQuestionBytes caps the question, pastes included, in UTF-8 bytes — the
+// unit the browser measures in too. 32 KiB is some 8k tokens, and the
+// question goes into the understand, rerank and answer prompts each; a paste
+// past that is a file, not a question. The pasted_texts metadata gets the same
+// cap: it rides inside the same body and is stored on every row of the turn.
+const maxQuestionBytes = 32 << 10
 
 // wireCandidate is one entry on the clarification card as the browser sees
 // it: no hits (large, and the browser has no use for them) and no
@@ -192,6 +203,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
 		http.Error(w, "the question is empty", http.StatusBadRequest)
+		return
+	}
+	if len(req.Question) > maxQuestionBytes {
+		http.Error(w, "the question is too long", http.StatusBadRequest)
+		return
+	}
+	for _, p := range req.PastedTexts {
+		if strings.TrimSpace(p.Text) == "" {
+			http.Error(w, "a pasted text is empty", http.StatusBadRequest)
+			return
+		}
+	}
+	if blob, err := json.Marshal(req.PastedTexts); err != nil || len(blob) > maxQuestionBytes {
+		http.Error(w, "the pasted texts are too long", http.StatusBadRequest)
 		return
 	}
 	audience := ask.AudienceBA
@@ -546,6 +571,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		slog.Error("record question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	// Render-only, so a failure costs the chip and never the turn: the paste
+	// is inside the question already.
+	if err := s.deps.Threads.SavePastedTexts(ctx, msg.ID, req.PastedTexts); err != nil {
+		slog.Error("record pasted texts failed", "err", err)
 	}
 	// The record decides the language, not the request: a thread keeps the one
 	// its first turn was asked in, and AddQuestion hands back what it stored.
@@ -1072,6 +1102,10 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		slog.Error("record re-explain question failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
+	}
+	// The row copies the question, so it copies the fold too.
+	if err := s.deps.Threads.SavePastedTexts(ctx, newMsg.ID, msg.PastedTexts); err != nil {
+		slog.Error("record re-explain pasted texts failed", "err", err)
 	}
 	// The stored language is the thread's, whatever was asked for. Same rule
 	// as /api/ask: the turn is answered in the language it is filed under.

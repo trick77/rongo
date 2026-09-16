@@ -195,4 +195,26 @@ describe("SharePage", () => {
     const candidate = screen.getByText("Gather hop budget").closest("button") as HTMLButtonElement;
     expect(candidate.disabled).toBe(true);
   });
+
+  it("folds a pasted block into a chip with nothing to remove it by", async () => {
+    // The fold is the question's own, not per-turn machinery: without it the
+    // link would set a stack trace as the reader's words.
+    shared({
+      title: "A panic in main",
+      messages: [
+        {
+          ...turn,
+          question: "Why does this fail?\n\npanic: boom\nmain.go:12",
+          pasted_texts: [{ text: "panic: boom\nmain.go:12", lines: 2 }],
+        },
+      ],
+    });
+    render(<SharePage token="tok" />);
+
+    await screen.findByText(/It is a ladder/);
+    expect(screen.getByText("Why does this fail?")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pasted text · 2 lines" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: "Remove pasted text" })).toBeNull();
+    expect(screen.queryByText(/main\.go:12/)).toBeNull();
+  });
 });

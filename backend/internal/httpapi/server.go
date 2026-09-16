@@ -78,6 +78,9 @@ type Threads interface {
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
 	// SaveFollowups records what the finished answer offered to ask next.
 	SaveFollowups(ctx context.Context, messageID int64, questions []string) error
+	// SavePastedTexts records which trailing blocks of a row's question were
+	// pasted, so the page can fold them into chips.
+	SavePastedTexts(ctx context.Context, messageID int64, pasted []threads.PastedText) error
 	// SaveSteps records the activity timeline one turn was watched through,
 	// however it ended.
 	SaveSteps(ctx context.Context, messageID int64, tr timeline.Trace) error

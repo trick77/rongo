@@ -13,6 +13,7 @@ import { type ClarifyCandidate } from "./Clarify";
 import { type Step, type TraceState } from "./Trace";
 import { type SourceRef } from "./SourceView";
 import { mermaidize } from "./diagramExport";
+import { fold, strip, type PastedText } from "./pastes";
 
 export type Citation = SourceRef;
 
@@ -46,7 +47,14 @@ export type RetryRequest = {
 };
 
 export type Turn = {
+  // The question as asked and as the record has it: what was typed, then
+  // every paste folded onto its tail (see pastes.ts). This is what every
+  // resend carries and what "Copy the question" copies.
   question: string;
+  // Which trailing blocks of question were pasted rather than typed. The
+  // view strips them off to draw the typed words as prose and each paste as
+  // a chip. Empty on a turn that carried none.
+  pastes: PastedText[];
   audience: Audience;
   language: string;
   text: string;
@@ -177,6 +185,9 @@ export type Message = {
   audience: string;
   language?: string;
   question: string;
+  // The trailing blocks of question the reader pasted. Absent on a turn that
+  // carried none and on every turn older than the column.
+  pasted_texts?: PastedText[] | null;
   answer: string;
   error: string;
   citations: Citation[] | null;
@@ -237,6 +248,7 @@ export type StoredTrace = {
 export function storedTurn(m: Message): Turn {
   return {
     question: m.question,
+    pastes: m.pasted_texts ?? [],
     audience: m.audience === "dev" ? "dev" : "ba",
     language: m.language ?? "en",
     text: m.answer ?? "",
@@ -277,10 +289,17 @@ export function storedTurn(m: Message): Turn {
  * belong to, because the words are the same and nothing else would tell the
  * record they are one question.
  */
-export function freshTurn(question: string, audience: Audience, language: string, headId: number | null = null): Turn {
+export function freshTurn(
+  question: string,
+  audience: Audience,
+  language: string,
+  headId: number | null = null,
+  pastes: PastedText[] = [],
+): Turn {
   const now = Date.now();
   return {
     question,
+    pastes,
     audience,
     language,
     text: "",
@@ -379,6 +398,7 @@ export function storedRetries(turns: Turn[]): Turn[] {
           // The turn this asks again, so the retry lands in it rather than
           // filing the same question a second time.
           head_message_id: head,
+          ...pastedField(t.pastes),
         },
       },
     };
@@ -463,11 +483,31 @@ export function clock(iso: string): string {
  * written in. The fence is rongo's own shape and draws nowhere else, so a
  * pasted answer used to carry a block of JSON where its picture had been. */
 export function asMarkdown(turn: Turn): string {
-  const lines = [`# ${turn.question}`, "", mermaidize(turn.text.trim())];
+  // The typed words are the heading; a paste is a fenced block under it,
+  // never a heading of two hundred lines. A paste-only turn has no heading.
+  const { typed, matched } = strip(turn.question, turn.pastes);
+  const lines = typed ? [`# ${typed}`] : [];
+  turn.pastes.forEach((p, i) => {
+    if (matched[i]) lines.push(...(lines.length ? [""] : []), "```", p.text, "```");
+  });
+  lines.push("", mermaidize(turn.text.trim()));
   if (turn.citations.length > 0) {
     lines.push("", "Sources:", ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`));
   }
   return lines.join("\n") + "\n";
+}
+
+/**
+ * The pasted_texts field of a request body, or nothing: a body with no pastes
+ * carries no key, so a turn that never saw one is sent exactly as before.
+ */
+export function pastedField(pastes: PastedText[]): { pasted_texts?: PastedText[] } {
+  return pastes.length > 0 ? { pasted_texts: pastes } : {};
+}
+
+/** The body of a fresh /api/ask, the question folded from what was typed and what was pasted. */
+export function askBody(typed: string, pastes: PastedText[], audience: Audience, language: string, threadId: string) {
+  return { question: fold(typed, pastes), audience, language, thread_id: threadId, ...pastedField(pastes) };
 }
 
 export const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";
