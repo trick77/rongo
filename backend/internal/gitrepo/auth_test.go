@@ -56,6 +56,24 @@ func TestBearer_keepsTheTokenOutOfTheURL(t *testing.T) {
 	}
 }
 
+func TestBearer_appendsToAnExistingGitConfigCount(t *testing.T) {
+	// Given: the operator already hands git one config entry through the
+	// environment. Bearer must come after it, not replace it.
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	spec := repos.Spec{CloneURL: "https://bitbucket.example.invalid/scm/shop/backend.git", TokenAuth: "bearer"}
+
+	got := bearerEnv(spec, "secret")
+
+	want := []string{
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_1=http.extraHeader",
+		"GIT_CONFIG_VALUE_1=Authorization: Bearer secret",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("bearerEnv() = %q, want %q", got, want)
+	}
+}
+
 func TestBearer_isNothingForBasicAuthOrSSH(t *testing.T) {
 	basic := repos.Spec{CloneURL: "https://github.com/acme/repo.git", TokenUser: "x-access-token"}
 	if got := bearerEnv(basic, "secret"); got != nil {

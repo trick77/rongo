@@ -556,14 +556,20 @@ func remoteURL(spec repos.Spec, token string) string {
 // way token_auth: bearer asks. Through git's environment config rather than
 // -c: an argument shows up in the process list, an environment variable
 // only to the same user. Nothing for basic auth or an ssh remote.
+//
+// Appended after whatever GIT_CONFIG_* the process already carries: the
+// count is one variable, and setting it to 1 would drop an operator's own
+// entries for exactly the bearer repositories.
 func bearerEnv(spec repos.Spec, token string) []string {
 	if spec.TokenAuth != "bearer" || token == "" || !isHTTPURL(spec.CloneURL) {
 		return nil
 	}
+	n, _ := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	i := strconv.Itoa(n)
 	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http.extraHeader",
-		"GIT_CONFIG_VALUE_0=Authorization: Bearer " + token,
+		"GIT_CONFIG_COUNT=" + strconv.Itoa(n+1),
+		"GIT_CONFIG_KEY_" + i + "=http.extraHeader",
+		"GIT_CONFIG_VALUE_" + i + "=Authorization: Bearer " + token,
 	}
 }
 
