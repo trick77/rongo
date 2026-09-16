@@ -160,7 +160,17 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	inner += stageQ
 	args = append(args, stageArgs...)
 	inner += ")"
-	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ? ORDER BY distance`
+	// Ties on distance are broken on the chunk's ADDRESS, never left to the
+	// rowid the row happens to carry: rowids are handed out in index order, so
+	// an unbroken tie reorders the result after a re-index that changed no
+	// code. The names are the subquery's, so they are unqualified.
+	//
+	// This makes the OUTER order stable and nothing more. vec0's own top-k
+	// runs inside, and which of several equidistant chunks it keeps at the k
+	// boundary is its decision — a chunk cut there is not reachable from here
+	// whatever this clause says.
+	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ?
+		ORDER BY distance, repo, path, start_line`
 	args = append(args, maxDistance, maxDistance)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -214,7 +224,10 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	stageQ, stageArgs := stage.clause("f")
 	q += stageQ
 	args = append(args, stageArgs...)
-	q += "\n\t\tORDER BY bm25(chunks_fts) LIMIT ?"
+	// Address after bm25, for the reason SearchVector gives: two chunks the
+	// ranking cannot separate must not be separated by their rowids, which
+	// are index order.
+	q += "\n\t\tORDER BY bm25(chunks_fts), f.repo, f.path, c.start_line LIMIT ?"
 	args = append(args, n)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)

@@ -48,6 +48,11 @@ type Candidate struct {
 }
 
 // candidates groups hits into the units routing reasons about, best first.
+//
+// Every sort here and in the two folds below is stable over the hit order
+// retrieval produced, which breaks its own ties on the chunk's address. An
+// equal score therefore keeps that order and never falls back to a chunk id,
+// which is index order and moves on a re-index.
 func candidates(hits []retrieve.Hit, moduleOf func(repo, path string) string) []Candidate {
 	index := map[string]int{}
 	var out []Candidate

@@ -219,6 +219,64 @@ printf '{"_type": "tag", "name": "Real", "line": 2, "kind": "func"}\n'`))
 	}
 }
 
+// ctags names an anonymous function by hashing the file name it was HANDED,
+// so a temporary directory in that name makes the symbol, the enriched text
+// and therefore the chunk's embedding different on every index of unchanged
+// code. Measured on the flow corpus: two indexes disagreed on 286 chunks, and
+// the hits moved with them.
+func TestExtract_anonymousNamesAreTheSameOnASecondExtraction(t *testing.T) {
+	// Given: a file whose callbacks ctags has to invent names for, one of them
+	// nested inside another.
+	body := []byte(`hooks.before("/orders > POST", function (transaction, done) {
+  request.get(url, function (err, res) {
+    done();
+  });
+});
+hooks.after("/orders > GET", function (transaction, done) {
+  done();
+});
+`)
+	testee := NewExtractor(realCtags(t))
+
+	// When: the same body is extracted twice, as two index runs would.
+	first, err := testee.Extract(context.Background(), "api-spec/hooks.js", body)
+	if err != nil {
+		t.Fatalf("first Extract() err = %v", err)
+	}
+	second, err := testee.Extract(context.Background(), "api-spec/hooks.js", body)
+	if err != nil {
+		t.Fatalf("second Extract() err = %v", err)
+	}
+
+	// Then: the whole record, not the name alone. Chunking reads a nested
+	// symbol's scope back against its parent's name, so a fix that settled the
+	// name and left the scope moving would break nesting instead.
+	if len(first) != len(second) || len(first) == 0 {
+		t.Fatalf("Extract() returned %d then %d symbols", len(first), len(second))
+	}
+	anonymous := 0
+	for i := range first {
+		if first[i] != second[i] {
+			t.Errorf("symbol %d = %+v then %+v; ctags named the same code twice", i, first[i], second[i])
+		}
+		if strings.Contains(first[i].Name, "anonymous") || strings.Contains(first[i].Name, "__anon") {
+			anonymous++
+		}
+	}
+	if anonymous == 0 {
+		t.Fatalf("no anonymous symbol in %+v; the fixture stopped exercising the naming", first)
+	}
+
+	// And: the invented names still tell the file's callbacks apart.
+	seen := map[string]bool{}
+	for _, s := range first {
+		if seen[s.Name] && (strings.Contains(s.Name, "anonymous") || strings.Contains(s.Name, "__anon")) {
+			t.Errorf("anonymous name %q used twice in one file: %+v", s.Name, first)
+		}
+		seen[s.Name] = true
+	}
+}
+
 func TestExtract_emptyBodyIsEmptyAndNoError(t *testing.T) {
 	// Given
 	testee := NewExtractor(realCtags(t))

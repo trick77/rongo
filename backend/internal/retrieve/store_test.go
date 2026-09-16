@@ -263,6 +263,78 @@ func TestSearchKeyword_emptyMatchTouchesNothing(t *testing.T) {
 	}
 }
 
+// Two chunks scoring identically must come out in the same order however the
+// indexer happened to visit their files: the rowid a chunk is written under is
+// index order, so an ORDER BY that falls back to it reorders a result after a
+// re-index that changed no code.
+func TestSearchKeyword_equalRankOrdersByPathNotByInsertionOrder(t *testing.T) {
+	const body = "public void dispatch() { promoMailer.send(); }"
+	for _, first := range []string{"Zeta.java", "Alpha.java"} {
+		t.Run("inserted "+first+" first", func(t *testing.T) {
+			// Given: the same text in two files, in one insertion order and
+			// then the other, so bm25 cannot separate them.
+			db := testDB(t)
+			addRepo(t, db, "shop", "master")
+			second := "Alpha.java"
+			if first == second {
+				second = "Zeta.java"
+			}
+			addChunk(t, db, "shop", first, "dispatch", body, nearVec)
+			addChunk(t, db, "shop", second, "dispatch", body, nearVec)
+
+			// When
+			hits, err := NewStore(db).SearchKeyword(context.Background(), BuildFTSMatch("promoMailer"), 10, nil)
+
+			// Then
+			if err != nil {
+				t.Fatalf("SearchKeyword() err = %v", err)
+			}
+			if len(hits) != 2 {
+				t.Fatalf("SearchKeyword() returned %d hits, want 2", len(hits))
+			}
+			if hits[0].Path != "Alpha.java" || hits[1].Path != "Zeta.java" {
+				t.Errorf("keyword order = %s, %s; want Alpha.java then Zeta.java whatever the insertion order",
+					hits[0].Path, hits[1].Path)
+			}
+		})
+	}
+}
+
+func TestSearchVector_equalDistanceOrdersByPathNotByInsertionOrder(t *testing.T) {
+	for _, first := range []string{"Zeta.java", "Alpha.java"} {
+		t.Run("inserted "+first+" first", func(t *testing.T) {
+			// Given: two chunks on the same embedding, so vec0 hands back the
+			// same distance for both.
+			db := testDB(t)
+			addRepo(t, db, "shop", "master")
+			second := "Alpha.java"
+			if first == second {
+				second = "Zeta.java"
+			}
+			addChunk(t, db, "shop", first, "dispatch", "one", nearVec)
+			addChunk(t, db, "shop", second, "dispatch", "two", nearVec)
+
+			// When
+			hits, err := NewStore(db).SearchVector(context.Background(), queryVec, 10, DefaultMaxDistance, nil)
+
+			// Then
+			if err != nil {
+				t.Fatalf("SearchVector() err = %v", err)
+			}
+			if len(hits) != 2 {
+				t.Fatalf("SearchVector() returned %d hits, want 2", len(hits))
+			}
+			if hits[0].Distance != hits[1].Distance {
+				t.Fatalf("the fixture stopped being a tie: %v against %v", hits[0].Distance, hits[1].Distance)
+			}
+			if hits[0].Path != "Alpha.java" || hits[1].Path != "Zeta.java" {
+				t.Errorf("vector order = %s, %s; want Alpha.java then Zeta.java whatever the insertion order",
+					hits[0].Path, hits[1].Path)
+			}
+		})
+	}
+}
+
 func TestSearch_literalIdentifierRanksAheadOfSemanticNoise(t *testing.T) {
 	// Given: three chunks the embedding places right next to the query, and one
 	// that literally contains the identifier but sits far away in vector space.

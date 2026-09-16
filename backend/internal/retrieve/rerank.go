@@ -138,7 +138,13 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 			order[i] = i
 		}
 		sort.SliceStable(order, func(a, b int) bool {
-			return blended[order[a]] > blended[order[b]]
+			if blended[order[a]] != blended[order[b]] {
+				return blended[order[a]] > blended[order[b]]
+			}
+			// Equal blend is broken on the address rather than left to the
+			// incoming order, which two different Score/boost pairs can reach
+			// from either side. See lessByAddress.
+			return lessByAddress(out[order[a]], out[order[b]])
 		})
 		ranked := make([]Hit, len(out))
 		for i, j := range order {
@@ -157,6 +163,10 @@ func RerankByModule(hits []Hit, idx *ModuleIndex, o RerankOpts) []Hit {
 		}
 		// Equal standing is broken by which module Search ranked first, so the
 		// result stays deterministic instead of depending on map iteration.
+		// It must stay a per-MODULE key — an address comparison between two
+		// individual hits would order one pair of modules one way and another
+		// pair the other, and "every hit of a module comes first" would break.
+		// Search's order is itself address-stable, so this inherits that.
 		return first[ga] < first[gb]
 	})
 	return out

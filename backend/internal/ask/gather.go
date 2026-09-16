@@ -330,7 +330,9 @@ const crossingReserve = 6
 // beside the hit: every other chunk when the file is small (at most
 // WholeFileTokens in all), otherwise only the chunks that continue the
 // hit's own symbol — a function cut into windows is one mechanism, and
-// half of it is not. Ordered by ordinal, so the file reads in order.
+// half of it is not. Ordered by ordinal, so the file reads in order: the
+// ordinal is the chunk's position in its file, not its id, so it says the
+// same thing after a re-index.
 func (g *Gatherer) wholeFile(ctx context.Context, h retrieve.Hit) ([]Source, error) {
 	rows, err := g.db.QueryContext(ctx, `
 		SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
@@ -426,6 +428,10 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 			JOIN repo_state r ON r.name = f.repo
 			JOIN chunks c ON c.file_id = f.id
 			WHERE f.repo = ? AND f.path = ? AND ? BETWEEN c.start_line AND c.end_line
+			-- Chunk windows OVERLAP, so a token's line is covered by more
+			-- than one of them and this LIMIT 1 is a choice. The ordinal is
+			-- the chunk's position in its FILE, not its id, so the same line
+			-- lands on the same chunk after a re-index.
 			ORDER BY c.ordinal
 			LIMIT 1`, n.Repo, n.Path, n.Line).Scan(
 			&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text)
@@ -511,7 +517,15 @@ JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 JOIN chunks c ON c.file_id = f.id AND s.line BETWEEN c.start_line AND c.end_line
 WHERE NOT (f.repo = ? AND f.path = ?)
   AND (f.repo = ? OR s.name NOT IN (SELECT name FROM home))
-ORDER BY definers ASC, f.path, c.ordinal`
+-- The path stays ahead of the repository: putting the repository first would
+-- regroup a multi-repository result by product and change which chunks the
+-- budget admits, which is a ranking change and not the ordering fix this is.
+-- The repository is only the tie-break two repositories holding one path
+-- need, and s.name the one two selective names landing on a single chunk
+-- need, so the Reason a source carries is fixed too. Left to the rowid, each
+-- of those reads whichever was indexed first, which moves on a re-index that
+-- changed no code.
+ORDER BY definers ASC, f.path, f.repo, s.name, c.ordinal`
 
 	args := make([]any, 0, len(names)+4)
 	for _, n := range names {

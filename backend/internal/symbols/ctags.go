@@ -100,8 +100,22 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 	// --fields=+neKzS: line numbers, end lines, long kind names, the kind key
 	// and the scope. --sort=no keeps the records in file order, which is what
 	// the chunker walks.
+	//
+	// ctags is run FROM the temp directory and handed the bare file name, and
+	// that is not cosmetic. A construct with no name of its own — a JavaScript
+	// callback, an anonymous class — is named by hashing the file name ctags
+	// was handed (`ctags --_anonhash=<name>` prints that hash), so the random
+	// component of the temp directory would land in the symbol. That name
+	// reaches the symbols table, the chunk's symbol and the ENRICHED TEXT that
+	// gets embedded, so every index of unchanged code would produce a
+	// different content hash, re-embed the chunk and move it in the ranking.
+	// Measured on the flow corpus: 286 chunks differed between two indexes of
+	// one commit, and search hits moved with them. The base name is what the
+	// language is inferred from anyway, so ctags sees exactly what it needs
+	// and nothing that changes per run.
 	cmd := exec.CommandContext(ctx, e.ctags,
-		"--output-format=json", "--fields=+neKzS", "--sort=no", "-f", "-", tmp)
+		"--output-format=json", "--fields=+neKzS", "--sort=no", "-f", "-", filepath.Base(path))
+	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
