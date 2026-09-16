@@ -70,6 +70,12 @@ func languageName(lang Language) string {
 // model told to drop one non-ASCII letter drops the rest as well, and a card
 // came back offering "Sequenzdiagramm fuer Geschaeftsprozesse". That is not
 // Swiss, it is not German, and it is what a person reads.
+//
+// Measured 2026-09-16 (docs/measurements/2026-09-16-swiss-digraphs.md): on
+// gpt-5.4-mini no wording of this note moves the count, gpt-5.4 is worse
+// and MiMo Pro writes none. The digraphs are the model's own function words,
+// sampled mid-sentence next to correct umlauts; the lever is the model, not
+// the note. The answers harness counts them.
 const swissGerman = `
 
 Swiss orthography: standard written German, never the letter ß - always ss
