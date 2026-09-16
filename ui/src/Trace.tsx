@@ -250,15 +250,11 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               {cited} of {sources} sources cited
             </>
           )}
-          {/* The second call the answer took. The pipeline sends the key only
-              past one attempt, so a turn that went through first time says
+          {/* The second call the answer took. A call is retried at most once
+              (`llm.Client`, attempts is 1 or 2) and the pipeline sends the key
+              only past one, so a turn that went through first time says
               nothing at all. */}
-          {attempts !== null && attempts > 1 && (
-            <span className="trace-k">
-              {" · retried "}
-              {attempts === 2 ? "once" : `${attempts - 1} times`}
-            </span>
-          )}
+          {attempts !== null && attempts > 1 && <span className="trace-k"> · retried once</span>}
           {/* Where the prompt went. Measured at four characters per token
               rather than billed, which is why it is said in the same breath
               rather than dressed as another exact figure. */}
