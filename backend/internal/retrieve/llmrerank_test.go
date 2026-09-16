@@ -7,19 +7,32 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/llm"
 )
 
-func rerankLLM(t *testing.T, reply string, saw *string) *llm.Client {
+// rerankSeen is what the fake read off the request: the prompt the model was
+// shown and the reply cap it was sent. The gate profile spells the cap
+// max_completion_tokens (llmwire profiles.yaml, mimo-v2.5).
+type rerankSeen struct {
+	prompt   string
+	replyCap int
+}
+
+func rerankLLM(t *testing.T, reply string, saw *rerankSeen) *llm.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Messages []struct{ Content string } `json:"messages"`
+			Messages            []struct{ Content string } `json:"messages"`
+			MaxCompletionTokens int                        `json:"max_completion_tokens"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if saw != nil && len(req.Messages) > 1 {
-			*saw = req.Messages[1].Content
+		if saw != nil {
+			saw.replyCap = req.MaxCompletionTokens
+			if len(req.Messages) > 1 {
+				saw.prompt = req.Messages[1].Content
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -61,14 +74,14 @@ func rerankLLMPicking(t *testing.T, path string, saw *string) *llm.Client {
 }
 
 func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
-	var prompt string
+	var seen rerankSeen
 	hits := []Hit{
 		{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: "func a()"},
 		{ChunkID: 2, Repo: "peeq", Path: "b.go", RawText: "func b()"},
 		{ChunkID: 3, Repo: "peeq", Path: "c.go", Symbol: "c", RawText: "// c is the answer\nfunc c()"},
 		{ChunkID: 4, Repo: "peeq", Path: "d.go", RawText: "func d()"},
 	}
-	r := NewLLMReranker(rerankLLM(t, "```json\n{\"relevant\":[3,1,9,3]}\n```", &prompt), 60)
+	r := NewLLMReranker(rerankLLM(t, "```json\n{\"relevant\":[3,1,9,3]}\n```", &seen), 60)
 	got, err := r.Rerank(context.Background(), "what is c?", hits, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +95,8 @@ func TestLLMRerank_putsWhatTheModelPickedFirstAndKeepsTheRest(t *testing.T) {
 	if len(ids) != 3 || ids[0] != 3 || ids[1] != 1 || ids[2] != 2 {
 		t.Errorf("order = %v, want [3 1 2]", ids)
 	}
-	if !strings.Contains(prompt, "[3] peeq c.go (c)") || !strings.Contains(prompt, "// c is the answer") {
-		t.Errorf("the model was not shown the numbered headers and excerpts:\n%s", prompt)
+	if !strings.Contains(seen.prompt, "[3] peeq c.go (c)") || !strings.Contains(seen.prompt, "// c is the answer") {
+		t.Errorf("the model was not shown the numbered headers and excerpts:\n%s", seen.prompt)
 	}
 }
 
@@ -130,6 +143,188 @@ func TestLLMRerank_reportsACancelledContextAsSuch(t *testing.T) {
 	r := NewLLMReranker(fakeLLM(t, srv), 60)
 	if _, err := r.Rerank(ctx, "q", []Hit{{ChunkID: 1}, {ChunkID: 2}, {ChunkID: 3}}, 1); err == nil {
 		t.Fatal("a cancelled context was answered with the fused order")
+	}
+}
+
+// TestExcerpt_isRuneSafeAndCutsAtALineBreak: the excerpt is measured in runes,
+// so a cut never splits an umlaut, and it prefers the last line break in the
+// back half of the window so the model reads whole lines.
+func TestExcerpt_isRuneSafeAndCutsAtALineBreak(t *testing.T) {
+	t.Run("a cut never splits a rune", func(t *testing.T) {
+		got := excerpt(strings.Repeat("ä", 50), 10)
+		if !utf8.ValidString(got) {
+			t.Fatalf("excerpt cut inside a rune: %q", got)
+		}
+		if got != strings.Repeat("ä", 10)+"…" {
+			t.Errorf("excerpt = %q, want ten runes and the ellipsis", got)
+		}
+	})
+	t.Run("a line break in the back half wins", func(t *testing.T) {
+		s := strings.Repeat("a", 6) + "\n" + strings.Repeat("b", 20)
+		got := excerpt(s, 10)
+		if got != strings.Repeat("a", 6)+"…" {
+			t.Errorf("excerpt = %q, want the cut at the newline", got)
+		}
+	})
+	t.Run("a line break in the front half loses", func(t *testing.T) {
+		s := "ab\n" + strings.Repeat("c", 30)
+		got := excerpt(s, 10)
+		if got != "ab\n"+strings.Repeat("c", 7)+"…" {
+			t.Errorf("excerpt = %q, want the full window", got)
+		}
+	})
+	t.Run("a single overlong line cuts at n", func(t *testing.T) {
+		got := excerpt(strings.Repeat("x", 100), 10)
+		if got != strings.Repeat("x", 10)+"…" {
+			t.Errorf("excerpt = %q, want ten runes and the ellipsis", got)
+		}
+	})
+	t.Run("text that fits comes back whole", func(t *testing.T) {
+		if got := excerpt("  füüf\nlines  ", 10); got != "füüf\nlines" {
+			t.Errorf("excerpt = %q, want the whole trimmed text", got)
+		}
+	})
+	t.Run("the byte walk agrees with the rune slice", func(t *testing.T) {
+		for _, s := range excerptCorpus {
+			for _, n := range []int{0, 1, 2, 3, 7, 10, 23, 240} {
+				if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+					t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+				}
+			}
+		}
+	})
+}
+
+// excerptCorpus is mixed ASCII, umlauts and line breaks, including a cut that
+// would land inside a rune and one where the only newline sits in the front
+// half of the window.
+var excerptCorpus = []string{
+	"",
+	"short",
+	"ä",
+	strings.Repeat("ä", 50),
+	strings.Repeat("äb\n", 40),
+	"ab\n" + strings.Repeat("c", 300),
+	strings.Repeat("a", 6) + "\n" + strings.Repeat("ü", 300),
+	"füüf\nlines\nof\ntext\nhere\n" + strings.Repeat("x", 500),
+	strings.Repeat("Umlaut ö line\n", 40),
+	"\n\n\n" + strings.Repeat("ß", 300),
+}
+
+// excerptByRuneSlice is the implementation excerpt replaced, kept as the
+// reference the byte walk is checked against.
+func excerptByRuneSlice(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cutAt := n
+	for i := n - 1; i >= n/2; i-- {
+		if r[i] == '\n' {
+			cutAt = i
+			break
+		}
+	}
+	return string(r[:cutAt]) + "…"
+}
+
+func FuzzExcerpt(f *testing.F) {
+	for _, s := range excerptCorpus {
+		f.Add(s, 10)
+	}
+	f.Fuzz(func(t *testing.T, s string, n int) {
+		// Invalid UTF-8 is where the two deliberately differ: the rune slice
+		// substitutes U+FFFD for a stray byte, the byte walk passes the
+		// file's own bytes through. Chunk text is a file's bytes, so passing
+		// them through is the better half of that pair; either way the cut
+		// still lands on a rune boundary.
+		if n < 0 || n > 1000 || !utf8.ValidString(s) {
+			t.Skip()
+		}
+		if got, want := excerpt(s, n), excerptByRuneSlice(s, n); got != want {
+			t.Errorf("excerpt(%q, %d) = %q, want %q", s, n, got, want)
+		}
+	})
+}
+
+// TestLLMRerank_headerCarriesTheStartLine: two chunks of one file differ by
+// where they start, and the model cannot tell them apart without it.
+func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
+	var seen rerankSeen
+	hits := []Hit{
+		{ChunkID: 1, Repo: "peeq", Path: "a.go", Symbol: "a", StartLine: 42, RawText: "func a()"},
+		{ChunkID: 2, Repo: "peeq", Path: "b.go", RawText: "func b()"},
+	}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 60)
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(seen.prompt, "[1] peeq a.go:42 (a)") {
+		t.Errorf("the start line is missing from the header:\n%s", seen.prompt)
+	}
+	if !strings.Contains(seen.prompt, "[2] peeq b.go\n") {
+		t.Errorf("a chunk starting at line zero got a colon:\n%s", seen.prompt)
+	}
+}
+
+// TestLLMRerank_excerptWidthIsAField: the field is what the model reads by; a
+// line past rune 600 is invisible at 240 and visible at the shipped 800.
+func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
+	body := strings.Repeat("filler line\n", 50) + "THE MARKER\n" + strings.Repeat("tail line\n", 50)
+	hits := []Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go", RawText: body}, {ChunkID: 2}}
+
+	var narrow rerankSeen
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &narrow), 60)
+	r.Excerpt = 240
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(narrow.prompt, "THE MARKER") {
+		t.Errorf("Excerpt = 240 already reaches the marker; the test proves nothing")
+	}
+
+	// The shipped width, left to the default.
+	var wide rerankSeen
+	r = NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &wide), 60)
+	if _, err := r.Rerank(context.Background(), "q", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wide.prompt, "THE MARKER") {
+		t.Errorf("the default width did not reach the marker:\n%s", wide.prompt)
+	}
+}
+
+// TestLLMRerank_replyCapGrowsWithTheListAskedFor: the prompt bounds the reply
+// at k numbers, so the cap is keyed to k. A long list past the floor must get
+// the room, or the reply ends with finish_reason=length, which is an error, a
+// warning and the fused order.
+func TestLLMRerank_replyCapGrowsWithTheListAskedFor(t *testing.T) {
+	for _, c := range []struct {
+		k, want int
+	}{
+		{20, 256},  // the shipped call, inside the floor
+		{60, 304},  // past the floor
+		{100, 464}, // a caller asking for a hundred
+	} {
+		if got := replyCap(c.k); got != c.want {
+			t.Errorf("replyCap(%d) = %d, want %d", c.k, got, c.want)
+		}
+	}
+
+	// And the cap really reaches the wire, under the gate profile's own
+	// spelling of the parameter.
+	var seen rerankSeen
+	hits := make([]Hit, 100)
+	for i := range hits {
+		hits[i] = Hit{ChunkID: int64(i + 1), Repo: "peeq", Path: "a.go"}
+	}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 100)
+	if _, err := r.Rerank(context.Background(), "q", hits, 100); err != nil {
+		t.Fatal(err)
+	}
+	if seen.replyCap != 464 {
+		t.Errorf("reply cap on the wire = %d for k = 100, want 464", seen.replyCap)
 	}
 }
 

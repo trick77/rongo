@@ -143,9 +143,13 @@ func TestFlowGathered(t *testing.T) {
 	var reranked *retrieve.Retriever
 	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
 		reranked = retrieve.New(db, evalEmbedder(t))
-		reranked.Candidates = 60
-		reranked.Reranker = evalReranker(t, evalLLM(t, 2*time.Minute))
-		arms = append(arms, flowGatherArm{name: "short-gate rerank over 60 + symbol walk + crossings", hops: deployed.MaxHops, rerank: true})
+		// The pool is the reranker's; searchTexts lifts the lanes to it.
+		rr := evalReranker(t, evalLLM(t, 2*time.Minute))
+		reranked.Reranker = rr
+		arms = append(arms, flowGatherArm{
+			name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings", rr.Pool, rr.Excerpt),
+			hops: deployed.MaxHops, rerank: true,
+		})
 	}
 
 	// Searched once per question and retriever, shared across the arms: the
