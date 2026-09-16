@@ -606,7 +606,7 @@ export function SourcesPane({
           </button>
         )}
       </header>
-      <div className="thin-scroll min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto">
         {!listed && (
           <p className="px-4.5 py-4 text-[13px] text-faint">
             The files an answer was written from appear here, numbered like the markers in the text.

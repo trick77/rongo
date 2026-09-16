@@ -39,7 +39,7 @@ export default function PasteChip({ text, lines, onRemove }: { text: string; lin
           </button>
         )}
       </div>
-      {open && <pre className="paste-chip-pre thin-scroll">{text}</pre>}
+      {open && <pre className="paste-chip-pre">{text}</pre>}
     </div>
   );
 }

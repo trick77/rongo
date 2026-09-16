@@ -184,7 +184,7 @@ export default function SharePage({ token }: { token: string }) {
             Each strip is the padding on its own side, so text clears the fade
             at rest. */}
         <div className="relative min-h-0 min-w-0">
-          <div className="thin-scroll h-full overflow-auto">
+          <div className="h-full overflow-auto">
             <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
               <ThreadView
                 turns={state.turns}
