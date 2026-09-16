@@ -458,7 +458,7 @@ export function StatsPane({ target, turns, onClose }: { target: StatsTarget; tur
       <aside
         role="dialog"
         aria-label="Token stats"
-        className="thin-scroll fixed top-0 right-0 bottom-0 z-30 w-[440px] max-w-[94vw] overflow-auto border-l border-border bg-panel px-5 pt-4 pb-8 shadow-panel"
+        className="fixed top-0 right-0 bottom-0 z-30 w-[440px] max-w-[94vw] overflow-auto border-l border-border bg-panel px-5 pt-4 pb-8 shadow-panel"
       >
         <div className="flex items-start justify-between gap-3">
           <div>

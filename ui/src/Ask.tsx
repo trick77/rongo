@@ -1044,7 +1044,7 @@ export default function Ask({
           // No stacking context on the scroller, deliberately: the full-screen
           // diagram view is rendered from inside a card in this column, and
           // isolating the column would trap that overlay under the composer.
-          className="thin-scroll min-h-0 flex-1 overflow-auto"
+          className="min-h-0 flex-1 overflow-auto"
         >
           <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
             {/* No top margin on the welcome: it starts where the Repositories
@@ -1245,7 +1245,7 @@ export default function Ask({
                       setLanguage(e.target.value);
                       rememberLanguage(e.target.value);
                     }}
-                    className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none pointer-coarse:text-base"
+                    className="lang-select cursor-pointer rounded-full border-0 bg-transparent py-1 pr-6 pl-3 font-medium text-inherit outline-none focus-visible:ring-2 focus-visible:ring-accent-dim pointer-coarse:text-base"
                   >
                     {languages.map((l) => (
                       <option key={l.code} value={l.code}>
