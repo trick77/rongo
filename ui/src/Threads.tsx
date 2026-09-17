@@ -365,7 +365,7 @@ export default function Threads({
             <ul className="flex flex-col">{starred.map(row)}</ul>
           </section>
         )}
-        {threads.length > starred.filter((s) => threads.some((t) => t.id === s.id)).length && (
+        {groups.some((g) => g.items.length > 0) && (
           <section>
             <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>
             {groups.map((g, i) => (

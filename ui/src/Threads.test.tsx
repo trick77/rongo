@@ -209,6 +209,14 @@ describe("Threads", () => {
       expect(screen.queryByText("Starred")).toBeNull();
     });
 
+    it("shows no Recents heading when every recent thread is starred", async () => {
+      const starred = { id: "1", title: "Starred only", created_at: days(0), starred: true };
+      threadList([starred], true, [starred]);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByText("Starred");
+      expect(screen.queryByText("Recents")).toBeNull();
+    });
+
     it("keeps the day groups under Recents, the first one on the heading's own gap", async () => {
       threadList([
         { id: "9", title: "Asked this morning", created_at: days(0) },
