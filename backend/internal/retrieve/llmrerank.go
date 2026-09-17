@@ -64,7 +64,9 @@ const rerankSystem = `You rank code search results for a question. Answer with J
 The numbers are the results that help answer the question, most relevant
 first, at most %d of them. Leave out results that do not help. A result helps
 when its code, comment or path is about what the question asks, not when it
-merely shares a word with it. Do not explain.`
+merely shares a word with it. A result marked (test) is a test of the code,
+not the code: prefer the code it exercises unless the question asks how
+something is tested. Do not explain.`
 
 // DefaultRerankExcerpt is how much of each chunk the model sees by default, in
 // runes. Eight hundred, not the 240 this shipped with: a signature and its
@@ -119,6 +121,12 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 		}
 		if h.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", h.Symbol)
+		}
+		// Fusion demoted this hit for being a test; a model reading a pool
+		// of bare excerpts would promote it back, because a test that says
+		// "verify X calls Y" reads as the clearest description of X.
+		if IsTestPath(h.Path) {
+			b.WriteString(" (test)")
 		}
 		b.WriteString("\n")
 		b.WriteString(Excerpt(h.RawText, r.Excerpt))

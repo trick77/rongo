@@ -268,6 +268,26 @@ func TestLLMRerank_headerCarriesTheStartLine(t *testing.T) {
 	}
 }
 
+// TestLLMRerank_labelsTestResults: the header says which results are tests,
+// so the model can prefer the code a test exercises over the test itself.
+func TestLLMRerank_labelsTestResults(t *testing.T) {
+	var seen rerankSeen
+	hits := []Hit{
+		{ChunkID: 1, Repo: "peeq", Path: "client.go", Symbol: "Do", StartLine: 10, RawText: "func Do()"},
+		{ChunkID: 2, Repo: "peeq", Path: "client_test.go", Symbol: "TestDo", StartLine: 5, RawText: "func TestDo()"},
+	}
+	r := NewLLMReranker(rerankLLM(t, `{"relevant":[1]}`, &seen), 60)
+	if _, err := r.Rerank(context.Background(), "what does Do do?", hits, 2); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(seen.prompt, "[2] peeq client_test.go:5 (TestDo) (test)") {
+		t.Errorf("the test result is not labelled:\n%s", seen.prompt)
+	}
+	if !strings.Contains(seen.prompt, "[1] peeq client.go:10 (Do)\n") {
+		t.Errorf("the code result got a label or lost its header:\n%s", seen.prompt)
+	}
+}
+
 // TestLLMRerank_excerptWidthIsAField: the field is what the model reads by; a
 // line past rune 600 is invisible at 240 and visible at the shipped 800.
 func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
