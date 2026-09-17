@@ -369,50 +369,72 @@ func TestIndexRepo_aConfigurationFileIsIndexedRedacted(t *testing.T) {
 	}
 }
 
-func TestSweepExcluded_removesWhatAnEarlierRunIndexed(t *testing.T) {
+func TestSweep_removesWhatAnEarlierRunIndexed(t *testing.T) {
 	// Given: a repository indexed BEFORE the exclusion existed, so the plan is
 	// embedded and searchable. Incremental runs only visit changed paths and
 	// the poller does nothing while HEAD is unchanged, so without a sweep the
-	// plan would stay in the index for as long as nobody edits it.
+	// plan would stay in the index for as long as nobody edits it. The same
+	// holds for a rule that ships with a newer rongo: the data ceiling is
+	// raised out of the way here so big.json is indexed like an older build
+	// did, and a translation bundle is renamed under the row an older build
+	// wrote, since the name rule has no knob to switch off.
 	h := newHarnessFiles(t, map[string]string{
 		"src/shop/cart/AbandonedCartJob.java": cartJava,
 		"docs/plans/phase-2.md":               stalePlan,
+		"src/shop/cart/big.json":              "[" + strings.Repeat(`{"plz":8000,"ort":"Zürich"},`, 400) + "]",
+		"src/shop/cart/de.json":               `{"cart.title": "Warenkorb"}`,
 	}, nil)
+	h.ix.selector = NewSelector(SelectOptions{MaxDataBytes: 1 << 20})
 	st := h.stateOf(t)
 	sha := h.head(t)
 	before, err := h.ix.IndexRepo(context.Background(), st, sha, nil)
 	if err != nil {
 		t.Fatalf("IndexRepo() err = %v", err)
 	}
-	planChunks := func() int {
+	if _, err := h.db.Exec(`UPDATE files SET path = 'src/shop/cart/i18n/generated-de-CH.json' WHERE path = 'src/shop/cart/de.json'`); err != nil {
+		t.Fatal(err)
+	}
+	chunksOf := func(path string) int {
 		return countOf(t, h.db, `
 			SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id
-			WHERE f.path = 'docs/plans/phase-2.md'`)
+			WHERE f.path = ?`, path)
 	}
-	if planChunks() == 0 {
-		t.Fatal("the plan was not indexed by the first run; the sweep would have nothing to prove")
+	retired := map[string]Decision{
+		"docs/plans/phase-2.md":                   SkipExcluded,
+		"src/shop/cart/big.json":                  SkipData,
+		"src/shop/cart/i18n/generated-de-CH.json": SkipGenerated,
+	}
+	for path := range retired {
+		if chunksOf(path) == 0 {
+			t.Fatalf("%s was not indexed by the first run; the sweep would have nothing to prove", path)
+		}
 	}
 	h.ix.selector = NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
 
 	// When
-	changed, counts, err := h.ix.SweepExcluded(context.Background(), "shop")
+	changed, counts, err := h.ix.Sweep(context.Background(), "shop")
 
 	// Then
 	if err != nil {
-		t.Fatalf("SweepExcluded() err = %v, want nil", err)
+		t.Fatalf("Sweep() err = %v, want nil", err)
 	}
-	if changed != 1 {
-		t.Errorf("changed = %d, want 1", changed)
+	if changed != len(retired) {
+		t.Errorf("changed = %d, want %d", changed, len(retired))
 	}
-	if n := planChunks(); n != 0 {
-		t.Errorf("the plan still has %d chunks after the sweep, want 0", n)
+	for path, want := range retired {
+		if n := chunksOf(path); n != 0 {
+			t.Errorf("%s still has %d chunks after the sweep, want 0", path, n)
+		}
+		var reason string
+		if err := h.db.QueryRow(`SELECT skip_reason FROM files WHERE path = ?`, path).Scan(&reason); err != nil {
+			t.Fatalf("the swept file row %s is gone: %v", path, err)
+		}
+		if reason != string(want) {
+			t.Errorf("%s: skip_reason = %q, want %q", path, reason, want)
+		}
 	}
-	var reason string
-	if err := h.db.QueryRow(`SELECT skip_reason FROM files WHERE path = 'docs/plans/phase-2.md'`).Scan(&reason); err != nil {
-		t.Fatalf("the swept file row is gone: %v", err)
-	}
-	if reason != string(SkipExcluded) {
-		t.Errorf("skip_reason = %q, want %q", reason, SkipExcluded)
+	if n := chunksOf("src/shop/cart/AbandonedCartJob.java"); n == 0 {
+		t.Error("the sweep took the source file with it")
 	}
 	// The mirrors go with the chunks: an orphaned vector keeps answering.
 	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks_vec`); n != counts.Chunks {
@@ -426,7 +448,7 @@ func TestSweepExcluded_removesWhatAnEarlierRunIndexed(t *testing.T) {
 	}
 
 	// And a second sweep finds nothing left to do.
-	if changed, _, err := h.ix.SweepExcluded(context.Background(), "shop"); err != nil || changed != 0 {
+	if changed, _, err := h.ix.Sweep(context.Background(), "shop"); err != nil || changed != 0 {
 		t.Errorf("second sweep: changed = %d, err = %v, want 0 and nil", changed, err)
 	}
 }

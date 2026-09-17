@@ -378,23 +378,21 @@ func (ix *Indexer) vectors(ctx context.Context, chunks []Chunk) ([][]float32, er
 	return out, nil
 }
 
-// SweepExcluded re-applies the exclusion list to what a repository already
-// holds, recording every indexed file that now matches as skipped and clearing
-// its chunks. It returns how many files it changed and the repository's
-// totals afterwards.
+// Sweep re-applies every path-and-size rule, the operator's exclusion list
+// and the built-in ones alike, to what a repository already holds, recording
+// every indexed file that now matches as skipped with its own reason and
+// clearing its chunks. It returns how many files it changed and the
+// repository's totals afterwards.
 //
 // It exists because nothing else would ever revisit those files: an
 // incremental run only touches the paths a commit changed, and the poller
 // does nothing at all while HEAD is unchanged. A pattern added to
-// BACKEND_INDEX_EXCLUDE would otherwise take effect only for files someone
-// happens to edit later, while the ones already embedded stayed searchable.
-// The list is read at start, so the sweep runs once per start.
-func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts, error) {
-	// Nothing to apply, nothing to scan: the caller only uses the totals when
-	// something changed.
-	if len(ix.selector.exclude) == 0 {
-		return 0, Counts{}, nil
-	}
+// BACKEND_INDEX_EXCLUDE, or a rule that ships with a newer build, would
+// otherwise take effect only for files someone happens to edit later, while
+// the ones already embedded stayed searchable. Verdicts that need the body
+// (secrets, the generated-code marker) are not re-applied: they were
+// already decided on the bytes that were indexed.
+func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) {
 	rows, err := ix.db.QueryContext(ctx, `
 		SELECT path, sha, lang, size FROM files WHERE repo = ? AND skip_reason = ''`, repo)
 	if err != nil {
@@ -403,6 +401,7 @@ func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts,
 	type indexed struct {
 		path, sha, lang string
 		size            int
+		why             Decision
 	}
 	var hits []indexed
 	for rows.Next() {
@@ -411,7 +410,8 @@ func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts,
 			rows.Close()
 			return 0, Counts{}, err
 		}
-		if _, ok := ix.selector.Excluded(f.path); ok {
+		if d, _ := ix.selector.selectByPath(f.path, f.size); d != Include {
+			f.why = d
 			hits = append(hits, f)
 		}
 	}
@@ -426,7 +426,7 @@ func (ix *Indexer) SweepExcluded(ctx context.Context, repo string) (int, Counts,
 		if err := ctx.Err(); err != nil {
 			return 0, Counts{}, err
 		}
-		if err := ix.writer.RecordSkipped(ctx, repo, f.path, f.sha, f.lang, string(SkipExcluded), f.size); err != nil {
+		if err := ix.writer.RecordSkipped(ctx, repo, f.path, f.sha, f.lang, string(f.why), f.size); err != nil {
 			return 0, Counts{}, err
 		}
 	}

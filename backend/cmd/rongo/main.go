@@ -39,8 +39,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// sweepExcluded applies BACKEND_INDEX_EXCLUDE to every repository's existing
-// index and refreshes the Repos page totals where it removed something.
+// sweepExcluded applies BACKEND_INDEX_EXCLUDE and the built-in skip rules to
+// every repository's existing index and refreshes the Repos page totals where
+// it removed something.
 func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *indexer.Indexer) {
 	all, err := state.All(ctx)
 	if err != nil {
@@ -48,7 +49,7 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 		return
 	}
 	for _, st := range all {
-		changed, counts, err := pipeline.SweepExcluded(ctx, st.Name)
+		changed, counts, err := pipeline.Sweep(ctx, st.Name)
 		if err != nil {
 			slog.Warn("exclusion sweep failed", "repo", st.Name, "err", err)
 			continue
@@ -59,7 +60,7 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 		if err := state.SetCounts(ctx, st.Name, counts); err != nil {
 			slog.Warn("recording the swept totals failed", "repo", st.Name, "err", err)
 		}
-		slog.Info("excluded files removed from the index", "repo", st.Name, "files", changed)
+		slog.Info("skipped files removed from the index", "repo", st.Name, "files", changed)
 	}
 }
 
@@ -273,8 +274,9 @@ func main() {
 		Cache:    embed.NewCache(db, embed.Model, embed.Dim()),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
-			MaxBytes: cfg.IndexMaxFileBytes,
-			Exclude:  cfg.IndexExclude,
+			MaxBytes:     cfg.IndexMaxFileBytes,
+			MaxDataBytes: cfg.IndexMaxDataFileBytes,
+			Exclude:      cfg.IndexExclude,
 		}),
 		Chunk: chunkOptions(cfg),
 	})
