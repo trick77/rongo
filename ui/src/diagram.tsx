@@ -260,11 +260,20 @@ function init(): void {
 export type Drawn = { svg: string } | { error: string };
 
 /** One drawing per source text, however many times the answer re-renders.
- * The stream re-renders on every token, and a closed fence is drawn once. */
+ * The stream re-renders on every token, and a closed fence is drawn once.
+ * Never evicted: a session's diagrams are a few strings, and the same
+ * string mounted twice (the card and the full view) is one drawing. */
 const drawn = new Map<string, Promise<Drawn>>();
 let seq = 0;
 
 /** draw renders a source to an SVG string, or to the parser's complaint.
+ *
+ * Only a drawing is kept. The renderer loads each diagram type as its own
+ * chunk, so the first sequence or entity diagram of a session can fail for
+ * a reason that is not the source (a redeploy took the hashed chunk away, a
+ * network blip); kept, that failure would follow the source for the rest of
+ * the session. A refused source is cheap to refuse again.
+ *
  * Exported for the tests, which mock the renderer and assert on the cache. */
 export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
@@ -276,6 +285,7 @@ export function draw(src: string): Promise<Drawn> {
         const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
         return { svg };
       } catch (e) {
+        drawn.delete(src);
         return { error: e instanceof Error ? e.message : String(e) };
       }
     })();

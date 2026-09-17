@@ -144,7 +144,7 @@ describe("toSvgFile", () => {
     document.head.querySelectorAll("style[data-test]").forEach((s) => s.remove());
   });
 
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 90"><style>.x{}</style><rect width="10" height="10"/></svg>';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -25 240 90"><style>.x{}</style><rect width="10" height="10"/></svg>';
 
   function card(): HTMLElement {
     const style = document.createElement("style");
@@ -159,7 +159,8 @@ describe("toSvgFile", () => {
 
   it("carries the card's ground, so the pale labels are not lost on white", () => {
     const out = toSvgFile({ svg }, card());
-    expect(out).toContain('<rect width="100%" height="100%" fill="rgb(27, 27, 26)"/>');
+    // Over the viewBox, which starts above and left of the origin.
+    expect(out).toContain('<rect x="-8" y="-25" width="240" height="90" fill="rgb(27, 27, 26)"/>');
     // First, so it sits behind the drawing rather than over it.
     expect(out.indexOf('fill="rgb(27, 27, 26)"')).toBeLessThan(out.indexOf('width="10"'));
   });
@@ -167,7 +168,7 @@ describe("toSvgFile", () => {
   it("leaves the renderer's file alone otherwise", () => {
     expect(toSvgFile({ svg }, null)).toBe(svg);
     const out = toSvgFile({ svg }, card());
-    expect(out).toContain('viewBox="0 0 240 90"');
+    expect(out).toContain('viewBox="-8 -25 240 90"');
     expect(out).toContain("<style>.x{}</style>");
   });
 });

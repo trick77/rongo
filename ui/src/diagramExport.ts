@@ -22,7 +22,15 @@ import { fenceRe } from "./markdown";
 export function toSvgFile(drawn: { svg: string }, card: Element | null): string {
   const ground = card ? groundOf(card) : null;
   if (ground === null) return drawn.svg;
-  return drawn.svg.replace(/<svg\b[^>]*>/, (open) => `${open}<rect width="100%" height="100%" fill="${ground}"/>`);
+  return drawn.svg.replace(/<svg\b[^>]*>/, (open) => {
+    // The ground covers the viewBox, not the user-space origin: the
+    // renderer's viewBox starts left of and above 0 (a sequence at y -25,
+    // a flowchart at minus its padding), and a rect at 0,0 would leave a
+    // bare band along the top and left edge of the file.
+    const vb = /viewBox="([^"]*)"/.exec(open);
+    const [x, y, w, h] = vb ? vb[1].trim().split(/[\s,]+/) : ["0", "0", "100%", "100%"];
+    return `${open}<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${ground}"/>`;
+  });
 }
 
 /** groundOf is the first real background behind the drawing, walked up from

@@ -164,6 +164,12 @@ describe("draw", () => {
     expect(out).toEqual({ error: "Parse error on line 1" });
     expect(renderSvg).not.toHaveBeenCalled();
   });
+
+  it("keeps a drawing but not a refusal, so a chunk that failed to load is tried again", async () => {
+    await draw("flowchart LR\n bad[ again");
+    await draw("flowchart LR\n bad[ again");
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("Diagram", () => {
