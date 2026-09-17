@@ -71,6 +71,10 @@ type fakeAsker struct {
 	// gotThread is what the handler read off the thread and handed the
 	// pipeline: what earlier turns narrowed to, and what they last answered.
 	gotThread ask.Thread
+	// reworked says the re-explain of a rework row went through Rework, and
+	// reworkInstruction what it was told to do.
+	reworked          bool
+	reworkInstruction string
 
 	// during runs inside the turn, with the turn's own context, so a test can
 	// do something to the thread while it is being answered.
@@ -205,6 +209,16 @@ func withAskerAsking() func(*fakeAsker) {
 
 func withAskerResuming() func(*fakeAsker) {
 	return func(f *fakeAsker) { f.resumeTokens = []string{"The ", "answer."} }
+}
+
+// Rework records the antecedent it was handed and answers like a re-explain.
+func (f *fakeAsker) Rework(ctx context.Context, instruction string, aud ask.Audience, lang ask.Language,
+	t ask.Thread, gotScope ask.Scope, ev ask.Events) (ask.Answer, error) {
+
+	f.reworked = true
+	f.reworkInstruction = instruction
+	f.gotThread = t
+	return f.Reexplain(ctx, instruction, aud, lang, t.Sources, gotScope, ev)
 }
 
 func withAskerReexplaining() func(*fakeAsker) {
