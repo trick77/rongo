@@ -211,7 +211,7 @@ export default function ThreadsPage({
                       {searching ? mark(t.title, term) : t.title}
                     </span>
                     {t.shared && (
-                      <span title="Shared with a link" className="h-[7px] w-[7px] shrink-0 rounded-full bg-online">
+                      <span title="Shared with a link" className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent-strong">
                         <span className="sr-only">Shared</span>
                       </span>
                     )}
