@@ -338,6 +338,26 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 	if strings.Index(*promptBA, "Audience: business analyst") > strings.Index(*promptBA, "```diagram") {
 		t.Error("the diagram rule comes before the audience block it refers to")
 	}
+	// The BA block names the picture in the reader's words, inside the
+	// block: "control flow" in the diagram rule never fired on a process
+	// question, and "then stop" a page earlier had already ended the answer.
+	// It names the picture, never the fence, so the shape rules still
+	// precede the first fence (asserted below).
+	ba := *promptBA
+	if end := strings.Index(ba, "Open with ONE sentence"); end < 0 ||
+		!strings.Contains(ba[:end], "a flowchart of it") || !strings.Contains(ba[:end], "a sequence diagram") {
+		t.Error("the BA audience block does not say when a picture belongs in the answer")
+	}
+	// The diagram rule's trigger is audience-neutral: a branch or a second
+	// party earns the picture, whoever the parties are.
+	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
+		if !strings.Contains(p, "roles, systems and people") || !strings.Contains(p, "Steps with no branch and one party are a list") {
+			t.Errorf("the %s diagram rule is not the audience-neutral trigger", name)
+		}
+		if !strings.Contains(p, "a second party are a diagram, not a list") {
+			t.Errorf("the %s shape rule leaves the list permission to claim the flowchart's material", name)
+		}
+	}
 	// The shape rules are about the whole answer, so BOTH audiences get them,
 	// and they sit between the audience block and everything conditional: put
 	// last, they would read as rules about whichever special case happened to

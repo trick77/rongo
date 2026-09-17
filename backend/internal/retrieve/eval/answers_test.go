@@ -221,7 +221,10 @@ type answerRecord struct {
 	// The reader never sees them - swiss.go corrects the stream - so this
 	// column is the only place the deployment's German spelling shows.
 	Digraphs []string `json:"digraphs,omitempty"`
-	Err      string   `json:"err,omitempty"`
+	// Diagram is "flow" or "sequence" when the answer draws one
+	// (ask.DiagramKind), "" when the reader gets prose alone.
+	Diagram string `json:"diagram,omitempty"`
+	Err     string `json:"err,omitempty"`
 }
 
 // TestEvalMeasureAnswers runs the product pipeline over the corpus's
@@ -273,7 +276,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	out := filepath.Join(os.TempDir(), fmt.Sprintf("rongo-answers-%s.json", time.Now().Format("20060102-150405")))
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
-		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs int
+		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs, diagrams int
 		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s ===", run, runs, audience, rerank, codeLaneLabel())
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
@@ -301,6 +304,10 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			if lang == ask.LanguageDE {
 				rec.Digraphs = a.Respelled
 				digraphs += len(rec.Digraphs)
+			}
+			rec.Diagram = ask.DiagramKind(a.Text)
+			if rec.Diagram != "" {
+				diagrams++
 			}
 			rec.Tokens = a.Usage.Total
 			rec.Sources = len(a.Sources)
@@ -346,12 +353,12 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			asserted += rec.Asserted
 			citeHit += rec.CiteHit
 			citeTotal += rec.CiteTotal
-			t.Logf("  %-70s rubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v",
-				short(q.Text), rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs)
+			t.Logf("  %-70s rubric %d/%d present, %d contradicted, %d forbidden; cited %d/%d; %d sources; %d tokens; digraphs %d %v; diagram %q",
+				short(q.Text), rec.Present, len(r.Must), rec.Contra, rec.Asserted, rec.CiteHit, rec.CiteTotal, rec.Sources, rec.Tokens, len(rec.Digraphs), rec.Digraphs, rec.Diagram)
 			records = append(records, rec)
 		}
-		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d; failed %d; %d tokens; digraphs %d",
-			run, present, must, contra, asserted, citeHit, citeTotal, asked, failed, tokens, digraphs)
+		t.Logf("  run %d: rubric %d/%d present, %d contradicted, %d forbidden asserted; cited parts %d/%d; asked %d; failed %d; %d tokens; digraphs %d; diagrams %d",
+			run, present, must, contra, asserted, citeHit, citeTotal, asked, failed, tokens, digraphs, diagrams)
 	}
 	body, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {

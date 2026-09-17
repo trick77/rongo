@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strconv"
@@ -358,6 +359,72 @@ func jsonish(s string) bool {
 		i++
 	}
 	return true // still a prefix of `{"`: it may yet become one
+}
+
+// DiagramKind returns "flow" or "sequence" when the answer text carries a
+// diagram the reader gets drawn, and "" when it carries none. It reads the
+// text as the renumberer left it, so a spec the model fenced as json or wrote
+// bare counts once retagged. What is measured is the picture, not the
+// attempt, so the conditions are the browser's (ui/src/diagram.tsx, parse;
+// markdown.tsx, fenceRe): a closed fence whose first header token is
+// "diagram", a body that is valid JSON, and at least one node or actor with
+// a string id and label - an empty or cut-off spec is shown as text there
+// and counts as none here. The answers harness reports it per answer.
+func DiagramKind(text string) string {
+	for rest := text; ; {
+		i := strings.Index(rest, "```")
+		if i < 0 {
+			return ""
+		}
+		nl := strings.IndexByte(rest[i:], '\n')
+		if nl < 0 {
+			return ""
+		}
+		head, after := rest[i:i+nl], rest[i+nl+1:]
+		end := strings.Index(after, "\n```")
+		if end < 0 {
+			return ""
+		}
+		if infoTag(head) == "diagram" {
+			if kind := drawnKind(after[:end]); kind != "" {
+				return kind
+			}
+		}
+		rest = after[end+4:]
+	}
+}
+
+// drawnKind is the type of the spec body when the browser would draw it.
+func drawnKind(body string) string {
+	var spec struct {
+		Type   string           `json:"type"`
+		Nodes  []map[string]any `json:"nodes"`
+		Actors []map[string]any `json:"actors"`
+	}
+	if err := json.Unmarshal([]byte(body), &spec); err != nil {
+		return ""
+	}
+	drawn := func(items []map[string]any) bool {
+		for _, it := range items {
+			id, _ := it["id"].(string)
+			_, labelled := it["label"].(string)
+			if id != "" && labelled {
+				return true
+			}
+		}
+		return false
+	}
+	switch spec.Type {
+	case "flow":
+		if drawn(spec.Nodes) {
+			return "flow"
+		}
+	case "sequence":
+		if drawn(spec.Actors) {
+			return "sequence"
+		}
+	}
+	return ""
 }
 
 // specKind returns the top-level "type" of the JSON object o when it names a
