@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
@@ -77,7 +78,13 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 	if err != nil {
 		return Commit{}, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
-	out := Commit{Repo: repo, Branch: branch, SHA: d.SHA, CommittedAt: d.CommittedAt, Subject: d.Subject, Body: d.Body, Files: []FileChange{}}
+	// UTC like the citation's committed_at, or the chip's day and the view's
+	// could differ across a midnight.
+	at := d.CommittedAt
+	if t, err := time.Parse(time.RFC3339, d.CommittedAt); err == nil {
+		at = t.UTC().Format(time.RFC3339)
+	}
+	out := Commit{Repo: repo, Branch: branch, SHA: d.SHA, CommittedAt: at, Subject: d.Subject, Body: d.Body, Files: []FileChange{}}
 	for _, f := range d.Files {
 		var indexed int
 		if err := s.db.QueryRowContext(ctx,

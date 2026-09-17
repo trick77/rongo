@@ -123,6 +123,16 @@ func TestLog_firstParentCollapsesAMergeToOneEntry(t *testing.T) {
 	if strings.Join(got[0].Paths, ",") != "s1.txt,s2.txt" {
 		t.Errorf("merge paths = %v, want [s1.txt s2.txt]", got[0].Paths)
 	}
+
+	// Show on the merge reads the same first-parent diff: both files, not
+	// the empty combined diff git prints for a merge by default.
+	shown, err := c.Show(ctx, spec, head)
+	if err != nil {
+		t.Fatalf("Show() err = %v", err)
+	}
+	if len(shown.Files) != 2 || shown.Files[0].Path != "s1.txt" || shown.Files[0].Added != 1 {
+		t.Errorf("Show(merge).Files = %+v, want s1.txt and s2.txt with +1 each", shown.Files)
+	}
 }
 
 func TestShow_reportsOneCommitWithCounts(t *testing.T) {
