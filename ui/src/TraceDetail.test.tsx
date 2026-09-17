@@ -30,6 +30,18 @@ describe("Trace, what each step found", () => {
     expect(screen.getByText(/schadenmeldung-service, named by the question/)).toBeTruthy();
   });
 
+  it("says a rework reads the previous answer, never that it scoped every project", () => {
+    strict(
+      <Trace
+        steps={[{ step: "understanding", at: t0, detail: { intent: "rework" } }]}
+        state="running"
+        startedAt={t0}
+      />,
+    );
+    expect(screen.getByText(/the previous answer from its own sources/)).toBeTruthy();
+    expect(screen.queryByText(/every indexed project/)).toBeNull();
+  });
+
   it("draws a changes turn's search as commits in a window, with the topic", () => {
     strict(
       <Trace
