@@ -410,7 +410,8 @@ as "target  repository/path:line". The target is the text at the site: a URL,
 or the expression the code builds it from:
 
 %s
-This listing is complete; the sources hold the code at each site and the
+The listing names every site the index holds, except a tail it counts
+instead of naming; the sources hold the code at the sites that fit and the
 configuration the expressions read. Group the sites by where they lead, say
 which lead to another application and which stay inside this one, and cite
 the source at each site - never this listing. A target built from a variable

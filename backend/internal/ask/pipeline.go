@@ -766,6 +766,10 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 			// Counted apart from the references: a chunk fetched by name
 			// after the walk had stopped is not something the walk reached.
 			gapped++
+		case strings.HasPrefix(s.Reason, "link:"):
+			// A census landing is not a reference either: it was seeded,
+			// not reached. Reported by withCensusDetail beside the count
+			// of sites it was drawn from.
 		default:
 			refs++
 		}
@@ -980,6 +984,14 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	// the project structure missing — the two-backends disambiguation present
 	// in the first answer and gone from the second.
 	scope = p.describeProjects(ctx, scope)
+	// The link listing too, for the same reason: it is never persisted, and
+	// the record says the turn was a census. Read again from the index, not
+	// re-gathered — the sources are the first turn's.
+	census, err := p.census(ctx, scope)
+	if err != nil {
+		return Answer{}, err
+	}
+	scope.Links = census.Listing
 	// No follow-up rule, on purpose: a re-explain answers the SAME question
 	// again for the other audience, and the first answer is right above it in
 	// the thread. Telling the model not to restate what was already explained

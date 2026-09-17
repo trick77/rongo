@@ -23,11 +23,17 @@ import (
 // by a model, so it sits outside the rule against stored model text — and
 // like the structure block it is never cited, the landing is.
 
-// censusMaxLandings caps the sources a census seeds, one per file: forty
-// chunks is up to half the gather budget, and the walk still needs room to
-// resolve the variables the sites name. Past it the listing still names the
-// site.
+// censusMaxLandings caps the sources a census seeds, one per file. Past it
+// the listing still names the site.
 const censusMaxLandings = 40
+
+// censusShare is the fraction of the gather budget the landings may fill:
+// a third. Landings are seeded whole and never evicted, and a chunk is up
+// to 600 tokens, so forty of them would be the whole budget and the walk
+// could take nothing — not even the environment file the sites name, which
+// is the point of landing on them. A third leaves the walk and the crossing
+// what they had.
+const censusShare = 3
 
 // censusMaxListed caps the listing block: two hundred lines is a page of
 // prompt, and a repository with more navigation sites than that is telling
@@ -60,6 +66,8 @@ func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, erro
 		return c, nil
 	}
 	files := map[string]bool{}
+	budget := g.opts.TokenBudget / censusShare
+	spent := 0
 	for _, n := range rows {
 		if len(c.Landings) >= censusMaxLandings {
 			break
@@ -75,7 +83,12 @@ func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, erro
 		if !ok {
 			continue
 		}
+		cost := estimateTokens(s.Text)
+		if spent+cost > budget {
+			break
+		}
 		files[key] = true
+		spent += cost
 		// integration_tokens.value: the index's spelling, never a model's.
 		s.Reason = "link:" + n.Value
 		c.Landings = append(c.Landings, s)

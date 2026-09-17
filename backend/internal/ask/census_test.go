@@ -110,15 +110,43 @@ func TestCensus_capsTheLandingsAndListsTheRest(t *testing.T) {
 	}
 }
 
+func TestCensus_landingsStopAtAThirdOfTheBudget(t *testing.T) {
+	// Given: five sites of 100 tokens each under a budget of 900, so a
+	// third holds three. The walk still needs its room to resolve what the
+	// sites name.
+	db := gatherDB(t)
+	seedRepo(t, db, "ui")
+	body := strings.Repeat("x", 400)
+	for _, p := range []string{"a.html", "b.html", "c.html", "d.html", "e.html"} {
+		seedChunkIn(t, db, "ui", p, 0, 1, 5, "", body)
+		seedTokenIn(t, db, "ui", p, "link", "https://x.example.ch/"+p, 1)
+	}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 900})
+
+	// When
+	census, err := g.LinkCensus(context.Background(), []string{"ui"})
+	if err != nil {
+		t.Fatalf("LinkCensus: %v", err)
+	}
+
+	// Then
+	if len(census.Landings) != 3 {
+		t.Errorf("landed %d, want 3: %v", len(census.Landings), repoPaths(census.Landings))
+	}
+	if census.Sites != 5 || strings.Count(census.Listing, "https://") != 5 {
+		t.Errorf("the listing must still name every site: %d, %q", census.Sites, census.Listing)
+	}
+}
+
 func TestCensus_seedsSitAfterTheHitsAndAreNeverEvicted(t *testing.T) {
-	// Given: one search hit and one landing, under a budget the walk cannot
-	// spend at all.
+	// Given: one search hit and one landing, under a budget the two fill
+	// between them, so the walk has nothing left to spend.
 	db := gatherDB(t)
 	seedRepo(t, db, "claims-ui")
 	hitID := seedChunkIn(t, db, "claims-ui", "src/a.ts", 0, 1, 20, "a", "const a = 1;")
 	seedChunkIn(t, db, "claims-ui", "src/nav.html", 0, 1, 20, "", `<a href="https://p.example.ch">P</a>`)
 	seedTokenIn(t, db, "claims-ui", "src/nav.html", "link", "https://p.example.ch", 1)
-	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 1})
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 30})
 
 	// When
 	census, err := g.LinkCensus(context.Background(), []string{"claims-ui"})
@@ -220,6 +248,28 @@ func TestRunReadsTheLinkCensusWhenTheQuestionAsksForOne(t *testing.T) {
 	}
 	if gathering["link_sites"] != 1 || gathering["links"] != 1 {
 		t.Errorf("the trace does not report the census: %v", gathering)
+	}
+}
+
+// TestReexplainRebuildsTheLinkListing: Scope.Links is never persisted, and a
+// re-explain of a census answer without it would write from forty landings
+// with the listing gone.
+func TestReexplainRebuildsTheLinkListing(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "claims-ui")
+	seedChunkIn(t, db, "claims-ui", "src/nav.html", 0, 1, 20, "", `<a href="https://portal.example.ch">Portal</a>`)
+	seedTokenIn(t, db, "claims-ui", "src/nav.html", "link", "https://portal.example.ch", 7)
+	c, prompt, _ := streamUpstream(t, "x")
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
+		[]Source{{ChunkID: 1, Repo: "claims-ui", Path: "src/nav.html", Text: "<a>", StartLine: 1, EndLine: 1}},
+		Scope{Known: []string{"claims-ui"}, Census: CensusLink}, Events{})
+	if err != nil {
+		t.Fatalf("reexplain: %v", err)
+	}
+	if !strings.Contains(*prompt, "https://portal.example.ch  claims-ui/src/nav.html:7") {
+		t.Errorf("a re-explained census must carry the listing:\n%s", *prompt)
 	}
 }
 

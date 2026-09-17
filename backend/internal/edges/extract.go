@@ -182,14 +182,42 @@ var linkExt = map[string]bool{
 // from there. A comparison ("href ===", "location.href == x") is not a
 // site; Extract checks the character after the match, RE2 having no
 // lookahead.
+//
+// The href and location forms are the ones that need care. "data-href" is
+// not href, so href takes no hyphen before it. A bare "location =" is any
+// variable of that name — React's useLocation() in every routed component —
+// so only the browser's own is a site: window.location, document.location,
+// or location.href.
 var navigationSite = regexp.MustCompile(`(?i)(?:` +
-	`\b(?:href|routerLink)\s*\]?\s*=` + // href=, [href]=, [attr.href]=, routerLink=, [routerLink]=
+	`(?:^|[^\w-])(?:href|routerLink)\s*\]?\s*=` + // href=, [href]=, [attr.href]=, routerLink=, [routerLink]=
 	`|<Link\b[^>]*?\bto\s*=` + // React Router
 	`|\bwindow\.open\s*\(` +
 	`|\blocation\.(?:assign|replace)\s*\(` +
-	`|\b(?:window\.)?location(?:\.href)?\s*=` +
+	`|\b(?:window|document)\.location(?:\.href)?\s*=` +
+	`|\blocation\.href\s*=` +
 	`|\.navigate(?:ByUrl)?\s*\(` + // Angular Router
 	`)`)
+
+// linkObject is the text before an href that names a stylesheet element:
+// "link.href =", the injected stylesheet. A "portalLink.href" is not it.
+var linkObject = regexp.MustCompile(`(?i)(?:^|[^\w])link\s*\.?\s*$`)
+
+// stylesheetSite says whether the href at line[at:] belongs to a stylesheet
+// or base tag rather than a navigation: the tag opened last before it is
+// <link or <base, or the script assigns link.href. Case matters on the tag:
+// "<Link" is the React Router component.
+func stylesheetSite(line string, at int) bool {
+	before := line[:at]
+	if linkObject.MatchString(before) {
+		return true
+	}
+	open := strings.LastIndexByte(before, '<')
+	if open < 0 {
+		return false
+	}
+	tag := before[open:]
+	return strings.HasPrefix(tag, "<link") || strings.HasPrefix(tag, "<base")
+}
 
 // linkSkip is a value that leads to no application: an in-page anchor,
 // mail, phone, script, nothing, the bare root.
@@ -389,18 +417,16 @@ func templateRoute(lit string) string {
 
 // linkSites returns the navigation targets on one line, as the text that
 // stood at each site. A stylesheet or base tag carries an href that is not a
-// navigation, and is skipped whole. Case matters there: "<link" is the
-// stylesheet tag, "<Link" the React Router component.
+// navigation, and is skipped.
 func linkSites(line string) []string {
-	t := strings.TrimSpace(line)
-	if strings.HasPrefix(t, "<link") || strings.HasPrefix(t, "<base") {
-		return nil
-	}
 	var out []string
 	for _, m := range navigationSite.FindAllStringIndex(line, -1) {
 		rest := line[m[1]:]
 		// "href ===" and "location.href == x" compare; only "=" assigns.
 		if line[m[1]-1] == '=' && strings.HasPrefix(rest, "=") {
+			continue
+		}
+		if stylesheetSite(line, m[0]) {
 			continue
 		}
 		v := linkValue(rest)
@@ -429,6 +455,19 @@ func linkValue(rest string) string {
 	rest = strings.TrimLeft(rest, " \t")
 	if rest == "" {
 		return ""
+	}
+	// A JSX attribute wraps its expression in braces: to={"/x"}, to={to},
+	// to={{ pathname: "/x" }}. One layer off, then the rules below.
+	if rest[0] == '{' {
+		inner := strings.TrimSpace(balanced(rest))
+		if inner == "" {
+			return ""
+		}
+		if inner[0] == '{' {
+			// An object literal: the expression itself, kept whole.
+			return inner
+		}
+		return linkValue(inner)
 	}
 	if q := rest[0]; q == '"' || q == '\'' || q == '`' {
 		if end := strings.IndexByte(rest[1:], q); end >= 0 {
@@ -459,6 +498,32 @@ func linkValue(rest string) string {
 		}
 	}
 	return strings.TrimSpace(rest)
+}
+
+// balanced returns the text inside the brace that opens s, up to its
+// matching close, stepping over quoted strings. Empty when it never closes.
+func balanced(s string) string {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return s[1:i]
+			}
+		}
+	}
+	return ""
 }
 
 // isDestinationShape keeps prose out of the destination namespace. A queue name

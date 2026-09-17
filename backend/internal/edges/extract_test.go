@@ -375,6 +375,46 @@ func TestExtractSkipsLinksThatLeadNowhere(t *testing.T) {
 	}
 }
 
+func TestExtractIgnoresAVariableCalledLocationAndAStylesheetHref(t *testing.T) {
+	// Given: React's useLocation in every routed component, a field named
+	// location, a stylesheet tag inside a one-line head, a stylesheet
+	// injected from script, and a data-href attribute.
+	testee := []byte("" +
+		`const location = useLocation();` + "\n" +
+		`this.location = loc;` + "\n" +
+		`const location = window.location;` + "\n" +
+		`<head><link rel="stylesheet" href="/s.css"></head>` + "\n" +
+		`link.href = "/styles.css";` + "\n" +
+		`<div data-href="/x">` + "\n")
+
+	// When
+	got := Extract("app.tsx", testee)
+
+	// Then
+	if len(got) != 0 {
+		t.Fatalf("want no link tokens, got %+v", got)
+	}
+}
+
+func TestExtractReadsJSXBraces(t *testing.T) {
+	// Given: the three shapes React Router links are written in, plus href.
+	testee := []byte("" +
+		`<Link to={"/x"}>X</Link>` + "\n" +
+		`<Link to={to}>Y</Link>` + "\n" +
+		`<Link to={{ pathname: "/z" }}>Z</Link>` + "\n" +
+		`<a href={url}>W</a>` + "\n")
+
+	// When
+	got := values(Extract("nav.jsx", testee), KindLink)
+
+	// Then
+	for _, want := range []string{"/x", "to", `{ pathname: "/z" }`, "url"} {
+		if !has(got, want) {
+			t.Errorf("JSX link %q was not extracted, got %+v", want, got)
+		}
+	}
+}
+
 func TestExtractDoesNotReadMarkupAsRoutes(t *testing.T) {
 	// Given: an .html line that the route rules would take for a client call.
 	testee := []byte(`<p>Use fetch to request "/api/orders" from the server.</p>`)
