@@ -497,6 +497,45 @@ describe("Ask, a stored thread", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("lists a commit citation by sha, day and subject, and opens it in the commit view", async () => {
+    const mock = routedFetch([
+      {
+        ...storedTurn,
+        question: "What changed in the last 2 days?",
+        answer: "Test sources are labelled now [1].",
+        citations: [
+          {
+            marker: 1,
+            repo: "rongo",
+            branch: "master",
+            path: "",
+            start_line: 0,
+            end_line: 0,
+            sha: "7f2a492abcdef",
+            kind: "commit",
+            subject: "Test sources are labelled",
+            committed_at: "2026-09-17T10:00:00Z",
+          },
+        ],
+      },
+    ]);
+    strict(<Ask threadId="7" />);
+
+    expect(await screen.findByText(/Test sources are labelled now/)).toBeTruthy();
+    const pane = screen.getByRole("complementary", { name: "Sources" });
+    expect(pane.textContent).toContain("7f2a492 · 2026-09-17");
+    expect(pane.textContent).toContain("Test sources are labelled");
+    expect(pane.textContent).not.toContain(":0-0");
+
+    // The row opens the commit, not a file: the request goes to /api/commit.
+    await userEvent.click(within(pane).getByRole("button", { name: /Test sources are labelled/ }));
+    const dialog = await screen.findByRole("dialog", { name: /Commit 1/ });
+    expect(dialog).toBeTruthy();
+    const urls = mock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.startsWith("/api/commit?") && u.includes("sha=7f2a492abcdef"))).toBe(true);
+    expect(urls.some((u) => u.startsWith("/api/source"))).toBe(false);
+  });
+
   it("brings the timeline back with the turn, rolled up onto its closing row", async () => {
     // The trace is part of the record the reader saw. Losing it on the way out
     // of the thread made the thread say less about the turn than the turn did.

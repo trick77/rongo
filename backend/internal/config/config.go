@@ -54,6 +54,9 @@ type Config struct {
 	// (pom.xml, package.json, project.json, ...) are exempt: the repository's
 	// structure is read from them. BACKEND_INDEX_MAX_DATA_FILE_BYTES.
 	IndexMaxDataFileBytes int
+	// HistoryDepth is how many first-parent commits a full index records
+	// for the commit lane. BACKEND_HISTORY_DEPTH.
+	HistoryDepth int
 	// IndexEnabled switches the whole indexing side off, for a deployment that
 	// only serves the UI. It defaults to ON. The embedding endpoint is
 	// mandatory either way: the query side of every answer embeds the
@@ -182,28 +185,31 @@ func Load() (Config, error) {
 		// fixture) stay under 1 KB; a data blob or a translation catalogue
 		// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
 		IndexMaxDataFileBytes: envIntOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
-		IndexEnabled:          envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:         envBoolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:          envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		GitSSHKey:             strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
-		GitSSHKnownHosts:      strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
-		GitCAFile:             strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
-		ModuleMinChunks:       envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:       envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:           envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
-		GatherMaxHops:         envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget:     envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:         envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		LLMModel:              strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
-		LLMGateModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
-		LLMGateReasoning:      envOr("BACKEND_LLM_GATE_REASONING", "off"),
-		LLMReasoning:          envOr("BACKEND_LLM_REASONING", "default"),
-		AuthMode:              AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:            strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		AdminUser:             strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
-		AdminPasswordHash:     strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
-		SessionSecret:         strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:              envOr("BACKEND_LOG_LEVEL", "info"),
+		// 500 commits: a year of a busy repository, bounded for a monorepo's
+		// first run. A "what changed" question looks back a year at most.
+		HistoryDepth:      envIntOr("BACKEND_HISTORY_DEPTH", 500),
+		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		GitSSHKey:         strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
+		GitSSHKnownHosts:  strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
+		GitCAFile:         strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
+		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
+		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
+		LLMGateReasoning:  envOr("BACKEND_LLM_GATE_REASONING", "off"),
+		LLMReasoning:      envOr("BACKEND_LLM_REASONING", "default"),
+		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
+		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
+		AdminPasswordHash: strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
+		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
+		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.

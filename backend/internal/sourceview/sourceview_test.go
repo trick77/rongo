@@ -100,7 +100,8 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 			t.Fatal(err)
 		}
 	}
-	return fixture{svc: New(db, gitrepo.New(gitBin, root), maxBytes), db: db, first: first, second: second}
+	client := gitrepo.New(gitBin, root)
+	return fixture{svc: New(db, client, maxBytes).WithCommits(client), db: db, first: first, second: second}
 }
 
 func TestRead_showsTheFileAtTheCitedCommitNotTheBranchHead(t *testing.T) {

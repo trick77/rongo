@@ -13,7 +13,18 @@ export type SourceRef = {
   start_line: number;
   end_line: number;
   sha?: string;
+  /** "commit" for a citation of a change rather than of lines: sha is the
+   * commit, path and the lines are empty, and subject and committed_at are
+   * what the chip shows. It opens in CommitView, never here. */
+  kind?: "commit";
+  subject?: string;
+  committed_at?: string;
 };
+
+/** Whether a citation is a commit of the lane rather than lines of a file. */
+export function isCommit(c: SourceRef): boolean {
+  return c.kind === "commit";
+}
 
 type Loaded =
   | { state: "loading" }
@@ -163,9 +174,12 @@ export default function SourceView({
           <span className="ml-auto hidden shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint sm:flex">
             <span className="rounded-full border border-border px-2 py-px">{branch}</span>
             {shortSha && <span className="rounded-full border border-border px-2 py-px">{shortSha}</span>}
-            <span>
-              lines {source.start_line}–{source.end_line}
-            </span>
+            {/* No range on a file opened whole from a commit view. */}
+            {source.end_line >= source.start_line && (
+              <span>
+                lines {source.start_line}–{source.end_line}
+              </span>
+            )}
           </span>
           <button
             ref={closeButton}

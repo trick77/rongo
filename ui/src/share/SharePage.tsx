@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-import SourceView, { type SourceRef } from "../SourceView";
+import SourceView, { isCommit, type SourceRef } from "../SourceView";
+import CommitView from "../CommitView";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "../ThreadView";
 import ThreadUsageBadge from "../ThreadUsageBadge";
 import {
@@ -222,13 +223,22 @@ export default function SharePage({ token }: { token: string }) {
 
       {/* The share's own endpoint, never /api/source: that one takes any
           repo/path/sha and would be a reader for the whole indexed corpus. */}
-      {viewing && (
-        <SourceView
-          source={viewing}
-          endpoint={`/api/shares/${encodeURIComponent(token)}/source`}
-          onClose={() => setViewing(null)}
-        />
-      )}
+      {viewing &&
+        (isCommit(viewing) ? (
+          // No onOpenFile: the share's file endpoint serves only what a turn
+          // cites, and a commit's touched files are not citations.
+          <CommitView
+            source={viewing}
+            endpoint={`/api/shares/${encodeURIComponent(token)}/commit`}
+            onClose={() => setViewing(null)}
+          />
+        ) : (
+          <SourceView
+            source={viewing}
+            endpoint={`/api/shares/${encodeURIComponent(token)}/source`}
+            onClose={() => setViewing(null)}
+          />
+        ))}
     </div>
   );
 }

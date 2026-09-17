@@ -25,6 +25,7 @@ import (
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/exttools"
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/llm"
@@ -281,10 +282,15 @@ func main() {
 		Chunk: chunkOptions(cfg),
 	})
 
+	// The commit lane: the branch's first-parent history beside the file
+	// index, written by the poller and read by a "what changed" turn.
+	commits := history.New(db)
 	poller := indexer.NewPoller(indexer.PollerDeps{
-		State: state,
-		Git:   gitClient,
-		Index: pipeline.IndexRepo,
+		State:        state,
+		Git:          gitClient,
+		Index:        pipeline.IndexRepo,
+		History:      commits,
+		HistoryDepth: cfg.HistoryDepth,
 		// Tokens are read from the environment by the variable name the YAML
 		// entry declared. The value never appears in repos.yaml.
 		Tokens: func(tokenEnv string) string { return os.Getenv(tokenEnv) },
@@ -331,12 +337,13 @@ func main() {
 	// The viewer and the answer pipeline read files through the same service:
 	// the viewer shows a citation, the pipeline reads a process model whose
 	// nodes were cited, both at the indexed commit under the same rules.
-	source := sourceview.New(db, gitClient, cfg.IndexMaxFileBytes)
+	source := sourceview.New(db, gitClient, cfg.IndexMaxFileBytes).WithCommits(gitClient)
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
 		Threads:        threads.NewStore(db),
 		Source:         source,
+		Commit:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
 		CookieSecure:   cfg.CookieSecure,
 	}
@@ -381,7 +388,7 @@ func main() {
 		retriever,
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
-	).WithModels(source)
+	).WithModels(source).WithHistory(commits, time.Now)
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/trick77/rongo/internal/ask"
 )
 
 // ErrNoShare is what every public lookup returns for a token that is unknown,
@@ -301,6 +303,16 @@ func (s *Store) SharedTitle(ctx context.Context, token string) (string, error) {
 // indexed corpus, so the public route serves only what the turns on the link
 // were actually written from.
 func (s *Store) SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error) {
+	return s.sharedCitation(ctx, token, repo, path, sha, "")
+}
+
+// SharedCommit is SharedCitation for a commit citation: the commit view on
+// a share link opens only a commit a covered turn cites.
+func (s *Store) SharedCommit(ctx context.Context, token, repo, sha string) (bool, error) {
+	return s.sharedCitation(ctx, token, repo, "", sha, ask.SourceCommit)
+}
+
+func (s *Store) sharedCitation(ctx context.Context, token, repo, path, sha, kind string) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT 1
@@ -308,8 +320,8 @@ func (s *Store) SharedCitation(ctx context.Context, token, repo, path, sha strin
 		JOIN messages m ON m.id = c.message_id
 		JOIN shared_threads sh ON sh.thread_id = m.thread_id
 		WHERE sh.token = ? AND sh.revoked = 0 AND m.id <= sh.up_to_message_id
-		  AND c.repo = ? AND c.path = ? AND c.sha = ?
-		LIMIT 1`, token, repo, path, sha).Scan(&n)
+		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ?
+		LIMIT 1`, token, repo, path, sha, kind).Scan(&n)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

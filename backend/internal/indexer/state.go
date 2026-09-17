@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/stages"
 )
@@ -312,7 +313,8 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE repo = ?`, name); err != nil {
 		return fmt.Errorf("purge %s: %w", name, err)
 	}
-	return nil
+	// The commit lane goes with the files: its mirror is an fts5 table too.
+	return history.PurgeTx(ctx, tx, name)
 }
 
 // Active lists the repositories currently in the list and enabled.

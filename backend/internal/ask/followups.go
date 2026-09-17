@@ -111,6 +111,11 @@ func followupsPaths(sources []Source) []string {
 	paths := make([]string, 0, len(sources))
 	for _, s := range sources {
 		p := s.Repo + "/" + s.Path
+		// A commit stands in by its subject: the paths it touched are not
+		// what the answer was about, the change is.
+		if s.IsCommit() {
+			p = s.Repo + " commit: " + s.Subject
+		}
 		if seen[p] {
 			continue
 		}

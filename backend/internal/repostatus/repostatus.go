@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/modules"
@@ -18,16 +19,17 @@ import (
 
 // Store reads repository state and derives the module count from the index.
 type Store struct {
-	db    *sql.DB
-	state *indexer.StateStore
-	opts  modules.Opts
+	db      *sql.DB
+	state   *indexer.StateStore
+	history *history.Store
+	opts    modules.Opts
 }
 
 // New builds a Store. opts are the clustering constants; they decide how many
 // modules a repository reports, so the page and the routing layer must be given
 // the same ones.
 func New(db *sql.DB, opts modules.Opts) *Store {
-	return &Store{db: db, state: indexer.NewStateStore(db), opts: opts}
+	return &Store{db: db, state: indexer.NewStateStore(db), history: history.New(db), opts: opts}
 }
 
 // RepoStatus reports every repository in repo_state, including the ones the
@@ -45,18 +47,24 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cluster %s: %w", st.Name, err)
 		}
+		commits, newest, err := s.history.Count(ctx, st.Name)
+		if err != nil {
+			return nil, fmt.Errorf("count commits of %s: %w", st.Name, err)
+		}
 		out = append(out, httpapi.RepoStatus{
-			Name:          st.Name,
-			Branch:        st.Branch,
-			LastSHA:       st.LastSHA,
-			LastRunAt:     st.LastRunAt,
-			LastIndexedAt: st.LastIndexedAt,
-			Files:         st.Files,
-			Chunks:        st.Chunks,
-			Modules:       len(mods),
-			Enabled:       st.Enabled,
-			Snapshot:      st.Snapshot(),
-			LastError:     st.LastError,
+			Commits:        commits,
+			NewestCommitAt: newest,
+			Name:           st.Name,
+			Branch:         st.Branch,
+			LastSHA:        st.LastSHA,
+			LastRunAt:      st.LastRunAt,
+			LastIndexedAt:  st.LastIndexedAt,
+			Files:          st.Files,
+			Chunks:         st.Chunks,
+			Modules:        len(mods),
+			Enabled:        st.Enabled,
+			Snapshot:       st.Snapshot(),
+			LastError:      st.LastError,
 			// A row written before projects shipped has no project; it stands
 			// as one of its own, the same fallback projects.Load applies.
 			Project:     projectOr(st.Project, st.Name),

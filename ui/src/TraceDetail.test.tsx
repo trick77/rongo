@@ -30,6 +30,28 @@ describe("Trace, what each step found", () => {
     expect(screen.getByText(/schadenmeldung-service, named by the question/)).toBeTruthy();
   });
 
+  it("draws a changes turn's search as commits in a window, with the topic", () => {
+    strict(
+      <Trace
+        steps={[
+          {
+            step: "searching",
+            at: t0,
+            detail: { commits: 7, since_days: 2, topic: "snapshot handling", per_repo: { rongo: 7 } },
+          },
+        ]}
+        state="running"
+        startedAt={t0}
+      />,
+    );
+    const detail = document.querySelector(".trace-detail");
+    expect(detail?.textContent).toContain("7 commits");
+    expect(detail?.textContent).toContain("in the last 2 days");
+    expect(screen.getByText("snapshot handling")).toBeTruthy();
+    expect(screen.getByText("rongo 7")).toBeTruthy();
+    expect(detail?.textContent).not.toContain("hits");
+  });
+
   it("turns the routing rung into a sentence, never its identifier", () => {
     strict(
       <Trace

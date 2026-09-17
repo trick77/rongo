@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
@@ -135,6 +136,9 @@ type Pipeline struct {
 	// models is optional: without it a turn answers with no process listing,
 	// which is every turn before process models were read.
 	models Models
+	// history is the commit lane, optional; see WithHistory.
+	history Histories
+	now     func() time.Time
 }
 
 // WithModels gives the pipeline the index's process models, so a turn whose
@@ -279,6 +283,14 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// reader what its scope was.
 	ev.notice(ScopeNotice(lang, scope))
 	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin), stageDetail))
+
+	// A changes question leaves here: its sources are commits, and neither
+	// the fused search nor the routing ladder has anything to say about a
+	// date window.
+	if p.isChanges(u) {
+		answer, err := p.answerChanges(ctx, question, audience, lang, u, scope, t.Question, ev)
+		return answer, nil, err
+	}
 
 	texts := u.SearchTexts(question)
 	ev.status("searching")

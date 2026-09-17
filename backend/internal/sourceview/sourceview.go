@@ -65,6 +65,7 @@ type FileReader interface {
 type Service struct {
 	db       *sql.DB
 	git      FileReader
+	commits  CommitReader
 	maxBytes int64
 }
 

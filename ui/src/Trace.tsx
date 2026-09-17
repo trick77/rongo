@@ -139,8 +139,33 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       );
     }
     case "searching": {
-      const hits = asNumber(detail.hits) ?? 0;
       const perRepo = (detail.per_repo ?? {}) as Record<string, number>;
+      // A changes turn searched the commit lane, not the index: a window
+      // and a count, with the topic when the question had one.
+      if (detail.since_days != null) {
+        const commits = asNumber(detail.commits) ?? 0;
+        const days = asNumber(detail.since_days) ?? 0;
+        const topic = typeof detail.topic === "string" ? detail.topic : "";
+        return (
+          <div className="trace-detail">
+            {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">in the last</span> {days}{" "}
+            {days === 1 ? "day" : "days"}
+            {topic && (
+              <>
+                {" "}
+                <span className="trace-k">about</span> <Chips values={[topic]} />
+              </>
+            )}
+            {Object.keys(perRepo).length > 0 && (
+              <>
+                {" · "}
+                <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
+              </>
+            )}
+          </div>
+        );
+      }
+      const hits = asNumber(detail.hits) ?? 0;
       const best = (detail.best ?? null) as { repo?: string; path?: string; lanes?: string[] } | null;
       const lanes = asStrings(best?.lanes).map((l) => l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"));
       return (

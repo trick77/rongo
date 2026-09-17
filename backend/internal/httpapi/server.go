@@ -102,6 +102,8 @@ type Threads interface {
 	// link, and does not need the turns.
 	SharedTitle(ctx context.Context, token string) (string, error)
 	SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error)
+	// SharedCommit is SharedCitation for a commit citation.
+	SharedCommit(ctx context.Context, token, repo, sha string) (bool, error)
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
@@ -135,6 +137,9 @@ type Deps struct {
 	// evidence panel can be opened. Nil means this deployment has no checkout
 	// to read from, which the endpoint says with a 503.
 	Source SourceReader
+	// Commit serves a cited commit for the commit view, under the same rule
+	// as Source: nil means no checkout, and a 503.
+	Commit CommitReader
 	// Titler names a thread. Optional: without it the sidebar keeps the first
 	// words of the question, which is a worse label but never a broken one.
 	Titler func(ctx context.Context, question string, lang ask.Language) string
@@ -199,6 +204,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/threads/{id}/star", s.requireAuth(http.HandlerFunc(s.handleStarThread)))
 	s.mux.Handle("POST /api/threads/{id}/unstar", s.requireAuth(http.HandlerFunc(s.handleUnstarThread)))
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
+	s.mux.Handle("GET /api/commit", s.requireAuth(http.HandlerFunc(s.handleCommit)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
 
@@ -216,6 +222,7 @@ func (s *Server) routes() {
 	// the limit, and neither handler can reach a turn the link does not cover.
 	s.mux.HandleFunc("GET /api/shares/{token}", s.handlePublicShare)
 	s.mux.HandleFunc("GET /api/shares/{token}/source", s.handlePublicShareSource)
+	s.mux.HandleFunc("GET /api/shares/{token}/commit", s.handlePublicShareCommit)
 
 	// "/" is the catch-all: everything not matched above goes to the SPA.
 	// The shell is handed the share title so a link unfurls in Slack and X
