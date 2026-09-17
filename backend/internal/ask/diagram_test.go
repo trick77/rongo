@@ -223,18 +223,33 @@ func TestRenumber_anUnclosedDiagramFenceStillEndsWhole(t *testing.T) {
 }
 
 // DiagramKind is what the answers harness counts: the picture the reader
-// gets, after the renumberer has retagged whatever the model fenced it as.
+// gets, after the renumberer has retagged whatever the model fenced it as,
+// under the browser's own conditions (diagram.tsx parse, markdown.tsx
+// fenceRe).
 func TestDiagramKind_countsTheDrawnPictureOnly(t *testing.T) {
+	flow := `{"type":"flow","nodes":[{"id":"a","label":"Start","kind":"start"}],"edges":[]}`
+	seq := `{"type":"sequence","actors":[{"id":"u","label":"User"}],"steps":[]}`
 	for name, tc := range map[string]struct{ text, want string }{
-		"flow":     {"Lead.\n```diagram\n{\"type\":\"flow\",\"nodes\":[],\"edges\":[]}\n```\nMore.", "flow"},
-		"sequence": {"```diagram\n{\"type\":\"sequence\",\"actors\":[],\"steps\":[]}\n```", "sequence"},
-		"prose":    {"Just prose [1].", ""},
-		"code":     {"```go\nx := 1\n```", ""},
-		// A fence tagged diagram whose body draws nothing is printed as a
-		// code block: no picture, so not counted.
-		"undrawable": {"```diagram\n{\"type\":\"pie\"}\n```", ""},
-		// The format quoted in a developer's code block is not a diagram.
-		"quoted": {"```json\n{\"type\":\"flow\"}\n```", ""},
+		"flow":     {"Lead.\n```diagram\n" + flow + "\n```\nMore.", "flow"},
+		"sequence": {"```diagram\n" + seq + "\n```", "sequence"},
+		// The browser takes the first token of the info string.
+		"header variant": {"```diagram flow\n" + flow + "\n```", "flow"},
+		// A code fence before the diagram is skipped, not mistaken for it.
+		"after code": {"```go\nx := 1\n```\n```diagram\n" + seq + "\n```", "sequence"},
+		"prose":      {"Just prose [1].", ""},
+		"code":       {"```go\nx := 1\n```", ""},
+		// The browser draws nothing from these and shows the block as text:
+		// a type it has no renderer for, no node or actor to draw, JSON that
+		// does not parse, a fence the stream cut off before the close.
+		"unknown type": {"```diagram\n{\"type\":\"pie\"}\n```", ""},
+		"empty nodes":  {"```diagram\n{\"type\":\"flow\",\"nodes\":[],\"edges\":[]}\n```", ""},
+		"empty actors": {"```diagram\n{\"type\":\"sequence\",\"actors\":[],\"steps\":[]}\n```", ""},
+		"bad json":     {"```diagram\n{\"type\":\"flow\",\"nodes\":[{\"id\":\"a\",\n```", ""},
+		"unclosed":     {"```diagram\n" + flow, ""},
+		// A json fence is what the renumberer retags on the way through;
+		// text that still carries it after the renumberer is a developer's
+		// quote of the format and stays a code block.
+		"json fence": {"```json\n" + flow + "\n```", ""},
 	} {
 		if got := DiagramKind(tc.text); got != tc.want {
 			t.Errorf("%s: DiagramKind = %q, want %q", name, got, tc.want)

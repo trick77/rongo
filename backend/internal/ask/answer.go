@@ -292,8 +292,8 @@ all of them are in the sources. Cover every one of them, say plainly where they
 differ and where they agree, and attribute every claim to the repository it
 came from. Do not answer for one and leave the others out; do not merge them
 into a single mechanism they do not share. Where the repositories call each
-other, the diagram is a sequence between them. Repository names stay as they
-are.`
+other and no process walk is listed below, the diagram is a sequence between
+them. Repository names stay as they are.`
 
 // answerCompareProjects is answerCompare for a turn comparing PRODUCTS rather
 // than bare repositories. Separate text rather than a shared template with the
@@ -312,8 +312,9 @@ repositories: treat everything from one project as one system. Cover every
 project, say plainly where they differ and where they agree, and attribute every
 claim to the project it came from as well as to the source it rests on. Do not
 answer for one and leave the others out; do not merge them into a single
-mechanism they do not share. Where the projects call each other, the diagram
-is a sequence between them. Names stay as they are.`
+mechanism they do not share. Where the projects call each other and no
+process walk is listed below, the diagram is a sequence between them. Names
+stay as they are.`
 
 // answerMissingRepo is added when the question named a repository the index
 // does not carry. Without it the model is handed "how do loom and rongo
@@ -430,7 +431,9 @@ quoted as written, never paraphrased or reassembled from memory.`
 //
 // The last sentence asks for the walk as the diagram: the listing is already
 // order plus branch conditions, which is a flowchart in text, and it is the
-// strongest signal the prompt has that the answer is a process.
+// strongest signal the prompt has that the answer is a process. It wins over
+// the sequence the comparison blocks ask for, and they say so, because both
+// can land in one prompt under "at most one diagram".
 const answerProcesses = `
 
 The process models among the sources are wired as follows, read from the model
