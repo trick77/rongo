@@ -158,6 +158,16 @@ func TestTitle_aTitleOnTheFirstTryCostsOneCall(t *testing.T) {
 	}
 }
 
+func TestTitle_markdownEmphasisIsStripped(t *testing.T) {
+	c, up := titleLLM(t, titleReply{status: http.StatusOK, content: "**Kafka-Topic-Produktion nach Situation**"})
+	if got := Title(context.Background(), c, "Wann produziere ich auf welches Kafka-Topic?", LanguageDE); got != "Kafka-Topic-Produktion nach Situation" {
+		t.Fatalf("title = %q", got)
+	}
+	if up.count() != 1 {
+		t.Fatalf("calls = %d, want 1", up.count())
+	}
+}
+
 func TestTitle_aCancelledTurnStopsRetrying(t *testing.T) {
 	c, up := titleLLM(t)
 	ctx, cancel := context.WithCancel(context.Background())
