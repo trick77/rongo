@@ -1,0 +1,14 @@
+The shipment is accepted and returned to the caller, but it is not queued for processing [1].
+
+When a new shipment is submitted, the shipping service immediately attempts to place it on a message queue for asynchronous handling. If that operation succeeds, the shipment is sent to the queue and will be processed later by a queue-master service [1][2]. However, if the message queue is unavailable, the attempt fails and throws an exception. The service is designed to catch this exception, log a message about the failure, and then return the original shipment object directly to the caller without interruption [1].
+
+This behavior is hardcoded in the shipping service; it is not a configurable setting. The code explicitly accepts the shipment on queue failure to ensure the overall request does not crash, returning the shipment as if it were successful [1]. A corresponding test verifies that this resilience works: when the queue is mocked to throw an error, the service still returns the original shipment and does not fail [3].
+
+The design is a defensive measure to maintain system availability during downstream queue failures, but the code itself warns that this approach—silently accepting data without queuing—is not suitable for a real production environment [1]. The shipment record exists locally, but any further processing steps that depend on the queue (like spawning a container) will not occur [2][4].
+
+```mermaid
+flowchart TD
+    A["Receive shipment request"] --> B{"Attempt to send to queue"}
+    B -- "Success" --> C["Return shipment (queued)"]
+    B -- "Exception" --> D["Log error and return shipment (not queued)"]
+```

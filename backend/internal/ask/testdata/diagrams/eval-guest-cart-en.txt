@@ -1,0 +1,26 @@
+When a guest logs in, the items from their anonymous session cart are merged into the customer's persistent cart, and the session cart is then deleted. [1][2]
+
+**Before login**, the shopping cart is identified by the visitor's browser session ID. The helper function that determines which cart to use returns the session ID for guests and the customer ID for logged-in users, so all add-to-cart, update, and view operations attach to an anonymous cart while the visitor is not logged in [3][4].
+
+**During login**, the front-end first authenticates the user and retrieves their customer ID [2][5]. As an immediate next step in the same sequence of asynchronous calls, the front-end sends a merge request to the carts service, passing both the customer ID and the current session ID as parameters [2][5]. This is a fixed part of the login flow, not a configuration choice.
+
+**The merge itself** is a single operation on the carts service. It loads both the customer's cart and the session cart, then iterates over every item in the session cart and adds it to the customer's cart [1][6]. After the items have been transferred, the session cart is deleted from storage so that the anonymous cart no longer exists [1]. If the customer already had items from a previous visit, the guest items are added alongside them—the session cart's contents do not overwrite the customer's existing cart [6].
+
+**Error handling**: if the merge request fails (for example, a network error reaching the carts service), the front-end logs the error but does not block the login itself. The user still becomes logged in and receives a cookie, but their guest cart items are effectively lost [7][8]. This means the merge is best-effort rather than transactional with the login.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant FrontEnd
+    participant UserService
+    participant CartsService
+    Browser->>FrontEnd: Login request
+    FrontEnd->>UserService: Authenticate user
+    UserService-->>FrontEnd: Customer ID
+    FrontEnd->>CartsService: Merge session cart into customer cart
+    Note over CartsService: Add session items to customer cart, delete session cart
+    CartsService-->>FrontEnd: Merge response
+    FrontEnd-->>Browser: Login cookie set
+```
+
+After this sequence completes, the visitor is logged in, their cart is identified by customer ID rather than session ID, and all previously anonymous items are now part of that customer's cart [3][8]. The entire merge-then-delete behavior is implemented in application code, not controlled by configuration.
