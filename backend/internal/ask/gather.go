@@ -107,7 +107,16 @@ func (g *Gatherer) Gather(ctx context.Context, hits []retrieve.Hit) ([]Source, e
 // search would honour "in production" and the crossing would land on every
 // stage's line anyway, with the answer then reporting them all.
 func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage retrieve.StagePrefixes) ([]Source, error) {
-	if len(hits) == 0 {
+	return g.GatherSeeded(ctx, hits, nil, stage)
+}
+
+// GatherSeeded is GatherWithin with sources the caller has already settled
+// on beside the hits: the landings of a link census. They are taken the way
+// hits are — at hop 0, whole, never evicted by the budget — and after the
+// hits, so the walk's frontier starts from both. A seed the hits already
+// carry is not taken twice.
+func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds []Source, stage retrieve.StagePrefixes) ([]Source, error) {
+	if len(hits) == 0 && len(seeds) == 0 {
 		return nil, nil
 	}
 
@@ -124,6 +133,15 @@ func (g *Gatherer) GatherWithin(ctx context.Context, hits []retrieve.Hit, stage 
 			SHA: h.SHA, Text: h.RawText, Reason: "hit", Hop: 0,
 		})
 		a.spent += estimateTokens(h.RawText)
+	}
+	for _, s := range seeds {
+		if a.seen[s.ChunkID] {
+			continue
+		}
+		a.seen[s.ChunkID] = true
+		s.Hop = 0
+		a.out = append(a.out, s)
+		a.spent += estimateTokens(s.Text)
 	}
 
 	// The symbol walk spends up to the budget less the crossing reserve, and

@@ -51,6 +51,11 @@ func Neighbours(ctx context.Context, db *sql.DB, repo, path string) ([]Neighbour
 // exact, because a spelled name is not a near side's literal and a loose rule
 // would land it on whatever route ends the same way.
 func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighbour, error) {
+	if kind == KindLink {
+		// A link is not an edge: see KindLink. Refused here, not left to the
+		// SQL, so a caller spelling the kind gets the same nothing.
+		return nil, nil
+	}
 	// The kind and the value are bound into the spread count rather than
 	// correlated on t: the pair is the caller's, the same for every row, so
 	// the count is one uncorrelated subquery evaluated once instead of per
@@ -140,6 +145,9 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		-- reference walk in internal/ask.
 		JOIN repo_state other_r ON other_r.name = other_f.repo AND other_r.enabled = 1
 		WHERE me.repo = ? AND me.path = ?
+		  -- A link is not an edge (see KindLink): two user interfaces
+		  -- pointing at the same portal say nothing about each other.
+		  AND mine.kind <> 'link'
 		  -- Other repositories only, except for a property key read by
 		  -- CODE: the file that sets a key's default is a properties file
 		  -- in the SAME repository as the code reading it, and a properties
@@ -157,6 +165,26 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 		           AND other_f.path LIKE '%.properties'))
 		  AND `+spreadCount("mine.kind", "mine.value")+` <= ?
 		ORDER BY other_f.repo, other_f.path, other.line`, repo, path, spreadCeiling)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNeighbours(rows)
+}
+
+// InRepo returns every token of one kind in ONE enabled repository, in path
+// and line order. It is the census half of the table: no value to match, no
+// spread ceiling, no far side. It exists for the link kind, which never
+// crosses (see KindLink) and is only ever read this way — "what does this
+// user interface link to" is a list of the repository's own sites.
+func InRepo(ctx context.Context, db *sql.DB, repo string, kind Kind) ([]Neighbour, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT f.repo, f.path, t.kind, t.value, t.line
+		FROM integration_tokens t
+		JOIN files f ON f.id = t.file_id
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+		WHERE f.repo = ? AND t.kind = ?
+		ORDER BY f.path, t.line`, repo, string(kind))
 	if err != nil {
 		return nil, err
 	}

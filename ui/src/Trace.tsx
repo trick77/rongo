@@ -195,6 +195,11 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const used = asNumber(detail.tokens);
       const budget = asNumber(detail.budget);
       const crossed = (Array.isArray(detail.crossed) ? detail.crossed : []) as { from?: string; to?: string; via?: string }[];
+      // The link census: how many navigation sites the index holds for the
+      // repository, and how many of them landed as sources. Absent on every
+      // turn that ran none.
+      const linkSites = asNumber(detail.link_sites) ?? 0;
+      const links = asNumber(detail.links) ?? 0;
       return (
         <div className="trace-detail">
           {hits} hits
@@ -208,6 +213,14 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
             <>
               {" "}
               <span className="trace-chip trace-chip-edge">+{crossings} across a boundary</span>
+            </>
+          )}
+          {linkSites > 0 && (
+            <>
+              {" "}
+              <span className="trace-chip trace-chip-edge">
+                +{links} of {linkSites} link sites
+              </span>
             </>
           )}
           {" · "}

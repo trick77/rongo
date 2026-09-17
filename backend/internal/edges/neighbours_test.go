@@ -149,6 +149,70 @@ func TestNeighboursNeverMatchesARouteToAQueueOfTheSameName(t *testing.T) {
 	}
 }
 
+func TestNeighboursNeverCrossOnASharedLink(t *testing.T) {
+	// Given: two user interfaces linking to the same portal. That they both
+	// point at a third application says nothing about each other, and a
+	// crossing here would spend the reserve on it.
+	db := edgeDB(t, "claims-ui", "policy-ui")
+	seedFileWithTokens(t, db, "claims-ui", "nav.html", "a", nil,
+		[]Token{{Kind: KindLink, Value: "https://portal.example.ch", Line: 1}})
+	seedFileWithTokens(t, db, "policy-ui", "nav.html", "b", nil,
+		[]Token{{Kind: KindLink, Value: "https://portal.example.ch", Line: 2}})
+
+	// When
+	got, err := Neighbours(context.Background(), db, "claims-ui", "nav.html")
+	if err != nil {
+		t.Fatalf("Neighbours: %v", err)
+	}
+	holders, err := Holders(context.Background(), db, KindLink, "https://portal.example.ch")
+	if err != nil {
+		t.Fatalf("Holders: %v", err)
+	}
+
+	// Then
+	if len(got) != 0 {
+		t.Errorf("a link was crossed: %+v", got)
+	}
+	if len(holders) != 0 {
+		t.Errorf("a link was held: %+v", holders)
+	}
+}
+
+func TestInRepoListsEveryLinkOfOneRepository(t *testing.T) {
+	// Given: two files of one UI with links, a second UI with its own, and
+	// a parked one.
+	db := edgeDB(t, "claims-ui", "policy-ui", "old-ui")
+	seedFileWithTokens(t, db, "claims-ui", "b/nav.html", "a", nil,
+		[]Token{{Kind: KindLink, Value: "https://portal.example.ch", Line: 3}, {Kind: KindRoute, Value: "/api/x", Line: 4}})
+	seedFileWithTokens(t, db, "claims-ui", "a/open.ts", "b", nil,
+		[]Token{{Kind: KindLink, Value: "${environment.portalUrl}/claims", Line: 9}})
+	seedFileWithTokens(t, db, "policy-ui", "nav.html", "c", nil,
+		[]Token{{Kind: KindLink, Value: "https://elsewhere.example.ch", Line: 1}})
+	seedFileWithTokens(t, db, "old-ui", "nav.html", "d", nil,
+		[]Token{{Kind: KindLink, Value: "https://old.example.ch", Line: 1}})
+	if _, err := db.Exec(`UPDATE repo_state SET enabled = 0 WHERE name = 'old-ui'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	got, err := InRepo(context.Background(), db, "claims-ui", KindLink)
+	if err != nil {
+		t.Fatalf("InRepo: %v", err)
+	}
+	parked, err := InRepo(context.Background(), db, "old-ui", KindLink)
+	if err != nil {
+		t.Fatalf("InRepo: %v", err)
+	}
+
+	// Then: that repository's links only, in path order, the route left out.
+	if len(got) != 2 || got[0].Path != "a/open.ts" || got[0].Line != 9 || got[1].Path != "b/nav.html" || got[1].Line != 3 {
+		t.Errorf("wrong census: %+v", got)
+	}
+	if len(parked) != 0 {
+		t.Errorf("a parked repository answered: %+v", parked)
+	}
+}
+
 func TestNeighboursOfAnUnknownFileIsEmpty(t *testing.T) {
 	db := edgeDB(t, "one")
 

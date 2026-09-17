@@ -76,7 +76,18 @@ type Understanding struct {
 	// — "in the integration environment" for a stage called intg — because
 	// the ordinary word is refused as an alias.
 	Stage string `json:"stage"`
+	// Census is "link" when the question asks to LIST the places a
+	// repository navigates to — links to other applications, external
+	// URLs — and empty otherwise. A listing is not a mechanism: search
+	// returns twenty chunks, and a census of navigation sites is read from
+	// the index instead (edges.InRepo). Read from the question, never from
+	// the intent: "where is the total computed" is also "where".
+	Census string `json:"census"`
 }
+
+// CensusLink is the one census the pipeline has. Any other value in the
+// reply is dropped on decode.
+const CensusLink = "link"
 
 // SearchTexts assembles what the retriever should search for. The raw question
 // comes first and is never dropped: the model's guesses are guesses, and a
@@ -139,6 +150,10 @@ Fields:
               no environment, or asks how something is integrated or tested
               rather than about the integration or test environment, has
               no stage.
+  census      "link" when the question asks to LIST the places a repository
+              links or navigates to — links to other applications, external
+              URLs, outbound links — else "". A question about how one
+              link works is not a census.
 
 A question may arrive with the previous turn of the conversation above it. That
 material is there for ONE purpose: to resolve what the current question leaves
@@ -233,6 +248,12 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 	// never wanted. A word the table does not carry is left as it is: it
 	// reaches the trace, where a reader sees what the model said.
 	got.Intent = strings.Trim(strings.ToLower(got.Intent), " \t\n\"'`.,:;!?")
+	// Same trim for the census, and only the one kind that has a census
+	// behind it survives: a model volunteering "route" would otherwise send
+	// the pipeline to a listing that does not exist.
+	if got.Census = strings.Trim(strings.ToLower(got.Census), " \t\n\"'`.,:;!?"); got.Census != CensusLink {
+		got.Census = ""
+	}
 	return got, nil
 }
 

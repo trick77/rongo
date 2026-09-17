@@ -46,6 +46,15 @@ const (
 	// repository, the deployed value per stage in another, and the key is
 	// the only thing they share.
 	KindProperty Kind = "property"
+	// KindLink is a navigation site in a user interface: an href, a
+	// window.open, a location assignment, a router call. It is NOT an edge.
+	// The value is whatever text stood at the site — an absolute URL when
+	// the code writes one, more often `${environment.portalUrl}/claims` or a
+	// variable — because a UI repository seldom spells the host it links to
+	// as one literal. Two repositories sharing the value are not linked by
+	// it, so Neighbours and Holders never match on this kind; the census in
+	// internal/ask reads it per repository instead.
+	KindLink Kind = "link"
 )
 
 // Token is one extracted destination with the line it was found on.
@@ -158,6 +167,44 @@ var propertyPlaceholder = regexp.MustCompile(`"[^"\n]*?\$\{([A-Za-z][\w]*[.\-][\
 // leading "#" or "!" is a comment in that format.
 var propertyLine = regexp.MustCompile(`^\s*([A-Za-z][\w.\-\[\]]*)\s*[=:]`)
 
+// linkExt is where navigation sites are read. Markup gets ONLY this branch:
+// running the route rules over .html would take a prose "fetch" and every
+// "/path" on that line for a client call. Script files run both.
+var linkExt = map[string]bool{
+	".html": true, ".htm": true, ".vue": true, ".svelte": true,
+	".js": true, ".jsx": true, ".ts": true, ".tsx": true,
+}
+
+// navigationSite matches the places a user interface navigates from. As
+// explicit as messagingCall, for the same reason: a rule that took every
+// string with a slash for a link would record every asset path. Each
+// alternative ends on the "=" or "(" the value follows, so linkValue reads
+// from there. A comparison ("href ===", "location.href == x") is not a
+// site; Extract checks the character after the match, RE2 having no
+// lookahead.
+var navigationSite = regexp.MustCompile(`(?i)(?:` +
+	`\b(?:href|routerLink)\s*\]?\s*=` + // href=, [href]=, [attr.href]=, routerLink=, [routerLink]=
+	`|<Link\b[^>]*?\bto\s*=` + // React Router
+	`|\bwindow\.open\s*\(` +
+	`|\blocation\.(?:assign|replace)\s*\(` +
+	`|\b(?:window\.)?location(?:\.href)?\s*=` +
+	`|\.navigate(?:ByUrl)?\s*\(` + // Angular Router
+	`)`)
+
+// linkSkip is a value that leads to no application: an in-page anchor,
+// mail, phone, script, nothing, the bare root.
+func linkSkip(v string) bool {
+	if v == "" || v == "/" {
+		return true
+	}
+	l := strings.ToLower(v)
+	return strings.HasPrefix(l, "#") || strings.HasPrefix(l, "mailto:") ||
+		strings.HasPrefix(l, "tel:") || strings.HasPrefix(l, "javascript:")
+}
+
+// linkMaxRunes bounds a value: past it the text is a statement, not a target.
+const linkMaxRunes = 120
+
 // Extract reads one file and returns the destinations it names.
 //
 // It works line by line rather than by parsing. A parser per language would be
@@ -169,7 +216,7 @@ func Extract(filePath string, body []byte) []Token {
 	if propertiesExt[ext] {
 		return propertyKeys(body)
 	}
-	if !codeExt[ext] {
+	if !codeExt[ext] && !linkExt[ext] {
 		return nil
 	}
 	var out []Token
@@ -188,6 +235,16 @@ func Extract(filePath string, body []byte) []Token {
 	}
 
 	lines := strings.Split(string(body), "\n")
+	if linkExt[ext] {
+		for i, line := range lines {
+			for _, v := range linkSites(line) {
+				add(KindLink, v, i+1)
+			}
+		}
+	}
+	if !codeExt[ext] {
+		return out
+	}
 	if placeholderExt[ext] {
 		for i, line := range lines {
 			for _, m := range propertyPlaceholder.FindAllStringSubmatch(line, -1) {
@@ -328,6 +385,80 @@ func templateRoute(lit string) string {
 		return ""
 	}
 	return rest
+}
+
+// linkSites returns the navigation targets on one line, as the text that
+// stood at each site. A stylesheet or base tag carries an href that is not a
+// navigation, and is skipped whole. Case matters there: "<link" is the
+// stylesheet tag, "<Link" the React Router component.
+func linkSites(line string) []string {
+	t := strings.TrimSpace(line)
+	if strings.HasPrefix(t, "<link") || strings.HasPrefix(t, "<base") {
+		return nil
+	}
+	var out []string
+	for _, m := range navigationSite.FindAllStringIndex(line, -1) {
+		rest := line[m[1]:]
+		// "href ===" and "location.href == x" compare; only "=" assigns.
+		if line[m[1]-1] == '=' && strings.HasPrefix(rest, "=") {
+			continue
+		}
+		v := linkValue(rest)
+		if linkSkip(v) {
+			continue
+		}
+		// Markup or a second statement leaked into the value: not a target.
+		if strings.ContainsAny(v, "<>\t") || strings.Contains(v, "  ") {
+			continue
+		}
+		if r := []rune(v); len(r) > linkMaxRunes {
+			v = string(r[:linkMaxRunes])
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// linkValue reads the target from the text after a site: a quoted literal
+// whole (a template literal included, its interpolation with it — that is
+// the variable the census hands to the symbol walk), else the expression up
+// to the first comma, closing bracket or semicolon at depth zero. Quotes
+// inside the expression are stepped over, so a concatenated '/path' does not
+// end it early.
+func linkValue(rest string) string {
+	rest = strings.TrimLeft(rest, " \t")
+	if rest == "" {
+		return ""
+	}
+	if q := rest[0]; q == '"' || q == '\'' || q == '`' {
+		if end := strings.IndexByte(rest[1:], q); end >= 0 {
+			return rest[1 : end+1]
+		}
+		return ""
+	}
+	depth := 0
+	var quote byte
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			if depth == 0 {
+				return strings.TrimSpace(rest[:i])
+			}
+			depth--
+		case (c == ',' || c == ';') && depth == 0:
+			return strings.TrimSpace(rest[:i])
+		}
+	}
+	return strings.TrimSpace(rest)
 }
 
 // isDestinationShape keeps prose out of the destination namespace. A queue name

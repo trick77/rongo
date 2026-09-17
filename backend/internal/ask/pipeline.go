@@ -265,7 +265,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// it is part of the record, so a resumed turn reads it off the stored
 	// clarification and a re-explained one off the stored row.
 	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all,
-		Stage: stage, Intent: u.Intent}
+		Stage: stage, Intent: u.Intent, Census: u.Census}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -515,10 +515,21 @@ func withParts(structure, parts string) string {
 // One function rather than two copies: the gap pass has to run on a resumed
 // turn as well, and a step a resume skips is a turn answered from less code
 // than the same question answered a minute earlier.
-func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, ev Events) ([]Source, error) {
+func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, ev Events) ([]Source, Scope, error) {
 	ev.status("gathering")
+	census, err := p.census(ctx, scope)
+	if err != nil {
+		return nil, scope, err
+	}
+	scope.Links = census.Listing
+	sources, err := p.gatherSeeded(ctx, question, hits, scope, census, ev)
+	return sources, scope, err
+}
+
+// gatherSeeded is the gather under a census that has already been read.
+func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, census Census, ev Events) ([]Source, error) {
 	stage := scope.Stages.Prefixes(scope.Stage)
-	sources, err := p.gatherer.GatherWithin(ctx, hits, stage)
+	sources, err := p.gatherer.GatherSeeded(ctx, hits, census.Landings, stage)
 	if err != nil {
 		return nil, err
 	}
@@ -526,8 +537,32 @@ func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.
 	if err != nil {
 		return nil, err
 	}
-	ev.detail("gathering", gatherDetail(sources, p.gatherer.opts.TokenBudget, report))
+	ev.detail("gathering", withCensusDetail(gatherDetail(sources, p.gatherer.opts.TokenBudget, report), census))
 	return sources, nil
+}
+
+// census reads the link sites of the named repositories when the question
+// asked for a listing, and nothing otherwise. Nothing named is nothing read:
+// a census over the corpus is the spread the repository rung refuses, and an
+// "all repositories" permission does not open it either — forty landings
+// per repository across the estate is not an answer about anything.
+func (p *Pipeline) census(ctx context.Context, scope Scope) (Census, error) {
+	if scope.Census != CensusLink || len(scope.Known) == 0 {
+		return Census{}, nil
+	}
+	return p.gatherer.LinkCensus(ctx, scope.Known)
+}
+
+// withCensusDetail adds what the census found to the gathering step, only
+// on a turn that ran one: the trace is stored per message, and "links: 0"
+// on every mechanism question would be a record of an absence.
+func withCensusDetail(d map[string]any, c Census) map[string]any {
+	if c.Sites == 0 {
+		return d
+	}
+	d["link_sites"] = c.Sites
+	d["links"] = len(c.Landings)
+	return d
 }
 
 // gatherAndAnswer is the tail both entry points share: expand the hits, settle
@@ -547,7 +582,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 
 	scope = p.describeProjects(ctx, scope)
 
-	sources, err := p.gather(ctx, question, hits, scope, ev)
+	sources, scope, err := p.gather(ctx, question, hits, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
@@ -917,7 +952,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	ev.detail("searching", searchDetail(hits))
 	scope = p.describeProjects(ctx, scope)
 
-	sources, err := p.gather(ctx, question, hits, scope, ev)
+	sources, scope, err := p.gather(ctx, question, hits, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
