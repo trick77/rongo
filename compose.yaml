@@ -130,6 +130,7 @@ services:
       BACKEND_GIT_CA_FILE: ${BACKEND_GIT_CA_FILE:-}
       # Repo-relative globs kept out of the index; see .env.example.
       BACKEND_INDEX_EXCLUDE: ${BACKEND_INDEX_EXCLUDE:-docs/plans/**}
+      BACKEND_INDEX_MAX_DATA_FILE_BYTES: ${BACKEND_INDEX_MAX_DATA_FILE_BYTES:-8192}
       BACKEND_LOG_LEVEL: ${BACKEND_LOG_LEVEL:-info}
     volumes:
       - ./data:/data

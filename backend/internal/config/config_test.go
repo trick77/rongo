@@ -27,6 +27,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_LOG_LEVEL",
 	"BACKEND_INDEX_ENABLED",
 	"BACKEND_INDEX_MAX_FILE_BYTES",
+	"BACKEND_INDEX_MAX_DATA_FILE_BYTES",
 	"BACKEND_INDEX_COMMENTS",
 	"BACKEND_INDEX_EXCLUDE",
 	"BACKEND_REPOS_FILE",
@@ -141,6 +142,36 @@ func TestLoad_turnMaxTokens(t *testing.T) {
 			}
 			if cfg.TurnMaxTokens != tc.want {
 				t.Errorf("TurnMaxTokens = %d, want %d", cfg.TurnMaxTokens, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoad_indexMaxDataFileBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want int
+	}{
+		{name: "unset means 8 KiB", env: "", want: 8192},
+		{name: "a number is taken", env: "16384", want: 16384},
+		{name: "zero falls back, there is no switching the ceiling off", env: "0", want: 8192},
+		{name: "garbage falls back", env: "lots", want: 8192},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Given
+			setEnv(t, map[string]string{"BACKEND_INDEX_MAX_DATA_FILE_BYTES": tc.env})
+
+			// When
+			cfg, err := Load()
+
+			// Then
+			if err != nil {
+				t.Fatalf("Load() err = %v, want nil", err)
+			}
+			if cfg.IndexMaxDataFileBytes != tc.want {
+				t.Errorf("IndexMaxDataFileBytes = %d, want %d", cfg.IndexMaxDataFileBytes, tc.want)
 			}
 		})
 	}
