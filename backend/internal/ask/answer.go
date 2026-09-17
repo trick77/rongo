@@ -239,6 +239,15 @@ exactly as they are.`
 // rule on purpose - the literal is the anti-hallucination check - so this
 // paragraph keeps the literal too and only moves it: once, after the words,
 // out of the lead.
+//
+// The flowchart sentence exists because this block shaped the answer as
+// prose-and-stop, and the diagram rule appended at the end of the prompt
+// never overrode it: Analyst answers to process questions came back as
+// paragraphs alone. The trigger is said in the reader's words - a case, an
+// approval, a hand-off -
+// because "control flow" and "call sequence" in the diagram rule never
+// fired on a business question. It names the picture, never the fence:
+// the shape rules must precede the first fence in the prompt (answer_test).
 const answerBA = `
 Audience: business analyst. The reader owns the requirements and the business
 process, knows the domain and the people the system serves, and does not read
@@ -251,8 +260,13 @@ paragraphs. Where the sources show it, say whether the behaviour is fixed in
 the code, set by configuration, or a manual step, because that decides whether
 a change is a configuration ticket or a development story; where the sources
 do not show it, say nothing about it. Explain the mechanism in three to five
-paragraphs in the language of the business domain. No source code, no
-signatures, no file paths in running text. Answer the question and then stop.
+paragraphs in the language of the business domain. Where the mechanism is a
+process the reader follows step by step - a case that moves through states,
+an approval, a hand-off with a decision on the way - the answer also carries
+a flowchart of it; where it is an exchange between systems, roles or people,
+a sequence diagram. The diagram sits after the paragraph that introduces the
+steps. No source code, no signatures, no file paths in running text. Answer
+the question, draw the flow if there is one, and then stop.
 
 Identifiers, property keys, cron expressions and code defaults are not the
 language of the business domain. Say what a value means for the reader: a
@@ -277,7 +291,9 @@ The question names these repositories: %s. Each has its own implementation and
 all of them are in the sources. Cover every one of them, say plainly where they
 differ and where they agree, and attribute every claim to the repository it
 came from. Do not answer for one and leave the others out; do not merge them
-into a single mechanism they do not share. Repository names stay as they are.`
+into a single mechanism they do not share. Where the repositories call each
+other, the diagram is a sequence between them. Repository names stay as they
+are.`
 
 // answerCompareProjects is answerCompare for a turn comparing PRODUCTS rather
 // than bare repositories. Separate text rather than a shared template with the
@@ -296,7 +312,8 @@ repositories: treat everything from one project as one system. Cover every
 project, say plainly where they differ and where they agree, and attribute every
 claim to the project it came from as well as to the source it rests on. Do not
 answer for one and leave the others out; do not merge them into a single
-mechanism they do not share. Names stay as they are.`
+mechanism they do not share. Where the projects call each other, the diagram
+is a sequence between them. Names stay as they are.`
 
 // answerMissingRepo is added when the question named a repository the index
 // does not carry. Without it the model is handed "how do loom and rongo
@@ -410,6 +427,10 @@ quoted as written, never paraphrased or reassembled from memory.`
 // answered as a paragraph per chunk with no sequence. The listing gives the
 // order and the branching; the claims still come from the sources, which is
 // why the block ends with the same rule the structure block does.
+//
+// The last sentence asks for the walk as the diagram: the listing is already
+// order plus branch conditions, which is a flowchart in text, and it is the
+// strongest signal the prompt has that the answer is a process.
 const answerProcesses = `
 
 The process models among the sources are wired as follows, read from the model
@@ -422,7 +443,9 @@ what the model file declares. What a step does is described in the sources and
 cited from them - cite the node's own source, never this listing. A called
 process listed here whose nodes have no source of their own may be walked by
 the names above, and then say in a clause that its model was not among the
-sources; say nothing about what its steps do inside.`
+sources; say nothing about what its steps do inside. This walk is the
+flowchart: draw it as the answer's diagram, one node per step above, the
+branch condition as the edge label, each node citing the step's own source.`
 
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
@@ -449,6 +472,12 @@ the control flow so that it can be followed in the code.`
 // unreadable - so the permission names what a list is FOR (a set the code
 // really has) and says twice what it is not for.
 //
+// The list permission names "ordered steps, branches, conditions", which is
+// the material a flowchart is made of, so without the last sentence the list
+// rule won by default and the diagram rule at the end of the prompt found
+// nothing left to draw. The line is drawn where the diagram rule draws it: a
+// branch or a second party.
+//
 // No headings: they were mocked up and deliberately left out. A short answer
 // wearing three ### headings looks over-built, and that judgement is one the
 // model gets wrong more often than it gets the list wrong. If dev answers
@@ -461,8 +490,10 @@ stops after that sentence has the answer; a reader who goes on gets why.
 Where the mechanism really is a set - branches, options, ordered steps,
 conditions - carry it as a short list instead of a paragraph. Prose that is
 prose stays prose: never split a single line of reasoning into bullets, and
-never use a list where two sentences would do. Markers sit on the list item
-that makes the claim, exactly as they do in running text.`
+never use a list where two sentences would do. Ordered steps with a branch or
+a second party are a diagram, not a list (the diagram rule below); a plain
+set stays a list. Markers sit on the list item that makes the claim, exactly
+as they do in running text.`
 
 // answerIntent is the one-line refinement of the shape rule per intent, keyed
 // by Understanding.Intent and appended directly after answerShape.
@@ -501,6 +532,15 @@ var answerIntent = map[string]string{
 // that the rule stops here - both the bare chain and the [6],[25] the model
 // writes when it remembers the comma but not the single array.
 //
+// The trigger is positive and audience-neutral on purpose. It used to read
+// "only where control flow or a call sequence carries the explanation",
+// which is a restriction in developer words: an Analyst question is about a
+// process, a hand-off, a decision, and the words never fired. Saying what
+// earns a picture - an order with a branch, or two parties exchanging
+// messages - and what does not (a plain sequence of steps is a list, one
+// rule or value is prose) draws the line the shape rule's list permission
+// otherwise claims for itself.
+//
 // The counts below are what reads well, and the renderer no longer enforces
 // them: a spec one actor too wide used to be dropped and shown as its JSON,
 // which is worse than a wide picture in a box that scrolls. They stay strict
@@ -522,8 +562,13 @@ var answerIntent = map[string]string{
 // renderer's side, so the fix is here: a node is a title.
 const answerDiagram = `
 
-At most one diagram, and only where control flow or a call sequence carries
-the explanation: a fenced block tagged ` + "```diagram" + ` holding JSON, either
+At most one diagram. Draw one when the explanation is steps in an order with
+a decision that splits the path (a flowchart, "type":"flow"), or two or more
+parties exchanging messages in an order (a sequence diagram,
+"type":"sequence") - whether the parties are functions and services or
+roles, systems and people. Steps with no branch and one party are a list,
+not a diagram. Skip it when the answer is one rule, one value or one place.
+The diagram is a fenced block tagged ` + "```diagram" + ` holding JSON, either
 {"type":"flow","nodes":[{"id","label","kind":"start|end|step|decision","src":[1]}],
  "edges":[{"from","to","label"}]} or
 {"type":"sequence","actors":[{"id","label"}],

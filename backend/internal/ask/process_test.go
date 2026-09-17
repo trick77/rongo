@@ -129,6 +129,12 @@ func TestTheProcessListingReachesThePromptAndIsNeverCited(t *testing.T) {
 	if !strings.Contains(*prompt, "never this listing") {
 		t.Errorf("the block must say it is not a source:\n%s", *prompt)
 	}
+	// The listing is order plus branch conditions, a flowchart in text, and
+	// the block asks for it drawn: the strongest signal the prompt has that
+	// the answer is a process.
+	if !strings.Contains(*prompt, "draw it as the answer's diagram") {
+		t.Errorf("the block must ask for the walk as the diagram:\n%s", *prompt)
+	}
 	// And nothing of it without a listing.
 	c, prompt, _ = streamUpstream(t, "x")
 	_, err = NewAnswerer(c).Answer(context.Background(), "Walk me through order intake", AudienceBA, LanguageEN,
@@ -136,7 +142,7 @@ func TestTheProcessListingReachesThePromptAndIsNeverCited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
-	if strings.Contains(*prompt, "process models among the sources") {
+	if strings.Contains(*prompt, "process models among the sources") || strings.Contains(*prompt, "draw it as the answer's diagram") {
 		t.Errorf("an empty listing must add nothing:\n%s", *prompt)
 	}
 }

@@ -221,3 +221,23 @@ func TestRenumber_anUnclosedDiagramFenceStillEndsWhole(t *testing.T) {
 		t.Errorf("out = %q, want the partial array flushed as it came", out)
 	}
 }
+
+// DiagramKind is what the answers harness counts: the picture the reader
+// gets, after the renumberer has retagged whatever the model fenced it as.
+func TestDiagramKind_countsTheDrawnPictureOnly(t *testing.T) {
+	for name, tc := range map[string]struct{ text, want string }{
+		"flow":     {"Lead.\n```diagram\n{\"type\":\"flow\",\"nodes\":[],\"edges\":[]}\n```\nMore.", "flow"},
+		"sequence": {"```diagram\n{\"type\":\"sequence\",\"actors\":[],\"steps\":[]}\n```", "sequence"},
+		"prose":    {"Just prose [1].", ""},
+		"code":     {"```go\nx := 1\n```", ""},
+		// A fence tagged diagram whose body draws nothing is printed as a
+		// code block: no picture, so not counted.
+		"undrawable": {"```diagram\n{\"type\":\"pie\"}\n```", ""},
+		// The format quoted in a developer's code block is not a diagram.
+		"quoted": {"```json\n{\"type\":\"flow\"}\n```", ""},
+	} {
+		if got := DiagramKind(tc.text); got != tc.want {
+			t.Errorf("%s: DiagramKind = %q, want %q", name, got, tc.want)
+		}
+	}
+}

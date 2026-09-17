@@ -347,6 +347,25 @@ func jsonish(s string) bool {
 	return true // still a prefix of `{"`: it may yet become one
 }
 
+// DiagramKind returns "flow" or "sequence" when the answer text carries a
+// diagram the reader gets drawn, and "" when it carries none. It reads the
+// text as the renumberer left it, so a spec the model fenced as json or wrote
+// bare counts once retagged, and a fence that parses to nothing drawable
+// counts as none: what is measured is the picture, not the attempt. The
+// answers harness reports it per answer.
+func DiagramKind(text string) string {
+	const open = "```diagram\n"
+	i := strings.Index(text, open)
+	if i < 0 {
+		return ""
+	}
+	body := text[i+len(open):]
+	if j := strings.Index(body, "\n```"); j >= 0 {
+		body = body[:j]
+	}
+	return specKind(body)
+}
+
 // specKind returns the top-level "type" of the JSON object o when it names a
 // diagram this renderer draws, and "" otherwise. The key is read at depth one
 // only, and read as a key rather than found anywhere in the text: rongo
