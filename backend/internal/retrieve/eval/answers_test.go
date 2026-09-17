@@ -216,8 +216,10 @@ type answerRecord struct {
 	CiteTotal int      `json:"cite_total"`
 	Tokens    int      `json:"tokens"`
 	Sources   int      `json:"sources"`
-	// Digraphs are the prose words of a German answer spelling an umlaut as
-	// ae/oe/ue (germanDigraphs); nil for the other languages.
+	// Digraphs are the prose words of a German answer the model wrote with
+	// ß or an umlaut as ae/oe/ue, as it wrote them (ask.Answer.Respelled).
+	// The reader never sees them - swiss.go corrects the stream - so this
+	// column is the only place the deployment's German spelling shows.
 	Digraphs []string `json:"digraphs,omitempty"`
 	Err      string   `json:"err,omitempty"`
 }
@@ -297,7 +299,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			}
 			rec.Answer = a.Text
 			if lang == ask.LanguageDE {
-				rec.Digraphs = germanDigraphs(a.Text)
+				rec.Digraphs = a.Respelled
 				digraphs += len(rec.Digraphs)
 			}
 			rec.Tokens = a.Usage.Total

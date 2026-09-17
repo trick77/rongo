@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // renumberer rewrites citation markers while the answer streams, so the
@@ -46,6 +47,12 @@ type renumberer struct {
 	// are does not guess, and the tests that construct one with a count
 	// alone renumber exactly as they did before.
 	docs []bool
+	// spell rewrites the prose between the markers and the code, set for a
+	// German answer (speller.prose) and nil for every other language. With
+	// it set, a word that reaches the end of what has arrived is held back
+	// until its end is known: a token boundary falls inside words, and
+	// "Gesch" alone cannot be spelled.
+	spell func(string) string
 }
 
 func newRenumberer(sources int) *renumberer {
@@ -142,10 +149,16 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 		// arrived without a fence at all.
 		j := strings.IndexAny(s[i:], "`[{")
 		if j < 0 {
-			b.WriteString(s[i:])
+			if r.spell != nil && !atEnd {
+				// The last word may go on in the next token.
+				cut := len(s) - trailingWord(s[i:])
+				b.WriteString(r.spell(s[i:cut]))
+				return b.String(), s[cut:]
+			}
+			b.WriteString(r.prose(s[i:]))
 			return b.String(), ""
 		}
-		b.WriteString(s[i : i+j])
+		b.WriteString(r.prose(s[i : i+j]))
 		i += j
 		if s[i] == '{' {
 			// A diagram the model wrote as bare JSON. Without this the
@@ -658,6 +671,30 @@ func (r *renumberer) citations(sources []Source) []Citation {
 		})
 	}
 	return out
+}
+
+// prose is the text between markers and code as the reader gets it: spelled
+// by r.spell where one is set, as it came otherwise.
+func (r *renumberer) prose(s string) string {
+	if r.spell == nil {
+		return s
+	}
+	return r.spell(s)
+}
+
+// trailingWord is the length in bytes of the run of non-space characters s
+// ends with: the word, path or name the next token may still be part of. It
+// is counted in whole runes, so what is held back never begins mid-umlaut.
+func trailingWord(s string) int {
+	n := 0
+	for n < len(s) {
+		c, w := utf8.DecodeLastRuneInString(s[:len(s)-n])
+		if unicode.IsSpace(c) {
+			break
+		}
+		n += w
+	}
+	return n
 }
 
 // trailingBackticks counts the backticks s ends with, up to max.

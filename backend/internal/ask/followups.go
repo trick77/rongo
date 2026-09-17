@@ -65,13 +65,18 @@ func Followups(
 	}
 	name := languageName(lang)
 	out, _, err := c.Complete(ctx, []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(followupsSystem, name, name) + languageStyle(lang)},
+		{Role: "system", Content: fmt.Sprintf(followupsSystem, name, name)},
 		{Role: "user", Content: followupsPrompt(question, answer, audience, sources, scope)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(followupsMaxTokens), llm.WithStep("followups"))
 	if err != nil {
 		return nil
 	}
-	return parseFollowups(out)
+	got := parseFollowups(out)
+	spell := spellFor(lang)
+	for i := range got {
+		got[i] = spell(got[i])
+	}
+	return got
 }
 
 // followupsPrompt is what the model reads: the turn, and the paths it was

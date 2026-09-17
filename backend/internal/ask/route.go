@@ -1235,7 +1235,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 	if audience != AudienceDev {
 		system += nameBA + fmt.Sprintf(nameLanguage, name)
 	}
-	system += languageStyle(lang)
+	spell := spellFor(lang)
 	named := make([]Candidate, len(cs))
 	copy(named, cs)
 	ok := make([]bool, len(cs))
@@ -1280,10 +1280,10 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 				return
 			}
 			if got.Title != "" {
-				c.Title = got.Title
+				c.Title = spell(got.Title)
 				ok[i] = true
 			}
-			c.Summary = got.Summary
+			c.Summary = spell(got.Summary)
 		}(i)
 	}
 	wg.Wait()

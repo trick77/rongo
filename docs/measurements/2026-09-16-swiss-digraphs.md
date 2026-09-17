@@ -1,5 +1,12 @@
 # Umlauts written as ae/oe/ue: the model, not the note
 
+**Superseded 2026-09-17: the note is gone. German prose is respelled by a
+string function (`backend/internal/ask/swiss.go`) in the answer stream and in
+the title, card names and follow-ups: ß to ss, and ae/oe/ue to the umlaut
+under the heuristic `germanDigraphs` used here. The `digraphs` column of
+`TestEvalMeasureAnswers` now lists what the function rewrote
+(`ask.Answer.Respelled`): the number this page measured, plus the ß words.**
+
 **Status: measured 2026-09-16. A German answer on gpt-5.4-mini came back
 with "die Korrektheit der Rueckgabe". The Swiss note in the answer prompt
 already forbids ae/oe/ue. Three wordings of that note were measured against

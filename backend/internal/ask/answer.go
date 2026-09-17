@@ -60,37 +60,6 @@ func languageName(lang Language) string {
 	return languageNames[ParseLanguage(string(lang))]
 }
 
-// swissGerman is appended to every prompt that writes German for a reader.
-// The readers are in Switzerland, where the letter does not exist, and the
-// product's own German strings are already spelled this way (scopeNotice);
-// a model left to itself writes "größer" right next to them. It asks for
-// standard German too: naming the country alone is an invitation to dialect.
-//
-// The umlauts are spelled out because the ß rule alone was over-applied: a
-// model told to drop one non-ASCII letter drops the rest as well, and a card
-// came back offering "Sequenzdiagramm fuer Geschaeftsprozesse". That is not
-// Swiss, it is not German, and it is what a person reads.
-//
-// Measured 2026-09-16 (docs/measurements/2026-09-16-swiss-digraphs.md): on
-// gpt-5.4-mini no wording of this note moves the count, gpt-5.4 is worse
-// and MiMo Pro writes none. The digraphs are the model's own function words,
-// sampled mid-sentence next to correct umlauts; the lever is the model, not
-// the note. The answers harness counts them.
-const swissGerman = `
-
-Swiss orthography: standard written German, never the letter ß - always ss
-(ausser, grösser, heisst, Strasse). Keep every umlaut as an umlaut: ä ö ü,
-never ae/oe/ue - "für" not "fuer", "Geschäftsprozess" not
-"Geschaeftsprozess". Not dialect.`
-
-// languageStyle is the orthography note for lang, empty where there is none.
-func languageStyle(lang Language) string {
-	if ParseLanguage(string(lang)) == LanguageDE {
-		return swissGerman
-	}
-	return ""
-}
-
 // answerMaxTokens is generous on purpose. This is the one call where a
 // truncated reply is worse than a long one: it is what a person reads.
 //
@@ -138,6 +107,12 @@ type Answer struct {
 	// with, so they will not add up to Usage.Prompt exactly — the total is
 	// billed, the split is measured, and the reader is told which is which.
 	Prompt PromptParts
+	// Respelled is every word of a German answer the model wrote with ß or
+	// a transliterated umlaut, as the model wrote it; the reader saw the
+	// Swiss spelling. The eval counts them, because the number says how the
+	// deployment writes German, and nothing else does now that the text is
+	// corrected on the way out.
+	Respelled []string
 }
 
 // PromptParts is the answer prompt by section, in estimated tokens. System is
@@ -1062,14 +1037,18 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// just read two thousand tokens of English tends to answer in it. How that
 	// language is spelled follows it, closing the prompt.
 	system += fmt.Sprintf(answerLanguage, name)
-	system += languageStyle(lang)
 
 	// Every token passes the renumberer before it reaches the reader or the
 	// record, so the two are the same text; what it holds back is flushed
-	// once the stream ends, cut short or not.
+	// once the stream ends, cut short or not. German is spelled the Swiss
+	// way on the same pass (swiss.go), so the record is what was read.
 	var text strings.Builder
 	rn := newRenumberer(len(sources))
 	rn.docs = docMask(sources)
+	sp := &speller{}
+	if ParseLanguage(string(lang)) == LanguageDE {
+		rn.spell = sp.prose
+	}
 	emit := func(s string) {
 		if s == "" {
 			return
@@ -1123,6 +1102,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Usage:     usage,
 		Sources:   sources,
 		Prompt:    parts,
+		Respelled: sp.rewrote,
 	}, nil
 }
 

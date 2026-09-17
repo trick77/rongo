@@ -70,7 +70,7 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		return ""
 	}
 	msgs := []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(titleSystem, languageName(lang)) + languageStyle(lang)},
+		{Role: "system", Content: fmt.Sprintf(titleSystem, languageName(lang))},
 		{Role: "user", Content: question},
 	}
 	for attempt := 0; attempt < titleAttempts; attempt++ {
@@ -87,7 +87,7 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		}
 		title, replied := titleOnce(ctx, c, asking)
 		if title != "" {
-			return title
+			return spellFor(lang)(title)
 		}
 		if !replied {
 			return ""
