@@ -171,6 +171,12 @@ You are given numbered sources. The rules, without exception:
   source names that in the sentence that makes it - what the document states,
   not what the system does - and says the code for it is not among the
   sources.
+- A source marked "(test)" is a test: it shows what the code is expected to
+  do, not the code that does it. A claim about the mechanism cites the source
+  holding the mechanism, and a test beside it at most as a second marker. A
+  claim resting only on a test says so in the sentence that makes it - what
+  the test expects, not what the system does. Where the question asks how
+  something is tested, tests are the answer and are cited as such.
 - <redacted> in a source marks a credential removed before indexing. Say that
   the key exists and where it is set; never guess, reconstruct or describe
   the value.
@@ -1146,6 +1152,13 @@ func renderSources(question string, sources []Source, declared stages.Set) strin
 		fmt.Fprintf(&b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
+		}
+		// The same predicate fusion demotes by and the walk orders by: read
+		// unlabelled, a test fake competes with the client it fakes for the
+		// citation, and the model cannot tell the harness from the mechanism
+		// by the excerpt alone.
+		if retrieve.IsTestPath(s.Path) {
+			b.WriteString(" (test)")
 		}
 		// The stage from the declared prefix, never from the model: a label
 		// the answer rule keys on has to be a fact about the path.
