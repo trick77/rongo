@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -732,10 +733,16 @@ func (r *renumberer) citations(sources []Source) []Citation {
 	out := make([]Citation, 0, len(r.order))
 	for i, n := range r.order {
 		s := sources[n-1]
-		out = append(out, Citation{
+		c := Citation{
 			Marker: i + 1, Repo: s.Repo, Branch: s.Branch, Path: s.Path,
 			StartLine: s.StartLine, EndLine: s.EndLine, SHA: s.SHA,
-		})
+		}
+		if s.IsCommit() {
+			c.Kind = SourceCommit
+			c.Subject = s.Subject
+			c.CommittedAt = s.CommittedAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, c)
 	}
 	return out
 }

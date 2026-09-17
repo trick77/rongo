@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/trick77/rongo/internal/edges"
@@ -36,7 +37,24 @@ type Source struct {
 	Reason string
 	// Hop is 0 for a search hit and counts up from there.
 	Hop int
+	// Kind is "" for a chunk of a file and SourceCommit for an entry of the
+	// commit lane, where SHA is the commit itself, Path and the lines are
+	// empty, Text is the message body, and the fields below are set.
+	Kind string
+	// CommitID is the commits row, the way ChunkID is the chunks row; it is
+	// what the record stores so a re-explain can read the commit back.
+	CommitID    int64
+	Subject     string
+	CommittedAt time.Time
+	// Paths are the files the commit changed.
+	Paths []string
 }
+
+// SourceCommit is Source.Kind for a commit of the lane.
+const SourceCommit = "commit"
+
+// IsCommit reports whether the source is a commit rather than a chunk.
+func (s Source) IsCommit() bool { return s.Kind == SourceCommit }
 
 // maxDefiners is how many files may define a name before following it is
 // pointless. The value and its measurement live in internal/edges, which

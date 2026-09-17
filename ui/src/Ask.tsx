@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
-import SourceView from "./SourceView";
+import SourceView, { isCommit } from "./SourceView";
+import CommitView from "./CommitView";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
@@ -1310,7 +1311,14 @@ export default function Ask({
         <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
       )}
 
-      {viewing && <SourceView source={viewing} onClose={() => setViewing(null)} />}
+      {/* A commit citation opens the commit view, whose touched files open
+          the source viewer in turn, whole, at their indexed commit. */}
+      {viewing &&
+        (isCommit(viewing) ? (
+          <CommitView source={viewing} onClose={() => setViewing(null)} onOpenFile={setViewing} />
+        ) : (
+          <SourceView source={viewing} onClose={() => setViewing(null)} />
+        ))}
     </div>
   );
 }

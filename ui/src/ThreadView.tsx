@@ -9,17 +9,20 @@ import Trace from "./Trace";
 import { CheckIcon, CopyIcon } from "./icons";
 import {
   clock,
+  commitDay,
   groupByQuestion,
   languages,
   money,
   pill,
   roleName,
+  shortSha,
   stageLabel,
   tokens,
   traceState,
   type Citation,
   type Turn,
 } from "./turns";
+import { isCommit } from "./SourceView";
 
 /**
  * The reading half of a thread: the turns, and the sources they were written
@@ -629,13 +632,28 @@ export function SourcesPane({
               {c.repo}
               <span className="ml-1.5 font-mono text-[11.5px] font-normal text-faint">{c.branch}</span>
             </span>
-            <span className="font-mono text-xs break-all text-muted">
-              {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
-              <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
-                {c.path.slice(c.path.lastIndexOf("/") + 1)}
-              </b>
-              :{c.start_line}-{c.end_line}
-            </span>
+            {isCommit(c) ? (
+              // A commit row: the short sha and the day in mono, the subject
+              // as the thing to open. No path, because the change is the
+              // evidence, not any one file it touched.
+              <span className="text-xs break-words text-muted">
+                <span className="font-mono">
+                  {shortSha(c.sha)} · {commitDay(c)}
+                </span>
+                {" · "}
+                <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
+                  {c.subject}
+                </b>
+              </span>
+            ) : (
+              <span className="font-mono text-xs break-all text-muted">
+                {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
+                <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
+                  {c.path.slice(c.path.lastIndexOf("/") + 1)}
+                </b>
+                :{c.start_line}-{c.end_line}
+              </span>
+            )}
           </button>
         ))}
       </div>

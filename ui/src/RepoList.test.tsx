@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import RepoList, { byProject, unconnected, wiringSpec } from "./RepoList";
+import RepoList, { byProject, historyLine, unconnected, wiringSpec } from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
 function respondWith(status: number, body: unknown) {
@@ -37,7 +37,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("historyLine", () => {
+  it("says what the commit lane holds, and that a snapshot has none", () => {
+    expect(historyLine({ ...peeq, commits: 483, newest_commit_at: "2026-09-17T10:00:00Z" })).toMatch(
+      /^483 commits recorded, newest /,
+    );
+    expect(historyLine({ ...peeq, commits: 1, newest_commit_at: "2026-09-17T10:00:00Z" })).toMatch(/^1 commit recorded/);
+    expect(historyLine(peeq)).toBe("No commits recorded yet.");
+    expect(historyLine({ ...peeq, snapshot: true, commits: 1 })).toBe("No history: a snapshot has no commits.");
+  });
+});
+
 describe("RepoList", () => {
+  it("sums the commits in the strip and carries the lane in the indexed cell's tooltip", async () => {
+    respondWith(200, [{ ...peeq, commits: 483, newest_commit_at: "2026-09-17T10:00:00Z" }]);
+    render(<RepoList />);
+    await screen.findByRole("heading", { name: "peeq" });
+    expect(screen.getByText("Commits").parentElement?.textContent).toContain("483");
+    const cell = screen.getByTitle(/483 commits recorded/);
+    expect(cell.textContent).toContain("611255a");
+  });
+
   it("shows the counts and a shortened HEAD SHA", async () => {
     respondWith(200, [peeq]);
 

@@ -49,8 +49,17 @@ const gateTemperature = 0
 // Understanding is what the first step produces. Nobody reads it — it exists to
 // aim the search.
 type Understanding struct {
-	// Intent is how, why, where or conformance. Phase 4a answers how.
+	// Intent is how, why, where, conformance or changes. Phase 4a answers
+	// how; changes is answered from the commit lane, never from the files.
 	Intent string `json:"intent"`
+	// SinceDays is how far back a "what changed" question looks, in days.
+	// Zero on every other intent; the pipeline applies the default window
+	// when a changes question names none, so the model never has to.
+	SinceDays int `json:"since_days"`
+	// Topic is what a changes question is about, or empty when it asks for
+	// every change in the window. Filtered against commit subjects, bodies
+	// and paths; "what changed" alone has no topic and lists the window.
+	Topic string `json:"topic"`
 	// Terms are the question restated in business language, which is what the
 	// vector lane matches against doc comments and module names.
 	Terms []string `json:"terms"`
@@ -136,7 +145,13 @@ func NewUnderstander(c *llm.Client) *Understander {
 const understandSystem = `You analyse a question about a codebase and answer with JSON ONLY.
 
 Fields:
-  intent      "how", "why", "where" or "conformance"
+  intent      "how", "why", "where", "conformance" or "changes"
+  since_days  for "changes" only: how many days back the question asks.
+              "yesterday" is 1, "the last 2 days" is 2, "this week" is 7,
+              "this month" is 30; nothing said is 0. Every other intent is 0.
+  topic       for "changes" only: what the changes are about, as 1-4 words
+              from the question ("snapshot handling", "login"), or "" when
+              the question asks for every change. Every other intent is "".
   terms       2-4 rewordings of the question in domain language, as whole phrases
   code_terms  3-8 identifiers likely to occur in the source: class, method,
               package and protocol names, written the way a developer would
@@ -155,12 +170,20 @@ Fields:
               URLs, outbound links — else "". A question about how one
               link works is not a census.
 
+"changes" is a question about what was DONE to the code recently, not about
+what the code does: "what changed", "what is new", "latest updates", "recent
+commits", "was hat sich geändert", "was ist neu", "letzte Änderungen",
+"quoi de neuf", "cosa è cambiato". A question about how a feature works is
+never "changes", however recent the feature.
+
 A question may arrive with the previous turn of the conversation above it. That
 material is there for ONE purpose: to resolve what the current question leaves
 out - "that", "this", "it", "and how about the other one", a question with no
 subject at all. Everything you answer with describes the CURRENT question. A
 follow-up that stays on the subject inherits it; a follow-up that changes the
-subject gets the new one, and the previous turn contributes nothing to it.
+subject gets the new one, and the previous turn contributes nothing to it. A
+follow-up that only moves the window of a changes question ("only the last
+two days") keeps intent "changes" and the topic.
 
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"

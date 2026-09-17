@@ -24,6 +24,12 @@ type RepoStatus struct {
 	Files         int
 	Chunks        int
 	Modules       int
+	// Commits is how many commits the lane holds for the branch, and
+	// NewestCommitAt the date of the newest: what a "what changed" answer
+	// can look back over. Zero and the zero time for a snapshot, which has
+	// no history.
+	Commits        int
+	NewestCommitAt time.Time
 	// Snapshot is true for a hand-extracted source drop rather than a clone.
 	// The page says so because a snapshot's LastSHA never moves on its own:
 	// without the word, a correct one-off index is indistinguishable from a
@@ -79,30 +85,35 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]map[string]any, 0, len(list))
 	for _, st := range list {
-		var lastRun, lastIndexed any
+		var lastRun, lastIndexed, newestCommit any
 		if !st.LastRunAt.IsZero() {
 			lastRun = st.LastRunAt.UTC().Format(time.RFC3339)
 		}
 		if !st.LastIndexedAt.IsZero() {
 			lastIndexed = st.LastIndexedAt.UTC().Format(time.RFC3339)
 		}
+		if !st.NewestCommitAt.IsZero() {
+			newestCommit = st.NewestCommitAt.UTC().Format(time.RFC3339)
+		}
 		out = append(out, map[string]any{
-			"name":            st.Name,
-			"branch":          st.Branch,
-			"last_sha":        st.LastSHA,
-			"last_run_at":     lastRun,
-			"last_indexed_at": lastIndexed,
-			"files":           st.Files,
-			"chunks":          st.Chunks,
-			"modules":         st.Modules,
-			"enabled":         st.Enabled,
-			"snapshot":        st.Snapshot,
-			"last_error":      st.LastError,
-			"project":         st.Project,
-			"part":            st.Part,
-			"description":     st.Description,
-			"uses":            uses(st.Uses),
-			"stages":          uses(st.Stages),
+			"name":             st.Name,
+			"branch":           st.Branch,
+			"last_sha":         st.LastSHA,
+			"last_run_at":      lastRun,
+			"last_indexed_at":  lastIndexed,
+			"files":            st.Files,
+			"chunks":           st.Chunks,
+			"modules":          st.Modules,
+			"commits":          st.Commits,
+			"newest_commit_at": newestCommit,
+			"enabled":          st.Enabled,
+			"snapshot":         st.Snapshot,
+			"last_error":       st.LastError,
+			"project":          st.Project,
+			"part":             st.Part,
+			"description":      st.Description,
+			"uses":             uses(st.Uses),
+			"stages":           uses(st.Stages),
 		})
 	}
 	// no-store, because this is a STATUS page and a cached status page lies.

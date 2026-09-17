@@ -30,7 +30,21 @@ export type Repo = {
   description: string;
   /** The siblings it depends on, inside the same project. */
   uses: string[];
+  /** The commit lane: how many commits are recorded for the branch and when
+   * the newest was made. Optional because a row from an older build has
+   * neither; a snapshot has none by design. */
+  commits?: number;
+  newest_commit_at?: string | null;
 };
+
+/** historyLine says what the commit lane holds for one repository, for the
+ * tooltip beside its indexed time. A snapshot has no history and says so. */
+export function historyLine(r: Repo): string {
+  if (r.snapshot) return "No history: a snapshot has no commits.";
+  const n = r.commits ?? 0;
+  if (n === 0) return "No commits recorded yet.";
+  return `${n} ${n === 1 ? "commit" : "commits"} recorded, newest ${ago(r.newest_commit_at ?? null)}.`;
+}
 
 /** Project is one product and the repositories it is made of. */
 export type Project = { name: string; repos: Repo[] };
@@ -342,6 +356,12 @@ export default function RepoList() {
         <Stat label="Files" value={sum((r) => r.files)} />
         <Stat label="Chunks" value={sum((r) => r.chunks)} />
         <Stat label="Modules" value={sum((r) => r.modules)} />
+        {/* The commit lane: what "what changed" can look back over. */}
+        <Stat
+          label="Commits"
+          value={sum((r) => r.commits ?? 0)}
+          title="Commits recorded for the indexed branches, for questions about what changed."
+        />
         {/* The poll, not the index: one health signal for the whole corpus.
             Each row says when its own index was last written. */}
         <Stat
@@ -509,7 +529,7 @@ function ProjectPanel({ project }: { project: Project }) {
                       anything was indexed, and read as "indexed just now". */}
                   <td
                     className="w-px whitespace-nowrap px-3.5 py-3"
-                    title={`Indexed ${ago(r.last_indexed_at)}. Last poll ${ago(r.last_run_at)}.`}
+                    title={`Indexed ${ago(r.last_indexed_at)}. Last poll ${ago(r.last_run_at)}. ${historyLine(r)}`}
                   >
                     {relative(r.last_indexed_at)}
                     {/* Its own line: beside the time it cost the column 70px,

@@ -11,7 +11,7 @@
  */
 import { type ClarifyCandidate } from "./Clarify";
 import { type Step, type TraceState } from "./Trace";
-import { type SourceRef } from "./SourceView";
+import { isCommit, type SourceRef } from "./SourceView";
 import { mermaidize } from "./diagramExport";
 import { fold, strip, type PastedText } from "./pastes";
 
@@ -417,7 +417,18 @@ export function traceState(turn: Turn): TraceState {
 /** How a citation reads on one line: in the list under an answer, and in the
  * Markdown a turn is copied as. */
 export function forgeLine(c: Citation): string {
+  if (isCommit(c)) return `${c.repo} · ${shortSha(c.sha)} ${commitDay(c)} ${c.subject ?? ""} (${c.branch})`;
   return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
+}
+
+/** The first seven characters of a commit, the way git prints one. */
+export function shortSha(sha: string | undefined): string {
+  return (sha ?? "").slice(0, 7);
+}
+
+/** The day a commit citation was made, as YYYY-MM-DD, or "" when unknown. */
+export function commitDay(c: Citation): string {
+  return (c.committed_at ?? "").slice(0, 10);
 }
 
 export function roleName(a: Audience): string {

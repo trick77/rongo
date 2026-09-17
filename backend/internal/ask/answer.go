@@ -76,6 +76,11 @@ const answerMaxTokens = 16384
 // the commit the cited file was indexed at: the source viewer reads the file
 // at that commit, so the cited lines are the lines the answer was written
 // from even after the branch has moved on.
+//
+// A commit citation (Kind = SourceCommit) cites a change rather than lines:
+// SHA is the commit, Path and the lines are empty, and Subject and
+// CommittedAt are what the chip shows. It opens in the commit view, never in
+// the file viewer.
 type Citation struct {
 	Marker    int    `json:"marker"`
 	Repo      string `json:"repo"`
@@ -84,6 +89,10 @@ type Citation struct {
 	StartLine int    `json:"start_line"`
 	EndLine   int    `json:"end_line"`
 	SHA       string `json:"sha"`
+	Kind      string `json:"kind,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	// CommittedAt is RFC 3339 in UTC; empty for a file citation.
+	CommittedAt string `json:"committed_at,omitempty"`
 }
 
 // Answer is one finished turn.
@@ -677,6 +686,14 @@ type Scope struct {
 	// The column is a JSON blob, so a row written before this field decodes
 	// to the empty string and the prompt is the one it was written under.
 	Intent string `json:"intent,omitempty"`
+	// SinceDays is the window a changes turn answered for, in days, after
+	// the default was applied; zero on every other intent. Part of the
+	// record for the reason Stage is: a re-explained turn describes the
+	// same days.
+	SinceDays int `json:"since_days,omitempty"`
+	// Topic is what the changes turn was narrowed to, or empty for the
+	// whole window. Recorded beside SinceDays so the prompt can say it.
+	Topic string `json:"topic,omitempty"`
 	// DocsOnly is true when every source the answer was written from is
 	// documentation. Not something the question said, but it belongs here for
 	// the same reason Unknown does: it is what the turn has to tell the reader
@@ -759,7 +776,9 @@ func DocsOnly(sources []Source) bool {
 		return false
 	}
 	for _, s := range sources {
-		if !retrieve.IsDocPath(s.Path) {
+		// A commit is neither code nor prose about it; a changes turn is
+		// never "documentation only".
+		if s.IsCommit() || !retrieve.IsDocPath(s.Path) {
 			return false
 		}
 	}
@@ -1048,6 +1067,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// answers the question" means depends on what the question asked for.
 	// A missing or unknown intent adds nothing.
 	system += answerIntent[scope.Intent]
+	system += changesBlock(scope, audience)
 	// After the audience block, so "cover every one of them" is read against
 	// the shape the audience block just set rather than before it.
 	//
@@ -1234,6 +1254,10 @@ func renderSources(question string, sources []Source, declared stages.Set) strin
 	b.WriteString(question)
 	b.WriteString("\n\nSources:\n")
 	for i, s := range sources {
+		if s.IsCommit() {
+			renderCommit(&b, i+1, s)
+			continue
+		}
 		fmt.Fprintf(&b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)

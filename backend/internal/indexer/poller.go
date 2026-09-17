@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/sched"
 )
@@ -28,6 +29,11 @@ const DefaultPollInterval = 30 * time.Minute
 // forge in the same second.
 const FirstPollDelay = 30 * time.Second
 
+// DefaultHistoryDepth is how many first-parent commits a full index records.
+// It bounds a monorepo's first run; an incremental poll records every commit
+// since the indexed one, which a thirty-minute interval keeps small.
+const DefaultHistoryDepth = 500
+
 // IndexFunc indexes one repository at one commit. paths is nil for a full index
 // and carries the changed paths for an incremental one.
 type IndexFunc func(ctx context.Context, st RepoState, sha string, paths []string) (Counts, error)
@@ -43,6 +49,12 @@ type PollerDeps struct {
 	Index    IndexFunc
 	Tokens   TokenFunc
 	Interval time.Duration
+	// History receives the branch's commits beside the file index; nil
+	// records none, which is what a retrieval-only harness wants.
+	History *history.Store
+	// HistoryDepth caps a full index's commit count; zero means
+	// DefaultHistoryDepth.
+	HistoryDepth int
 	// FirstDelay overrides FirstPollDelay. A test that wants the first cycle
 	// immediately sets it; nothing in production does.
 	FirstDelay time.Duration
@@ -59,6 +71,8 @@ type Poller struct {
 	tokens     TokenFunc
 	interval   time.Duration
 	firstDelay time.Duration
+	history    *history.Store
+	depth      int
 	log        *slog.Logger
 }
 
@@ -76,9 +90,13 @@ func NewPoller(d PollerDeps) *Poller {
 	if d.Tokens == nil {
 		d.Tokens = func(string) string { return "" }
 	}
+	if d.HistoryDepth <= 0 {
+		d.HistoryDepth = DefaultHistoryDepth
+	}
 	return &Poller{
 		state: d.State, git: d.Git, index: d.Index,
 		tokens: d.Tokens, interval: d.Interval, firstDelay: d.FirstDelay,
+		history: d.History, depth: d.HistoryDepth,
 		log: d.Logger,
 	}
 }
@@ -339,8 +357,40 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		return pollResult{}, err
 	}
 
+	// After the index and before last_sha moves: a failure here leaves the
+	// commit un-recorded, and the next cycle logs the same range again.
+	// Append skips what is held, so the redo is safe.
+	if err := p.recordHistory(ctx, spec, st.LastSHA, head); err != nil {
+		return pollResult{}, err
+	}
+
 	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: head, Counts: counts}
 	return res, p.state.MarkIndexed(ctx, st.Name, head, counts)
+}
+
+// recordHistory writes the commits an index run made answerable: the whole
+// first-parent history on a full run, the range since the indexed commit
+// on an incremental one. A snapshot has one synthetic commit and no
+// history worth the name; it records none, and the answer says so.
+func (p *Poller) recordHistory(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) error {
+	if p.history == nil || spec.Snapshot {
+		return nil
+	}
+	commits, err := p.git.Log(ctx, spec, fromSHA, toSHA, p.depth)
+	if err != nil {
+		return err
+	}
+	if fromSHA == "" {
+		err = p.history.Replace(ctx, spec.Name, commits)
+	} else {
+		err = p.history.Append(ctx, spec.Name, commits)
+	}
+	if err != nil {
+		return err
+	}
+	p.log.Debug("commits recorded", "repo", spec.Name, "commits", len(commits),
+		"full", fromSHA == "")
+	return nil
 }
 
 // pollSnapshot is pollRepo for a hand-extracted source drop: the same shape

@@ -89,7 +89,7 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 	for _, table := range []string{
 		"users", "sessions", "repo_state", "files", "symbols", "chunks",
 		"embed_cache", "repo_deps", "threads", "messages", "citations",
-		"clarifications", "clarification_candidates", "message_sources",
+		"clarifications", "clarification_candidates", "message_sources", "commits", "commits_fts",
 	} {
 		var name string
 		err := db.QueryRow(
