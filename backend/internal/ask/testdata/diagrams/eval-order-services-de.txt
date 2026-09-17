@@ -1,0 +1,47 @@
+## Dienste, die der Bestelldienst vor dem Speichern abfragt
+
+Der Bestelldienst ruft vor dem Speichern einer Bestellung insgesamt **sechs Dienste** auf: vier parallel zu Beginn (Benutzer-, Adressen-, Karten- und Warenkorbdienst), dann den Zahlungsdienst zur Autorisierung und bei Erfolg den Versanddienst zur Erstellung einer Lieferung [1][2].
+
+Zuerst startet der Bestelldienst vier parallele asynchrone HTTP-GET-Aufrufe. Über die in der Bestellanfrage übergebenen URLs fragt er den **Benutzerdienst** nach den Kundendaten, den **Adressendienst** nach der Rechnungsadresse, den **Kartendienst** nach den Zahlungskartendetails und den **Warenkorbdienst** nach der Artikelliste samt Stückpreisen ab [2]. Die Adress-URL zeigt auf den Benutzerdienst (`http://user.<domain>/addresses/…`) [3].
+
+Sobald die vier Antworten vorliegen, berechnet der Bestelldienst den Gesamtbetrag – Artikelpreise zzgl. pauschaler Versandkosten in Höhe von 4,99 Einheiten [4] – und sendet diesen zusammen mit den Adress-, Karten- und Kundendaten an den **Zahlungsdienst** per HTTP-POST (Konfigurationspfad: `payment`) [1][2][5]. Der Zahlungsdienst prüft, ob der Betrag autorisiert werden kann [6]. Ist die Zahlung nicht autorisiert oder die Antwort nicht lesbar, wird die Bestellung mit einer entsprechenden Meldung abgelehnt [1].
+
+Erst nach erfolgreicher Zahlungsautorisation erstellt der Bestelldienst einen neuen Versandauftrag über den **Versanddienst** per HTTP-POST (Konfigurationspfad: `shipping`) [1][7]. Die Kunden-ID wird aus der zuvor erhaltenen Kundenressource extrahiert [8]. Erst danach werden alle gesammelten Daten – Kunde, Adresse, Karte, Artikel, Lieferung, Datum und Gesamtbetrag – zu einer Bestellung zusammengefügt und in der Datenbank gespeichert [1].
+
+Die nachfolgende Abbildung zeigt den Ablauf inklusive der Verzweigung bei nicht autorisierter Zahlung:
+
+```mermaid
+sequenceDiagram
+    participant BS as Bestelldienst
+    participant BD as Benutzerdienst
+    participant AD as Adressendienst
+    participant KD as Kartendienst
+    participant WK as Warenkorbdienst
+    participant ZA as Zahlungsdienst
+    participant VS as Versanddienst
+
+    par Parallel: Daten abrufen
+        BS->>BD: Kundendaten abrufen
+        BD-->>BS: Kunde
+    and
+        BS->>AD: Adresse abrufen
+        AD-->>BS: Rechnungsadresse
+    and
+        BS->>KD: Karte abrufen
+        KD-->>BS: Zahlungskarte
+    and
+        BS->>WK: Warenkorbartikel abrufen
+        WK-->>BS: Artikelliste
+    end
+    BS->>ZA: Zahlung autorisieren
+    ZA-->>BS: Autorisierungsantwort
+    alt Zahlung abgelehnt
+        BS-->>BS: Bestellung ablehnen
+    else Zahlung genehmigt
+        BS->>VS: Lieferung beauftragen
+        VS-->>BS: Lieferungsbestätigung
+        BS->>BS: Bestellung speichern
+    end
+```
+
+Das Verhalten ist in der Code-Logik des Bestelldienstes fest eingebrannt – es handelt sich um fest programmierte Aufrufreihenfolgen mit einem konfigurierbaren Timeout von 5 Sekunden [9]. Eine Änderung der Abfolge oder der beteiligten Dienste wäre eine Entwicklungsaufgabe, keine Konfigurationsänderung.

@@ -1,0 +1,13 @@
+A thread moves through four states, and only the owner moves it [8][1].
+
+```mermaid
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Shared : share()
+  Shared --> Draft : unshare()
+  Shared --> Archived : archive()
+  Draft --> Archived : archive()
+  Archived --> [*]
+```
+
+An archived thread is never shared again [8].

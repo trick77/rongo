@@ -438,7 +438,8 @@ process listed here whose nodes have no source of their own may be walked by
 the names above, and then say in a clause that its model was not among the
 sources; say nothing about what its steps do inside. This walk is the
 flowchart: draw it as the answer's diagram, one node per step above, the
-branch condition as the edge label, each node citing the step's own source.`
+branch condition as the edge label, the steps' sources cited in the sentence
+that introduces it.`
 
 // answerLinks is the link census block. The listing is read from the index,
 // so it is complete where the sources are capped; what the sites lead to is
@@ -539,73 +540,84 @@ var answerIntent = map[string]string{
 // are the ones the model just read: a Developer diagram names functions and
 // files, an Analyst diagram speaks the domain. The fence is named literally,
 // as the DEV block names ` + "```go" + `: the model needs the syntax, not a
-// description of it. The src array cites the same sources the prose does,
-// but it is JSON: answerCommon's "one marker per bracket" reads as [6][25]
-// applied to an array, which is not JSON at all, so the fence says outright
-// that the rule stops here - both the bare chain and the [6],[25] the model
-// writes when it remembers the comma but not the single array.
+// description of it.
 //
 // The trigger is positive and audience-neutral on purpose. It used to read
 // "only where control flow or a call sequence carries the explanation",
 // which is a restriction in developer words: an Analyst question is about a
 // process, a hand-off, a decision, and the words never fired. Saying what
-// earns a picture - an order with a branch, or two parties exchanging
-// messages - and what does not (a plain sequence of steps is a list, one
+// earns a picture and what does not (a plain sequence of steps is a list, one
 // rule or value is prose) draws the line the shape rule's list permission
 // otherwise claims for itself.
 //
-// The counts below are what reads well, and the renderer no longer enforces
-// them: a spec one actor too wide used to be dropped and shown as its JSON,
-// which is worse than a wide picture in a box that scrolls. They stay strict
-// here because that is what keeps a diagram compact in the first place.
+// The type table is the reason the renderer changed. With two shapes on
+// offer, a question whose answer is a mapping - which trigger produces to
+// which topic, which handler serves which route - came back as a flowchart
+// with an invented order between the targets and one target drawn twice
+// (share W5L1FYhvOF, 2026-09-17). Each row names the shape of the content
+// and the type that draws it; the mapping row says outright that a target is
+// one node, because that is the error the flowchart made.
+//
+// The picture does not cite. It used to, through a src array per node, and
+// the chips were the reason the renderer was hand-written; the sentence that
+// introduces the diagram carries the markers now, as a doc-only claim
+// already does. Inside the fence a bracket is syntax, so a marker there
+// breaks the picture, and the rule says so.
+//
+// The label rule exists because with nothing said about length the model
+// wrote sentences ("RANK 1: gefundene Code-Fragmente nach Relevanz zur Frage
+// bewerten") and the reader got boxes of half-sentences, seen 2026-09-16.
+// Quotes around every label are what keeps a label with a parenthesis, a
+// colon or an umlaut from being read as syntax: the renderer's parser is
+// strict and a parse error loses the whole picture.
 //
 // The closing paragraph settles a contradiction the model was left to resolve
 // on its own: answerBA bars source code from an Analyst answer, and a diagram
-// is syntactically a code fence, so the block came back tagged ```json or with
-// no fence at all and the reader got JSON. The prompt is not the guard,
-// though - renumber.go recognises the spec by its content whatever the fence
-// says, because a prompt this one only ever holds most of the time.
-//
-// The label rule exists because the count cap alone did not keep a node
-// short: with nothing said about length the model wrote sentences ("RANK 1:
-// gefundene Code-Fragmente nach Relevanz zur Frage bewerten"), and the
-// renderer's box is fixed at about twenty columns by three lines, cutting
-// the rest with an ellipsis (ui/src/diagram.tsx, wrap). The reader then got
-// a diagram of half-sentences, seen 2026-09-16. The cut is deliberate on the
-// renderer's side, so the fix is here: a node is a title.
+// is syntactically a code fence, so the block came back tagged as something
+// else or with no fence at all and the reader got text.
 const answerDiagram = `
 
 At most one diagram. Draw one when the explanation is steps in an order with
-a decision that splits the path (a flowchart, "type":"flow"), or two or more
-parties exchanging messages in an order (a sequence diagram,
-"type":"sequence") - whether the parties are functions and services or
-roles, systems and people. Steps with no branch and one party are a list,
-not a diagram. Skip it when the answer is one rule, one value or one place.
-The diagram is a fenced block tagged ` + "```diagram" + ` holding JSON, either
-{"type":"flow","nodes":[{"id","label","kind":"start|end|step|decision","src":[1]}],
- "edges":[{"from","to","label"}]} or
-{"type":"sequence","actors":[{"id","label"}],
- "steps":[{"from","to","label","kind":"call|return|async","src":[1]}]}.
-src holds the markers the node rests on. It is a JSON array, not prose: two
-sources read "src":[6,25], never "src":[6][25] or "src":[6],[25] - the
-one-marker-per-bracket rule is about running text and does not reach inside
-the fence. At most 12 nodes, 5 actors, 12 steps. Labels follow the audience
-rules above and are written in the answer language; ids stay short ASCII.
-A label is a title, not a sentence: a noun phrase or an imperative of at
-most five words, about 40 characters - "Treffer bewerten", not "RANK 1:
-gefundene Code-Fragmente nach Relevanz zur Frage bewerten". No step
-numbers, no "RANK 1:" prefixes, no clauses: the box holds three short lines
-and cuts the rest with an ellipsis, so a long label reaches the reader
-truncated. An actor gets one line of about 15 characters, one or two words:
-"Indexer", not "Indexing Service Backend". What a node cannot say in five
-words goes in the prose.
-The prose still explains; the diagram is not a substitute.
+a decision that splits the path; two or more parties exchanging messages in
+an order, whether the parties are functions and services or
+roles, systems and people; a set of states with the transitions between
+them; entities with the relations between them; or a mapping from triggers
+to targets.
+Steps with no branch and one party are a list, not a diagram. Skip it when
+the answer is one rule, one value or one place.
+The diagram is a fenced block tagged ` + "```mermaid" + ` holding mermaid
+syntax, and its type follows the shape of the content:
+- steps with a branch: flowchart TD, a decision as a {"?"} node, the
+  condition as the edge label
+- an exchange between parties over time: sequenceDiagram, one participant
+  per party
+- states and transitions: stateDiagram-v2, the guard on the transition
+- entities and their relations: erDiagram, with the fields that matter
+- a mapping from triggers to targets (which event produces to which topic,
+  which handler serves which route): flowchart LR with two subgraphs, the
+  triggers in one and the targets in the other, an edge per pair and the
+  condition as its label. A target that several triggers reach is ONE node
+  with several edges into it, never drawn twice, and there is no edge between
+  two targets: a mapping has no order.
+At most 12 nodes, 5 participants, 12 messages. Every node label sits in
+double quotes - a["Treffer bewerten"], b{"Zeiträume vorhanden?"} - because
+a parenthesis, a colon or a bracket outside quotes is syntax and breaks the
+picture; a sequence message after the colon needs no quotes. A label is a
+title, not a sentence: a noun phrase or an imperative of at most five words,
+about 40 characters - "Treffer bewerten", not "RANK 1: gefundene
+Code-Fragmente nach Relevanz zur Frage bewerten". No step numbers, no
+"RANK 1:" prefixes, no clauses. Labels follow the audience rules above and
+are written in the answer language; ids stay short ASCII without spaces.
+What a node cannot say in five words goes in the prose.
+No citation markers inside the fence: the sentence that introduces the
+diagram carries the markers for what it shows, and the prose still explains;
+the diagram is not a substitute.
 
 The block is a diagram, not source code: an audience rule that bars code,
 signatures or file paths from running text does not bar it, and it is written
-for every audience. Open it with ` + "```diagram" + ` and nothing else - not
-` + "```json" + `, not ` + "```mermaid" + `, and never as bare JSON without a
-fence. A block opened any other way is printed as text and the reader gets no
+for every audience. Open it with ` + "```mermaid" + ` and nothing else - not
+` + "```json" + `, not ` + "```diagram" + `, and never without a fence. A
+block opened any other way is printed as text and the reader gets no
 picture.`
 
 // nothingFound is the answer when nothing was gathered, in the language the
@@ -783,21 +795,6 @@ func DocsOnly(sources []Source) bool {
 		}
 	}
 	return true
-}
-
-// docMask says, per source, whether it is documentation. It is what lets the
-// renumberer keep a diagram node from citing prose; the order is the order
-// renderSources numbered, so index i is the prompt's source i+1.
-//
-// IsProseDoc, not IsDocPath: this drops a citation outright rather than
-// demoting it, so a file that is code sitting in a docs/ directory keeps its
-// chip. See IsProseDoc for why the two predicates differ.
-func docMask(sources []Source) []bool {
-	out := make([]bool, len(sources))
-	for i, s := range sources {
-		out[i] = retrieve.IsProseDoc(s.Path)
-	}
-	return out
 }
 
 // scopeNotice is the "one of the repositories you named is not indexed"
@@ -1151,7 +1148,6 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// way on the same pass (swiss.go), so the record is what was read.
 	var text strings.Builder
 	rn := newRenumberer(len(sources))
-	rn.docs = docMask(sources)
 	sp := &speller{}
 	if ParseLanguage(string(lang)) == LanguageDE {
 		rn.spell = sp.prose

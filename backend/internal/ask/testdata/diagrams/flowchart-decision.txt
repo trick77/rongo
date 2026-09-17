@@ -1,0 +1,12 @@
+The answer path decides first whether anything was gathered [4].
+
+```mermaid
+flowchart TD
+  a(["Answer()"]) --> b{"sources empty?"}
+  b -->|"yes"| c(["NothingFound"])
+  b -->|"no"| d["Stream to the model"]
+  d --> e["Renumber markers"]
+  e --> f(["Answer stored"])
+```
+
+The stored text is what the reader watched being written [4][9].

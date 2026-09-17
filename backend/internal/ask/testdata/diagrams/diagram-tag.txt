@@ -1,0 +1,9 @@
+The model opened the fence with the older tag [3].
+
+```diagram
+flowchart TD
+  a["Fetch"] --> b["Index"]
+  b --> c["Answer"]
+```
+
+Same picture [3].

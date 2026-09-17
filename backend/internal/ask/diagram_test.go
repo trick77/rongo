@@ -1,14 +1,13 @@
 package ask
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
 
-// A diagram fence cites through the src arrays of its nodes. Those numbers
-// are the same claim a marker in prose is, so they pass through the same
-// renumberer and land in the same evidence panel.
+// A diagram fence is a code fence to the renumberer: nothing in it is a
+// marker, and nothing in it is rewritten. The picture cites through the
+// sentence that introduces it, and that sentence renumbers as prose does.
 
 // renumbered runs the whole answer through the renumberer in one go.
 func renumbered(t *testing.T, sources int, text string) (string, *renumberer) {
@@ -18,111 +17,68 @@ func renumbered(t *testing.T, sources int, text string) (string, *renumberer) {
 	return out, rn
 }
 
-func TestRenumber_aDiagramNodeCitesThroughItsSrc(t *testing.T) {
-	text := "Prose without markers.\n```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"NewGrant","src":[2]},` +
-		`{"id":"b","label":"issueGrant","src":[1]}],"edges":[]}` +
-		"\n```\n"
+const kafkaMap = "flowchart LR\n" +
+	"  subgraph Ereignis\n" +
+	"    e1[\"Schadenmeldung eingegangen\"]\n" +
+	"    e2[\"Nachreichung eingegangen\"]\n" +
+	"  end\n" +
+	"  subgraph Topic\n" +
+	"    t1[\"Benachrichtigung\"]\n" +
+	"    t2[\"Arbeitsunfähigkeit\"]\n" +
+	"  end\n" +
+	"  e1 --> t1\n" +
+	"  e2 --> t1\n" +
+	"  e2 -->|\"nur mit Zeiträumen\"| t2\n"
 
-	out, rn := renumbered(t, 2, text)
+func TestRenumber_aDiagramFenceIsLeftExactlyAsItCame(t *testing.T) {
+	text := "Die Zuordnung steht im Code [7][3].\n\n```mermaid\n" + kafkaMap + "```\n\nDanach [7]."
 
-	// First appearance decides the reader's number: source 2 is cited first.
-	if !strings.Contains(out, `"src":[1]`) || !strings.Contains(out, `"src":[2]`) {
-		t.Errorf("out = %q, want the src arrays renumbered 1 then 2", out)
+	out, rn := renumbered(t, 9, text)
+
+	if !strings.Contains(out, "```mermaid\n"+kafkaMap+"```") {
+		t.Errorf("out = %q, want the fence byte for byte as it came", out)
 	}
-	cits := rn.citations(twoSources())
-	if len(cits) != 2 || cits[0].Path != "backend/internal/httpapi/grant.go" {
-		t.Errorf("citations = %+v, want both, the reader's [1] being prompt source 2", cits)
+	if !strings.HasPrefix(out, "Die Zuordnung steht im Code [1][2].") || !strings.HasSuffix(out, "Danach [1].") {
+		t.Errorf("out = %q, want the prose around it renumbered", out)
 	}
-}
-
-func TestRenumber_aDiagramAndTheProseShareOneNumbering(t *testing.T) {
-	// The invariant the feature rests on: a chip on a node is the chip in
-	// the prose, so the same source may not read [1] in one and [2] in the
-	// other.
-	text := "The grant is created in store.go [1].\n```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]},{"id":"b","label":"y","src":[1]}],"edges":[]}` +
-		"\n```"
-
-	out, rn := renumbered(t, 2, text)
-
-	if !strings.Contains(out, "store.go [1]") {
-		t.Errorf("out = %q, want the prose marker to stay the reader's [1]", out)
-	}
-	if !strings.Contains(out, `"src":[2]`) || !strings.Contains(out, `"src":[1]`) {
-		t.Errorf("out = %q, want the node on source 1 to read [1], as the prose does", out)
-	}
-	if len(rn.citations(twoSources())) != 2 {
-		t.Errorf("citations = %+v, want one row per source", rn.citations(twoSources()))
+	if len(rn.order) != 2 {
+		t.Errorf("order = %v, want the two prose sources and nothing from the fence", rn.order)
 	}
 }
 
-func TestRenumber_anIndexExpressionInADiagramLabelIsNotACitation(t *testing.T) {
-	// Anchored on the "src" key, never on a bracket: a label is text.
-	text := "```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"parts[2]","src":[]}],"edges":[]}` +
-		"\n```"
+func TestRenumber_aNumberInADiagramLabelIsNotACitation(t *testing.T) {
+	// A label may hold anything: an index expression, a step number, a
+	// marker the model wrote against the prompt. None of it is a claim.
+	text := "```mermaid\nflowchart TD\n  a[\"parts[2]\"] --> b[\"Schritt [1]\"]\n```"
 
 	out, rn := renumbered(t, 2, text)
 
-	if !strings.Contains(out, `"label":"parts[2]"`) {
-		t.Errorf("out = %q, want the label untouched", out)
+	if out != text {
+		t.Errorf("out = %q, want %q", out, text)
 	}
-	if len(rn.citations(twoSources())) != 0 {
-		t.Errorf("citations = %+v, want none: parts[2] is a label, not a claim", rn.citations(twoSources()))
-	}
-}
-
-func TestRenumber_aCodeFenceNextToADiagramStillCitesNothing(t *testing.T) {
-	text := "```go\nx := a[1]\n// \"src\":[2]\n```\n```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]}],"edges":[]}` +
-		"\n```"
-
-	out, rn := renumbered(t, 2, text)
-
-	if !strings.Contains(out, "x := a[1]") || !strings.Contains(out, "// \"src\":[2]") {
-		t.Errorf("out = %q, want the go fence untouched, src-shaped comment included", out)
-	}
-	cits := rn.citations(twoSources())
-	if len(cits) != 1 || cits[0].Marker != 1 {
-		t.Errorf("citations = %+v, want only the diagram's source, as the reader's [1]", cits)
+	if len(rn.order) != 0 {
+		t.Errorf("order = %v, want nothing cited", rn.order)
 	}
 }
 
-func TestRenumber_anInventedNumberInSrcIsLeftAloneAndNeverCited(t *testing.T) {
-	text := "```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[1,9]}],"edges":[]}` +
-		"\n```"
+func TestRenumber_aDiagramSplitAcrossTokensIsStillOneFence(t *testing.T) {
+	text := "Sequenz [4].\n```mermaid\nsequenceDiagram\n  A->>B: call [4]\n  B-->>A: ok\n```\nEnde [2]."
+	want := "Sequenz [1].\n```mermaid\nsequenceDiagram\n  A->>B: call [4]\n  B-->>A: ok\n```\nEnde [2]."
 
-	out, rn := renumbered(t, 2, text)
-
-	if !strings.Contains(out, `"src":[1,9]`) {
-		t.Errorf("out = %q, want 9 left as it came", out)
-	}
-	if len(rn.citations(twoSources())) != 1 {
-		t.Errorf("citations = %+v, want only the real source", rn.citations(twoSources()))
-	}
-}
-
-func TestRenumber_aDiagramSplitAcrossTokensStillRenumbers(t *testing.T) {
-	// The normal case: the fence, the key and the array all arrive in
-	// pieces, and a half-written src may not reach the reader as it came.
-	rn := newRenumberer(2)
-	var got strings.Builder
-	for _, tok := range []string{"Text.\n``", "`diag", "ram\n{\"nodes\":[{\"sr", "c\":[", "2", "]},{\"src\"", ": [1", ", 2]}]}\n``", "`\n"} {
-		got.WriteString(rn.feed(tok))
-	}
-	got.WriteString(rn.flush())
-
-	out := got.String()
-	if !strings.Contains(out, `"src":[1]`) {
-		t.Errorf("out = %q, want the first src renumbered to the reader's [1]", out)
-	}
-	if !strings.Contains(out, `"src":[1,2]`) {
-		t.Errorf("out = %q, want the grouped src renumbered and sorted", out)
-	}
-	if !strings.HasPrefix(out, "Text.\n```diagram\n") {
-		t.Errorf("out = %q, want the fence header intact", out)
+	for _, size := range []int{1, 2, 3, 5, 7, 11} {
+		rn := newRenumberer(5)
+		var out strings.Builder
+		for i := 0; i < len(text); i += size {
+			end := i + size
+			if end > len(text) {
+				end = len(text)
+			}
+			out.WriteString(rn.feed(text[i:end]))
+		}
+		out.WriteString(rn.flush())
+		if out.String() != want {
+			t.Errorf("token size %d: out = %q, want %q", size, out.String(), want)
+		}
 	}
 }
 
@@ -140,116 +96,42 @@ func TestRenumber_aSameLineTripleBacktickSpanIsNotAFence(t *testing.T) {
 	}
 }
 
-func TestRenumber_theInfoStringIsReadAsTheBrowserReadsIt(t *testing.T) {
-	// markdown.tsx takes the first token of the info string, so "```diagram
-	// flow" still draws a diagram. Were this end stricter, its src would keep
-	// the prompt's numbering while the chip claimed the reader's - a chip
-	// opening a source the node never cited.
-	text := "```diagram flow\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2]}],"edges":[]}` +
-		"\n```"
-
-	out, rn := renumbered(t, 2, text)
-
-	if !strings.Contains(out, `"src":[1]`) {
-		t.Errorf("out = %q, want the src renumbered despite the trailing word", out)
-	}
-	if len(rn.order) != 1 {
-		t.Errorf("order = %v, want the node's source cited", rn.order)
-	}
-}
-
-func TestRenumber_aChainedSrcBecomesTheArrayItMeant(t *testing.T) {
-	// answerCommon tells the model that two sources read [6][25], and it
-	// applies that inside the fence. Written into JSON the chain does not
-	// parse, so the browser shows the diagram as the code block it now is -
-	// and renumbering only the first group would leave the second at prompt
-	// numbering, putting a wrong source under a chip.
-	text := "```diagram\n" +
-		`{"type":"flow","nodes":[{"id":"a","label":"x","src":[2][1]}],"edges":[]}` +
-		"\n```"
-
-	out, rn := renumbered(t, 2, text)
-
-	if !strings.Contains(out, `"src":[1,2]`) {
-		t.Errorf("out = %q, want one array holding both, each renumbered", out)
-	}
-	if len(rn.order) != 2 {
-		t.Errorf("order = %v, want both sources cited, not one of them twice", rn.order)
-	}
-}
-
-func TestRenumber_aChainedSrcSplitAcrossTokensIsStillOneArray(t *testing.T) {
-	// The group is complete where the token ends, so it may not be emitted
-	// yet: the bracket that follows turns it into a chain.
-	rn := newRenumberer(2)
-	var got strings.Builder
-	for _, tok := range []string{"```diagram\n{\"nodes\":[{\"src\":[2]", "[1]}]}\n```"} {
-		got.WriteString(rn.feed(tok))
-	}
-	got.WriteString(rn.flush())
-
-	if out := got.String(); !strings.Contains(out, `"src":[1,2]`) {
-		t.Errorf("out = %q, want the chain joined across the token boundary", out)
-	}
-}
-
-func TestRenumber_aChainedSrcLeavesTheDiagramParseable(t *testing.T) {
-	// The whole answer as one payload: what the reader must get back is a
-	// spec the browser's parseDiagram accepts, not a code block.
-	text := "```diagram\n" +
-		`{"type":"sequence","actors":[{"id":"ui","label":"UI"},{"id":"be","label":"Backend"}],` +
-		`"steps":[{"from":"ui","to":"be","label":"Get current rates","kind":"call","src":[2][1]}]}` +
-		"\n```"
-
-	out, _ := renumbered(t, 2, text)
-
-	body, _, _ := strings.Cut(strings.TrimPrefix(out, "```diagram\n"), "\n```")
-	var spec any
-	if err := json.Unmarshal([]byte(body), &spec); err != nil {
-		t.Errorf("the fence body does not parse: %v\nbody = %s", err, body)
-	}
-}
-
 func TestRenumber_anUnclosedDiagramFenceStillEndsWhole(t *testing.T) {
 	// A cut stream: the browser shows the block as text, so nothing may be
 	// held back for a close that never comes.
 	rn := newRenumberer(2)
-	out := rn.feed("```diagram\n{\"nodes\":[{\"src\":[2") + rn.flush()
+	out := rn.feed("```mermaid\nflowchart TD\n  a --> b[\"x") + rn.flush()
 
-	if !strings.Contains(out, `"src":[2`) {
-		t.Errorf("out = %q, want the partial array flushed as it came", out)
+	if !strings.HasSuffix(out, "b[\"x") {
+		t.Errorf("out = %q, want the partial fence flushed as it came", out)
 	}
 }
 
-// DiagramKind is what the answers harness counts: the picture the reader
-// gets, after the renumberer has retagged whatever the model fenced it as,
-// under the browser's own conditions (diagram.tsx parse, markdown.tsx
-// fenceRe).
-func TestDiagramKind_countsTheDrawnPictureOnly(t *testing.T) {
-	flow := `{"type":"flow","nodes":[{"id":"a","label":"Start","kind":"start"}],"edges":[]}`
-	seq := `{"type":"sequence","actors":[{"id":"u","label":"User"}],"steps":[]}`
+// DiagramKind is what the answers harness counts: the diagram type the fence
+// names, under the browser's reading of a fence (markdown.tsx fenceRe,
+// diagram.tsx diagramKind).
+func TestDiagramKind_readsTheTypeOffTheFence(t *testing.T) {
 	for name, tc := range map[string]struct{ text, want string }{
-		"flow":     {"Lead.\n```diagram\n" + flow + "\n```\nMore.", "flow"},
-		"sequence": {"```diagram\n" + seq + "\n```", "sequence"},
-		// The browser takes the first token of the info string.
-		"header variant": {"```diagram flow\n" + flow + "\n```", "flow"},
+		"flowchart": {"Lead.\n```mermaid\n" + kafkaMap + "```\nMore.", "flowchart"},
+		"sequence":  {"```mermaid\nsequenceDiagram\n  A->>B: x\n```", "sequenceDiagram"},
+		"state":     {"```mermaid\nstateDiagram-v2\n  [*] --> A\n```", "stateDiagram-v2"},
+		"er":        {"```mermaid\nerDiagram\n  A ||--o{ B : has\n```", "erDiagram"},
+		// A directive or a comment before the type is skipped.
+		"directive": {"```mermaid\n%%{init: {}}%%\n\nflowchart TD\n  a\n```", "flowchart"},
+		// The browser takes the first token of the info string, and the
+		// older tag still opens a diagram.
+		"header variant": {"```mermaid graph\nflowchart TD\n  a\n```", "flowchart"},
+		"diagram tag":    {"```diagram\nflowchart TD\n  a\n```", "flowchart"},
 		// A code fence before the diagram is skipped, not mistaken for it.
-		"after code": {"```go\nx := 1\n```\n```diagram\n" + seq + "\n```", "sequence"},
+		"after code": {"```go\nx := 1\n```\n```mermaid\nerDiagram\n  A\n```", "erDiagram"},
 		"prose":      {"Just prose [1].", ""},
 		"code":       {"```go\nx := 1\n```", ""},
-		// The browser draws nothing from these and shows the block as text:
-		// a type it has no renderer for, no node or actor to draw, JSON that
-		// does not parse, a fence the stream cut off before the close.
-		"unknown type": {"```diagram\n{\"type\":\"pie\"}\n```", ""},
-		"empty nodes":  {"```diagram\n{\"type\":\"flow\",\"nodes\":[],\"edges\":[]}\n```", ""},
-		"empty actors": {"```diagram\n{\"type\":\"sequence\",\"actors\":[],\"steps\":[]}\n```", ""},
-		"bad json":     {"```diagram\n{\"type\":\"flow\",\"nodes\":[{\"id\":\"a\",\n```", ""},
-		"unclosed":     {"```diagram\n" + flow, ""},
-		// A json fence is what the renumberer retags on the way through;
-		// text that still carries it after the renumberer is a developer's
-		// quote of the format and stays a code block.
-		"json fence": {"```json\n" + flow + "\n```", ""},
+		"empty":      {"```mermaid\n\n```", ""},
+		// The older JSON spec under either tag: the browser converts it, but
+		// the harness counts the shape the model wrote, and it wrote none.
+		"legacy json":     {"```diagram\n{\"type\":\"flow\",\"nodes\":[]}\n```", ""},
+		"json as mermaid": {"```mermaid\n{\"type\":\"flow\"}\n```", ""},
+		"unclosed":        {"```mermaid\nflowchart TD\n  a", ""},
 	} {
 		if got := DiagramKind(tc.text); got != tc.want {
 			t.Errorf("%s: DiagramKind = %q, want %q", name, got, tc.want)

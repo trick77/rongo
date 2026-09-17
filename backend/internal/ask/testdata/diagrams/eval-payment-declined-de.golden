@@ -1,0 +1,28 @@
+Wenn eine Zahlung abgelehnt wird, wird die Bestellung nicht aufgegeben und der Kunde erhält eine Fehlermeldung mit dem Ablehnungsgrund [1][2].
+
+Der Bestellvorgang startet, wenn der Kunde eine Bestellung aufgibt. Das System berechnet den Gesamtbetrag aus den Artikelpreisen und den Versandkosten [3]. Anschliessend wird eine Autorisierungsanfrage an den Zahlungsdienst mit diesem Gesamtbetrag gesendet [1]. Der Zahlungsdienst prüft, ob der Betrag gültig ist und ob er einen konfigurierten Schwellenwert überschreitet. Wird der Betrag als ungültig (z.B. negativ) erachtet oder überschreitet er den erlaubten Höchstbetrag, lehnt der Dienst die Zahlung ab und gibt eine entsprechende Nachricht zurück [4]. Die Ablehnungsmeldung wird beispielsweise lauten: „Payment declined: amount exceeds X.XX“, wobei X.XX der konfigurierte Höchstbetrag ist [4].
+
+Die Antwort des Zahlungsdienstes wird im Auftragssystem ausgewertet. Wenn die Antwort nicht vorhanden ist oder das Feld „autorisiert“ auf „false“ steht, wird eine Ausnahme vom Typ `PaymentDeclinedException` ausgelöst [1]. Diese Ausnahme bewirkt, dass der HTTP-Statuscode 406 (Nicht akzeptabel) zurückgegeben wird [5][6].
+
+Im Frontend wird bei Erhalt des Statuscodes 406 eine Fehlermeldung auf der Benutzeroberfläche eingeblendet. Diese Meldung enthält den Text, der vom Zahlungsdienst als Ablehnungsgrund übermittelt wurde (z.B. „Payment declined: amount exceeds 100.00“) [2]. Der Warenkorb des Kunden bleibt erhalten, sodass er die Bestellung nach Überprüfung der Daten erneut versuchen kann.
+
+Der gesamte Ablauft entspricht einem festgelegten Prozess in der Software, der keine manuelle Eingriff erfordert. Der konkrete Schwellenwert, ab dem Zahlungen abgelehnt werden, ist eine konfigurierbare Einstellung im Zahlungsdienst [4][7].
+
+```mermaid
+flowchart TD
+    a["Bestellung aufgeben"]
+    b{"Betrag gültig?"}
+    c{"Schwellenwert überschritten?"}
+    d["Zahlung ablehnen"]
+    e["Zahlung autorisieren"]
+    f["Bestellung bestätigen"]
+    g["Fehlermeldung anzeigen"]
+
+    a --> b
+    b -- Ja --> c
+    b -- Nein --> d
+    c -- Ja --> d
+    c -- Nein --> e
+    e --> f
+    d --> g
+```

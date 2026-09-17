@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parseDiagram } from "./diagram";
+import mermaid from "mermaid";
+import { diagramSource } from "./diagram";
+import { fenceRe } from "./markdown";
 
 /**
  * The other half of the diagram corpus. The .txt files are answers as models
@@ -7,9 +9,13 @@ import { parseDiagram } from "./diagram";
  * browser (backend/internal/ask/renumber_corpus_test.go writes them with
  * `go test ./internal/ask/ -update`).
  *
- * Both ends read the same files on purpose. A spec the backend normalises and
+ * Both ends read the same files on purpose. An answer the backend passes and
  * this end will not draw is the same defect as one neither touches, and it
  * was never caught because each end had its own hand-written examples.
+ *
+ * The renderer's parser is the real one, not a mock: parse runs without a
+ * DOM, and whether it accepts the source is exactly the question. Drawing
+ * it needs a browser, which is what the Playwright check is for.
  *
  * A diagram that fails to draw belongs here as a new .txt first, and the fix
  * afterwards.
@@ -20,14 +26,17 @@ const goldens: Record<string, string> = import.meta.glob(
   { query: "?raw", import: "default", eager: true },
 );
 
-/** fence returns the body of the one `diagram` fence in an answer. */
-function fence(text: string): string | null {
+/** fence returns the tag and body of the one diagram fence in an answer,
+ * read as markdown.tsx reads it. */
+function fence(text: string): { tag: string; body: string } | null {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() !== "```diagram") continue;
+    const open = fenceRe.exec(lines[i]);
+    if (!open) continue;
     const body: string[] = [];
-    for (i++; i < lines.length && !lines[i].trim().startsWith("```"); i++) body.push(lines[i]);
-    return body.join("\n");
+    for (i++; i < lines.length && !fenceRe.test(lines[i]); i++) body.push(lines[i]);
+    const src = diagramSource(open[1], body.join("\n"));
+    if (src !== null) return { tag: open[1], body: src };
   }
   return null;
 }
@@ -39,21 +48,11 @@ describe("the diagram corpus", () => {
 
   for (const [path, text] of Object.entries(goldens)) {
     const name = path.slice(path.lastIndexOf("/") + 1);
-    it(`draws ${name}`, () => {
-      const body = fence(text);
-      expect(body, "the backend left no ```diagram fence").not.toBeNull();
-
-      const spec = parseDiagram(body as string);
-      expect(spec, "the backend normalised it and the renderer will not draw it").not.toBeNull();
-
-      // Every chip stands on a number the backend renumbered. Anything else
-      // is a prompt index, and it would name a different file than the node
-      // rests on.
-      const cited =
-        spec!.type === "flow" ? spec!.nodes.map((n) => n.src) : spec!.steps.map((s) => s.src);
-      for (const src of cited) {
-        for (const m of src) expect(Number.isInteger(m) && m > 0).toBe(true);
-      }
+    it(`draws ${name}`, async () => {
+      const f = fence(text);
+      expect(f, "the backend left no diagram fence").not.toBeNull();
+      const ok = await mermaid.parse(f!.body, { suppressErrors: true });
+      expect(ok, `the renderer refuses:\n${f!.body}`).toBeTruthy();
     });
   }
 });

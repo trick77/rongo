@@ -27,8 +27,9 @@ import (
 // camelCase, snake_case, a digit, a path or a dotted name keep the spelling
 // the source has, because `pruefeBetrag` renamed is a symbol that does not
 // exist. Fenced and inline code never reach here at all - a diagram fence's
-// node labels included, which is the one place a reader sees German the
-// model spelled: those are JSON strings, and this walks prose.
+// labels included, which is the one place a reader sees German the model
+// spelled: a label sits in diagram syntax, and this walks prose. A known
+// gap, wider since every diagram type carries labels.
 
 // speller rewrites prose and remembers what it changed, so the eval can count
 // the words the model got wrong even though the reader never sees them.

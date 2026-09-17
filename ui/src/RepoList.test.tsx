@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
+
+// The diagram renderer measures text, which jsdom cannot; see diagram.test.tsx.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: async () => undefined,
+    render: async (id: string) => ({ svg: `<svg id="${id}"><g class="drawn"></g></svg>` }),
+  },
+}));
+
 import RepoList, { byProject, historyLine, unconnected, wiringSpec } from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
@@ -302,7 +312,7 @@ describe("the Projects page", () => {
     render(<RepoList />);
 
     await screen.findByRole("heading", { name: "shop" });
-    expect(screen.getByRole("img", { name: /flow diagram/i })).toBeTruthy();
+    await screen.findByRole("img", { name: /project wiring/i });
     expect(screen.getByText(/No declared connection/)).toBeTruthy();
     // One table, four rows: the project is one panel, not four.
     expect(screen.getAllByRole("table")).toHaveLength(1);
@@ -390,6 +400,6 @@ describe("the Projects page", () => {
     render(<RepoList />);
 
     await screen.findByRole("heading", { name: "peeq" });
-    expect(screen.queryByRole("img", { name: /flow diagram/i })).toBeNull();
+    expect(screen.queryByRole("img", { name: /project wiring/i })).toBeNull();
   });
 });

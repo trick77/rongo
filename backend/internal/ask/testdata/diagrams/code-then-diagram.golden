@@ -1,0 +1,13 @@
+The handler reads the index expression [1]:
+
+```go
+x := parts[1]
+// "src":[2]
+```
+
+and the flow is [1][2]:
+
+```mermaid
+flowchart TD
+  a["parse"] --> b["index"]
+```
