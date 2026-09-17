@@ -358,9 +358,8 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 	}
 
 	// After the index and before last_sha moves: a failure here leaves the
-	// commit un-recorded, and the next cycle logs the same range again.
-	// Append skips what is held, so the redo is safe.
-	if err := p.recordHistory(ctx, spec, st.LastSHA, head); err != nil {
+	// commit un-recorded, and the next cycle records it again.
+	if err := p.recordHistory(ctx, spec, head); err != nil {
 		return pollResult{}, err
 	}
 
@@ -368,28 +367,24 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 	return res, p.state.MarkIndexed(ctx, st.Name, head, counts)
 }
 
-// recordHistory writes the commits an index run made answerable: the whole
-// first-parent history on a full run, the range since the indexed commit
-// on an incremental one. A snapshot has one synthetic commit and no
-// history worth the name; it records none, and the answer says so.
-func (p *Poller) recordHistory(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) error {
+// recordHistory makes the lane the branch's first-parent history from head,
+// bounded by depth, on every index run, full or incremental alike: the lane
+// has to lose what a rebase or a force-push dropped, and only the whole
+// list says what is still on the branch. Cheap next to the index itself. A
+// snapshot has one synthetic commit and no history worth the name; it
+// records none, and the answer says so.
+func (p *Poller) recordHistory(ctx context.Context, spec repos.Spec, toSHA string) error {
 	if p.history == nil || spec.Snapshot {
 		return nil
 	}
-	commits, err := p.git.Log(ctx, spec, fromSHA, toSHA, p.depth)
+	commits, err := p.git.Log(ctx, spec, "", toSHA, p.depth)
 	if err != nil {
 		return err
 	}
-	if fromSHA == "" {
-		err = p.history.Replace(ctx, spec.Name, commits)
-	} else {
-		err = p.history.Append(ctx, spec.Name, commits)
-	}
-	if err != nil {
+	if err := p.history.Sync(ctx, spec.Name, commits); err != nil {
 		return err
 	}
-	p.log.Debug("commits recorded", "repo", spec.Name, "commits", len(commits),
-		"full", fromSHA == "")
+	p.log.Debug("commits recorded", "repo", spec.Name, "commits", len(commits))
 	return nil
 }
 

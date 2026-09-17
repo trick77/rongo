@@ -60,6 +60,18 @@ func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 		t.Errorf("Count after incremental = %d, want 3", n)
 	}
 
+	// When: the last commit is amended upstream (a rewritten history).
+	gitRun(t, src, "commit", "-q", "--amend", "-m", "third: amended")
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("third PollOnce() err = %v", err)
+	}
+	// Then: the amended commit replaces the original, never sits beside it.
+	n, _, _ = h.Count(ctx, "fixture")
+	amended, _ := h.Search(ctx, history.Query{Repos: []string{"fixture"}, Since: time.Time{}, Topic: "third"})
+	if n != 3 || len(amended) != 1 || amended[0].Subject != "third: amended" {
+		t.Errorf("after the amend: %d commits, third = %+v", n, amended)
+	}
+
 	// When: the repository is reset (a clone_url mismatch, a migration).
 	if err := s.ResetRepo(ctx, "fixture"); err != nil {
 		t.Fatal(err)

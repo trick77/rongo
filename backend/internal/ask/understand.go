@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/trick77/llmwire"
@@ -55,7 +56,7 @@ type Understanding struct {
 	// SinceDays is how far back a "what changed" question looks, in days.
 	// Zero on every other intent; the pipeline applies the default window
 	// when a changes question names none, so the model never has to.
-	SinceDays int `json:"since_days"`
+	SinceDays Days `json:"since_days"`
 	// Topic is what a changes question is about, or empty when it asks for
 	// every change in the window. Filtered against commit subjects, bodies
 	// and paths; "what changed" alone has no topic and lists the window.
@@ -97,6 +98,28 @@ type Understanding struct {
 // CensusLink is the one census the pipeline has. Any other value in the
 // reply is dropped on decode.
 const CensusLink = "link"
+
+// Days is an integer a gate model may also write as a quoted string ("7") or
+// a float (7.0): the only numeric field of the understanding, and the one
+// place a small model's formatting would otherwise fail the whole turn as
+// "reply was not JSON". Anything unreadable is 0, the default window.
+type Days int
+
+// UnmarshalJSON reads a number, a numeric string, or null.
+func (d *Days) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*d = 0
+		return nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		*d = 0
+		return nil
+	}
+	*d = Days(int(f))
+	return nil
+}
 
 // SearchTexts assembles what the retriever should search for. The raw question
 // comes first and is never dropped: the model's guesses are guesses, and a

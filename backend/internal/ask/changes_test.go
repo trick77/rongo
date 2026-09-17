@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -205,6 +206,48 @@ func TestClampSinceDays(t *testing.T) {
 		if got := clampSinceDays(in); got != want {
 			t.Errorf("clampSinceDays(%d) = %d, want %d", in, got, want)
 		}
+	}
+}
+
+func TestDays_readsANumberAQuotedNumberOrNothing(t *testing.T) {
+	for in, want := range map[string]Days{`{"since_days":7}`: 7, `{"since_days":"7"}`: 7, `{"since_days":7.0}`: 7,
+		`{"since_days":null}`: 0, `{"since_days":"a week"}`: 0, `{}`: 0} {
+		var u Understanding
+		if err := json.Unmarshal([]byte(in), &u); err != nil {
+			t.Errorf("%s: %v", in, err)
+		}
+		if u.SinceDays != want {
+			t.Errorf("%s: since_days = %d, want %d", in, u.SinceDays, want)
+		}
+	}
+}
+
+func TestRenderCommit_boundsTheBodyAndThePaths(t *testing.T) {
+	paths := make([]string, 45)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("vendor/p%d.go", i)
+	}
+	var b strings.Builder
+	renderCommit(&b, 1, Source{Kind: SourceCommit, Repo: "r", SHA: "abcdef0123", Subject: "s",
+		CommittedAt: fixedNow, Text: strings.Repeat("x", 4000), Paths: paths})
+	out := b.String()
+	if !strings.Contains(out, "[cut]") || len(out) > 3000 {
+		t.Errorf("body not cut: %d bytes", len(out))
+	}
+	if !strings.Contains(out, "vendor/p29.go and 15 more") || strings.Contains(out, "vendor/p30.go") {
+		t.Errorf("paths not cut:\n%s", out)
+	}
+}
+
+func TestChangesBlock_needsTheWindowNotOnlyTheIntent(t *testing.T) {
+	// A pipeline without the lane answers a changes question from chunks:
+	// its scope carries the intent but no window, and the prompt must not
+	// call those chunks commits.
+	if got := changesBlock(Scope{Intent: IntentChanges}, AudienceBA); got != "" {
+		t.Errorf("block without a window: %q", got)
+	}
+	if got := changesBlock(Scope{Intent: IntentChanges, SinceDays: 3}, AudienceDev); !strings.Contains(got, "last 3 days") {
+		t.Errorf("block with a window: %q", got)
 	}
 }
 

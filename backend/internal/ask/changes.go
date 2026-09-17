@@ -60,7 +60,7 @@ const IntentChanges = "changes"
 func (p *Pipeline) answerChanges(ctx context.Context, question string, audience Audience, lang Language,
 	u Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
 
-	scope.SinceDays = clampSinceDays(u.SinceDays)
+	scope.SinceDays = clampSinceDays(int(u.SinceDays))
 	scope.Topic = strings.TrimSpace(u.Topic)
 	now := time.Now()
 	if p.now != nil {
@@ -129,19 +129,39 @@ func changesDetail(sources []Source, scope Scope) map[string]any {
 	return d
 }
 
+// commitBodyRunes and commitPathsShown bound one commit in the prompt. The
+// gather budget does not apply on this path, and forty squash-merge bodies
+// carrying whole pull-request descriptions, or one vendor drop listing ten
+// thousand paths, would otherwise exceed the context in a single call and
+// fail the turn instead of answering it. 1500 runes is the first two or
+// three paragraphs of a message, where the reason is.
+const (
+	commitBodyRunes  = 1500
+	commitPathsShown = 30
+)
+
 // renderCommit numbers one commit for the prompt, the way renderSources
 // numbers a chunk: the marker, the repository, the short commit, the date,
-// the subject, then the body and the paths it touched.
+// the subject, then the body and the paths it touched, both bounded.
 func renderCommit(b *strings.Builder, n int, s Source) {
 	fmt.Fprintf(b, "\n[%d] %s commit %s %s: %s\n", n, s.Repo, shortSHA(s.SHA),
 		s.CommittedAt.UTC().Format("2006-01-02"), s.Subject)
 	if s.Text != "" {
-		b.WriteString(s.Text)
+		body := s.Text
+		if r := []rune(body); len(r) > commitBodyRunes {
+			body = string(r[:commitBodyRunes]) + " [cut]"
+		}
+		b.WriteString(body)
 		b.WriteString("\n")
 	}
 	if len(s.Paths) > 0 {
 		b.WriteString("paths: ")
-		b.WriteString(strings.Join(s.Paths, ", "))
+		if len(s.Paths) > commitPathsShown {
+			b.WriteString(strings.Join(s.Paths[:commitPathsShown], ", "))
+			fmt.Fprintf(b, " and %d more", len(s.Paths)-commitPathsShown)
+		} else {
+			b.WriteString(strings.Join(s.Paths, ", "))
+		}
 		b.WriteString("\n")
 	}
 }
@@ -158,7 +178,10 @@ func shortSHA(sha string) string {
 // opening sentence can say what was looked at, and it says the list may be
 // cut so a busy window is not reported as the whole of it.
 func changesBlock(scope Scope, audience Audience) string {
-	if scope.Intent != IntentChanges {
+	// SinceDays is set only by answerChanges: a pipeline without the lane
+	// answers a changes question from chunks, and must not be told they
+	// are commits.
+	if scope.Intent != IntentChanges || scope.SinceDays == 0 {
 		return ""
 	}
 	var b strings.Builder

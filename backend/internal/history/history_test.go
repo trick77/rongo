@@ -38,17 +38,17 @@ func fixture(t *testing.T) *Store {
 	t.Helper()
 	s := New(testDB(t))
 	ctx := context.Background()
-	if err := s.Replace(ctx, "shop", []gitrepo.Commit{
+	if err := s.Sync(ctx, "shop", []gitrepo.Commit{
 		{SHA: "c3", CommittedAt: at(17), Author: "jan", Subject: "Snapshot badge on the Repos page", Body: "A snapshot shows a badge, not a branch.", Paths: []string{"ui/src/RepoList.tsx"}},
 		{SHA: "c2", CommittedAt: at(15), Author: "jan", Subject: "Bearer token for Bitbucket", Paths: []string{"backend/internal/gitrepo/gitrepo.go"}},
 		{SHA: "c1", CommittedAt: at(2), Author: "jan", Subject: "Corpus swap", Body: "loom to rongo", Paths: []string{"docs/measurements/2026-08-20-corpus-swap.md"}},
 	}); err != nil {
-		t.Fatalf("Replace: %v", err)
+		t.Fatalf("Sync: %v", err)
 	}
-	if err := s.Replace(ctx, "loom", []gitrepo.Commit{
+	if err := s.Sync(ctx, "loom", []gitrepo.Commit{
 		{SHA: "l1", CommittedAt: at(16), Subject: "Loom snapshot handling", Paths: []string{"a.go"}},
 	}); err != nil {
-		t.Fatalf("Replace: %v", err)
+		t.Fatalf("Sync: %v", err)
 	}
 	return s
 }
@@ -121,38 +121,63 @@ func TestSearch_noReposIsEveryEnabledRepo_andLimitHolds(t *testing.T) {
 	}
 }
 
-func TestAppend_skipsHeldCommits_ReplaceDropsThem(t *testing.T) {
+func TestSync_keepsHeldRowsAddsNewAndDropsAbsent(t *testing.T) {
 	s := fixture(t)
 	ctx := context.Background()
-	if err := s.Append(ctx, "shop", []gitrepo.Commit{
-		{SHA: "c3", CommittedAt: at(17), Subject: "duplicate"},
+	before, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "badge"})
+	if len(before) != 1 {
+		t.Fatalf("fixture: %+v", before)
+	}
+	heldID := before[0].ID
+
+	// A rebase: c3 stays, c2 is rewritten as c2b, c4 is new, c1 is gone.
+	if err := s.Sync(ctx, "shop", []gitrepo.Commit{
 		{SHA: "c4", CommittedAt: at(18), Subject: "New"},
+		{SHA: "c3", CommittedAt: at(17), Subject: "duplicate"},
+		{SHA: "c2b", CommittedAt: at(15), Subject: "Bearer token for Bitbucket, amended"},
 	}); err != nil {
-		t.Fatalf("Append: %v", err)
+		t.Fatalf("Sync: %v", err)
 	}
 	n, newest, err := s.Count(ctx, "shop")
-	if err != nil || n != 4 || newest.Day() != 18 {
-		t.Errorf("Count = %d %v %v, want 4 on the 18th", n, newest, err)
+	if err != nil || n != 3 || newest.Day() != 18 {
+		t.Errorf("Count = %d %v %v, want 3 on the 18th", n, newest, err)
 	}
-	got, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "duplicate"})
-	if len(got) != 0 {
-		t.Errorf("a held commit was overwritten: %+v", got)
+	// The held row keeps its id and its text: a changes turn citing it
+	// still resolves, and a redo of the same list changes nothing.
+	after, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "badge"})
+	if len(after) != 1 || after[0].ID != heldID {
+		t.Errorf("held commit = %+v, want id %d kept", after, heldID)
 	}
-
-	if err := s.Replace(ctx, "shop", nil); err != nil {
-		t.Fatalf("Replace: %v", err)
+	if dup, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "duplicate"}); len(dup) != 0 {
+		t.Errorf("a held commit was overwritten: %+v", dup)
 	}
-	n, _, _ = s.Count(ctx, "shop")
+	// The dropped and rewritten ones are gone from both tables.
+	if got, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "corpus"}); len(got) != 0 {
+		t.Errorf("the dropped commit still answers: %+v", got)
+	}
+	if got, _ := s.Search(ctx, Query{Repos: []string{"shop"}, Since: time.Time{}, Topic: "bitbucket"}); len(got) != 1 || got[0].SHA != "c2b" {
+		t.Errorf("the rewritten commit = %+v, want c2b alone", got)
+	}
 	var mirror int
 	s.db.QueryRow(`SELECT count(*) FROM commits_fts`).Scan(&mirror)
+	if mirror != 4 {
+		t.Errorf("mirror rows = %d, want shop's 3 and loom's 1", mirror)
+	}
+
+	// An empty list empties the repository and leaves the other alone.
+	if err := s.Sync(ctx, "shop", nil); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	n, _, _ = s.Count(ctx, "shop")
+	s.db.QueryRow(`SELECT count(*) FROM commits_fts`).Scan(&mirror)
 	if n != 0 || mirror != 1 {
-		t.Errorf("after Replace(nil): %d commits, %d mirror rows; want 0 and loom's 1", n, mirror)
+		t.Errorf("after Sync(nil): %d commits, %d mirror rows; want 0 and loom's 1", n, mirror)
 	}
 }
 
 func TestInsert_refusesAnUnparseableDate(t *testing.T) {
 	s := New(testDB(t))
-	err := s.Append(context.Background(), "shop", []gitrepo.Commit{{SHA: "x", CommittedAt: "yesterday", Subject: "s"}})
+	err := s.Sync(context.Background(), "shop", []gitrepo.Commit{{SHA: "x", CommittedAt: "yesterday", Subject: "s"}})
 	if err == nil {
 		t.Error("a bad date was stored")
 	}

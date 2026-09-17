@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -67,11 +68,23 @@ func parseLog(out string) ([]Commit, error) {
 			CommittedAt: f[1],
 			Author:      f[2],
 			Subject:     f[3],
-			Body:        strings.TrimSpace(f[4]),
+			Body:        stripTrailers(f[4]),
 			Paths:       append([]string{}, nonEmptyLines(f[5])...),
 		})
 	}
 	return commits, nil
+}
+
+// trailerRe matches a git trailer line: Signed-off-by, Co-authored-by,
+// Reviewed-by, Reported-by, and the rest of the "-by:" family. Every one
+// names a person, most with an email.
+var trailerRe = regexp.MustCompile(`(?im)^[A-Za-z-]+-by:[^\n]*\n?`)
+
+// stripTrailers drops the trailer lines from a message body. The author is
+// stored and never served, and a trailer is the same fact by another door:
+// the body reaches the answer prompt and the public commit view.
+func stripTrailers(body string) string {
+	return strings.TrimSpace(trailerRe.ReplaceAllString(body, ""))
 }
 
 // CommitDetail is what the commit view shows: the message and date, with
@@ -98,7 +111,7 @@ type FileChange struct {
 // error page: a citation outlives a re-extracted snapshot.
 func (c *Client) Show(ctx context.Context, spec repos.Spec, sha string) (CommitDetail, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"show", "--first-parent", "--numstat", "--format=%H%x00%aI%x00%s%x00%b%x00", sha)
+		"show", "--first-parent", "--no-renames", "--numstat", "--format=%H%x00%aI%x00%s%x00%b%x00", sha)
 	if err != nil {
 		return CommitDetail{}, err
 	}
@@ -106,7 +119,7 @@ func (c *Client) Show(ctx context.Context, spec repos.Spec, sha string) (CommitD
 	if len(f) != 5 {
 		return CommitDetail{}, fmt.Errorf("unparseable show record for %s", ShortSHA(sha))
 	}
-	d := CommitDetail{SHA: f[0], CommittedAt: f[1], Subject: f[2], Body: strings.TrimSpace(f[3]), Files: []FileChange{}}
+	d := CommitDetail{SHA: f[0], CommittedAt: f[1], Subject: f[2], Body: stripTrailers(f[3]), Files: []FileChange{}}
 	for _, line := range nonEmptyLines(f[4]) {
 		parts := strings.SplitN(line, "\t", 3)
 		if len(parts) != 3 {

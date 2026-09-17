@@ -135,6 +135,44 @@ func TestLog_firstParentCollapsesAMergeToOneEntry(t *testing.T) {
 	}
 }
 
+func TestLogAndShow_dropTrailersAndSplitARename(t *testing.T) {
+	// Given: a commit whose body carries a sign-off and a co-author, then a
+	// rename of the file it added.
+	src := fixtureRepo(t)
+	writeAndCommit(t, src, "b.txt", "b\n", "second\n\nThe reason.\n\nSigned-off-by: Some One <one@example.invalid>\nCo-authored-by: Other <two@example.invalid>")
+	gitRun(t, src, "mv", "b.txt", "c.txt")
+	gitRun(t, src, "commit", "-qm", "rename")
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	head, _ := c.HeadSHA(ctx, spec, "main")
+
+	// When
+	log, err := c.Log(ctx, spec, "", head, 10)
+	if err != nil {
+		t.Fatalf("Log() err = %v", err)
+	}
+	// Then: the trailers are gone from the body, the reason stays.
+	if log[1].Body != "The reason." {
+		t.Errorf("body = %q, want the trailers stripped", log[1].Body)
+	}
+	shown, err := c.Show(ctx, spec, log[1].SHA)
+	if err != nil || shown.Body != "The reason." {
+		t.Errorf("Show().Body = %q, %v", shown.Body, err)
+	}
+	// And a rename is a delete plus an add, never "{b.txt => c.txt}".
+	renamed, err := c.Show(ctx, spec, head)
+	if err != nil {
+		t.Fatalf("Show() err = %v", err)
+	}
+	if strings.Join([]string{renamed.Files[0].Path, renamed.Files[1].Path}, ",") != "b.txt,c.txt" {
+		t.Errorf("rename files = %+v, want b.txt and c.txt", renamed.Files)
+	}
+}
+
 func TestShow_reportsOneCommitWithCounts(t *testing.T) {
 	// Given
 	src := fixtureRepo(t)

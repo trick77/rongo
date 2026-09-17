@@ -25,36 +25,61 @@ func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
-// Replace rewrites one repository's history: a full index, a reset, a
-// re-cloned checkout. Everything the repository had goes first, so a
-// force-push that dropped commits does not leave them answerable.
-func (s *Store) Replace(ctx context.Context, repo string, commits []gitrepo.Commit) error {
+// Sync makes one repository's rows the given first-parent list, which is
+// what every index run hands it: the branch's history from head, bounded
+// by depth. A commit already held keeps its row and its id, so a full
+// re-index does not orphan the changes turns that cite it; a commit no
+// longer in the list goes, so a rebase, an amend, a force-push or a branch
+// change leaves neither a stale change nor two versions of one answerable.
+// A poll that failed after writing is safe to redo for the same reason.
+func (s *Store) Sync(ctx context.Context, repo string, commits []gitrepo.Commit) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err := PurgeTx(ctx, tx, repo); err != nil {
+	if err := insert(ctx, tx, repo, commits); err != nil {
 		return err
 	}
-	if err := insert(ctx, tx, repo, commits); err != nil {
+	if err := dropAbsent(ctx, tx, repo, commits); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// Append adds the commits an incremental poll found. A commit already held
-// is left alone, so a poll that failed after writing them is safe to redo.
-func (s *Store) Append(ctx context.Context, repo string, commits []gitrepo.Commit) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+// dropAbsent removes the repository's rows whose sha the list no longer
+// carries, mirror first, like PurgeTx.
+func dropAbsent(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit) error {
+	keep := make(map[string]bool, len(commits))
+	for _, c := range commits {
+		keep[c.SHA] = true
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, sha FROM commits WHERE repo = ?`, repo)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if err := insert(ctx, tx, repo, commits); err != nil {
-		return err
+	var gone []int64
+	for rows.Next() {
+		var id int64
+		var sha string
+		if err := rows.Scan(&id, &sha); err != nil {
+			rows.Close()
+			return err
+		}
+		if !keep[sha] {
+			gone = append(gone, id)
+		}
 	}
-	return tx.Commit()
+	rows.Close()
+	for _, id := range gone {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM commits_fts WHERE rowid = ?`, id); err != nil {
+			return fmt.Errorf("drop commit %d from commits_fts: %w", id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM commits WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("drop commit %d: %w", id, err)
+		}
+	}
+	return nil
 }
 
 func insert(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit) error {
