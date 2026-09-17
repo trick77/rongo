@@ -281,3 +281,185 @@ func TestExtractIgnoresAPlaceholderWithoutADotOrDash(t *testing.T) {
 		t.Errorf("got %v, want none", got)
 	}
 }
+
+// Outbound links: the fourth kind. A UI repository rarely writes the URL it
+// navigates to as one literal — the host comes from a config service, the path
+// is concatenated — so what is recorded is the SITE of the navigation, with
+// whatever text stood there as the value. The census in internal/ask lands on
+// the line and lets the symbol walk resolve the variable.
+func TestExtractFindsAnAbsoluteLinkInMarkup(t *testing.T) {
+	// Given
+	testee := []byte(`<a class="nav" href="https://portal.example.ch/claims" target="_blank">Portal</a>`)
+
+	// When
+	got := Extract("app.component.html", testee)
+
+	// Then
+	if !has(values(got, KindLink), "https://portal.example.ch/claims") {
+		t.Fatalf("the absolute href was not extracted: %+v", got)
+	}
+}
+
+func TestExtractFindsNavigationSitesInTypeScript(t *testing.T) {
+	// Given: every idiom, one per line, none with a literal host.
+	testee := []byte("" +
+		"window.open(`${environment.portalUrl}/claims/${id}`, '_blank');\n" +
+		"window.location.href = this.config.links.customerApp + '/overview';\n" +
+		"location.assign(targetUrl);\n" +
+		"this.router.navigateByUrl('/schaden/neu');\n" +
+		"this.router.navigate(['/schaden', id]);\n")
+
+	// When
+	got := Extract("nav.service.ts", testee)
+
+	// Then: each site is recorded with the text that stood there.
+	links := values(got, KindLink)
+	for _, want := range []string{
+		"${environment.portalUrl}/claims/${id}",
+		"this.config.links.customerApp + '/overview'",
+		"targetUrl",
+		"/schaden/neu",
+		"['/schaden', id]",
+	} {
+		if !has(links, want) {
+			t.Errorf("navigation site %q was not extracted, got %+v", want, links)
+		}
+	}
+	if len(got) != 5 {
+		t.Errorf("want exactly five link sites, got %+v", got)
+	}
+}
+
+func TestExtractFindsAngularAndReactLinkAttributes(t *testing.T) {
+	// Given
+	testee := []byte("" +
+		`<a [href]="externalLink">Extern</a>` + "\n" +
+		`<a [attr.href]="portal.url">Portal</a>` + "\n" +
+		`<a routerLink="/uebersicht">Home</a>` + "\n" +
+		`<a [routerLink]="['/schaden', id]">Detail</a>` + "\n" +
+		`<Link to="/settings">Settings</Link>` + "\n")
+
+	// When
+	got := Extract("nav.component.html", testee)
+
+	// Then
+	links := values(got, KindLink)
+	for _, want := range []string{"externalLink", "portal.url", "/uebersicht", "['/schaden', id]", "/settings"} {
+		if !has(links, want) {
+			t.Errorf("attribute link %q was not extracted, got %+v", want, links)
+		}
+	}
+}
+
+func TestExtractSkipsLinksThatLeadNowhere(t *testing.T) {
+	// Given: anchors, mail, phone, script, empty, the bare root, stylesheets
+	// and the base tag — none is an app someone navigates to. A read of
+	// window.location is not a navigation either.
+	testee := []byte("" +
+		`<a href="#top">Top</a>` + "\n" +
+		`<a href="mailto:x@example.ch">Mail</a>` + "\n" +
+		`<a href="tel:+41">Call</a>` + "\n" +
+		`<a href="javascript:void(0)">Nothing</a>` + "\n" +
+		`<a href="">Empty</a>` + "\n" +
+		`<a href="/">Root</a>` + "\n" +
+		`<link rel="stylesheet" href="/styles.css">` + "\n" +
+		`<base href="/">` + "\n" +
+		`if (window.location.pathname === '/x') {` + "\n")
+
+	// When
+	got := Extract("index.html", testee)
+
+	// Then
+	if len(got) != 0 {
+		t.Fatalf("want no link tokens, got %+v", got)
+	}
+}
+
+func TestExtractIgnoresAVariableCalledLocationAndAStylesheetHref(t *testing.T) {
+	// Given: React's useLocation in every routed component, a field named
+	// location, a stylesheet tag inside a one-line head, a stylesheet
+	// injected from script, and a data-href attribute.
+	testee := []byte("" +
+		`const location = useLocation();` + "\n" +
+		`this.location = loc;` + "\n" +
+		`const location = window.location;` + "\n" +
+		`<head><link rel="stylesheet" href="/s.css"></head>` + "\n" +
+		`link.href = "/styles.css";` + "\n" +
+		`<div data-href="/x">` + "\n")
+
+	// When
+	got := Extract("app.tsx", testee)
+
+	// Then
+	if len(got) != 0 {
+		t.Fatalf("want no link tokens, got %+v", got)
+	}
+}
+
+func TestExtractIgnoresSVGSpritesAndAssetPaths(t *testing.T) {
+	// Given: the icon sprite on nearly every page, in both spellings, and
+	// an href to a downloadable file.
+	testee := []byte("" +
+		`<use xlink:href="assets/icons.svg#close"></use>` + "\n" +
+		`<use href="assets/icons.svg#close"/>` + "\n" +
+		`<a href="assets/agb.pdf" download>AGB</a>` + "\n" +
+		`<a href="https://portal.example.ch/report.pdf">Report</a>` + "\n")
+
+	// When
+	got := values(Extract("icon.component.html", testee), KindLink)
+
+	// Then: the sprite is not a site; a document behind a URL still is.
+	if len(got) != 1 || got[0] != "https://portal.example.ch/report.pdf" {
+		t.Fatalf("got %v, want the report link alone", got)
+	}
+}
+
+func TestExtractReadsJSXBraces(t *testing.T) {
+	// Given: the three shapes React Router links are written in, plus href.
+	testee := []byte("" +
+		`<Link to={"/x"}>X</Link>` + "\n" +
+		`<Link to={to}>Y</Link>` + "\n" +
+		`<Link to={{ pathname: "/z" }}>Z</Link>` + "\n" +
+		`<a href={url}>W</a>` + "\n")
+
+	// When
+	got := values(Extract("nav.jsx", testee), KindLink)
+
+	// Then
+	for _, want := range []string{"/x", "to", `{ pathname: "/z" }`, "url"} {
+		if !has(got, want) {
+			t.Errorf("JSX link %q was not extracted, got %+v", want, got)
+		}
+	}
+}
+
+func TestExtractDoesNotReadMarkupAsRoutes(t *testing.T) {
+	// Given: an .html line that the route rules would take for a client call.
+	testee := []byte(`<p>Use fetch to request "/api/orders" from the server.</p>`)
+
+	// When
+	got := Extract("help.html", testee)
+
+	// Then: markup gets the link branch only, never the route branch.
+	if len(values(got, KindRoute)) != 0 {
+		t.Fatalf("a route was extracted from markup: %+v", got)
+	}
+}
+
+func TestExtractRunsBothBranchesOnTypeScript(t *testing.T) {
+	// Given: a client call and a navigation in one file.
+	testee := []byte("" +
+		`const r = await fetch("/api/claims");` + "\n" +
+		`window.open("https://portal.example.ch");` + "\n")
+
+	// When
+	got := Extract("claims.ts", testee)
+
+	// Then
+	if !has(values(got, KindRoute), "/api/claims") {
+		t.Errorf("the route branch did not run on .ts: %+v", got)
+	}
+	if !has(values(got, KindLink), "https://portal.example.ch") {
+		t.Errorf("the link branch did not run on .ts: %+v", got)
+	}
+}

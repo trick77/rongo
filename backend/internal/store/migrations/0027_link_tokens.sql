@@ -1,0 +1,13 @@
+-- integration_tokens gains a fourth kind, 'link': the navigation sites of a
+-- user interface (href, window.open, a location assignment, a router call),
+-- read per repository as a census and never crossed as an edge
+-- (edges.KindLink). No schema change: kind is TEXT.
+--
+-- What a new extraction rule needs is the same thing 0015 needed: a forced
+-- re-index. An incremental poll re-runs extraction only on the paths a
+-- commit changed, so a settled repository would carry no link token for as
+-- long as its files sit untouched, and a census over it would come back
+-- empty while looking healthy. Emptying last_sha makes the next poll index
+-- every repository whole; the embedding cache is keyed on content hash, so
+-- unchanged chunks are re-read and re-chunked but never re-embedded.
+UPDATE repo_state SET last_sha = '';

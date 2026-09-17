@@ -405,6 +405,26 @@ process listed here whose nodes have no source of their own may be walked by
 the names above, and then say in a clause that its model was not among the
 sources; say nothing about what its steps do inside.`
 
+// answerLinks is the link census block. The listing is read from the index,
+// so it is complete where the sources are capped; what the sites lead to is
+// in the sources, and a site written on a variable is resolved from the
+// configuration source the walk pulled in, never guessed.
+const answerLinks = `
+
+Every place the repository navigates from, read from the index, one line per
+target as "target  repository/path:line, ..." with the places it is written
+at. The target is the text at the site: a URL, or the expression the code
+builds it from:
+
+%s
+The listing names every site the index holds, except a tail it counts
+instead of naming; the sources hold the code at the sites that fit and the
+configuration the expressions read. Group the sites by where they lead, say
+which lead to another application and which stay inside this one, and cite
+the source at each site - never this listing. A target built from a variable
+is resolved from the configuration among the sources; when no source sets it,
+say so rather than guessing the host.`
+
 const answerDev = `
 Audience: developer. Name types, functions and files, and quote short excerpts
 where they carry the explanation. A fenced code block carries its language tag
@@ -669,6 +689,16 @@ type Scope struct {
 	// the model files at their indexed commit, never persisted, for the
 	// reason Structure is not.
 	Processes string `json:"-"`
+	// Census is the listing the understanding step read the question as
+	// asking for — CensusLink, or empty for a mechanism question. Part of
+	// the record for the reason Intent is: a resumed turn reads the same
+	// listing the first one would have. An older row decodes to none.
+	Census string `json:"census,omitempty"`
+	// Links is the link census listing for the answer prompt: every
+	// navigation site of the named repositories with its place, read from
+	// the index at answer time. Derived per turn like Processes, never
+	// persisted, for the same reason.
+	Links string `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -1011,6 +1041,9 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if scope.Processes != "" {
 		system += fmt.Sprintf(answerProcesses, scope.Processes)
 	}
+	if scope.Links != "" {
+		system += fmt.Sprintf(answerLinks, scope.Links)
+	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}
@@ -1126,6 +1159,10 @@ func reachedVia(reason string) string {
 	// name after the rest had been read.
 	if rest, ok := strings.CutPrefix(reason, "gap:"); ok {
 		return "looked up by name after reading the sources: " + rest
+	}
+	// A census landing: the index recorded a navigation site here.
+	if rest, ok := strings.CutPrefix(reason, "link:"); ok {
+		return "link site " + rest
 	}
 	return "reached via " + strings.TrimPrefix(reason, "reference:")
 }

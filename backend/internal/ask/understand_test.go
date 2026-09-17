@@ -226,6 +226,49 @@ func TestUnderstand_ordinaryQuestionAsksForNoRepositoryAtAll(t *testing.T) {
 	}
 }
 
+// TestUnderstand_readsALinkCensus: "what links lead out of this UI" is a
+// listing, not a mechanism, and the field is the only thing that tells the
+// pipeline to read the link tokens of the repository instead of searching.
+func TestUnderstand_readsALinkCensus(t *testing.T) {
+	c, _, prompt := modelUpstream(t, `{
+  "intent": "where",
+  "terms": ["outbound links"],
+  "code_terms": ["href"],
+  "repos": ["claims-ui"],
+  "census": " Link "
+}`)
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "in claims-ui, what links lead to apps outside it?", Thread{}, nil)
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if got.Census != "link" {
+		t.Errorf("Census = %q, want link, normalised like the intent", got.Census)
+	}
+	if !strings.Contains(*prompt, "census") {
+		t.Errorf("the prompt never asks for the field:\n%s", *prompt)
+	}
+}
+
+// TestUnderstand_aMechanismQuestionAsksForNoCensus is the default: a reply
+// that says nothing, or names a kind the pipeline has no census for, reads
+// as none.
+func TestUnderstand_aMechanismQuestionAsksForNoCensus(t *testing.T) {
+	for _, reply := range []string{
+		`{"intent":"where","terms":["t"],"code_terms":["c"],"repos":["x"]}`,
+		`{"intent":"where","terms":["t"],"code_terms":["c"],"repos":["x"],"census":"route"}`,
+	} {
+		c, _, _ := modelUpstream(t, reply)
+		got, err := NewUnderstander(c).Understand(context.Background(), "where is the claim total computed?", Thread{}, nil)
+		if err != nil {
+			t.Fatalf("Understand: %v", err)
+		}
+		if got.Census != "" {
+			t.Errorf("Census = %q for %s, want none", got.Census, reply)
+		}
+	}
+}
+
 // TestUnderstand_carriesThePreviousTurnSoAFollowUpCanBeResolved: "Kannst du
 // das in einem Diagramm aufzeigen?" names no mechanism, no module and no
 // repository, because the reader named all three a turn ago. Alone it is

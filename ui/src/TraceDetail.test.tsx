@@ -75,6 +75,23 @@ describe("Trace, what each step found", () => {
     expect(screen.getByText(/shipping → queue-master/)).toBeTruthy();
   });
 
+  it("says how many link sites a census landed", () => {
+    strict(
+      <Trace
+        steps={[
+          {
+            step: "gathering",
+            at: t0,
+            detail: { hits: 3, references: 2, crossings: 0, sources: 45, repos: 1, tokens: 9000, budget: 24000, link_sites: 57, links: 40 },
+          },
+        ]}
+        state="running"
+        startedAt={t0}
+      />,
+    );
+    expect(screen.getByText("+40 of 57 link sites")).toBeTruthy();
+  });
+
   it("draws no detail row for a step that reported none", () => {
     // Every turn stored before the detail existed, and every step that has
     // nothing to say: the label and the duration alone, as before.
