@@ -44,6 +44,10 @@ type Asker interface {
 	// Reexplain answers the same question for the other audience from sources
 	// a prior turn already gathered, without searching or gathering again.
 	Reexplain(ctx context.Context, question string, audience ask.Audience, lang ask.Language, sources []ask.Source, scope ask.Scope, ev ask.Events) (ask.Answer, error)
+	// Rework restates the previous answer of t in the form the instruction
+	// asks for, from that answer's own sources. Run takes this path on its
+	// own; the re-explain of a rework row takes it from here.
+	Rework(ctx context.Context, instruction string, audience ask.Audience, lang ask.Language, t ask.Thread, scope ask.Scope, ev ask.Events) (ask.Answer, error)
 }
 
 // turnFailed is what a failed turn says, in the stream AND in the stored
@@ -65,6 +69,9 @@ func failureMessage(err error) string {
 	if errors.Is(err, llm.ErrTurnBudget) {
 		return turnOverBudget
 	}
+	if errors.Is(err, ask.ErrBasisGone) {
+		return reworkBasisGone
+	}
 	return turnFailed
 }
 
@@ -81,6 +88,12 @@ const maxNarrowRepos = 3
 // telling the reader "the turn failed" would claim a failure that
 // did not happen — the truth is the material itself is gone.
 const basisGone = "The basis of this answer is no longer indexed."
+
+// reworkBasisGone is basisGone for a rework ("summarize"): the answer whose
+// basis is gone is the one above, and the turn that asked is the one that
+// fails. Same rule, no fresh search in its place — a new answer to
+// "summarize" is a different answer dressed as a summary.
+const reworkBasisGone = "The basis of the previous answer is no longer indexed, so it cannot be reworked. Ask the question again."
 
 // errNotYours separates "this thread is not yours" from "the query failed".
 // Collapsing them turns a locked database into a 403 and hands its text to the
@@ -530,6 +543,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			slog.Error("read last turn failed", "err", err)
 		} else if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
+			// And what that answer was written from, for a rework. Read
+			// here rather than once the understanding has said the turn is
+			// one: the pipeline has no thread store, and one SELECT per
+			// follow-up is the cost. A read that fails fails the request,
+			// unlike the reads above: a turn that goes on without the
+			// basis answers "summarize" afresh, which is worse than no
+			// answer.
+			sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, last.ID)
+			if err != nil {
+				slog.Error("read last turn's sources failed", "err", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			prior.Sources, prior.SourcesTotal = sources, total
 		}
 	}
 
@@ -1140,14 +1167,24 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record scope failed", err)
 	}
 
-	answer, err := s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, ask.Events{
+	events := ask.Events{
 		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
 		OnDetail: func(step string, d map[string]any) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})
 		},
 		OnToken: func(tok string) { send("token", map[string]any{"text": tok}) },
-	})
+	}
+	var answer ask.Answer
+	if msg.Scope.Intent == ask.IntentRework {
+		// A rework row's question is an instruction ("summarize"), and its
+		// sources are the turn below's. Re-explained over the sources alone
+		// it would be answered afresh — the very thing the rework lane
+		// stops — so it is reworked again, over the same antecedent.
+		answer, err = s.reworkAgain(ctx, u.Subject, msg, audience, lang, sources, total, events)
+	} else {
+		answer, err = s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, events)
+	}
 	// The same rule as handleAsk: what the turn paid for is stored and
 	// reported however it ended.
 	closeRecord := func() {
@@ -1183,6 +1220,24 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record sources failed", err)
 	}
 	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeRecord)
+}
+
+// reworkAgain re-answers a rework row for the other audience: the same
+// instruction over the same antecedent, the last answered turn below the
+// row, whose sources the row already carries. An antecedent that cannot be
+// read is a basis that is gone.
+func (s *Server) reworkAgain(ctx context.Context, subject string, msg threads.Message, audience ask.Audience,
+	lang ask.Language, sources []ask.Source, total int, ev ask.Events) (ask.Answer, error) {
+
+	last, ok, err := s.deps.Threads.LastTurnBefore(ctx, subject, msg.ThreadID, s.headOrdinal(ctx, subject, msg))
+	if err != nil {
+		return ask.Answer{}, fmt.Errorf("read the reworked turn: %w", err)
+	}
+	if !ok {
+		return ask.Answer{}, fmt.Errorf("%w: no answered turn below the rework", ask.ErrBasisGone)
+	}
+	t := ask.Thread{Pin: msg.Scope.Known, Question: last.Question, Answer: last.Answer, Sources: sources, SourcesTotal: total}
+	return s.deps.Ask.Rework(ctx, msg.Question, audience, lang, t, msg.Scope, ev)
 }
 
 // headOrdinal is the ordinal a turn continuing m has to stay below: m's own,

@@ -337,17 +337,36 @@ comparison, not "presumably".`
 // answered something. Its one format argument is the PREVIOUS QUESTION.
 //
 // The previous answer's text is not here and must not be: the sources are what
-// a claim rests on, and a model handed its own earlier prose alongside them
-// ends up restating it and citing the new sources for it. The question is
-// enough for both things this rule is for — telling the model what a pronoun
-// points at, and telling it not to write the same answer again with a picture
-// on top.
+// a claim rests on, and a model handed its own earlier prose alongside sources
+// it was NOT written from ends up restating it and citing the new sources for
+// it. The question is enough for both things this rule is for — telling the
+// model what a pronoun points at, and telling it not to write the same answer
+// again with a picture on top. A rework is the exception, and it has its own
+// block: answerRework.
 const answerFollowUp = `
 
 This is a follow-up to an earlier question in the same thread: %s. Answer the
 NEW question. Where it points at something without naming it ("that", "this",
 "it"), it points at the subject of that earlier question. Do not restate what
 was already explained - the reader has it directly above.`
+
+// answerRework replaces answerFollowUp on a turn that asks for the previous
+// answer in another form. Its one format argument is the reader's
+// instruction. The previous text stands in the user message beside the
+// sources it was written from, so the rule can ask for both: keep every
+// claim on its source, and add nothing the text did not already say.
+const answerRework = `
+
+This turn does not answer a new question. The reader asked for the previous
+answer, given in full under "Previous answer", to be written again in another
+form: %s. Follow that instruction on the shape and length of the text, even
+where it departs from the shape rules above. Keep every claim on the source it
+rests on and cite it by its number from the list. Add nothing the previous
+answer does not say, and drop a claim only where the instruction asks for less.
+Where the instruction asks for less and a claim has to go, drop it whole,
+never its citation alone. A summary, or "shorter", is at most half the length
+of the previous answer, and a diagram in it is kept only when the instruction
+asks for one.`
 
 // answerOutsideRepo is added when the question named a repository this THREAD
 // does not carry. The model's position is the same one answerMissingRepo
@@ -1048,7 +1067,56 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, nil)}, nil
 	}
+	system := systemPrompt(audience, lang, sources, scope, followingUp, "")
+	user := renderSources(question, sources, scope.Stages)
+	// Measured before the call, from the exact strings that go on the wire.
+	// The user message is the question with the code under it, so the code is
+	// what is left once the question is taken off — counted that way round
+	// because the headers, paths and separators renderSources writes are part
+	// of what the sources cost, and attributing them to the question would
+	// flatter the figure that matters.
+	asked := estimateTokens(question)
+	parts := PromptParts{
+		System:   estimateTokens(system),
+		Sources:  max(estimateTokens(user)-asked, 0),
+		Question: asked,
+	}
+	return a.stream(ctx, lang, sources, system, user, parts, onToken)
+}
 
+// Rework writes the previous answer again in the form the instruction asks
+// for, from that answer's own sources. The previous text goes into the user
+// message beside them — the one place in the product where prose of the
+// model's own reaches the answering prompt, and it is safe here because the
+// sources next to it are the ones it was written from.
+//
+// No follow-up rule: "do not restate what was already explained" would forbid
+// the one thing this call exists to do, the same as Reexplain.
+func (a *Answerer) Rework(ctx context.Context, instruction string, audience Audience, lang Language,
+	t Thread, scope Scope, onToken func(string)) (Answer, error) {
+
+	if len(t.Sources) == 0 {
+		return Answer{}, fmt.Errorf("rework: no sources to rework from")
+	}
+	system := systemPrompt(audience, lang, t.Sources, scope, "", fmt.Sprintf(answerRework, instruction))
+	user := renderRework(instruction, t, scope.Stages)
+	// The sources are measured on their own here: the user message also
+	// carries the previous turn, which is neither the question nor the code
+	// and is left out of the split. The billed total still covers it.
+	var list strings.Builder
+	renderSourceList(&list, t.Sources, scope.Stages)
+	parts := PromptParts{
+		System:   estimateTokens(system),
+		Sources:  estimateTokens(list.String()),
+		Question: estimateTokens(instruction),
+	}
+	return a.stream(ctx, lang, t.Sources, system, user, parts, onToken)
+}
+
+// systemPrompt assembles the answering rules for one turn. followingUp is
+// the previous question of an ordinary follow-up, rework the rendered rework
+// block; at most one of them is set.
+func systemPrompt(audience Audience, lang Language, sources []Source, scope Scope, followingUp, rework string) string {
 	name := languageName(lang)
 	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
@@ -1121,6 +1189,7 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if followingUp != "" {
 		system += fmt.Sprintf(answerFollowUp, followingUp)
 	}
+	system += rework
 	// Computed from the sources rather than read off the scope, so this block
 	// is right even for a caller that has not filled the field in.
 	if DocsOnly(sources) {
@@ -1141,6 +1210,13 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	// just read two thousand tokens of English tends to answer in it. How that
 	// language is spelled follows it, closing the prompt.
 	system += fmt.Sprintf(answerLanguage, name)
+	return system
+}
+
+// stream makes the one Pro call and turns what comes back into the record.
+// user is the whole user message; parts is the caller's measure of it.
+func (a *Answerer) stream(ctx context.Context, lang Language, sources []Source,
+	system, user string, parts PromptParts, onToken func(string)) (Answer, error) {
 
 	// Every token passes the renumberer before it reaches the reader or the
 	// record, so the two are the same text; what it holds back is flushed
@@ -1160,19 +1236,6 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		if onToken != nil {
 			onToken(s)
 		}
-	}
-	// Measured before the call, from the exact strings that go on the wire.
-	// The user message is the question with the code under it, so the code is
-	// what is left once the question is taken off — counted that way round
-	// because the headers, paths and separators renderSources writes are part
-	// of what the sources cost, and attributing them to the question would
-	// flatter the figure that matters.
-	user := renderSources(question, sources, scope.Stages)
-	asked := estimateTokens(question)
-	parts := PromptParts{
-		System:   estimateTokens(system),
-		Sources:  max(estimateTokens(user)-asked, 0),
-		Question: asked,
 	}
 	usage, err := a.llm.Stream(ctx, []llm.Message{
 		{Role: "system", Content: system},
@@ -1249,14 +1312,58 @@ func renderSources(question string, sources []Source, declared stages.Set) strin
 	b.WriteString("Question: ")
 	b.WriteString(question)
 	b.WriteString("\n\nSources:\n")
+	renderSourceList(&b, sources, declared)
+	return b.String()
+}
+
+// renderRework is the user message of a rework: the previous turn whole,
+// the instruction, and the sources that turn was written from, numbered the
+// same way renderSources numbers them.
+//
+// The previous answer's citation markers are stripped. The record resolves
+// its sources by hop and chunk id, not in the order the first turn numbered
+// them, so a marker in the old text would point at the wrong entry of the
+// list below; the model cites again from the list. Fences stay: a diagram or
+// a code block is part of what "shorter" or "as a table" is asked of.
+func renderRework(instruction string, t Thread, declared stages.Set) string {
+	var b strings.Builder
+	b.WriteString("Previous question: ")
+	b.WriteString(t.Question)
+	b.WriteString("\n\nPrevious answer:\n")
+	b.WriteString(stripMarkersOutsideFences(t.Answer))
+	b.WriteString("\n\nInstruction: ")
+	b.WriteString(instruction)
+	b.WriteString("\n\nSources:\n")
+	renderSourceList(&b, t.Sources, declared)
+	return b.String()
+}
+
+// stripMarkersOutsideFences removes the citation markers from an answer's
+// prose and leaves its fenced blocks alone: a marker is [1], and so is an
+// index expression in a code block a dev answer quoted.
+func stripMarkersOutsideFences(answer string) string {
+	var b strings.Builder
+	last := 0
+	for _, f := range fenceRe.FindAllStringIndex(answer, -1) {
+		b.WriteString(markerGroupRe.ReplaceAllString(answer[last:f[0]], ""))
+		b.WriteString(answer[f[0]:f[1]])
+		last = f[1]
+	}
+	b.WriteString(markerGroupRe.ReplaceAllString(answer[last:], ""))
+	return b.String()
+}
+
+// renderSourceList writes the numbered material, the number being the marker
+// the model cites by.
+func renderSourceList(b *strings.Builder, sources []Source, declared stages.Set) {
 	for i, s := range sources {
 		if s.IsCommit() {
-			renderCommit(&b, i+1, s)
+			renderCommit(b, i+1, s)
 			continue
 		}
-		fmt.Fprintf(&b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
+		fmt.Fprintf(b, "\n[%d] %s %s:%d-%d", i+1, s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
-			fmt.Fprintf(&b, " (%s)", s.Symbol)
+			fmt.Fprintf(b, " (%s)", s.Symbol)
 		}
 		// The same predicate fusion demotes by and the walk orders by: read
 		// unlabelled, a test fake competes with the client it fakes for the
@@ -1268,14 +1375,13 @@ func renderSources(question string, sources []Source, declared stages.Set) strin
 		// The stage from the declared prefix, never from the model: a label
 		// the answer rule keys on has to be a fact about the path.
 		if st := declared.Of(s.Repo, s.Path); st != "" {
-			fmt.Fprintf(&b, " (stage %s)", st)
+			fmt.Fprintf(b, " (stage %s)", st)
 		}
 		if s.Reason != "" && s.Reason != "hit" {
-			fmt.Fprintf(&b, " [%s]", reachedVia(s.Reason))
+			fmt.Fprintf(b, " [%s]", reachedVia(s.Reason))
 		}
 		b.WriteString("\n")
 		b.WriteString(s.Text)
 		b.WriteString("\n")
 	}
-	return b.String()
 }

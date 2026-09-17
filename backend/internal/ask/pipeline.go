@@ -176,9 +176,15 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 //     searched for as the word "diagram".
 //
 // Answer is the previous answer's TEXT, and it is deliberately kept out of the
-// answering prompt: sources are the truth, and a model handed its own earlier
-// prose as context ends up citing itself. Only the previous QUESTION goes
-// there, as the thing a pronoun points at.
+// answering prompt of an ordinary follow-up: sources are the truth, and a
+// model handed its own earlier prose beside sources it was NOT written from
+// ends up citing them for it. Only the previous QUESTION goes there, as the
+// thing a pronoun points at.
+//
+// The one turn that does read the answer is a rework ("summarize", "as a
+// table"): the answer IS what that turn is about, and it is handed over
+// together with Sources, the material it was written from, so every claim in
+// the reworked text still has its source in front of the model.
 type Thread struct {
 	// Pin is the repositories the thread has already narrowed to.
 	Pin []string
@@ -186,6 +192,12 @@ type Thread struct {
 	Question string
 	// Answer is the answer that question got.
 	Answer string
+	// Sources is what Answer was written from, as the record resolves them
+	// now, and SourcesTotal is how many the record holds. A re-index between
+	// the turns drops chunks from Sources and not from SourcesTotal, which
+	// is how a rework tells a whole basis from a partial one.
+	Sources      []Source
+	SourcesTotal int
 }
 
 // Run answers one question, or ends the turn by asking which of several
@@ -206,6 +218,12 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	u, err := p.understander.Understand(ctx, question, t, declared.Names())
 	if err != nil {
 		return Answer{}, nil, err
+	}
+	// A rework the guard refuses is an ordinary question from here on, in
+	// the record too: the intent rides the scope onto the row, and a
+	// re-explain of that row keys on it to rework again.
+	if u.Intent == IntentRework && !isRework(u, t) {
+		u.Intent = ""
 	}
 	// The stage before the repositories: a reader writing "in production"
 	// gets it guessed as a repository name as often as not, and unresolved
@@ -289,6 +307,13 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// date window.
 	if p.isChanges(u) {
 		answer, err := p.answerChanges(ctx, question, audience, lang, u, scope, t.Question, ev)
+		return answer, nil, err
+	}
+	// A rework leaves here too: the previous answer and its own sources are
+	// the whole of what it reads, and a search on "summarize" has nothing to
+	// add but a second, different answer.
+	if isRework(u, t) {
+		answer, err := p.answerRework(ctx, question, audience, lang, t, scope, ev)
 		return answer, nil, err
 	}
 

@@ -50,8 +50,10 @@ const gateTemperature = 0
 // Understanding is what the first step produces. Nobody reads it — it exists to
 // aim the search.
 type Understanding struct {
-	// Intent is how, why, where, conformance or changes. Phase 4a answers
-	// how; changes is answered from the commit lane, never from the files.
+	// Intent is how, why, where, conformance, changes or rework. Phase 4a
+	// answers how; changes is answered from the commit lane, never from the
+	// files; rework is answered from the previous answer and its own sources,
+	// with no search at all.
 	Intent string `json:"intent"`
 	// SinceDays is how far back a "what changed" question looks, in days.
 	// Zero on every other intent; the pipeline applies the default window
@@ -168,7 +170,7 @@ func NewUnderstander(c *llm.Client) *Understander {
 const understandSystem = `You analyse a question about a codebase and answer with JSON ONLY.
 
 Fields:
-  intent      "how", "why", "where", "conformance" or "changes"
+  intent      "how", "why", "where", "conformance", "changes" or "rework"
   since_days  for "changes" only: how many days back the question asks.
               "yesterday" is 1, "the last 2 days" is 2, "this week" is 7,
               "this month" is 30; nothing said is 0. Every other intent is 0.
@@ -198,6 +200,14 @@ what the code does: "what changed", "what is new", "latest updates", "recent
 commits", "was hat sich geändert", "was ist neu", "letzte Änderungen",
 "quoi de neuf", "cosa è cambiato". A question about how a feature works is
 never "changes", however recent the feature.
+
+"rework" is a request to restate the PREVIOUS ANSWER in another form, asking
+nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",
+"as a table", "as bullet points", "simpler", "rephrase", "expand the second
+point", "fasse zusammen", "kürzer", "résume", "riassumi".
+It exists only when a previous turn is above; with none, or when the question
+asks about anything the previous answer does not already say, it is not
+"rework". A rework has terms [], code_terms [] and repos [].
 
 A question may arrive with the previous turn of the conversation above it. That
 material is there for ONE purpose: to resolve what the current question leaves
