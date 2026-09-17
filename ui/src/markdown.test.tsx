@@ -1,6 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+// The diagram renderer measures text, which jsdom cannot; see diagram.test.tsx.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    parse: async (src: string) => {
+      if (!/^(flowchart|sequenceDiagram|stateDiagram-v2|erDiagram)\b/.test(src.trim())) {
+        throw new Error("Parse error");
+      }
+    },
+    render: async (id: string, src: string) => ({ svg: `<svg id="${id}"><g class="drawn">${src.length}</g></svg>` }),
+  },
+}));
+
 import Markdown, { splitIntoSegments } from "./markdown";
 
 describe("Markdown", () => {
@@ -371,8 +385,8 @@ describe("Markdown", () => {
     });
   });
 
-  // The one fence that is not code. Its nodes carry markers, so it is drawn,
-  // not shown — but only when it is complete and says something drawable.
+  // The one fence that is not code. It is drawn, not shown, but only when it
+  // is complete; the older JSON spec draws through the same door.
   describe("diagram fence", () => {
     const spec = JSON.stringify({
       type: "flow",
@@ -382,34 +396,41 @@ describe("Markdown", () => {
       ],
       edges: [{ from: "a", to: "b" }],
     });
+    const mermaid = "flowchart LR\n  a[\"Answer()\"] --> b[\"stored\"]";
 
-    it("is drawn as SVG, not shown as text", () => {
-      const { container } = render(<Markdown text={"Before.\n\n```diagram\n" + spec + "\n```\n\nAfter."} />);
-      expect(container.querySelector("svg")).toBeTruthy();
+    it("is drawn as SVG, not shown as text", async () => {
+      const { container } = render(<Markdown text={"Before.\n\n```mermaid\n" + mermaid + "\n```\n\nAfter."} />);
+      await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
       expect(container.querySelector("pre")).toBeNull();
-      expect(container.textContent).not.toContain('"type"');
+      expect(container.textContent).not.toContain("flowchart");
       expect(container.textContent).toContain("Before.");
       expect(container.textContent).toContain("After.");
     });
 
-    it("carries the citation hooks into the picture", () => {
-      const { container } = render(<Markdown text={"```diagram\n" + spec + "\n```"} backed={new Set([1])} />);
-      expect(container.querySelectorAll("rect.fill-accent-dim").length).toBe(1);
-      expect(Array.from(container.querySelectorAll("text.fill-muted")).some((t) => t.textContent === "[2]")).toBe(true);
+    it("still draws the older JSON spec", async () => {
+      const { container } = render(<Markdown text={"```diagram\n" + spec + "\n```"} />);
+      await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
+      expect(container.textContent).not.toContain('"type"');
     });
 
-    it("says so when a block meant to be a diagram did not draw", () => {
+    it("says so when a block meant to be a diagram did not draw", async () => {
       // For three releases this looked like an ordinary code block and the
       // reader could not tell whether the model or the renderer had slipped.
       const { container } = render(<Markdown text={'```diagram\n{"type":"flow","nodes":[{"id"\n```'} />);
+      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
       expect(container.querySelector("svg")).toBeNull();
-      expect(container.textContent).toContain("Diagram could not be drawn");
       expect(container.querySelector("pre code")?.textContent).toBe('{"type":"flow","nodes":[{"id"');
     });
 
-    it("says the same about a spec the model fenced as something else", () => {
+    it("says the same about a spec the model fenced as something else", async () => {
       const { container } = render(<Markdown text={'```json\n{"type":"sequence","actors":[{"id"\n```'} />);
-      expect(container.textContent).toContain("Diagram could not be drawn");
+      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
+    });
+
+    it("says the same about diagram syntax the renderer refuses", async () => {
+      const { container } = render(<Markdown text={"```mermaid\npie\n  x: 1\n```"} />);
+      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
+      expect(container.querySelector("pre code")?.textContent).toBe("pie\n  x: 1");
     });
 
     it("leaves an ordinary code block alone", () => {

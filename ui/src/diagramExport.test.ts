@@ -128,9 +128,9 @@ describe("mermaidize", () => {
     expect(mermaidize(src)).toBe(src);
   });
 
-  it("leaves a diagram fence that does not parse exactly as it is", () => {
-    const src = "```diagram\n{not json\n```\n";
-    expect(mermaidize(src)).toBe(src);
+  it("retags a diagram fence holding mermaid text, which draws here and nowhere else", () => {
+    const src = "```diagram\nflowchart TD\n  a --> b\n```\n";
+    expect(mermaidize(src)).toBe("```mermaid\nflowchart TD\n  a --> b\n```\n");
   });
 
   it("leaves an unclosed diagram fence as the text it is", () => {
@@ -144,69 +144,42 @@ describe("toSvgFile", () => {
     document.head.querySelectorAll("style[data-test]").forEach((s) => s.remove());
   });
 
-  function drawn(): SVGSVGElement {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 90"><style>.x{}</style><rect width="10" height="10"/></svg>';
+
+  function card(): HTMLElement {
     const style = document.createElement("style");
     style.setAttribute("data-test", "1");
-    style.textContent =
-      ".fill-active { fill: #2c2c2a; } .stroke-border { stroke: #323230; } .card { background-color: #1b1b1a; }";
+    style.textContent = ".card { background-color: #1b1b1a; }";
     document.head.appendChild(style);
     const host = document.createElement("div");
     host.className = "card";
-    host.innerHTML =
-      '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="90" role="img" aria-label="Sequence diagram">' +
-      "<title>Sequence diagram</title>" +
-      '<rect class="fill-active stroke-border" x="0" y="0" width="10" height="10"></rect>' +
-      '<rect data-export="skip" x="0" y="0" width="30" height="30"></rect>' +
-      "</svg>";
     document.body.appendChild(host);
-    return host.querySelector("svg") as SVGSVGElement;
+    return host;
   }
 
-  it("inlines the colours the classes carried", () => {
-    const out = toSvgFile(drawn());
-    expect(out).toContain('fill="rgb(44, 44, 42)"');
-    expect(out).toContain('stroke="rgb(50, 50, 48)"');
-  });
-
-  it("leaves the elements that carry no paint unpainted", () => {
-    const out = toSvgFile(drawn());
-    expect(out).toMatch(/<svg[^>]*>/);
-    expect(out).not.toMatch(/<svg[^>]*fill=/);
-  });
-
-  it("leaves no class behind for a viewer that has no stylesheet", () => {
-    expect(toSvgFile(drawn())).not.toContain("class=");
-  });
-
-  it("drops the chips' hit rects, which are invisible in a file", () => {
-    expect(toSvgFile(drawn())).not.toContain('width="30"');
-  });
-
   it("carries the card's ground, so the pale labels are not lost on white", () => {
-    const out = toSvgFile(drawn());
-    expect(out).toMatch(/<rect width="240" height="90" fill="rgb\(27, 27, 26\)"\/?>/);
+    const out = toSvgFile({ svg }, card());
+    expect(out).toContain('<rect width="100%" height="100%" fill="rgb(27, 27, 26)"/>');
     // First, so it sits behind the drawing rather than over it.
     expect(out.indexOf('fill="rgb(27, 27, 26)"')).toBeLessThan(out.indexOf('width="10"'));
   });
 
-  it("adds a viewBox so the file scales in a viewer", () => {
-    const out = toSvgFile(drawn());
+  it("leaves the renderer's file alone otherwise", () => {
+    expect(toSvgFile({ svg }, null)).toBe(svg);
+    const out = toSvgFile({ svg }, card());
     expect(out).toContain('viewBox="0 0 240 90"');
-    expect(out).toContain("http://www.w3.org/2000/svg");
-    expect(out).toContain("<title>Sequence diagram</title>");
-  });
-
-  it("keeps the drawing out of the live tree", () => {
-    const el = drawn();
-    toSvgFile(el);
-    expect(el.querySelectorAll('[data-export="skip"]').length).toBe(1);
+    expect(out).toContain("<style>.x{}</style>");
   });
 });
 
 describe("fileName", () => {
   it("names the file after the kind of picture", () => {
-    expect(fileName(seq)).toBe("rongo-sequence-diagram.svg");
-    expect(fileName(flow)).toBe("rongo-flow-diagram.svg");
+    expect(fileName("sequenceDiagram\n A->>B: x")).toBe("rongo-sequence-diagram.svg");
+    expect(fileName("flowchart TD\n a")).toBe("rongo-flowchart-diagram.svg");
+    expect(fileName("graph LR\n a")).toBe("rongo-flowchart-diagram.svg");
+    expect(fileName("stateDiagram-v2\n a")).toBe("rongo-state-diagram.svg");
+    expect(fileName("erDiagram\n A")).toBe("rongo-er-diagram.svg");
+    expect(fileName("")).toBe("rongo-diagram.svg");
   });
 });
 

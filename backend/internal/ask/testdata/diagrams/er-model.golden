@@ -1,0 +1,18 @@
+Three tables carry a thread [1][2].
+
+```mermaid
+erDiagram
+  THREAD ||--o{ MESSAGE : holds
+  MESSAGE ||--o{ CITATION : cites
+  THREAD ||--o| SHARE : "is shared as"
+  THREAD {
+    int id
+    string title
+  }
+  MESSAGE {
+    int ordinal
+    string answer
+  }
+```
+
+A share points at the thread, not at a message [2].

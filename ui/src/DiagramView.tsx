@@ -1,47 +1,32 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { DiagramSvg, diagramSize, diagramTitle, type DiagramSpec } from "./diagram";
+import { useEffect, useRef } from "react";
+import { MermaidSvg, diagramTitle } from "./diagram";
 import { download, fileName, toSvgFile } from "./diagramExport";
 import { useBackdropDismiss } from "./dismiss";
 import { DownloadIcon } from "./icons";
-import type { MarkerHooks } from "./markdown";
 
 /**
- * DiagramView is the diagram seen whole. In the answer the picture is drawn at
- * its intrinsic width and the card scrolls sideways, so a five-actor sequence
- * is read a slice at a time; here it is one picture.
+ * DiagramView is the diagram seen whole. In the answer the picture is scaled
+ * into a prose column, so a five-actor sequence is read small; here it has
+ * the width of the sheet.
  *
  * The shell is SourceView's, down to the z-index: the reader is stepping out
  * of the answer for a moment and goes straight back, and one overlay at a time
- * is what the app does. That is also why a citation chip in here closes the
- * view before opening its source — SourceView is z-30 as well and traps Tab
- * and Escape on the document, so stacked, one Escape would close both.
+ * is what the app does.
  */
 export default function DiagramView({
-  spec,
-  hooks,
+  src,
+  svg,
   onClose,
 }: {
-  spec: DiagramSpec;
-  hooks: MarkerHooks;
+  src: string;
+  svg: string;
   onClose: () => void;
 }) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const dismiss = useBackdropDismiss(onClose);
   const body = useRef<HTMLDivElement>(null);
-  const svg = useRef<SVGSVGElement>(null);
-  // Fitting is the default on a screen with room for it, and only there.
-  // Below sm the sheet is a phone's width, and fitting a seven-actor sequence
-  // lands near 0.34: the 10px chips reach 3.5px, which is neither readable nor
-  // tappable — exactly what diagram.tsx keeps the drawing unscaled to avoid.
-  // A phone opens at 1:1 and scrolls, as the card behind it does, and the
-  // toggle is there to take the whole picture in deliberately.
-  const [fit, setFit] = useState(
-    () => typeof matchMedia !== "function" || matchMedia("(min-width: 40rem)").matches,
-  );
-  const [box, setBox] = useState({ width: 0, height: 0 });
-  const title = diagramTitle(spec);
-  const size = diagramSize(spec);
+  const title = diagramTitle(src);
 
   // Focus moves into the dialog on open and back to where it was on close, as
   // SourceView does.
@@ -55,8 +40,7 @@ export default function DiagramView({
   // simply refocus it; this dialog has several, so the ends of the ring wrap
   // to each other. Without it, Tab reaches the citation chips in the answer
   // behind the scrim — they are focusable groups — and Enter there would open
-  // a second z-30 overlay under this one, which is the very thing the chip
-  // hand-off above stands aside to avoid.
+  // a second z-30 overlay under this one.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -81,36 +65,8 @@ export default function DiagramView({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // The available box, measured rather than assumed: the sheet is a share of
-  // the window, and the window is anything from a phone to a desktop.
-  useLayoutEffect(() => {
-    const el = body.current;
-    if (!el) return;
-    function read() {
-      if (el) setBox({ width: el.clientWidth, height: el.clientHeight });
-    }
-    read();
-    if (typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(read);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Down only, never up: a small diagram blown up to fill the sheet is a
-  // blurry-looking drawing with 30px labels, and the point here is to see the
-  // whole picture, not a bigger one.
-  const room = { width: box.width - 48, height: box.height - 48 };
-  const scale =
-    fit && room.width > 0 && room.height > 0
-      ? Math.min(1, room.width / size.width, room.height / size.height)
-      : 1;
-  // Either dimension: a long sequence in a short window is scaled down by its
-  // height, and a toggle that stayed hidden would leave the reader with a
-  // shrunken picture and no way back to 1:1.
-  const overflows = room.width > 0 && (size.width > room.width || size.height > room.height);
-
   function save() {
-    if (svg.current) download(fileName(spec), toSvgFile(svg.current));
+    download(fileName(src), toSvgFile({ svg }, body.current));
   }
 
   return (
@@ -123,9 +79,9 @@ export default function DiagramView({
       onPointerUp={dismiss.onPointerUp}
     >
       {/* font-sans explicitly: this is mounted from inside the answer's
-          .ui-markdown wrapper, which is serif prose, and the dialog is chrome
-          — the same reason DiagramSvg names it. SourceView needs no such line
-          because Ask.tsx mounts it outside the prose. */}
+          .ui-markdown wrapper, which is serif prose, and the dialog is chrome.
+          SourceView needs no such line because Ask.tsx mounts it outside the
+          prose. */}
       <div
         ref={dialog}
         role="dialog"
@@ -136,27 +92,6 @@ export default function DiagramView({
         <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4.5 sm:py-3">
           <span className="min-w-0 truncate text-[13.5px] text-ink">{title}</span>
           <span className="ml-auto" />
-          {/* Only offered when there is something to fit: on a diagram that
-              already stands whole in the sheet the toggle would do nothing,
-              and a control that does nothing reads as broken. */}
-          {/* Never hidden on a phone, unlike the pills beside it: that is the
-              width where fitting scales a wide diagram hardest, and this is
-              the only way back to the size the labels were drawn at. */}
-          {(overflows || !fit) && (
-            <button
-              type="button"
-              onClick={() => setFit(!fit)}
-              aria-pressed={fit}
-              className={
-                "flex h-8 items-center rounded-ui-sm border px-2.5 text-[13px] " +
-                (fit
-                  ? "border-elevated-border bg-active text-ink"
-                  : "border-border text-ink-dim hover:border-elevated-border hover:bg-active")
-              }
-            >
-              Fit
-            </button>
-          )}
           <button
             type="button"
             onClick={save}
@@ -176,41 +111,12 @@ export default function DiagramView({
           </button>
         </header>
 
+        {/* The drawing scales to the sheet's width and no further: the SVG
+            carries its own max-width, so a small diagram stays 1:1 and is
+            centred, and a wide one fits. */}
         <div ref={body} className="grid min-h-0 place-items-center overflow-auto p-6">
-          {/* A transform scales the drawing without touching its layout box,
-              so the wrapper carries the scaled size itself — left to reserve
-              the intrinsic width, a fitted diagram would still scroll while
-              looking as though it fits. */}
-          <div
-            style={
-              scale === 1
-                ? undefined
-                : { width: size.width * scale, height: size.height * scale }
-            }
-          >
-            <div
-              style={scale === 1 ? undefined : { transform: `scale(${scale})`, transformOrigin: "0 0" }}
-              data-scale={scale}
-            >
-              <DiagramSvg
-                spec={spec}
-                hooks={{
-                  ...hooks,
-                  // The source opens where the reader can see it: behind this
-                  // scrim the Sources pane is invisible, so the view stands
-                  // aside first.
-                  onOpen: hooks.onOpen
-                    ? (m) => {
-                        onClose();
-                        hooks.onOpen?.(m);
-                      }
-                    : undefined,
-                  // Nothing to hover on to: the pane is behind the scrim.
-                  onHover: undefined,
-                }}
-                svgRef={svg}
-              />
-            </div>
+          <div className="w-full">
+            <MermaidSvg svg={svg} title={title} />
           </div>
         </div>
       </div>

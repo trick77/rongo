@@ -212,6 +212,17 @@ body {
   margin-bottom: 0;
 }
 
+/* The renderer's SVG carries a viewBox and its own intrinsic max-width, so
+   it scales down into a narrow column and never past 1:1. Block, so the card
+   holds no inline-box gap under it. The colours are the theme's, handed to
+   the renderer as its theme variables (diagram.tsx themeVariables). */
+.rongo-diagram svg {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  height: auto;
+}
+
 .ui-markdown :where(h1, h2, h3, h4) {
   margin: 1.1rem 0 0.45rem;
   color: var(--color-ink);

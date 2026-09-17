@@ -1,0 +1,9 @@
+A label may hold anything, a marker included [7][2].
+
+```mermaid
+flowchart TD
+  a["parts[2]"] --> b["Step [1]: gather"]
+  b --> c["done (ok)"]
+```
+
+None of it is a claim; the claims are here [7].

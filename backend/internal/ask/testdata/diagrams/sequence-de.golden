@@ -1,0 +1,14 @@
+Der Aufruf läuft über drei Stationen [1][2].
+
+```mermaid
+sequenceDiagram
+  participant UI as Ask.tsx
+  participant API as httpapi
+  participant A as Answerer
+  UI->>API: POST /api/ask
+  API->>A: Answer()
+  A-->>UI: Token-Stream
+  A-)API: Zitate (async)
+```
+
+Die Zitate kommen zuletzt [2].

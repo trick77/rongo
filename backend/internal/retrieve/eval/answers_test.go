@@ -221,8 +221,9 @@ type answerRecord struct {
 	// The reader never sees them - swiss.go corrects the stream - so this
 	// column is the only place the deployment's German spelling shows.
 	Digraphs []string `json:"digraphs,omitempty"`
-	// Diagram is "flow" or "sequence" when the answer draws one
-	// (ask.DiagramKind), "" when the reader gets prose alone.
+	// Diagram is the type the answer's diagram fence names, "flowchart",
+	// "sequenceDiagram", "stateDiagram-v2", "erDiagram" (ask.DiagramKind),
+	// and "" when the reader gets prose alone.
 	Diagram string `json:"diagram,omitempty"`
 	Err     string `json:"err,omitempty"`
 }

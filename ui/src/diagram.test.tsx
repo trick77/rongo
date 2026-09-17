@@ -1,47 +1,35 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent, createEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, fireEvent, waitFor } from "@testing-library/react";
+
+// The renderer measures text with getBBox, which jsdom lacks, so the tests
+// stand in for it: parse accepts anything that does not say `bad`, and
+// render answers with a marked SVG. What is under test is what diagram.tsx
+// does around the renderer: source selection, the cache, the fallbacks.
+const parse = vi.fn(async (src: string) => {
+  if (src.includes("bad")) throw new Error("Parse error on line 1");
+  return { diagramType: src.split(/\s+/)[0] };
+});
+const renderSvg = vi.fn(async (id: string, src: string) => ({
+  svg: `<svg id="${id}" data-src="${src.length}"><g class="drawn"></g></svg>`,
+}));
+vi.mock("mermaid", () => ({
+  default: { initialize: vi.fn(), parse: (s: string) => parse(s), render: (i: string, s: string) => renderSvg(i, s) },
+}));
+
 import Diagram, {
+  diagramKind,
+  diagramSource,
+  diagramTitle,
+  draw,
   parseDiagram,
-  wrap,
-  truncate,
-  chipsWidth,
-  labelWidth,
-  layoutFlow,
-  layoutSequence,
-  NODE_W,
   type FlowSpec,
   type SequenceSpec,
 } from "./diagram";
 
-const flow: FlowSpec = {
-  type: "flow",
-  nodes: [
-    { id: "a", label: "Answer()", kind: "start", src: [3] },
-    { id: "b", label: "sources empty?", kind: "decision", src: [3] },
-    { id: "c", label: "NothingFound", kind: "end", src: [] },
-    { id: "d", label: "Stream to the model", kind: "step", src: [3, 4] },
-    { id: "e", label: "Answer stored", kind: "end", src: [6] },
-  ],
-  edges: [
-    { from: "a", to: "b" },
-    { from: "b", to: "c", label: "yes" },
-    { from: "b", to: "d", label: "no" },
-    { from: "d", to: "e" },
-  ],
-};
-
-const seq: SequenceSpec = {
-  type: "sequence",
-  actors: [
-    { id: "ui", label: "Ask.tsx" },
-    { id: "api", label: "httpapi" },
-  ],
-  steps: [
-    { from: "ui", to: "api", label: "POST /api/ask", kind: "call", src: [1] },
-    { from: "api", to: "ui", label: "token events", kind: "return", src: [2] },
-    { from: "api", to: "api", label: "flush", kind: "async", src: [] },
-  ],
-};
+beforeEach(() => {
+  parse.mockClear();
+  renderSvg.mockClear();
+});
 
 describe("parseDiagram", () => {
   it("accepts a flow and a sequence, defaulting kind and src", () => {
@@ -117,439 +105,114 @@ describe("parseDiagram", () => {
   });
 });
 
-/** The spec a reader was handed as a code block: eight actors, past the five
- * the prompt asks for, and drawable in every other respect. */
-const wideSequence = `{"type":"sequence","actors":[{"id":"cfg","label":"repos.yaml"},{"id":"startup","label":"Startup"},{"id":"indexer","label":"Indexer"},{"id":"git","label":"git"},{"id":"ctags","label":"universal-ctags"},{"id":"rg","label":"ripgrep"},{"id":"embed","label":"Embedding Service"},{"id":"db","label":"SQLite (FTS5 + vec)"}],"steps":[{"from":"cfg","to":"startup","label":"Load repository list","kind":"call","src":[1,2]},{"from":"startup","to":"indexer","label":"Sync specs and start pipeline","kind":"call","src":[2,11]},{"from":"indexer","to":"git","label":"Clone or fetch repository","kind":"call","src":[3,4]},{"from":"indexer","to":"ctags","label":"Extract symbols from file bodies","kind":"call","src":[6,7]},{"from":"indexer","to":"rg","label":"Keyword indexing of raw text","kind":"call","src":[3,7]},{"from":"indexer","to":"embed","label":"Embed enriched chunk text","kind":"call","src":[3,8]},{"from":"indexer","to":"db","label":"Store files, symbols, chunks, vectors","kind":"return","src":[5,7]}]}`;
 
-describe("a spec past the prompt's size guidance", () => {
-  it("draws the eight-actor sequence rather than showing its JSON", () => {
-    const s = parseDiagram(wideSequence) as SequenceSpec | null;
-    expect(s?.type).toBe("sequence");
-    expect(s!.actors).toHaveLength(8);
-    expect(s!.steps).toHaveLength(7);
-    expect(s!.steps[0].src).toEqual([1, 2]);
-    // Nothing is clipped: the SVG carries no viewBox, so the layout has to be
-    // as wide as the eighth lifeline and the box scrolls it.
-    const l = layoutSequence(s!);
-    expect(l.actors).toHaveLength(8);
-    // 55 is half an actor box: the eighth one's right edge is inside the width.
-    expect(l.width).toBeGreaterThanOrEqual(l.actors[7].x + 55);
+describe("diagramSource", () => {
+  it("takes a mermaid fence as it is", () => {
+    expect(diagramSource("mermaid", "flowchart LR\n a --> b")).toBe("flowchart LR\n a --> b");
   });
 
-  it("draws a flow past the node guidance, and a sequence past the step guidance", () => {
-    const many = parseDiagram(
-      JSON.stringify({
-        type: "flow",
-        nodes: Array.from({ length: 16 }, (_, i) => ({ id: `n${i}`, label: `n${i}` })),
-        edges: Array.from({ length: 15 }, (_, i) => ({ from: `n${i}`, to: `n${i + 1}` })),
-      }),
-    ) as FlowSpec | null;
-    expect(many?.nodes).toHaveLength(16);
-    expect(layoutFlow(many!).nodes).toHaveLength(16);
-    const long = parseDiagram(
-      JSON.stringify({
-        type: "sequence",
-        actors: [{ id: "u", label: "UI" }],
-        steps: Array.from({ length: 16 }, () => ({ from: "u", to: "u", label: "x" })),
-      }),
-    ) as SequenceSpec | null;
-    expect(long?.steps).toHaveLength(16);
+  it("converts the older JSON spec whatever the fence says", () => {
+    const body = '{"type":"flow","nodes":[{"id":"a","label":"x"}],"edges":[]}';
+    for (const tag of ["diagram", "json", ""]) {
+      expect(diagramSource(tag, body), tag).toBe('flowchart TD\n    a["x"]');
+    }
+  });
+
+  it("takes a diagram fence holding mermaid text as mermaid", () => {
+    expect(diagramSource("diagram", "sequenceDiagram\n A->>B: hi")).toBe("sequenceDiagram\n A->>B: hi");
+  });
+
+  it("leaves code alone", () => {
+    expect(diagramSource("json", '{"type":"config"}')).toBeNull();
+    expect(diagramSource("go", "func main() {}")).toBeNull();
+    // A spec the parser rejects is handed on, so the card can say it broke.
+    expect(diagramSource("json", '{"type":"flow","nodes":[]}')).toBe('{"type":"flow","nodes":[]}');
   });
 });
 
-describe("wrap", () => {
-  it("breaks on words at the column and caps at three lines with an ellipsis", () => {
-    expect(wrap("citationsFor drops unbacked markers")).toEqual(["citationsFor drops", "unbacked markers"]);
-    expect(wrap("one two three four five six seven eight nine ten eleven twelve thirteen fourteen")).toHaveLength(3);
-    expect(wrap("one two three four five six seven eight nine ten eleven twelve thirteen fourteen")[2]).toMatch(/…$/);
-    expect(wrap("averyveryverylongidentifierwithoutspaces")).toEqual(["averyveryverylongid…"]);
+describe("diagramKind and diagramTitle", () => {
+  it("reads the type off the first word, past directives and blank lines", () => {
+    expect(diagramKind("flowchart LR\n a-->b")).toBe("flowchart");
+    expect(diagramKind("\n%%{init: {}}%%\nsequenceDiagram\n A->>B: x")).toBe("sequenceDiagram");
+    expect(diagramKind("stateDiagram-v2\n [*] --> A")).toBe("stateDiagram-v2");
+    expect(diagramKind("")).toBe("");
+    expect(diagramKind('{"type":"flow"}')).toBe("");
+  });
+
+  it("names the picture by its type and falls back to Diagram", () => {
+    expect(diagramTitle("flowchart TD\n a")).toBe("Flow diagram");
+    expect(diagramTitle("graph LR\n a")).toBe("Flow diagram");
+    expect(diagramTitle("sequenceDiagram\n A->>B: x")).toBe("Sequence diagram");
+    expect(diagramTitle("stateDiagram-v2\n a")).toBe("State diagram");
+    expect(diagramTitle("erDiagram\n A ||--o{ B : has")).toBe("Entity diagram");
+    expect(diagramTitle("classDiagram\n class A")).toBe("Class diagram");
+    expect(diagramTitle("gantt\n title x")).toBe("Diagram");
   });
 });
 
-describe("layoutFlow", () => {
-  it("ranks a chain top-down on one column", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "a", label: "a", kind: "start", src: [] },
-        { id: "b", label: "b", kind: "step", src: [] },
-        { id: "c", label: "c", kind: "end", src: [] },
-      ],
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: "c" },
-      ],
-    });
-    expect(l.ranks).toEqual([["a"], ["b"], ["c"]]);
-    expect(l.nodes.map((n) => n.x)).toEqual([0, 0, 0]);
-    expect(l.nodes[0].y).toBeLessThan(l.nodes[1].y);
-    expect(l.nodes[1].y).toBeLessThan(l.nodes[2].y);
-    // One column, plus the overhang a chip would need.
-    expect(l.width).toBe(NODE_W + 6);
-    expect(l.edges.every((e) => !e.back)).toBe(true);
+describe("draw", () => {
+  it("renders a source once, however often it is asked for", async () => {
+    const src = "flowchart LR\n once --> twice";
+    const a = await draw(src);
+    const b = await draw(src);
+    expect(a).toBe(b);
+    expect(renderSvg).toHaveBeenCalledTimes(1);
   });
 
-  it("puts the branches of a decision side by side and labels the exits", () => {
-    const l = layoutFlow(flow);
-    expect(l.ranks).toEqual([["a"], ["b"], ["c", "d"], ["e"]]);
-    const c = l.nodes.find((n) => n.id === "c")!;
-    const d = l.nodes.find((n) => n.id === "d")!;
-    expect(c.y).toBe(d.y);
-    expect(c.x).toBeLessThan(d.x);
-    expect(l.edges.find((e) => e.key.startsWith("b->c"))?.label).toBe("yes");
-    // The decision leaves by its side points, not its bottom: the "yes" exit
-    // starts on b's left edge, level with its middle.
-    const b = l.nodes.find((n) => n.id === "b")!;
-    expect(l.edges.find((e) => e.key.startsWith("b->c"))?.d).toBe(
-      `M${b.x} ${b.y + b.h / 2} H${c.x + c.w / 2} V${c.y - 2}`,
-    );
-    expect(l.width).toBe(2 * NODE_W + 32 + 6);
-  });
-
-  it("orders a rank by its parents so branches do not cross", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "l", label: "l", kind: "step", src: [] },
-        { id: "r", label: "r", kind: "step", src: [] },
-        { id: "rr", label: "rr", kind: "step", src: [] },
-        { id: "ll", label: "ll", kind: "step", src: [] },
-      ],
-      edges: [
-        { from: "r", to: "rr" },
-        { from: "l", to: "ll" },
-      ],
-    });
-    expect(l.ranks).toEqual([
-      ["l", "r"],
-      ["ll", "rr"],
-    ]);
-  });
-
-  it("routes a cycle's back edge up a lane right of the column", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "a", label: "a", kind: "step", src: [] },
-        { id: "b", label: "b", kind: "step", src: [] },
-      ],
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: "a", label: "retry" },
-      ],
-    });
-    expect(l.ranks).toEqual([["a"], ["b"]]);
-    const back = l.edges.find((e) => e.back)!;
-    expect(back.label).toBe("retry");
-    expect(back.lx).toBeGreaterThan(NODE_W);
-    expect(l.width).toBeGreaterThan(NODE_W);
-  });
-
-  it("routes an edge that skips a rank through the lane too", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "a", label: "a", kind: "step", src: [] },
-        { id: "b", label: "b", kind: "step", src: [] },
-        { id: "c", label: "c", kind: "step", src: [] },
-      ],
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: "c" },
-        { from: "a", to: "c" },
-      ],
-    });
-    const skip = l.edges.find((e) => e.key.startsWith("a->c"))!;
-    expect(skip.back).toBe(false);
-    expect(skip.lx).toBeGreaterThan(NODE_W);
-  });
-
-  it("is deterministic: the same spec lays out to the same coordinates", () => {
-    const a = layoutFlow(flow);
-    const b = layoutFlow(flow);
-    expect(a).toEqual(b);
-    expect(a.nodes.map((n) => [n.id, n.x, n.y, n.h])).toEqual([
-      ["a", 91, 0, 40],
-      ["b", 91, 88, 56],
-      ["c", 0, 192, 40],
-      ["d", 182, 192, 40],
-      ["e", 91, 280, 40],
-    ]);
-  });
-});
-
-// The SVG has no viewBox, so anything past the computed width is clipped
-// away. A clipped chip takes a node's sources with it, which is the one
-// thing a diagram in an answer may never do.
-describe("nothing is drawn outside the width", () => {
-  it("keeps a long back-edge label right of the lane, inside the width", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "a", label: "a", kind: "step", src: [] },
-        { id: "b", label: "b", kind: "step", src: [] },
-      ],
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: "a", label: "retry the whole thing" },
-      ],
-    });
-    const e = l.edges.find((x) => x.back)!;
-    const half = (labelWidth(e.label) + 8) / 2;
-    expect(e.lx - half).toBeGreaterThan(NODE_W); // clear of the node column
-    expect(e.lx + half).toBeLessThanOrEqual(l.width);
-  });
-
-  it("makes room for a self call on the rightmost actor, label and chips", () => {
-    const l = layoutSequence({
-      type: "sequence",
-      actors: [
-        { id: "u", label: "UI" },
-        { id: "s", label: "Store" },
-      ],
-      steps: [{ from: "s", to: "s", label: "validateGrant", kind: "call", src: [1, 2] }],
-    });
-    const step = l.steps[0];
-    expect(step.right).toBeGreaterThan(250); // past the actor columns
-    expect(l.width).toBeGreaterThanOrEqual(step.right);
-    expect(step.chipsX + chipsWidth(step.src)).toBeLessThanOrEqual(l.width);
-  });
-
-  it("shifts right when an edge label reaches past the origin", () => {
-    // A label is centred on its edge, and an edge in the only column is
-    // centred on a 150px node: anything wider than 300px hangs off the left.
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [
-        { id: "a", label: "a", kind: "step", src: [] },
-        { id: "b", label: "b", kind: "step", src: [] },
-      ],
-      edges: [{ from: "a", to: "b", label: "only when the grant is still valid" }],
-    });
-    const e = l.edges.find((x) => x.label)!;
-    expect(e.lx - (labelWidth(e.label) + 8) / 2).toBeLessThan(0); // would clip
-    expect(l.originX).toBeGreaterThan(0);
-    expect(l.originX + e.lx - (labelWidth(e.label) + 8) / 2).toBeGreaterThanOrEqual(0);
-  });
-
-  it("keeps a node's chips inside the width", () => {
-    const l = layoutFlow({
-      type: "flow",
-      nodes: [{ id: "a", label: "a", kind: "step", src: [11, 12] }],
-      edges: [],
-    });
-    expect(l.width).toBeGreaterThanOrEqual(NODE_W + 6);
-  });
-});
-
-describe("truncate", () => {
-  it("marks a shortened name so it cannot read as a real one", () => {
-    expect(truncate("Grant Store Service", 16)).toBe("Grant Store Ser…");
-    expect(truncate("httpapi", 16)).toBe("httpapi");
-  });
-});
-
-describe("layoutSequence", () => {
-  it("spaces the lifelines by actor index and stacks the steps", () => {
-    const l = layoutSequence(seq);
-    expect(l.actors.map((a) => a.x)).toEqual([55, 195]);
-    expect(l.steps[0].y).toBeLessThan(l.steps[1].y);
-    expect(l.steps[1].y).toBeLessThan(l.steps[2].y);
-    expect(l.steps[2].self).toBe(true);
-    // The columns are 250 wide; the width stretches to the widest step.
-    expect(l.width).toBe(Math.max(250, ...l.steps.map((s) => s.right)));
-    expect(l.width).toBeGreaterThanOrEqual(250);
-    // A return runs right to left; a self message loops out and back.
-    expect(l.steps[1].x1).toBeGreaterThan(l.steps[1].x2);
-    expect(l.steps[2].d).toMatch(/^M195 \d+ H225 V/);
+  it("answers a refused source with the parser's complaint, not a throw", async () => {
+    const out = await draw("flowchart LR\n bad[");
+    expect(out).toEqual({ error: "Parse error on line 1" });
+    expect(renderSvg).not.toHaveBeenCalled();
   });
 });
 
 describe("Diagram", () => {
-  it("draws a flow as SVG shapes: pills for start and end, a diamond for a decision", () => {
-    const { container } = render(<Diagram spec={flow} hooks={{}} />);
-    // The drawing, not the control strip: the two icon buttons above it are
-    // inline SVG as well.
-    const svg = container.querySelector('svg[role="img"]')!;
-    expect(svg.getAttribute("role")).toBe("img");
-    expect(container.querySelectorAll("polygon").length).toBe(1);
-    const rects = Array.from(container.querySelectorAll("rect")).filter((r) => r.getAttribute("height") === "40");
-    expect(rects.some((r) => r.getAttribute("rx") === "20")).toBe(true);
-    expect(rects.some((r) => r.getAttribute("rx") === "8")).toBe(true);
-    expect(container.textContent).toContain("sources empty?");
-    expect(container.textContent).toContain("yes");
+  it("says a picture is on its way, then draws it", async () => {
+    const { container, getByText } = render(<Diagram src={"sequenceDiagram\n A->>B: hi"} />);
+    expect(getByText("Drawing the diagram…")).toBeTruthy();
+    await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
+    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("Sequence diagram");
   });
 
-  it("draws a sequence with dashed returns and an open head for async", () => {
-    const { container } = render(<Diagram spec={seq} hooks={{}} />);
-    const paths = Array.from(container.querySelectorAll("g > path[marker-end]"));
-    expect(paths.length).toBe(3);
-    expect(paths[1].getAttribute("stroke-dasharray")).toBe("4 3");
-    expect(paths[2].getAttribute("marker-end")).toMatch(/open\)$/);
-    expect(paths[0].getAttribute("marker-end")).toMatch(/head\)$/);
-    expect(container.querySelectorAll("line").length).toBe(2);
+  it("says so when the renderer refuses the source, and keeps the source", async () => {
+    const { getByText, container } = render(<Diagram src={"flowchart LR\n bad["} />);
+    await waitFor(() => expect(getByText("Diagram could not be drawn")).toBeTruthy());
+    expect(container.querySelector("details pre code")?.textContent).toBe("flowchart LR\n bad[");
+    expect(container.querySelector("svg")).toBeNull();
   });
 
-  describe("marker chips", () => {
-    it("wear the chip look while the citations are unknown, one per source", () => {
-      const { container } = render(<Diagram spec={flow} hooks={{}} />);
-      expect(container.textContent).toContain("[3]");
-      expect(container.textContent).toContain("[4]");
-      // Five src entries across the five nodes: [3] [3] [] [3,4] [6].
-      const chips = container.querySelectorAll("rect.fill-accent-dim");
-      expect(chips.length).toBe(5);
-    });
-
-    it("drop a number no source backs to plain text with no hover", () => {
-      const onHover = vi.fn();
-      const { container } = render(<Diagram spec={flow} hooks={{ backed: new Set([3, 4]), onHover }} />);
-      const plain = Array.from(container.querySelectorAll("text.fill-muted")).find((t) => t.textContent === "[6]")!;
-      expect(plain).toBeTruthy();
-      fireEvent.mouseEnter(plain);
-      expect(onHover).not.toHaveBeenCalled();
-      // The four backed entries keep their chips; only [6] drops out.
-      expect(container.querySelectorAll("rect.fill-accent-dim").length).toBe(4);
-    });
-
-    it("open their source when tapped, as a chip in the prose does", () => {
-      const onOpen = vi.fn();
-      const { container } = render(<Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen }} />);
-      const chip = container.querySelector('g[role="button"]')!;
-      fireEvent.click(chip);
-      expect(onOpen).toHaveBeenLastCalledWith(3);
-      fireEvent.keyDown(chip, { key: "Enter" });
-      expect(onOpen).toHaveBeenCalledTimes(2);
-      // Space opens the source without also scrolling the answer away.
-      const space = createEvent.keyDown(chip, { key: " " });
-      fireEvent(chip, space);
-      expect(onOpen).toHaveBeenCalledTimes(3);
-      expect(space.defaultPrevented).toBe(true);
-    });
-
-    it("are not buttons while the citations are unknown", () => {
-      const { container } = render(<Diagram spec={flow} hooks={{ onOpen: vi.fn() }} />);
-      expect(container.querySelector('g[role="button"]')).toBeNull();
-    });
-
-    it("hand a hovered chip to the Sources pane, and nothing while unknown", () => {
-      const onHover = vi.fn();
-      const { container } = render(<Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onHover }} />);
-      const chip = container.querySelector("rect.fill-accent-dim")!.parentElement!;
-      fireEvent.mouseEnter(chip);
-      expect(onHover).toHaveBeenLastCalledWith(3);
-      fireEvent.mouseLeave(chip);
-      expect(onHover).toHaveBeenLastCalledWith(null);
-
-      const unknown = vi.fn();
-      const r2 = render(<Diagram spec={flow} hooks={{ onHover: unknown }} />);
-      fireEvent.mouseEnter(r2.container.querySelector("rect.fill-accent-dim")!.parentElement!);
-      expect(unknown).not.toHaveBeenCalled();
-    });
-  });
-
-  // A diagram is the one thing here too wide for a phone. It scrolls inside
-  // its own box; it must never be scaled to fit, because at the ratio a phone
-  // would need the labels and the chips stop being readable and tappable.
-  it("scrolls rather than scales, and gives the chips a finger's hit area", () => {
-    const { container } = render(
-      <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
-    );
-    const svg = container.querySelector('svg[role="img"]')!;
-    expect(svg.getAttribute("viewBox")).toBeNull();
-    expect(svg.parentElement!.className).toContain("overflow-x-auto");
-    expect(svg.parentElement!.className).toContain("max-w-full");
-
-    const chip = container.querySelector("rect.fill-accent-dim")!;
-    const hit = chip.parentElement!.querySelector("rect.fill-transparent")!;
-    expect(Number(hit.getAttribute("height"))).toBeGreaterThan(
-      Number(chip.getAttribute("height")),
-    );
-    expect(Number(hit.getAttribute("width"))).toBeGreaterThan(Number(chip.getAttribute("width")));
-  });
-
-  // The chips of one node sit 2px apart. A hit area wider than half that gap
-  // reaches over its neighbour, which is later in document order and wins the
-  // tap: the right edge of [1] would open source 2.
-  it("never lets a chip's hit area reach over the next chip", () => {
-    const { container } = render(
-      <Diagram spec={flow} hooks={{ backed: new Set([3, 4, 6]), onOpen: vi.fn() }} />,
-    );
-    const spans = [...container.querySelectorAll("rect.fill-transparent")].map((r) => ({
-      l: Number(r.getAttribute("x")),
-      r: Number(r.getAttribute("x")) + Number(r.getAttribute("width")),
-      y: Number(r.getAttribute("y")),
-    }));
-    expect(spans.length).toBeGreaterThan(1);
-    for (const a of spans) {
-      for (const b of spans) {
-        if (a === b || a.y !== b.y) continue;
-        expect(a.l >= b.r || a.r <= b.l).toBe(true);
-      }
-    }
-  });
-
-  it("offers the full view and the file, without being hovered first", () => {
+  it("offers the full view and the file, without being hovered first", async () => {
     // A phone has no hover, and the full view is the only way it sees a wide
     // diagram whole.
-    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
-    expect(getByLabelText("Sequence diagram: full view")).toBeTruthy();
+    const { getByLabelText } = render(<Diagram src={"sequenceDiagram\n A->>B: x"} />);
+    await waitFor(() => expect(getByLabelText("Sequence diagram: full view")).toBeTruthy());
     expect(getByLabelText("Sequence diagram: download SVG")).toBeTruthy();
   });
 
-  it("keeps the controls out of the scroller, so they cannot scroll away", () => {
-    const { container, getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
-    const scroller = container.querySelector(".overflow-x-auto") as HTMLElement;
-    expect(scroller.querySelector("svg")).toBeTruthy();
-    expect(scroller.contains(getByLabelText("Sequence diagram: full view"))).toBe(false);
-  });
-
-  it("lets a tap through the control strip to the chip beneath it", () => {
-    // The strip is ~110px wide with its fade and lies over the top-right of
-    // the drawing; solid, it would eat the taps meant for a chip scrolled
-    // under it.
-    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
-    const strip = getByLabelText("Sequence diagram: full view").parentElement!;
-    expect(strip.className).toContain("pointer-events-none");
-    expect(getByLabelText("Sequence diagram: full view").className).toContain("pointer-events-auto");
-    expect(getByLabelText("Sequence diagram: download SVG").className).toContain("pointer-events-auto");
-  });
-
-  it("opens the full view on the button and closes it again", () => {
-    const { getByLabelText, queryByRole } = render(<Diagram spec={seq} hooks={{}} />);
+  it("opens the full view on the button and closes it again", async () => {
+    const { getByLabelText, queryByRole } = render(<Diagram src={"sequenceDiagram\n A->>B: y"} />);
+    await waitFor(() => expect(getByLabelText("Sequence diagram: full view")).toBeTruthy());
     expect(queryByRole("dialog")).toBeNull();
     fireEvent.click(getByLabelText("Sequence diagram: full view"));
     expect(queryByRole("dialog")).toBeTruthy();
+    expect(queryByRole("dialog")?.querySelector("svg .drawn")).toBeTruthy();
     fireEvent.click(getByLabelText("Close"));
     expect(queryByRole("dialog")).toBeNull();
   });
 
-  it("downloads the drawing, not an empty file", () => {
+  it("downloads the drawing under the kind of picture it is", async () => {
     let written = "";
-    Object.defineProperty(URL, "createObjectURL", {
-      configurable: true,
-      value: (b: Blob) => ((written = (b as unknown as { parts?: string }).parts ?? ""), "blob:x"),
-    });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:x" });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,
     ) {
       written = this.download;
     });
-    const { getByLabelText } = render(<Diagram spec={seq} hooks={{}} />);
-    fireEvent.click(getByLabelText("Sequence diagram: download SVG"));
-    expect(written).toBe("rongo-sequence-diagram.svg");
+    const { getByLabelText } = render(<Diagram src={"stateDiagram-v2\n [*] --> A"} />);
+    await waitFor(() => expect(getByLabelText("State diagram: download SVG")).toBeTruthy());
+    fireEvent.click(getByLabelText("State diagram: download SVG"));
+    expect(written).toBe("rongo-state-diagram.svg");
     click.mockRestore();
-  });
-
-  it("gives two diagrams on one page distinct arrowhead ids", () => {
-    const { container } = render(
-      <>
-        <Diagram spec={flow} hooks={{}} />
-        <Diagram spec={seq} hooks={{}} />
-      </>,
-    );
-    const ids = Array.from(container.querySelectorAll("marker")).map((m) => m.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.every((id) => /^[A-Za-z0-9_-]+$/.test(id))).toBe(true);
   });
 });

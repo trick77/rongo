@@ -329,13 +329,16 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		t.Error("the BA prompt talks about fenced code, but a BA answer carries none")
 	}
 	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
-		if !strings.Contains(p, "```diagram") || !strings.Contains(p, `"src":[1]`) {
-			t.Errorf("the %s prompt does not name the diagram fence and its src arrays", name)
+		if !strings.Contains(p, "```mermaid") || !strings.Contains(p, "flowchart LR with two subgraphs") {
+			t.Errorf("the %s prompt does not name the diagram fence and its types", name)
+		}
+		if !strings.Contains(p, "No citation markers inside the fence") {
+			t.Errorf("the %s prompt lets a marker into the fence, where a bracket is syntax", name)
 		}
 	}
 	// The diagram rule follows the audience block, so "the audience rules
 	// above" are the ones the model just read.
-	if strings.Index(*promptBA, "Audience: business analyst") > strings.Index(*promptBA, "```diagram") {
+	if strings.Index(*promptBA, "Audience: business analyst") > strings.Index(*promptBA, "```mermaid") {
 		t.Error("the diagram rule comes before the audience block it refers to")
 	}
 	// The BA block names the picture in the reader's words, inside the
@@ -376,7 +379,7 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		if strings.Index(p, "Open with ONE sentence") < strings.Index(p, audience) {
 			t.Errorf("the %s shape rules come before the audience block", name)
 		}
-		if strings.Index(p, "Open with ONE sentence") > strings.Index(p, "```diagram") {
+		if strings.Index(p, "Open with ONE sentence") > strings.Index(p, "```mermaid") {
 			t.Errorf("the %s shape rules come after the conditional blocks", name)
 		}
 	}
@@ -415,7 +418,7 @@ func TestAnswer_theIntentSharpensTheOpeningSentence(t *testing.T) {
 		if strings.Index(*prompt, want) < strings.Index(*prompt, "Open with ONE sentence") {
 			t.Errorf("the %q rule comes before the shape rules it refines", intent)
 		}
-		if strings.Index(*prompt, want) > strings.Index(*prompt, "```diagram") {
+		if strings.Index(*prompt, want) > strings.Index(*prompt, "```mermaid") {
 			t.Errorf("the %q rule comes after the conditional blocks", intent)
 		}
 	}

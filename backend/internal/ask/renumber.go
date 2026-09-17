@@ -1,7 +1,6 @@
 package ask
 
 import (
-	"encoding/json"
 	"regexp"
 	"sort"
 	"strconv"
@@ -36,19 +35,7 @@ type renumberer struct {
 	dense   map[int]int // the prompt's number -> the reader's
 	order   []int       // the reader's number - 1 -> the prompt's
 	pending string      // what cannot be decided yet
-	// lastOut is the last byte handed to the reader, so a fence minted
-	// around a bare spec knows whether it already stands at a line start.
-	lastOut byte
 	inFence bool
-	// inDiagram says the open fence is a diagram, the one block whose
-	// numbers are claims rather than code.
-	inDiagram bool
-	// docs says, per prompt source number - 1, whether that source is
-	// documentation, so a diagram node can be kept from citing one. Empty
-	// means nothing is: a renumberer that was never told what its sources
-	// are does not guess, and the tests that construct one with a count
-	// alone renumber exactly as they did before.
-	docs []bool
 	// spell rewrites the prose between the markers and the code, set for a
 	// German answer (speller.prose) and nil for every other language. With
 	// it set, a word that reaches the end of what has arrived is held back
@@ -59,12 +46,6 @@ type renumberer struct {
 
 func newRenumberer(sources int) *renumberer {
 	return &renumberer{n: sources, dense: map[int]int{}}
-}
-
-// isDoc reports whether the prompt's source n is documentation. Out of range
-// is false: an invented number is not a document, it is not a source at all.
-func (r *renumberer) isDoc(n int) bool {
-	return n >= 1 && n <= len(r.docs) && r.docs[n-1]
 }
 
 // A complete marker at the start of the text, or the start of one. The
@@ -92,22 +73,13 @@ func (r *renumberer) feed(tok string) string {
 	r.pending += tok
 	out, rest := r.decide(r.pending, false)
 	r.pending = rest
-	r.remember(out)
 	return out
-}
-
-// remember keeps the last byte emitted, the one openFence asks about.
-func (r *renumberer) remember(out string) {
-	if out != "" {
-		r.lastOut = out[len(out)-1]
-	}
 }
 
 // flush ends the stream: whatever is still pending is decided as it stands.
 func (r *renumberer) flush() string {
 	out, _ := r.decide(r.pending, true)
 	r.pending = ""
-	r.remember(out)
 	return out
 }
 
@@ -119,37 +91,28 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 	i := 0
 	for i < len(s) {
 		if r.inFence {
-			// Nothing in a fence is a marker, with one exception: a diagram
-			// fence cites through the src arrays of its nodes, and those
-			// numbers are the same claim a marker in prose is, so they are
-			// renumbered with it (diagram.tsx draws them as the same chip).
+			// Nothing in a fence is a marker. A diagram fence included: its
+			// labels are drawn, not cited, and a number in one is a label.
 			if end := strings.Index(s[i:], "```"); end >= 0 {
-				b.WriteString(r.fenceBody(s[i:i+end], true))
+				b.WriteString(s[i : i+end])
 				b.WriteString("```")
 				i += end + 3
 				r.inFence = false
-				r.inDiagram = false
 				continue
 			}
 			if atEnd {
-				b.WriteString(r.fenceBody(s[i:], true))
+				b.WriteString(s[i:])
 				return b.String(), ""
 			}
 			// Trailing backticks may be the start of the close. Counted over
 			// what is left to decide, never over the whole buffer: the fence
 			// that opened at i is made of backticks too.
 			cut := len(s) - trailingBackticks(s[i:], 2)
-			if r.inDiagram {
-				out, rest := r.rewriteSrc(s[i:cut], false)
-				b.WriteString(out)
-				return b.String(), rest + s[cut:]
-			}
 			b.WriteString(s[i:cut])
 			return b.String(), s[cut:]
 		}
-		// The earliest of: a fence, an inline span, a marker, a spec that
-		// arrived without a fence at all.
-		j := strings.IndexAny(s[i:], "`[{")
+		// The earliest of: a fence, an inline span, a marker.
+		j := strings.IndexAny(s[i:], "`[")
 		if j < 0 {
 			if r.spell != nil && !atEnd {
 				// The last word may go on in the next token.
@@ -162,32 +125,6 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 		}
 		b.WriteString(r.prose(s[i : i+j]))
 		i += j
-		if s[i] == '{' {
-			// A diagram the model wrote as bare JSON. Without this the
-			// object is prose, and the src arrays inside it are read as
-			// citation markers: the [6] of "src":[6] would be renumbered as
-			// though the sentence around it had cited source 6.
-			if jsonish(s[i:]) {
-				end := jsonEnd(s[i:])
-				if end < 0 && !atEnd {
-					return b.String(), s[i:] // the object may still close
-				}
-				if end >= 0 && specKind(s[i:i+end]) != "" {
-					prev := r.lastOut
-					if b.Len() > 0 {
-						written := b.String()
-						prev = written[len(written)-1]
-					}
-					body, _ := r.rewriteSrc(s[i:i+end], true)
-					b.WriteString(openFence(prev) + body + "\n```\n")
-					i += end
-					continue
-				}
-			}
-			b.WriteByte('{')
-			i++
-			continue
-		}
 		if s[i] == '`' {
 			// One or two backticks at the end of what has arrived may be the
 			// start of an opening fence: held back, as the closing one is.
@@ -198,23 +135,20 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				return b.String(), s[i:]
 			}
 			if strings.HasPrefix(s[i:], "```") {
-				// The info string says whether this is a diagram fence, whose
-				// src arrays renumber; held back until the line is whole,
-				// because the tag decides how the whole block is read.
+				// The header line is held back until it is whole: a second
+				// "```" on the same line closes it, and that is a span, not
+				// a block. Reading the rest of the line as an info string
+				// would leave the fence open over the whole answer - every
+				// marker after it silently uncited.
 				nl := strings.IndexByte(s[i:], '\n')
 				line := s[i:]
 				if nl >= 0 {
 					line = s[i : i+nl]
 				}
-				// A second "```" on the same line closes it: that is a span,
-				// not a block, and reading the rest of the line as an info
-				// string would leave the fence open over the whole answer -
-				// every marker after it silently uncited.
 				if strings.Contains(line[3:], "```") {
 					b.WriteString("```")
 					i += 3
 					r.inFence = true
-					r.inDiagram = false
 					continue
 				}
 				if nl < 0 && !atEnd {
@@ -224,37 +158,7 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 				if nl >= 0 {
 					raw = s[i : i+nl+1]
 				}
-				head := raw
-				r.inDiagram = infoTag(raw) == "diagram"
-				if !r.inDiagram {
-					// The tag is not the one the prompt asked for, so the
-					// body decides. A spec opened as ```json is still the
-					// picture the answer meant; left as it came it renumbers
-					// nowhere and the reader is handed the JSON. The header
-					// is rewritten to the one both ends agree on.
-					//
-					// The body is read no further than this fence: a block
-					// the stream cut off mid-object must not have its brace
-					// matched against whatever the rest of the answer holds.
-					body := s[i+len(raw):]
-					if k := strings.Index(body, "```"); k >= 0 {
-						body = body[:k]
-					}
-					if jsonish(body) {
-						end := jsonEnd(body)
-						if end < 0 && !atEnd {
-							return b.String(), s[i:]
-						}
-						if end >= 0 && specKind(body[:end]) != "" {
-							r.inDiagram = true
-							head = "```diagram"
-							if strings.HasSuffix(raw, "\n") {
-								head += "\n"
-							}
-						}
-					}
-				}
-				b.WriteString(head)
+				b.WriteString(raw)
 				i += len(raw)
 				r.inFence = true
 				continue
@@ -296,81 +200,14 @@ func (r *renumberer) decide(s string, atEnd bool) (out string, rest string) {
 	return b.String(), ""
 }
 
-// A src array of a diagram node, or the start of one. Anchored on the KEY,
-// never on the bracket: a node label may be `parts[2]`, and renumbering that
-// would mint a citation out of an index expression - the fabrication the
-// whole citation path exists to prevent.
-//
-// The value is read as a CHAIN of bracket groups, because answerCommon tells
-// the model that two sources read [6][25], and it applies that inside the
-// fence often enough. Written into JSON the chain is not parseable, so the
-// browser shows the diagram as the code block it now is; worse, renumbering
-// only the first group leaves the second at prompt numbering, which puts a
-// wrong source under a chip. Both groups are read and the value is emitted
-// as the one array it was meant to be.
-//
-// The groups may be separated by a comma as well as by nothing at all: the
-// model reaching for JSON halfway writes [1],[43], which is neither the chain
-// the prose rule asks for nor the array the fence needs, and is exactly as
-// unparseable. It is the same value written a second way, so it folds the
-// same way. A comma only joins two groups when a bracket follows it, so
-// "src":[1],"kind" ends the value where it should.
-var (
-	// Whitespace is allowed everywhere JSON allows it: a model that writes
-	// "src" : [ 9 ] means the same array, and read strictly it went through
-	// unrenumbered - a prompt index drawn as a chip.
-	srcGroup    = `\[\s*(?:\d{1,3}(?:\s*,\s*\d{1,3})*)\s*\]`
-	srcAtStart  = regexp.MustCompile(`^"src"\s*:\s*(` + srcGroup + `(?:\s*,?\s*` + srcGroup + `)*)`)
-	srcPrefixRe = regexp.MustCompile(`^"(s(r(c("(\s*(:(\s*(\[[\d\s,]*)?)?)?)?)?)?)?)?$`)
-	// What may still grow into another group of the chain: nothing yet, a
-	// comma that has not been followed yet, or a bracket that has not closed.
-	// Held back until it is decided.
-	srcMoreRe = regexp.MustCompile(`^\s*(?:,\s*)?(\[[\d\s,]*)?$`)
-	// The seam between two groups of a chain, with or without the comma the
-	// model half-remembered, which becomes the one comma the array should
-	// have carried.
-	srcJoinRe = regexp.MustCompile(`\]\s*,?\s*\[`)
-)
-
-// Reading the content rather than the fence tag is what keeps a diagram a
-// diagram when the model opens the block as ```json, or writes it with no
-// fence at all: three times now a picture has been thrown away because one
-// exact match failed, and an exact match on the tag would have been the
-// fourth. So nothing here matches a fixed opening. A candidate is anything
-// shaped like a JSON object; it is read to its closing brace and then asked
-// what it is, which is the one question that does not go stale when the
-// model reorders its keys.
-
-// jsonish says s may be the start of a JSON object: a brace and then a key,
-// whitespace ignored. It is deliberately weak - it only decides whether the
-// text is worth holding until its closing brace arrives, and specKind makes
-// the real decision - but weak is not nothing: prose does not open a brace
-// and follow it with a quote, so an ordinary "{" in a sentence is passed
-// through rather than stalling the stream.
-func jsonish(s string) bool {
-	const want = `{"`
-	i := 0
-	for _, r := range s {
-		if unicode.IsSpace(r) {
-			continue
-		}
-		if i == len(want) || byte(r) != want[i] {
-			return i == len(want)
-		}
-		i++
-	}
-	return true // still a prefix of `{"`: it may yet become one
-}
-
-// DiagramKind returns "flow" or "sequence" when the answer text carries a
-// diagram the reader gets drawn, and "" when it carries none. It reads the
-// text as the renumberer left it, so a spec the model fenced as json or wrote
-// bare counts once retagged. What is measured is the picture, not the
-// attempt, so the conditions are the browser's (ui/src/diagram.tsx, parse;
-// markdown.tsx, fenceRe): a closed fence whose first header token is
-// "diagram", a body that is valid JSON, and at least one node or actor with
-// a string id and label - an empty or cut-off spec is shown as text there
-// and counts as none here. The answers harness reports it per answer.
+// DiagramKind returns the type of the diagram an answer carries, as the
+// first word of its mermaid fence names it ("flowchart", "sequenceDiagram",
+// "stateDiagram-v2", "erDiagram"), and "" when it carries none. It reads the
+// text as the renumberer left it. What is measured is the fence, not the
+// picture: whether the renderer draws it is the browser's call, and the UI
+// corpus test (ui/src/corpus.test.ts) asks the renderer's parser exactly
+// that for every answer in the corpus. The answers harness reports it per
+// answer.
 func DiagramKind(text string) string {
 	for rest := text; ; {
 		i := strings.Index(rest, "```")
@@ -386,8 +223,8 @@ func DiagramKind(text string) string {
 		if end < 0 {
 			return ""
 		}
-		if infoTag(head) == "diagram" {
-			if kind := drawnKind(after[:end]); kind != "" {
+		if tag := infoTag(head); tag == "mermaid" || tag == "diagram" {
+			if kind := mermaidKind(after[:end]); kind != "" {
 				return kind
 			}
 		}
@@ -395,214 +232,38 @@ func DiagramKind(text string) string {
 	}
 }
 
-// drawnKind is the type of the spec body when the browser would draw it.
-func drawnKind(body string) string {
-	var spec struct {
-		Type   string           `json:"type"`
-		Nodes  []map[string]any `json:"nodes"`
-		Actors []map[string]any `json:"actors"`
-	}
-	if err := json.Unmarshal([]byte(body), &spec); err != nil {
-		return ""
-	}
-	drawn := func(items []map[string]any) bool {
-		for _, it := range items {
-			id, _ := it["id"].(string)
-			_, labelled := it["label"].(string)
-			if id != "" && labelled {
-				return true
-			}
-		}
-		return false
-	}
-	switch spec.Type {
-	case "flow":
-		if drawn(spec.Nodes) {
-			return "flow"
-		}
-	case "sequence":
-		if drawn(spec.Actors) {
-			return "sequence"
-		}
-	}
-	return ""
-}
-
-// specKind returns the top-level "type" of the JSON object o when it names a
-// diagram this renderer draws, and "" otherwise. The key is read at depth one
-// only, and read as a key rather than found anywhere in the text: rongo
-// indexes rongo, so an answer that quotes answerDiagram's own format carries
-// these very words inside a code block, and retagging that block would turn a
-// developer's example into a picture.
-func specKind(o string) string {
-	depth := 0
-	for i := 0; i < len(o); {
-		switch o[i] {
-		case '{', '[':
-			depth++
-			i++
-		case '}', ']':
-			depth--
-			i++
-		case '"':
-			key, next := jsonString(o, i)
-			if depth != 1 || key != "type" {
-				i = next
-				continue
-			}
-			j := skipSpace(o, next)
-			if j >= len(o) || o[j] != ':' {
-				i = next
-				continue
-			}
-			if j = skipSpace(o, j+1); j >= len(o) || o[j] != '"' {
-				return ""
-			}
-			switch v, _ := jsonString(o, j); v {
-			case "flow", "sequence":
-				return v
-			}
-			return ""
-		default:
-			i++
-		}
-	}
-	return ""
-}
-
-// jsonString reads the string literal starting at o[i] == '"' and returns its
-// content and the index just past the closing quote. The content is returned
-// raw: nothing here needs an unescaped "type".
-func jsonString(o string, i int) (string, int) {
-	for j := i + 1; j < len(o); j++ {
-		switch o[j] {
-		case '\\':
-			j++
-		case '"':
-			return o[i+1 : j], j + 1
-		}
-	}
-	return "", len(o)
-}
-
-func skipSpace(o string, i int) int {
-	for i < len(o) && (o[i] == ' ' || o[i] == '\t' || o[i] == '\n' || o[i] == '\r') {
-		i++
-	}
-	return i
-}
-
-// jsonEnd returns the index just past the object starting at s[0], or -1
-// when it has not arrived whole. A brace inside a string literal does not
-// count, or a node labelled "{ }" would end the spec early.
-func jsonEnd(s string) int {
-	depth, inStr, esc := 0, false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if inStr {
-			switch {
-			case esc:
-				esc = false
-			case c == '\\':
-				esc = true
-			case c == '"':
-				inStr = false
-			}
+// mermaidKind is the first word of a mermaid source, past blank lines and
+// %% comments or directives, the way the browser reads it (diagram.tsx,
+// diagramKind). Empty when there is none, and empty when the word is not
+// the shape of a type name: a fence holding the older JSON spec opens with
+// a brace, and counting that as a diagram would put a picture in the
+// harness's tally that the reader never got.
+func mermaidKind(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "%%") {
 			continue
 		}
-		switch c {
-		case '"':
-			inStr = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i + 1
-			}
+		word := strings.TrimRight(strings.Fields(t)[0], ";:")
+		if !kindWordRe.MatchString(word) {
+			return ""
 		}
+		return word
 	}
-	return -1
+	return ""
 }
 
-// openFence writes the header for a spec that arrived without one. A fence
-// is read line by line (markdown.tsx fenceRe), so it needs a line of its own;
-// prev is the byte it would follow, 0 at the very start of the answer.
-func openFence(prev byte) string {
-	if prev == 0 || prev == '\n' {
-		return "```diagram\n"
-	}
-	return "\n```diagram\n"
-}
+// kindWordRe is the shape of a diagram type name: flowchart, graph,
+// sequenceDiagram, stateDiagram-v2, erDiagram.
+var kindWordRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
 
 // infoTag reads the language of a fence header the way the browser does
-// (markdown.tsx fenceRe): the first token of the info string. The two ends
-// must agree on what a diagram fence is - one drawing a diagram the other
-// left at prompt numbering would put a wrong source under a chip.
+// (markdown.tsx fenceRe): the first token of the info string.
 func infoTag(head string) string {
 	if f := strings.Fields(strings.Trim(head, "`\n")); len(f) > 0 {
 		return f[0]
 	}
 	return ""
-}
-
-// fenceBody hands a complete fence body to the renumberer for a diagram, and
-// passes anything else through untouched.
-func (r *renumberer) fenceBody(body string, atEnd bool) string {
-	if !r.inDiagram {
-		return body
-	}
-	out, rest := r.rewriteSrc(body, atEnd)
-	return out + rest
-}
-
-// rewriteSrc renumbers the src arrays of a diagram fence, holding back a key
-// or an array that has not arrived whole.
-func (r *renumberer) rewriteSrc(s string, atEnd bool) (out string, rest string) {
-	var b strings.Builder
-	i := 0
-	for i < len(s) {
-		j := strings.Index(s[i:], `"src"`)
-		if j < 0 {
-			// No key left, but the tail may be the start of one.
-			if !atEnd {
-				for k := len(s) - 1; k >= i && k > len(s)-6; k-- {
-					if srcPrefixRe.MatchString(s[k:]) {
-						b.WriteString(s[i:k])
-						return b.String(), s[k:]
-					}
-				}
-			}
-			b.WriteString(s[i:])
-			return b.String(), ""
-		}
-		b.WriteString(s[i : i+j])
-		i += j
-		if m := srcAtStart.FindStringSubmatch(s[i:]); m != nil {
-			// A group that ends where the text does may be the first of a
-			// chain: decided only once what follows it has arrived.
-			if !atEnd && srcMoreRe.MatchString(s[i+len(m[0]):]) {
-				return b.String(), s[i:]
-			}
-			b.WriteString(`"src":` + r.rewriteArray(srcGroups(m[1])))
-			i += len(m[0])
-			continue
-		}
-		if !atEnd && srcPrefixRe.MatchString(s[i:]) {
-			return b.String(), s[i:]
-		}
-		b.WriteString(`"src"`)
-		i += len(`"src"`)
-	}
-	return b.String(), ""
-}
-
-// srcGroups flattens a chain of bracket groups into the one group they meant,
-// so [6][25] renumbers and is written back as the array [6,25]. What comes
-// back out is rewriteArray's own array, sorted; only a group carrying an
-// invented number keeps the separators it came in with.
-func srcGroups(chain string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(srcJoinRe.ReplaceAllString(chain, ","), "["), "]")
 }
 
 // rewrite renumbers the numbers of one marker group, keeping its separators.
@@ -674,58 +335,6 @@ func (r *renumberer) rewriteChain(chain string) string {
 		b.WriteByte(']')
 	}
 	return b.String()
-}
-
-// dropDocs removes the markers of a node's src that rest on documentation.
-//
-// A node is a place in the mechanism and a document is not one, so a chip
-// opening a README under a step of the control flow says the step was read
-// there. No citation is better than that one: the node is still drawn, it
-// just carries nothing to open. Prose is untouched — a claim resting on a
-// document is made in a sentence, where answerCommon has the model say so.
-//
-// Filtered BEFORE markerRun assigns reader numbers, which is what keeps the
-// rest of the answer's numbering intact: a source takes its number on first
-// use, so a document dropped here still gets one where the prose cites it,
-// and one cited nowhere else simply never becomes a citation.
-//
-// Everything that is not a known document survives, an invented number
-// included: it is never a citation, and the UI drops it to plain text.
-func (r *renumberer) dropDocs(group string) string {
-	if len(r.docs) == 0 {
-		return group
-	}
-	kept := make([]string, 0, 4)
-	for _, num := range numberRe.FindAllString(group, -1) {
-		if n, err := strconv.Atoi(num); err == nil && r.isDoc(n) {
-			continue
-		}
-		kept = append(kept, num)
-	}
-	return strings.Join(kept, ",")
-}
-
-// rewriteArray writes a diagram node's src back sorted, as the one array the
-// browser parses. Its chips are the chips of the prose, so they are ordered
-// the same way.
-//
-// The documents go first, above the markerRun branch rather than inside it:
-// a src mixing one with an invented number takes the fallback, and a filter
-// living in the sorted path alone would leave that chip standing.
-func (r *renumberer) rewriteArray(group string) string {
-	group = r.dropDocs(group)
-	if strings.TrimSpace(group) == "" {
-		return "[]"
-	}
-	dense, ok := r.markerRun(group)
-	if !ok {
-		return r.rewrite(group)
-	}
-	parts := make([]string, len(dense))
-	for i, d := range dense {
-		parts[i] = strconv.Itoa(d)
-	}
-	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // citations resolves the markers the answer used, in the reader's numbering.

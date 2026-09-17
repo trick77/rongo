@@ -1,7 +1,6 @@
 package ask
 
 import (
-	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -18,9 +17,12 @@ var update = flag.Bool("update", false, "rewrite the corpus golden files")
 // would have been a file here.
 //
 // Nothing is asserted about the wording of a fixture, only the invariants
-// that make a diagram a diagram: it leaves the renumberer inside a ```diagram
-// fence, every number in a src array is one of the reader's, and a stream
-// broken into single bytes says exactly what one whole string says.
+// that make a diagram a diagram: it leaves the renumberer inside one
+// ```mermaid fence with its body byte for byte as it came, the prose around
+// it renumbered, and a stream broken into single bytes says exactly what one
+// whole string says. Whether the browser draws the body is the other half,
+// asked of the renderer's own parser in ui/src/corpus.test.ts on the same
+// files.
 
 // corpusSources is how many sources the fixtures may cite. Generous, so a
 // new file can use whatever markers the answer it came from used.
@@ -50,7 +52,8 @@ func corpus(t *testing.T) map[string]string {
 	return out
 }
 
-// diagramFence returns the body of the one ```diagram fence in text, and
+// diagramFence returns the body of the one diagram fence in text, read as
+// the browser reads it (markdown.tsx: a `mermaid` or `diagram` tag), and
 // whether there is exactly one.
 func diagramFence(text string) (string, bool) {
 	var body []string
@@ -62,7 +65,8 @@ func diagramFence(text string) (string, bool) {
 				continue
 			}
 			inside = true
-			isDiagram = infoTag(strings.TrimSpace(l)) == "diagram"
+			tag := infoTag(strings.TrimSpace(l))
+			isDiagram = tag == "mermaid" || tag == "diagram"
 			if isDiagram {
 				found++
 			}
@@ -83,34 +87,21 @@ func TestCorpus_everyShapeLeavesAsADiagramFence(t *testing.T) {
 
 			body, ok := diagramFence(out)
 			if !ok {
-				t.Fatalf("no single ```diagram fence in:\n%s", out)
+				t.Fatalf("no single diagram fence in:\n%s", out)
 			}
-
-			// The body has to be the JSON the browser parses. A src written
-			// as a chain of groups is not, which is the whole reason #45
-			// existed.
-			var spec map[string]any
-			if err := json.Unmarshal([]byte(body), &spec); err != nil {
-				t.Fatalf("fence body is not JSON: %v\n%s", err, body)
+			// The fence is code to this end: what the model wrote is what
+			// the renderer gets, a marker-shaped label included.
+			if came, _ := diagramFence(text); came != body {
+				t.Errorf("fence body was rewritten\ngot:\n%s\nwant:\n%s", body, came)
 			}
-			if spec["type"] != "flow" && spec["type"] != "sequence" {
-				t.Fatalf("type = %v, want flow or sequence", spec["type"])
-			}
-
-			// Every chip the picture will draw is one of the reader's
-			// numbers. A prompt index left behind here puts a wrong source
-			// under a node.
-			n := len(rn.citations(fakeSources(corpusSources)))
-			for _, m := range srcNumbers(t, spec) {
-				if m < 1 || m > n {
-					t.Errorf("src holds %d, outside the reader's 1..%d", m, n)
-				}
+			if DiagramKind(out) == "" {
+				t.Errorf("DiagramKind = %q, want the type the fence names:\n%s", "", body)
 			}
 
 			// The golden is what the browser is handed, and the UI reads the
-			// same files (ui/src/corpus.test.ts): a spec this end normalises
-			// and the other end will not draw is the same defect as one
-			// neither touches, and only a shared artefact catches it.
+			// same files (ui/src/corpus.test.ts): an answer this end passes
+			// and the other end will not draw is the defect only a shared
+			// artefact catches.
 			golden := filepath.Join("testdata", "diagrams", strings.TrimSuffix(name, ".txt")+".golden")
 			if *update {
 				if err := os.WriteFile(golden, []byte(out), 0o644); err != nil {
@@ -151,56 +142,25 @@ func TestCorpus_aStreamSaysWhatOneStringSays(t *testing.T) {
 	}
 }
 
-// The other half of reading a block by its content: what must NOT be read as
-// a diagram. rongo indexes rongo, so a Developer answer explaining the format
-// carries these very words, and a code block turned into a picture is the
-// same defect as a picture turned into a code block.
-func TestCorpus_codeThatOnlyLooksLikeASpecIsLeftAlone(t *testing.T) {
+// What must NOT count as a diagram: a code block that happens to hold the
+// words, a brace in prose, JSON in the answer. rongo indexes rongo, so a
+// Developer answer explaining the format carries these very words.
+func TestCorpus_codeThatOnlyLooksLikeADiagramIsLeftAlone(t *testing.T) {
 	for name, text := range map[string]string{
-		"a config with its own type":     "Config [1].\n\n```json\n{\"pipeline\":{\"type\":\"flow\",\"steps\":2}}\n```\n",
-		"the format, quoted":             "The prompt asks for [1]:\n\n```json\n{\"shape\":\"{\\\"type\\\":\\\"flow\\\"}\"}\n```\n",
-		"a type this file does not draw": "Not ours [1].\n\n```json\n{\"type\":\"pie\",\"slices\":[]}\n```\n",
-		"a brace in running prose":       "The handler returns { on the empty path [1].\n",
-		"an object that is not a spec":   "State [1].\n\n{\"repo\":\"rongo\",\"branch\":\"master\"}\n",
+		"a config with its own type":   "Config [1].\n\n```json\n{\"pipeline\":{\"type\":\"flow\",\"steps\":2}}\n```\n",
+		"the syntax, quoted":           "The prompt asks for [1]:\n\n```go\nconst head = \"flowchart TD\"\n```\n",
+		"a brace in running prose":     "The handler returns { on the empty path [1].\n",
+		"an object that is not a spec": "State [1].\n\n{\"repo\":\"rongo\",\"branch\":\"master\"}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			rn := newRenumberer(corpusSources)
 			out := rn.feed(text) + rn.flush()
-			if strings.Contains(out, "```diagram") {
+			if DiagramKind(out) != "" {
 				t.Errorf("read as a diagram:\n%s", out)
+			}
+			if !strings.Contains(out, "[1]") {
+				t.Errorf("the prose marker did not survive:\n%s", out)
 			}
 		})
 	}
-}
-
-// srcNumbers collects every src entry of a spec.
-func srcNumbers(t *testing.T, spec map[string]any) []int {
-	t.Helper()
-	var out []int
-	for _, key := range []string{"nodes", "steps"} {
-		items, _ := spec[key].([]any)
-		for _, it := range items {
-			rec, _ := it.(map[string]any)
-			arr, _ := rec["src"].([]any)
-			for _, v := range arr {
-				f, ok := v.(float64)
-				if !ok {
-					t.Errorf("src holds %#v, not a number", v)
-					continue
-				}
-				out = append(out, int(f))
-			}
-		}
-	}
-	return out
-}
-
-// fakeSources is a numbered list long enough for citations() to resolve
-// anything the corpus cites. Only the count matters here.
-func fakeSources(n int) []Source {
-	out := make([]Source, n)
-	for i := range out {
-		out[i] = Source{Repo: "repo", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 2, SHA: "sha"}
-	}
-	return out
 }

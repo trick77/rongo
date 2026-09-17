@@ -1,88 +1,32 @@
-import { parseDiagram, type DiagramSpec, type FlowKind } from "./diagram";
+import { diagramKind, parseDiagram, type DiagramSpec, type FlowKind } from "./diagram";
 import { fenceRe } from "./markdown";
 
 /**
  * Taking a diagram out of rongo: as a standalone .svg file, and as mermaid
  * inside the copied markdown.
  *
- * Both exist because the drawing in the answer is only readable inside the
- * app. The SVG on the page carries no colours of its own — every fill and
- * stroke is a Tailwind utility bound to a theme token — so a serialized node
- * lands in a viewer as flat black on white. And "Copy as Markdown" copies the
- * answer text, which holds the diagram as its `diagram` JSON fence: correct,
- * and unreadable everywhere outside rongo.
+ * The file is the renderer's own SVG with a ground put under it. "Copy as
+ * Markdown" copies the answer text; a `mermaid` fence in it already reads
+ * everywhere, and the older `diagram` JSON fence is rewritten to one, since
+ * that shape is rongo's own and draws nowhere else.
  */
 
 // ---- SVG file ----
 
-/** The properties a shape in diagram.tsx gets from a class rather than an
- * attribute. Read off the live node, so the file follows the @theme tokens
- * instead of a second copy of them kept here. */
-const inlined = [
-  "fill",
-  "stroke",
-  "stroke-width",
-  "stroke-dasharray",
-  "font-family",
-  "font-size",
-  "font-weight",
-] as const;
-
-/** Elements that carry no paint of their own. */
-const skipPaint = new Set(["svg", "title", "desc", "defs", "marker"]);
-
-/** toSvgFile turns a drawn diagram into a file that stands on its own: the
- * colours inlined, the classes dropped, and a viewBox added. The viewBox is
- * deliberate here and deliberately absent on the page — a file is opened in a
- * viewer that scales it to the window, while the element in the answer must
- * keep its intrinsic width and scroll (diagram.tsx). */
-export function toSvgFile(el: SVGSVGElement): string {
-  const clone = el.cloneNode(true) as SVGSVGElement;
-  const live = [el, ...el.querySelectorAll("*")];
-  const copy = [clone, ...clone.querySelectorAll("*")];
-  for (let i = 0; i < live.length && i < copy.length; i++) {
-    // Only what draws. Painting the root, the <title> or a <defs> wrapper
-    // would put a colour on elements that have none and leave the file
-    // carrying a paragraph of inherited defaults per node.
-    if (skipPaint.has(copy[i].tagName)) continue;
-    const style = getComputedStyle(live[i] as Element);
-    for (const prop of inlined) {
-      const v = style.getPropertyValue(prop);
-      if (v !== "") copy[i].setAttribute(prop, v);
-    }
-  }
-  // The chips' hit rects are drawn only because an SVG group cannot take
-  // padding; in a file they are invisible rectangles over the drawing.
-  for (const hit of clone.querySelectorAll('[data-export="skip"]')) hit.remove();
-  for (const node of copy) {
-    node.removeAttribute("class");
-    node.removeAttribute("role");
-    node.removeAttribute("tabindex");
-    for (const a of [...node.attributes]) {
-      if (a.name.startsWith("aria-") || a.name.startsWith("data-")) node.removeAttribute(a.name);
-    }
-  }
-  const w = el.getAttribute("width") ?? "0";
-  const h = el.getAttribute("height") ?? "0";
-  // The drawing's ground travels with it. On the page the dark panel is the
-  // card's, not the SVG's; in a file, a viewer paints white behind it and the
-  // warm off-white labels all but disappear.
-  const ground = groundOf(el);
-  if (ground !== null) {
-    const rect = clone.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "rect");
-    rect.setAttribute("width", w);
-    rect.setAttribute("height", h);
-    rect.setAttribute("fill", ground);
-    clone.insertBefore(rect, clone.firstChild);
-  }
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  return new XMLSerializer().serializeToString(clone);
+/** toSvgFile turns a rendered diagram into a file that stands on its own.
+ * The renderer already inlines its stylesheet and a viewBox, so the string
+ * lacks only its ground: on the page the dark panel is the card's, not the
+ * SVG's, and in a file a viewer paints white behind it and the warm off-white
+ * labels all but disappear. The ground is read off the card rather than
+ * named here, so there is one copy of the token. */
+export function toSvgFile(drawn: { svg: string }, card: Element | null): string {
+  const ground = card ? groundOf(card) : null;
+  if (ground === null) return drawn.svg;
+  return drawn.svg.replace(/<svg\b[^>]*>/, (open) => `${open}<rect width="100%" height="100%" fill="${ground}"/>`);
 }
 
-/** groundOf is the first real background behind the drawing. Walked rather
- * than named, for the same reason the paint is read and not tabulated: the
- * colour is a theme token, and there should be one copy of it. */
+/** groundOf is the first real background behind the drawing, walked up from
+ * the card. */
 function groundOf(el: Element): string | null {
   for (let node: Element | null = el; node; node = node.parentElement) {
     const bg = getComputedStyle(node).backgroundColor;
@@ -106,8 +50,10 @@ export function download(name: string, svg: string): void {
 
 /** fileName is what the download is called: the kind of picture it is, so a
  * folder of them stays sortable. */
-export function fileName(spec: DiagramSpec): string {
-  return spec.type === "flow" ? "rongo-flow-diagram.svg" : "rongo-sequence-diagram.svg";
+export function fileName(src: string): string {
+  const kind = diagramKind(src).replace(/Diagram(-v2)?$/, "").toLowerCase();
+  if (kind === "") return "rongo-diagram.svg";
+  return `rongo-${kind === "graph" ? "flowchart" : kind}-diagram.svg`;
 }
 
 // ---- mermaid ----
@@ -171,9 +117,9 @@ function bare(label: string): string {
   return label.replace(/[;#]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** markers renders a step's sources the way the prose writes them, so the
+/** cited renders a step's sources the way the prose writes them, so the
  * numbers in a pasted diagram still point into the `Sources:` block under it. */
-function markers(src: number[]): string {
+function cited(src: number[]): string {
   return src.map((m) => ` [${m}]`).join("");
 }
 
@@ -187,8 +133,15 @@ function shape(kind: FlowKind, label: string): string {
 }
 
 /** toMermaid writes the spec as the diagram syntax GitHub, GitLab, Obsidian
- * and Notion draw, and that reads as plain text everywhere else. */
-export function toMermaid(spec: DiagramSpec): string {
+ * and Notion draw, and that reads as plain text everywhere else.
+ *
+ * cite says whether a node's markers go into its label. On the clipboard
+ * they do: the numbers point into the Sources block pasted under the text.
+ * Drawn in the answer they do not: the picture no longer cites, and a spec
+ * the backend never renumbered would draw the prompt's numbers as if they
+ * were the reader's. */
+export function toMermaid(spec: DiagramSpec, cite = true): string {
+  const markers = cite ? cited : () => "";
   if (spec.type === "sequence") {
     const id = safeIds(spec.actors.map((a) => a.id));
     const out = ["sequenceDiagram"];
@@ -211,9 +164,10 @@ export function toMermaid(spec: DiagramSpec): string {
   return out.join("\n");
 }
 
-/** mermaidize rewrites the diagram fences in an answer for the clipboard. A
- * fence that does not parse is left exactly as it is: it is not a diagram
- * this renderer drew either, and the reader gets what the answer said. */
+/** mermaidize rewrites the older diagram fences in an answer for the
+ * clipboard: a JSON spec becomes mermaid text, and a `diagram` tag over
+ * mermaid text (which diagram.tsx draws) becomes the `mermaid` tag every
+ * other renderer knows. */
 export function mermaidize(text: string): string {
   const lines = text.split("\n");
   const out: string[] = [];
@@ -228,14 +182,13 @@ export function mermaidize(text: string): string {
     const body: string[] = [];
     while (i < lines.length && !fenceRe.test(lines[i])) body.push(lines[i++]);
     const closed = i < lines.length;
-    const close = closed ? lines[i++] : null;
-    const spec = closed ? parseDiagram(body.join("\n")) : null;
-    if (!spec) {
+    if (closed) i++;
+    if (!closed) {
       out.push(open, ...body);
-      if (close !== null) out.push(close);
       continue;
     }
-    out.push("```mermaid", ...toMermaid(spec).split("\n"), "```");
+    const spec = parseDiagram(body.join("\n"));
+    out.push("```mermaid", ...(spec ? toMermaid(spec).split("\n") : body), "```");
   }
   return out.join("\n");
 }

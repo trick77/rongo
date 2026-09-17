@@ -1,0 +1,25 @@
+Die Schadenmeldung-Anwendung produziert in fünf Kafka-Topics, jeweils ausgelöst durch ein Geschäftsereignis [1][2].
+
+Das Diagramm zeigt, welches Ereignis welches Topic bedient [2][3][4].
+
+```mermaid
+flowchart LR
+  subgraph Ereignis
+    e1["Schadenmeldung eingegangen"]
+    e2["Nachreichung eingegangen"]
+    e3["Vorerfassung erstellt"]
+  end
+  subgraph Topic
+    t1["Benachrichtigung"]
+    t2["Arbeitsunfähigkeit"]
+    t3["Vorerfassung"]
+    t4["Digitale ID"]
+  end
+  e1 --> t1
+  e1 -->|"ID-Prüfung nötig"| t4
+  e2 --> t1
+  e2 -->|"nur mit Zeiträumen"| t2
+  e3 --> t3
+```
+
+Die Zuordnung ist im Code fest verdrahtet [1].

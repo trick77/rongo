@@ -1,8 +1,7 @@
 ![Rongo](rongo-wide.jpg)
 
 Turns a codebase into something the rest of the company can ask. Plain-language
-questions, answers in domain terms, flowcharts and sequence diagrams where the
-process is the point.
+questions, answers in domain terms, a diagram where the shape is the point.
 
 Rongo is a web app. It runs on a server, clones the repositories you list,
 indexes them, and answers questions about them in a browser. No install, no
@@ -19,8 +18,10 @@ the places the answer was read from](rongo-app.png)
 what happens to a customer record on close, and Rongo reads the code that matched
 and explains the mechanism.
 
-**A diagram where the flow is the answer.** A process worth following step by step
-comes back as a flowchart, an exchange between services as a sequence diagram.
+**A diagram where the shape is the answer.** A process worth following step by step
+comes back as a flowchart, an exchange between services as a sequence diagram, a
+set of states as a state machine, a data model as an entity diagram, and which
+event feeds which topic as a mapping.
 
 **Somewhere to look.** Every claim shows where it was read, and one click opens
 that file inside Rongo, at the state it was indexed at.

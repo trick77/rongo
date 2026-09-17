@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
-import { DiagramSvg, type FlowSpec } from "./diagram";
+import { MermaidSvg, useDrawn, type FlowSpec } from "./diagram";
+import { toMermaid } from "./diagramExport";
 
 /** One row of GET /api/repos. */
 export type Repo = {
@@ -67,21 +68,16 @@ export function byProject(repos: Repo[]): Project[] {
 }
 
 /** wiringSpec turns a project's declared `uses` edges into the flow spec
- * rongo's own diagram renderer already draws.
+ * an answer's diagram used to be written in, which toMermaid then writes as
+ * the source the renderer draws. The spec is kept as the middle step because
+ * it already says what a node is, and a test can assert on it without
+ * parsing diagram syntax.
  *
- * No new renderer and no library: layoutFlow removes back edges by DFS, ranks
- * by longest path and orders each rank by parent barycentre, so a cascade, a
- * diamond and a cycle all come out right and a shared repository is drawn once.
- * mermaid is ruled out here on purpose (see diagram.tsx) — and this spec is
- * built by rongo from repos.yaml rather than written by a model, so that file's
- * injection reasoning holds all the more.
- *
- * Every node carries src: [] because the graph is CONFIGURATION, not code.
- * AGENTS.md says a node cites code or nothing and is still drawn with no
- * sources, which is exactly this case: there is nothing to cite.
+ * Every node carries src: [] because the graph is CONFIGURATION, not code:
+ * there is nothing to cite.
  *
  * An entry point — a repository nothing in the project uses — comes out as a
- * pill, which is what the flow renderer already does for `start`.
+ * pill, which is what `start` draws as.
  *
  * Returns null when there is no edge to draw. A project of one has no wiring,
  * and neither has a set of repositories nobody declared a connection between:
@@ -384,6 +380,16 @@ export default function RepoList() {
   );
 }
 
+/** Wiring is the project graph drawn. Nothing while the renderer works and
+ * nothing when it refuses the source: the list under it names every
+ * repository anyway, and a "could not be drawn" notice belongs to an answer,
+ * where the model wrote the picture, not to a page drawing its own config. */
+function Wiring({ spec }: { spec: FlowSpec }) {
+  const out = useDrawn(toMermaid(spec));
+  if (out === null || "error" in out) return null;
+  return <MermaidSvg svg={out.svg} title="Project wiring" />;
+}
+
 /** ProjectPanel is one product: what it is made of, how its repositories are
  * wired together, and the index status of each.
  *
@@ -407,11 +413,7 @@ function ProjectPanel({ project }: { project: Project }) {
 
       {spec && (
         <div className="border-b border-border px-3.5 pt-3.5 pb-2">
-          {/* No hooks: every node carries src: [], so no chip is ever drawn.
-              The graph is configuration, and configuration is not citable. */}
-          <div className="overflow-x-auto overscroll-x-contain">
-            <DiagramSvg spec={spec} hooks={{}} />
-          </div>
+          <Wiring spec={spec} />
           <p className="mt-1.5 text-[12px] text-faint">
             Arrows are <code className="font-mono">uses:</code> entries from{" "}
             <code className="font-mono">repos.yaml</code>. A repository with no arrow is reached from

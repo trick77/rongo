@@ -1,0 +1,9 @@
+A directive before the type [2].
+
+```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
+flowchart LR
+  a["Request"] --> b["Handler"]
+```
+
+Drawn all the same [2].
