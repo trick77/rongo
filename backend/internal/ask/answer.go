@@ -405,9 +405,10 @@ sources; say nothing about what its steps do inside.`
 // configuration source the walk pulled in, never guessed.
 const answerLinks = `
 
-Every place the repository navigates from, read from the index, one per line
-as "target  repository/path:line". The target is the text at the site: a URL,
-or the expression the code builds it from:
+Every place the repository navigates from, read from the index, one line per
+target as "target  repository/path:line, ..." with the places it is written
+at. The target is the text at the site: a URL, or the expression the code
+builds it from:
 
 %s
 The listing names every site the index holds, except a tail it counts

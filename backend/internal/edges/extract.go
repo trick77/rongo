@@ -189,7 +189,7 @@ var linkExt = map[string]bool{
 // so only the browser's own is a site: window.location, document.location,
 // or location.href.
 var navigationSite = regexp.MustCompile(`(?i)(?:` +
-	`(?:^|[^\w-])(?:href|routerLink)\s*\]?\s*=` + // href=, [href]=, [attr.href]=, routerLink=, [routerLink]=
+	`(?:^|[^\w:-])(?:href|routerLink)\s*\]?\s*=` + // href=, [href]=, [attr.href]=, routerLink=, [routerLink]=; not data-href, not xlink:href
 	`|<Link\b[^>]*?\bto\s*=` + // React Router
 	`|\bwindow\.open\s*\(` +
 	`|\blocation\.(?:assign|replace)\s*\(` +
@@ -216,13 +216,33 @@ func stylesheetSite(line string, at int) bool {
 		return false
 	}
 	tag := before[open:]
-	return strings.HasPrefix(tag, "<link") || strings.HasPrefix(tag, "<base")
+	return strings.HasPrefix(tag, "<link") || strings.HasPrefix(tag, "<base") || strings.HasPrefix(tag, "<use")
+}
+
+// assetExt is what a relative href to a file is: a sprite, an image, a
+// stylesheet, a download. None is an application. An absolute URL to a
+// document is still a link — where it points is what the census is for.
+var assetExt = map[string]bool{
+	".svg": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".ico": true, ".css": true, ".js": true, ".woff": true, ".woff2": true, ".ttf": true,
+	".pdf": true, ".zip": true, ".xml": true, ".json": true, ".txt": true,
+}
+
+// isAsset reports whether a relative value names a file rather than a place.
+func isAsset(v string) bool {
+	if strings.Contains(v, "://") {
+		return false
+	}
+	if i := strings.IndexAny(v, "#?"); i >= 0 {
+		v = v[:i]
+	}
+	return assetExt[strings.ToLower(path.Ext(v))]
 }
 
 // linkSkip is a value that leads to no application: an in-page anchor,
 // mail, phone, script, nothing, the bare root.
 func linkSkip(v string) bool {
-	if v == "" || v == "/" {
+	if v == "" || v == "/" || isAsset(v) {
 		return true
 	}
 	l := strings.ToLower(v)

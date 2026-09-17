@@ -396,6 +396,24 @@ func TestExtractIgnoresAVariableCalledLocationAndAStylesheetHref(t *testing.T) {
 	}
 }
 
+func TestExtractIgnoresSVGSpritesAndAssetPaths(t *testing.T) {
+	// Given: the icon sprite on nearly every page, in both spellings, and
+	// an href to a downloadable file.
+	testee := []byte("" +
+		`<use xlink:href="assets/icons.svg#close"></use>` + "\n" +
+		`<use href="assets/icons.svg#close"/>` + "\n" +
+		`<a href="assets/agb.pdf" download>AGB</a>` + "\n" +
+		`<a href="https://portal.example.ch/report.pdf">Report</a>` + "\n")
+
+	// When
+	got := values(Extract("icon.component.html", testee), KindLink)
+
+	// Then: the sprite is not a site; a document behind a URL still is.
+	if len(got) != 1 || got[0] != "https://portal.example.ch/report.pdf" {
+		t.Fatalf("got %v, want the report link alone", got)
+	}
+}
+
 func TestExtractReadsJSXBraces(t *testing.T) {
 	// Given: the three shapes React Router links are written in, plus href.
 	testee := []byte("" +

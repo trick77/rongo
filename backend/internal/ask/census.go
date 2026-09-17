@@ -97,16 +97,37 @@ func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, erro
 	return c, nil
 }
 
-// linkListing renders the sites for the prompt, one per line, the value
-// first and its place after, in the index's path order.
+// censusMaxPlaces is how many places one value names before the rest are
+// counted: a UI links to its own index page from every template, and the
+// fourth place says nothing the count does not.
+const censusMaxPlaces = 3
+
+// linkListing renders the sites for the prompt, one line per distinct
+// value in the order the index first names it, the places after it. The
+// Sock Shop front-end has 221 sites over 45 values; listing the sites would
+// name index.html fourteen times.
 func linkListing(rows []edges.Neighbour) string {
+	var order []string
+	places := map[string][]string{}
+	for _, n := range rows {
+		if _, seen := places[n.Value]; !seen {
+			order = append(order, n.Value)
+		}
+		places[n.Value] = append(places[n.Value], fmt.Sprintf("%s/%s:%d", n.Repo, n.Path, n.Line))
+	}
 	var b strings.Builder
-	for i, n := range rows {
+	for i, v := range order {
 		if i == censusMaxListed {
-			fmt.Fprintf(&b, "... and %d more\n", len(rows)-i)
+			fmt.Fprintf(&b, "... and %d more\n", len(order)-i)
 			break
 		}
-		fmt.Fprintf(&b, "%s  %s/%s:%d\n", n.Value, n.Repo, n.Path, n.Line)
+		ps := places[v]
+		more := ""
+		if len(ps) > censusMaxPlaces {
+			more = fmt.Sprintf(", +%d more", len(ps)-censusMaxPlaces)
+			ps = ps[:censusMaxPlaces]
+		}
+		fmt.Fprintf(&b, "%s  %s%s\n", v, strings.Join(ps, ", "), more)
 	}
 	return b.String()
 }

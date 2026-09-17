@@ -138,6 +138,31 @@ func TestCensus_landingsStopAtAThirdOfTheBudget(t *testing.T) {
 	}
 }
 
+func TestCensus_listsOneLinePerValueWithItsPlaces(t *testing.T) {
+	// Given: the same in-app page linked from five templates, and one
+	// external URL.
+	db := gatherDB(t)
+	seedRepo(t, db, "ui")
+	for _, p := range []string{"a.html", "b.html", "c.html", "d.html", "e.html"} {
+		seedChunkIn(t, db, "ui", p, 0, 1, 5, "", `<a href="index.html">Home</a>`)
+		seedTokenIn(t, db, "ui", p, "link", "index.html", 1)
+	}
+	seedTokenIn(t, db, "ui", "e.html", "link", "https://x.example.ch", 2)
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 24000})
+
+	// When
+	census, err := g.LinkCensus(context.Background(), []string{"ui"})
+	if err != nil {
+		t.Fatalf("LinkCensus: %v", err)
+	}
+
+	// Then
+	want := "index.html  ui/a.html:1, ui/b.html:1, ui/c.html:1, +2 more\nhttps://x.example.ch  ui/e.html:2\n"
+	if census.Listing != want {
+		t.Errorf("listing:\n%s\nwant:\n%s", census.Listing, want)
+	}
+}
+
 func TestCensus_seedsSitAfterTheHitsAndAreNeverEvicted(t *testing.T) {
 	// Given: one search hit and one landing, under a budget the two fill
 	// between them, so the walk has nothing left to spend.
