@@ -111,7 +111,10 @@ func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title st
 		return "", errors.As(err, &fin)
 	}
 	title = strings.TrimSpace(out)
-	title = strings.Trim(title, "\"'“”.")
+	// Quotes and a full stop the prompt forbids, and the markdown emphasis a
+	// model wraps a label in anyway (`**Kafka-Topic-Produktion**`): all of it
+	// is parsed off rather than argued out of the model.
+	title = strings.Trim(title, "\"'“”.*_`")
 	if title == "" && u.Attempts > 1 {
 		// Nothing came back twice in a row. That is the deployment, not a
 		// shape a correction could fix.
