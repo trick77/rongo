@@ -105,6 +105,16 @@ function tokens(n: number): string {
 function Detail({ step, detail }: { step: string; detail: StepDetail }) {
   switch (step) {
     case "understanding": {
+      // A rework searches nothing: its scope is the previous answer's own
+      // sources, and "every indexed project" would claim a search that
+      // never ran.
+      if (detail.intent === "rework") {
+        return (
+          <div className="trace-detail">
+            <span className="trace-k">Reworks</span> the previous answer from its own sources
+          </div>
+        );
+      }
       const terms = asStrings(detail.terms);
       const code = asStrings(detail.code_terms);
       const repos = asStrings(detail.repos);
