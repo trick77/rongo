@@ -212,8 +212,5 @@ func TestTheAnalystIsNamedInDomainWordingAndInTheReadersLanguage(t *testing.T) {
 		if strings.Count(p, "German") < 2 {
 			t.Error("the language is named first and last, around the audience block")
 		}
-		if !strings.Contains(p, "always ss") {
-			t.Error("a German card follows Swiss orthography, like every other German string")
-		}
 	}
 }

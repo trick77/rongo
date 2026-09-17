@@ -176,19 +176,20 @@ func TestFollowups_isGroundedInTheFilesTheAnswerWasWrittenFrom(t *testing.T) {
 }
 
 func TestFollowups_speaksTheReadersLanguageTheSwissWay(t *testing.T) {
-	c, up := followupsLLM(t, "Was passiert beim Neuindexieren?\n", http.StatusOK)
+	c, up := followupsLLM(t, "Was passiert beim Neuindexieren größerer Dateien?\nWas prueft `pruefeBetrag`?\n", http.StatusOK)
 
 	got := Followups(context.Background(), c, "Wie werden Zitate gespeichert?", "Die Antwort.", AudienceBA,
 		followupsSources(), Scope{}, LanguageDE)
 
-	if len(got) != 1 || got[0] != "Was passiert beim Neuindexieren?" {
+	// The pills are spelled the Swiss way; a symbol in them is not.
+	if len(got) != 2 || got[0] != "Was passiert beim Neuindexieren grösserer Dateien?" || got[1] != "Was prüft `pruefeBetrag`?" {
 		t.Errorf("Followups() = %q", got)
 	}
 	if strings.Count(up.prompt, "German") < 2 {
 		t.Errorf("the language is named %d times, want it first and last:\n%s", strings.Count(up.prompt, "German"), up.prompt)
 	}
-	if !strings.Contains(up.prompt, "never the letter ß") {
-		t.Errorf("the German prompt does not ask for Swiss orthography:\n%s", up.prompt)
+	if strings.Contains(up.prompt, "ß") {
+		t.Errorf("the spelling is a string function, not a prompt note:\n%s", up.prompt)
 	}
 }
 

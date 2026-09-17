@@ -158,3 +158,61 @@ func TestRenumberer_aRunWithAnInventedNumberKeepsItsOrder(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// runDE feeds the tokens through a renumberer spelling German the Swiss way.
+func runDE(n int, tokens ...string) ([]string, string) {
+	r := newRenumberer(n)
+	r.spell = (&speller{}).prose
+	var out []string
+	for _, tok := range tokens {
+		if s := r.feed(tok); s != "" {
+			out = append(out, s)
+		}
+	}
+	if s := r.flush(); s != "" {
+		out = append(out, s)
+	}
+	return out, strings.Join(out, "")
+}
+
+func TestRenumberer_germanIsSpelledTheSwissWay(t *testing.T) {
+	// A word split by the token boundary is spelled once it is whole,
+	// wherever the boundary fell; ß goes the same way.
+	for _, tokens := range [][]string{
+		{"Der Gesch", "aeftsprozess ist gr", "ößer [2]."},
+		{"Der Gescha", "eftsprozess ist grö", "ßer [2]."},
+		{"Der Geschaeftsprozess ist größer [2]."},
+	} {
+		_, got := runDE(3, tokens...)
+		if got != "Der Geschäftsprozess ist grösser [1]." {
+			t.Errorf("%q -> %q", tokens, got)
+		}
+	}
+}
+
+func TestRenumberer_theHeldWordReachesTheReaderAtItsEnd(t *testing.T) {
+	// The word is held back only until its end is known: the space after
+	// it releases it, and the stream never ends with it still pending.
+	out, got := runDE(1, "Die ", "Rueck", "gabe ", "stimmt")
+	if got != "Die Rückgabe stimmt" {
+		t.Errorf("got %q", got)
+	}
+	if len(out) < 3 || out[0] != "Die " {
+		t.Errorf("the reader saw %q, want the first word at once", out)
+	}
+}
+
+func TestRenumberer_spellingLeavesCodeAlone(t *testing.T) {
+	_, got := runDE(2, "Siehe `pruefeGroesse` und ", "```go\nvar groesse = strasse\n```\ndann größer und pruefe_betrag [1].")
+	want := "Siehe `pruefeGroesse` und ```go\nvar groesse = strasse\n```\ndann grösser und pruefe_betrag [1]."
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRenumberer_withoutASpellerNothingIsHeldOrChanged(t *testing.T) {
+	out, got := run(1, "Der Gesch", "aeftsprozess ist größer.")
+	if got != "Der Geschaeftsprozess ist größer." || len(out) != 2 {
+		t.Errorf("out = %q", out)
+	}
+}
