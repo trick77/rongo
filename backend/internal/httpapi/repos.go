@@ -51,6 +51,9 @@ type RepoStatus struct {
 	Part        string
 	Description string
 	Uses        []string
+	// Image is the container image the entry declares, tag-less; empty for
+	// a repository nothing deploys.
+	Image string
 	// Library says the entry is a shared library from the `libraries:` block:
 	// a project of one that other projects' uses edges may point at, which is
 	// how the page draws it inside their wiring without listing it as a member.
@@ -116,6 +119,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"project":          st.Project,
 			"part":             st.Part,
 			"description":      st.Description,
+			"image":            st.Image,
 			"uses":             uses(st.Uses),
 			"library":          st.Library,
 			"stages":           uses(st.Stages),

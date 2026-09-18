@@ -187,6 +187,15 @@ projects:
   #      part: backend
   #      description: Storefront API and checkout.
   #      uses: [shop-contract, acme-commons]
+  #      # image is the container image this repository is built into, as the
+  #      # infrastructure repository's overlays name it and WITHOUT a tag. It
+  #      # is what a release question ("what is between production and
+  #      # intg?") pairs a deployed version with: the overlay under prod/
+  #      # says shop-backend:2024.3.1, the one under intg/ 2024.4.0, both are
+  #      # tags of this repository (with or without a leading v), and the
+  #      # commits between them are the release notes. Declared, never
+  #      # guessed from the name; one image per repository inside a project.
+  #      image: registry.example.invalid/acme/shop-backend
   #    - name: shop-search
   #      clone_url: https://forge.example.invalid/acme/shop-search.git
   #      token_env: BACKEND_FORGE_TOKEN
@@ -232,6 +241,12 @@ projects:
   # long hex or base64 blob, credentials in a URL), is stored as <redacted>.
   # The key line stays, so "where is the database password set" still has
   # an answer. Secret and SealedSecret manifests are skipped whole.
+  #
+  # The overlays are also where a release question reads the deployed
+  # versions: a kustomize images: entry (newTag) or an image: line under a
+  # stage's directory, paired with the image: declared on the member above.
+  # Only the stage directories are read; base/ is not, so a placeholder there
+  # is never mistaken for a version.
   #    - name: shop-infra
   #      clone_url: https://forge.example.invalid/acme/shop-infra.git
   #      token_env: BACKEND_FORGE_TOKEN

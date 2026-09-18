@@ -46,7 +46,8 @@ func TestRepoStatus_countsModulesFromTheIndex(t *testing.T) {
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
-	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true,
+		Image: "registry.example.invalid/acme/peeq"}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
@@ -65,8 +66,8 @@ func TestRepoStatus_countsModulesFromTheIndex(t *testing.T) {
 	if got[0].Modules != 2 {
 		t.Errorf("Modules = %d, want 2", got[0].Modules)
 	}
-	if got[0].Name != "peeq" || !got[0].Enabled {
-		t.Errorf("status = %+v, want the active peeq row", got[0])
+	if got[0].Name != "peeq" || !got[0].Enabled || got[0].Image != "registry.example.invalid/acme/peeq" {
+		t.Errorf("status = %+v, want the active peeq row with its image", got[0])
 	}
 }
 

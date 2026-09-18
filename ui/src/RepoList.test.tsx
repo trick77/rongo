@@ -138,7 +138,9 @@ describe("RepoList", () => {
   // Seven columns do not fit a phone. Without its own scroller the table
   // overflowed the page's, dragging the whole Repos page sideways.
   it("keeps every column inside the panel, the name cell the only one that flexes", async () => {
-    respondWith(200, [{ ...peeq, name: "peeq-workflow-engine-intranet-service", part: "workflow" }]);
+    respondWith(200, [
+      { ...peeq, name: "peeq-workflow-engine-intranet-service", part: "workflow", image: "registry.example.invalid/acme/wf" },
+    ]);
 
     render(<RepoList />);
     await screen.findByRole("heading", { name: "peeq" });
@@ -154,6 +156,9 @@ describe("RepoList", () => {
     const name = within(table).getByText("peeq-workflow-engine-intranet-service").closest("td")!;
     expect(within(name).getByText("workflow")).toBeTruthy();
     expect(within(name).getByText("master")).toBeTruthy();
+    // The declared image beside them: what a release turn pairs a deployed
+    // version with. A row without one shows nothing there.
+    expect(within(name).getByText("registry.example.invalid/acme/wf")).toBeTruthy();
     expect(name.className).not.toContain("whitespace-nowrap");
     // Every other cell is sized to its content.
     const cells = within(table).getAllByRole("cell");

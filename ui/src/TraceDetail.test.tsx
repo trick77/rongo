@@ -64,6 +64,37 @@ describe("Trace, what each step found", () => {
     expect(detail?.textContent).not.toContain("hits");
   });
 
+  it("draws a release turn's search as commits between two stages, with the verdicts", () => {
+    strict(
+      <Trace
+        steps={[
+          {
+            step: "searching",
+            at: t0,
+            detail: {
+              commits: 5,
+              between: ["prod", "test"],
+              infrastructure: "shop-infra",
+              images: 3,
+              per_repo: { "shop-backend": 5 },
+              notes: { unchanged: 1, undeclared: 1 },
+            },
+          },
+        ]}
+        state="running"
+        startedAt={t0}
+      />,
+    );
+    const detail = document.querySelector(".trace-detail");
+    expect(detail?.textContent).toContain("5 commits");
+    expect(detail?.textContent).toContain("between prod and test");
+    expect(detail?.textContent).toContain("3 images");
+    expect(screen.getByText("shop-infra")).toBeTruthy();
+    expect(screen.getByText("shop-backend 5")).toBeTruthy();
+    expect(screen.getByText("unchanged 1")).toBeTruthy();
+    expect(detail?.textContent).not.toContain("in the last");
+  });
+
   it("turns the routing rung into a sentence, never its identifier", () => {
     strict(
       <Trace
