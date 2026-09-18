@@ -89,6 +89,11 @@ type fakeAsker struct {
 	remembered *memory.Added
 	memoryRows []memory.Row
 	memoryOn   bool
+
+	// silentText, when set, is an answer written by a template: returned as
+	// text with no sources and never streamed, the way the pipeline answers
+	// nothing-found.
+	silentText string
 }
 
 func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
@@ -125,6 +130,9 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 	}
 	if f.clarification != nil {
 		return ask.Answer{}, f.clarification, nil
+	}
+	if f.silentText != "" {
+		return ask.Answer{Text: f.silentText, Scope: f.scope}, nil, nil
 	}
 	var text string
 	for _, tok := range f.tokens {

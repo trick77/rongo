@@ -240,3 +240,54 @@ func TestReexplain_runsUnderTheReadersRules(t *testing.T) {
 		t.Fatalf("re-explain rows = %+v, want the reader's rule", f.memoryRows)
 	}
 }
+
+// TestAsk_aTemplatedAnswerReachesTheBrowserLive: a turn with no sources
+// streams nothing, so its text went only to the record and the reader saw
+// an empty answer until a reload. finishTurn sends it whole, once, and says
+// the turn is sourceless so the page hides the re-explain action.
+func TestAsk_aTemplatedAnswerReachesTheBrowserLive(t *testing.T) {
+	// The fake answers with no sources and streams nothing: the shape of
+	// nothing-found, no-changes and a rule kept.
+	srv := newTestServer(t, func(a *fakeAsker) { a.silentText = "I found nothing about this in the indexed code." })
+
+	body := doSSE(t, srv, "/api/ask", `{"question":"How?","audience":"ba"}`)
+
+	var tokens int
+	var doneSourceless bool
+	for _, ev := range events(body) {
+		switch ev[0] {
+		case "token":
+			tokens++
+			if !strings.Contains(ev[1], "found nothing") {
+				t.Fatalf("token = %s", ev[1])
+			}
+		case "done":
+			doneSourceless = strings.Contains(ev[1], `"sourceless":true`)
+		}
+	}
+	if tokens != 1 {
+		t.Fatalf("%d token events, want the templated text once:\n%s", tokens, body)
+	}
+	if !doneSourceless {
+		t.Fatalf("done does not say the turn is sourceless:\n%s", body)
+	}
+
+	// A streamed answer is not sent twice, and is not sourceless.
+	srv = newTestServer(t, func(a *fakeAsker) {
+		a.tokens = []string{"So ", "[1]."}
+		a.sources = []ask.Source{{ChunkID: 1, Reason: "hit"}}
+	})
+	body = doSSE(t, srv, "/api/ask", `{"question":"How?","audience":"ba"}`)
+	tokens = 0
+	for _, ev := range events(body) {
+		if ev[0] == "token" {
+			tokens++
+		}
+		if ev[0] == "done" && strings.Contains(ev[1], `"sourceless":true`) {
+			t.Fatalf("a streamed answer with sources reads as sourceless:\n%s", body)
+		}
+	}
+	if tokens != 2 {
+		t.Fatalf("%d token events, want the two streamed and nothing appended", tokens)
+	}
+}

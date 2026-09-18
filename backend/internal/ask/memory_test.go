@@ -114,11 +114,9 @@ func TestPipeline_aDirectiveAloneIsRememberedAndAnsweredWithoutAModel(t *testing
 	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 	var got memory.Directive
 	var steps []string
-	var streamed string
 	details := map[string]map[string]any{}
 	ev := Events{
 		OnStatus: func(s string) { steps = append(steps, s) },
-		OnToken:  func(tok string) { streamed += tok },
 		OnDetail: func(s string, d map[string]any) { details[s] = d },
 		OnMemory: func(d memory.Directive) (memory.Added, error) {
 			got = d
@@ -143,9 +141,6 @@ func TestPipeline_aDirectiveAloneIsRememberedAndAnsweredWithoutAModel(t *testing
 	}
 	if !strings.Contains(answer.Text, `Notiert: "Never draw flowchart diagrams". `) || !strings.Contains(answer.Text, `Ersetzt: "Always draw one".`) {
 		t.Fatalf("text = %q", answer.Text)
-	}
-	if streamed != answer.Text {
-		t.Fatalf("streamed %q, want the templated answer pushed to the browser", streamed)
 	}
 	if strings.Join(steps, ",") != "understanding,remembering" {
 		t.Fatalf("steps = %v", steps)

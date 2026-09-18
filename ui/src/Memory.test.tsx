@@ -94,6 +94,28 @@ describe("memory in the thread", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 
+  it("a turn answered by a template shows its text live and offers no re-explain", async () => {
+    streamFrames([
+      ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
+      ev("status", { step: "understanding" }),
+      ev("token", { text: 'Noted: "Never draw flowchart diagrams".' }),
+      ev("citations", []),
+      ev("done", { message_id: 5, sourceless: true }),
+    ]);
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Ask />
+      </StrictMode>,
+    );
+    await user.type(screen.getByLabelText("Question"), "Zeig mir nie wieder Flowcharts.");
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+
+    await screen.findByText(/Noted:/);
+    await screen.findByRole("button", { name: "Copy as Markdown" });
+    expect(screen.queryByRole("button", { name: /Explain as/ })).toBeNull();
+  });
+
   it("a stored turn carries the rule it saved and nothing more", () => {
     const t = storedTurn({
       id: 5,
@@ -107,7 +129,9 @@ describe("memory in the thread", () => {
       from_candidate_idx: -1,
       from_clarification_id: 0,
       memory: { id: 7, text: "Never draw flowchart diagrams." },
+      sourceless: true,
     });
+    expect(t.sourceless).toBe(true);
     expect(t.memory).toEqual({
       id: 7,
       text: "Never draw flowchart diagrams.",
@@ -129,6 +153,7 @@ describe("memory in the thread", () => {
       from_clarification_id: 0,
     });
     expect(none.memory).toBeNull();
+    expect(none.sourceless).toBe(false);
   });
 });
 

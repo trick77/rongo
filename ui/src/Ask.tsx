@@ -680,6 +680,7 @@ export default function Ask({
               // thread's language rather than the one it asked for.
               recorded: true,
               language: payload.language ?? t.language,
+              sourceless: payload.sourceless === true,
             }));
             // The model-written title replaces the placeholder in a background
             // goroutine that has no way to push it here. Without this the

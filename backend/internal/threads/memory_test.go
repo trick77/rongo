@@ -74,3 +74,34 @@ func TestMessagesCarryTheRuleATurnSavedUntilItIsDeleted(t *testing.T) {
 		t.Fatalf("a deleted rule still shows: %+v", msgs[0].Memory)
 	}
 }
+
+// TestMessagesSayWhichTurnsHaveNoSources: the page hides the re-explain
+// action on a turn that answered from none, and the record is what says so.
+func TestMessagesSayWhichTurnsHaveNoSources(t *testing.T) {
+	s, ctx, threadID, db := newThreadStore(t)
+	none, err := s.AddQuestion(ctx, threadID, "ba", "en", "Anything about warp drives?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, none.ID, "I found nothing about this in the indexed code.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	some, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.Finish(ctx, some.ID, "Every claim carries a marker.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO message_sources (message_id, chunk_id, reason, hop) VALUES (?, 0, 'hit', 0)`, some.ID); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(msgs) != 2 || !msgs[0].Sourceless || msgs[1].Sourceless {
+		t.Fatalf("sourceless = %v, %v; want the nothing-found turn only", msgs[0].Sourceless, msgs[1].Sourceless)
+	}
+}

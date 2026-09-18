@@ -133,6 +133,13 @@ type Message struct {
 	// carried none. A shared link keeps it: the text is public either way, and
 	// a chip drawn as prose would misread as the reader's words.
 	PastedTexts []PastedText `json:"pasted_texts,omitempty"`
+	// Sourceless is a turn that answered from no sources: nothing found, an
+	// empty commit window, an instruction kept. The page hides the re-explain
+	// action on it, which would otherwise answer "the sources are no longer
+	// indexed" about sources that never were. Read off message_sources, so a
+	// turn from before anything was recorded there reads as sourceless too,
+	// which is what its re-explain would have said anyway.
+	Sourceless bool `json:"sourceless,omitempty"`
 	// Memory is the standing instruction this turn saved, for the chip under
 	// the answer and its undo. Read off the memories row the turn points at,
 	// so a rule deleted since simply is not there: the record says
@@ -868,7 +875,8 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at,
-		       COALESCE(mem.id, 0), COALESCE(mem.text, '')
+		       COALESCE(mem.id, 0), COALESCE(mem.text, ''),
+		       NOT EXISTS (SELECT 1 FROM message_sources ms WHERE ms.message_id = m.id)
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		LEFT JOIN memories mem ON mem.id = m.memory_id
 		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
@@ -889,7 +897,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		var steps string
 		var memID int64
 		var memText string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created, &memID, &memText); err != nil {
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created, &memID, &memText, &m.Sourceless); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if memID != 0 {

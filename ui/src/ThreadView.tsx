@@ -501,20 +501,27 @@ export default function ThreadView({
                 {/* The footer: the two actions need a stored answer to build
                     from — never on a turn that failed or ended by asking. The
                     usage pill does not: a turn that asked back or failed still
-                    paid for its gates, and the thread total counts them. */}
+                    paid for its gates, and the thread total counts them.
+
+                    Re-explain needs sources besides: a turn answered by a
+                    template (nothing found, no commits, a rule kept) has none,
+                    and offering it would answer "the sources are no longer
+                    indexed" about sources that never were. Copy stays. */}
                 {actions && turn.done && (turn.usage || (turn.messageId && !turn.error && !turn.clarification)) && (
                   <div className="mt-4">
                     <div className="flex items-center gap-2">
                       {turn.messageId && !turn.error && !turn.clarification && (
                         <>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => reexplain(i)}
-                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
-                          >
-                            {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
-                          </button>
+                          {!turn.sourceless && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => reexplain(i)}
+                              className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                            >
+                              {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => copy(i)}

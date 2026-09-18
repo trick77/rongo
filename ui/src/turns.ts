@@ -114,6 +114,11 @@ export type Turn = {
   // thread of stale offers would compete with the answer in front of the
   // reader.
   followups: string[];
+  // True for a turn answered from no sources: nothing found, an empty
+  // commit window, an instruction kept. There is nothing to re-explain
+  // from, so the footer hides that action. Said by the server, on the done
+  // event and on the record; a turn still running is not yet known.
+  sourceless: boolean;
   // The standing instruction this turn saved ("never draw flowcharts"),
   // what it replaced and what the reader asked to forget, for the chip under
   // the answer. Null on every other turn. A stored turn carries only the rule
@@ -239,6 +244,8 @@ export type Message = {
   // The rule this turn saved, while it exists. Absent on every other turn
   // and on a shared thread.
   memory?: { id: number; text: string } | null;
+  // Absent on a turn that has sources: only the templated turns say it.
+  sourceless?: boolean;
   // The activity timeline this turn was watched through, as the server timed
   // it. Absent on a turn that announced nothing, on every turn older than the
   // column, and on a shared thread, which carries no machinery.
@@ -300,6 +307,7 @@ export function storedTurn(m: Message): Turn {
     usage: m.usage ?? null,
     askedAt: m.created_at ?? "",
     followups: m.followups ?? [],
+    sourceless: m.sourceless === true,
     memory: m.memory
       ? { id: m.memory.id, text: m.memory.text, scope: "", replaced: [], removed: [], scopeDropped: "" }
       : null,
@@ -347,6 +355,7 @@ export function freshTurn(
     usage: null,
     askedAt: new Date(now).toISOString(),
     followups: [],
+    sourceless: false,
     memory: null,
   };
 }

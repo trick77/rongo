@@ -246,13 +246,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		if remembered == nil && memErr == nil {
 			u.Intent = ""
 		} else {
-			answer := answerMemory(lang, remembered, memErr)
-			// Sent as one token: nothing streams it, and the reader would
-			// otherwise see the chip and no sentence until a reload.
-			if ev.OnToken != nil {
-				ev.OnToken(answer.Text)
-			}
-			return answer, nil, nil
+			return answerMemory(lang, remembered, memErr), nil, nil
 		}
 	}
 	// The stage before the repositories: a reader writing "in production"
