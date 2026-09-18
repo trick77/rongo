@@ -505,16 +505,22 @@ func validateProjects(specs []Spec) error {
 		first[k] = s.Name
 	}
 
-	// A library's remote is declared ONCE, corpus-wide. The same clone_url
-	// under a project as well would clone and index the shared code twice
-	// and answer about it under two names — the duplication the block exists
-	// to remove. Snapshots are exempt as above: their identity is the
-	// directory, which Name already keeps unique.
+	// A library's remote is declared ONCE, corpus-wide: not under a project
+	// as well, and not as a second library either. Either would clone and
+	// index the shared code twice and answer about it under two names — the
+	// duplication the block exists to remove. Snapshots are exempt as above:
+	// their identity is the directory, which Name already keeps unique.
 	libraryURL := make(map[string]string, len(specs))
 	for _, s := range specs {
-		if s.Library && s.CloneURL != "" {
-			libraryURL[s.CloneURL] = s.Name
+		if !s.Library || s.CloneURL == "" {
+			continue
 		}
+		if other, ok := libraryURL[s.CloneURL]; ok {
+			return fmt.Errorf(
+				"%s and %s are the same clone_url — a library is declared once",
+				other, s.Name)
+		}
+		libraryURL[s.CloneURL] = s.Name
 	}
 	for _, s := range specs {
 		if s.Library || s.CloneURL == "" {

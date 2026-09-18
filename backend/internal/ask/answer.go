@@ -1017,7 +1017,15 @@ func StructureBlock(ps []projects.Project) string {
 		if !declared {
 			continue
 		}
-		fmt.Fprintf(&b, "\n\nProject %q is one product in %d repositories.\n\n", p.Name, len(p.Members))
+		// A library's own block, when a turn reaches it: it is a project of
+		// one in the map, and calling it a product here right after another
+		// block said it is a shared library would name one repository as two
+		// things in one prompt.
+		if len(p.Members) == 1 && p.Members[0].Library {
+			fmt.Fprintf(&b, "\n\nRepository %q is a shared library, used by other products and indexed on its own.\n\n", p.Name)
+		} else {
+			fmt.Fprintf(&b, "\n\nProject %q is one product in %d repositories.\n\n", p.Name, len(p.Members))
+		}
 		for _, m := range p.Members {
 			fmt.Fprintf(&b, "  %s", m.Name)
 			if m.Part != "" {

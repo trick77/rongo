@@ -39,6 +39,29 @@ func TestStructureBlockSaysALibraryIsSharedNotInsideTheProject(t *testing.T) {
 	}
 }
 
+func TestStructureBlockCallsALibraryALibraryNotAProduct(t *testing.T) {
+	// A turn about shop that hopped into the library covers both: the shop
+	// block just said acme-commons is a shared library, so its own block
+	// must not turn around and call it a product.
+	got := StructureBlock([]projects.Project{
+		{Name: "shop", Members: []projects.Repo{
+			{Name: "shop-backend", Part: "backend", Uses: []string{"acme-commons"}},
+		}},
+		{Name: "acme-commons", Members: []projects.Repo{
+			{Name: "acme-commons", Description: "Shared utilities.", Library: true},
+		}},
+	})
+	if !strings.Contains(got, `Repository "acme-commons" is a shared library`) {
+		t.Errorf("the library's own block names it as a library:\n%s", got)
+	}
+	if strings.Contains(got, `Project "acme-commons"`) {
+		t.Errorf("a library is not a product:\n%s", got)
+	}
+	if !strings.Contains(got, "acme-commons — Shared utilities.") {
+		t.Errorf("its description still reaches the prompt:\n%s", got)
+	}
+}
+
 func TestStructureBlockSpeaksForAProjectOfOneThatUsesALibrary(t *testing.T) {
 	// One member, nothing else declared — except an edge to a library. That
 	// edge is the one fact the model cannot see in a citation.

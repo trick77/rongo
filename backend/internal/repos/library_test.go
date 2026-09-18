@@ -105,6 +105,19 @@ projects:
       - name: shop-commons
         clone_url: https://forge.example.invalid/acme/commons.git
 `, "declared once"},
+		"two libraries on one clone_url": {`
+libraries:
+  - name: acme-commons
+    clone_url: https://forge.example.invalid/acme/commons.git
+  - name: acme-commons-legacy
+    clone_url: https://forge.example.invalid/acme/commons.git
+    branch: v1
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+`, "declared once"},
 		"a project named after a library": {`
 libraries:
   - name: acme-commons
