@@ -33,7 +33,7 @@ func TestUnderstand_asksForAMemoryOnlyWhenTheDeploymentKeepsOne(t *testing.T) {
 	if strings.Contains(*prompt, "memory") {
 		t.Fatalf("memory off, yet the prompt asks for one:\n%s", *prompt)
 	}
-	if !strings.Contains(*prompt, `"changes" or "rework"`) {
+	if !strings.Contains(*prompt, `"release" or "rework"`) {
 		t.Fatalf("the intent line changed with memory off:\n%s", *prompt)
 	}
 

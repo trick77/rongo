@@ -101,6 +101,10 @@ func NewPoller(d PollerDeps) *Poller {
 	}
 }
 
+// Depth is how many first-parent commits a full index records, after the
+// default is applied: what a release turn measures a range against.
+func (p *Poller) Depth() int { return p.depth }
+
 // Run polls until the context ends. It sleeps before every cycle, the first
 // one included, so a restart does not stampede every remote at once — but that
 // first wait is FirstPollDelay, not the full interval.

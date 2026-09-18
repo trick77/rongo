@@ -25,6 +25,10 @@ func (f *fakeHistory) Search(_ context.Context, q history.Query) ([]history.Comm
 	return f.commits, nil
 }
 
+func (f *fakeHistory) BySHAs(context.Context, string, []string) ([]history.Commit, error) {
+	return nil, nil
+}
+
 var fixedNow = time.Date(2026, 9, 17, 18, 0, 0, 0, time.UTC)
 
 func changesUpstream(t *testing.T, understanding string, answerTokens ...string) (*fakeHistory, *Pipeline, *[]string) {

@@ -147,6 +147,9 @@ type Pipeline struct {
 	// history is the commit lane, optional; see WithHistory.
 	history Histories
 	now     func() time.Time
+	// releases is the checkout side of a release turn, optional; see
+	// WithReleases.
+	releases Releaser
 }
 
 // WithModels gives the pipeline the index's process models, so a turn whose
@@ -333,6 +336,12 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// date window.
 	if p.isChanges(u) {
 		answer, err := p.answerChanges(ctx, question, audience, lang, u, scope, t.Question, ev)
+		return answer, nil, err
+	}
+	// A release question leaves here for the same reason: its sources are
+	// the commits between two deployed versions.
+	if p.isRelease(u) {
+		answer, err := p.answerRelease(ctx, question, audience, lang, u, scope, t.Question, ev)
 		return answer, nil, err
 	}
 	// A rework leaves here too: the previous answer and its own sources are

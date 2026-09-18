@@ -31,6 +31,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/modules"
+	"github.com/trick77/rongo/internal/release"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
@@ -389,7 +390,10 @@ func main() {
 		retriever,
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
-	).WithModels(source).WithHistory(commits, time.Now)
+	).WithModels(source).WithHistory(commits, time.Now).
+		// The release turn: tags and ancestry from the checkouts, the
+		// commits between two deployed versions from the lane.
+		WithReleases(release.New(gitClient, db, poller.Depth()))
 	// The reader's standing instructions. Nil leaves the understanding
 	// prompt as it was before memory existed, which is what the eval
 	// baseline compares against.
