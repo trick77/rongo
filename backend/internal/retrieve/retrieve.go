@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/trick77/rongo/internal/projects"
 )
 
 // defaultCandidates is how many rows each lane retrieves before fusion. Fusion
@@ -457,38 +460,34 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 // reposAndProjects reads the repository names and the projects they group into.
 // A project of one is still a project: it is listed, and its own name resolves
 // to its single member, which is the same answer the repository name gives.
+//
+// Read through projects.Load rather than a query of its own, so a project's
+// name resolves to the same members the card and the prompt block use — the
+// library a product is built on among them. projects.Load reads enabled = 1
+// only: a parked repository is not a name the index knows. That is deliberate
+// rather than incidental — it puts naming one on exactly the path a
+// repository that was never indexed takes, where the name is dropped from the
+// restriction and the turn says so out loud. Keeping the name would send it
+// into `WHERE f.repo IN (…)`, match nothing, and report "nothing found" about
+// the whole corpus.
 func (r *Retriever) reposAndProjects(ctx context.Context) ([]string, map[string][]string, error) {
-	// enabled = 1: a parked repository is not a name the index knows. That is
-	// deliberate rather than incidental — it puts naming one on exactly the path
-	// a repository that was never indexed takes, where the name is dropped from
-	// the restriction and the turn says so out loud. Keeping the name would send
-	// it into `WHERE f.repo IN (…)`, match nothing, and report "nothing found"
-	// about the whole corpus.
-	rows, err := r.store.db.QueryContext(ctx,
-		`SELECT name, project FROM repo_state WHERE enabled = 1 ORDER BY name`)
+	pm, err := projects.Load(ctx, r.store.db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
 	}
-	defer rows.Close()
+	seen := map[string]bool{}
 	var known []string
 	project := map[string][]string{}
-	for rows.Next() {
-		var name, p string
-		if err := rows.Scan(&name, &p); err != nil {
-			return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
+	for _, p := range pm.All() {
+		project[p.Name] = pm.Members(p.Name)
+		for _, m := range p.Members {
+			if !seen[m.Name] {
+				seen[m.Name] = true
+				known = append(known, m.Name)
+			}
 		}
-		known = append(known, name)
-		// An empty project can only come from a row written before projects
-		// shipped; repos.Load refuses an entry without one. Grouping those
-		// under "" would make one nameless product of every such repository.
-		if p == "" {
-			p = name
-		}
-		project[p] = append(project[p], name)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
-	}
+	sort.Strings(known)
 	return known, project, nil
 }
 

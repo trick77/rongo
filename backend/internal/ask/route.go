@@ -272,11 +272,15 @@ func repoCandidates(cs []Candidate) []Candidate {
 // more than one: a product spanning repositories has no single branch, and
 // printing one member's would label it with half its truth. A project of one
 // keeps its branch, because there is exactly one and nothing is hidden.
+//
+// A library folds AFTER the products, into every product beside it that uses
+// it — its hit is evidence for each — and stands as a project of one only
+// when no such product is there. Same rule as projects.Fold, kept in step
+// with it; written out here because the entries carry hits and scores.
 func projectCandidates(cs []Candidate, pm projects.Map) []Candidate {
 	index := map[string]int{}
 	var out []Candidate
-	for _, c := range cs {
-		name := pm.Of(c.Repo)
+	fold := func(name string, c Candidate) {
 		i, ok := index[name]
 		if !ok {
 			out = append(out, Candidate{Repo: name, Branch: c.Branch})
@@ -287,6 +291,26 @@ func projectCandidates(cs []Candidate, pm projects.Map) []Candidate {
 		out[i].Hits = append(out[i].Hits, c.Hits...)
 		if c.Score > out[i].Score {
 			out[i].Score = c.Score
+		}
+	}
+	for _, c := range cs {
+		if !pm.IsLibrary(c.Repo) {
+			fold(pm.Of(c.Repo), c)
+		}
+	}
+	for _, c := range cs {
+		if !pm.IsLibrary(c.Repo) {
+			continue
+		}
+		placed := false
+		for _, p := range pm.UsedBy(c.Repo) {
+			if _, ok := index[p]; ok {
+				fold(p, c)
+				placed = true
+			}
+		}
+		if !placed {
+			fold(c.Repo, c)
 		}
 	}
 	for i := range out {

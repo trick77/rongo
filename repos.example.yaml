@@ -12,11 +12,12 @@
 # once and a repository cannot end up in two products.
 #
 # A LIBRARY is the one repository several products are built on. It goes in the
-# top-level `libraries:` block, once, owned by no project, and any repository
-# in any project names it with `uses`. It is not searched as part of the
-# products using it: a question about the shop reaches the library the way it
-# reaches any other repository, through the code that calls into it. Asked
-# about by name, it is a project of one like any standalone repository.
+# top-level `libraries:` block, once, and any repository in any project names
+# it with `uses`. That makes it part of every product using it: a question
+# about the shop searches the shop's repositories and the library alike, a
+# thread on the shop may narrow to the library, and a card between two
+# products built on it offers both. Asked about by name alone, it is a
+# project of one like any standalone repository.
 #
 # Credentials NEVER belong in this file — it ends up in a repository or a ticket
 # sooner or later. Name the environment variable with token_env instead, and put
