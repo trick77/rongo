@@ -213,14 +213,28 @@ describe("RepoList", () => {
     expect(name.className).not.toContain("font-medium");
   });
 
-  it("stacks the stats two-up on a phone", async () => {
+  it("stacks the stats two-up on a phone and four-up above, the odd last one filling its row", async () => {
     respondWith(200, [peeq]);
 
     render(<RepoList />);
-    // label div -> the Stat -> the block holding all five.
+    // label div -> the Stat -> the grid holding all seven.
     const stats = (await screen.findByText("Repositories")).parentElement!.parentElement!;
     expect(stats.className).toContain("grid-cols-2");
-    expect(stats.className).toContain("sm:flex");
+    expect(stats.className).toContain("sm:grid-cols-4");
+    expect(stats.className).not.toContain("flex");
+    expect(stats.children).toHaveLength(7);
+    // Seven stats: the last spans two columns so neither the 2- nor the
+    // 4-column layout ends on a half-empty row.
+    expect(stats.lastElementChild!.className).toContain("col-span-2");
+  });
+
+  it("keeps the last stat one column wide when a library makes it eight", async () => {
+    respondWith(200, [peeq, { ...peeq, name: "commons", project: "commons", library: true }]);
+
+    render(<RepoList />);
+    const stats = (await screen.findByText("Repositories")).parentElement!.parentElement!;
+    expect(stats.children).toHaveLength(8);
+    expect(stats.lastElementChild!.className).not.toContain("col-span-2");
   });
 });
 
