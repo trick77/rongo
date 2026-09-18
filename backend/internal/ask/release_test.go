@@ -280,9 +280,15 @@ func TestReleaseLines_theRefusalMatrix(t *testing.T) {
 		ahead  string
 		commit int
 	}{
-		{"rollback: prod ahead of test", func(rel *fakeReleaser, _ *releaseHistory) {
+		// The pair is a set: with prod's tag the newer one, prod is ahead and
+		// the same two commits are the range. Never a "rollback": nothing
+		// declares which stage is meant to lead.
+		{"prod ahead of test", func(rel *fakeReleaser, _ *releaseHistory) {
 			rel.tags["shop-backend/v1.0.0"], rel.tags["shop-backend/v1.1.0"] = "c3", "c1"
-		}, NoteRollback, "prod", 0},
+		}, "", "prod", 2},
+		{"never indexed", func(rel *fakeReleaser, _ *releaseHistory) {
+			rel.head["shop-backend"] = RepoHead{SHA: "", Remote: "c4", Branch: "main"}
+		}, NoteNoIndex, "", 0},
 		{"diverged", func(rel *fakeReleaser, _ *releaseHistory) {
 			rel.tags["shop-backend/v1.1.0"] = "h1"
 			rel.branch["shop-backend"] = append(rel.branch["shop-backend"], "h1")
@@ -419,5 +425,29 @@ func TestRun_releaseTakesTheStagesFromTheReadersOwnWords(t *testing.T) {
 	}
 	if strings.Join(got.Scope.Between, ",") != "prod,test" {
 		t.Errorf("between = %v", got.Scope.Between)
+	}
+}
+
+func TestReleasePair_composesTheReadersWordAndTheModelsMapping(t *testing.T) {
+	declared := stages.Set{
+		{Repo: "infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production"}},
+		{Repo: "infra", Name: "intg", Prefix: "intg/"},
+	}
+	// "integration" is a refused alias, so only the model can map it; the
+	// reader's "production" still counts.
+	if got := releasePair("production vs. the integration environment", []string{"intg"}, declared); strings.Join(got, ",") != "prod,intg" {
+		t.Errorf("composed = %v", got)
+	}
+	// The model repeating the reader's word is not a second stage.
+	if got := releasePair("what is on production", []string{"production", "prod"}, declared); got != nil {
+		t.Errorf("one stage twice = %v", got)
+	}
+	// A comma-separated string decodes like a list.
+	var u Understanding
+	if err := json.Unmarshal([]byte(`{"between":"prod, intg"}`), &u); err != nil || strings.Join(u.Between, ",") != "prod,intg" {
+		t.Errorf("string between = %v, %v", u.Between, err)
+	}
+	if err := json.Unmarshal([]byte(`{"between":7}`), &u); err != nil || len(u.Between) != 0 {
+		t.Errorf("number between = %v, %v", u.Between, err)
 	}
 }

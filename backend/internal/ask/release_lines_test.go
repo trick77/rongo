@@ -13,7 +13,7 @@ import (
 func TestReleaseNotes_everyNoteHasAClauseAndASentenceInEveryLanguage(t *testing.T) {
 	pair := []string{"prod", "test"}
 	notes := []string{NoteUnchanged, NoteUndeclared, NoteMissing, NoteAmbiguous, NoteDigest, NoteSnapshot,
-		NoteTagUnknown, NoteOffBranch, NoteNotIndexed, NoteRollback, NoteDiverged, NoteBeyondDepth}
+		NoteTagUnknown, NoteOffBranch, NoteNotIndexed, NoteNoIndex, NoteDiverged, NoteBeyondDepth}
 	for _, note := range notes {
 		line := ReleaseLine{Image: "acme/x", Repo: "x", Versions: map[string]string{"prod": "1", "test": "2"},
 			Note: note, Detail: "1 main", Ahead: "prod"}

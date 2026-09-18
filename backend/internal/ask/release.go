@@ -85,7 +85,7 @@ const (
 	NoteTagUnknown  = "tag-unknown"
 	NoteOffBranch   = "off-branch"
 	NoteNotIndexed  = "not-indexed"
-	NoteRollback    = "rollback"
+	NoteNoIndex     = "no-index"
 	NoteDiverged    = "diverged"
 	NoteBeyondDepth = "beyond-depth"
 )
@@ -155,23 +155,28 @@ func (p *Pipeline) answerRelease(ctx context.Context, question string, audience 
 	return p.answer(ctx, question, audience, lang, sources, scope, followingUp, ev)
 }
 
-// releasePair settles the two stages, the reader's own words first: two
-// declared names or aliases in the question are the pair, whatever the
-// model guessed. The model's field covers phrasings no alias can, and is
-// only ever declared names. Order is the question's, or the model's; it
-// carries no meaning, because ancestry decides per component which stage
-// is ahead. Anything but two distinct declared names is no pair.
+// releasePair settles the two stages: the reader's own words first, then
+// the model's guesses, the first two distinct declared names. The two
+// compose because they have to — "testing" is a refused stage word
+// (repos.Load), so "production vs. testing" names one stage by word and
+// the other only through the model's mapping. Order carries no meaning:
+// ancestry decides per component which stage is ahead. Anything but two
+// distinct declared names is no pair.
 func releasePair(question string, guessed []string, declared stages.Set) []string {
-	if named := declared.Mentioned(question); len(named) == 2 {
-		return named
-	}
 	var out []string
 	seen := map[string]bool{}
-	for _, g := range guessed {
-		name, ok := declared.Resolve(g)
-		if ok && !seen[name] {
+	add := func(name string) {
+		if !seen[name] && len(out) < 2 {
 			seen[name] = true
 			out = append(out, name)
+		}
+	}
+	for _, name := range declared.Mentioned(question) {
+		add(name)
+	}
+	for _, g := range guessed {
+		if name, ok := declared.Resolve(g); ok {
+			add(name)
 		}
 	}
 	if len(out) != 2 {
@@ -315,9 +320,10 @@ func isKustomization(p string) bool {
 //	pinned by digest             digest
 //	the repository is a snapshot snapshot
 //	a version names no tag       tag-unknown
+//	the repository never indexed no-index
 //	a tag off the indexed branch off-branch, or not-indexed when the
 //	                             remote branch has it and the index not yet
-//	ancestry                     ahead, or rollback / diverged
+//	ancestry                     which stage is ahead, or diverged
 //	range past the depth, or a   beyond-depth
 //	sha the lane never recorded
 func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, pm projects.Map,
@@ -423,8 +429,19 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 		line.Note = NoteSnapshot
 		return nil, nil
 	}
+	// A repository the poller has not indexed yet — the first run after a
+	// forced re-index empties every last_sha — has no head to measure a
+	// tag against, and asking git about "" is an error, not a verdict.
+	if head.SHA == "" {
+		line.Note = NoteNoIndex
+		return nil, nil
+	}
+	versions := map[string]stageVersion{pair[0]: a, pair[1]: b}
 	shas := map[string]string{}
-	for stage, v := range map[string]stageVersion{pair[0]: a, pair[1]: b} {
+	// Over the pair, never over the map: with both tags unknown the detail
+	// must name the same one on every call.
+	for _, stage := range pair {
+		v := versions[stage]
 		sha, err := rel.ResolveTag(ctx, line.Repo, v.tag)
 		if errors.Is(err, ErrVersionUnknown) {
 			line.Note, line.Detail = NoteTagUnknown, v.tag
@@ -438,7 +455,8 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 	// Both tags must lie on the indexed history. A tag the remote branch
 	// holds but the index does not yet is the poller lagging a push, which
 	// is a different sentence from a tag on a side branch.
-	for stage, sha := range shas {
+	for _, stage := range pair {
+		sha := shas[stage]
 		indexed, err := rel.IsAncestor(ctx, line.Repo, sha, head.SHA)
 		if err != nil {
 			return nil, fmt.Errorf("ancestry in %s: %w", line.Repo, err)
@@ -457,17 +475,20 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 		}
 		return nil, nil
 	}
-	// Direction from ancestry, never from the order the stages were named.
-	// The first stage named is read as the baseline, so the second being
-	// ahead is the release and the first being ahead is a rollback.
-	forward, err := rel.IsAncestor(ctx, line.Repo, shas[pair[0]], shas[pair[1]])
+	// Direction from ancestry, never from the order the stages were named:
+	// the pair is a set, and "between testing and production" must read the
+	// same as the reverse. The stage whose tag descends from the other's is
+	// ahead, and the range runs from the older tag to it. Without a
+	// declared promotion order nothing here can call a direction a
+	// rollback, so it does not.
+	from, to := shas[pair[0]], shas[pair[1]]
+	line.Ahead = pair[1]
+	forward, err := rel.IsAncestor(ctx, line.Repo, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("ancestry in %s: %w", line.Repo, err)
 	}
-	from, to := shas[pair[0]], shas[pair[1]]
-	line.Ahead = pair[1]
 	if !forward {
-		back, err := rel.IsAncestor(ctx, line.Repo, shas[pair[1]], shas[pair[0]])
+		back, err := rel.IsAncestor(ctx, line.Repo, to, from)
 		if err != nil {
 			return nil, fmt.Errorf("ancestry in %s: %w", line.Repo, err)
 		}
@@ -475,8 +496,8 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 			line.Note, line.Ahead = NoteDiverged, ""
 			return nil, nil
 		}
-		line.Note, line.Ahead = NoteRollback, pair[0]
-		return nil, nil
+		from, to = to, from
+		line.Ahead = pair[0]
 	}
 	// Sized FIRST, at the whole depth: a cap applied before the check would
 	// always pass it, because the newest commits always have rows.
@@ -609,8 +630,8 @@ func noteEnglish(l ReleaseLine) string {
 		return fmt.Sprintf("version %s is not on the indexed branch %s", parts[0], strings.Join(parts[1:], ""))
 	case NoteNotIndexed:
 		return fmt.Sprintf("version %s is not indexed yet", l.Detail)
-	case NoteRollback:
-		return fmt.Sprintf("%s is AHEAD, a rollback, so no release notes", l.Ahead)
+	case NoteNoIndex:
+		return "the repository is not indexed yet"
 	case NoteDiverged:
 		return "the two versions diverged, neither descends from the other"
 	case NoteBeyondDepth:
@@ -694,9 +715,9 @@ var releaseNotes = map[string]map[Language]string{
 	NoteNotIndexed: {
 		LanguageEN: "%s: version %s is not indexed yet.", LanguageDE: "%s: Version %s ist noch nicht indexiert.",
 		LanguageFR: "%s : la version %s n'est pas encore indexée.", LanguageIT: "%s: la versione %s non è ancora indicizzata."},
-	NoteRollback: {
-		LanguageEN: "%s: %s is ahead, a rollback.", LanguageDE: "%s: %s ist voraus, ein Rollback.",
-		LanguageFR: "%s : %s est en avance, un retour arrière.", LanguageIT: "%s: %s è avanti, un rollback."},
+	NoteNoIndex: {
+		LanguageEN: "%s: not indexed yet.", LanguageDE: "%s: noch nicht indexiert.",
+		LanguageFR: "%s : pas encore indexé.", LanguageIT: "%s: non ancora indicizzato."},
 	NoteDiverged: {
 		LanguageEN: "%s: the two versions diverged.", LanguageDE: "%s: die beiden Versionen sind divergiert.",
 		LanguageFR: "%s : les deux versions ont divergé.", LanguageIT: "%s: le due versioni sono divergenti."},
@@ -726,8 +747,6 @@ func NoRelease(lang Language, pair []string, infra string, lines []ReleaseLine) 
 			fmt.Fprintf(&b, tmpl, who, line.Detail)
 		case NoteOffBranch:
 			fmt.Fprintf(&b, tmpl, who, strings.SplitN(line.Detail, " ", 2)[0])
-		case NoteRollback:
-			fmt.Fprintf(&b, tmpl, who, line.Ahead)
 		default:
 			fmt.Fprintf(&b, tmpl, who)
 		}

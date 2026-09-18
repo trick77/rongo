@@ -68,7 +68,7 @@ type Understanding struct {
 	// declared names; empty on every other intent. A set, not a pair: which
 	// stage is ahead is read from the tags' ancestry, never from the order
 	// the model wrote them in. The reader's own stage words win over it.
-	Between []string `json:"between"`
+	Between Names `json:"between"`
 	// Terms are the question restated in business language, which is what the
 	// vector lane matches against doc comments and module names.
 	Terms []string `json:"terms"`
@@ -157,6 +157,33 @@ func (u Understanding) Directive() memory.Directive {
 // CensusLink is the one census the pipeline has. Any other value in the
 // reply is dropped on decode.
 const CensusLink = "link"
+
+// Names is a list of names a gate model may also write as one string
+// ("prod, intg") or null: the release turn's one list field, and the one
+// place a small model's formatting would otherwise fail the whole turn as
+// "reply was not JSON". Anything unreadable is empty.
+type Names []string
+
+// UnmarshalJSON reads a list of strings, one comma-separated string, or null.
+func (n *Names) UnmarshalJSON(b []byte) error {
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		*n = list
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(b, &one); err != nil {
+		*n = nil
+		return nil
+	}
+	*n = nil
+	for _, part := range strings.Split(one, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			*n = append(*n, p)
+		}
+	}
+	return nil
+}
 
 // Days is an integer a gate model may also write as a quoted string ("7") or
 // a float (7.0): the only numeric field of the understanding, and the one
