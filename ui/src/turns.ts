@@ -114,6 +114,26 @@ export type Turn = {
   // thread of stale offers would compete with the answer in front of the
   // reader.
   followups: string[];
+  // The standing instruction this turn saved ("never draw flowcharts"),
+  // what it replaced and what the reader asked to forget, for the chip under
+  // the answer. Null on every other turn. A stored turn carries only the rule
+  // it saved, and only while that rule exists: a deleted rule leaves no chip.
+  memory: TurnMemory | null;
+};
+
+/** What a turn did to the reader's memory, as the memory event and the
+ * record carry it. */
+export type TurnMemory = {
+  // The rule's id, for the undo; null when the turn only forgot rules.
+  id: number | null;
+  text: string;
+  // The project or repository the rule is limited to; empty is everywhere.
+  scope: string;
+  replaced: string[];
+  removed: string[];
+  // A scope the reader named that the index does not carry: the rule holds
+  // everywhere, and the chip says so.
+  scopeDropped: string;
 };
 /** One paid call of a turn, as the usage event and the record carry it. */
 export type UsageCall = {
@@ -216,6 +236,9 @@ export type Message = {
   // Absent for a turn with nothing on record: older than the usage table,
   // or one that paid for nothing.
   usage?: Usage | null;
+  // The rule this turn saved, while it exists. Absent on every other turn
+  // and on a shared thread.
+  memory?: { id: number; text: string } | null;
   // The activity timeline this turn was watched through, as the server timed
   // it. Absent on a turn that announced nothing, on every turn older than the
   // column, and on a shared thread, which carries no machinery.
@@ -277,6 +300,9 @@ export function storedTurn(m: Message): Turn {
     usage: m.usage ?? null,
     askedAt: m.created_at ?? "",
     followups: m.followups ?? [],
+    memory: m.memory
+      ? { id: m.memory.id, text: m.memory.text, scope: "", replaced: [], removed: [], scopeDropped: "" }
+      : null,
   };
 }
 
@@ -321,6 +347,7 @@ export function freshTurn(
     usage: null,
     askedAt: new Date(now).toISOString(),
     followups: [],
+    memory: null,
   };
 }
 /**

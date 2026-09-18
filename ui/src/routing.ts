@@ -17,6 +17,8 @@ export type Route =
   | { view: "threads" }
   | { view: "projects" }
   | { view: "shared" }
+  /** The reader's standing instructions. */
+  | { view: "memory" }
   /** The public page. Never rendered inside the app — see main.tsx. */
   | { view: "share"; token: string };
 
@@ -45,6 +47,7 @@ export function routeFromPath(path: string): Route {
   if (path === "/threads") return { view: "threads" };
   if (path === "/projects") return { view: "projects" };
   if (path === "/shared") return { view: "shared" };
+  if (path === "/memory") return { view: "memory" };
   return { view: "new" };
 }
 
@@ -65,6 +68,8 @@ export function pathForRoute(route: Route): string {
       return "/projects";
     case "shared":
       return "/shared";
+    case "memory":
+      return "/memory";
     case "share":
       return sharePrefix + encodeURIComponent(route.token);
     default:

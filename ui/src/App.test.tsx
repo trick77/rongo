@@ -546,6 +546,36 @@ describe("App, the rail on a phone", () => {
     await screen.findByRole("heading", { name: "Shared threads" });
   });
 
+  it("closes on Memory and counts the rules in the header", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          String(url) === "/api/memory"
+            ? {
+                enabled: true,
+                memories: [
+                  { id: 1, text: "Never draw flowchart diagrams.", scope_live: true, created_at: "2026-09-18T10:00:00Z" },
+                  { id: 2, text: "Skip the tests.", scope_live: true, created_at: "2026-09-18T10:00:00Z" },
+                ],
+              }
+            : [],
+      })),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { level: 1 });
+    const user = await openDrawer();
+    const memory = screen.getByRole("button", { name: "Memory" });
+    await user.click(memory);
+    expect(rail().className).toContain("-translate-x-full");
+    expect(memory.getAttribute("aria-current")).toBe("page");
+    await screen.findByRole("heading", { name: "Memory" });
+    expect(await screen.findByText("2 rules")).toBeTruthy();
+    expect(window.location.pathname).toBe("/memory");
+  });
+
   // The rail rows are disabled mid-turn; the way back to the rail must not be.
   // With the drawer shut and the toggle dead there would be no navigation at
   // all while an answer is being written.

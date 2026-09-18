@@ -588,6 +588,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// reader watched is still there when they come back to the thread.
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
+	// And the reader's standing instructions, read once here: the
+	// understanding step lists them, the answer is written under them, and a
+	// rule given in this very question joins them mid-turn.
+	ctx = s.memoryHolder(ctx, u.Subject)
 
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
@@ -693,6 +697,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		},
 		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
 		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
+		OnMemory: s.onMemory(record, u.Subject, msg.ID, send),
 	}
 
 	// closeRecord stores what the turn paid for and how it was watched, and
@@ -1079,6 +1084,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	ctx = usage.WithMeter(ctx, meter)
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
+	// The reader's standing instructions apply to a re-explain as they do
+	// to any answer: same reader, same rules.
+	ctx = s.memoryHolder(ctx, u.Subject)
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)

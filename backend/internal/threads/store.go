@@ -133,6 +133,17 @@ type Message struct {
 	// carried none. A shared link keeps it: the text is public either way, and
 	// a chip drawn as prose would misread as the reader's words.
 	PastedTexts []PastedText `json:"pasted_texts,omitempty"`
+	// Memory is the standing instruction this turn saved, for the chip under
+	// the answer and its undo. Read off the memories row the turn points at,
+	// so a rule deleted since simply is not there: the record says
+	// "forgotten" by saying nothing. Never on a shared link.
+	Memory *MemoryRef `json:"memory,omitempty"`
+}
+
+// MemoryRef is the rule a turn saved, as the chip needs it.
+type MemoryRef struct {
+	ID   int64  `json:"id"`
+	Text string `json:"text"`
 }
 
 // PastedText is one pasted block as the browser staged it: the text, and its
@@ -460,6 +471,15 @@ func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) err
 	return nil
 }
 
+// SetMemory records the standing instruction a turn saved, so the chip under
+// its answer and the undo on it come back on a reload.
+func (s *Store) SetMemory(ctx context.Context, messageID, memoryID int64) error {
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET memory_id = ? WHERE id = ?`, memoryID, messageID); err != nil {
+		return fmt.Errorf("store memory link: %w", err)
+	}
+	return nil
+}
+
 // SaveFollowups records the questions this answer offered to ask next.
 // Written after the answer, because it is written from it. Nothing to save
 // writes nothing, and a failure here is never a turn failure: the caller logs
@@ -727,6 +747,11 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 // answered and sits below ordinal `before`, or false when there is none. It is
 // what a follow-up is a follow-up TO.
 //
+// A turn that was only a standing instruction ("never show flowcharts") is
+// skipped: it answered, templated, but nothing follows it. Handed over as the
+// antecedent it would make "kürzer" typed after it search for "kürzer"
+// instead of reworking the answer before it.
+//
 // "Kannst du das in einem Diagramm aufzeigen?" names no mechanism, no module
 // and no repository, because the reader named all three a turn ago. Without
 // this the question reaches the pipeline as a bare sentence, the search runs
@@ -751,6 +776,7 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ? AND m.answer != ''
 		  AND m.ordinal < ?
+		  AND NOT (json_valid(m.scope) AND json_extract(m.scope, '$.intent') IS 'memory')
 		ORDER BY m.ordinal DESC
 		LIMIT 1`, threadID, subject, before).
 		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
@@ -841,8 +867,10 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at,
+		       COALESCE(mem.id, 0), COALESCE(mem.text, '')
 		FROM messages m JOIN threads t ON t.id = m.thread_id
+		LEFT JOIN memories mem ON mem.id = m.memory_id
 		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
 		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling)
 	if err != nil {
@@ -859,8 +887,13 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		var followups string
 		var pasted string
 		var steps string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created); err != nil {
+		var memID int64
+		var memText string
+		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created, &memID, &memText); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		if memID != 0 {
+			m.Memory = &MemoryRef{ID: memID, Text: memText}
 		}
 		m.FromClarificationID = fromClar.Int64
 		m.Scope = scanScope(scope)

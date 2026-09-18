@@ -136,6 +136,10 @@ type Config struct {
 	// heaviest on record 83k, and the default sits three times above that so
 	// normal operation never meets it. Zero turns it off.
 	TurnMaxTokens int
+	// Memory keeps each reader's standing instructions ("never show me
+	// flowcharts") across threads and writes them into every answer prompt.
+	// Off, the understanding step asks for none and the page says so.
+	Memory bool
 	// No embedding model here: it is embed.Model, a constant of the build,
 	// and its width embed.Dim comes from the llmwire profile. Its host is the
 	// profile's and its key, LLMWIRE_OPENAI_API_KEY, is read by llmwire the
@@ -200,6 +204,7 @@ func Load() (Config, error) {
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		Memory:            envBoolOr("BACKEND_MEMORY", true),
 		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
 		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
 		LLMGateReasoning:  envOr("BACKEND_LLM_GATE_REASONING", "off"),

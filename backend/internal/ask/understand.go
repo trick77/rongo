@@ -24,6 +24,7 @@ import (
 	"github.com/trick77/llmwire"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 )
 
 // understandMaxTokens caps the JSON reply. It is a short structured object; a
@@ -95,6 +96,57 @@ type Understanding struct {
 	// the index instead (edges.InRepo). Read from the question, never from
 	// the intent: "where is the total computed" is also "where".
 	Census string `json:"census"`
+	// Memory is a standing instruction the question carries — "never show
+	// flowcharts", "don't mention lerb-chooser-ui anymore" — as one English
+	// sentence, or "". Only with a memory holder on the context: a
+	// deployment with memory off never asks for it, and a stray value is
+	// dropped by the pipeline. MemoryScope is the project or repository the
+	// instruction is limited to, as the reader named it; MemoryReplaces the
+	// saved rules it contradicts; MemoryRemoves the saved rules the reader
+	// asks to forget. The intent "memory" is a question that is ONLY a
+	// directive, answered without a search.
+	Memory         string `json:"memory"`
+	MemoryScope    string `json:"memory_scope"`
+	MemoryReplaces IDs    `json:"memory_replaces"`
+	MemoryRemoves  IDs    `json:"memory_removes"`
+}
+
+// IDs is a list of row ids as a model writes one: numbers, numeric strings,
+// or nothing. Anything else reads as nothing rather than failing the whole
+// understanding, whose other fields the turn needs regardless.
+type IDs []int64
+
+// UnmarshalJSON reads an array of numbers or numeric strings, or null.
+func (ids *IDs) UnmarshalJSON(b []byte) error {
+	var raw []any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		*ids = nil
+		return nil
+	}
+	out := make(IDs, 0, len(raw))
+	for _, v := range raw {
+		switch x := v.(type) {
+		case float64:
+			out = append(out, int64(x))
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(x), 64); err == nil {
+				out = append(out, int64(f))
+			}
+		}
+	}
+	*ids = out
+	return nil
+}
+
+// Directive is what the understanding read as a standing instruction, or
+// nothing.
+func (u Understanding) Directive() memory.Directive {
+	return memory.Directive{
+		Text:     u.Memory,
+		Scope:    u.MemoryScope,
+		Replaces: []int64(u.MemoryReplaces),
+		Removes:  []int64(u.MemoryRemoves),
+	}
 }
 
 // CensusLink is the one census the pipeline has. Any other value in the
@@ -170,7 +222,7 @@ func NewUnderstander(c *llm.Client) *Understander {
 const understandSystem = `You analyse a question about a codebase and answer with JSON ONLY.
 
 Fields:
-  intent      "how", "why", "where", "conformance", "changes" or "rework"
+  intent      "how", "why", "where", "conformance", "changes"%s
   since_days  for "changes" only: how many days back the question asks.
               "yesterday" is 1, "the last 2 days" is 2, "this week" is 7,
               "this month" is 30; nothing said is 0. Every other intent is 0.
@@ -193,7 +245,7 @@ Fields:
   census      "link" when the question asks to LIST the places a repository
               links or navigates to — links to other applications, external
               URLs, outbound links — else "". A question about how one
-              link works is not a census.
+              link works is not a census.%s
 
 "changes" is a question about what was DONE to the code recently, not about
 what the code does: "what changed", "what is new", "latest updates", "recent
@@ -207,7 +259,7 @@ nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",
 point", "fasse zusammen", "kürzer", "résume", "riassumi".
 It exists only when a previous turn is above; with none, or when the question
 asks about anything the previous answer does not already say, it is not
-"rework". A rework has terms [], code_terms [] and repos [].
+"rework". A rework has terms [], code_terms [] and repos [].%s
 
 A question may arrive with the previous turn of the conversation above it. That
 material is there for ONE purpose: to resolve what the current question leaves
@@ -225,6 +277,49 @@ means "AirPlay" in the code; someone asking about "disk almost full" means
 simply repeat the words of the question.
 
 No running text, no explanation, just the JSON object.`
+
+// understandIntents closes the intent line, with or without "memory".
+const (
+	understandIntentsOff = ` or "rework"`
+	understandIntentsOn  = `, "rework" or "memory"`
+)
+
+// understandMemory is the rule for the memory fields, in the system prompt
+// only when the deployment keeps memory. Written in English whatever the
+// question's language: one row serves threads in four languages.
+const understandMemoryFields = `
+  memory          a STANDING instruction the question gives about how to
+                  answer from now on, as ONE English sentence in the
+                  imperative, else "". It is standing when the reader says so:
+                  "never", "always", "from now on", "don't ... anymore",
+                  "stop ...ing", "nie wieder", "ab jetzt", "künftig",
+                  "désormais", "ne ... plus jamais", "d'ora in poi", "mai
+                  più". Examples: "Zeig mir nie wieder Flowcharts" is "Never
+                  draw flowchart diagrams."; "the library lerb-chooser-ui
+                  doesn't interest me, don't mention it anymore" is "Do not
+                  mention the library lerb-chooser-ui.". A request for THIS
+                  answer only ("no diagram this time", "shorter", "as a
+                  table") is not a memory. A question is never a memory. An
+                  instruction about the answer language, the audience or
+                  which repositories to search is not a memory: those are
+                  settings the reader picks. Never a statement about what the
+                  code does, never a credential.
+  memory_scope    the project or repository the instruction is limited to,
+                  written exactly as the reader named it, else "".
+  memory_replaces ids of saved instructions (listed below the question when
+                  there are any) that the new instruction contradicts or
+                  restates, else [].
+  memory_removes  ids of saved instructions the reader asks to forget
+                  ("forget the rule about diagrams", "show flowcharts
+                  again"), else [].`
+
+// understandMemoryIntent defines the intent, after the rework's.
+const understandMemoryIntent = `
+
+"memory" is the intent of a question that is ONLY an instruction — it asks
+nothing of the code. It has terms [], code_terms [] and repos []. A question
+that carries an instruction AND asks something keeps the intent of what it
+asks, with the instruction in memory.`
 
 // answerRecall is how much of the previous answer the understanding step is
 // shown. A BA answer is the core mechanism in three to five paragraphs, so the
@@ -280,9 +375,10 @@ func recall(question string, t Thread) string {
 // SEPARATE decision, for a reason of its own — MiMo's reasoning channel can
 // bleed into the content, and here the content has to parse as JSON.
 func (u *Understander) Understand(ctx context.Context, question string, t Thread, stageNames []string) (Understanding, error) {
+	holder := memory.From(ctx)
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
-		{Role: "system", Content: understandSystem + stageList(stageNames)},
-		{Role: "user", Content: recall(question, t)},
+		{Role: "system", Content: understandPrompt(holder != nil) + stageList(stageNames)},
+		{Role: "user", Content: recall(question, t) + memoryList(holder)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
 		return Understanding{}, fmt.Errorf("understand the question: %w", err)
@@ -311,6 +407,27 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 		got.Census = ""
 	}
 	return got, nil
+}
+
+// understandPrompt is the system prompt with or without the memory fields.
+// Without them the prompt is byte for byte what it was before memory
+// existed, which is what keeps the eval baseline comparable.
+func understandPrompt(withMemory bool) string {
+	if !withMemory {
+		return fmt.Sprintf(understandSystem, understandIntentsOff, "", "")
+	}
+	return fmt.Sprintf(understandSystem, understandIntentsOn, understandMemoryFields, understandMemoryIntent)
+}
+
+// memoryList closes the user message with the saved rules, ids first, so
+// the model can say which one a new instruction contradicts. Nothing when
+// memory is off or empty.
+func memoryList(h *memory.Holder) string {
+	rows := h.Rows()
+	if len(rows) == 0 {
+		return ""
+	}
+	return "\n\n" + memory.ListLine(rows)
 }
 
 // stageList closes the system prompt with the declared stage names, or with

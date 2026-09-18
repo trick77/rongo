@@ -632,6 +632,18 @@ export default function Ask({
           else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
           else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
           else if (name === "followups") patchLast((t) => ({ ...t, followups: payload ?? [] }));
+          else if (name === "memory")
+            patchLast((t) => ({
+              ...t,
+              memory: {
+                id: payload.id ?? null,
+                text: payload.text ?? "",
+                scope: payload.scope ?? "",
+                replaced: payload.replaced ?? [],
+                removed: payload.removed ?? [],
+                scopeDropped: payload.scope_dropped ?? "",
+              },
+            }));
           else if (name === "usage") patchLast((t) => ({ ...t, usage: payload as Usage }));
           else if (name === "clarification") {
             patchLast((t) => ({

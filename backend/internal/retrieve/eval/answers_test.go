@@ -39,6 +39,7 @@ import (
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/sourceview"
 )
@@ -237,6 +238,23 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
+	// The product runs every turn with a memory holder on the context
+	// (BACKEND_MEMORY defaults on), which is what makes the understanding
+	// prompt ask for a standing instruction. Measured as the product ships
+	// it: BACKEND_EVAL_MEMORY=0 is the arm without, the prompt as it was.
+	// Rules can be seeded for a "memory wins" arm: BACKEND_EVAL_MEMORY_RULES
+	// is a "|"-separated list of English sentences written into every turn.
+	memoryArm := "off"
+	if envOr("BACKEND_EVAL_MEMORY", "1") != "0" {
+		var rows []memory.Row
+		for i, text := range strings.Split(os.Getenv("BACKEND_EVAL_MEMORY_RULES"), "|") {
+			if text = strings.TrimSpace(text); text != "" {
+				rows = append(rows, memory.Row{ID: int64(i + 1), Text: text, ScopeLive: true})
+			}
+		}
+		ctx = memory.With(ctx, memory.NewHolder(rows))
+		memoryArm = fmt.Sprintf("on, %d rules", len(rows))
+	}
 	c := answerLLM(t)
 	judge := judgeLLM(t)
 	retriever := evalRetriever(t, db)
@@ -278,7 +296,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
 		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs, diagrams int
-		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s ===", run, runs, audience, rerank, codeLaneLabel())
+		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s ===", run, runs, audience, rerank, codeLaneLabel(), memoryArm)
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {

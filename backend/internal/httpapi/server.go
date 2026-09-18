@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
@@ -74,6 +75,9 @@ type Threads interface {
 	// SetScope records what the turn's question said about repositories, so a
 	// reload can render the notice and a resumed turn can rebuild the rules.
 	SetScope(ctx context.Context, messageID int64, scope ask.Scope) error
+	// SetMemory records the standing instruction a turn saved, so its chip
+	// and undo survive a reload.
+	SetMemory(ctx context.Context, messageID, memoryID int64) error
 	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
 	// SaveUsage records the paid calls one turn made, however it ended.
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
@@ -133,6 +137,10 @@ type Deps struct {
 	// this deployment cannot answer questions, which its routes say with a 503.
 	Ask     Asker
 	Threads Threads
+	// Memory keeps each reader's standing instructions. Nil means the
+	// deployment keeps none (BACKEND_MEMORY=false): the understanding step
+	// asks for no directive, the answer carries no block, the page says so.
+	Memory Memories
 	// Source serves a cited file out of the checkout, so a source in the
 	// evidence panel can be opened. Nil means this deployment has no checkout
 	// to read from, which the endpoint says with a 503.
@@ -148,6 +156,14 @@ type Deps struct {
 	// simply ends, which is what it did before the pills existed.
 	Suggester func(ctx context.Context, question, answer string, audience ask.Audience,
 		sources []ask.Source, scope ask.Scope, lang ask.Language) []string
+}
+
+// Memories is the reader's standing instructions, as the HTTP layer needs
+// them. *memory.Store satisfies it structurally.
+type Memories interface {
+	List(ctx context.Context, subject string) ([]memory.Row, error)
+	Add(ctx context.Context, subject string, d memory.Directive, sourceMessageID int64) (memory.Added, error)
+	Remove(ctx context.Context, subject string, id int64) (bool, error)
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.
@@ -207,6 +223,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/commit", s.requireAuth(http.HandlerFunc(s.handleCommit)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
 	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
+
+	// The reader's standing instructions: listed on the Memory page, deleted
+	// there or by the undo under the answer that saved one. Written only
+	// through chat, so there is no POST.
+	s.mux.Handle("GET /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemory)))
+	s.mux.Handle("DELETE /api/memory/{id}", s.requireAuth(http.HandlerFunc(s.handleForgetMemory)))
 
 	// Making, moving and taking back a link is the owner's, so these are gated
 	// like every other thread action.

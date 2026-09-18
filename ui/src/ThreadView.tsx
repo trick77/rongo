@@ -6,6 +6,7 @@ import Question from "./Question";
 import PasteChip from "./PasteChip";
 import { strip } from "./pastes";
 import Trace from "./Trace";
+import MemoryChip from "./memory/MemoryChip";
 import { CheckIcon, CopyIcon } from "./icons";
 import {
   clock,
@@ -443,6 +444,11 @@ export default function ThreadView({
                     )}
                   </div>
                 )}
+
+                {/* What this turn did to the reader's memory, under the
+                    answer it applies to. Undo only where there are actions:
+                    a shared page never carries it anyway. */}
+                {turn.memory && <MemoryChip memory={turn.memory} readOnly={!actions} />}
 
                 {/* The way into the pane, under every answer that cites. The
                     pane lists one turn at a time, and this chip is what points
