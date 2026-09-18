@@ -365,20 +365,21 @@ export default function Threads({
             <ul className="flex flex-col">{starred.map(row)}</ul>
           </section>
         )}
-        {groups.some((g) => g.items.length > 0) && (
+        {groups.length > 0 && (
           <section>
-            <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>
-            {groups.map((g, i) => (
-              // "Today" is not painted: it always heads the list, and naming
-              // the day a thread was asked on is only worth the line once the
-              // day is no longer this one. The group still exists, so
-              // tomorrow's threads split off it.
-              //
-              // The first group under Recents sits on the heading's own 8px,
-              // painted or not: its label, when it has one, drops the 20px a
-              // later day label puts between itself and the rows above it.
+            {/* "Recents" heads today's threads, which carry no day label of
+                their own: naming the day a thread was asked on is only worth
+                the line once the day is no longer this one. With nothing from
+                today the first day label heads the section itself — a
+                "Recents" over a "Yesterday" is two labels stacked on the same
+                rows, and it read as a Recents group with nothing in it the
+                morning after the day's only thread was deleted. */}
+            {groups[0].label === "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>}
+            {groups.map((g) => (
+              // Every painted day label carries the 20px a section heading
+              // does: it is one, whether it follows today's rows or Starred.
               <div key={g.label}>
-                {g.label !== "Today" && <h3 className={(i === 0 ? "mb-2 " : "mt-5 mb-2 ") + railLabel}>{g.label}</h3>}
+                {g.label !== "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>{g.label}</h3>}
                 <ul className="flex flex-col">{g.items.map(row)}</ul>
               </div>
             ))}

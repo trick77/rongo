@@ -23,9 +23,12 @@ const loads = 2;
 
 afterEach(() => vi.unstubAllGlobals());
 
+const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+
+// Both from today: the rail says "Recents" only over today's threads.
 const two = [
-  { id: "7", title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" },
-  { id: "3", title: "Where does the token come from?", created_at: "2026-08-16T10:00:00Z" },
+  { id: "7", title: "How does shipping work?", created_at: days(0) },
+  { id: "3", title: "Where does the token come from?", created_at: days(0) },
 ];
 
 describe("Threads", () => {
@@ -148,7 +151,6 @@ describe("Threads", () => {
   // position already says. The day groups below it stay: there the day is
   // the useful part.
   describe("day groups", () => {
-    const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
     const mixed = [
       { id: "9", title: "Asked this morning", created_at: days(0) },
       { id: "4", title: "Asked earlier in the week", created_at: days(3) },
@@ -183,7 +185,6 @@ describe("Threads", () => {
   // then the recent ones under "Recents". Starred is read separately, so a
   // star holds on a thread the 30 newest no longer carry.
   describe("sections", () => {
-    const days = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
     const older = { id: "1", title: "Asked long ago", created_at: days(40), starred: true };
 
     it("heads the recent threads and files the starred ones above them", async () => {
@@ -217,7 +218,7 @@ describe("Threads", () => {
       expect(screen.queryByText("Recents")).toBeNull();
     });
 
-    it("keeps the day groups under Recents, the first one on the heading's own gap", async () => {
+    it("keeps the day groups under Recents, each on a heading's 20px", async () => {
       threadList([
         { id: "9", title: "Asked this morning", created_at: days(0) },
         { id: "4", title: "Asked earlier in the week", created_at: days(3) },
@@ -227,12 +228,18 @@ describe("Threads", () => {
       expect(screen.queryByText("Today")).toBeNull();
       expect(screen.getByText("This week").className).toContain("mt-5");
 
-      // With nothing from today, the first day label sits on the heading's
-      // 8px, not 20px further down.
+    });
+
+    // "Recents" over a "This week" is two labels stacked on the same rows,
+    // and it read as a Recents group with nothing in it the morning after
+    // the day's only thread was deleted. With nothing from today the day
+    // label heads the section, on a section heading's 20px.
+    it("drops the Recents heading when nothing is from today", async () => {
       threadList([{ id: "4", title: "Asked earlier in the week", created_at: days(3) }]);
-      render(<Threads activeId={null} onSelect={() => {}} version={1} />);
-      await waitFor(() => expect(screen.getAllByText("This week")).toHaveLength(2));
-      expect(screen.getAllByText("This week")[1].className).not.toContain("mt-5");
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      await screen.findByRole("button", { name: "Asked earlier in the week" });
+      expect(screen.queryByText("Recents")).toBeNull();
+      expect(screen.getByText("This week").className).toContain("mt-5");
     });
 
     it("asks for every starred thread, not a page of them", async () => {
