@@ -984,16 +984,16 @@ func coveredRepos(known []string, sources []Source) []string {
 // Absence takes no marker, and "rongo is one product in 1 repository" tells the
 // model something it can already see in every citation.
 //
-// A uses edge leaving the project can only point at a library — projects.Load
-// drops every other kind — and it is said apart from the edges inside: the
-// library is a separate repository, shared with other products, and folding it
-// into "connections inside the project" would tell the model it is a part of
-// this one.
+// A library the product is built on is a member like the rest — searched
+// with the product, drawn in its wiring — and its line says it is shared
+// with other products, so the model does not read its code as this product's
+// own. A uses edge to it is an ordinary connection inside the project. A
+// uses edge to anything else outside the project cannot occur: projects.Load
+// drops every such row, so an unknown target here is skipped.
 func StructureBlock(ps []projects.Project) string {
 	var b strings.Builder
 	for _, p := range ps {
 		var edges []string
-		var libraries []string
 		var unreached []string
 		reached := map[string]bool{}
 		member := make(map[string]bool, len(p.Members))
@@ -1007,7 +1007,6 @@ func StructureBlock(ps []projects.Project) string {
 			}
 			for _, u := range m.Uses {
 				if !member[u] {
-					libraries = append(libraries, m.Name+" uses the shared library "+u+".")
 					continue
 				}
 				edges = append(edges, m.Name+" uses "+u+".")
@@ -1028,7 +1027,9 @@ func StructureBlock(ps []projects.Project) string {
 		}
 		for _, m := range p.Members {
 			fmt.Fprintf(&b, "  %s", m.Name)
-			if m.Part != "" {
+			if m.Library && len(p.Members) > 1 {
+				b.WriteString(" (shared library)")
+			} else if m.Part != "" {
 				fmt.Fprintf(&b, " (%s)", m.Part)
 			}
 			if m.Description != "" {
@@ -1052,13 +1053,6 @@ func StructureBlock(ps []projects.Project) string {
 			if len(unreached) > 0 {
 				fmt.Fprintf(&b, "Nothing in this project uses %s. They are reached from outside it, "+
 					"so do not connect them to the others yourself.\n", strings.Join(unreached, ", "))
-			}
-		}
-		if len(libraries) > 0 {
-			b.WriteString("\nShared libraries this project is built on, each a separate repository " +
-				"indexed on its own and used by other products too:\n")
-			for _, l := range libraries {
-				fmt.Fprintf(&b, "  %s\n", l)
 			}
 		}
 	}

@@ -37,16 +37,20 @@ type Repo struct {
 type Project struct {
 	Name string
 	// Members are sorted by name, so every caller — the card, the page, the
-	// prompt block — lists them in the same order on every turn.
+	// prompt block — lists them in the same order on every turn. A library a
+	// member uses is among them, marked Library: a product is searched with
+	// the code it is built on, and a thread pinned to the product may narrow
+	// to the library. The library's own project of one lists it too.
 	Members []Repo
 }
 
 // Map answers the two questions routing asks: which project a repository
 // belongs to, and which repositories a project holds.
 type Map struct {
-	of       map[string]string // repository -> project
+	of       map[string]string // repository -> its own project (a library: itself)
 	projects map[string]Project
-	library  map[string]bool // repositories from the libraries block
+	library  map[string]bool     // repositories from the libraries block
+	usedBy   map[string][]string // library -> the products it is a member of, sorted
 }
 
 // Load reads the whole grouping in two queries. There are a handful of
@@ -54,7 +58,7 @@ type Map struct {
 // repodeps.DependsOn is, so it is deliberately not cached: a project renamed in
 // repos.yaml takes effect on the next question, not on the next restart.
 func Load(ctx context.Context, db *sql.DB) (Map, error) {
-	m := Map{of: map[string]string{}, projects: map[string]Project{}, library: map[string]bool{}}
+	m := Map{of: map[string]string{}, projects: map[string]Project{}, library: map[string]bool{}, usedBy: map[string][]string{}}
 
 	// enabled = 1: a parked repository is not offered on a clarification card
 	// and does not count towards a project's membership. Offering one would ask
@@ -83,7 +87,9 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 			project = name
 		}
 		m.of[name] = project
-		m.library[name] = library == 1
+		if library == 1 {
+			m.library[name] = true
+		}
 		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description, Library: library == 1})
 	}
 	if err := rows.Err(); err != nil {
@@ -93,12 +99,67 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	if err := m.loadUses(ctx, db, members); err != nil {
 		return Map{}, err
 	}
+	m.shareLibraries(members)
 
 	for name, ms := range members {
 		sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
 		m.projects[name] = Project{Name: name, Members: ms}
 	}
 	return m, nil
+}
+
+// shareLibraries makes every library a member of each product whose members
+// use it, following library-to-library edges: a backend that uses acme-http,
+// which uses acme-commons, is built on both. The library's own project of
+// one is untouched, and of[library] still names it — which product a
+// library hit belongs to is decided per turn, by the products beside it, in
+// Distinct and Fold.
+func (m Map) shareLibraries(members map[string][]Repo) {
+	uses := map[string][]string{}
+	for _, ms := range members {
+		for _, r := range ms {
+			uses[r.Name] = r.Uses
+		}
+	}
+	// A library's own row sits under its own name. A hand-written row that
+	// says library = 1 under another project is not one, and is left alone
+	// rather than taking the turn down.
+	byName := map[string]Repo{}
+	for lib := range m.library {
+		for _, r := range members[lib] {
+			if r.Name == lib {
+				byName[lib] = r
+			}
+		}
+		if _, ok := byName[lib]; !ok {
+			delete(m.library, lib)
+		}
+	}
+	for project, ms := range members {
+		if m.library[project] {
+			continue
+		}
+		reached := map[string]bool{}
+		var walk func(from string)
+		walk = func(from string) {
+			for _, u := range uses[from] {
+				if m.library[u] && !reached[u] {
+					reached[u] = true
+					walk(u)
+				}
+			}
+		}
+		for _, r := range ms {
+			walk(r.Name)
+		}
+		for lib := range reached {
+			members[project] = append(members[project], byName[lib])
+			m.usedBy[lib] = append(m.usedBy[lib], project)
+		}
+	}
+	for lib := range m.usedBy {
+		sort.Strings(m.usedBy[lib])
+	}
 }
 
 // loadUses attaches the declared edges. An edge whose target is neither a
@@ -178,13 +239,54 @@ func (m Map) All() []Project {
 
 // Distinct counts the projects a set of repositories spans. This is what the
 // repository rung asks: three repositories of one product are one thing to
-// choose between, not three.
+// choose between, not three. A library beside a product that uses it is that
+// product's; on its own, or beside products that do not use it, it is a
+// project of one like any repository.
 func (m Map) Distinct(repos []string) int {
-	seen := map[string]bool{}
+	return len(m.Fold(repos))
+}
+
+// Fold groups repositories by the project a turn should treat them as, in
+// first-seen order: every non-library under its own project, then every
+// library under each present product that uses it, or under itself when
+// none is present. A library used by two present products lands in both,
+// because the hit is evidence for either and a card offering the two must
+// carry it on both entries.
+func (m Map) Fold(repos []string) map[string][]string {
+	out := map[string][]string{}
 	for _, r := range repos {
-		seen[m.Of(r)] = true
+		if !m.library[r] {
+			p := m.Of(r)
+			out[p] = append(out[p], r)
+		}
 	}
-	return len(seen)
+	for _, r := range repos {
+		if !m.library[r] {
+			continue
+		}
+		placed := false
+		for _, p := range m.usedBy[r] {
+			if _, ok := out[p]; ok {
+				out[p] = append(out[p], r)
+				placed = true
+			}
+		}
+		if !placed {
+			out[r] = append(out[r], r)
+		}
+	}
+	return out
+}
+
+// IsLibrary reports whether a repository came from the libraries block.
+func (m Map) IsLibrary(repo string) bool {
+	return m.library[repo]
+}
+
+// UsedBy lists the products a library is a member of, sorted; nil for
+// anything else.
+func (m Map) UsedBy(library string) []string {
+	return m.usedBy[library]
 }
 
 // Covered lists the projects the given repositories cover ENTIRELY, sorted.
@@ -193,6 +295,12 @@ func (m Map) Distinct(repos []string) int {
 // prompt rule, and a reader who named one repository of a three-repo project
 // asked about that repository: the turn must behave exactly as it did before
 // projects existed, which it does only if a partial cover counts for nothing.
+//
+// A product's own repositories are what has to be there; a library it uses
+// is not required. A turn on the product's members alone is still a turn on
+// the product, and a card written before the library was declared stored
+// those members and nothing else. The library's own project of one is
+// covered by the library alone, as before.
 func (m Map) Covered(repos []string) []string {
 	have := make(map[string]bool, len(repos))
 	for _, r := range repos {
@@ -202,7 +310,7 @@ func (m Map) Covered(repos []string) []string {
 	for name, p := range m.projects {
 		whole := len(p.Members) > 0
 		for _, r := range p.Members {
-			if !have[r.Name] {
+			if !have[r.Name] && !(r.Library && !m.library[name]) {
 				whole = false
 				break
 			}
@@ -211,6 +319,32 @@ func (m Map) Covered(repos []string) []string {
 			out = append(out, name)
 		}
 	}
+	// A library's own project of one steps aside when any repository of a
+	// product that uses it is present — Fold's rule, whether or not that
+	// product is covered whole. The turn is about the product, built on the
+	// library; a card that stored the library beside one member of the
+	// product must not resume as a turn about the library compared with
+	// that member.
+	present := make(map[string]bool, len(repos))
+	for _, r := range repos {
+		if !m.library[r] {
+			present[m.Of(r)] = true
+		}
+	}
+	kept := out[:0]
+	for _, name := range out {
+		absorbed := false
+		for _, p := range m.usedBy[name] {
+			if present[p] {
+				absorbed = true
+				break
+			}
+		}
+		if !absorbed {
+			kept = append(kept, name)
+		}
+	}
+	out = kept
 	sort.Strings(out)
 	return out
 }

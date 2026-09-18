@@ -137,8 +137,18 @@ func resolveScope(pm projects.Map, scope string) (members []string, live bool) {
 	if scope == "" {
 		return nil, true
 	}
-	if _, ok := pm.Project(scope); ok {
-		return pm.Members(scope), true
+	// A product's own repositories, never the library it shares with other
+	// products: a rule scoped to shop must not fire on a billing turn because
+	// both are built on acme-commons. A scope that IS a library resolves to
+	// the library alone, through the member check below.
+	if _, ok := pm.Project(scope); ok && !pm.IsLibrary(scope) {
+		var own []string
+		for _, m := range pm.Members(scope) {
+			if !pm.IsLibrary(m) {
+				own = append(own, m)
+			}
+		}
+		return own, true
 	}
 	// Of answers the name itself for a repository it does not carry, so the
 	// project it names has to be checked for the member in turn.

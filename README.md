@@ -50,11 +50,11 @@ hosts, keys and an optional LiteLLM gateway in front are llmwire's variables,
 see `.env.example`.
 
 Projects are listed in `repos.yaml`, each holding the repositories it is built
-from; a library several products share is declared once under `libraries:` and
-named with `uses:` from any of them. Credentials never live in that file, they
-come from `BACKEND_*` environment variables, one per forge host. Any git remote
-works: GitHub and Bitbucket Data Center are the ones exercised, over https with
-a token or over ssh with a mounted key.
+from; a library several products share is declared once under `libraries:`,
+named with `uses:` from any of them, and searched as part of each. Credentials
+never live in that file, they come from `BACKEND_*` environment variables, one
+per forge host. Any git remote works: GitHub and Bitbucket Data Center are the
+ones exercised, over https with a token or over ssh with a mounted key.
 
 ## Running it
 
