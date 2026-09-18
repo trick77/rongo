@@ -276,21 +276,25 @@ function Stat({
   value,
   note,
   title,
+  wide,
 }: {
   label: string;
   value: string | number;
   note?: string;
   title?: string;
+  /** The last stat of an odd count: it takes two columns so the row it
+   * closes is full rather than half ruled and half blank. */
+  wide?: boolean;
 }) {
   return (
-    // The bottom border separates the two-up rows on a phone; from sm the
-    // block is one flex row again and only the vertical rules are left. The
-    // even: and last: rules keep a cell from drawing its own rule flush
-    // against the wrapper's border, which reads as a doubled line — and the
-    // odd fifth stat takes the whole last row rather than leaving half of it
-    // ruled and half of it blank.
+    // Every cell draws its own right and bottom rule. The grid around them
+    // is pulled a pixel past the wrapper on those two sides, so the rules on
+    // the outer edge fall under the wrapper's border instead of doubling it.
+    // That holds for any column count and any number of stats, which the
+    // even:/last: rules this replaced did not: with eight stats the eighth,
+    // spanning two columns as "the odd last one", fell onto a row of its own.
     <div
-      className="flex-1 border-r border-b border-border px-4 py-3 even:border-r-0 last:col-span-2 last:border-r-0 last:border-b-0 sm:border-b-0 sm:px-5 sm:py-3.5 sm:even:border-r sm:last:border-r-0"
+      className={"border-r border-b border-border px-4 py-3 sm:px-5 sm:py-3.5 " + (wide ? "col-span-2" : "")}
       title={title}
     >
       <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">{label}</div>
@@ -378,11 +382,16 @@ export default function RepoList() {
 
   return (
     <>
-      {/* Six stats across a 360px phone is 60px each; two-up they still read as
-          numbers. From sm it is one row again. Projects leads Repositories: the
-          project is what a reader is asked to choose between, and the
-          repository count is how that product is built. */}
-      <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-ui border border-border bg-panel sm:flex">
+      {/* Two-up on a phone, four-up from sm. Never one row: seven or eight
+          stats in the 900px column is 112px each, and the Repositories label
+          alone needs 145 with its padding, so a single row clipped the last
+          stat at the wrapper's edge ("neve|"). Projects leads Repositories:
+          the project is what a reader is asked to choose between, and the
+          repository count is how that product is built. Libraries is the one
+          optional stat, so the count is seven or eight, and only seven leaves
+          a row to fill. */}
+      <div className="mb-5 overflow-hidden rounded-ui border border-border bg-panel">
+      <div className="-mr-px -mb-px grid grid-cols-2 sm:grid-cols-4">
         <Stat label="Projects" value={projects.length} />
         {shared.length > 0 && (
           <Stat
@@ -410,7 +419,9 @@ export default function RepoList() {
           label="Last poll"
           value={relative(lastRun)}
           title="The last time every repository was fetched and compared with its indexed commit."
+          wide={shared.length === 0}
         />
+      </div>
       </div>
       {/* Directly under the numbers it explains, and drawn only when there is
           something to explain. Faint, because an absence is not news. */}
