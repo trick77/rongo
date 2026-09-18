@@ -213,6 +213,15 @@ describe("Trace, the remembering step", () => {
     expect(container.querySelector(".trace-detail")?.textContent).toContain("1 standing instruction");
   });
 
+  it("says a rule that could not be written was not kept", () => {
+    render(
+      <StrictMode>
+        <Trace steps={[{ step: "remembering", at: t0, detail: { refused: "failed" } }]} state="done" startedAt={t0} endedAt={t0 + 1} />
+      </StrictMode>,
+    );
+    expect(screen.getByText(/could not be written/)).toBeTruthy();
+  });
+
   it("says a full memory refused the rule", () => {
     render(
       <StrictMode>

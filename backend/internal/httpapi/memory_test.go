@@ -132,6 +132,23 @@ func TestAsk_theStoreRefusesThe41stRuleThroughTheHandler(t *testing.T) {
 	}
 }
 
+// TestAsk_aDirectiveThatChangedNothingSendsNoEvent: the model names an id
+// the reader deleted already; nothing is written, nothing is announced, and
+// the page draws no empty note.
+func TestAsk_aDirectiveThatChangedNothingSendsNoEvent(t *testing.T) {
+	f := &fakeAsker{tokens: []string{"x"}, directive: &memory.Directive{Removes: []int64{9999}}}
+	srv, _, _, _ := memoryServer(t, f)
+
+	body := doSSE(t, srv, "/api/ask", `{"question":"Forget the diagram rule.","audience":"ba"}`)
+
+	if strings.Contains(body, "event: memory") {
+		t.Fatalf("a no-op directive was announced:\n%s", body)
+	}
+	if strings.Contains(body, "event: error") {
+		t.Fatalf("the turn failed:\n%s", body)
+	}
+}
+
 func TestMemory_listsTheReadersRulesNewestFirst(t *testing.T) {
 	srv, _, ms, _ := memoryServer(t, &fakeAsker{})
 	ctx := context.Background()

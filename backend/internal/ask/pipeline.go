@@ -237,15 +237,17 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// of this same turn is already under it. A turn that was ONLY the
 	// instruction ends here, templated: there is nothing to search for. One
 	// the understanding called a memory but that carried nothing to keep
-	// runs as the ordinary question it must then have been.
+	// runs as the ordinary question it must then have been. A write that
+	// failed beside a question is the trace's to report, not the turn's to
+	// die of; alone, it is the whole turn.
 	remembered, memErr := p.remember(ctx, u, ev)
-	if memErr != nil && !errors.Is(memErr, memory.ErrFull) {
-		return Answer{}, nil, memErr
-	}
 	if u.Intent == IntentMemory {
-		if remembered == nil && memErr == nil {
+		switch {
+		case memErr != nil && !errors.Is(memErr, memory.ErrFull):
+			return Answer{}, nil, memErr
+		case remembered == nil && memErr == nil:
 			u.Intent = ""
-		} else {
+		default:
 			return answerMemory(lang, remembered, memErr), nil, nil
 		}
 	}

@@ -229,10 +229,54 @@ func TestPipeline_aFullMemoryRefusesTheRuleAndSaysSo(t *testing.T) {
 		t.Fatalf("detail = %v", detail)
 	}
 
-	// Any other failure to write is the turn's failure.
+	// A write that failed on a turn that was only the rule fails the turn:
+	// there is nothing else to deliver.
 	ev.OnMemory = func(memory.Directive) (memory.Added, error) { return memory.Added{}, errors.New("disk") }
 	if _, _, err := p.Run(withMemory(), "Nie wieder Flowcharts.", AudienceBA, LanguageEN, Thread{}, ev); err == nil || !strings.Contains(err.Error(), "disk") {
 		t.Fatalf("err = %v", err)
+	}
+	if detail["refused"] != "failed" {
+		t.Fatalf("detail = %v", detail)
+	}
+}
+
+func TestPipeline_aFailedWriteBesideAQuestionIsATraceLineNotAFailedTurn(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
+	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams."}`
+	c, streams, _ := memoryUpstream(t, reply, "So [1].")
+	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	var detail map[string]any
+	ev := Events{
+		OnDetail: func(s string, d map[string]any) {
+			if s == "remembering" {
+				detail = d
+			}
+		},
+		OnMemory: func(memory.Directive) (memory.Added, error) { return memory.Added{}, errors.New("disk") },
+	}
+
+	answer, _, err := p.Run(withMemory(), "How does f work, and never show me flowcharts again?", AudienceBA, LanguageEN, Thread{}, ev)
+	if err != nil {
+		t.Fatalf("the question died of an aside: %v", err)
+	}
+	if *streams != 1 || !strings.Contains(answer.Text, "So [1].") {
+		t.Fatalf("streams = %d, text = %q", *streams, answer.Text)
+	}
+	if detail["refused"] != "failed" {
+		t.Fatalf("detail = %v, want the trace to say the rule was not kept", detail)
+	}
+}
+
+func TestMemoryAnswer_aRuleWithQuotesIsNotEscaped(t *testing.T) {
+	added := &memory.Added{Row: memory.Row{ID: 1, Text: `Do not mention "lerb-chooser-ui".`}, Removed: []string{`Skip "tests".`}}
+	text := MemoryAnswer(LanguageEN, added, false)
+	if strings.Contains(text, `\"`) {
+		t.Fatalf("Go escapes reached the reader: %q", text)
+	}
+	if !strings.Contains(text, `Noted: "Do not mention "lerb-chooser-ui"".`) || !strings.Contains(text, `Forgotten: "Skip "tests"".`) {
+		t.Fatalf("text = %q", text)
 	}
 }
 

@@ -110,6 +110,11 @@ func (s *Server) onMemory(record context.Context, subject string, messageID int6
 		if err != nil {
 			return memory.Added{}, err
 		}
+		// A directive that changed nothing (the model named an id the reader
+		// deleted already) gets no event: the chip would draw an empty note.
+		if added.Row.ID == 0 && len(added.Replaced) == 0 && len(added.Removed) == 0 {
+			return added, nil
+		}
 		if added.Row.ID != 0 {
 			if err := s.deps.Threads.SetMemory(record, messageID, added.Row.ID); err != nil {
 				recordFailed(record, "record memory link failed", err)

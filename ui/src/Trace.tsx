@@ -286,6 +286,13 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           </div>
         );
       }
+      if (detail.refused === "failed") {
+        return (
+          <div className="trace-detail">
+            <span className="trace-k">Not kept</span> the rule could not be written; say it again
+          </div>
+        );
+      }
       const memoryText = typeof detail.memory === "string" ? detail.memory : "";
       const scope = typeof detail.scope === "string" ? detail.scope : "";
       const dropped = typeof detail.scope_dropped === "string" ? detail.scope_dropped : "";
