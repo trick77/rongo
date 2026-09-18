@@ -121,3 +121,20 @@ func TestIsAncestor_tellsForwardReverseAndDiverged(t *testing.T) {
 	check("v1.1.0", "1.0.1", false) // diverged: the hotfix branched before 1.1.0
 	check("1.0.0", "1.0.1", true)   // the hotfix still descends from 1.0.0
 }
+
+func TestResolveTag_aMissingCheckoutIsAnErrorNotAMissingTag(t *testing.T) {
+	c := newClient(t)
+	spec := repos.Spec{Name: "absent", CloneURL: "file:///nowhere", Branch: "main", Enabled: true}
+	_, err := c.ResolveTag(context.Background(), spec, "1.0.0")
+	if err == nil || errors.Is(err, ErrTagUnknown) {
+		t.Fatalf("ResolveTag(no checkout) err = %v, want a real error, not ErrTagUnknown", err)
+	}
+}
+
+func TestIsAncestor_aMissingObjectIsAnErrorNotANo(t *testing.T) {
+	c, spec, shas := taggedFixture(t)
+	_, err := c.IsAncestor(context.Background(), spec, "0000000000000000000000000000000000000000", shas["1.0.0"])
+	if err == nil {
+		t.Fatal("IsAncestor(missing object) err = nil, want the exit 128 reported")
+	}
+}

@@ -69,6 +69,23 @@ projects:
 	}
 }
 
+func TestLoad_aRegistryPortIsNotAVersion(t *testing.T) {
+	specs, err := Load(writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-backend
+        clone_url: https://forge.example.invalid/acme/shop-backend.git
+        image: registry.example.invalid:5000/acme/shop-backend
+`))
+	if err != nil {
+		t.Fatalf("Load() err = %v, want a registry port accepted", err)
+	}
+	if specs[0].Image != "registry.example.invalid:5000/acme/shop-backend" {
+		t.Errorf("Image = %q", specs[0].Image)
+	}
+}
+
 func TestLoad_allowsOneImageInTwoProjects(t *testing.T) {
 	// A registry path is only unique inside the product that deploys it;
 	// two products may well ship a library image under one name.

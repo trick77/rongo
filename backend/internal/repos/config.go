@@ -331,7 +331,9 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 		return Spec{}, err
 	}
 	image := strings.TrimSpace(r.Image)
-	if strings.ContainsAny(image, ":@") {
+	// A version is a ":" after the last "/" or a digest anywhere; a ":" before
+	// it is a registry port ("registry.example.invalid:5000/acme/shop").
+	if strings.Contains(image, "@") || strings.Contains(image[strings.LastIndex(image, "/")+1:], ":") {
 		return Spec{}, fmt.Errorf("%s: image %q carries a version — declare the name alone, the tag is read per stage from the infrastructure repository", r.Name, image)
 	}
 	return Spec{

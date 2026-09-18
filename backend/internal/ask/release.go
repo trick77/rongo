@@ -88,6 +88,7 @@ const (
 	NoteNoIndex     = "no-index"
 	NoteDiverged    = "diverged"
 	NoteBeyondDepth = "beyond-depth"
+	NoteUnrecorded  = "unrecorded"
 )
 
 // ReleaseLine is one image of the infrastructure repository as the turn
@@ -324,8 +325,8 @@ func isKustomization(p string) bool {
 //	a tag off the indexed branch off-branch, or not-indexed when the
 //	                             remote branch has it and the index not yet
 //	ancestry                     which stage is ahead, or diverged
-//	range past the depth, or a   beyond-depth
-//	sha the lane never recorded
+//	range past the depth         beyond-depth
+//	a sha the lane never recorded unrecorded
 func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, pm projects.Map,
 	infra string, declared stages.Set, pair []string) ([]ReleaseLine, map[string][]history.Commit, error) {
 
@@ -452,6 +453,11 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 		}
 		shas[stage] = sha
 	}
+	// Two spellings of one tag ("2024.3.1" and "v2024.3.1") are one version.
+	if shas[pair[0]] == shas[pair[1]] {
+		line.Note = NoteUnchanged
+		return nil, nil
+	}
 	// Both tags must lie on the indexed history. A tag the remote branch
 	// holds but the index does not yet is the poller lagging a push, which
 	// is a different sentence from a tag on a side branch.
@@ -515,8 +521,12 @@ func resolveLine(ctx context.Context, rel Releaser, h Histories, pair []string, 
 	if err != nil {
 		return nil, fmt.Errorf("commits of %s: %w", line.Repo, err)
 	}
+	// A sha with no row is not necessarily depth: the lane holds the head's
+	// first-parent chain, and a tag on a merged hotfix commit walks a
+	// first-parent line of its own. Either way the commits are not in the
+	// record, and the line says that rather than blaming the depth.
 	if len(rows) != len(shasBetween) {
-		line.Note, line.Detail = NoteBeyondDepth, fmt.Sprint(depth)
+		line.Note, line.Detail = NoteUnrecorded, fmt.Sprint(len(shasBetween)-len(rows))
 		return nil, nil
 	}
 	return rows, nil
@@ -554,18 +564,23 @@ func other(l ReleaseLine, ahead string) string {
 	return ""
 }
 
+// releaseDetail is what the searching step found: commits is the whole of
+// every range, shown how many of them the prompt holds after the caps.
 func releaseDetail(lines []ReleaseLine, sources []Source, infra string, pair []string) map[string]any {
-	d := map[string]any{"infrastructure": infra, "between": pair, "images": len(lines), "commits": len(sources)}
+	d := map[string]any{"infrastructure": infra, "between": pair, "images": len(lines), "shown": len(sources)}
 	perRepo := map[string]int{}
 	notes := map[string]int{}
+	total := 0
 	for _, l := range lines {
 		if l.Commits > 0 && l.Note == "" {
 			perRepo[l.Repo] = l.Commits
+			total += l.Commits
 		}
 		if l.Note != "" {
 			notes[l.Note]++
 		}
 	}
+	d["commits"] = total
 	if len(perRepo) > 0 {
 		d["per_repo"] = perRepo
 	}
@@ -636,6 +651,8 @@ func noteEnglish(l ReleaseLine) string {
 		return "the two versions diverged, neither descends from the other"
 	case NoteBeyondDepth:
 		return fmt.Sprintf("%d commits apart, older than the recorded history of %s, so not summarised", l.Commits, l.Detail)
+	case NoteUnrecorded:
+		return fmt.Sprintf("%d commits apart, %s of them not in the recorded history, so not summarised", l.Commits, l.Detail)
 	}
 	return l.Note
 }
@@ -724,6 +741,9 @@ var releaseNotes = map[string]map[Language]string{
 	NoteBeyondDepth: {
 		LanguageEN: "%s: older than the recorded history of %s commits.", LanguageDE: "%s: älter als die aufgezeichnete Historie von %s Commits.",
 		LanguageFR: "%s : plus ancien que l'historique enregistré de %s commits.", LanguageIT: "%s: più vecchio della cronologia registrata di %s commit."},
+	NoteUnrecorded: {
+		LanguageEN: "%s: %s commits between the versions are not in the recorded history.", LanguageDE: "%s: %s Commits zwischen den Versionen sind nicht in der aufgezeichneten Historie.",
+		LanguageFR: "%s : %s commits entre les versions ne sont pas dans l'historique enregistré.", LanguageIT: "%s: %s commit tra le versioni non sono nella cronologia registrata."},
 }
 
 // NoRelease is the answer when no component has a range: the sentence,
@@ -743,7 +763,7 @@ func NoRelease(lang Language, pair []string, infra string, lines []ReleaseLine) 
 		}
 		b.WriteString("\n")
 		switch line.Note {
-		case NoteMissing, NoteTagUnknown, NoteNotIndexed, NoteBeyondDepth:
+		case NoteMissing, NoteTagUnknown, NoteNotIndexed, NoteBeyondDepth, NoteUnrecorded:
 			fmt.Fprintf(&b, tmpl, who, line.Detail)
 		case NoteOffBranch:
 			fmt.Fprintf(&b, tmpl, who, strings.SplitN(line.Detail, " ", 2)[0])

@@ -347,19 +347,36 @@ func (c *Client) ResolveTag(ctx context.Context, spec repos.Spec, tag string) (s
 		return "", ErrTagUnknown
 	}
 	dir := c.Dir(spec)
-	for _, ref := range []string{"refs/tags/" + tag, "refs/tags/v" + tag} {
+	candidates := []string{"refs/tags/" + tag, "refs/tags/v" + tag}
+	if isShaShaped(tag) {
+		candidates = append(candidates, tag)
+	}
+	for _, ref := range candidates {
+		// --verify --quiet exits 1 with nothing when the ref is simply
+		// absent, which is the miss. Anything else — no checkout, a broken
+		// one — is a different problem and is reported as one, for
+		// HeadSHA's reason: a missing volume must not read as "no such tag"
+		// on every component.
 		out, err := c.run(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 		if err == nil && strings.TrimSpace(out) != "" {
 			return strings.TrimSpace(out), nil
 		}
-	}
-	if isShaShaped(tag) {
-		out, err := c.run(ctx, dir, "rev-parse", "--verify", "--quiet", tag+"^{commit}")
-		if err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
+		if err != nil && exitCode(err) != 1 {
+			return "", err
 		}
 	}
 	return "", fmt.Errorf("%s: %q: %w", spec.Name, tag, ErrTagUnknown)
+}
+
+// exitCode is git's exit status behind a wrapped error, or -1 when the
+// error is not an exit at all. Read off the ExitError, never the text:
+// "exit status 128" contains "exit status 1".
+func exitCode(err error) int {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
 }
 
 // isShaShaped is seven to forty hex digits: an image tagged with the commit
@@ -384,9 +401,9 @@ func (c *Client) IsAncestor(ctx context.Context, spec repos.Spec, ancestor, desc
 	if err == nil {
 		return true, nil
 	}
-	// Exit status 1 is "no"; anything else is a broken checkout or a
-	// missing object, which the caller must not read as "diverged".
-	if strings.Contains(err.Error(), "exit status 1") {
+	// Exit status 1 is "no"; anything else (128: a missing object, no
+	// checkout) is an error the caller must not read as "diverged".
+	if exitCode(err) == 1 {
 		return false, nil
 	}
 	return false, err
