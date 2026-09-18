@@ -25,7 +25,7 @@ func TestStructureBlockListsALibraryAsASharedMember(t *testing.T) {
 	if !strings.Contains(got, `Project "shop" is one product in 4 repositories.`) {
 		t.Errorf("the library counts as a member:\n%s", got)
 	}
-	if !strings.Contains(got, "acme-commons (shared library, also used by other products) — Shared utilities.") {
+	if !strings.Contains(got, "acme-commons (shared library) — Shared utilities.") {
 		t.Errorf("the library's line says it is shared:\n%s", got)
 	}
 	if !strings.Contains(got, "shop-backend uses acme-commons.") || !strings.Contains(got, "shop-backend uses shop-contract.") {
@@ -47,7 +47,7 @@ func TestStructureBlockCallsALibraryALibraryNotAProduct(t *testing.T) {
 	if !strings.Contains(got, `Repository "acme-commons" is a shared library`) {
 		t.Errorf("the library's own block names it as a library:\n%s", got)
 	}
-	if strings.Contains(got, `Project "acme-commons"`) || strings.Contains(got, "also used by other products") {
+	if strings.Contains(got, `Project "acme-commons"`) || strings.Contains(got, "(shared library)") {
 		t.Errorf("a library alone is neither a product nor a member of one:\n%s", got)
 	}
 	if !strings.Contains(got, "acme-commons — Shared utilities.") {

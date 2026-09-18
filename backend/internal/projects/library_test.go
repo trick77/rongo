@@ -142,8 +142,17 @@ func TestCovered_aProductIsCoveredByItsOwnMembersWithOrWithoutTheLibrary(t *test
 	if got := m.Covered([]string{"acme-commons", "shop-backend", "shop-ui"}); !reflect.DeepEqual(got, []string{"shop"}) {
 		t.Errorf("Covered(members and library) = %v, want shop alone", got)
 	}
-	if got := m.Covered([]string{"shop-backend", "acme-commons"}); !reflect.DeepEqual(got, []string{"acme-commons"}) {
-		t.Errorf("Covered(one member and the library) = %v, want the library alone — a partial cover counts for nothing", got)
+	// One member and the library: a partial cover of shop counts for
+	// nothing, and the library steps aside for the product beside it — so
+	// nothing is covered, exactly as a partial card resumed before the
+	// library existed. Never "a turn about the library compared with
+	// shop-backend".
+	if got := m.Covered([]string{"shop-backend", "acme-commons"}); len(got) != 0 {
+		t.Errorf("Covered(one member and the library) = %v, want nothing", got)
+	}
+	// Beside a product that does not use it, the library's own project stands.
+	if got := m.Covered([]string{"legacy-crm", "acme-commons"}); !reflect.DeepEqual(got, []string{"acme-commons", "legacy-crm"}) {
+		t.Errorf("Covered(legacy-crm, acme-commons) = %v", got)
 	}
 }
 

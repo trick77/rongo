@@ -1028,7 +1028,7 @@ func StructureBlock(ps []projects.Project) string {
 		for _, m := range p.Members {
 			fmt.Fprintf(&b, "  %s", m.Name)
 			if m.Library && len(p.Members) > 1 {
-				b.WriteString(" (shared library, also used by other products)")
+				b.WriteString(" (shared library)")
 			} else if m.Part != "" {
 				fmt.Fprintf(&b, " (%s)", m.Part)
 			}

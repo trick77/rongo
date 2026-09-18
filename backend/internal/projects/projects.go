@@ -121,9 +121,19 @@ func (m Map) shareLibraries(members map[string][]Repo) {
 			uses[r.Name] = r.Uses
 		}
 	}
+	// A library's own row sits under its own name. A hand-written row that
+	// says library = 1 under another project is not one, and is left alone
+	// rather than taking the turn down.
 	byName := map[string]Repo{}
 	for lib := range m.library {
-		byName[lib] = members[lib][0]
+		for _, r := range members[lib] {
+			if r.Name == lib {
+				byName[lib] = r
+			}
+		}
+		if _, ok := byName[lib]; !ok {
+			delete(m.library, lib)
+		}
 	}
 	for project, ms := range members {
 		if m.library[project] {
@@ -309,18 +319,23 @@ func (m Map) Covered(repos []string) []string {
 			out = append(out, name)
 		}
 	}
-	// A library's own project of one steps aside when a covered product
-	// carries it: the turn is about the product, built on the library, and
-	// listing both would read as two products to compare.
-	covered := make(map[string]bool, len(out))
-	for _, name := range out {
-		covered[name] = true
+	// A library's own project of one steps aside when any repository of a
+	// product that uses it is present — Fold's rule, whether or not that
+	// product is covered whole. The turn is about the product, built on the
+	// library; a card that stored the library beside one member of the
+	// product must not resume as a turn about the library compared with
+	// that member.
+	present := make(map[string]bool, len(repos))
+	for _, r := range repos {
+		if !m.library[r] {
+			present[m.Of(r)] = true
+		}
 	}
 	kept := out[:0]
 	for _, name := range out {
 		absorbed := false
 		for _, p := range m.usedBy[name] {
-			if covered[p] {
+			if present[p] {
 				absorbed = true
 				break
 			}
