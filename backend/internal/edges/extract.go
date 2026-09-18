@@ -55,6 +55,16 @@ const (
 	// it, so Neighbours and Holders never match on this kind; the census in
 	// internal/ask reads it per repository instead.
 	KindLink Kind = "link"
+	// KindImage is a deployed container image with its version: the value
+	// of a kustomize images: entry or an image: line in a yaml manifest,
+	// "registry/acme/shop-backend:2024.3.1" or "...@sha256:...". It is NOT
+	// an edge — two infrastructure repositories deploying one base image do
+	// not call each other — and it is the one thing yaml is read for. The
+	// release turn in internal/ask reads it per repository and per stage
+	// (edges.InRepo) to pair a version with the repository whose tag it is.
+	// A placeholder ("${VERSION}", "{{ .Values.tag }}") is not a version
+	// and is not recorded; an untagged name is not a version either.
+	KindImage Kind = "image"
 )
 
 // Token is one extracted destination with the line it was found on.
@@ -156,6 +166,11 @@ var placeholderExt = map[string]bool{".java": true}
 // from every manifest in every repository, and a Spring application.yaml is
 // a follow-up with its own rule.
 var propertiesExt = map[string]bool{".properties": true}
+
+// yamlExt is where the image rule runs, and the only rule yaml gets: a
+// property rule over manifests would emit spec.template.spec.containers
+// from every one of them.
+var yamlExt = map[string]bool{".yaml": true, ".yml": true}
 
 // propertyPlaceholder is "${key}" or "${key:default}" inside a double-quoted
 // literal. The key needs a dot or a dash: "${id}" in a Java string is a
@@ -263,6 +278,9 @@ func Extract(filePath string, body []byte) []Token {
 	ext := strings.ToLower(path.Ext(filePath))
 	if propertiesExt[ext] {
 		return propertyKeys(body)
+	}
+	if yamlExt[ext] {
+		return imageRefs(body)
 	}
 	if !codeExt[ext] && !linkExt[ext] {
 		return nil
@@ -595,4 +613,120 @@ func propertyKeys(body []byte) []Token {
 		out = append(out, Token{Kind: KindProperty, Value: m[1], Line: i + 1})
 	}
 	return out
+}
+
+// imageLine is "image: <ref>" as a manifest writes it, the value bare or
+// quoted. The key is exactly "image": "baseImage:" is somebody's parameter
+// and "image:" opening a Helm values block has no scalar on the line.
+var imageLine = regexp.MustCompile(`^\s*(?:-\s+)?image:\s*["']?([^"'\s#]+)["']?\s*(?:#.*)?$`)
+
+// kustomizeField is one field of an images: transformer entry.
+var kustomizeField = regexp.MustCompile(`^\s*(?:-\s+)?(name|newName|newTag|digest):\s*["']?([^"'\s#]+)["']?\s*(?:#.*)?$`)
+
+// imageRefs reads the deployed versions out of one yaml file: every
+// "image:" line carrying a tag or digest, and every entry of a kustomize
+// images: list that sets newTag or digest. Line-based on purpose, like every
+// other rule here: a yaml parser would take the whole document's shape into
+// account, and the two shapes read here are fixed enough to match by line.
+func imageRefs(body []byte) []Token {
+	var out []Token
+	seen := map[string]bool{}
+	add := func(value string, line int) {
+		if value == "" || !isVersioned(value) || seen[value] {
+			return
+		}
+		seen[value] = true
+		out = append(out, Token{Kind: KindImage, Value: value, Line: line})
+	}
+	lines := strings.Split(string(body), "\n")
+	// An images: entry spans lines; its fields arrive in any order, so an
+	// entry is closed by the next "- " item or by a dedent.
+	type entry struct {
+		name, newName, newTag, digest string
+		line, indent                  int
+	}
+	var cur *entry
+	inImages := false
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		name := cur.newName
+		if name == "" {
+			name = cur.name
+		}
+		switch {
+		case name == "":
+		case cur.digest != "":
+			add(name+"@"+cur.digest, cur.line)
+		case cur.newTag != "":
+			add(name+":"+cur.newTag, cur.line)
+		}
+		cur = nil
+	}
+	for i, raw := range lines {
+		if m := imageLine.FindStringSubmatch(raw); m != nil {
+			add(m[1], i+1)
+			continue
+		}
+		indent := len(raw) - len(strings.TrimLeft(raw, " \t"))
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "images:" {
+			flush()
+			inImages = true
+			continue
+		}
+		if !inImages {
+			continue
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") {
+			flush()
+			cur = &entry{line: i + 1, indent: indent}
+		} else if cur != nil && indent <= cur.indent {
+			// A key at the list's own indent or above closes the list.
+			flush()
+			inImages = false
+			continue
+		} else if cur == nil {
+			// A key right after images: that is not an item: the list is
+			// empty or not a list.
+			inImages = false
+			continue
+		}
+		m := kustomizeField.FindStringSubmatch(raw)
+		if m == nil {
+			continue
+		}
+		switch m[1] {
+		case "name":
+			cur.name = m[2]
+		case "newName":
+			cur.newName = m[2]
+		case "newTag":
+			cur.newTag = m[2]
+		case "digest":
+			cur.digest = m[2]
+		}
+	}
+	flush()
+	return out
+}
+
+// isVersioned says a reference carries a tag or a digest and no placeholder:
+// "acme/shop:1.2" and "acme/shop@sha256:..." yes, "acme/shop",
+// "acme/shop:${VERSION}" and "acme/shop:{{ .Values.tag }}" no. The tag is
+// what follows the last "/", so a registry port ("host:5000/acme/shop") is
+// not read as one.
+func isVersioned(ref string) bool {
+	if strings.Contains(ref, "${") || strings.Contains(ref, "{{") {
+		return false
+	}
+	if strings.Contains(ref, "@") {
+		return true
+	}
+	last := ref[strings.LastIndex(ref, "/")+1:]
+	return strings.Contains(last, ":") && !strings.HasSuffix(last, ":")
 }

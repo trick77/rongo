@@ -31,6 +31,9 @@ type Repo struct {
 	// Library says this is a shared library: a project of one that any
 	// project's uses may name. See repos.Spec.Library.
 	Library bool
+	// Image is the container image it is built into, tag-less, or empty.
+	// See repos.Spec.Image.
+	Image string
 }
 
 // Project is one product.
@@ -66,7 +69,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	// members are all parked disappears entirely rather than becoming an option
 	// with no code behind it.
 	rows, err := db.QueryContext(ctx,
-		`SELECT name, project, part, description, library FROM repo_state WHERE enabled = 1 ORDER BY name`)
+		`SELECT name, project, part, description, library, image FROM repo_state WHERE enabled = 1 ORDER BY name`)
 	if err != nil {
 		return Map{}, err
 	}
@@ -74,9 +77,9 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 
 	members := map[string][]Repo{}
 	for rows.Next() {
-		var name, project, part, description string
+		var name, project, part, description, image string
 		var library int
-		if err := rows.Scan(&name, &project, &part, &description, &library); err != nil {
+		if err := rows.Scan(&name, &project, &part, &description, &library, &image); err != nil {
 			return Map{}, err
 		}
 		// An empty project can only come from a row written before this
@@ -90,7 +93,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 		if library == 1 {
 			m.library[name] = true
 		}
-		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description, Library: library == 1})
+		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description, Library: library == 1, Image: image})
 	}
 	if err := rows.Err(); err != nil {
 		return Map{}, err

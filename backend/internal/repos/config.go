@@ -86,6 +86,13 @@ type Spec struct {
 	// use other libraries. Any other coupling across projects is repo_deps'
 	// business, read from a manifest rather than declared by hand.
 	Uses []string
+	// Image is the container image this repository is built into, as the
+	// infrastructure repository's manifests name it and WITHOUT a tag:
+	// "registry.example.invalid/acme/shop-backend". It is what pairs a
+	// deployed version with the repository whose tag it is. Declared,
+	// never inferred from a name: shop-backend's image may be called
+	// acme/shop-api. Empty for a repository nothing deploys.
+	Image string
 	// Stages are the deployment stages an infrastructure repository holds,
 	// each a directory of the checkout. Declared, never inferred from the
 	// tree: which directories are stages and what a reader calls them is
@@ -143,6 +150,7 @@ type rawSpec struct {
 	Part        string     `yaml:"part"`
 	Description string     `yaml:"description"`
 	Uses        []string   `yaml:"uses"`
+	Image       string     `yaml:"image"`
 	Stages      []rawStage `yaml:"stages"`
 }
 
@@ -274,7 +282,30 @@ func Load(path string) ([]Spec, error) {
 	if err := validateStageWords(specs); err != nil {
 		return nil, err
 	}
+	if err := validateImages(specs); err != nil {
+		return nil, err
+	}
 	return specs, nil
+}
+
+// validateImages refuses one image on two members of one project: the
+// release turn pairs an image found in the infrastructure repository with
+// the ONE repository whose tags it carries, and two claimants would make
+// that a coin toss. Across projects the same name is fine — a registry path
+// is only unique inside the product that deploys it.
+func validateImages(specs []Spec) error {
+	holder := map[string]string{} // project + image -> repository
+	for _, s := range specs {
+		if s.Image == "" {
+			continue
+		}
+		key := s.Project + "\x00" + s.Image
+		if other, ok := holder[key]; ok {
+			return fmt.Errorf("%s: image %q is already declared by %s in project %q", s.Name, s.Image, other, s.Project)
+		}
+		holder[key] = s.Name
+	}
+	return nil
 }
 
 // loadEntry validates one entry — a project member or a library — and
@@ -299,6 +330,10 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
+	image := strings.TrimSpace(r.Image)
+	if strings.ContainsAny(image, ":@") {
+		return Spec{}, fmt.Errorf("%s: image %q carries a version — declare the name alone, the tag is read per stage from the infrastructure repository", r.Name, image)
+	}
 	return Spec{
 		Name:        r.Name,
 		CloneURL:    strings.TrimSpace(r.CloneURL),
@@ -312,6 +347,7 @@ func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
 		Part:        strings.TrimSpace(r.Part),
 		Description: strings.TrimSpace(r.Description),
 		Uses:        trimAll(r.Uses),
+		Image:       image,
 		Stages:      stages,
 	}, nil
 }

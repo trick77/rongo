@@ -369,7 +369,8 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	// When
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "shop-backend", CloneURL: "file:///b", Enabled: true, Project: "shop",
-			Part: "backend", Description: "Storefront API and checkout."},
+			Part: "backend", Description: "Storefront API and checkout.",
+			Image: "registry.example.invalid/acme/shop-backend"},
 		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
 			Part: "ui", Description: "Storefront, React.", Uses: []string{"shop-backend"}},
 	}); err != nil {
@@ -390,6 +391,9 @@ func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	}
 	if got := by["shop-ui"].Uses; len(got) != 1 || got[0] != "shop-backend" {
 		t.Errorf("shop-ui.Uses = %v, want [shop-backend]", got)
+	}
+	if got := by["shop-backend"].Image; got != "registry.example.invalid/acme/shop-backend" {
+		t.Errorf("shop-backend.Image = %q, want the declared image", got)
 	}
 	if got := by["shop-backend"].Uses; len(got) != 0 {
 		t.Errorf("shop-backend.Uses = %v, want empty", got)
