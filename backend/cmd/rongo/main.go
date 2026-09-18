@@ -29,6 +29,7 @@ import (
 	"github.com/trick77/rongo/internal/httpapi"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
@@ -389,6 +390,12 @@ func main() {
 		ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget}),
 		ask.NewRouter(models, db, cfg.RouteMargin, moduleOpts(cfg)),
 	).WithModels(source).WithHistory(commits, time.Now)
+	// The reader's standing instructions. Nil leaves the understanding
+	// prompt as it was before memory existed, which is what the eval
+	// baseline compares against.
+	if cfg.Memory {
+		deps.Memory = memory.NewStore(db)
+	}
 	deps.Titler = func(ctx context.Context, question string, lang ask.Language) string {
 		return ask.Title(ctx, models, question, lang)
 	}

@@ -38,6 +38,9 @@ const stepLabels: Record<string, string> = {
   writing: "Writing the answer",
   // After the answer, not during it: the questions are written from it.
   suggesting: "Suggesting follow-ups",
+  // Before the search: a standing instruction in the question is kept first,
+  // so the answer of this same turn is already written under it.
+  remembering: "Remembering the instruction",
 };
 
 export function stepLabel(step: string): string {
@@ -275,6 +278,60 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         </div>
       );
     }
+    case "remembering": {
+      if (detail.refused === "full") {
+        return (
+          <div className="trace-detail">
+            <span className="trace-k">Refused</span> the memory is full; delete a rule on the Memory page
+          </div>
+        );
+      }
+      if (detail.refused === "failed") {
+        return (
+          <div className="trace-detail">
+            <span className="trace-k">Not kept</span> the rule could not be written; say it again
+          </div>
+        );
+      }
+      const memoryText = typeof detail.memory === "string" ? detail.memory : "";
+      const scope = typeof detail.scope === "string" ? detail.scope : "";
+      const dropped = typeof detail.scope_dropped === "string" ? detail.scope_dropped : "";
+      const replaced = asStrings(detail.replaced);
+      const removed = asStrings(detail.removed);
+      return (
+        <div className="trace-detail">
+          {memoryText && (
+            <>
+              <span className="trace-k">Kept</span> <Chips values={[memoryText]} />
+              {scope && (
+                <>
+                  {" "}
+                  <span className="trace-k">for</span> {scope}
+                </>
+              )}
+              {dropped && (
+                <>
+                  {" "}
+                  <span className="trace-k">everywhere:</span> {dropped} is not indexed
+                </>
+              )}
+            </>
+          )}
+          {replaced.length > 0 && (
+            <>
+              {memoryText ? " · " : ""}
+              <span className="trace-k">replaces</span> <Chips dim values={replaced} />
+            </>
+          )}
+          {removed.length > 0 && (
+            <>
+              {memoryText || replaced.length > 0 ? " · " : ""}
+              <span className="trace-k">forgot</span> <Chips dim values={removed} />
+            </>
+          )}
+        </div>
+      );
+    }
     case "writing": {
       const inTok = asNumber(detail.prompt_tokens);
       const outTok = asNumber(detail.completion_tokens);
@@ -284,6 +341,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const system = asNumber(detail.prompt_system);
       const sourceTok = asNumber(detail.prompt_sources);
       const attempts = asNumber(detail.attempts);
+      const memories = asNumber(detail.memories);
       return (
         <div className="trace-detail">
           {inTok !== null && <>{tokens(inTok)} tokens in</>}
@@ -310,6 +368,14 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
             <span className="trace-k">
               {" · about "}
               {tokens(system)} of rules, {tokens(sourceTok)} of code
+            </span>
+          )}
+          {/* The reader's own rules in the prompt. Only past zero: a reader
+              with none is every reader before memory. */}
+          {memories !== null && memories > 0 && (
+            <span className="trace-k">
+              {" · "}
+              {memories} {memories === 1 ? "standing instruction" : "standing instructions"}
             </span>
           )}
         </div>

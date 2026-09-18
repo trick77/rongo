@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/stages"
@@ -122,6 +123,9 @@ type Answer struct {
 	// deployment writes German, and nothing else does now that the text is
 	// corrected on the way out.
 	Respelled []string
+	// Memories is how many of the reader's standing instructions the prompt
+	// carried, for the trace. Zero for a reader with none.
+	Memories int
 }
 
 // PromptParts is the answer prompt by section, in estimated tokens. System is
@@ -1067,7 +1071,8 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, nil)}, nil
 	}
-	system := systemPrompt(audience, lang, sources, scope, followingUp, "")
+	rules := memory.Applying(memory.From(ctx).Rows(), scope.Known)
+	system := systemPrompt(audience, lang, sources, scope, followingUp, "", memory.Block(rules, scope.Known))
 	user := renderSources(question, sources, scope.Stages)
 	// Measured before the call, from the exact strings that go on the wire.
 	// The user message is the question with the code under it, so the code is
@@ -1081,7 +1086,9 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 		Sources:  max(estimateTokens(user)-asked, 0),
 		Question: asked,
 	}
-	return a.stream(ctx, lang, sources, system, user, parts, onToken)
+	answer, err := a.stream(ctx, lang, sources, system, user, parts, onToken)
+	answer.Memories = len(rules)
+	return answer, err
 }
 
 // Rework writes the previous answer again in the form the instruction asks
@@ -1098,7 +1105,8 @@ func (a *Answerer) Rework(ctx context.Context, instruction string, audience Audi
 	if len(t.Sources) == 0 {
 		return Answer{}, fmt.Errorf("rework: no sources to rework from")
 	}
-	system := systemPrompt(audience, lang, t.Sources, scope, "", fmt.Sprintf(answerRework, instruction))
+	rules := memory.Applying(memory.From(ctx).Rows(), scope.Known)
+	system := systemPrompt(audience, lang, t.Sources, scope, "", fmt.Sprintf(answerRework, instruction), memory.Block(rules, scope.Known))
 	user := renderRework(instruction, t, scope.Stages)
 	// The sources are measured on their own here: the user message also
 	// carries the previous turn, which is neither the question nor the code
@@ -1110,13 +1118,17 @@ func (a *Answerer) Rework(ctx context.Context, instruction string, audience Audi
 		Sources:  estimateTokens(list.String()),
 		Question: estimateTokens(instruction),
 	}
-	return a.stream(ctx, lang, t.Sources, system, user, parts, onToken)
+	answer, err := a.stream(ctx, lang, t.Sources, system, user, parts, onToken)
+	answer.Memories = len(rules)
+	return answer, err
 }
 
 // systemPrompt assembles the answering rules for one turn. followingUp is
 // the previous question of an ordinary follow-up, rework the rendered rework
-// block; at most one of them is set.
-func systemPrompt(audience Audience, lang Language, sources []Source, scope Scope, followingUp, rework string) string {
+// block; at most one of them is set. memories is the reader's standing
+// instructions as memory.Block rendered them, empty for a reader with none,
+// and then the prompt is byte for byte what it was before memory existed.
+func systemPrompt(audience Audience, lang Language, sources []Source, scope Scope, followingUp, rework, memories string) string {
 	name := languageName(lang)
 	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
@@ -1205,6 +1217,10 @@ func systemPrompt(audience Audience, lang Language, sources []Source, scope Scop
 		}
 	}
 	system += answerDiagram
+	// The reader's own rules come after every rule of the product's, because
+	// they outrank them, and before the closing language line, because that
+	// is the one thing they do not.
+	system += memories
 	// Said twice, first and at the end: the sources in between are code and
 	// comments in whatever language the repository uses, and a model that has
 	// just read two thousand tokens of English tends to answer in it. How that

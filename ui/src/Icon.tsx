@@ -18,6 +18,7 @@ import type { CSSProperties } from "react";
 const CODEPOINTS = {
   code: 0xe048,
   sidebar: 0xe0dd,
+  memory: 0xe055,
   edit: 0xe064,
   moreVertical: 0xe062,
   trash: 0xe101,

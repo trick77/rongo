@@ -14,6 +14,7 @@ describe("routeFromPath", () => {
     expect(routeFromPath("/threads")).toEqual({ view: "threads" });
     expect(routeFromPath("/projects")).toEqual({ view: "projects" });
     expect(routeFromPath("/shared")).toEqual({ view: "shared" });
+    expect(routeFromPath("/memory")).toEqual({ view: "memory" });
     expect(routeFromPath("/share/kd8Qw1rZ")).toEqual({ view: "share", token: "kd8Qw1rZ" });
   });
 
@@ -44,6 +45,7 @@ describe("routeFromPath", () => {
       { view: "threads" },
       { view: "projects" },
       { view: "shared" },
+      { view: "memory" },
       { view: "share", token: "kd8Qw1rZ" },
     ] as const) {
       expect(routeFromPath(pathForRoute(route))).toEqual(route);

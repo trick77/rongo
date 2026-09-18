@@ -15,6 +15,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/threads"
@@ -79,6 +80,20 @@ type fakeAsker struct {
 	// during runs inside the turn, with the turn's own context, so a test can
 	// do something to the thread while it is being answered.
 	during func(ctx context.Context)
+
+	// directive, when set, is what the fake "understood" as a standing
+	// instruction and hands the handler through OnMemory before answering;
+	// remembered is what came back, and memoryRows what the handler had put
+	// on the context for the turn (nil when the deployment keeps none).
+	directive  *memory.Directive
+	remembered *memory.Added
+	memoryRows []memory.Row
+	memoryOn   bool
+
+	// silentText, when set, is an answer written by a template: returned as
+	// text with no sources and never streamed, the way the pipeline answers
+	// nothing-found.
+	silentText string
 }
 
 func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang ask.Language, t ask.Thread, ev ask.Events) (ask.Answer, *ask.Clarification, error) {
@@ -103,8 +118,21 @@ func (f *fakeAsker) Run(ctx context.Context, _ string, aud ask.Audience, lang as
 	if f.notice != "" && ev.OnNotice != nil {
 		ev.OnNotice(f.notice)
 	}
+	f.memoryOn = memory.From(ctx) != nil
+	f.memoryRows = memory.From(ctx).Rows()
+	if f.directive != nil && ev.OnMemory != nil {
+		added, err := ev.OnMemory(*f.directive)
+		if err != nil {
+			return ask.Answer{}, nil, err
+		}
+		f.remembered = &added
+		memory.From(ctx).Apply(added)
+	}
 	if f.clarification != nil {
 		return ask.Answer{}, f.clarification, nil
+	}
+	if f.silentText != "" {
+		return ask.Answer{Text: f.silentText, Scope: f.scope}, nil, nil
 	}
 	var text string
 	for _, tok := range f.tokens {
@@ -180,6 +208,7 @@ func (f *fakeAsker) Reexplain(ctx context.Context, _ string, aud ask.Audience, l
 	f.gotAud = aud
 	f.gotScope = gotScope
 	f.gotLang = lang
+	f.memoryRows = memory.From(ctx).Rows()
 	if f.during != nil {
 		f.during(ctx)
 	}

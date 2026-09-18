@@ -60,7 +60,7 @@ func HasBuiltIndex() bool {
 // not, which addresses are real. The app asks the API and says so itself.
 func isRoute(path string) bool {
 	switch path {
-	case "/", "/new", "/threads", "/projects", "/shared":
+	case "/", "/new", "/threads", "/projects", "/shared", "/memory":
 		return true
 	}
 	if rest, ok := strings.CutPrefix(path, "/share/"); ok {

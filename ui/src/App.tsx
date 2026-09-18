@@ -11,10 +11,11 @@ import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 import { railRow } from "./rail";
 import SharedLinks from "./share/SharedLinks";
+import MemoryPage from "./memory/MemoryPage";
 import { PlusIcon } from "./icons";
 import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
 
-type Page = "ask" | "threads" | "projects" | "shared";
+type Page = "ask" | "threads" | "projects" | "shared" | "memory";
 
 type Me = { subject: string; email: string; is_admin: boolean; version: string };
 
@@ -278,7 +279,9 @@ export default function App() {
   // Back must close a thread rather than a drawer.
   const [navOpen, setNavOpen] = useState(false);
   const page: Page =
-    route.view === "threads" || route.view === "projects" || route.view === "shared" ? route.view : "ask";
+    route.view === "threads" || route.view === "projects" || route.view === "shared" || route.view === "memory"
+      ? route.view
+      : "ask";
   const threadId = route.view === "thread" ? route.id : null;
   // Bumped whenever the list may have changed. The titles are written by the
   // server — a placeholder on Create, the model's version later from a
@@ -298,6 +301,9 @@ export default function App() {
   // How many live links there are, as the Shared page counts them. The page
   // is the one that lists them, so it is the one that knows.
   const [sharedCount, setSharedCount] = useState<number | null>(null);
+  // How many standing instructions the reader has, as the Memory page counts
+  // them, on the same terms.
+  const [memoryCount, setMemoryCount] = useState<number | null>(null);
   // The open thread's running total, as Ask reports it: every turn on
   // screen summed. Shown in the header next to the title.
   const [usageTotal, setUsageTotal] = useState<ThreadTotal | null>(null);
@@ -541,6 +547,15 @@ export default function App() {
               <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
               <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
             </>
+          ) : page === "memory" ? (
+            <>
+              <span className="font-serif text-[19px] font-medium text-accent-strong">Memory</span>
+              {memoryCount !== null && (
+                <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
+                  {memoryCount === 1 ? "1 rule" : `${memoryCount} rules`}
+                </span>
+              )}
+            </>
           ) : (
             <>
               <span className="font-serif text-[19px] font-medium text-accent-strong">Shared</span>
@@ -667,6 +682,23 @@ export default function App() {
                 <Icon name="code" size="21px" className="text-ink-dim" />
               </span>
               Projects
+            </button>
+            {/* What rongo keeps in mind for this reader. A place, like Shared:
+                a rule given in chat has to be somewhere you can go and take
+                back. */}
+            <button
+              type="button"
+              aria-current={page === "memory" ? "page" : undefined}
+              onClick={() => {
+                go({ view: "memory" });
+                setNavOpen(false);
+              }}
+              className={railRow + " " + (page === "memory" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Icon name="memory" size="21px" className="text-ink-dim" />
+              </span>
+              Memory
             </button>
           </div>
           {/* No heading over the list: everything below the two actions is
@@ -795,6 +827,21 @@ export default function App() {
                   in it. A repo that drops out of the file is removed here too, index and checkout with it.
                 </p>
                 <RepoList />
+              </div>
+            </div>
+          )}
+          {page === "memory" && (
+            <div className="h-full overflow-auto">
+              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
+                  Memory
+                </h2>
+                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+                  What rongo keeps in mind for every answer you get. Tell it in chat: “never …”, “from now
+                  on …”, “don't mention … anymore”. A rule outranks the answer's own style rules and never
+                  its sources, its language or your role. A rule stays until you delete it here.
+                </p>
+                <MemoryPage onCount={setMemoryCount} onOpenThread={(id) => selectThread(id)} />
               </div>
             </div>
           )}

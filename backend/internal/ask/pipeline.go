@@ -2,6 +2,7 @@ package ask
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/stages"
@@ -85,6 +87,12 @@ type Events struct {
 	// the sources by reason, the answer's usage. Facts the pipeline held
 	// anyway and used to log for nobody; the trace draws them under the step.
 	OnDetail func(step string, detail map[string]any)
+	// OnMemory writes the standing instruction the understanding read out of
+	// the question and reports what that left behind. The pipeline has no
+	// reader and no store; the handler has both. Nil means nothing is
+	// written, and a question that was only an instruction runs as a
+	// question.
+	OnMemory func(d memory.Directive) (memory.Added, error)
 }
 
 func (e Events) detail(step string, d map[string]any) {
@@ -224,6 +232,24 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// re-explain of that row keys on it to rework again.
 	if u.Intent == IntentRework && !isRework(u, t) {
 		u.Intent = ""
+	}
+	// The instruction is written before anything else runs, so the answer
+	// of this same turn is already under it. A turn that was ONLY the
+	// instruction ends here, templated: there is nothing to search for. One
+	// the understanding called a memory but that carried nothing to keep
+	// runs as the ordinary question it must then have been. A write that
+	// failed beside a question is the trace's to report, not the turn's to
+	// die of; alone, it is the whole turn.
+	remembered, memErr := p.remember(ctx, u, ev)
+	if u.Intent == IntentMemory {
+		switch {
+		case memErr != nil && !errors.Is(memErr, memory.ErrFull):
+			return Answer{}, nil, memErr
+		case remembered == nil && memErr == nil:
+			u.Intent = ""
+		default:
+			return answerMemory(lang, remembered, memErr), nil, nil
+		}
 	}
 	// The stage before the repositories: a reader writing "in production"
 	// gets it guessed as a repository name as often as not, and unresolved
@@ -674,6 +700,11 @@ func writingDetail(answer Answer, sources int) map[string]any {
 	// client counts it, so every step could report it the same way.
 	if answer.Usage.Attempts > 1 {
 		d["attempts"] = answer.Usage.Attempts
+	}
+	// How many of the reader's standing instructions the prompt carried.
+	// Only past zero: a reader with none is every reader before memory.
+	if answer.Memories > 0 {
+		d["memories"] = answer.Memories
 	}
 	// How much of the prompt the endpoint had read before and did not
 	// charge full price for again. Absent when the reply carried no

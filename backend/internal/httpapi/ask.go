@@ -588,6 +588,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// reader watched is still there when they come back to the thread.
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
+	// And the reader's standing instructions, read once here: the
+	// understanding step lists them, the answer is written under them, and a
+	// rule given in this very question joins them mid-turn.
+	ctx = s.memoryHolder(ctx, u.Subject)
 
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
@@ -685,14 +689,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Whether any of the answer was streamed: a templated answer is not, and
+	// finishTurn then sends its text whole.
+	var streamed bool
 	events := ask.Events{
 		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
 		OnDetail: func(step string, d map[string]any) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})
 		},
-		OnToken:  func(tok string) { send("token", map[string]any{"text": tok}) },
+		OnToken:  func(tok string) { streamed = true; send("token", map[string]any{"text": tok}) },
 		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
+		OnMemory: s.onMemory(record, u.Subject, msg.ID, send),
 	}
 
 	// closeRecord stores what the turn paid for and how it was watched, and
@@ -774,7 +782,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
 			recordFailed(ctx, "link choice failed", err)
 		}
-		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, send, closeRecord)
+		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, streamed, send, closeRecord)
 		return
 	}
 
@@ -832,7 +840,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
 		recordFailed(ctx, "record sources failed", err)
 	}
-	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, send, closeRecord)
+	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, streamed, send, closeRecord)
 }
 
 const (
@@ -883,15 +891,28 @@ func (s *Server) finishTurn(
 	audience ask.Audience,
 	scope ask.Scope,
 	lang ask.Language,
+	streamed bool,
 	send func(string, any),
 	closeRecord func(),
 ) {
+	// A turn with no sources was answered by a template, never a stream:
+	// nothing found, no commits in the window, an instruction kept. The
+	// text is on the record, and this is the one place it reaches the
+	// browser live; without it the reader saw the trace close over an empty
+	// answer until a reload. Only when nothing streamed: a text sent twice
+	// is an answer read twice.
+	sourceless := len(answer.Sources) == 0
+	if !streamed && answer.Text != "" {
+		send("token", map[string]any{"text": answer.Text})
+	}
 	send("citations", answer.Citations)
 	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
 	closeRecord()
 	// Language again, for the re-explain path: it opens no thread event, and
 	// its turn is filed in the thread's language whatever it asked for.
-	send("done", map[string]any{"message_id": messageID, "language": string(lang)})
+	// Sourceless too: the page hides "Explain as Developer" on a turn that
+	// has nothing to re-explain from, live as on a reload.
+	send("done", map[string]any{"message_id": messageID, "language": string(lang), "sourceless": sourceless})
 }
 
 // suggestFollowups offers two or three questions to ask next, under the answer
@@ -1079,6 +1100,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	ctx = usage.WithMeter(ctx, meter)
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
+	// The reader's standing instructions apply to a re-explain as they do
+	// to any answer: same reader, same rules.
+	ctx = s.memoryHolder(ctx, u.Subject)
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)
@@ -1167,13 +1191,14 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record scope failed", err)
 	}
 
+	var streamed bool
 	events := ask.Events{
 		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
 		OnDetail: func(step string, d map[string]any) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})
 		},
-		OnToken: func(tok string) { send("token", map[string]any{"text": tok}) },
+		OnToken: func(tok string) { streamed = true; send("token", map[string]any{"text": tok}) },
 	}
 	var answer ask.Answer
 	if msg.Scope.Intent == ask.IntentRework {
@@ -1219,7 +1244,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
 		recordFailed(ctx, "record sources failed", err)
 	}
-	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, send, closeRecord)
+	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, streamed, send, closeRecord)
 }
 
 // reworkAgain re-answers a rework row for the other audience: the same

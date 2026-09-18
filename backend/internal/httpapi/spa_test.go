@@ -46,7 +46,7 @@ func TestSPA_fallsBackForClientRoutes(t *testing.T) {
 	// addresses are real.
 	srv := NewServer(Deps{})
 
-	for _, path := range []string{"/new", "/threads", "/projects", "/shared", "/thread/v76BBy2b1nMYOFl2Lnm9JQ", "/share/kd8Qw1rZ"} {
+	for _, path := range []string{"/new", "/threads", "/projects", "/shared", "/memory", "/thread/v76BBy2b1nMYOFl2Lnm9JQ", "/share/kd8Qw1rZ"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
