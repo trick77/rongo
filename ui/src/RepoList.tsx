@@ -29,6 +29,10 @@ export type Repo = {
   part: string;
   /** One sentence saying what it does. */
   description: string;
+  /** The container image it is built into, tag-less, as repos.yaml declares
+   * it: what a release turn pairs a deployed version with. Optional because a
+   * row from an older build has no such field. */
+  image?: string;
   /** The siblings it depends on, inside the same project, and any library. */
   uses: string[];
   /** A shared library from the `libraries:` block: a project of one no product
@@ -570,6 +574,10 @@ function ProjectPanel({
                           {r.part}
                         </span>
                       )}
+                      {/* The declared image, beside the part: the two are
+                          the entry's own words about what it is, and a
+                          release turn reads this one. */}
+                      {r.image && <span className="text-faint">{r.image}</span>}
                       {/* A snapshot has no branch anyone chose: rongo made
                           one up to have something to commit to. Where the
                           branch would stand, the line says how the code got

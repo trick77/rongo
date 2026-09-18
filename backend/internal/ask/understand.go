@@ -64,6 +64,11 @@ type Understanding struct {
 	// every change in the window. Filtered against commit subjects, bodies
 	// and paths; "what changed" alone has no topic and lists the window.
 	Topic string `json:"topic"`
+	// Between is the two deployment stages a release question compares, as
+	// declared names; empty on every other intent. A set, not a pair: which
+	// stage is ahead is read from the tags' ancestry, never from the order
+	// the model wrote them in. The reader's own stage words win over it.
+	Between Names `json:"between"`
 	// Terms are the question restated in business language, which is what the
 	// vector lane matches against doc comments and module names.
 	Terms []string `json:"terms"`
@@ -153,6 +158,33 @@ func (u Understanding) Directive() memory.Directive {
 // reply is dropped on decode.
 const CensusLink = "link"
 
+// Names is a list of names a gate model may also write as one string
+// ("prod, intg") or null: the release turn's one list field, and the one
+// place a small model's formatting would otherwise fail the whole turn as
+// "reply was not JSON". Anything unreadable is empty.
+type Names []string
+
+// UnmarshalJSON reads a list of strings, one comma-separated string, or null.
+func (n *Names) UnmarshalJSON(b []byte) error {
+	var list []string
+	if err := json.Unmarshal(b, &list); err == nil {
+		*n = list
+		return nil
+	}
+	var one string
+	if err := json.Unmarshal(b, &one); err != nil {
+		*n = nil
+		return nil
+	}
+	*n = nil
+	for _, part := range strings.Split(one, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			*n = append(*n, p)
+		}
+	}
+	return nil
+}
+
 // Days is an integer a gate model may also write as a quoted string ("7") or
 // a float (7.0): the only numeric field of the understanding, and the one
 // place a small model's formatting would otherwise fail the whole turn as
@@ -222,13 +254,16 @@ func NewUnderstander(c *llm.Client) *Understander {
 const understandSystem = `You analyse a question about a codebase and answer with JSON ONLY.
 
 Fields:
-  intent      "how", "why", "where", "conformance", "changes"%s
+  intent      "how", "why", "where", "conformance", "changes", "release"%s
   since_days  for "changes" only: how many days back the question asks.
               "yesterday" is 1, "the last 2 days" is 2, "this week" is 7,
               "this month" is 30; nothing said is 0. Every other intent is 0.
   topic       for "changes" only: what the changes are about, as 1-4 words
               from the question ("snapshot handling", "login"), or "" when
               the question asks for every change. Every other intent is "".
+  between     for "release" only: the two deployment stages the question
+              compares, each written exactly as one of the names listed
+              below, else []. Every other intent is [].
   terms       2-4 rewordings of the question in domain language, as whole phrases
   code_terms  3-8 identifiers likely to occur in the source: class, method,
               package and protocol names, written the way a developer would
@@ -252,6 +287,14 @@ what the code does: "what changed", "what is new", "latest updates", "recent
 commits", "was hat sich geändert", "was ist neu", "letzte Änderungen",
 "quoi de neuf", "cosa è cambiato". A question about how a feature works is
 never "changes", however recent the feature.
+
+"release" is a question about what is deployed on one stage and not yet on
+another, or for release notes between two stages or versions: "what is
+between production and testing", "release notes for the next deployment",
+"what goes live with the next release", "was ist zwischen prod und test",
+"Release Notes", "notes de version", "note di rilascio". It names two
+stages. A question about what changed in the code lately, with no two stages
+in it, is "changes", never "release".
 
 "rework" is a request to restate the PREVIOUS ANSWER in another form, asking
 nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",

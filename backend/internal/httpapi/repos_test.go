@@ -58,7 +58,7 @@ func TestRepos_reportsWhatThePageShows(t *testing.T) {
 	indexed := time.Date(2026, 8, 15, 6, 0, 0, 0, time.UTC)
 	deps := Deps{Auth: devAuth(t), Repos: fakeRepos{out: []RepoStatus{{
 		Name: "peeq", Branch: "master", LastSHA: "abc1234", LastRunAt: when, LastIndexedAt: indexed,
-		Files: 412, Chunks: 3120, Modules: 34, Enabled: true,
+		Files: 412, Chunks: 3120, Modules: 34, Enabled: true, Image: "registry.example.invalid/acme/peeq",
 	}}}}
 
 	// When
@@ -85,6 +85,7 @@ func TestRepos_reportsWhatThePageShows(t *testing.T) {
 		"chunks":          float64(3120),
 		"modules":         float64(34),
 		"enabled":         true,
+		"image":           "registry.example.invalid/acme/peeq",
 	} {
 		if got[0][key] != want {
 			t.Errorf("%s = %v, want %v", key, got[0][key], want)

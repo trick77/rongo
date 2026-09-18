@@ -1,0 +1,12 @@
+-- integration_tokens gains a fifth kind, 'image': the deployed versions an
+-- infrastructure repository's yaml names (kustomize images: entries and
+-- image: lines), read per repository and per stage by a release turn and
+-- never crossed as an edge (edges.KindImage). No schema change: kind is TEXT.
+--
+-- A new extraction rule needs what 0015 and 0027 needed: a forced re-index.
+-- An incremental poll re-runs extraction only on the paths a commit changed,
+-- so a settled overlay would carry no image token for as long as it sits
+-- untouched, and a release turn over it would find no version while looking
+-- healthy. Emptying last_sha makes the next poll index every repository
+-- whole; unchanged chunks are re-read and re-chunked but never re-embedded.
+UPDATE repo_state SET last_sha = '';

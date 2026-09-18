@@ -153,6 +153,42 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
     }
     case "searching": {
       const perRepo = (detail.per_repo ?? {}) as Record<string, number>;
+      // A release turn read the infrastructure repository's overlays and the
+      // commits between two deployed versions: the pair, the images, the
+      // commits per component, and the verdicts that yielded no range.
+      const between = asStrings(detail.between);
+      if (between.length === 2) {
+        const commits = asNumber(detail.commits) ?? 0;
+        const images = asNumber(detail.images) ?? 0;
+        const notes = (detail.notes ?? {}) as Record<string, number>;
+        const infra = typeof detail.infrastructure === "string" ? detail.infrastructure : "";
+        return (
+          <div className="trace-detail">
+            {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">between</span> {between[0]}{" "}
+            <span className="trace-k">and</span> {between[1]}
+            {" · "}
+            {images} {images === 1 ? "image" : "images"}
+            {infra && (
+              <>
+                {" "}
+                <span className="trace-k">in</span> <Chips values={[infra]} />
+              </>
+            )}
+            {Object.keys(perRepo).length > 0 && (
+              <>
+                {" · "}
+                <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
+              </>
+            )}
+            {Object.keys(notes).length > 0 && (
+              <>
+                {" · "}
+                <Chips dim values={Object.entries(notes).map(([k, n]) => `${k} ${n}`)} />
+              </>
+            )}
+          </div>
+        );
+      }
       // A changes turn searched the commit lane, not the index: a window
       // and a count, with the topic when the question had one.
       if (detail.since_days != null) {

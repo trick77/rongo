@@ -217,6 +217,52 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	return out, rows.Err()
 }
 
+// BySHAs reads one repository's rows for the shas given, in the order
+// given, leaving out any the lane never recorded. It is how a release turn
+// turns a range read from the checkout into citable rows: the range's order
+// is the answer's, and a sha with no row is the range reaching past the
+// recorded history, which the caller refuses rather than fills in.
+func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commit, error) {
+	if len(shas) == 0 {
+		return []Commit{}, nil
+	}
+	args := []any{repo}
+	for _, sha := range shas {
+		args = append(args, sha)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
+		FROM commits c JOIN repo_state r ON r.name = c.repo
+		WHERE c.repo = ? AND c.sha IN (`+placeholders(len(shas))+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("commits by sha: %w", err)
+	}
+	defer rows.Close()
+	by := map[string]Commit{}
+	for rows.Next() {
+		var c Commit
+		var at, paths string
+		if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
+			return nil, err
+		}
+		c.CommittedAt, _ = time.Parse(time.RFC3339, at)
+		if paths != "" {
+			c.Paths = strings.Split(paths, "\n")
+		}
+		by[c.SHA] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Commit, 0, len(by))
+	for _, sha := range shas {
+		if c, ok := by[sha]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // topicMatch is the widest rung of retrieve's keyword ladder over the
 // topic: content words, prefixed, ORed. A commit message is short, so any
 // one of the reader's words in it is a hit worth ranking.

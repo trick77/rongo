@@ -26,6 +26,11 @@ import (
 // from months-old code.
 var ErrBranchGone = errors.New("configured branch not found")
 
+// ErrTagUnknown reports that a version names no tag and no commit of the
+// checkout. Named so a release turn can say "tag X not in <repo>" rather
+// than fail on it: one component's unknown version is a line, not an error.
+var ErrTagUnknown = errors.New("tag not found")
+
 // Client runs git commands against checkouts under root.
 type Client struct {
 	git  string
@@ -319,11 +324,89 @@ func (c *Client) DefaultBranch(ctx context.Context, spec repos.Spec, token strin
 	return "", fmt.Errorf("%s: remote reported no default branch", spec.Name)
 }
 
-// Fetch updates the remote-tracking refs.
+// Fetch updates the remote-tracking refs and the tags. Tags are fetched by
+// an explicit refspec rather than left to auto-following, which only brings
+// a tag pointing into the fetched branches: a release tag on a hotfix branch
+// would never arrive, and --prune over the explicit refspec retires a tag
+// moved or deleted upstream, so a version resolves to what the remote says
+// today and never to a tag the remote no longer has.
 func (c *Client) Fetch(ctx context.Context, spec repos.Spec, token string) error {
 	_, err := c.runRemote(ctx, c.Dir(spec), spec, token, "fetch", "--quiet", "--prune",
-		remoteURL(spec, token), "+refs/heads/*:refs/remotes/origin/*")
+		remoteURL(spec, token), "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*")
 	return err
+}
+
+// ResolveTag turns a version as an image tag writes it into a commit sha.
+// Tried as written, then with the v the repository may prefix ("1.1.0" for
+// "v1.1.0"), through ^{commit} so an annotated tag yields the commit and
+// never the tag object. A sha-shaped version is looked up as a commit. The
+// miss is ErrTagUnknown.
+func (c *Client) ResolveTag(ctx context.Context, spec repos.Spec, tag string) (string, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", ErrTagUnknown
+	}
+	dir := c.Dir(spec)
+	candidates := []string{"refs/tags/" + tag, "refs/tags/v" + tag}
+	if isShaShaped(tag) {
+		candidates = append(candidates, tag)
+	}
+	for _, ref := range candidates {
+		// --verify --quiet exits 1 with nothing when the ref is simply
+		// absent, which is the miss. Anything else — no checkout, a broken
+		// one — is a different problem and is reported as one, for
+		// HeadSHA's reason: a missing volume must not read as "no such tag"
+		// on every component.
+		out, err := c.run(ctx, dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+		if err == nil && strings.TrimSpace(out) != "" {
+			return strings.TrimSpace(out), nil
+		}
+		if err != nil && exitCode(err) != 1 {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("%s: %q: %w", spec.Name, tag, ErrTagUnknown)
+}
+
+// exitCode is git's exit status behind a wrapped error, or -1 when the
+// error is not an exit at all. Read off the ExitError, never the text:
+// "exit status 128" contains "exit status 1".
+func exitCode(err error) int {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
+}
+
+// isShaShaped is seven to forty hex digits: an image tagged with the commit
+// it was built from.
+func isShaShaped(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// IsAncestor reports whether ancestor is reachable from descendant. It is
+// what tells a release range's direction (forward, rollback, diverged) and
+// whether a tag lies on the indexed history at all.
+func (c *Client) IsAncestor(ctx context.Context, spec repos.Spec, ancestor, descendant string) (bool, error) {
+	_, err := c.run(ctx, c.Dir(spec), "merge-base", "--is-ancestor", ancestor, descendant)
+	if err == nil {
+		return true, nil
+	}
+	// Exit status 1 is "no"; anything else (128: a missing object, no
+	// checkout) is an error the caller must not read as "diverged".
+	if exitCode(err) == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // HeadSHA returns the commit the branch points at on the remote-tracking side.

@@ -30,6 +30,9 @@ const changesLimit = 40
 // the reason Searcher is: a test drives the branch without a database.
 type Histories interface {
 	Search(ctx context.Context, q history.Query) ([]history.Commit, error)
+	// BySHAs is the rows for a range read from the checkout, in the
+	// range's order, without the ones the lane never recorded.
+	BySHAs(ctx context.Context, repo string, shas []string) ([]history.Commit, error)
 }
 
 // WithHistory wires the commit lane and the clock a changes turn measures

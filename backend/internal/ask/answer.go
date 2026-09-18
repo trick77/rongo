@@ -729,6 +729,13 @@ type Scope struct {
 	// Topic is what the changes turn was narrowed to, or empty for the
 	// whole window. Recorded beside SinceDays so the prompt can say it.
 	Topic string `json:"topic,omitempty"`
+	// Between is the two stages a release turn compared, and Release one
+	// line per image the infrastructure repository deploys under them, as
+	// the turn resolved it. Part of the record for the reason SinceDays
+	// is: a re-explained turn describes the same ranges, and the share page
+	// shows what was compared.
+	Between []string      `json:"between,omitempty"`
+	Release []ReleaseLine `json:"release,omitempty"`
 	// DocsOnly is true when every source the answer was written from is
 	// documentation. Not something the question said, but it belongs here for
 	// the same reason Unknown does: it is what the turn has to tell the reader
@@ -1169,6 +1176,7 @@ func systemPrompt(audience Audience, lang Language, sources []Source, scope Scop
 	// A missing or unknown intent adds nothing.
 	system += answerIntent[scope.Intent]
 	system += changesBlock(scope, audience)
+	system += releaseBlock(scope, audience)
 	// After the audience block, so "cover every one of them" is read against
 	// the shape the audience block just set rather than before it.
 	//
