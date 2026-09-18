@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { MermaidSvg, useDrawn, type FlowSpec } from "./diagram";
+import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
 
 /** One row of GET /api/repos. */
@@ -29,8 +29,12 @@ export type Repo = {
   part: string;
   /** One sentence saying what it does. */
   description: string;
-  /** The siblings it depends on, inside the same project. */
+  /** The siblings it depends on, inside the same project, and any library. */
   uses: string[];
+  /** A shared library from the `libraries:` block: a project of one no product
+   * owns, which any project's `uses` may name. Optional because a row from an
+   * older build has no such field. */
+  library?: boolean;
   /** The commit lane: how many commits are recorded for the branch and when
    * the newest was made. Optional because a row from an older build has
    * neither; a snapshot has none by design. */
@@ -67,6 +71,23 @@ export function byProject(repos: Repo[]): Project[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** libraryNames is the set of shared libraries on the page, which is what a
+ * project's wiring needs to draw an edge leaving it: the target is not a
+ * member, and it is the one non-member an edge may legitimately point at. */
+export function libraryNames(repos: Repo[]): Set<string> {
+  return new Set(repos.filter((r) => r.library).map((r) => r.name));
+}
+
+/** usedBy lists the repositories naming a library in their `uses`, sorted, for
+ * the line under the library's own heading. It is the one fact the library
+ * panel has that its table does not: which products are built on it. */
+export function usedBy(library: string, repos: Repo[]): string[] {
+  return repos
+    .filter((r) => (r.uses ?? []).includes(library))
+    .map((r) => r.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** wiringSpec turns a project's declared `uses` edges into the flow spec
  * an answer's diagram used to be written in, which toMermaid then writes as
  * the source the renderer draws. The spec is kept as the middle step because
@@ -79,13 +100,21 @@ export function byProject(repos: Repo[]): Project[] {
  * An entry point — a repository nothing in the project uses — comes out as a
  * pill, which is what `start` draws as.
  *
+ * An edge to a library leaves the project, and is drawn as leaving it: the
+ * library is a node of its own at the edge of the picture, an `end` so it
+ * reads as a terminal rather than a member, labelled as a library. Any other
+ * target outside the project is ignored — repos.Load refuses one, so it can
+ * only be a hand-written row, and an arrow into nowhere is worse than none.
+ *
  * Returns null when there is no edge to draw. A project of one has no wiring,
  * and neither has a set of repositories nobody declared a connection between:
  * a picture of unconnected boxes says less than the table under it. */
-export function wiringSpec(p: Project): FlowSpec | null {
+export function wiringSpec(p: Project, libraries: Set<string> = new Set()): FlowSpec | null {
   const member = new Set(p.repos.map((r) => r.name));
   const edges = p.repos.flatMap((r) =>
-    (r.uses ?? []).filter((u) => member.has(u)).map((u) => ({ from: r.name, to: u })),
+    (r.uses ?? [])
+      .filter((u) => member.has(u) || libraries.has(u))
+      .map((u) => ({ from: r.name, to: u })),
   );
   if (edges.length === 0) return null;
   const reached = new Set(edges.map((e) => e.to));
@@ -94,18 +123,22 @@ export function wiringSpec(p: Project): FlowSpec | null {
   // in the line beneath it — the same fact twice, once as a picture that says
   // nothing. It belongs in the list alone.
   const touched = new Set(edges.flatMap((e) => [e.from, e.to]));
+  const external = [...new Set(edges.map((e) => e.to))].filter((u) => !member.has(u)).sort();
   return {
     type: "flow",
-    nodes: p.repos
-      .filter((r) => touched.has(r.name))
-      .map((r) => ({
-        id: r.name,
-        label: r.part ? `${r.name} · ${r.part}` : r.name,
-        // A diagram node's own kind, unrelated to the repository's part: it
-        // says whether layoutFlow draws a pill or a box.
-        kind: reached.has(r.name) ? "step" : "start",
-        src: [],
-      })),
+    nodes: [
+      ...p.repos
+        .filter((r) => touched.has(r.name))
+        .map((r) => ({
+          id: r.name,
+          label: r.part ? `${r.name} · ${r.part}` : r.name,
+          // A diagram node's own kind, unrelated to the repository's part: it
+          // says whether layoutFlow draws a pill or a box.
+          kind: (reached.has(r.name) ? "step" : "start") as FlowNode["kind"],
+          src: [],
+        })),
+      ...external.map((u) => ({ id: u, label: `${u} · library`, kind: "end" as const, src: [] })),
+    ],
     edges,
   };
 }
@@ -171,12 +204,12 @@ export function parkedSummary(repos: Repo[]): Parked | null {
  * They are listed under the picture rather than drawn into it: nothing in the
  * project reaches them, and that is a fact worth stating — it is what keeps an
  * answer about the storefront from attributing a call to the admin API. */
-export function unconnected(p: Project): Repo[] {
+export function unconnected(p: Project, libraries: Set<string> = new Set()): Repo[] {
   const member = new Set(p.repos.map((r) => r.name));
   const touched = new Set<string>();
   for (const r of p.repos) {
     for (const u of r.uses ?? []) {
-      if (member.has(u)) {
+      if (member.has(u) || libraries.has(u)) {
         touched.add(r.name);
         touched.add(u);
       }
@@ -333,7 +366,13 @@ export default function RepoList() {
   // the one job that block has. The line below carries what the totals dropped.
   const shown = state.repos.filter((r) => r.enabled);
   const parked = parkedSummary(state.repos);
-  const projects = byProject(shown);
+  // A library is a project of one the grouping already yields; it is set
+  // apart here so the Projects count says products and the libraries follow
+  // them, each saying which products are built on it.
+  const libraries = libraryNames(shown);
+  const grouped = byProject(shown);
+  const projects = grouped.filter((p) => !libraries.has(p.name));
+  const shared = grouped.filter((p) => libraries.has(p.name));
   const sum = (pick: (r: Repo) => number) => shown.reduce((n, r) => n + pick(r), 0);
   const lastRun = lastRunAt(shown);
 
@@ -345,6 +384,13 @@ export default function RepoList() {
           repository count is how that product is built. */}
       <div className="mb-5 grid grid-cols-2 overflow-hidden rounded-ui border border-border bg-panel sm:flex">
         <Stat label="Projects" value={projects.length} />
+        {shared.length > 0 && (
+          <Stat
+            label="Libraries"
+            value={shared.length}
+            title="Shared libraries: declared once, used by repositories in any project."
+          />
+        )}
         {/* No "n active" note any more: with parked rows out of the count there
             is no second number left to give, and the line below says what is
             missing in words the note never had room for. */}
@@ -374,7 +420,10 @@ export default function RepoList() {
         </p>
       )}
       {projects.map((p) => (
-        <ProjectPanel key={p.name} project={p} />
+        <ProjectPanel key={p.name} project={p} libraries={libraries} />
+      ))}
+      {shared.map((p) => (
+        <ProjectPanel key={p.name} project={p} libraries={libraries} usedBy={usedBy(p.name, shown)} />
       ))}
     </>
   );
@@ -396,9 +445,18 @@ function Wiring({ spec }: { spec: FlowSpec }) {
  * A project of one gets a header and a single row and no wiring, because there
  * is none. That is rongo's own shape and almost every setup's, so it is the
  * case that has to stay quiet. */
-function ProjectPanel({ project }: { project: Project }) {
-  const spec = wiringSpec(project);
-  const loose = unconnected(project);
+function ProjectPanel({
+  project,
+  libraries,
+  usedBy,
+}: {
+  project: Project;
+  libraries: Set<string>;
+  /** Set for a library's own panel: the repositories naming it. */
+  usedBy?: string[];
+}) {
+  const spec = wiringSpec(project, libraries);
+  const loose = unconnected(project, libraries);
   const sum = (pick: (r: Repo) => number) => project.repos.reduce((n, r) => n + pick(r), 0);
 
   return (
@@ -409,6 +467,17 @@ function ProjectPanel({ project }: { project: Project }) {
           {project.repos.length} {project.repos.length === 1 ? "repository" : "repositories"} ·{" "}
           {sum((r) => r.files)} files · {sum((r) => r.chunks)} chunks
         </span>
+        {usedBy && (
+          <span className="text-[12.5px] text-faint">
+            library
+            {usedBy.length > 0 && (
+              <>
+                {" "}
+                · used by <span className="font-mono text-muted">{usedBy.join(", ")}</span>
+              </>
+            )}
+          </span>
+        )}
       </header>
 
       {spec && (
@@ -417,7 +486,8 @@ function ProjectPanel({ project }: { project: Project }) {
           <p className="mt-1.5 text-[12px] text-faint">
             Arrows are <code className="font-mono">uses:</code> entries from{" "}
             <code className="font-mono">repos.yaml</code>. A repository with no arrow is reached from
-            outside the project — a browser, a queue, another product.
+            outside the project — a browser, a queue, another product. A node marked library is a
+            shared repository outside it.
           </p>
           {loose.length > 0 && (
             <p className="mt-1 text-[12px] text-faint">

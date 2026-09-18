@@ -58,6 +58,14 @@ type Spec struct {
 	// unit a reader is asked to choose between, so a repository that stands
 	// alone is a project of one, conventionally named after itself.
 	Project string
+	// Library marks an entry from the top-level `libraries:` block: a
+	// repository several products are built on, declared once and owned by
+	// none of them. It stands as a project of one named after itself, so
+	// Project equals Name, and it is the one legal target of a `uses` edge
+	// from another project. It is not searched as part of any product that
+	// uses it: a project turn reaches it the way it reaches any other
+	// repository, through a symbol hop or a manifest edge.
+	Library bool
 	// Part is a free-form token for the part this repository plays — backend,
 	// ui, consumer, contract. Deliberately not an enum: a closed vocabulary
 	// rejects a real corpus the first time it needs a word not on the list, and
@@ -72,10 +80,11 @@ type Spec struct {
 	// does. It is what separates a Kafka receiver from a second HTTP backend,
 	// which Part alone cannot. Never embedded, never indexed, never cited.
 	Description string
-	// Uses names sibling repositories INSIDE the same project that this one
-	// depends on — declared by the consumer, the same direction as go.mod's
-	// require. Coupling across projects is repo_deps' business, read from a
-	// manifest rather than declared by hand.
+	// Uses names the repositories this one depends on — declared by the
+	// consumer, the same direction as go.mod's require. A target is either a
+	// sibling INSIDE the same project or a library; a library itself may only
+	// use other libraries. Any other coupling across projects is repo_deps'
+	// business, read from a manifest rather than declared by hand.
 	Uses []string
 	// Stages are the deployment stages an infrastructure repository holds,
 	// each a directory of the checkout. Declared, never inferred from the
@@ -101,7 +110,10 @@ type Stage struct {
 }
 
 type file struct {
-	Projects []rawProject `yaml:"projects"`
+	// Libraries are the repositories no single product owns: declared once
+	// here, named by `uses` from any project. See Spec.Library.
+	Libraries []rawSpec    `yaml:"libraries"`
+	Projects  []rawProject `yaml:"projects"`
 }
 
 // rawProject is one product and the repositories it is built from. The project
@@ -183,9 +195,29 @@ func Load(path string) ([]Spec, error) {
 			"%s names no project: expected a `projects:` list, each with a `repositories:` list of at least one entry", path)
 	}
 
-	seen := map[string]bool{} // repository names, across every project
-	seenProject := map[string]bool{}
+	seen := map[string]bool{}        // repository names, across every project and library
+	seenProject := map[string]bool{} // project names, and library names: a library is a project of one
 	var specs []Spec
+
+	// Libraries first: their names occupy both namespaces, so a project block
+	// named after one is refused by the ordinary duplicate-project rule below.
+	for i, r := range f.Libraries {
+		if err := validateName(r.Name); err != nil {
+			return nil, fmt.Errorf("library %d: %w", i, err)
+		}
+		if seen[r.Name] {
+			return nil, fmt.Errorf("duplicate repository name %q", r.Name)
+		}
+		seen[r.Name] = true
+		seenProject[r.Name] = true
+		spec, err := loadEntry(r, r.Name, true)
+		if err != nil {
+			return nil, err
+		}
+		spec.Library = true
+		specs = append(specs, spec)
+	}
+
 	for i, p := range f.Projects {
 		name := strings.TrimSpace(p.Name)
 		if name == "" {
@@ -225,40 +257,11 @@ func Load(path string) ([]Spec, error) {
 				return nil, fmt.Errorf("duplicate repository name %q", r.Name)
 			}
 			seen[r.Name] = true
-
-			if r.Snapshot {
-				if err := validateSnapshot(r); err != nil {
-					return nil, err
-				}
-			} else if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
-				return nil, err
-			} else if err := validateToken(r); err != nil {
-				return nil, err
-			}
-
-			enabled := projectEnabled
-			if r.Enabled != nil && !*r.Enabled {
-				enabled = false
-			}
-			stages, err := loadStages(r.Name, r.Stages)
+			spec, err := loadEntry(r, name, projectEnabled)
 			if err != nil {
 				return nil, err
 			}
-			specs = append(specs, Spec{
-				Name:        r.Name,
-				CloneURL:    strings.TrimSpace(r.CloneURL),
-				Snapshot:    r.Snapshot,
-				Branch:      strings.TrimSpace(r.Branch),
-				TokenEnv:    strings.TrimSpace(r.TokenEnv),
-				TokenUser:   strings.TrimSpace(r.TokenUser),
-				TokenAuth:   strings.TrimSpace(r.TokenAuth),
-				Enabled:     enabled,
-				Project:     name,
-				Part:        strings.TrimSpace(r.Part),
-				Description: strings.TrimSpace(r.Description),
-				Uses:        trimAll(r.Uses),
-				Stages:      stages,
-			})
+			specs = append(specs, spec)
 		}
 	}
 
@@ -272,6 +275,45 @@ func Load(path string) ([]Spec, error) {
 		return nil, err
 	}
 	return specs, nil
+}
+
+// loadEntry validates one entry — a project member or a library — and
+// flattens it. The name has already been checked by the caller, which owns the
+// duplicate rules; project is the block the entry sits in, or the entry's own
+// name for a library. enabled is the enclosing project's flag, ANDed with the
+// entry's own.
+func loadEntry(r rawSpec, project string, enabled bool) (Spec, error) {
+	if r.Snapshot {
+		if err := validateSnapshot(r); err != nil {
+			return Spec{}, err
+		}
+	} else if err := validateCloneURL(r.Name, r.CloneURL); err != nil {
+		return Spec{}, err
+	} else if err := validateToken(r); err != nil {
+		return Spec{}, err
+	}
+	if r.Enabled != nil && !*r.Enabled {
+		enabled = false
+	}
+	stages, err := loadStages(r.Name, r.Stages)
+	if err != nil {
+		return Spec{}, err
+	}
+	return Spec{
+		Name:        r.Name,
+		CloneURL:    strings.TrimSpace(r.CloneURL),
+		Snapshot:    r.Snapshot,
+		Branch:      strings.TrimSpace(r.Branch),
+		TokenEnv:    strings.TrimSpace(r.TokenEnv),
+		TokenUser:   strings.TrimSpace(r.TokenUser),
+		TokenAuth:   strings.TrimSpace(r.TokenAuth),
+		Enabled:     enabled,
+		Project:     project,
+		Part:        strings.TrimSpace(r.Part),
+		Description: strings.TrimSpace(r.Description),
+		Uses:        trimAll(r.Uses),
+		Stages:      stages,
+	}, nil
 }
 
 // stageStopWords are words a stage may not be called or aliased, because a
@@ -372,7 +414,7 @@ func trimAll(in []string) []string {
 	return out
 }
 
-// validateProjects enforces the three rules that need the whole list.
+// validateProjects enforces the rules that need the whole list.
 func validateProjects(specs []Spec) error {
 	project := make(map[string]string, len(specs)) // repository -> its project
 	size := make(map[string]int, len(specs))       // project -> how many repositories
@@ -409,10 +451,18 @@ func validateProjects(specs []Spec) error {
 		}
 	}
 
-	// A uses edge stays inside one product: the target must exist, sit in the
-	// same project, and not be the entry itself. A cycle between siblings is
-	// allowed — two backends calling each other is real, and layoutFlow removes
-	// back edges by DFS before it ranks.
+	// A uses edge stays inside one product or points at a library: the target
+	// must exist, not be the entry itself, and either sit in the same project
+	// or be a library. A library may only use other libraries — an edge from
+	// a shared thing into one product would make it that product's. A cycle
+	// between siblings is allowed — two backends calling each other is real,
+	// and layoutFlow removes back edges by DFS before it ranks.
+	library := make(map[string]bool, len(specs))
+	for _, s := range specs {
+		if s.Library {
+			library[s.Name] = true
+		}
+	}
 	for _, s := range specs {
 		for _, u := range s.Uses {
 			switch {
@@ -420,7 +470,11 @@ func validateProjects(specs []Spec) error {
 				return fmt.Errorf("%s: uses names itself", s.Name)
 			case project[u] == "":
 				return fmt.Errorf("%s: uses names %q, which is not a repository in this file", s.Name, u)
-			case project[u] != s.Project:
+			case s.Library && !library[u]:
+				return fmt.Errorf(
+					"%s: uses names %q, which is in project %q — a library is shared by every product and may only use other libraries",
+					s.Name, u, project[u])
+			case project[u] != s.Project && !library[u]:
 				return fmt.Errorf(
 					"%s: uses names %q, which is in project %q not %q — coupling across projects is read from a manifest, never declared here",
 					s.Name, u, project[u], s.Project)
@@ -449,6 +503,34 @@ func validateProjects(specs []Spec) error {
 				other, s.Name, s.Project)
 		}
 		first[k] = s.Name
+	}
+
+	// A library's remote is declared ONCE, corpus-wide: not under a project
+	// as well, and not as a second library either. Either would clone and
+	// index the shared code twice and answer about it under two names — the
+	// duplication the block exists to remove. Snapshots are exempt as above:
+	// their identity is the directory, which Name already keeps unique.
+	libraryURL := make(map[string]string, len(specs))
+	for _, s := range specs {
+		if !s.Library || s.CloneURL == "" {
+			continue
+		}
+		if other, ok := libraryURL[s.CloneURL]; ok {
+			return fmt.Errorf(
+				"%s and %s are the same clone_url — a library is declared once",
+				other, s.Name)
+		}
+		libraryURL[s.CloneURL] = s.Name
+	}
+	for _, s := range specs {
+		if s.Library || s.CloneURL == "" {
+			continue
+		}
+		if lib, ok := libraryURL[s.CloneURL]; ok {
+			return fmt.Errorf(
+				"%s in project %q is the same clone_url as library %q — a library is declared once and named with uses, never listed in a project too",
+				s.Name, s.Project, lib)
+		}
 	}
 	return nil
 }

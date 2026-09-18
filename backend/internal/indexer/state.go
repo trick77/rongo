@@ -51,6 +51,9 @@ type RepoState struct {
 	Part        string
 	Description string
 	Uses        []string
+	// Library says the entry came from the `libraries:` block: a project of
+	// one that any project's uses may name. See repos.Spec.Library.
+	Library bool
 	// Stages are the deployment stages the entry declares, by name; empty
 	// for every ordinary repository.
 	Stages []string
@@ -120,9 +123,13 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 		if spec.Enabled {
 			enabled = 1
 		}
+		library := 0
+		if spec.Library {
+			library = 1
+		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, token_user, token_auth, project, part, description)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO repo_state (name, clone_url, branch, enabled, token_env, token_user, token_auth, project, part, description, library)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(name) DO UPDATE SET
 				clone_url = excluded.clone_url,
 				-- An omitted branch: means "the remote's default", which is
@@ -159,9 +166,10 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 				-- says what a repository is for, not what is in it.
 				project     = excluded.project,
 				part        = excluded.part,
-				description = excluded.description`,
+				description = excluded.description,
+				library     = excluded.library`,
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv, spec.TokenUser, spec.TokenAuth,
-			spec.Project, spec.Part, spec.Description,
+			spec.Project, spec.Part, spec.Description, library,
 		); err != nil {
 			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
 		}
@@ -334,7 +342,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description
+		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description, library
 		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -344,14 +352,15 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	var out []RepoState
 	for rows.Next() {
 		var r RepoState
-		var enabled int
+		var enabled, library int
 		var lastRun, lastIndexed string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
 			&r.LastError, &lastRun, &lastIndexed, &r.Files, &r.Chunks, &r.TokenEnv, &r.TokenUser, &r.TokenAuth,
-			&r.Project, &r.Part, &r.Description); err != nil {
+			&r.Project, &r.Part, &r.Description, &library); err != nil {
 			return nil, err
 		}
 		r.Enabled = enabled == 1
+		r.Library = library == 1
 		if lastRun != "" {
 			r.LastRunAt, _ = time.Parse(time.RFC3339, lastRun)
 		}

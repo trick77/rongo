@@ -58,6 +58,9 @@ func InventoryAttrs(st RepoState) []any {
 	if st.LastError != "" {
 		attrs = append(attrs, "last_error", st.LastError)
 	}
+	if st.Library {
+		attrs = append(attrs, "library", true)
+	}
 	if len(st.Uses) > 0 {
 		// The declared edges, because they are the one part of a repository's
 		// configuration with no other way to check it took effect. repos.yaml

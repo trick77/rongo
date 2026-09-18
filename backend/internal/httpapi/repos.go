@@ -51,7 +51,11 @@ type RepoStatus struct {
 	Part        string
 	Description string
 	Uses        []string
-	Stages      []string
+	// Library says the entry is a shared library from the `libraries:` block:
+	// a project of one that other projects' uses edges may point at, which is
+	// how the page draws it inside their wiring without listing it as a member.
+	Library bool
+	Stages  []string
 }
 
 // RepoStatusSource reports the state of every repository rongo knows about.
@@ -113,6 +117,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"part":             st.Part,
 			"description":      st.Description,
 			"uses":             uses(st.Uses),
+			"library":          st.Library,
 			"stages":           uses(st.Stages),
 		})
 	}

@@ -71,6 +71,7 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			Part:        st.Part,
 			Description: st.Description,
 			Uses:        st.Uses,
+			Library:     st.Library,
 			Stages:      st.Stages,
 		})
 	}
