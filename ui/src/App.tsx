@@ -14,6 +14,7 @@ import SharedLinks from "./share/SharedLinks";
 import MemoryPage from "./memory/MemoryPage";
 import { PlusIcon } from "./icons";
 import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
+import { tabTitle } from "./tabTitle";
 
 type Page = "ask" | "threads" | "projects" | "shared" | "memory";
 
@@ -402,6 +403,25 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Only a settled title reaches the header. Until the model's title call
+  // lands, the row holds the question's first 48 runes, and putting that up
+  // there showed a question cut mid-word — then cut a second time by the
+  // header's own truncate. The rail keeps the placeholder, where first words
+  // are what tells one pending row from another.
+  const openThread =
+    threadId === null
+      ? null
+      : (threads.find((t) => t.id === threadId) ?? (summary?.id === threadId ? summary : null));
+  const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
+
+  // The tab follows the header: the same settled title, the same page name,
+  // so a row of tabs can be told apart and a rename reaches the tab strip.
+  // Above the session gate because it is a hook, so a sign-in screen already
+  // carries the name of the page it will open on.
+  useEffect(() => {
+    document.title = tabTitle(route, openTitle);
+  }, [route, openTitle]);
+
   // Nothing is rendered until the session is known: the alternative is a flash
   // of the signed-out app on every reload, and a redirect landing on top of it.
   if (session.state !== "in") {
@@ -433,16 +453,6 @@ export default function App() {
     );
   }
 
-  // Only a settled title reaches the header. Until the model's title call
-  // lands, the row holds the question's first 48 runes, and putting that up
-  // there showed a question cut mid-word — then cut a second time by the
-  // header's own truncate. The rail keeps the placeholder, where first words
-  // are what tells one pending row from another.
-  const openThread =
-    threadId === null
-      ? null
-      : (threads.find((t) => t.id === threadId) ?? (summary?.id === threadId ? summary : null));
-  const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
   const total = threadId === null ? null : usageTotal;
 
   return (
