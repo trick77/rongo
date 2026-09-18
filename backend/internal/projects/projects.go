@@ -26,8 +26,11 @@ type Repo struct {
 	Part string
 	// Description is one human sentence saying what it does.
 	Description string
-	// Uses names the siblings it depends on, sorted.
+	// Uses names the siblings and libraries it depends on, sorted.
 	Uses []string
+	// Library says this is a shared library: a project of one that any
+	// project's uses may name. See repos.Spec.Library.
+	Library bool
 }
 
 // Project is one product.
@@ -43,6 +46,7 @@ type Project struct {
 type Map struct {
 	of       map[string]string // repository -> project
 	projects map[string]Project
+	library  map[string]bool // repositories from the libraries block
 }
 
 // Load reads the whole grouping in two queries. There are a handful of
@@ -50,7 +54,7 @@ type Map struct {
 // repodeps.DependsOn is, so it is deliberately not cached: a project renamed in
 // repos.yaml takes effect on the next question, not on the next restart.
 func Load(ctx context.Context, db *sql.DB) (Map, error) {
-	m := Map{of: map[string]string{}, projects: map[string]Project{}}
+	m := Map{of: map[string]string{}, projects: map[string]Project{}, library: map[string]bool{}}
 
 	// enabled = 1: a parked repository is not offered on a clarification card
 	// and does not count towards a project's membership. Offering one would ask
@@ -58,7 +62,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	// members are all parked disappears entirely rather than becoming an option
 	// with no code behind it.
 	rows, err := db.QueryContext(ctx,
-		`SELECT name, project, part, description FROM repo_state WHERE enabled = 1 ORDER BY name`)
+		`SELECT name, project, part, description, library FROM repo_state WHERE enabled = 1 ORDER BY name`)
 	if err != nil {
 		return Map{}, err
 	}
@@ -67,7 +71,8 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	members := map[string][]Repo{}
 	for rows.Next() {
 		var name, project, part, description string
-		if err := rows.Scan(&name, &project, &part, &description); err != nil {
+		var library int
+		if err := rows.Scan(&name, &project, &part, &description, &library); err != nil {
 			return Map{}, err
 		}
 		// An empty project can only come from a row written before this
@@ -78,7 +83,8 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 			project = name
 		}
 		m.of[name] = project
-		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description})
+		m.library[name] = library == 1
+		members[project] = append(members[project], Repo{Name: name, Part: part, Description: description, Library: library == 1})
 	}
 	if err := rows.Err(); err != nil {
 		return Map{}, err
@@ -95,10 +101,13 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	return m, nil
 }
 
-// loadUses attaches the declared edges. An edge whose target is not a member of
-// the same project is dropped rather than kept: repos.Load already refuses one,
-// so reaching here means the row predates that check or was written by hand,
-// and drawing an arrow out of a project is worse than drawing none.
+// loadUses attaches the declared edges. An edge whose target is neither a
+// member of the same project nor a library is dropped rather than kept:
+// repos.Load already refuses one, so reaching here means the row predates that
+// check or was written by hand, and drawing an arrow out of a project is worse
+// than drawing none. A library target is the one edge that legitimately leaves
+// the project, and a parked library is no target at all: it is absent from
+// the map, so the edge is dropped like the rest.
 func (m Map) loadUses(ctx context.Context, db *sql.DB, members map[string][]Repo) error {
 	rows, err := db.QueryContext(ctx, `SELECT repo, uses FROM repo_uses ORDER BY repo, uses`)
 	if err != nil {
@@ -118,7 +127,7 @@ func (m Map) loadUses(ctx context.Context, db *sql.DB, members map[string][]Repo
 			return err
 		}
 		r, ok := at[repo]
-		if !ok || m.of[repo] != m.of[uses] {
+		if !ok || (m.of[repo] != m.of[uses] && !m.library[uses]) {
 			continue
 		}
 		r.Uses = append(r.Uses, uses)

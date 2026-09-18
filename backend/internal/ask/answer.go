@@ -983,18 +983,33 @@ func coveredRepos(known []string, sources []Source) []string {
 // A project with nothing declared and one member produces nothing at all.
 // Absence takes no marker, and "rongo is one product in 1 repository" tells the
 // model something it can already see in every citation.
+//
+// A uses edge leaving the project can only point at a library — projects.Load
+// drops every other kind — and it is said apart from the edges inside: the
+// library is a separate repository, shared with other products, and folding it
+// into "connections inside the project" would tell the model it is a part of
+// this one.
 func StructureBlock(ps []projects.Project) string {
 	var b strings.Builder
 	for _, p := range ps {
 		var edges []string
+		var libraries []string
 		var unreached []string
 		reached := map[string]bool{}
+		member := make(map[string]bool, len(p.Members))
+		for _, m := range p.Members {
+			member[m.Name] = true
+		}
 		declared := len(p.Members) > 1
 		for _, m := range p.Members {
-			if m.Part != "" || m.Description != "" {
+			if m.Part != "" || m.Description != "" || len(m.Uses) > 0 {
 				declared = true
 			}
 			for _, u := range m.Uses {
+				if !member[u] {
+					libraries = append(libraries, m.Name+" uses the shared library "+u+".")
+					continue
+				}
 				edges = append(edges, m.Name+" uses "+u+".")
 				reached[u] = true
 			}
@@ -1029,6 +1044,13 @@ func StructureBlock(ps []projects.Project) string {
 			if len(unreached) > 0 {
 				fmt.Fprintf(&b, "Nothing in this project uses %s. They are reached from outside it, "+
 					"so do not connect them to the others yourself.\n", strings.Join(unreached, ", "))
+			}
+		}
+		if len(libraries) > 0 {
+			b.WriteString("\nShared libraries this project is built on, each a separate repository " +
+				"indexed on its own and used by other products too:\n")
+			for _, l := range libraries {
+				fmt.Fprintf(&b, "  %s\n", l)
 			}
 		}
 	}

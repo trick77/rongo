@@ -11,6 +11,13 @@
 # after itself. The project holds its repositories, so the grouping is written
 # once and a repository cannot end up in two products.
 #
+# A LIBRARY is the one repository several products are built on. It goes in the
+# top-level `libraries:` block, once, owned by no project, and any repository
+# in any project names it with `uses`. It is not searched as part of the
+# products using it: a question about the shop reaches the library the way it
+# reaches any other repository, through the code that calls into it. Asked
+# about by name, it is a project of one like any standalone repository.
+#
 # Credentials NEVER belong in this file — it ends up in a repository or a ticket
 # sooner or later. Name the environment variable with token_env instead, and put
 # the value in the environment.
@@ -34,6 +41,17 @@
 # both and only the declared edge says which one the storefront calls. All three
 # are written by hand here and never inferred - a manifest cannot see across a
 # Go backend and a TypeScript UI, and guessing from names is not a fact.
+
+# Shared libraries, declared once. Every field an ordinary entry takes works
+# here too; the only rule of its own is that a library may `uses` nothing but
+# another library. Listing the same clone_url under a project as well is
+# refused: that would index the shared code twice under two names.
+#libraries:
+#  - name: acme-commons
+#    clone_url: https://forge.example.invalid/acme/commons.git
+#    token_env: BACKEND_FORGE_TOKEN
+#    description: Shared Java utilities every acme backend is built on.
+
 projects:
   # rongo indexes itself. It replaced loom on 2026-08-20: loom was peeq's
   # wholesale twin, rongo overlaps peeq only where it has to — retrieval,
@@ -150,6 +168,10 @@ projects:
   #   shop-ui ─┬─> shop-backend ─┬─> shop-contract
   #            └─> shop-search ──┘
   #   shop-admin-backend, shop-events: reached from outside the project
+  #
+  # shop-backend also uses acme-commons, the library declared above: that
+  # arrow leaves the project and is drawn as leaving it. payments-api below
+  # uses the same library from its own product.
   #- name: shop
   #  repositories:
   #    - name: shop-ui
@@ -163,7 +185,7 @@ projects:
   #      token_env: BACKEND_FORGE_TOKEN
   #      part: backend
   #      description: Storefront API and checkout.
-  #      uses: [shop-contract]
+  #      uses: [shop-contract, acme-commons]
   #    - name: shop-search
   #      clone_url: https://forge.example.invalid/acme/shop-search.git
   #      token_env: BACKEND_FORGE_TOKEN
@@ -220,3 +242,13 @@ projects:
   #          aliases: [production, produktion, produktiv]
   #        - name: intg
   #          path: intg/**
+
+  # A second product on the same library. Nothing here repeats the library:
+  # the edge is the whole declaration.
+  #- name: payments
+  #  repositories:
+  #    - name: payments-api
+  #      clone_url: https://forge.example.invalid/acme/payments-api.git
+  #      token_env: BACKEND_FORGE_TOKEN
+  #      description: Payments and invoicing API.
+  #      uses: [acme-commons]
