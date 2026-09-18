@@ -194,11 +194,19 @@ describe("RepoList", () => {
     }
   });
 
-  it("writes the project name in the mono face and its repositories muted", async () => {
+  it("writes the project name in the serif face on a lid lighter than the panel, its repositories mono and muted", async () => {
     respondWith(200, [peeq]);
     render(<RepoList />);
     const heading = await screen.findByRole("heading", { name: "peeq" });
-    expect(heading.className).toContain("font-mono");
+    expect(heading.className).toContain("font-serif");
+    expect(heading.className).toContain("text-ink");
+    // The lid: the one band on the page lighter than the panel, so a frame
+    // visibly begins. bg-bg was the page colour and fused with the gutter.
+    expect(heading.parentElement?.className).toContain("bg-active");
+    expect(heading.parentElement?.className).not.toContain("bg-bg");
+    // And no second page-coloured band under it: the column headings sit
+    // on the panel.
+    expect(screen.getByText("Repository").closest("tr")?.className).not.toContain("bg-bg");
     const name = screen.getByText("peeq", { selector: "span" });
     expect(name.className).toContain("font-mono");
     expect(name.className).toContain("text-muted");

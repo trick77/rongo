@@ -459,21 +459,31 @@ function ProjectPanel({
   const loose = unconnected(project, libraries);
   const sum = (pick: (r: Repo) => number) => project.repos.reduce((n, r) => n + pick(r), 0);
 
+  // The header is the lid of the panel: painted bg-active, the one ground on
+  // the page lighter than the panel, so a frame visibly begins where the
+  // previous one ended. Before it was bg-bg, the page colour, and the header
+  // fused with the gutter above it; with the column headings on bg-bg too the
+  // panel opened on two like bands a hairline apart, and the panels stacked
+  // as one grey column. The name is serif, the page-title face, so it stops
+  // reading as the first mono row. The gap is 28px for the same reason: 20
+  // was the gap between two rows of stats, not two products.
   return (
-    <section className="mb-5 overflow-hidden rounded-ui border border-border bg-panel">
-      <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-border bg-bg px-3.5 py-2.5">
-        <h3 className="font-mono text-ink">{project.name}</h3>
-        <span className="text-[12.5px] text-faint">
+    <section className="mb-7 overflow-hidden rounded-ui border border-border bg-panel">
+      <header className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 border-b border-border bg-active px-3.5 py-2.5">
+        <h3 className="font-serif text-[18px] font-medium leading-tight tracking-tight text-ink">
+          {project.name}
+        </h3>
+        <span className="text-[12.5px] text-muted">
           {project.repos.length} {project.repos.length === 1 ? "repository" : "repositories"} ·{" "}
           {sum((r) => r.files)} files · {sum((r) => r.chunks)} chunks
         </span>
         {usedBy && (
-          <span className="text-[12.5px] text-faint">
+          <span className="text-[12.5px] text-muted">
             library
             {usedBy.length > 0 && (
               <>
                 {" "}
-                · used by <span className="font-mono text-muted">{usedBy.join(", ")}</span>
+                · used by <span className="font-mono text-ink-dim">{usedBy.join(", ")}</span>
               </>
             )}
           </span>
@@ -506,7 +516,7 @@ function ProjectPanel({
       <div className="overflow-x-auto overscroll-x-contain">
         <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
-            <tr className="bg-bg">
+            <tr className="bg-panel">
               <th className={th + " border-b border-border"}>Repository</th>
               <th className={th + " border-b border-border"}>State</th>
               <th className={th + " border-b border-border"}>Indexed</th>
@@ -533,8 +543,9 @@ function ProjectPanel({
                 >
                   {/* Name, then part and branch under it: two facts nobody
                       compares down a column, so they cost no column. The name
-                      is muted and the project header is not, which is what
-                      makes the header read as the heading. */}
+                      is muted and mono and the project header is ink and
+                      serif, which is what makes the header read as the
+                      heading. */}
                   <td
                     className={
                       "px-3.5 py-3 " +
