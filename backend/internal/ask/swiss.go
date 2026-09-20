@@ -10,9 +10,9 @@ import (
 // German is spelled the Swiss way by rewriting the text, not by asking the
 // model. The readers are in Switzerland, where ß does not exist, and the
 // product's own German strings are already spelled that way (scopeNotice); a
-// prompt note asking for the same was measured on 2026-09-16
-// (docs/measurements/2026-09-16-swiss-digraphs.md) and moved nothing: the
-// gpt-5 series writes "größer" and "fuer" regardless of wording. So the
+// prompt note asking for the same was measured on 2026-09-16 and moved
+// nothing: the gpt-5 series writes "größer" and "fuer" regardless of
+// wording. So the
 // spelling is a string function over the prose the model wrote.
 //
 // Two rules. ß becomes ss, always. ae, oe and ue become the umlaut they stand

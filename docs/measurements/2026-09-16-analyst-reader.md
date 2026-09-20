@@ -29,9 +29,9 @@ one adds the role paragraph in front of it. The role paragraph restates
 opening sentence whole) and conditions the code/config/manual classification on the
 sources (`answerCommon` says invent nothing).
 
-The umlaut mixing in the same answer (Verzögerung beside stuendlich) is the
-gpt-5.4 behaviour `2026-09-16-swiss-digraphs.md` measured; not a prompt
-change.
+The umlaut mixing in the same answer (Verzögerung beside stuendlich) is
+gpt-5.4 behaviour measured the same day, and the reason the Swiss spelling is
+a string function rather than a prompt note; not a prompt change.
 
 ## The arms
 
