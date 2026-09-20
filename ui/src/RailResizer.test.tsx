@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   RAIL_DEFAULT,
   RAIL_MAX,
   RAIL_MIN,
   RailResizer,
   clampRail,
+  displayedWidth,
   storedRailWidth,
 } from "./RailResizer";
 
@@ -24,8 +25,17 @@ const grab = (h: HTMLElement, pointerId = 1, pointerType = "mouse") =>
     clientX: valuenow(),
   });
 
+/** jsdom reports 1024 by default; the clamp keys on 40vw, so tests set it. */
+function withViewport(width: number) {
+  Object.defineProperty(document.documentElement, "clientWidth", {
+    configurable: true,
+    value: width,
+  });
+}
+
 beforeEach(() => {
   localStorage.clear();
+  withViewport(1600); // 40vw = 640, so the 520 max is the binding cap
   document.documentElement.style.removeProperty("--rail-pref");
 });
 afterEach(() => {
@@ -352,34 +362,56 @@ describe("RailResizer", () => {
   });
 
   // Review finding: the arrow keys stepped the preference while the drag stepped
-  // the rendered edge, so with a preference above the 40vw cap the first presses
-  // moved nothing on screen and aria-valuenow announced a width the layout did
-  // not have. jsdom lays nothing out, so the cap is simulated by measuring.
-  it("steps the rendered width, not a preference the clamp is holding back", () => {
+  // the rendered edge, so above the 40vw cap the first presses moved nothing on
+  // screen. The width is computed from the viewport now, never measured.
+  it("narrows from the edge the user can see, not from a hidden preference", () => {
+    withViewport(1100); // 40vw = 440, so a stored 520 shows as 440
     localStorage.setItem("rongo.rail-width", "520");
     render(<RailResizer />);
-    const h = handle();
-    // The window is narrow: the rail renders 440 though the preference is 520.
-    const drawer = document.createElement("div");
-    drawer.id = "nav-drawer";
-    drawer.getBoundingClientRect = () => ({ width: 440 }) as DOMRect;
-    document.body.appendChild(drawer);
 
-    fireEvent.keyDown(h, { key: "ArrowLeft" });
-    expect(valuenow()).toBe(424); // 440 - 16, the edge the user can see
-    drawer.remove();
+    fireEvent.keyDown(handle(), { key: "ArrowLeft" });
+    expect(valuenow()).toBe(424); // 440 - 16, the edge that actually moved
   });
 
-  // Review finding: a drag on a capped viewport used to commit the capped number
-  // and throw the wider preference away, which is what the clamp exists to stop.
-  it("keeps a wider stored preference when a capped drag widens", () => {
+  // The other direction: widening must not be capped away, or a preference above
+  // the cap could never grow and the press would look dead.
+  it("widens the preference even while the cap holds the edge back", () => {
+    withViewport(1100);
+    localStorage.setItem("rongo.rail-width", "460");
+    render(<RailResizer />);
+
+    fireEvent.keyDown(handle(), { key: "ArrowRight" });
+    expect(stored()).toBe("476"); // 460 + 16, though the edge stays at 440
+  });
+
+  it("mirrors the CSS clamp it stands in for", () => {
+    withViewport(1600); // 40vw = 640, so the 520 max wins
+    expect(displayedWidth(520)).toBe(520);
+    expect(displayedWidth(200)).toBe(RAIL_MIN);
+    withViewport(1100); // 40vw = 440 wins over the max
+    expect(displayedWidth(520)).toBe(440);
+    withViewport(600); // 40vw = 240, below the min, so the min wins
+    expect(displayedWidth(400)).toBe(RAIL_MIN);
+  });
+
+  // Review finding: body.resizing had no unmount cleanup, and it disables the
+  // cursor and selection page-wide.
+  it("clears the resizing class if it is unmounted mid-drag", () => {
+    const view = render(<RailResizer />);
+    grab(handle());
+    expect(document.body.classList.contains("resizing")).toBe(true);
+    view.unmount();
+    expect(document.body.classList.contains("resizing")).toBe(false);
+  });
+
+  // Review finding: a drag on a capped viewport threw the wider preference away.
+  // The first fix kept storage but still painted the capped number, which left
+  // two live widths for one preference. Assert all three move together.
+  it("grows the preference from a capped drag, in storage and in the paint", () => {
+    withViewport(1100); // 40vw = 440; the stored 520 is held back on screen
     localStorage.setItem("rongo.rail-width", "520");
     render(<RailResizer />);
     const h = handle();
-    const drawer = document.createElement("div");
-    drawer.id = "nav-drawer";
-    drawer.getBoundingClientRect = () => ({ width: 440 }) as DOMRect;
-    document.body.appendChild(drawer);
 
     fireEvent.pointerDown(h, {
       pointerId: 1,
@@ -387,13 +419,20 @@ describe("RailResizer", () => {
       button: 0,
       clientX: 440,
     });
-    fireEvent.pointerMove(h, { pointerId: 1, clientX: 445 });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 465 }); // +25
     fireEvent.pointerUp(h, { pointerId: 1 });
-    expect(stored()).toBe("520"); // the docked-monitor width survives
-    drawer.remove();
+
+    // 520 + 25 runs into the 520 max, so the preference stays 520 — and is NOT
+    // cut down to the 440 the viewport was showing.
+    expect(stored()).toBe(String(RAIL_MAX));
+    expect(pref()).toBe(RAIL_MAX + "px"); // one number, not two
+    // The separator sits at the capped edge, so that is what it announces:
+    // saying 520 would describe a rail that is not on screen.
+    expect(valuenow()).toBe(440);
   });
 
-  // A deliberate narrowing is taken at face value, cap or no cap.
+  // Uncapped: a deliberate narrowing is taken at face value. The capped case is
+  // its own test below, because that is where the two numbers diverge.
   it("lowers the stored preference when the user narrows", () => {
     localStorage.setItem("rongo.rail-width", "520");
     render(<RailResizer />);
@@ -407,6 +446,76 @@ describe("RailResizer", () => {
     fireEvent.pointerMove(h, { pointerId: 1, clientX: 400 });
     fireEvent.pointerUp(h, { pointerId: 1 });
     expect(stored()).toBe("400");
+  });
+
+  // Review finding: travel was always added to the preference, so under the cap a
+  // narrowing drag had a dead zone as wide as the gap between the two. Pulling the
+  // edge 40px left moved nothing on screen AND wrote 480 back: the narrowing was
+  // neither honoured nor preserved.
+  it("narrows from the first pixel when the cap is holding the edge back", () => {
+    withViewport(1100); // cap 440, so a stored 520 shows as 440
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    const h = handle();
+
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 440, // the edge the user can see
+    });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 400 }); // pull 40px left
+    expect(pref()).toBe("400px"); // tracked the pointer, no dead zone
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    expect(stored()).toBe("400"); // and the narrowing was kept
+  });
+
+  // The same drag the other way still protects a preference above the cap.
+  it("still keeps a capped preference when the drag widens", () => {
+    withViewport(1100);
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    const h = handle();
+
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 440,
+    });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 460 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    expect(stored()).toBe(String(RAIL_MAX)); // 520 + 20, clamped, not cut to 440
+  });
+
+  // Review finding: aria-valuenow reported the preference while the separator sat
+  // at the capped edge, so a screen reader was told about a rail that is not there.
+  it("announces where the separator actually is", () => {
+    withViewport(1100);
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    expect(valuenow()).toBe(440);
+    expect(handle().getAttribute("aria-valuemax")).toBe("440");
+  });
+
+  // Review finding: aria-valuenow is computed from the viewport, but CSS repaints
+  // the edge on a resize while React does not re-render, so the separator went on
+  // announcing the width from the last render — wrong as the preference and wrong
+  // as the edge at once.
+  it("re-announces the edge when the window changes size", async () => {
+    withViewport(1600); // cap is the plain 520 max
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    expect(valuenow()).toBe(520);
+
+    withViewport(1100); // 40vw = 440 now binds
+    fireEvent(window, new Event("resize"));
+    await waitFor(() => expect(valuenow()).toBe(440));
+    expect(handle().getAttribute("aria-valuemax")).toBe("440");
+
+    withViewport(1600); // and back
+    fireEvent(window, new Event("resize"));
+    await waitFor(() => expect(valuenow()).toBe(520));
   });
 
   // Review finding: a cancel before the slop left the double-tap window armed, so
