@@ -257,17 +257,24 @@ export default function Threads({
                         // set the text 4px higher than it sits today.
                         className="relative flex min-w-0 flex-1 items-center self-stretch overflow-hidden text-left whitespace-nowrap"
                       >
-                        {/* The title runs out under a gradient to the row's
-                            own background rather than ending in an ellipsis,
-                            as ../loom's sidebar does. The text stays whole. */}
-                        {t.title}
-                        <span
-                          aria-hidden="true"
-                          className={
-                            "pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent " +
-                            (active ? "to-rail-sel" : "to-panel group-hover:to-rail-hover")
-                          }
-                        />
+                        {/* ../loom's sidebar truncates in two ways, and which
+                            one is showing IS the selection. An idle row ends
+                            in an ellipsis: the row paints no ground of its own
+                            against the panel, and a gradient needs a colour to
+                            arrive at. A selected row drops the ellipsis for
+                            pr-7 — reserving the kebab's 24px, which is visible
+                            from here on — and runs the title out under a fade
+                            to the selected ground instead, so the text stays
+                            whole under the one row the reader is reading.
+                            The hover ground gets no fade: the row is still
+                            idle, and loom leaves its ellipsis alone. */}
+                        <span className={"block " + (active ? "pr-7" : "truncate")}>{t.title}</span>
+                        {active && (
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent to-rail-sel"
+                          />
+                        )}
                       </button>
                       {/* No dot on the row being written: a question is asked
                           at the top of the rail and its row is the one right
