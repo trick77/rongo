@@ -111,6 +111,24 @@ html {
   color-scheme: dark;
 }
 
+/* The rail is user-resizable from lg up: RailResizer writes only --rail-pref and
+   the clamp keeps the result sane without a resize listener. A listener that
+   re-clamped and wrote back would destroy the preference the first time a tablet
+   turned to portrait. 40vw keeps the 900px reading column the majority of the
+   window, so a rail dragged wide cannot squeeze the answer out. */
+:root {
+  --rail-pref: 362px;
+  --rail-w: clamp(280px, var(--rail-pref), min(520px, 40vw));
+}
+
+/* The drag turns the pointer into a resize cursor everywhere, not only over the
+   10px handle: a fast drag outruns the handle, and the cursor would otherwise
+   flicker back to an arrow over the thread list. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
 /* The scrollbar on every scroller, ../loom's values (0e14883): 8px of track
    that is not there, and an opaque #383837 thumb that lightens under the
    pointer. The platform bar is a chrome-coloured slab down the edge of a
