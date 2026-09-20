@@ -216,7 +216,7 @@ func (c *Client) assertSnapshotCheckout(ctx context.Context, spec repos.Spec, di
 // against and everything to record.
 func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) {
 	if _, err := c.run(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
-		return true, nil
+		return true, nil //nolint:nilerr // an unborn HEAD counts as a difference: nothing to compare against and everything to record
 	}
 	_, err := c.run(ctx, dir, "diff", "--cached", "--quiet")
 	if err == nil {
@@ -261,7 +261,7 @@ func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) boo
 func (c *Client) OriginURL(ctx context.Context, spec repos.Spec) (string, error) {
 	dir := c.Dir(spec)
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		return "", nil
+		return "", nil //nolint:nilerr // an unborn HEAD counts as a difference: nothing to compare against and everything to record
 	}
 	out, err := c.run(ctx, dir, "remote", "get-url", "origin")
 	if err != nil {

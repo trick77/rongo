@@ -1,0 +1,61 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gosec
+    - govet
+    - ineffassign
+    # misspell is deliberately NOT enabled here, and rongo is the only repo
+    # that deviates from the shared config. Every one of its 14 findings was a
+    # false positive on a foreign-language string: "produktion" is a German
+    # stage alias matched against a question at RUNTIME (see repos.StageSpec
+    # Aliases), so "correcting" it silently stops the stage from being
+    # recognised, and the rest are correct French ("correspondant") and
+    # Italian ("conservato") UI copy. An auto-fix here changes behaviour while
+    # the tests keep passing.
+    - nilerr
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        # shadow fires on `if err := f(); err != nil`, which is idiomatic Go and
+        # statement-scoped. Every hit across the repo family was that pattern,
+        # so the check was pure noise.
+        - shadow
+    revive:
+      rules:
+        - name: var-naming
+        - name: exported
+        - name: error-return
+        - name: error-strings
+        - name: context-as-argument
+        - name: unused-parameter
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unparam
+          # bodyclose fires on httptest.NewRecorder().Result(), whose body is an
+          # in-memory buffer with no connection to leak, and it reports at every
+          # call site rather than at the shared helper.
+          - bodyclose
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

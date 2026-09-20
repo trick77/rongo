@@ -117,8 +117,13 @@ func main() {
 	}
 
 	if *healthcheck {
-		resp, err := http.Get("http://" + cfg.Addr + "/healthz")
-		if err != nil || resp.StatusCode != http.StatusOK {
+		resp, err := http.Get("http://" + cfg.Addr + "/healthz") //nolint:noctx // a one-shot probe in a process that exits on the next line
+		if err != nil {
+			os.Exit(1)
+		}
+		code := resp.StatusCode
+		_ = resp.Body.Close()
+		if code != http.StatusOK {
 			os.Exit(1)
 		}
 		os.Exit(0)

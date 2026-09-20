@@ -78,7 +78,7 @@ func (g *Git) Head(ctx context.Context, repo string) (ask.RepoHead, error) {
 		// A branch gone upstream is the Repos page's error, not this
 		// turn's: the indexed head still answers, and a tag past it is
 		// then reported as off the branch rather than as not yet indexed.
-		return h, nil
+		return h, nil //nolint:nilerr // a branch gone upstream is the Repos page's error, not this turn's: the indexed head still answers
 	}
 	h.Remote = remote
 	return h, nil

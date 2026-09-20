@@ -252,8 +252,6 @@ var (
 	xmlTag = func(tag string) *regexp.Regexp {
 		return regexp.MustCompile(`(?s)<` + tag + `>\s*([^<]+?)\s*</` + tag + `>`)
 	}
-	pomModules = regexp.MustCompile(`(?s)<modules>(.*?)</modules>`)
-	pomModule  = xmlTag("module")
 	// pomDeps matches every <dependency> element wherever it sits; it cuts
 	// them all out of the text the module's own coordinates are read from.
 	// The module's dependencies themselves come from pomDependencies.

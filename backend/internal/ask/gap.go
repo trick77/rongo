@@ -164,7 +164,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
 		g.logger().Warn("gap reply was not JSON; the gathered sources kept", "reply", llmwire.Truncate(out, 120))
-		return sources, GapReport{Skipped: "not json"}, nil
+		return sources, GapReport{Skipped: "not json"}, nil //nolint:nilerr // a failed or unparseable gap call keeps the gathered sources and reports Skipped; it must not fail the turn (logged above)
 	}
 
 	report := GapReport{Asked: gapNames(reply.Missing, sources)}
