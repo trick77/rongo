@@ -111,22 +111,37 @@ html {
   color-scheme: dark;
 }
 
-/* The scrollbar on every scroller, ../loom's values: 8px of track that is
-   not there, and a thumb at a fifth of white that comes forward a little
-   under the pointer. The platform bar is a chrome-coloured slab down the
-   edge of a column whose whole point is that its text dissolves into the
-   ground, and it was the loudest thing on the page. Global, not a class:
-   macOS overlays hide the bar until you scroll, Windows shows it always, so
-   every code block, table and page scroller a class had missed wore the
-   classic 17px arrow bar there.
+/* The scrollbar on every scroller, ../loom's values (0e14883): 8px of track
+   that is not there, and an opaque #383837 thumb that lightens under the
+   pointer. The platform bar is a chrome-coloured slab down the edge of a
+   column whose whole point is that its text dissolves into the ground, and it
+   was the loudest thing on the page. Global, not a class: macOS overlays hide
+   the bar until you scroll, Windows shows it always, so every code block,
+   table and page scroller a class had missed wore the classic 17px arrow bar
+   there.
+
+   In @layer base so an explicit per-element scrollbar style still wins;
+   nothing declares one today, and the next one that does should not have to
+   fight a bare * selector.
+
+   The thumb is OPAQUE on purpose, and this is the whole point of the rule.
+   A translucent rgba(255,255,255,.1) thumb composites over whatever panel sits
+   behind it, so one declaration renders a different grey on every surface -
+   measured in loom as #3f3f3e on the composer against #323231 on the sidebar.
+   getComputedStyle reports the DECLARED colour either way, so a sweep of the
+   DOM says they match while the screen says otherwise; only a rendered pixel
+   catches it. #383837 is the midpoint of those two greys, so every bar is
+   literally one colour whatever it sits on. Never put an rgba() back here.
 
    scrollbar-width/-color is the standard pair, read by Chromium and Firefox;
    once it is set Chromium ignores ::-webkit-scrollbar entirely, so the
    webkit block is fenced off for Safari, the one engine still without the
    standard pair. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #383837 transparent;
+  }
 }
 
 @supports not (scrollbar-width: thin) {
@@ -140,12 +155,12 @@ html {
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.18);
+    background-color: #383837;
     border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.28);
+    background-color: #4b4b4a;
   }
 }
 
