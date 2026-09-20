@@ -3,6 +3,7 @@ import Ask from "./Ask";
 import ThreadUsageBadge from "./ThreadUsageBadge";
 import type { ThreadTotal } from "./turns";
 import { Icon } from "./Icon";
+import { RailResizer } from "./RailResizer";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
 import ThreadMenu from "./ThreadMenu";
@@ -461,7 +462,7 @@ export default function App() {
     // it. The short-viewport row is the landscape phone, where 56px of header
     // out of 390px is a tenth of the screen spent on chrome.
     <div className="grid h-dvh grid-rows-[56px_1fr] [@media(max-height:500px)]:grid-rows-[44px_1fr]">
-      <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[362px_1fr_auto]">
+      <header className="grid grid-cols-[auto_1fr_auto] items-center border-b border-border bg-panel lg:grid-cols-[var(--rail-w)_1fr_auto]">
         <div className="flex h-full items-center gap-2.5 px-2 lg:px-5">
           {/*
             Deliberately not disabled={busy}: with the drawer shut and the
@@ -585,9 +586,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* 362px, ../loom's expanded rail. The header above runs the same
-          column, so the seam under the wordmark stays on the rail's border. */}
-      <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[362px_1fr]">
+      {/* --rail-w, ../loom's expanded rail by default and draggable from lg
+          up. The header above runs the same column, so the seam under the
+          wordmark stays on the rail's border at every width. position:relative
+          is what RailResizer's absolute handle pins against. */}
+      <div className="relative grid min-h-0 grid-cols-1 lg:grid-cols-[var(--rail-w)_1fr]">
         {/*
           The same rail at every width; below lg the box is off-canvas and
           slides in, ../loom's drawer. Its contents are untouched — one action
@@ -756,6 +759,10 @@ export default function App() {
             </div>
           )}
         </aside>
+        {/* The rail's right edge, draggable from lg up. Outside the aside so
+            its overflow-y-auto cannot clip the handle, and after it in the DOM
+            so the handle wins the overlap against the rail's border. */}
+        <RailResizer />
         {/*
           The way out, with no close button in the drawer: every row inside it
           closes it, and on a 360px phone the backdrop is still 60px of tap.
