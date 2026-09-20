@@ -190,8 +190,18 @@ export function diagramTitle(src: string): string {
  * nothing reaches for var(--color-…) directly, and this is the one exception
  * because the renderer wants hex values in a config object, not classes on
  * elements. Missing under jsdom, where the tokens are not loaded; the renderer
- * then keeps its own defaults, and no test looks at the colours. */
-function themeVariables(): Record<string, string> {
+ * then keeps its own defaults.
+ *
+ * Every frame is `--color-faint`, and that is a measurement, not a taste: the
+ * border token is chrome, where it separates a panel from the page ground, and
+ * against a node fill four points away from it a frame drew at 1.3:1 and did
+ * not appear on screen at all. Faint reads at 4:1 and stays under the arrows'
+ * muted, so the flow remains the loudest thing drawn. A cluster sits on the
+ * page ground instead and reads 3.6:1 there; nothing sits between the two, so
+ * it takes the same value rather than a quieter rung that would draw nothing.
+ * A test asserts the five border keys, but only the screen proves a line: a
+ * declared colour and the painted pixel have disagreed before. */
+export function themeVariables(): Record<string, string> {
   if (typeof getComputedStyle !== "function") return {};
   const style = getComputedStyle(document.documentElement);
   const token = (name: string) => style.getPropertyValue(name).trim();
@@ -202,14 +212,14 @@ function themeVariables(): Record<string, string> {
   };
   set("background", "--color-bg");
   set("primaryColor", "--color-panel");
-  set("primaryBorderColor", "--color-border");
+  set("primaryBorderColor", "--color-faint");
   set("primaryTextColor", "--color-ink");
   set("textColor", "--color-ink");
   set("lineColor", "--color-muted");
   set("signalColor", "--color-muted");
   set("signalTextColor", "--color-ink");
   set("secondaryColor", "--color-active");
-  set("secondaryBorderColor", "--color-border");
+  set("secondaryBorderColor", "--color-faint");
   set("secondaryTextColor", "--color-ink");
   set("tertiaryColor", "--color-ochre-wash");
   set("tertiaryBorderColor", "--color-ochre");
@@ -218,16 +228,16 @@ function themeVariables(): Record<string, string> {
   set("noteBorderColor", "--color-ochre");
   set("noteTextColor", "--color-ink");
   set("actorBkg", "--color-active");
-  set("actorBorder", "--color-border");
+  set("actorBorder", "--color-faint");
   set("actorTextColor", "--color-ink");
   set("actorLineColor", "--color-faint");
   set("labelBoxBkgColor", "--color-panel");
-  set("labelBoxBorderColor", "--color-border");
+  set("labelBoxBorderColor", "--color-faint");
   set("labelTextColor", "--color-ink");
   set("loopTextColor", "--color-ink");
   set("edgeLabelBackground", "--color-panel");
   set("clusterBkg", "--color-bg");
-  set("clusterBorder", "--color-border-soft");
+  set("clusterBorder", "--color-faint");
   set("titleColor", "--color-ink");
   set("attributeBackgroundColorOdd", "--color-panel");
   set("attributeBackgroundColorEven", "--color-active");
