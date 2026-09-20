@@ -1,0 +1,14 @@
+-- The generated-code marker matched "@generated" bare, so two shapes that
+-- name a generator rather than tagging its output were skipped whole: the
+-- TypeScript path alias `from '@generated'`, and "@GeneratedValue" on a JPA
+-- @Id. Hand-written code went unindexed -- 278 files in one repository of the
+-- author's corpus, all 43 entities in another -- and an answer reported the
+-- code it needed as not among its sources.
+--
+-- The verdict needs the body, and Sweep re-applies path-and-size rules only,
+-- over files that are NOT skipped. Nothing else revisits a skipped file: an
+-- incremental poll touches the paths a commit changed, and a repository whose
+-- HEAD has not moved is never read at all. So the rows stay skipped until the
+-- files are read again. Emptying last_sha makes the next poll index every
+-- repository whole; unchanged chunks are re-read, never re-embedded.
+UPDATE repo_state SET last_sha = '';
