@@ -73,7 +73,7 @@ func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	if err != nil {
 		return Map{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	members := map[string][]Repo{}
 	for rows.Next() {
@@ -177,7 +177,7 @@ func (m Map) loadUses(ctx context.Context, db *sql.DB, members map[string][]Repo
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	at := map[string]*Repo{}
 	for project := range members {
@@ -313,7 +313,7 @@ func (m Map) Covered(repos []string) []string {
 	for name, p := range m.projects {
 		whole := len(p.Members) > 0
 		for _, r := range p.Members {
-			if !have[r.Name] && !(r.Library && !m.library[name]) {
+			if !have[r.Name] && (!r.Library || m.library[name]) {
 				whole = false
 				break
 			}

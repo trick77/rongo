@@ -411,7 +411,7 @@ func envFloatOr(key string, fallback float64) float64 {
 
 // envBoolOr reads an on/off setting. Anything unrecognised falls back to the
 // default rather than failing the boot.
-func envBoolOr(key string, fallback bool) bool {
+func envBoolOr(key string, fallback bool) bool { //nolint:unparam // a general on/off reader: every current setting happens to default to true, which is not a property of the function
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
 	case "":
 		return fallback

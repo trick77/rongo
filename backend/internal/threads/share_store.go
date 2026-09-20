@@ -219,7 +219,7 @@ func (s *Store) Shares(ctx context.Context, subject string) ([]Share, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list shares: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Share{}
 	for rows.Next() {
 		sh, err := scanShare(rows)
@@ -241,7 +241,7 @@ func (s *Store) SharedIDs(ctx context.Context, subject string) (map[int64]bool, 
 	if err != nil {
 		return nil, fmt.Errorf("list shared threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[int64]bool{}
 	for rows.Next() {
 		var id int64

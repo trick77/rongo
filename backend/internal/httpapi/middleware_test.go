@@ -17,7 +17,7 @@ import (
 func TestLogging_flushSucceedsThroughTheChain(t *testing.T) {
 	// Given
 	var flushErr error
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("chunk"))
 		flushErr = http.NewResponseController(w).Flush()
@@ -42,7 +42,7 @@ func TestLogging_flushSucceedsThroughTheChain(t *testing.T) {
 func TestLogging_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
 	// Given
 	var asserted bool
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("chunk"))
 		f, ok := w.(http.Flusher)
@@ -73,7 +73,7 @@ func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	status := http.StatusOK
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 	}))
 

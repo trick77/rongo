@@ -76,11 +76,11 @@ func Migrate(db *sql.DB, embedDim int) error {
 			return err
 		}
 		if _, err := tx.Exec(sqlText); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO schema_migrations (version) VALUES (?)`, name); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("record %s: %w", name, err)
 		}
 		if err := tx.Commit(); err != nil {

@@ -31,7 +31,7 @@ func Describe(where string, m *Model, resolved func(processID string) string) st
 	return b.String()
 }
 
-func describeProcess(b *strings.Builder, where string, p *Process, m *Model, resolved func(string) string) {
+func describeProcess(b *strings.Builder, where string, p *Process, m *Model, resolved func(string) string) { //nolint:unparam // m keeps the signature uniform with the other describe helpers and with the recursive call below
 	if p.Parent == nil {
 		fmt.Fprintf(b, "Process %q in %s:\n", p.ID, where)
 	} else {

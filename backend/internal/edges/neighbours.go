@@ -173,7 +173,7 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNeighbours(rows)
 }
 
@@ -193,6 +193,6 @@ func InRepo(ctx context.Context, db *sql.DB, repo string, kind Kind) ([]Neighbou
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNeighbours(rows)
 }

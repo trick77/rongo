@@ -92,7 +92,7 @@ type countingEmbedder struct {
 	sent strings.Builder
 }
 
-func (e *countingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *countingEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	e.calls++
 	e.texts += len(texts)
 	for _, tx := range texts {

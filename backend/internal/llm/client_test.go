@@ -89,7 +89,7 @@ func TestStream_aStreamWithoutAUsageFrameRecordsNothingNotZeros(t *testing.T) {
 	// Given: an upstream that streams tokens and ends without ever reporting
 	// usage, the shape of a dropped connection or an endpoint that ignores
 	// include_usage.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		frame, _ := json.Marshal(map[string]any{
 			"choices": []any{map[string]any{"delta": map[string]any{"content": "half"}}},
@@ -146,7 +146,7 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 		}
 	})
 	t.Run("stream", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
 			writeSSE(w, []string{"a"}, "", 1)
@@ -169,7 +169,7 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 
 func TestComplete_recordsTheCachedAndReasoningSharesAndHowLongItTook(t *testing.T) {
 	// Given an endpoint that reports both details objects, as MiMo does
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],
 			"usage":{"prompt_tokens":3267,"completion_tokens":64,"total_tokens":3331,
@@ -225,7 +225,7 @@ func TestComplete_anEndpointThatSendsNoDetailsLeavesThemAbsentNotZero(t *testing
 
 func TestStream_recordsTheDetailsFromTheTrailingUsageFrame(t *testing.T) {
 	// Given a stream whose trailing usage frame carries the details objects
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
@@ -559,7 +559,7 @@ func writeSSE(w http.ResponseWriter, tokens []string, finishReason string, compl
 
 func streamingUpstream(t *testing.T, tokens []string, finishReason string, completion int) *Client {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		writeSSE(w, tokens, finishReason, completion)
@@ -672,7 +672,7 @@ func TestComplete_aLengthFinishIsAnErrorNamingTheBudget(t *testing.T) {
 // it through untouched rather than re-wrapping the URL back in.
 func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	// Given an endpoint nobody listens on, named with a key in the query
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
 	addr := srv.URL
 	srv.Close()
 	c := mustClient(t, Config{BaseURL: addr + "/v1?key=querysecret"}, nil)

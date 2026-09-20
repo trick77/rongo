@@ -37,7 +37,7 @@ func (s *Store) Sync(ctx context.Context, repo string, commits []gitrepo.Commit)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := insert(ctx, tx, repo, commits); err != nil {
 		return err
 	}
@@ -63,14 +63,14 @@ func dropAbsent(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.
 		var id int64
 		var sha string
 		if err := rows.Scan(&id, &sha); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		if !keep[sha] {
 			gone = append(gone, id)
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range gone {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM commits_fts WHERE rowid = ?`, id); err != nil {
 			return fmt.Errorf("drop commit %d from commits_fts: %w", id, err)
@@ -200,7 +200,7 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	if err != nil {
 		return nil, fmt.Errorf("commit search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Commit{}
 	for rows.Next() {
 		var c Commit
@@ -238,7 +238,7 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	if err != nil {
 		return nil, fmt.Errorf("commits by sha: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	by := map[string]Commit{}
 	for rows.Next() {
 		var c Commit

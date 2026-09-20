@@ -29,7 +29,7 @@ var (
 
 type fixedEmbedder struct{ vec []float32 }
 
-func (e fixedEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		out[i] = e.vec

@@ -89,7 +89,7 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	fileID, err := upsertFile(ctx, tx, repo, path, sha, lang, size, "")
 	if err != nil {
@@ -174,7 +174,7 @@ func (w *Writer) RecordSkipped(ctx context.Context, repo, path, sha, lang, reaso
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	fileID, err := upsertFile(ctx, tx, repo, path, sha, lang, size, reason)
 	if err != nil {
 		return err
@@ -193,7 +193,7 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var fileID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
@@ -245,12 +245,12 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}

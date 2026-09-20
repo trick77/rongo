@@ -107,7 +107,7 @@ func (s *Store) List(ctx context.Context, subject string) ([]Row, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list memories: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Row{}
 	for rows.Next() {
 		var r Row
@@ -203,7 +203,7 @@ func (s *Store) Add(ctx context.Context, subject string, d Directive, sourceMess
 	if err != nil {
 		return out, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var ids []int64
 	out.Replaced, ids, err = deleteRows(ctx, tx, subject, d.Replaces)

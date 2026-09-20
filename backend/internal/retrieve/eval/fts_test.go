@@ -66,7 +66,7 @@ func TestEvalMeasureFTS(t *testing.T) {
 	ranks := make([]map[string]int, len(arms))
 	for i, a := range arms {
 		t.Logf("\n=== %s ===", a.name)
-		m := measureArm(t, ctx, a.name, g, questions, func(q Question) []retrieve.Hit {
+		m := measureArm(ctx, t, a.name, g, questions, func(q Question) []retrieve.Hit {
 			hits, err := a.r.Search(ctx, retrieve.Query{
 				Texts:    expansionTextsOf(t, expansions, q),
 				Code:     expansionCodes[q.Text],

@@ -91,7 +91,7 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 	if err != nil {
 		return nil, fmt.Errorf("ctags temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	name := filepath.Base(path)
 	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
 		return nil, fmt.Errorf("ctags temp file: %w", err)

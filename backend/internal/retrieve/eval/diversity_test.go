@@ -58,7 +58,7 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 		var compAll, compN int
 
 		for _, q := range questions {
-			hits := diverseHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
+			hits := diverseHits(ctx, t, r, expansions, expansionCodes, expansionRepos, q)
 			found := candidatesFound(hits, q)
 
 			switch q.Resolution {
@@ -94,7 +94,7 @@ func TestEvalMeasureDiversitySweep(t *testing.T) {
 // diverseHits searches with the retriever's own decay. It is hitsFor with the
 // diversity cut rather than the routing one, kept separate so a change to the
 // routing arm's depth cannot silently move this measurement.
-func diverseHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
+func diverseHits(ctx context.Context, t *testing.T, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
 	t.Helper()
 	hits, err := r.Search(ctx, retrieve.Query{
 		Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],

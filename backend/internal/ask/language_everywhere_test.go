@@ -125,7 +125,7 @@ func TestAnswer_germanIsSpelledTheSwissWay(t *testing.T) {
 }
 
 func TestTitleAndCandidateNamesAreSpelledTheSwissWay(t *testing.T) {
-	tc := testLLM(t, func(p string) string { return "Anmeldung fuer die Straße" })
+	tc := testLLM(t, func(_ string) string { return "Anmeldung fuer die Straße" })
 	if got := Title(context.Background(), tc, "wie wird angemeldet?", LanguageDE); got != "Anmeldung für die Strasse" {
 		t.Errorf("Title() = %q", got)
 	}

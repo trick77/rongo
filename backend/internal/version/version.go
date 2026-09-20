@@ -10,4 +10,5 @@
 // that Rongo can make mistakes.
 package version
 
+// Version is the build-time version string, stamped via ldflags.
 var Version = "dev"

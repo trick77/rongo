@@ -56,17 +56,17 @@ func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32,
 			var hash string
 			var blob []byte
 			if err := rows.Scan(&hash, &blob); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, fmt.Errorf("embed cache get: %w", err)
 			}
 			vec, err := decodeVector(blob)
 			if err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, fmt.Errorf("embed cache get %s: %w", hash, err)
 			}
 			out[hash] = vec
 		}
-		rows.Close()
+		_ = rows.Close()
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("embed cache get: %w", err)
 		}

@@ -184,7 +184,7 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Hit
 	for rows.Next() {
 		var h Hit
@@ -242,7 +242,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Hit
 	for rows.Next() {
 		var h Hit

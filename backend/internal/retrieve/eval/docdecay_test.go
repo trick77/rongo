@@ -90,7 +90,7 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 
 		var codeHit, codeTop5, docHit int
 		for _, q := range codeLed {
-			rank := rankOfExpected(docHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q), q)
+			rank := rankOfExpected(docHits(ctx, t, r, expansions, expansionCodes, expansionRepos, q), q)
 			if rank > 0 {
 				codeHit++
 				ranks[i][q.Text] = rank
@@ -100,7 +100,7 @@ func TestEvalMeasureDocSweep(t *testing.T) {
 			}
 		}
 		for _, q := range docLed {
-			if rankOfExpected(docHits(t, ctx, r, expansions, expansionCodes, expansionRepos, q), q) > 0 {
+			if rankOfExpected(docHits(ctx, t, r, expansions, expansionCodes, expansionRepos, q), q) > 0 {
 				docHit++
 			}
 		}
@@ -141,7 +141,7 @@ func docLedQuestion(q Question) bool {
 // docHits searches with the retriever's own doc decay, at the routing cut.
 // Kept separate from diverseHits so a change to either measurement's depth
 // cannot move the other one.
-func docHits(t *testing.T, ctx context.Context, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
+func docHits(ctx context.Context, t *testing.T, r *retrieve.Retriever, expansions map[string][]string, codes map[string]string, repos map[string][]string, q Question) []retrieve.Hit {
 	t.Helper()
 	hits, err := r.Search(ctx, retrieve.Query{
 		Texts: expansionTextsOf(t, expansions, q), Code: codes[q.Text],

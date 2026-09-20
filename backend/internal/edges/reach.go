@@ -177,7 +177,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	hit := map[string]bool{}
 	mine := map[string]bool{}
@@ -218,7 +218,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 		for back.Next() {
 			var p, body string
 			if err := back.Scan(&p, &body); err != nil {
-				back.Close()
+				_ = back.Close()
 				return nil, err
 			}
 			if hit[p] {
@@ -231,7 +231,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 				}
 			}
 		}
-		back.Close()
+		_ = back.Close()
 		if err := back.Err(); err != nil {
 			return nil, err
 		}

@@ -80,7 +80,7 @@ func TestEvalMeasureRepoRungSweep(t *testing.T) {
 	var turns []repoRungTurn
 	judgeCalls := 0
 	for _, q := range loadQuestions(t) {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
+		hits, named := hitsFor(ctx, t, r, expansions, expansionCodes, expansionRepos, q)
 		ranked, err := router.Rank(ctx, hits)
 		if err != nil {
 			t.Fatalf("rank %q: %v", q.Text, err)

@@ -185,7 +185,7 @@ func (s *Service) Models(ctx context.Context, repo string) ([]ask.ModelRef, erro
 	if err != nil {
 		return nil, fmt.Errorf("list the process models of %q: %w", repo, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ask.ModelRef
 	for rows.Next() {
 		var r ask.ModelRef

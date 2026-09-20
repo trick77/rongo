@@ -100,7 +100,7 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	listed := make(map[string]bool, len(specs))
 	for _, spec := range specs {
@@ -217,7 +217,7 @@ func (s *StateStore) EmptyStages(ctx context.Context, name string) ([]string, er
 	if err != nil {
 		return nil, fmt.Errorf("empty stages of %s: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var n string
@@ -243,7 +243,7 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := purgeContent(ctx, tx, name); err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func namesTx(ctx context.Context, tx *sql.Tx) ([]Purged, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Purged
 	for rows.Next() {
 		var name, cloneURL string
@@ -355,7 +355,7 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []RepoState
 	for rows.Next() {
@@ -400,7 +400,7 @@ func (s *StateStore) attachStages(ctx context.Context, states []RepoState) error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var repo, name string
 		if err := rows.Scan(&repo, &name); err != nil {
@@ -433,7 +433,7 @@ func (s *StateStore) attachUses(ctx context.Context, states []RepoState) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var repo, uses string
 		if err := rows.Scan(&repo, &uses); err != nil {

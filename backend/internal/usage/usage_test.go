@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRecord_withoutAMeterOnTheContextIsANoop(t *testing.T) {
+func TestRecord_withoutAMeterOnTheContextIsANoop(_ *testing.T) {
 	Record(context.Background(), Call{Step: "answer", Model: "m", Prompt: 1, Completion: 1})
 	// Nothing to assert beyond "did not panic": indexing runs on a context
 	// that carries no meter, and its embeddings must not be counted anywhere.

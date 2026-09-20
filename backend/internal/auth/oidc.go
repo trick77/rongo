@@ -28,6 +28,9 @@ const (
 // day.
 const oidcTransientTTL = 10 * time.Minute
 
+// Errors returned when an OIDC callback fails its anti-forgery checks: the
+// state parameter or the id token's nonce did not match the one issued with
+// the redirect.
 var (
 	ErrInvalidState = errors.New("invalid oidc state")
 	ErrInvalidNonce = errors.New("invalid oidc nonce")

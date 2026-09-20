@@ -14,7 +14,7 @@ import (
 // fused twenty were became the question put back to the reader.
 func TestRankDropsCandidatesFarBehindTheLeader(t *testing.T) {
 	// Given: two serious candidates and a straggler.
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -41,7 +41,7 @@ func TestRankKeepsTheLeaderHoweverWeakItIs(t *testing.T) {
 	// Given: everything scored badly, which is not the same as nothing being
 	// the best. A floor that can empty the list would turn a weak answer into
 	// no answer.
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -65,7 +65,7 @@ func TestRankKeepsTheLeaderHoweverWeakItIs(t *testing.T) {
 func TestRankDropsAModuleThatIsOnlyTestCode(t *testing.T) {
 	// Given: a production module and a module that is nothing but tests, at
 	// comparable scores.
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -90,7 +90,7 @@ func TestRankDropsAModuleThatIsOnlyTestCode(t *testing.T) {
 // answers instead of asking. The test's hits are still gathered from.
 func TestRankDropsATestOnlyLeaderWhenProductionCodeSurvives(t *testing.T) {
 	// Given
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -112,7 +112,7 @@ func TestRankDropsATestOnlyLeaderWhenProductionCodeSurvives(t *testing.T) {
 // corpus has, and someone asking how a thing is tested is entitled to it.
 func TestRankKeepsATestOnlyLeaderWhenNothingElseIsLeft(t *testing.T) {
 	// Given
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -135,7 +135,7 @@ func TestRankKeepsATestOnlyLeaderWhenNothingElseIsLeft(t *testing.T) {
 // the reader would silently get one of the two.
 func TestRankStillAsksWhenEveryCandidateIsATest(t *testing.T) {
 	// Given
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{
@@ -155,7 +155,7 @@ func TestRankStillAsksWhenEveryCandidateIsATest(t *testing.T) {
 func TestRankKeepsAModuleThatMixesTestsAndCode(t *testing.T) {
 	// Given: a module whose hits include a test alongside the code. Dropping
 	// it would lose the mechanism to keep out its harness.
-	r := newTestRouter(t, testLLM(t, func(prompt string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
+	r := newTestRouter(t, testLLM(t, func(_ string) string { return `{"decision":"compose"}` }), testDBWithDeps(t, nil))
 
 	// When
 	got, err := r.Rank(context.Background(), []retrieve.Hit{

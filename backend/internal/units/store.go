@@ -81,7 +81,7 @@ func ImportDeps(ctx context.Context, db *sql.DB, repo string, us []Unit, aliases
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	edges := map[Dep]bool{}
 	for rows.Next() {
 		var p, text string
@@ -129,14 +129,14 @@ func Load(ctx context.Context, db *sql.DB, repo string) ([]Unit, []Dep, error) {
 		var u Unit
 		var tags string
 		if err := rows.Scan(&u.Key, &u.Kind, &u.Name, &tags); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, nil, err
 		}
 		u.Repo = repo
 		u.Tags = strings.Fields(tags)
 		us = append(us, u)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -145,7 +145,7 @@ func Load(ctx context.Context, db *sql.DB, repo string) ([]Unit, []Dep, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer drows.Close()
+	defer func() { _ = drows.Close() }()
 	var deps []Dep
 	for drows.Next() {
 		var d Dep

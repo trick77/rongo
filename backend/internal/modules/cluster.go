@@ -140,7 +140,7 @@ func claimByUnits(ctx context.Context, db *sql.DB, repo string, own map[string]*
 }
 
 // clusterDirs is the directory rule over whatever own still holds.
-func clusterDirs(repo string, own map[string]*group, o Opts) ([]Module, error) {
+func clusterDirs(repo string, own map[string]*group, o Opts) ([]Module, error) { //nolint:unparam // keeps the same (result, error) shape as the other clustering steps its caller chains
 	// Deepest first, so a directory sees everything its children handed up
 	// before it decides whether it is a module.
 	dirs := make([]string, 0, len(own))
@@ -237,7 +237,7 @@ ORDER BY f.path`
 	if err != nil {
 		return nil, fmt.Errorf("load files of %s: %w", repo, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	dirs := map[string]*group{}
 	for rows.Next() {

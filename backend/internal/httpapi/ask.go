@@ -644,7 +644,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if sendClosed {
 			return
 		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
 		_ = rc.Flush()
 	}
 
@@ -1137,7 +1137,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		// A vanished basis is its own message, not the generic turnFailed:
 		// the pipeline never ran, and the truth is that the code the answer
 		// was written from is no longer indexed.
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
+		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
 		_ = rc.Flush()
 		return
 	}
@@ -1172,7 +1172,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
+		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
 		_ = rc.Flush()
 	}
 

@@ -61,7 +61,7 @@ func TestConfigOverridesReplaceTheLaneNamesOnTheWire(t *testing.T) {
 // a quality number measured against a model nobody described. The gate lane
 // is checked the same way.
 func TestConfigOverrideToAnUnknownModelFailsTheBoot(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("an unknown model must never reach the wire")
 	}))
 	t.Cleanup(srv.Close)

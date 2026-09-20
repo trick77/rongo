@@ -27,6 +27,8 @@ import (
 // Kind says which manifest declared a unit and what it is.
 type Kind string
 
+// The module kinds the scanners recognise, by build system and by whether the
+// module is an application or a library.
 const (
 	KindNxApp         Kind = "nx-app"
 	KindNxLib         Kind = "nx-lib"
@@ -125,7 +127,7 @@ type nxProject struct {
 	ImplicitDependencies []string `json:"implicitDependencies"`
 }
 
-func scanNx(repo string, paths []string, has map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
+func scanNx(repo string, paths []string, _ map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
 	byName := map[string]string{}
 	for _, p := range paths {
 		if path.Base(p) != "project.json" || ignoredDir(p) || path.Dir(p) == "." {
@@ -283,7 +285,7 @@ func pomDependencies(body []byte) (pomProject, error) {
 	return proj, err
 }
 
-func scanMaven(repo string, paths []string, has map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
+func scanMaven(repo string, paths []string, _ map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
 	type pom struct {
 		key, artifact, group string
 		requires             []string // groupId:artifactId
@@ -447,7 +449,7 @@ func scanGradle(repo string, paths []string, has map[string]bool, read Read) (un
 
 // --- Go ---------------------------------------------------------------------
 
-func scanGo(repo string, paths []string, read Read) (units []Unit, deps []Dep, skipped []string) {
+func scanGo(repo string, paths []string, read Read) (units []Unit, deps []Dep, skipped []string) { //nolint:unparam // deps is part of the scanner signature every language scanner shares, even where Go resolves none
 	for _, p := range paths {
 		if path.Base(p) != "go.mod" || ignoredDir(p) || path.Dir(p) == "." {
 			// A go.mod at the root is the repository, not a part of it.
