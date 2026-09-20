@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export const RAIL_MIN = 280;
 export const RAIL_MAX = 520;
@@ -43,11 +43,16 @@ function rememberRailWidth(w: number) {
   }
 }
 
-/** The rail's on-screen width, which the CSS clamp may hold below the preference. */
-function renderedWidth(fallback: number): number {
-  const el = document.getElementById("nav-drawer");
-  const w = el?.getBoundingClientRect().width ?? 0;
-  return w > 0 ? w : fallback; // jsdom lays nothing out
+/**
+ * What the CSS clamp on --rail-w resolves the preference to, computed rather than
+ * measured. Measuring #nav-drawer read a box that is still settling right after a
+ * width change, and below lg it is the fixed 300px off-canvas drawer rather than
+ * the rail at all. Mirrors `clamp(280px, pref, min(520px, 40vw))` exactly.
+ */
+export function displayedWidth(preference: number): number {
+  const vw = document.documentElement.clientWidth || 0;
+  const cap = vw > 0 ? Math.min(RAIL_MAX, 0.4 * vw) : RAIL_MAX;
+  return Math.round(Math.max(RAIL_MIN, Math.min(preference, cap)));
 }
 
 /** Write the width to the DOM only. The CSS clamp on --rail-w does the viewport cap. */
@@ -77,7 +82,10 @@ export function RailResizer() {
   const live = useRef(w);
   const moved = useRef(false);
   const active = useRef<number | null>(null); // the pointer that owns the drag
-  const start = useRef({ x: 0, w: 0 }); // grab point, so the edge does not jump
+  // Grab point, so the edge does not jump to the pointer. `w` is where the edge
+  // sits on screen, `pref` the number behind it: they differ under the cap, and a
+  // widening drag has to add its travel to the preference, not to the cap.
+  const start = useRef({ x: 0, w: 0, pref: 0 });
 
   // Layout, not effect: an effect paints after the first frame, so the rail would
   // flash at the default width before the stored preference landed.
@@ -87,23 +95,27 @@ export function RailResizer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // body.resizing pins the cursor and kills selection page-wide, so it must not
+  // outlive the handle: an unmount mid-drag would leave nothing to clear it.
+  useEffect(
+    () => () => {
+      active.current = null;
+      document.body.classList.remove("resizing");
+    },
+    [],
+  );
+
   /**
-   * `next` is a width the user just expressed on screen, so it is the rendered
-   * edge. The preference may be wider: the CSS clamp caps --rail-w at 40vw, and a
-   * narrow window must not quietly spend the user's stored number. Widening past
-   * the cap therefore keeps the larger preference, while any narrowing is taken at
-   * face value because that is a deliberate act.
+   * One number throughout: the PREFERENCE. The 40vw cap is presentation, applied by
+   * the CSS clamp on screen and reported through aria-valuenow, and is never
+   * written back over the preference. Keeping the cap out of the stored and painted
+   * value is what lets a 520 set on a desktop survive a session spent in portrait.
    */
-  function commit(
-    next: number,
-    intent: "narrow" | "widen" | "exact" = "exact",
-  ) {
+  function commit(next: number) {
     live.current = next;
     setW(next);
     paint(next);
-    rememberRailWidth(
-      intent === "widen" ? Math.max(next, storedRailWidth()) : next,
-    );
+    rememberRailWidth(next);
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -120,7 +132,11 @@ export function RailResizer() {
     // Seed from the RENDERED width, not the preference: --rail-w is clamped to 40vw,
     // so on a narrow window the two diverge and an offset drag would spend that
     // difference moving nothing.
-    start.current = { x: e.clientX, w: renderedWidth(live.current) };
+    start.current = {
+      x: e.clientX,
+      w: displayedWidth(live.current),
+      pref: live.current,
+    };
     moved.current = false;
     e.preventDefault();
     // preventDefault suppresses the compatibility mousedown, and with it the focus it
@@ -141,7 +157,10 @@ export function RailResizer() {
     moved.current = true;
     // Offset from the grab point, not the raw clientX: grabbing the handle off-centre
     // would otherwise snap the border to the pointer by up to half the hit area.
-    const next = clampRail(start.current.w + dx);
+    // Travel is applied to the PREFERENCE. Under the cap the preference sits above
+    // the visible edge, and adding dx to the edge instead would silently spend the
+    // difference: a 5px nudge on a capped viewport used to overwrite a stored 520.
+    const next = clampRail(start.current.pref + dx);
     live.current = next;
     setW(next);
     paint(next);
@@ -161,10 +180,7 @@ export function RailResizer() {
     // handle within it to fine-tune would snap the width back to the default.
     if (moved.current) {
       lastDown.current = -Infinity;
-      commit(
-        live.current,
-        live.current >= start.current.w ? "widen" : "narrow",
-      );
+      commit(live.current);
     }
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
@@ -178,9 +194,10 @@ export function RailResizer() {
     // preference above the 40vw cap, stepping the preference would walk a number
     // nobody can see and announce it through aria-valuenow, while the edge stood
     // still for several presses.
-    const from = renderedWidth(live.current);
-    if (e.key === "ArrowLeft") commit(clampRail(from - STEP), "narrow");
-    else if (e.key === "ArrowRight") commit(clampRail(from + STEP), "widen");
+    const shown = displayedWidth(live.current);
+    if (e.key === "ArrowLeft") commit(clampRail(shown - STEP));
+    else if (e.key === "ArrowRight")
+      commit(clampRail(Math.max(live.current, shown) + STEP));
     else if (e.key === "Home") commit(RAIL_DEFAULT);
     else return;
     e.preventDefault();
@@ -191,7 +208,10 @@ export function RailResizer() {
       // Only from lg, where the rail is the layout. Below it the rail is an
       // off-canvas 300px drawer and this would drag an edge nobody can see.
       className="rail-resizer absolute inset-y-0 z-30 hidden w-2.5 cursor-col-resize touch-none select-none lg:block"
-      style={{ left: "calc(var(--rail-w) - 7px)" }}
+      // Starts AT the border rather than 7px inside it: the rail's own scrollbar
+      // is 8px of track down that edge, and overlapping it meant that on a
+      // platform with classic scrollbars, reaching for the thumb resized the rail.
+      style={{ left: "var(--rail-w)" }}
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"
