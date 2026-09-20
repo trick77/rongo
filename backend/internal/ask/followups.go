@@ -85,7 +85,7 @@ func Followups(
 // not this one's.
 func followupsPrompt(question, answer string, audience Audience, sources []Source, scope Scope) string {
 	var b strings.Builder
-	role := "a business analyst"
+	role := "a business analyst, fluent in the business and new to the software"
 	if audience == AudienceDev {
 		role = "a developer"
 	}
