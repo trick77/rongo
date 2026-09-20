@@ -261,7 +261,7 @@ func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) boo
 func (c *Client) OriginURL(ctx context.Context, spec repos.Spec) (string, error) {
 	dir := c.Dir(spec)
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
-		return "", nil //nolint:nilerr // an unborn HEAD counts as a difference: nothing to compare against and everything to record
+		return "", nil //nolint:nilerr // no checkout yet: an empty origin tells the caller to clone, which is what the doc comment above promises
 	}
 	out, err := c.run(ctx, dir, "remote", "get-url", "origin")
 	if err != nil {

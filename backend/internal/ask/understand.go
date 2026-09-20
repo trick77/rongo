@@ -174,7 +174,7 @@ func (n *Names) UnmarshalJSON(b []byte) error {
 	var one string
 	if err := json.Unmarshal(b, &one); err != nil {
 		*n = nil
-		return nil //nolint:nilerr // malformed ids read as none: the rest of the understanding is what the turn needs (see the type comment)
+		return nil //nolint:nilerr // a malformed name list reads as none: the rest of the understanding is what the turn needs (see the type comment)
 	}
 	*n = nil
 	for _, part := range strings.Split(one, ",") {
@@ -201,7 +201,7 @@ func (d *Days) UnmarshalJSON(b []byte) error {
 	f, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		*d = 0
-		return nil //nolint:nilerr // malformed ids read as none: the rest of the understanding is what the turn needs (see the type comment)
+		return nil //nolint:nilerr // a malformed day count reads as zero: the rest of the understanding is what the turn needs (see the type comment)
 	}
 	*d = Days(int(f))
 	return nil
