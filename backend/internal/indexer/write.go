@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/trick77/rongo/internal/edges"
@@ -196,7 +197,7 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 
 	var fileID int64
 	err = tx.QueryRowContext(ctx, `SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {

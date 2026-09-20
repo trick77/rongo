@@ -127,7 +127,7 @@ func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error
 	spec := repos.Spec{Name: repo}
 	kind, size, err := s.git.Object(ctx, spec, sha, path)
 	if err != nil {
-		return File{}, fmt.Errorf("%w: %v", ErrNotFound, err)
+		return File{}, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	if kind != "blob" {
 		// "git show sha:dir" prints a listing and exits 0; it is not a file.
@@ -139,7 +139,7 @@ func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error
 	}
 	body, err := s.git.ReadFile(ctx, spec, sha, path)
 	if err != nil {
-		return File{}, fmt.Errorf("%w: %v", ErrNotFound, err)
+		return File{}, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	// The same verdict the indexer gives (indexer.isBinary): a NUL byte. Not
 	// utf8.Valid — a Latin-1 comment is text the indexer took and cited, and

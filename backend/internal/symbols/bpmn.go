@@ -89,7 +89,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 	dec.Strict = false
 	for {
 		tok, err := dec.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

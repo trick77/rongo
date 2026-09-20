@@ -164,7 +164,7 @@ func (s *OIDCService) ClearTransientCookies(w http.ResponseWriter) {
 }
 
 func (s *OIDCService) transientCookie(name, value string) *http.Cookie {
-	return &http.Cookie{
+	return &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
 		Name:     name,
 		Value:    value,
 		Path:     "/",
@@ -176,7 +176,7 @@ func (s *OIDCService) transientCookie(name, value string) *http.Cookie {
 }
 
 func (s *OIDCService) expiredCookie(name string) *http.Cookie {
-	return &http.Cookie{
+	return &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
 		Name:     name,
 		Value:    "",
 		Path:     "/",

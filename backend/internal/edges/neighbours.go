@@ -61,6 +61,7 @@ func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighb
 	// correlated on t: the pair is the caller's, the same for every row, so
 	// the count is one uncorrelated subquery evaluated once instead of per
 	// candidate row.
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := db.QueryContext(ctx, `
 		SELECT f.repo, f.path, t.kind, t.value, t.line
 		FROM integration_tokens t
@@ -75,7 +76,7 @@ func Holders(ctx context.Context, db *sql.DB, kind Kind, value string) ([]Neighb
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNeighbours(rows)
 }
 
@@ -131,6 +132,7 @@ func NeighboursWith(ctx context.Context, db *sql.DB, repo, path string, m Match)
 			(length(other.value) > length(mine.value) AND substr(other.value, -length(mine.value)) = mine.value)
 			OR (length(mine.value) > length(other.value) AND substr(mine.value, -length(other.value)) = other.value))))`
 	}
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := db.QueryContext(ctx, `
 		SELECT other_f.repo, other_f.path, other.kind, other.value, other.line
 		FROM files me

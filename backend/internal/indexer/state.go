@@ -316,7 +316,10 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	// inert: the semantic lane keeps returning it, and rowid == chunks.id then
 	// resolves it against whatever chunk is written next.
 	for _, mirror := range []string{"chunks_vec", "chunks_fts"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+mirror+` WHERE rowid IN (
+		// mirror is one of the two literals above, never caller input.
+		if _, err := tx.ExecContext(ctx, //nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+			//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
+			`DELETE FROM `+mirror+` WHERE rowid IN (
 			SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?)`,
 			name); err != nil {
 			return fmt.Errorf("purge %s from %s: %w", name, mirror, err)
@@ -344,6 +347,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 // same columns plus the structure and attach the same edges, and keeping two
 // copies of that is how one of them ends up a column behind the other.
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
 		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description, library, image

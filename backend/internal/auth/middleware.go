@@ -114,7 +114,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 // redirect URL: behind a TLS-terminating proxy the process only ever sees
 // plain HTTP, so nothing it can observe about the request says otherwise.
 func SetSessionCookie(w http.ResponseWriter, token string, secure bool, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
 		Name:     SessionCookie,
 		Value:    token,
 		Path:     "/",
@@ -130,7 +130,7 @@ func SetSessionCookie(w http.ResponseWriter, token string, secure bool, ttl time
 // domain and path, so a clear that differs in Path or Secure leaves the
 // original in place and the user stays signed in.
 func ClearSessionCookie(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
 		Name:     SessionCookie,
 		Value:    "",
 		Path:     "/",

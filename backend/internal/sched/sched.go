@@ -15,7 +15,7 @@ func Jittered(d time.Duration) time.Duration {
 		return d
 	}
 	spread := float64(d) * 0.2
-	return time.Duration(float64(d) - spread + rand.Float64()*2*spread)
+	return time.Duration(float64(d) - spread + rand.Float64()*2*spread) //nolint:gosec // jitter and backoff, not a secret: no security property depends on this value
 }
 
 // Sleep waits for d or until ctx is done. It reports false if the context ended,

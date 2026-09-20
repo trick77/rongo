@@ -46,7 +46,7 @@ const (
 var sleep = sched.Sleep
 
 // jitter is the random part of a retry wait, indirect for the same reason.
-var jitter = func() time.Duration { return time.Duration(rand.Int64N(int64(retryPause))) }
+var jitter = func() time.Duration { return time.Duration(rand.Int64N(int64(retryPause))) } //nolint:gosec // jitter and backoff, not a secret: no security property depends on this value
 
 // retriable is a positive list: a failure is retried because it is named here,
 // never because it failed to match something. An error llmwire does not

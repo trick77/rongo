@@ -3,6 +3,7 @@ package edges
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 	"unicode"
@@ -153,7 +154,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 		FROM files f LEFT JOIN chunks c ON c.file_id = f.id
 		WHERE f.repo = ? AND f.path = ?
 		GROUP BY f.id`, repo, path).Scan(&text)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

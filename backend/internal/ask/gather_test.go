@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func seedChunk(t *testing.T, db *sql.DB, path string, ordinal, start, end int, s
 	t.Helper()
 	var fileID int64
 	err := db.QueryRow(`SELECT id FROM files WHERE repo='peeq' AND path=?`, path).Scan(&fileID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', ?, 'sha')`, path)
 		if err != nil {
 			t.Fatalf("seed file: %v", err)
@@ -137,7 +138,7 @@ func seedChunkIn(t *testing.T, db *sql.DB, repo, path string, ordinal, start, en
 	t.Helper()
 	var fileID int64
 	err := db.QueryRow(`SELECT id FROM files WHERE repo=? AND path=?`, repo, path).Scan(&fileID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES (?, ?, 'sha')`, repo, path)
 		if err != nil {
 			t.Fatalf("seed file: %v", err)

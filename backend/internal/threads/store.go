@@ -818,7 +818,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
 		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
@@ -1117,7 +1117,7 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 		JOIN threads t ON t.id = m.thread_id
 		WHERE c.message_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3)`, messageID, subject, anySubject).
 		Scan(&c.ID, &c.ThreadID, &understanding, &c.TooBroad, &c.Answered)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {

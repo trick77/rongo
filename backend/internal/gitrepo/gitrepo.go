@@ -83,7 +83,7 @@ func (c *Client) EnsureCloned(ctx context.Context, spec repos.Spec, token string
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return nil
 	}
-	if err := os.MkdirAll(c.root, 0o755); err != nil {
+	if err := os.MkdirAll(c.root, 0o750); err != nil {
 		return fmt.Errorf("create repository root: %w", err)
 	}
 	if _, err := c.runRemote(ctx, c.root, spec, token, "clone", "--quiet", remoteURL(spec, token), dir); err != nil {
@@ -502,7 +502,7 @@ func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]
 // what makes a citation verifiable later.
 func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
 	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "show", sha+":"+path)...)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "show", sha+":"+path)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -520,7 +520,7 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 // buffers the whole object before returning it.
 func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) (kind string, size int64, err error) {
 	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "cat-file", "--batch-check")...)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "cat-file", "--batch-check")...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(sha + ":" + path + "\n")
 	var stdout, stderr bytes.Buffer
@@ -570,7 +570,7 @@ func (c *Client) runRemote(ctx context.Context, dir string, spec repos.Spec, tok
 }
 
 func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...)
+	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.

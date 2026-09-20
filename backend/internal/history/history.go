@@ -230,6 +230,7 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	for _, sha := range shas {
 		args = append(args, sha)
 	}
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
 		FROM commits c JOIN repo_state r ON r.name = c.repo

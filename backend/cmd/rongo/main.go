@@ -153,7 +153,7 @@ func main() {
 	// hang off it, so a shutdown cancels everything from one place.
 	ctx := context.Background()
 
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o750); err != nil {
 		slog.Error("create data directory", "err", err)
 		os.Exit(1)
 	}
@@ -163,7 +163,7 @@ func main() {
 		slog.Error("open database", "err", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if err := migrateForModel(db); err != nil {
 		slog.Error("prepare database", "err", err)
 		os.Exit(1)

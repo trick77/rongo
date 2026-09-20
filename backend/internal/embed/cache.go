@@ -45,6 +45,7 @@ func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32,
 		for _, h := range batch {
 			args = append(args, h)
 		}
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 		q := `SELECT content_hash, embedding FROM embed_cache WHERE model = ? AND content_hash IN (` +
 			strings.TrimSuffix(strings.Repeat("?,", len(batch)), ",") + `)`
 		rows, err := c.db.QueryContext(ctx, q, args...)
