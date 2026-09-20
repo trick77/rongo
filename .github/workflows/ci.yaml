@@ -43,10 +43,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep universal-ctags
       - run: cd backend && go build ./...
       - run: cd backend && go vet ./...
-      # gofmt is not covered by `go vet`.
+      # gofmt is not covered by `go vet`. Run it from the repo root, not
+      # backend/: hack/strip-comment-lines.go is outside the module, so
+      # `go vet ./...` above never sees it, and patch-coverage.sh runs it on
+      # every build.
       - name: gofmt
         run: |
-          cd backend
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
             echo "::error::These files are not gofmt'd. Run: gofmt -w ."
@@ -59,6 +61,11 @@ jobs:
       - run: make backend-coverage
       - name: Backend patch coverage
         run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+      # The gate scripts decide whether a PR may merge, so they get tested too.
+      - name: Gate self-tests
+        run: |
+          ./hack/coverage-gate.test.sh
+          ./hack/strip-comment-lines.test.sh
 
   ui:
     name: UI (build + test)
