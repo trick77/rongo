@@ -683,7 +683,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	if err != nil {
 		return Usage{}, 0, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// llmwire drains the stream and hands back what it assembled, error or
 	// not. Recorded even when the read failed, as long as a usage frame

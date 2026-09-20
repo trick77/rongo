@@ -163,7 +163,7 @@ type rawStage struct {
 // Load reads and validates the repository list, returning the first problem it
 // finds rather than indexing a half-valid list.
 func Load(path string) ([]Spec, error) {
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // path is the operator-supplied repository list from configuration, not request data
 	if err != nil {
 		return nil, fmt.Errorf("read repository list %s: %w", path, err)
 	}

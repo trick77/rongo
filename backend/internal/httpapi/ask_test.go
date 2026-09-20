@@ -946,18 +946,6 @@ func TestAsk_withoutAPipelineAnswers503(t *testing.T) {
 	}
 }
 
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
-}
-
 // gateCalls is what a turn pays for before it decides how to end: the
 // understanding gate and the query embedding.
 // gateCalls is what a fake turn paid for: one priced call, as llmwire

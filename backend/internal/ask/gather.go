@@ -451,7 +451,7 @@ func (g *Gatherer) wholeFile(ctx context.Context, h retrieve.Hit) ([]Source, err
 	if err != nil {
 		return nil, fmt.Errorf("read the file of %s/%s: %w", h.Repo, h.Path, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var all []Source
 	total := 0
 	for rows.Next() {
@@ -617,6 +617,7 @@ func (g *Gatherer) definers(ctx context.Context, names []string, home, notRepo, 
 	// nowhere else. Crossing stays possible, and stays the point: a name this
 	// repository does not define at all is genuine composition — peeq calling
 	// into go-sqlite3 — and still travels.
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	q := `
 -- Every count here is over ENABLED repositories only. Filtering just the final
 -- join would keep a parked repository out of the result while still letting it
@@ -676,7 +677,7 @@ ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 	if err != nil {
 		return nil, fmt.Errorf("look up definers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Source
 	for rows.Next() {

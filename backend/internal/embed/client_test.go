@@ -19,7 +19,7 @@ import (
 
 func TestEmbed_recordsPromptTokensIntoTheContextsMeter(t *testing.T) {
 	// Given: the endpoint reports usage, as OpenAI-compatible ones do.
-	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
+	srv, _ := recordingServer(t, func(_ []string) (int, any) {
 		return 200, map[string]any{
 			"data":  []respData{{Index: 0, Embedding: vecOf(1, Dim())}},
 			"usage": map[string]any{"prompt_tokens": 9, "total_tokens": 9},
@@ -109,7 +109,7 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 	// Given: the endpoint answers OUT OF ORDER, which is allowed by the API and
 	// is the whole point of this test. A fake that answers in order would pass
 	// whether or not the client realigns, so it would test nothing.
-	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
+	srv, seen := recordingServer(t, func(_ []string) (int, any) {
 		return 200, map[string]any{"data": []respData{
 			{Index: 2, Embedding: vecOf(3, Dim())},
 			{Index: 0, Embedding: vecOf(1, Dim())},
@@ -145,7 +145,7 @@ func TestEmbed_returnsVectorsInInputOrder(t *testing.T) {
 
 func TestEmbed_wrongDimensionIsAnError(t *testing.T) {
 	// Given: vec0 would reject this later, at a point far from the cause.
-	srv, _ := recordingServer(t, func(inputs []string) (int, any) {
+	srv, _ := recordingServer(t, func(_ []string) (int, any) {
 		return 200, map[string]any{"data": []respData{{Index: 0, Embedding: vecOf(1, 3)}}}
 	})
 	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
@@ -193,7 +193,7 @@ func TestEmbed_aTransportErrorNeverCarriesTheURL(t *testing.T) {
 func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 	// Given: an endpoint that never answers.
 	block := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		<-block
 	}))
 	defer srv.Close()
@@ -222,7 +222,7 @@ func TestEmbed_contextCancellationReturnsPromptly(t *testing.T) {
 
 func TestEmbed_emptyInputMakesNoRequest(t *testing.T) {
 	// Given
-	srv, seen := recordingServer(t, func(inputs []string) (int, any) {
+	srv, seen := recordingServer(t, func(_ []string) (int, any) {
 		return 200, map[string]any{"data": []respData{}}
 	})
 	testee := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())

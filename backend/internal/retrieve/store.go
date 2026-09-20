@@ -175,15 +175,16 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	// runs inside, and which of several equidistant chunks it keeps at the k
 	// boundary is its decision — a chunk cut there is not reachable from here
 	// whatever this clause says.
-	q := `SELECT * FROM (` + inner + `) WHERE ? <= 0 OR distance < ?
+	const outerTail = `) WHERE ? <= 0 OR distance < ?
 		ORDER BY distance, repo, path, start_line, ordinal`
+	q := `SELECT * FROM (` + inner + outerTail //nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
 	args = append(args, maxDistance, maxDistance)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Hit
 	for rows.Next() {
 		var h Hit
@@ -219,6 +220,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	if n <= 0 {
 		n = 10
 	}
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	q := `SELECT ` + hitColumns + `
 		FROM chunks_fts x` + fmt.Sprintf(hitJoins, "x") + `
 		WHERE x.raw_text MATCH ?`
@@ -240,7 +242,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Hit
 	for rows.Next() {
 		var h Hit

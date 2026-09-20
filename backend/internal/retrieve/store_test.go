@@ -3,6 +3,7 @@ package retrieve
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -28,7 +29,7 @@ var (
 
 type fixedEmbedder struct{ vec []float32 }
 
-func (e fixedEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		out[i] = e.vec
@@ -65,7 +66,7 @@ func addChunk(t *testing.T, db *sql.DB, repo, path, symbol, raw string, vec []fl
 	t.Helper()
 	var fileID int64
 	err := db.QueryRow(`SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		res, err := db.Exec(`INSERT INTO files (repo, path, sha, lang) VALUES (?,?,?,?)`, repo, path, "sha", "java")
 		if err != nil {
 			t.Fatalf("insert file: %v", err)
@@ -100,7 +101,7 @@ func addChunkAt(t *testing.T, db *sql.DB, repo, path string, ordinal, start, end
 	t.Helper()
 	var fileID int64
 	err := db.QueryRow(`SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		res, err := db.Exec(`INSERT INTO files (repo, path, sha, lang) VALUES (?,?,?,?)`, repo, path, "sha", "java")
 		if err != nil {
 			t.Fatalf("insert file: %v", err)

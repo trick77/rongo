@@ -546,7 +546,7 @@ type armMetrics struct {
 // measureArm runs one arm over the questions and logs a line per question.
 // search is the caller's own query shape — the arms differ in what they search
 // with, never in how the result is read.
-func measureArm(t *testing.T, ctx context.Context, name string, g *ask.Gatherer,
+func measureArm(ctx context.Context, t *testing.T, name string, g *ask.Gatherer,
 	questions []Question, search func(Question) []retrieve.Hit) armMetrics {
 	t.Helper()
 	m := armMetrics{ranks: map[string]int{}}

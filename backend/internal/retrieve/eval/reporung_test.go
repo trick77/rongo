@@ -61,7 +61,7 @@ func TestEvalMeasureRepoRungShape(t *testing.T) {
 
 	var rows []row
 	for _, q := range loadQuestions(t) {
-		hits, named := hitsFor(t, ctx, r, expansions, expansionCodes, expansionRepos, q)
+		hits, named := hitsFor(ctx, t, r, expansions, expansionCodes, expansionRepos, q)
 		if len(named) >= 1 {
 			continue // the named-repo rung settles these before the rung under test
 		}

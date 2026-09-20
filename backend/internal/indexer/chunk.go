@@ -105,7 +105,7 @@ var commentPrefixes = []string{"//", "/*", "*", "#", "--", ";", "%", "'''", `"""
 // same code on two branches embeds identically and must share its cache entry,
 // otherwise adding a second branch entry re-embeds a whole repository. The
 // branch belongs to the citation, which the write path stores alongside.
-func ChunkFile(repo, branch, path string, body []byte, syms []symbols.Symbol, opts ChunkOptions) []Chunk {
+func ChunkFile(repo, _, path string, body []byte, syms []symbols.Symbol, opts ChunkOptions) []Chunk {
 	if opts.TargetTokens <= 0 {
 		opts = DefaultChunkOptions()
 	}

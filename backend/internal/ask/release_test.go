@@ -301,7 +301,7 @@ func TestReleaseLines_theRefusalMatrix(t *testing.T) {
 			rel.head["shop-backend"] = RepoHead{SHA: "c2", Remote: "c4", Branch: "main"}
 		}, NoteNotIndexed, "", 0},
 		// Refused, but the direction and the true size still stand.
-		{"a commit the lane never recorded", func(rel *fakeReleaser, h *releaseHistory) {
+		{"a commit the lane never recorded", func(_ *fakeReleaser, h *releaseHistory) {
 			delete(h.rows, "shop-backend/c2")
 		}, NoteUnrecorded, "test", 2},
 		{"one tag spelled two ways", func(rel *fakeReleaser, _ *releaseHistory) {

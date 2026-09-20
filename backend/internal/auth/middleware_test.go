@@ -9,7 +9,7 @@ import (
 
 // protected reports whether the wrapped handler was reached.
 func protected(reached *bool) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		*reached = true
 		w.WriteHeader(http.StatusOK)
 	})

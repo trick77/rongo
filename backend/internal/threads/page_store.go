@@ -92,7 +92,7 @@ func (s *Store) ListPage(ctx context.Context, subject string, opts ListOptions) 
 	if err != nil {
 		return ThreadPage{}, fmt.Errorf("list threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items, err := scanThreads(rows)
 	if err != nil {
 		return ThreadPage{}, err
@@ -120,7 +120,7 @@ func (s *Store) Get(ctx context.Context, subject string, threadID int64) (Thread
 	if err != nil {
 		return Thread{}, false, fmt.Errorf("get thread: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items, err := scanThreads(rows)
 	if err != nil || len(items) == 0 {
 		return Thread{}, false, err
@@ -173,7 +173,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 		return nil, fmt.Errorf("search titles: %w", err)
 	}
 	byTitle, err := scanThreads(rows)
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}
-	defer content.Close()
+	defer func() { _ = content.Close() }()
 	seen := map[int64]bool{}
 	for content.Next() {
 		var (

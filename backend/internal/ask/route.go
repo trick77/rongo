@@ -1253,7 +1253,7 @@ type nameResult struct {
 // is what lets the Analyst's rung refuse a card carrying a path.
 //
 // The Analyst's prompt carries nameBA, the Developer's is unchanged.
-func (r *Router) name(ctx context.Context, question string, audience Audience, lang Language, cs []Candidate) ([]Candidate, bool, error) {
+func (r *Router) name(ctx context.Context, question string, audience Audience, lang Language, cs []Candidate) ([]Candidate, bool, error) { //nolint:unparam // the error is part of the shape the other routing steps share; both callers already handle it
 	name := languageName(lang)
 	system := fmt.Sprintf(nameSystem, name)
 	if audience != AudienceDev {

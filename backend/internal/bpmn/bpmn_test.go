@@ -119,6 +119,9 @@ func TestDescribeRendersOneLinePerNode(t *testing.T) {
 	// Walk order, not file order: the start event first, the boundary event
 	// right after the node it interrupts, the end events last.
 	idx := func(s string) int { return strings.Index(got, s) }
+	// Kept as a negated chain of <: the ordering it asserts reads directly this
+	// way, and De Morgan would turn it into five >= terms that do not.
+	//nolint:staticcheck // QF1001: see above
 	if !(idx("- startEvent StartEvent_1") < idx("- Validate order") &&
 		idx("- Validate order") < idx("- Charge payment (subProcess)") &&
 		idx("- Charge payment (subProcess)") < idx("- Payment declined") &&

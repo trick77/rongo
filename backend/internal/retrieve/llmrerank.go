@@ -152,7 +152,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &reply); err != nil {
 		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", llmwire.Truncate(out, 120))
-		return cut(hits, k), nil
+		return cut(hits, k), nil //nolint:nilerr // a failed or unparseable rerank keeps the fused order rather than failing retrieval (logged above)
 	}
 	taken := make([]bool, len(hits))
 	ranked := make([]Hit, 0, len(hits))

@@ -20,6 +20,7 @@ import (
 // "explain that as a dev" a second generation rather than a second search.
 type Audience string
 
+// The audiences an answer can be written for.
 const (
 	AudienceBA  Audience = "ba"
 	AudienceDev Audience = "dev"
@@ -32,6 +33,7 @@ const (
 // falls back to English, the same way an unknown audience falls back to BA.
 type Language string
 
+// The languages an answer can be written in.
 const (
 	LanguageEN Language = "en"
 	LanguageDE Language = "de"

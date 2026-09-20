@@ -409,25 +409,9 @@ func envFloatOr(key string, fallback float64) float64 {
 	return f
 }
 
-// envBool reads a mandatory on/off setting. Empty or anything but a boolean
-// word is an error, not a default: the setting exists because the answer
-// depends on which host is behind the endpoint, and nobody but the operator
-// knows that.
-func envBool(key string) (bool, error) {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return false, fmt.Errorf("%s is required: true or false", key)
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return false, fmt.Errorf("%s=%q is not a boolean; want true or false", key, v)
-	}
-	return b, nil
-}
-
 // envBoolOr reads an on/off setting. Anything unrecognised falls back to the
 // default rather than failing the boot.
-func envBoolOr(key string, fallback bool) bool {
+func envBoolOr(key string, fallback bool) bool { //nolint:unparam // a general on/off reader: every current setting happens to default to true, which is not a property of the function
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
 	case "":
 		return fallback

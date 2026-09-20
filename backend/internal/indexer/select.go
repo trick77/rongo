@@ -13,6 +13,7 @@ import (
 // Decision is what the selector concluded about one file.
 type Decision string
 
+// The verdicts the selector can reach about a file.
 const (
 	Include       Decision = "include"
 	SkipVendored  Decision = "vendored"

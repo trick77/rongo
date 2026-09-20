@@ -16,7 +16,7 @@ import (
 func failThenStream(t *testing.T, tokens ...string) (*llm.Client, *atomic.Int32) {
 	t.Helper()
 	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
 			http.Error(w, `{"error":{"message":"upstream is having a moment"}}`, http.StatusBadGateway)
 			return
@@ -33,7 +33,7 @@ func failThenStream(t *testing.T, tokens ...string) (*llm.Client, *atomic.Int32)
 func breakAfter(t *testing.T, tokens ...string) (*llm.Client, *atomic.Int32) {
 	t.Helper()
 	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeDeltas(w, tokens)

@@ -15,6 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      # Pinned so CI runs the same version developers run locally. The family
+      # moved off v2.11 because its G706 log-injection check went red here on
+      # findings that did not reproduce locally; the linter version is a
+      # free-form input, so Dependabot cannot keep this honest.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13
+          working-directory: backend
+
   backend:
     name: Backend (build + test)
     runs-on: ubuntu-latest
@@ -34,6 +53,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # coverage-gate.test.sh exercises the gate's ui branch, which parses the
+      # vitest summary with node, so the backend job needs a node too.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
       - run: pip install diff-cover==10.3.0
       # universal-ctags and ripgrep are not test fixtures: the indexer shells
       # out to both, and rongo verifies at startup that ctags is the universal
@@ -58,14 +82,17 @@ jobs:
       # The floor gate (inside make backend-coverage) runs before the patch
       # gate: when a PR drops the project below the floor the absolute number
       # is the more actionable failure.
-      - run: make backend-coverage
-      - name: Backend patch coverage
-        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
-      # The gate scripts decide whether a PR may merge, so they get tested too.
+      # The gate scripts decide whether a PR may merge, so they run before the
+      # gates themselves: a fail-closed regression in coverage-gate.sh aborts
+      # the job at the gate step, and a self-test after it would never run to
+      # explain why.
       - name: Gate self-tests
         run: |
           ./hack/coverage-gate.test.sh
           ./hack/strip-comment-lines.test.sh
+      - run: make backend-coverage
+      - name: Backend patch coverage
+        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
 
   ui:
     name: UI (build + test)

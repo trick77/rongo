@@ -407,7 +407,7 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 	for rows.Next() {
 		var f indexed
 		if err := rows.Scan(&f.path, &f.sha, &f.lang, &f.size); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, Counts{}, err
 		}
 		if d, _ := ix.selector.selectByPath(f.path, f.size); d != Include {
@@ -415,7 +415,7 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 			hits = append(hits, f)
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, Counts{}, err
 	}

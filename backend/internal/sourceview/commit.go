@@ -76,7 +76,7 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 	}
 	d, err := s.commits.Show(ctx, repos.Spec{Name: repo}, sha)
 	if err != nil {
-		return Commit{}, fmt.Errorf("%w: %v", ErrNotFound, err)
+		return Commit{}, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	// UTC like the citation's committed_at, or the chip's day and the view's
 	// could differ across a midnight.

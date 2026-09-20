@@ -441,7 +441,7 @@ type flowTrajectory struct {
 	Err      error
 }
 
-func runFlowQuestion(ctx context.Context, t *testing.T, env *flowEnv, wire *llmwire.Client, deployment string, q flowQuestion) flowTrajectory {
+func runFlowQuestion(ctx context.Context, _ *testing.T, env *flowEnv, wire *llmwire.Client, deployment string, q flowQuestion) flowTrajectory {
 	env.seen = map[flowPart]bool{}
 	traj := flowTrajectory{Question: q.Text}
 	msgs := []llmwire.Message{

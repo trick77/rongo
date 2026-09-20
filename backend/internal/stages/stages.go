@@ -64,7 +64,7 @@ func Load(ctx context.Context, db *sql.DB) (Set, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load stages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out Set
 	for rows.Next() {
 		var s Stage

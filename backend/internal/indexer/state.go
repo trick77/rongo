@@ -100,7 +100,7 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	listed := make(map[string]bool, len(specs))
 	for _, spec := range specs {
@@ -217,7 +217,7 @@ func (s *StateStore) EmptyStages(ctx context.Context, name string) ([]string, er
 	if err != nil {
 		return nil, fmt.Errorf("empty stages of %s: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var n string
@@ -243,7 +243,7 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := purgeContent(ctx, tx, name); err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func namesTx(ctx context.Context, tx *sql.Tx) ([]Purged, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Purged
 	for rows.Next() {
 		var name, cloneURL string
@@ -316,7 +316,10 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	// inert: the semantic lane keeps returning it, and rowid == chunks.id then
 	// resolves it against whatever chunk is written next.
 	for _, mirror := range []string{"chunks_vec", "chunks_fts"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+mirror+` WHERE rowid IN (
+		// mirror is one of the two literals above, never caller input.
+		if _, err := tx.ExecContext(ctx, //nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+			//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
+			`DELETE FROM `+mirror+` WHERE rowid IN (
 			SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?)`,
 			name); err != nil {
 			return fmt.Errorf("purge %s from %s: %w", name, mirror, err)
@@ -344,6 +347,7 @@ func (s *StateStore) All(ctx context.Context) ([]RepoState, error) {
 // same columns plus the structure and attach the same edges, and keeping two
 // copies of that is how one of them ends up a column behind the other.
 func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, error) {
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
 		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description, library, image
@@ -351,7 +355,7 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []RepoState
 	for rows.Next() {
@@ -396,7 +400,7 @@ func (s *StateStore) attachStages(ctx context.Context, states []RepoState) error
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var repo, name string
 		if err := rows.Scan(&repo, &name); err != nil {
@@ -429,7 +433,7 @@ func (s *StateStore) attachUses(ctx context.Context, states []RepoState) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var repo, uses string
 		if err := rows.Scan(&repo, &uses); err != nil {

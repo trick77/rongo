@@ -18,6 +18,7 @@ package bpmn
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -100,7 +101,7 @@ func Parse(body []byte) (*Model, error) {
 	dec.Strict = false
 	for {
 		tok, err := dec.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -206,7 +207,7 @@ func Parse(body []byte) (*Model, error) {
 	// process, so at the time a boundary event is read its errorRef names a
 	// definition the decoder has not met yet. Read eagerly, every real export
 	// listed "error Error_0k3x1" instead of the name.
-	resolve := func(p *Process) {}
+	resolve := func(_ *Process) {}
 	resolve = func(p *Process) {
 		for _, n := range p.Nodes {
 			n.Error = firstOf(m.Errors[n.Error], n.Error)

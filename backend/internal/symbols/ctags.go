@@ -91,7 +91,7 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 	if err != nil {
 		return nil, fmt.Errorf("ctags temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	name := filepath.Base(path)
 	if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
 		return nil, fmt.Errorf("ctags temp file: %w", err)
@@ -122,7 +122,7 @@ func (e *Extractor) Extract(ctx context.Context, path string, body []byte) ([]Sy
 	// one commit, and search hits moved with them. The base name is what the
 	// language is inferred from anyway, so ctags sees exactly what it needs
 	// and nothing that changes per run.
-	cmd := exec.CommandContext(ctx, e.ctags,
+	cmd := exec.CommandContext(ctx, e.ctags, //nolint:gosec // argv with no shell: the ctags binary from config and a base name derived from the indexed file
 		"--output-format=json", "--fields=+neKzS", "--sort=no", "-f", "-", arg)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer

@@ -221,6 +221,7 @@ const anySubject = "\x00 share"
 // instead, so a turn asked after the link was made is not in the result.
 const noCeiling = int64(1<<63 - 1)
 
+// Store is the thread and message store, backed by the messages tables.
 type Store struct {
 	db *sql.DB
 }
@@ -426,7 +427,7 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `UPDATE messages SET answer = ? WHERE id = ?`, answer, messageID); err != nil {
 		return fmt.Errorf("store answer: %w", err)
@@ -443,10 +444,6 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 	return tx.Commit()
 }
 
-// SaveUsage records the paid calls one turn made. Called on EVERY way a turn
-// ends — answered, asked back, found nothing, failed — because the gates ran
-// either way and a thread total that skipped them would be a lie. Nothing to
-// save writes nothing.
 // SetScope records what the turn's question said about repositories, once the
 // index has been asked which of those names it carries. Written before the
 // answer, because a turn that ends by asking or by failing has a scope too.
@@ -599,6 +596,10 @@ func scanScope(blob string) ask.Scope {
 	return sc
 }
 
+// SaveUsage records the paid calls one turn made. Called on EVERY way a turn
+// ends — answered, asked back, found nothing, failed — because the gates ran
+// either way and a thread total that skipped them would be a lie. Nothing to
+// save writes nothing.
 func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error {
 	if len(calls) == 0 {
 		return nil
@@ -607,7 +608,7 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for _, c := range calls {
 		// nullable() rather than the ints themselves: a call whose reply
 		// carried no details object stores NULL, and reads back absent. Zero
@@ -629,7 +630,7 @@ func (s *Store) calls(ctx context.Context, messageID int64) ([]usage.Call, error
 	if err != nil {
 		return nil, fmt.Errorf("read usage: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []usage.Call{}
 	for rows.Next() {
 		var c usage.Call
@@ -691,7 +692,7 @@ func (s *Store) List(ctx context.Context, subject string) ([]Thread, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out, err := scanThreads(rows)
 	if err != nil {
 		return nil, err
@@ -730,7 +731,7 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 	if err != nil {
 		return nil, fmt.Errorf("read thread scope: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var blob string
 		if err := rows.Scan(&blob); err != nil {
@@ -818,7 +819,7 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
 		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
@@ -884,7 +885,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	if err != nil {
 		return nil, fmt.Errorf("read thread: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := []Message{}
 	for rows.Next() {
@@ -944,7 +945,7 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 	if err != nil {
 		return nil, fmt.Errorf("read citations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []ask.Citation{}
 	for rows.Next() {
 		var c ask.Citation
@@ -1054,7 +1055,7 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO clarifications (message_id, understanding, too_broad) VALUES (?, ?, ?)`,
@@ -1117,7 +1118,7 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 		JOIN threads t ON t.id = m.thread_id
 		WHERE c.message_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3)`, messageID, subject, anySubject).
 		Scan(&c.ID, &c.ThreadID, &understanding, &c.TooBroad, &c.Answered)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -1135,7 +1136,7 @@ func (s *Store) Clarification(ctx context.Context, subject string, messageID int
 	if err != nil {
 		return nil, fmt.Errorf("read candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	c.Candidates = []Candidate{}
 	for rows.Next() {
 		var cand Candidate
@@ -1229,7 +1230,7 @@ func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, src := range sources {
 		// One id per row: a commit source has no chunk, a chunk no commit.
@@ -1287,7 +1288,7 @@ func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (s
 	if err != nil {
 		return nil, 0, fmt.Errorf("read sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []ask.Source{}
 	for rows.Next() {
 		var src ask.Source
@@ -1323,7 +1324,7 @@ func (s *Store) commitSources(ctx context.Context, subject string, messageID int
 	if err != nil {
 		return nil, fmt.Errorf("read commit sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []ask.Source{}
 	for rows.Next() {
 		src := ask.Source{Kind: ask.SourceCommit}
