@@ -22,6 +22,7 @@ import Diagram, {
   diagramTitle,
   draw,
   parseDiagram,
+  themeVariables,
   type FlowSpec,
   type SequenceSpec,
 } from "./diagram";
@@ -220,5 +221,52 @@ describe("Diagram", () => {
     fireEvent.click(getByLabelText("State diagram: download SVG"));
     expect(written).toBe("rongo-state-diagram.svg");
     click.mockRestore();
+  });
+});
+
+describe("themeVariables", () => {
+  // The tokens live in index.css, which jsdom does not load, so the test sets
+  // the handful it asserts on directly. An inline custom property resolves
+  // through getComputedStyle, which is the path themeVariables reads.
+  const tokens: Record<string, string> = {
+    "--color-panel": "#1b1b1a",
+    "--color-border": "#323230",
+    "--color-border-soft": "#2a2a28",
+    "--color-faint": "#6f6d66",
+    "--color-muted": "#9c9a92",
+  };
+
+  beforeEach(() => {
+    for (const [name, value] of Object.entries(tokens)) {
+      document.documentElement.style.setProperty(name, value);
+    }
+    return () => {
+      for (const name of Object.keys(tokens)) {
+        document.documentElement.style.removeProperty(name);
+      }
+    };
+  });
+
+  // A frame is only a frame if it reads against the fill it sits on. The border
+  // token is a chrome value, where it separates a panel from the page ground;
+  // against a node fill four points away from it, it draws nothing.
+  it("draws every frame in a colour that reads on the fill", () => {
+    const vars = themeVariables();
+    for (const key of [
+      "primaryBorderColor",
+      "secondaryBorderColor",
+      "actorBorder",
+      "labelBoxBorderColor",
+      "clusterBorder",
+    ]) {
+      expect(vars[key]).toBe(tokens["--color-faint"]);
+    }
+  });
+
+  // Quieter than the arrows, so the flow stays the loudest thing drawn.
+  it("keeps the frames quieter than the lines between them", () => {
+    const vars = themeVariables();
+    expect(vars.lineColor).toBe(tokens["--color-muted"]);
+    expect(vars.primaryBorderColor).not.toBe(vars.lineColor);
   });
 });
