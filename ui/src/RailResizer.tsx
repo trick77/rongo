@@ -134,7 +134,12 @@ export function RailResizer() {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (active.current !== null) return; // a drag is running; ignore a second finger
     const now = performance.now();
-    if (now - lastDown.current < DOUBLE_TAP_MS) {
+    // Touch only. The reset exists because a finger has no other way back to the
+    // default: no arrow keys, no Home. A mouse has both, and letting it reset made
+    // an ordinary double-click on the border throw a stored width away -- the strip
+    // straddles the border by 3px, so that click does not even have to be aimed at
+    // the handle.
+    if (e.pointerType !== "mouse" && now - lastDown.current < DOUBLE_TAP_MS) {
       lastDown.current = -Infinity;
       commit(RAIL_DEFAULT);
       return;
@@ -225,12 +230,16 @@ export function RailResizer() {
       // Only from lg, where the rail is the layout. Below it the rail is an
       // off-canvas 300px drawer and this would drag an edge nobody can see.
       className="rail-resizer absolute inset-y-0 z-30 hidden w-2.5 cursor-col-resize touch-none select-none lg:block"
-      // 1px inside the border, not 7px: the rail's own scrollbar is 8px of track
-      // down that edge, and covering it meant that on a platform with classic
-      // scrollbars reaching for the thumb resized the rail instead of scrolling.
-      // The single pixel keeps the border itself grabbable, since the visible line
-      // is what people aim at.
-      style={{ left: "calc(var(--rail-w) - 1px)" }}
+      // 7px inside the border, so only 3px of the strip hangs over the content.
+      // It does overlap the rail's scrollbar, and an earlier pass moved it out to
+      // 1px to stop that -- which put 9 of its 10px over the content instead,
+      // where a double-click 2px past the border hit the double-tap branch and
+      // silently reset a stored width to the default. Measured, the scrollbar is
+      // 12px and this covers its outer half, leaving the rest of the thumb
+      // grabbable at full height with the wheel untouched. Sharing the scrollbar
+      // is much cheaper than shadowing the content, which is how resizable panes
+      // elsewhere on the web take the same collision.
+      style={{ left: "calc(var(--rail-w) - 7px)" }}
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize sidebar"

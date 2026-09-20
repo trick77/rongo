@@ -518,6 +518,56 @@ describe("RailResizer", () => {
     await waitFor(() => expect(valuenow()).toBe(520));
   });
 
+  // Regression: the handle was moved to 1px inside the border to stop it covering
+  // the scrollbar, which put 9 of its 10px over the content. A double-click 2px
+  // past the border then hit the double-tap branch and silently reset a stored
+  // width to the default. The strip has to stay mostly on the rail's side.
+  it("keeps all but a few pixels of the strip off the content", () => {
+    render(<RailResizer />);
+    const left = handle().style.left;
+    // calc(var(--rail-w) - Npx): N is how far the strip reaches back over the
+    // rail, and 10px wide means 10 - N hangs over the content.
+    const inset = Number(/-\s*(\d+)px/.exec(left)?.[1]);
+    expect(inset).toBeGreaterThanOrEqual(7); // at most 3px over the content
+  });
+
+  // The reset is the tablet's only way back to the default, so it is a TOUCH
+  // gesture. A mouse has the arrow keys and Home, and letting it reset meant an
+  // ordinary double-click near the border threw a stored width away: the strip
+  // straddles the border, so the click need not even be aimed at the handle.
+  it("does not reset on a mouse double-click", () => {
+    const clock = vi.spyOn(performance, "now");
+    localStorage.setItem("rongo.rail-width", "480");
+    render(<RailResizer />);
+    const h = handle();
+
+    clock.mockReturnValue(1000);
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    clock.mockReturnValue(1100); // well inside the tap window
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+
+    expect(valuenow()).toBe(480); // the rail width survives the double-click
+    expect(localStorage.getItem("rongo.rail-width")).toBe("480");
+  });
+
+  // A finger still gets its reset, which is the whole reason the gesture exists.
+  it("still resets on a touch double tap", () => {
+    const clock = vi.spyOn(performance, "now");
+    localStorage.setItem("rongo.rail-width", "480");
+    render(<RailResizer />);
+    const h = handle();
+
+    clock.mockReturnValue(1000);
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "touch" });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    clock.mockReturnValue(1150);
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "touch" });
+
+    expect(valuenow()).toBe(RAIL_DEFAULT);
+  });
+
   // Review finding: a cancel before the slop left the double-tap window armed, so
   // the next deliberate grab inside 350ms was swallowed as a reset.
   it("does not let a cancelled tap arm the double-tap reset", () => {
