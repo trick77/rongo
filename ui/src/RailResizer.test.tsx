@@ -535,6 +535,24 @@ describe("RailResizer", () => {
   // gesture. A mouse has the arrow keys and Home, and letting it reset meant an
   // ordinary double-click near the border threw a stored width away: the strip
   // straddles the border, so the click need not even be aimed at the handle.
+  // A pen is not a finger: the device it comes on has a keyboard, so it has the
+  // arrow keys and Home and never needed the gesture.
+  it("does not reset on a pen double-tap", () => {
+    const clock = vi.spyOn(performance, "now");
+    localStorage.setItem("rongo.rail-width", "480");
+    render(<RailResizer />);
+    const h = handle();
+
+    clock.mockReturnValue(1000);
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "pen" });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    clock.mockReturnValue(1100);
+    fireEvent.pointerDown(h, { pointerId: 1, pointerType: "pen" });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+
+    expect(valuenow()).toBe(480);
+  });
+
   it("does not reset on a mouse double-click", () => {
     const clock = vi.spyOn(performance, "now");
     localStorage.setItem("rongo.rail-width", "480");
