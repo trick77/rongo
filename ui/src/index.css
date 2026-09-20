@@ -129,6 +129,13 @@ body.resizing {
   user-select: none;
 }
 
+/* The handle focuses itself on pointerdown (RailResizer), so Chrome's default
+   outline: auto painted its two-stroke focus ring down the strip on every
+   grab. The handle is marked by the resize cursor and nothing else. */
+.rail-resizer:focus-visible {
+  outline: none;
+}
+
 /* The scrollbar on every scroller, ../loom's values (0e14883): 8px of track
    that is not there, and an opaque #383837 thumb that lightens under the
    pointer. The platform bar is a chrome-coloured slab down the edge of a
