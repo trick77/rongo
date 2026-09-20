@@ -383,6 +383,32 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 			t.Errorf("the %s shape rules come after the conditional blocks", name)
 		}
 	}
+	// The block describes the reader by what they decide and what they know,
+	// and every clause names a move the model makes. A job title alone left
+	// what a business analyst is to the model's training; a sentence about
+	// what the reader lacks left the behaviour to be inferred from a ban.
+	// "The person who will read this answer" binds the pronoun: "the reader"
+	// recurs unbound in the memory block and the values paragraph, and
+	// "Audience: business analyst" names a category, not a person.
+	// The constant is wrapped, so a phrase is matched against the prompt with
+	// its newlines folded to spaces: the assertion is about the wording, not
+	// about where the source happens to break a line.
+	flatBA := strings.Join(strings.Fields(*promptBA), " ")
+	flatDev := strings.Join(strings.Fields(*promptDev), " ")
+	for _, want := range []string{
+		"The person who will read this answer decides what the system is supposed to do and checks whether it does it",
+		"Write in that vocabulary and spend the words on the mechanism",
+		"say what each system does for the business",
+		"state the effect the business sees",
+	} {
+		if !strings.Contains(flatBA, want) {
+			t.Errorf("the BA audience block does not say %q", want)
+		}
+		if strings.Contains(flatDev, want) {
+			t.Errorf("the DEV prompt carries the Analyst persona sentence %q", want)
+		}
+	}
+
 	// Deliberately no headings: a short answer wearing three of them looks
 	// over-built, and that is a judgement the model gets wrong more often than
 	// it gets the list wrong. answerLanguage names headings for a different

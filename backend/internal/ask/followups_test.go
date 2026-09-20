@@ -148,6 +148,28 @@ func TestFollowups_runsOnTheShortGateLaneWithThePinnedTemperature(t *testing.T) 
 	}
 }
 
+// The suggestion call names the reader the same way the answer prompt does.
+// A bare job title left what a business analyst is to the model's training,
+// and this prompt has no second sentence to correct it.
+func TestFollowups_nameTheReaderByWhatTheyKnow(t *testing.T) {
+	cBA, upBA := followupsLLM(t, "What happens on a re-index?\n", http.StatusOK)
+	Followups(context.Background(), cBA, "q", "a", AudienceBA, followupsSources(), Scope{}, LanguageEN)
+
+	cDev, upDev := followupsLLM(t, "What happens on a re-index?\n", http.StatusOK)
+	Followups(context.Background(), cDev, "q", "a", AudienceDev, followupsSources(), Scope{}, LanguageEN)
+
+	const want = "fluent in the business and new to the software"
+	if !strings.Contains(upBA.prompt, want) {
+		t.Errorf("the Analyst prompt does not say %q:\n%s", want, upBA.prompt)
+	}
+	if strings.Contains(upDev.prompt, want) {
+		t.Errorf("the Developer prompt carries the Analyst reader sentence:\n%s", upDev.prompt)
+	}
+	if !strings.Contains(upDev.prompt, "a developer") {
+		t.Errorf("the Developer prompt does not name its reader:\n%s", upDev.prompt)
+	}
+}
+
 func TestFollowups_isGroundedInTheFilesTheAnswerWasWrittenFrom(t *testing.T) {
 	c, up := followupsLLM(t, "What happens on a re-index?\n", http.StatusOK)
 

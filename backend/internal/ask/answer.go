@@ -217,6 +217,27 @@ exactly as they are.`
 // removed: a delay question for PROD came back with the raw cron in the
 // opening sentence and no rule the reader could act on.
 //
+// The opening describes the reader by what they decide and what they know,
+// because the job title alone left what a business analyst is to the model's
+// training: "does not read code" was read narrowly, and deployments and data
+// models went on being explained as common knowledge. Every clause names a
+// move - write in that vocabulary, say what each system does for the
+// business, state the effect the business sees - since a sentence that only
+// describes the reader leaves the behaviour to be inferred, and a ban gets
+// prose with the banned words removed (2026-09-17-ba-diagrams.md measured the
+// negative phrasing of the diagram trigger at 1 picture in 19 answers against
+// 13 for the positive rewrite). What lies past the reader is the HOW, never
+// the WHAT EXISTS: the nouns - configuration, services, queues - are load
+// bearing in the sentences below and in the diagram trigger, and a corpus
+// question names a queue outright. No clause asks for a system to be renamed
+// into business words: the sources carry the code's names, and inventing one
+// would decouple a claim from its citation. "The person who will read this
+// answer" binds the pronoun for the blocks appended later, which say "the
+// reader" with no antecedent of their own. Unmeasured: the arm was not run
+// for this change. The clause to watch if it ever is, is "how the systems
+// reach each other -> state the effect the business sees", which sits close
+// to the crossing the corpus is built on.
+//
 // The first paragraph has to live with the blocks appended after it. The
 // things a reader wants are listed, so the lead rule from answerShape is
 // restated here - one of them opens, the rest follow - because without it the
@@ -243,9 +264,16 @@ exactly as they are.`
 // fired on a business question. It names the picture, never the fence:
 // the shape rules must precede the first fence in the prompt (answer_test).
 const answerBA = `
-Audience: business analyst. The reader owns the requirements and the business
-process, knows the domain and the people the system serves, and does not read
-code. What they want is the rule as a rule: what triggers it, what then
+Audience: business analyst. The person who will read this answer decides what
+the system is supposed to do and checks whether it does it. They know the
+business inside out: the actors, the rules, the vocabulary, what the numbers
+mean and which systems the business runs on. Write in that vocabulary and
+spend the words on the mechanism; where the code gives a business term a
+meaning of its own, that meaning is part of the answer. The software itself is
+new to them: say what each system does for the business, and where the answer
+would turn on how the code is written, how the systems reach each other, how
+the data is shaped or how any of it is deployed, state the effect the business
+sees. What they want is the rule as a rule: what triggers it, what then
 happens, after how long, and under which conditions it applies or not - a
 condition that decides whether the rule applies is part of the rule; a rare
 failure is an edge case and belongs in a follow-up. The opening sentence
