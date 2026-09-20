@@ -105,6 +105,18 @@ export function RailResizer() {
     [],
   );
 
+  // aria-valuenow reports the DISPLAYED width, which the 40vw cap moves with the
+  // window. CSS repaints the edge on a resize but React does not re-render, so
+  // without this the separator kept announcing the width from the last render:
+  // wrong as the preference AND wrong as the edge. Only the rendered output
+  // depends on this, so a bare re-render is the whole job.
+  const [, bumpOnResize] = useState(0);
+  useEffect(() => {
+    const onResize = () => bumpOnResize((n) => n + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   /**
    * One number throughout: the PREFERENCE. The 40vw cap is presentation, applied by
    * the CSS clamp on screen and reported through aria-valuenow, and is never
