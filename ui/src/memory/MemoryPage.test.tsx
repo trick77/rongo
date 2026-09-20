@@ -48,7 +48,7 @@ describe("MemoryPage", () => {
     await screen.findByText("Never draw flowchart diagrams.");
     expect(screen.getByText("everywhere")).toBeTruthy();
     expect(screen.getByText("shop")).toBeTruthy();
-    expect(onCount).toHaveBeenCalledWith(2);
+    await waitFor(() => expect(onCount).toHaveBeenCalledWith(2));
 
     // Only the rule whose turn still exists links back to it.
     const links = screen.getAllByRole("button", { name: "from thread" });
@@ -74,7 +74,10 @@ describe("MemoryPage", () => {
 
     await waitFor(() => expect(screen.queryByText("Never draw flowchart diagrams.")).toBeNull());
     expect(mock).toHaveBeenCalledWith("/api/memory/7", { method: "DELETE" });
-    expect(onCount).toHaveBeenLastCalledWith(0);
+    // onCount fires from an effect, which the scheduler may run in a later task
+    // than the render that drops the row. Asserting it straight after the
+    // waitFor above raced that effect and went red on a slow runner.
+    await waitFor(() => expect(onCount).toHaveBeenLastCalledWith(0));
   });
 
   it("says so when the list cannot be fetched", async () => {
