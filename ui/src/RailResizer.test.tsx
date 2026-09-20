@@ -351,6 +351,91 @@ describe("RailResizer", () => {
     expect(stored()).toBe(String(RAIL_DEFAULT));
   });
 
+  // Review finding: the arrow keys stepped the preference while the drag stepped
+  // the rendered edge, so with a preference above the 40vw cap the first presses
+  // moved nothing on screen and aria-valuenow announced a width the layout did
+  // not have. jsdom lays nothing out, so the cap is simulated by measuring.
+  it("steps the rendered width, not a preference the clamp is holding back", () => {
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    const h = handle();
+    // The window is narrow: the rail renders 440 though the preference is 520.
+    const drawer = document.createElement("div");
+    drawer.id = "nav-drawer";
+    drawer.getBoundingClientRect = () => ({ width: 440 }) as DOMRect;
+    document.body.appendChild(drawer);
+
+    fireEvent.keyDown(h, { key: "ArrowLeft" });
+    expect(valuenow()).toBe(424); // 440 - 16, the edge the user can see
+    drawer.remove();
+  });
+
+  // Review finding: a drag on a capped viewport used to commit the capped number
+  // and throw the wider preference away, which is what the clamp exists to stop.
+  it("keeps a wider stored preference when a capped drag widens", () => {
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    const h = handle();
+    const drawer = document.createElement("div");
+    drawer.id = "nav-drawer";
+    drawer.getBoundingClientRect = () => ({ width: 440 }) as DOMRect;
+    document.body.appendChild(drawer);
+
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 440,
+    });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 445 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    expect(stored()).toBe("520"); // the docked-monitor width survives
+    drawer.remove();
+  });
+
+  // A deliberate narrowing is taken at face value, cap or no cap.
+  it("lowers the stored preference when the user narrows", () => {
+    localStorage.setItem("rongo.rail-width", "520");
+    render(<RailResizer />);
+    const h = handle();
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 520,
+    });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 400 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    expect(stored()).toBe("400");
+  });
+
+  // Review finding: a cancel before the slop left the double-tap window armed, so
+  // the next deliberate grab inside 350ms was swallowed as a reset.
+  it("does not let a cancelled tap arm the double-tap reset", () => {
+    const clock = vi.spyOn(performance, "now");
+    localStorage.setItem("rongo.rail-width", "480");
+    render(<RailResizer />);
+    const h = handle();
+
+    clock.mockReturnValue(1000);
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 480,
+    });
+    fireEvent.pointerCancel(h, { pointerId: 1 }); // system took the pointer
+
+    clock.mockReturnValue(1100); // inside the tap window
+    fireEvent.pointerDown(h, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 480,
+    });
+    fireEvent.pointerMove(h, { pointerId: 1, clientX: 450 });
+    fireEvent.pointerUp(h, { pointerId: 1 });
+    expect(valuenow()).toBe(450); // dragged, not reset to 362
+  });
+
   it("does not reset two slow taps", () => {
     const clock = vi.spyOn(performance, "now");
     localStorage.setItem("rongo.rail-width", "480");

@@ -87,11 +87,23 @@ export function RailResizer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function commit(next: number) {
+  /**
+   * `next` is a width the user just expressed on screen, so it is the rendered
+   * edge. The preference may be wider: the CSS clamp caps --rail-w at 40vw, and a
+   * narrow window must not quietly spend the user's stored number. Widening past
+   * the cap therefore keeps the larger preference, while any narrowing is taken at
+   * face value because that is a deliberate act.
+   */
+  function commit(
+    next: number,
+    intent: "narrow" | "widen" | "exact" = "exact",
+  ) {
     live.current = next;
     setW(next);
     paint(next);
-    rememberRailWidth(next);
+    rememberRailWidth(
+      intent === "widen" ? Math.max(next, storedRailWidth()) : next,
+    );
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -139,6 +151,9 @@ export function RailResizer() {
     if (active.current !== e.pointerId) return;
     active.current = null;
     document.body.classList.remove("resizing");
+    // A cancel before the slop is not a tap the user made: leaving the window
+    // armed would swallow their next deliberate grab as a double-tap reset.
+    if (e.type === "pointercancel") lastDown.current = -Infinity;
     // Commit before releasing capture: releasePointerCapture throws NotFoundError
     // when the pointer is already gone, which is exactly the pointercancel case, and
     // the throw would skip the commit and lose the drag.
@@ -146,7 +161,10 @@ export function RailResizer() {
     // handle within it to fine-tune would snap the width back to the default.
     if (moved.current) {
       lastDown.current = -Infinity;
-      commit(live.current);
+      commit(
+        live.current,
+        live.current >= start.current.w ? "widen" : "narrow",
+      );
     }
     try {
       e.currentTarget.releasePointerCapture?.(e.pointerId);
@@ -156,8 +174,13 @@ export function RailResizer() {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === "ArrowLeft") commit(clampRail(live.current - STEP));
-    else if (e.key === "ArrowRight") commit(clampRail(live.current + STEP));
+    // Seeded from the RENDERED width for the same reason the drag is: with a
+    // preference above the 40vw cap, stepping the preference would walk a number
+    // nobody can see and announce it through aria-valuenow, while the edge stood
+    // still for several presses.
+    const from = renderedWidth(live.current);
+    if (e.key === "ArrowLeft") commit(clampRail(from - STEP), "narrow");
+    else if (e.key === "ArrowRight") commit(clampRail(from + STEP), "widen");
     else if (e.key === "Home") commit(RAIL_DEFAULT);
     else return;
     e.preventDefault();
