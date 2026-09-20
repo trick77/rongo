@@ -257,17 +257,34 @@ export default function Threads({
                         // set the text 4px higher than it sits today.
                         className="relative flex min-w-0 flex-1 items-center self-stretch overflow-hidden text-left whitespace-nowrap"
                       >
-                        {/* The title runs out under a gradient to the row's
-                            own background rather than ending in an ellipsis,
-                            as ../loom's sidebar does. The text stays whole. */}
-                        {t.title}
-                        <span
-                          aria-hidden="true"
-                          className={
-                            "pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent " +
-                            (active ? "to-rail-sel" : "to-panel group-hover:to-rail-hover")
-                          }
-                        />
+                        {/* ../loom's sidebar truncates in two ways, and which
+                            one is showing IS the selection. An idle row ends
+                            in an ellipsis: the row paints no ground of its own
+                            against the panel, and a gradient needs a colour to
+                            arrive at. A selected row drops the ellipsis and
+                            runs the title out under a fade to the selected
+                            ground instead, so the text stays whole under the
+                            one row the reader is reading.
+
+                            The fade is what holds the title clear of the
+                            kebab, and nothing else does: pr-7 is loom's, kept
+                            for parity, but it reserves nothing. The kebab is a
+                            flex sibling hidden with `invisible`, so its 24px
+                            box sits in the row on every row, selected or not,
+                            and the title button's width already excludes it.
+                            Measured 2026-09-20: dropping pr-7 moves the
+                            painted text 0px — the button clips the span at
+                            317px while the padding trails out at 658px.
+
+                            The hover ground gets no fade: the row is still
+                            idle, and loom leaves its ellipsis alone. */}
+                        <span className={"block " + (active ? "pr-7" : "truncate")}>{t.title}</span>
+                        {active && (
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent to-rail-sel"
+                          />
+                        )}
                       </button>
                       {/* No dot on the row being written: a question is asked
                           at the top of the rail and its row is the one right

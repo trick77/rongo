@@ -39,16 +39,34 @@ describe("Threads", () => {
     expect(screen.getByText("Where does the token come from?")).toBeTruthy();
   });
 
-  it("fades a long title out instead of cutting it with an ellipsis", async () => {
-    // As ../loom does: the title runs under a gradient to the row's own
-    // background. The text stays whole for a reader and a test.
+  it("cuts an idle title with an ellipsis and no fade", async () => {
+    // ../loom's sidebar: an idle row ends in an ellipsis. It paints no ground
+    // of its own against the panel, so there is no colour for a gradient to
+    // arrive at — and the hover ground does not earn one either, the row is
+    // still idle.
     threadList(two);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
     const title = await screen.findByText("How does shipping work?");
+    expect(title.className).toContain("truncate");
+    expect(title.className).not.toContain("pr-7");
+    const row = screen.getByRole("button", { name: "How does shipping work?" });
+    expect(row.querySelector("[aria-hidden]")).toBeNull();
+  });
+
+  it("fades the selected title out instead of cutting it", async () => {
+    // The selected row is the one place with a ground to fade to, so the
+    // title runs out whole under it rather than ending in an ellipsis. The
+    // fade is what keeps it clear of the kebab; pr-7 is loom's and inert,
+    // asserted here only so a port away from loom's markup is deliberate.
+    threadList(two);
+    render(<Threads activeId="7" onSelect={() => {}} version={0} />);
+    const title = await screen.findByText("How does shipping work?");
+    expect(title.className).toContain("pr-7");
     expect(title.className).not.toContain("truncate");
-    expect(title.className).toContain("whitespace-nowrap");
-    const fade = title.querySelector("[aria-hidden]");
+    const row = screen.getByRole("button", { name: "How does shipping work?" });
+    const fade = row.querySelector("[aria-hidden]");
     expect(fade?.className).toContain("bg-gradient-to-r");
+    expect(fade?.className).toContain("to-rail-sel");
   });
 
   it("marks the open thread", async () => {
