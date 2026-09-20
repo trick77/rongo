@@ -261,11 +261,21 @@ export default function Threads({
                             one is showing IS the selection. An idle row ends
                             in an ellipsis: the row paints no ground of its own
                             against the panel, and a gradient needs a colour to
-                            arrive at. A selected row drops the ellipsis for
-                            pr-7 — reserving the kebab's 24px, which is visible
-                            from here on — and runs the title out under a fade
-                            to the selected ground instead, so the text stays
-                            whole under the one row the reader is reading.
+                            arrive at. A selected row drops the ellipsis and
+                            runs the title out under a fade to the selected
+                            ground instead, so the text stays whole under the
+                            one row the reader is reading.
+
+                            The fade is what holds the title clear of the
+                            kebab, and nothing else does: pr-7 is loom's, kept
+                            for parity, but it reserves nothing. The kebab is a
+                            flex sibling hidden with `invisible`, so its 24px
+                            box sits in the row on every row, selected or not,
+                            and the title button's width already excludes it.
+                            Measured 2026-09-20: dropping pr-7 moves the
+                            painted text 0px — the button clips the span at
+                            317px while the padding trails out at 658px.
+
                             The hover ground gets no fade: the row is still
                             idle, and loom leaves its ellipsis alone. */}
                         <span className={"block " + (active ? "pr-7" : "truncate")}>{t.title}</span>

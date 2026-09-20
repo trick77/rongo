@@ -53,10 +53,11 @@ describe("Threads", () => {
     expect(row.querySelector("[aria-hidden]")).toBeNull();
   });
 
-  it("fades the selected title out instead, under a reserved kebab", async () => {
+  it("fades the selected title out instead of cutting it", async () => {
     // The selected row is the one place with a ground to fade to, so the
-    // title runs out whole under it rather than ending in an ellipsis. pr-7
-    // holds the kebab's slot, which is visible from here on.
+    // title runs out whole under it rather than ending in an ellipsis. The
+    // fade is what keeps it clear of the kebab; pr-7 is loom's and inert,
+    // asserted here only so a port away from loom's markup is deliberate.
     threadList(two);
     render(<Threads activeId="7" onSelect={() => {}} version={0} />);
     const title = await screen.findByText("How does shipping work?");
