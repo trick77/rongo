@@ -255,6 +255,106 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	return out, rows.Err()
 }
 
+// substringHubShare is the share of the corpus past which a term is treated as
+// a hub and skipped. A substring matching a fiftieth of every chunk is telling
+// the fusion nothing it did not already know, and it costs a lane slot that a
+// real identifier could have used.
+//
+// The floor on term LENGTH (minSubstringRunes) catches most of these before the
+// query runs; this catches the rest — a long term that happens to be ubiquitous,
+// like a package path or a licence header.
+const substringHubShare = 0.02
+
+// substringHubFloor is the corpus size below which the share guard does not
+// apply. A share is meaningless over a handful of chunks: in a test fixture, or
+// a corpus mid-index, the one chunk that legitimately contains the identifier IS
+// a large share of the whole. Below this the term stands on its length alone.
+const substringHubFloor = 500
+
+// SearchSubstringIn is the rung that finds an identifier occurring only INSIDE a
+// larger token. It is the one lane that does not go through FTS5.
+//
+// The keyword lane cannot answer this: chunks_fts is fts5(raw_text) with the
+// default unicode61 tokenizer, so getAnzahlKinder and setAnzahlkinder are each a
+// single token and the bare word "anzahlkinder" matches neither. The prefix
+// rungs widen to the right, and the word is at the token's right end. Measured
+// over the schadenmeldung corpus: FTS 0, prefix rung 0, substring 145 chunks.
+//
+// instr() rather than LIKE: LIKE would make % and _ in the term into syntax and
+// need an ESCAPE clause, while instr takes the needle literally. Both sides are
+// folded — the column by SQL lower(), the term by the caller's fold() — and
+// SQLite's lower() is ASCII-only, which is why the Go side folds too rather
+// than trusting the column's.
+//
+// This is a SCAN. It has no ranking of its own, so it cannot order by relevance
+// the way bm25 does for the keyword lane; it orders by address instead, which
+// keeps two runs over one database identical. Ranking is fusion's job, and the
+// reranker's after it: getting the chunk INTO the fused list is all this lane
+// claims to do.
+func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
+	term = strings.TrimSpace(strings.ToLower(term))
+	if term == "" {
+		return nil, nil
+	}
+	if n <= 0 {
+		n = 10
+	}
+
+	where := "\n\t\tWHERE instr(lower(c.raw_text), ?) > 0"
+	args := []any{term}
+	if len(repos) > 0 {
+		where += " AND f.repo IN (" + placeholders(len(repos)) + ")"
+		args = append(args, toAny(repos)...)
+	}
+	stageQ, stageArgs := stage.clause("f")
+	where += stageQ
+	args = append(args, stageArgs...)
+
+	// The hub guard, before the rows are fetched: a term in more than
+	// substringHubShare of the corpus is not evidence, and counting is cheaper
+	// than materialising its hits.
+	//
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	countQ := `SELECT count(*), (SELECT count(*) FROM chunks)
+		FROM chunks c
+		JOIN files f ON f.id = c.file_id
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1` + where
+	var matched, total int
+	if err := s.db.QueryRowContext(ctx, countQ, args...).Scan(&matched, &total); err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	if matched == 0 {
+		return nil, nil
+	}
+	if total >= substringHubFloor && float64(matched)/float64(total) > substringHubShare {
+		return nil, nil
+	}
+
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	q := `SELECT ` + hitColumns + `
+		FROM chunks c
+		JOIN files f ON f.id = c.file_id
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1` + where +
+		"\n\t\tORDER BY f.repo, f.path, c.start_line, c.ordinal LIMIT ?"
+	args = append(args, n)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Hit
+	for rows.Next() {
+		var h Hit
+		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
+			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+			return nil, fmt.Errorf("substring search: %w", err)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }

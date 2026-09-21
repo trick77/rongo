@@ -97,6 +97,14 @@ type Retriever struct {
 	// New ships it at 0.8; zero — and so a struct-literal Retriever — is the
 	// prose floor, which is what the harness's baseline arm runs.
 	CodeWeight float64
+	// SubstringWeight, when above zero, runs the substring rung: a scan for
+	// identifier-shaped terms that occur only INSIDE a larger token, which the
+	// FTS lane cannot reach at all. See WeightKeywordSubstring and
+	// Store.SearchSubstringIn.
+	//
+	// New ships it on; zero — and so a struct-literal Retriever — leaves the
+	// rung off, which is the arm the harness measures the baseline with.
+	SubstringWeight float64
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
 	// see LLMReranker. The product sets it; nil is the fused order as it has
 	// always been, and the eval harness's baseline.
@@ -114,6 +122,8 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		TestDecay:   DefaultTestDecay,
 		DocDecay:    DefaultDocDecay,
 		CodeWeight:  WeightKeywordCode,
+
+		SubstringWeight: WeightKeywordSubstring,
 	}
 }
 
@@ -654,6 +664,31 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 				Name:   name,
 				Hits:   hits,
 				Weight: weight,
+			})
+		}
+	}
+
+	// The substring rung, last because it is the only lane that does not go
+	// through an index: a term that occurs solely INSIDE a larger token
+	// (getAnzahlKinder, setAnzahlkinder) is invisible to every rung above,
+	// whatever weight they carry, because unicode61 tokenizes those whole.
+	//
+	// Terms are derived in code from the question and the guessed identifiers,
+	// never asked of the model: one more model call to recover from a model
+	// guess that missed is a second chance at the same mistake.
+	if r.SubstringWeight > 0 {
+		for _, term := range BuildSubstringTerms(texts[0], strings.Fields(code)) {
+			hits, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
+			if err != nil {
+				return nil, err
+			}
+			if len(hits) == 0 {
+				continue
+			}
+			lanes = append(lanes, Lane{
+				Name:   "keyword:substring",
+				Hits:   hits,
+				Weight: r.SubstringWeight,
 			})
 		}
 	}
