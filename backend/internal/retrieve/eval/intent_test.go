@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,14 +19,16 @@ var intentStages = []string{"prod", "intg", "test"}
 // only that neither of them is taken, which is the real requirement for a
 // question that must be searched: "how", "why" and "where" route the same
 // way and the gate picking one over another changes nothing.
-// Between is checked only where it is named.
+//
+// The stages themselves are not asserted here: the classifier no longer
+// reports them, releasePair reads them from the question's own words, and
+// release_test.go covers that.
 type intentCase struct {
 	name     string
 	question string
 	follows  string
 	want     string
 	notLane  bool
-	between  string
 	record   bool
 }
 
@@ -53,22 +54,20 @@ var intentCases = []intentCase{{
 	name:     "release notes are a release",
 	question: "release notes between intg and prod",
 	want:     ask.IntentRelease,
-	between:  "intg,prod",
 }, {
 	name:     "release notes in German are a release",
 	question: "Release Notes zwischen intg und prod",
 	want:     ask.IntentRelease,
-	between:  "intg,prod",
 }, {
 	name:     "a hyphen is not a different word",
 	question: "release-notes between intg and prod",
 	want:     ask.IntentRelease,
-	between:  "intg,prod",
 }, {
 	// Recorded, not graded. The trigger moved off stage count, so this
-	// phrasing no longer earns the release lane; whether it lands on "how"
-	// (a configuration search) or "changes" (a time-windowed commit list
-	// ignoring both stages) is what the run is asked to report.
+	// phrasing asks for no notes and could have fallen to a search or to
+	// "changes". Two runs said "release" both times, which is why nothing
+	// was lost by narrowing the trigger; left recorded rather than asserted
+	// because it is the gate's own reading, not a rule the product states.
 	name:     "what is between two stages, with no notes asked for",
 	question: "what is between prod and intg?",
 	record:   true,
@@ -102,21 +101,17 @@ func TestEvalUnderstandIntent(t *testing.T) {
 			if last != nil {
 				t.Fatalf("understand: %v", last)
 			}
-			between := strings.Join(got.Between, ",")
 			if tc.record {
-				t.Logf("RECORDED intent=%q between=%q stage=%q", got.Intent, between, got.Stage)
+				t.Logf("RECORDED intent=%q stage=%q", got.Intent, got.Stage)
 				return
 			}
 			switch {
 			case tc.notLane:
 				if got.Intent == ask.IntentRelease || got.Intent == ask.IntentChanges {
-					t.Errorf("intent = %q, want a searched turn (between=%q stage=%q)", got.Intent, between, got.Stage)
+					t.Errorf("intent = %q, want a searched turn (stage=%q)", got.Intent, got.Stage)
 				}
 			case got.Intent != tc.want:
-				t.Errorf("intent = %q, want %q (between=%q stage=%q)", got.Intent, tc.want, between, got.Stage)
-			}
-			if tc.between != "" && between != tc.between {
-				t.Errorf("between = %q, want %q", between, tc.between)
+				t.Errorf("intent = %q, want %q (stage=%q)", got.Intent, tc.want, got.Stage)
 			}
 		})
 	}
