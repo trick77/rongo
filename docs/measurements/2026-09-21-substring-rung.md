@@ -141,7 +141,24 @@ Replaced with four verified at the pin, each 0 bare occurrences and exactly one 
 
 Of these, only `MaxSources` actually needed the rung; the other three reach rank 1 through the prose lanes because their expansions happen to contain words the corpus spells bare. A question being suffix-only makes it *reachable only by substring in the keyword lane* — it does not make the semantic lane blind.
 
+## Answers, measured 2026-09-21
+
+`TestEvalMeasureAnswers` runs against the **flow corpus** (Sock Shop), not the Go corpus — `hack/run-flow-eval.sh`, per the header of `answers_test.go`. Pointing it at the Go corpus answers Sock Shop questions out of peeq/rongo and scores 0/N on every rubric; that was done once here by mistake and the numbers discarded.
+
+Two runs, `BACKEND_EVAL_ANSWER_RUNS=2`, rung on at 0.85, BA audience, rerank pool 60, 800-rune excerpts:
+
+| run | rubric present | contradicted | forbidden | cited parts | asked | failed | diagrams |
+|---|---|---|---|---|---|---|---|
+| 1 | 18/22 | 0 | 0 | 15/23 | 0 | 2 | 5 |
+| 2 | 27/30 | 0 | 0 | 18/30 | 0 | 0 | 7 |
+
+**The denominators differ because run 1 lost two questions to model-delivery failures** — one `finish_reason=length` at 16384 completion tokens, one empty reply after 700 — so their rubric parts left the total. Both are "nothing was delivered" cases, retry material under the model rule, not retrieval results. Run 2 delivered every question.
+
+What the two runs agree on, which is what this arm was run to check: **0 contradicted and 0 forbidden in both**, and 0 asked-back. The rung does not make an answer claim something the code does not say, and it does not push the routing into needless clarification. Run 2's 27/30 present on a complete set is the cleaner figure.
+
+This corpus contains no suffix-only question, so it measures whether the rung HARMS answer quality, never whether it helps. The help is the retrieval table above.
+
 ## Still open
 
-- `TestEvalMeasureAnswers` twice, per the model rule. Running; numbers to be appended.
-- The reranked path (`TestEvalMeasureRerank`), where the eight small slips may or may not survive the rerank.
+- The reranked path (`TestEvalMeasureRerank`), where the eight small rank slips may or may not survive the rerank.
+- A flow-corpus question that is genuinely suffix-only, so the answer arm can price the rung's benefit rather than only its cost.
