@@ -1031,3 +1031,49 @@ func TestNothingFoundDoesNotQuoteThePreviousQuestion(t *testing.T) {
 		t.Errorf("nothing-found text names the previous question:\n%s", answer.Text)
 	}
 }
+
+// TestWithoutPrior_keepsTheReadersOwnQuestion: a retry re-asks the question it
+// retries, so the previous question and this one are the same string. No lane
+// was added for it, and dropping it by value would take the reader's own
+// question out of "searched for" instead.
+func TestWithoutPrior_keepsTheReadersOwnQuestion(t *testing.T) {
+	q := "How is pricing resolved?"
+
+	if got := withoutPrior([]string{q, "cost", "Price"}, q); !slices.Equal(got, []string{q, "cost", "Price"}) {
+		t.Errorf("withoutPrior = %v, want the reader's question kept", got)
+	}
+	// And the ordinary shape: the lane sits at index 1 and only it goes.
+	prior := "Wann genau und was genau macht der ZAS Check?"
+	if got := withoutPrior([]string{q, prior, "cost", "Price"}, prior); !slices.Equal(got, []string{q, "cost", "Price"}) {
+		t.Errorf("withoutPrior = %v, want only the previous question dropped", got)
+	}
+}
+
+// TestResumeRepoDoesNotQuoteThePreviousQuestion: a resumed turn reads its
+// understanding back off the card, Prior included, so it searches the thread's
+// subject like any other follow-up - and must report what it searched for the
+// same way.
+func TestResumeRepoDoesNotQuoteThePreviousQuestion(t *testing.T) {
+	var got retrieve.Query
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
+		got = q
+		return nil, nil
+	}))
+	prior := "Wann genau und was genau macht der ZAS Check?"
+	u := Understanding{Prior: prior, Terms: []string{"Formularschritt"}, CodeTerms: []string{"FormStep"}}
+
+	answer, err := p.ResumeRepo(context.Background(), "In welchem Formularschritt passiert das?", u, []string{"peeq"},
+		AudienceBA, LanguageDE, Scope{Known: []string{"peeq"}}, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+
+	// The lane is in the search the card resumed ...
+	if !slices.Contains(got.Texts, prior) {
+		t.Errorf("Texts = %v, want the previous question among them", got.Texts)
+	}
+	// ... and out of the sentence that says what was looked for.
+	if strings.Contains(answer.Text, prior) {
+		t.Errorf("nothing-found text names the previous question:\n%s", answer.Text)
+	}
+}

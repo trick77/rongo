@@ -440,24 +440,72 @@ func TestSearchTexts_aFollowUpSearchesThePreviousQuestion(t *testing.T) {
 func TestUnderstandPrompt_aFirstTurnCarriesNoFollowUpRule(t *testing.T) {
 	for _, withMemory := range []bool{false, true} {
 		first := understandPrompt(withMemory, false)
-		if strings.Contains(first, "The previous turn of the conversation") {
-			t.Errorf("memory=%v: a first turn is told about a turn that does not exist:\n%s", withMemory, first)
+		if strings.Contains(first, "EVERY entry of terms") {
+			t.Errorf("memory=%v: a first turn is told to carry a subject it has none of:\n%s", withMemory, first)
 		}
-		// The old unconditional wording is gone too, not merely moved behind
-		// the gate under another name.
-		if strings.Contains(first, "A question may arrive with the previous turn") {
-			t.Errorf("memory=%v: the old unconditional paragraph is still in a first turn's prompt", withMemory)
+		// The paragraph the baseline was measured with stays, on every turn:
+		// dropping it from a first turn would be an unmeasured prompt change
+		// on the one path the eval does cover.
+		if !strings.Contains(first, "A question may arrive with the previous turn") {
+			t.Errorf("memory=%v: the measured paragraph left the first-turn prompt", withMemory)
 		}
 
 		followUp := understandPrompt(withMemory, true)
 		if !strings.Contains(followUp, "EVERY entry of terms and EVERY entry of code_terms carries it") {
 			t.Errorf("memory=%v: a follow-up is never told to carry the subject:\n%s", withMemory, followUp)
 		}
+		// The follow-up prompt is the first-turn one plus the rule, nothing
+		// removed and nothing reordered.
+		if !strings.Contains(followUp, "A question may arrive with the previous turn") {
+			t.Errorf("memory=%v: the follow-up prompt dropped the paragraph it extends", withMemory)
+		}
 		if len(followUp) <= len(first) {
 			t.Errorf("memory=%v: the follow-up prompt is not longer than the first-turn one", withMemory)
 		}
 	}
 }
+
+// TestUnderstandPrompt_aFirstTurnIsByteIdenticalToTheMeasuredOne is the guard
+// the eval cannot be: TestEvalMeasureAnswers has no follow-up questions, so a
+// first turn's prompt is the only part of this change it could see, and the
+// cheapest way not to move that number is not to touch those bytes.
+//
+// The golden is the rendering of the prompt as it stood when the baseline was
+// taken. A deliberate first-turn prompt change updates it AND re-runs the
+// eval twice; anything else failing here is an accident.
+func TestUnderstandPrompt_aFirstTurnIsByteIdenticalToTheMeasuredOne(t *testing.T) {
+	first := understandPrompt(false, false)
+	if !strings.HasSuffix(first, goldenFirstTurnTail) {
+		t.Errorf("the first-turn prompt no longer ends as the measured one did.\ngot tail:\n%q\nwant tail:\n%q",
+			first[max(0, len(first)-len(goldenFirstTurnTail)):], goldenFirstTurnTail)
+	}
+	// Every %s is filled: a stray verb would reach the model as "%!s(MISSING)".
+	if strings.Contains(first, "%!") {
+		t.Errorf("unfilled format verb in the prompt:\n%s", first)
+	}
+	if strings.Contains(understandPrompt(true, true), "%!") {
+		t.Error("unfilled format verb in the memory+follow-up prompt")
+	}
+}
+
+// goldenFirstTurnTail is the last paragraphs of the first-turn prompt exactly
+// as origin/master renders them, blank lines included.
+const goldenFirstTurnTail = `A question may arrive with the previous turn of the conversation above it. That
+material is there for ONE purpose: to resolve what the current question leaves
+out - "that", "this", "it", "and how about the other one", a question with no
+subject at all. Everything you answer with describes the CURRENT question. A
+follow-up that stays on the subject inherits it; a follow-up that changes the
+subject gets the new one, and the previous turn contributes nothing to it. A
+follow-up that only moves the window of a changes question ("only the last
+two days") keeps intent "changes" and the topic.
+
+code_terms is the most important part. The question is phrased in the language
+of the business domain, the code is not: someone asking about an "Apple TV"
+means "AirPlay" in the code; someone asking about "disk almost full" means
+"statfs" or "free bytes". Guess that bridge, even when you are not sure. Do not
+simply repeat the words of the question.
+
+No running text, no explanation, just the JSON object.`
 
 // TestUnderstand_aFollowUpIsToldToCarryTheSubject: the gate is driven by the
 // thread, not by a flag a caller might forget.

@@ -416,17 +416,23 @@ func hitRepos(sources []Source) []string {
 
 // withoutPrior drops the previous-question lane from the list a failed search
 // reports back. The lane earns its place in the search, never in the sentence.
+// Filtered from index 1 and at most once: texts[0] is the reader's own
+// question, and when a retry re-asks the question it follows, the two are the
+// same string. SearchTexts adds no lane in that case, so there is nothing
+// here to remove and removing by value would take the reader's question out
+// of the sentence instead.
 func withoutPrior(texts []string, prior string) []string {
 	if prior = strings.TrimSpace(prior); prior == "" {
 		return texts
 	}
-	out := make([]string, 0, len(texts))
-	for _, t := range texts {
-		if t != prior {
-			out = append(out, t)
+	for i := 1; i < len(texts); i++ {
+		if texts[i] == prior {
+			out := make([]string, 0, len(texts)-1)
+			out = append(out, texts[:i]...)
+			return append(out, texts[i+1:]...)
 		}
 	}
-	return out
+	return texts
 }
 
 // outsideThePin is the repositories the question named, the index carries, and
@@ -1084,7 +1090,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		return Answer{}, err
 	}
 	if len(sources) == 0 {
-		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
+		return Answer{Text: NothingFound(lang, withoutPrior(texts, u.Prior)), Scope: scope}, nil
 	}
 
 	return p.answer(ctx, question, audience, lang, sources, scope, t.Question, ev)

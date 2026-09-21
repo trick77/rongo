@@ -331,7 +331,15 @@ It exists only when a previous turn is above; with none, or when the question
 asks about anything the previous answer does not already say, it is not
 "rework". A rework has terms [], code_terms [] and repos [].%s
 
-%s
+A question may arrive with the previous turn of the conversation above it. That
+material is there for ONE purpose: to resolve what the current question leaves
+out - "that", "this", "it", "and how about the other one", a question with no
+subject at all. Everything you answer with describes the CURRENT question. A
+follow-up that stays on the subject inherits it; a follow-up that changes the
+subject gets the new one, and the previous turn contributes nothing to it. A
+follow-up that only moves the window of a changes question ("only the last
+two days") keeps intent "changes" and the topic.%s
+
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"
 means "AirPlay" in the code; someone asking about "disk almost full" means
@@ -346,34 +354,26 @@ const (
 	understandIntentsOn  = `, "rework" or "memory"`
 )
 
-// understandFollowUp is the rule for a question that continues a thread, in
-// the system prompt ONLY when a previous turn is actually above it. A first
-// turn never reads a paragraph about material it does not have, and its
-// prompt stays byte-identical to what the evaluation baseline was measured
-// on.
+// understandFollowUp is ADDED to the follow-up paragraph above, and only on a
+// turn that actually has a previous turn. The paragraph itself stays
+// unconditional: removing it from a first turn would be an unmeasured change
+// to the prompt the evaluation baseline was taken on, and it costs a first
+// turn nothing to read a rule about material it does not have.
 //
-// It says to CARRY the subject rather than merely to resolve it, because the
-// fields it governs are specified as rewordings of the current question and a
-// pronoun rewritten as "dieser Vorgang" satisfies that while naming nothing
-// the index can match. The search carries the previous question on its own
-// account either way (Understanding.Prior); this is what makes the model's
-// own lanes point at the same thing.
+// It exists because "resolve what the current question leaves out" is a
+// statement of purpose that no field contract enforces. terms is specified as
+// rewordings of the CURRENT question, so a pronoun rewritten as "dieser
+// Vorgang" satisfies it exactly while naming nothing the index can match.
+// This says to CARRY the subject into the fields the search actually runs on.
+//
+// Second line of defence only: the previous question reaches the search as
+// its own lane (Understanding.Prior) whatever this call returns.
 const understandFollowUp = `
-The previous turn of the conversation is above the question. It is there for
-ONE purpose: to resolve what the current question leaves out - "that", "this",
-"it", "dies", "dieser Vorgang", a question with no subject at all.
-
 Name that thing to yourself, as the previous question named it, and then keep
 it: EVERY entry of terms and EVERY entry of code_terms carries it. A rewording
 that drops it is a rewording of a different question, and terms and code_terms
 are what the search runs on - the words of the current question alone are not
-enough to find what it points at.
-
-A follow-up that names its own subject inherits nothing, and the previous turn
-contributes nothing to it. A follow-up that changes the subject gets the new
-one. A follow-up that only moves the window of a changes question ("only the
-last two days") keeps intent "changes" and the topic.
-`
+enough to find what it points at.`
 
 // understandMemory is the rule for the memory fields, in the system prompt
 // only when the deployment keeps memory. Written in English whatever the
