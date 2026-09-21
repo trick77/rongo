@@ -803,36 +803,46 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 	return m, true, nil
 }
 
-// FailUnfinishedTurnsBefore marks every unfinished turn below the bound as
-// failed, and reports how many it closed.
+// NewestTurnBefore is the turn directly below the bound, whatever state it is
+// in: answered, failed, a card, or still being written. LastTurnBefore reads
+// the newest turn that ANSWERED, so the two together say whether anything
+// stands between a follow-up and what it means to point at.
 //
-// This is the sweep the record otherwise lacks. A process killed mid-stream
-// leaves a row with no answer, no error and no card, and nothing collects it:
-// the turn is over, the row says it is still running, and the browser offers
-// no retry because retry is gated on an error. The thread is then stuck for
-// good.
-//
-// Called when a later turn runs into one, so the row is closed at the moment
-// something is known to be wrong with it rather than on a timer: a turn this
-// far below a live request is not still being written. The message is the
-// ordinary failure text, so the row reads as what it is and the reader gets
-// the retry every other failed turn has.
-func (s *Store) FailUnfinishedTurnsBefore(ctx context.Context, subject string, threadID int64, before int, msg string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE messages SET error = ?
-		WHERE thread_id = ? AND ordinal < ?
-		  AND answer = '' AND error = ''
-		  AND NOT EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = messages.id)
-		  AND EXISTS (SELECT 1 FROM threads t WHERE t.id = messages.thread_id AND t.user_subject = ?)`,
-		msg, threadID, before, subject)
-	if err != nil {
-		return 0, fmt.Errorf("close unfinished turns: %w", err)
+// Deliberately not a sweep. An unfinished row cannot be told from a live one
+// in the database -- both are an empty answer with no error and no card -- and
+// two tabs may ask into one thread at once, so closing rows from a read path
+// would write a failure onto a turn that is still streaming and land a row
+// holding both an answer and an error. This only reports; nothing here decides
+// a row is dead.
+func (s *Store) NewestTurnBefore(ctx context.Context, subject string, threadID int64, before int) (Message, bool, error) {
+	var m Message
+	var created string
+	var fromClar sql.NullInt64
+	var scope string
+	var followups string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.thread_id = ? AND t.user_subject = ? AND m.ordinal < ?
+		ORDER BY m.ordinal DESC
+		LIMIT 1`, threadID, subject, before).
+		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
+	if err == sql.ErrNoRows {
+		return Message{}, false, nil
 	}
-	n, err := res.RowsAffected()
 	if err != nil {
-		return 0, fmt.Errorf("close unfinished turns: %w", err)
+		return Message{}, false, fmt.Errorf("read newest turn: %w", err)
 	}
-	return n, nil
+	m.FromClarificationID = fromClar.Int64
+	m.Scope = scanScope(scope)
+	m.Followups = scanFollowups(followups)
+	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+	clar, err := s.Clarification(ctx, subject, m.ID)
+	if err != nil {
+		return Message{}, false, err
+	}
+	m.Clarification = clar
+	return m, true, nil
 }
 
 // Message returns one turn by id, or false when it does not belong to a
@@ -910,6 +920,15 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 // renders as a question with no body under it, which is the one thing a
 // frozen thread must never show. The owner's read keeps every row: a turn
 // being written is exactly what that view is for.
+//
+// One consequence, taken knowingly: a turn still streaming BELOW the ceiling
+// (shared from a second tab while an earlier turn runs) is hidden now and
+// appears once it lands, without the owner raising anything. It stays inside
+// what the ceiling already authorised -- id <= up_to_message_id, which the
+// citation reads use too -- so nothing is exposed that the share did not
+// already cover, and the alternative is the hole this filter exists to close,
+// left on the page for good. A ceiling pinned to the newest CONTIGUOUSLY
+// finished turn would remove even that window.
 func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling int64) ([]Message, error) {
 	// The subject is part of the query rather than checked afterwards: a thread
 	// belongs to the person who asked, and a mistake here hands someone else's

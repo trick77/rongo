@@ -538,32 +538,34 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// — the reader named it a turn ago. A read that fails is logged and
 	// treated as no previous turn, the way an unreadable thread is.
 	if followUpIn != 0 {
+		// What stands directly below this turn decides whether it may run at
+		// all. A turn that answered, one that failed, one that asked back:
+		// all finished, and asking past any of them is ordinary. A row with
+		// none of the three never finished, and a question typed under it
+		// points at something this turn cannot read - so it would drop the
+		// subject, widen the scope to every repository and answer confidently
+		// out of whichever one the bare words happened to match, a funnel
+		// widening in silence.
+		//
+		// Tested on the row directly below rather than on any row below: an
+		// abandoned turn further back is already stepped over by the answered
+		// turn between them, and only the immediate neighbour is what a
+		// pronoun reaches for. Reported, never repaired - the database cannot
+		// tell an abandoned row from one still streaming in another tab, and
+		// writing a failure onto the second would leave a row carrying both
+		// an answer and an error.
+		if below, ok, err := s.deps.Threads.NewestTurnBefore(ctx, u.Subject, followUpIn, followUpBefore); err != nil {
+			slog.Error("read newest turn failed", "err", err)
+		} else if ok && below.Answer == "" && below.Error == "" && below.Clarification == nil {
+			slog.Warn("follow-up typed under a turn that never finished", "thread", followUpIn, "message", below.ID)
+			http.Error(w, "the turn above is still unfinished; wait for it or retry it", http.StatusConflict)
+			return
+		}
+
 		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		if err != nil {
 			slog.Error("read last turn failed", "err", err)
-		} else if !ok {
-			// Nothing to point at. That is ordinary for a first turn, and for
-			// one asked past a turn that failed or past an open card, all of
-			// which are finished rows. It is a fault only when a row below
-			// never finished at all: the reader's "das" then names something
-			// this turn cannot read, and going on would drop the subject,
-			// widen the scope to every repository and answer confidently out
-			// of whichever one the bare words happened to match — a funnel
-			// widening in silence.
-			//
-			// The stranded row is closed as it is found. Nothing else
-			// collects one, and while it reads as still running the browser
-			// offers no retry, so refusing without closing it would leave the
-			// thread stuck for good and make "ask again" a lie.
-			closed, herr := s.deps.Threads.FailUnfinishedTurnsBefore(ctx, u.Subject, followUpIn, followUpBefore, turnFailed)
-			if herr != nil {
-				slog.Error("close unfinished turns failed", "err", herr)
-			} else if closed > 0 {
-				slog.Warn("follow-up ran into a turn that never finished", "thread", followUpIn, "closed", closed)
-				http.Error(w, "the turn this follows did not finish; ask again", http.StatusConflict)
-				return
-			}
-		} else {
+		} else if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
 			// And what that answer was written from, for a rework. Read
 			// here rather than once the understanding has said the turn is

@@ -64,12 +64,11 @@ type Threads interface {
 	// be the newest turn of its thread, and what the new turn follows sits
 	// below the turn it joins. A turn typed into a thread passes math.MaxInt.
 	LastTurnBefore(ctx context.Context, subject string, threadID int64, before int) (threads.Message, bool, error)
-	// FailUnfinishedTurnsBefore closes every turn below the bound that never
-	// finished, reporting how many it closed: what tells a genuine first
-	// turn, or one asked past a failed turn or an open card, apart from a
-	// follow-up whose antecedent died mid-stream — and the only thing that
-	// collects such a row, so the thread does not stay stuck.
-	FailUnfinishedTurnsBefore(ctx context.Context, subject string, threadID int64, before int, msg string) (int64, error)
+	// NewestTurnBefore is the turn directly below the bound in whatever state
+	// it is in, where LastTurnBefore reads the newest one that ANSWERED. A
+	// row that is neither answered nor failed nor a card never finished, and
+	// a question typed under it has nothing readable to point at.
+	NewestTurnBefore(ctx context.Context, subject string, threadID int64, before int) (threads.Message, bool, error)
 	// MessageOrdinal is where one message sits in its thread, for placing a
 	// continuation under the row its head belongs to.
 	MessageOrdinal(ctx context.Context, subject string, messageID int64) (int, bool, error)

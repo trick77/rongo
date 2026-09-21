@@ -865,21 +865,44 @@ func TestAsk_aFollowUpWhoseAntecedentNeverFinishedIsRefused(t *testing.T) {
 		t.Errorf("the pipeline was reached with %+v, want the turn refused before any paid work", a.gotThread)
 	}
 
-	// And the stranded row is closed on the way out. Nothing else collects
-	// one, and the browser gates retry on an error, so leaving it as it was
-	// would make "ask again" a lie and strand the thread for good.
+	// The row below is left exactly as it was. It cannot be told apart from a
+	// turn still streaming in another tab, and writing a failure onto that
+	// one would leave a row carrying an answer AND an error.
 	after, err := deps.Threads.Messages(context.Background(), testSubject, list[0].ID)
 	if err != nil || len(after) != 1 {
 		t.Fatalf("messages: %v (%d)", err, len(after))
 	}
-	if after[0].Error == "" {
-		t.Error("the turn that never finished is still open: the thread stays stuck and offers no retry")
+	if after[0].Error != "" {
+		t.Errorf("the turn below was written to: error = %q, want it untouched", after[0].Error)
+	}
+}
+
+// TestAsk_aFollowUpUnderAnOrphanIsRefusedEvenWithAnAnsweredTurnBelowIt: the
+// check reads the row DIRECTLY below, not the newest answered one. A thread
+// that answered, then lost a turn mid-stream, is the common shape — rarer is
+// losing the very first turn — and the answered row further down must not
+// stand in for the one the question was actually typed under.
+func TestAsk_aFollowUpUnderAnOrphanIsRefusedEvenWithAnAnsweredTurnBelowIt(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, _ := askDeps(t, a)
+	postAsk(t, deps, `{"question":"Was macht der ZAS Check?","audience":"ba"}`)
+
+	list, err := deps.Threads.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	// A second turn, killed mid-stream above the answered one.
+	if _, err := deps.Threads.AddQuestion(context.Background(), list[0].ID, "ba", "en", "Und wo?", 0); err != nil {
+		t.Fatalf("add question: %v", err)
 	}
 
-	// So the reader's next attempt runs, instead of meeting the same 409.
-	again := postAsk(t, deps, fmt.Sprintf(`{"question":"In welchem Formularschritt passiert das?","audience":"ba","thread_id":%q}`, list[0].PublicID))
-	if again.Code != http.StatusOK {
-		t.Errorf("asking again = %d, want 200: the refusal told the reader to", again.Code)
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"In welchem Formularschritt passiert das?","audience":"ba","thread_id":%q}`, list[0].PublicID))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409: the turn directly below never finished", rec.Code)
+	}
+	if a.gotThread.Question != "" {
+		t.Errorf("the pipeline was reached with %+v, want the turn refused", a.gotThread)
 	}
 }
 
