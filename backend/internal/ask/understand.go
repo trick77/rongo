@@ -86,6 +86,26 @@ type Understanding struct {
 	// satisfies them while naming nothing the index can match. Carried as its
 	// own search lane instead, where a wrong guess cannot lose it.
 	//
+	// Unconditional, on every follow-up, and that is the design rather than a
+	// simplification. Whether a follow-up still concerns the previous subject
+	// is not something the model can judge from two sentences - a thread
+	// usually moves to another layer or another step while staying on topic,
+	// and a turn that has genuinely left reads much the same. So nothing here
+	// asks. The lane is one of four: where the subject still applies fusion
+	// ranks its hits up, and where the question really did move on three
+	// lanes outvote one and the reranker drops it. Relevance is decided by
+	// the search, which measures it, instead of by a gate call that would
+	// guess.
+	//
+	// The cost falls on a BROAD follow-up, and it is worth naming: three
+	// vague lanes plus this one leave the previous subject the sharpest
+	// signal in the query, so a question that asked for something wider can
+	// come back narrowed to what the thread was about. A precise follow-up
+	// outvotes it; a vague one may not. Against that stands the failure this
+	// exists for - a follow-up whose subject reaches the search nowhere at
+	// all - which is silent, confident and wrong, where this one is at worst
+	// an answer about the right thread.
+	//
 	// Stored in the clarification blob with everything else, so a resumed
 	// turn searches what the thread was about; omitempty keeps rows written
 	// before this existed decoding unchanged.
@@ -371,21 +391,34 @@ const (
 // Second line of defence only: the previous question reaches the search as
 // its own lane (Understanding.Prior) whatever this call returns.
 //
-// The last sentence is not decoration. Without it the rule reads as "carry
-// the old subject" on a follow-up that CHANGED subject, which would put the
-// old one into three of the four lanes instead of one: hits then span two
-// repositories with none named in the current question, and the deterministic
-// repository card fires where an answer belonged. The stamped lane costs one
-// lane and cannot be talked out of; this rule can, so it says when not to
-// apply.
+// Deliberately narrow: it fires on the ONE case a model can recognise from
+// the text alone, a question that names no subject. "Is the next question
+// still about the last one" is not that case - a thread usually moves to
+// another layer or another step while staying on topic, and telling the
+// difference between moving and leaving is a judgement of the same kind that
+// produced "dieser Vorgang" instead of the subject. A rule resting on it
+// would be wrong exactly when it matters.
+//
+// The connected-but-moved case is left to the search instead, where no
+// judgement is needed: the stamped lane (Understanding.Prior) carries the
+// previous question on EVERY follow-up, one lane of four. Where the subject
+// still applies, fusion ranks its hits up; where the question really did move
+// on, three lanes outvote one and the reranker drops it. That is why this
+// rule can afford to say nothing about the middle case - the structure
+// already covers it, and a prompt that guessed would only add a way to be
+// wrong.
 const understandFollowUp = `
-So when the current question points at something without naming it, name that
-subject to yourself as the previous question named it, and then keep it: EVERY
-entry of terms and EVERY entry of code_terms carries it. A rewording that
-drops it is a rewording of a different question, and terms and code_terms are
-what the search runs on - the words of the current question alone are not
-enough to find what it points at. When the current question names its own
-subject, this does not apply: expand THAT one and let the previous turn go.`
+So when the current question names no subject of its own - "that", "this",
+"it", "dies", "dieser Vorgang", a question that cannot be read on its own -
+take the subject from the previous question, name it as that question named
+it, and keep it: EVERY entry of terms and EVERY entry of code_terms carries
+it. A rewording that drops it is a rewording of a different question, and
+terms and code_terms are what the search runs on - the words of the current
+question alone are not enough to find what it points at.
+
+When the current question does name its own subject, expand THAT one. Do not
+add the previous subject to the terms yourself; the search carries the
+previous question on its own account.`
 
 // understandMemory is the rule for the memory fields, in the system prompt
 // only when the deployment keeps memory. Written in English whatever the
