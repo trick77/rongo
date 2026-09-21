@@ -455,12 +455,23 @@ func TestReleasePair_takesTheReadersOwnWordsOnly(t *testing.T) {
 	if got := releasePair("what is on production, that is prod", declared); got != nil {
 		t.Errorf("one stage twice = %v", got)
 	}
-	// A comma-separated string decodes like a list.
-	var u Understanding
-	if err := json.Unmarshal([]byte(`{"between":"prod, intg"}`), &u); err != nil || strings.Join(u.Between, ",") != "prod,intg" {
-		t.Errorf("string between = %v, %v", u.Between, err)
+}
+
+// TestNamesDecodesWhatAGateModelWrites keeps the tolerance under test now
+// that no field carries it: a gate model asked for a list sometimes replies
+// with one comma-separated string, and sometimes with something that is not
+// a list at all.
+func TestNamesDecodesWhatAGateModelWrites(t *testing.T) {
+	var n struct {
+		Got Names `json:"got"`
 	}
-	if err := json.Unmarshal([]byte(`{"between":7}`), &u); err != nil || len(u.Between) != 0 {
-		t.Errorf("number between = %v, %v", u.Between, err)
+	if err := json.Unmarshal([]byte(`{"got":"prod, intg"}`), &n); err != nil || strings.Join(n.Got, ",") != "prod,intg" {
+		t.Errorf("string = %v, %v", n.Got, err)
+	}
+	if err := json.Unmarshal([]byte(`{"got":["prod","intg"]}`), &n); err != nil || strings.Join(n.Got, ",") != "prod,intg" {
+		t.Errorf("list = %v, %v", n.Got, err)
+	}
+	if err := json.Unmarshal([]byte(`{"got":7}`), &n); err != nil || len(n.Got) != 0 {
+		t.Errorf("number = %v, %v", n.Got, err)
 	}
 }

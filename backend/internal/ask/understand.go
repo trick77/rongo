@@ -64,17 +64,6 @@ type Understanding struct {
 	// every change in the window. Filtered against commit subjects, bodies
 	// and paths; "what changed" alone has no topic and lists the window.
 	Topic string `json:"topic"`
-	// Between is the two deployment stages a release question compares, as
-	// declared names; empty on every other intent. A set, not a pair: which
-	// stage is ahead is read from the tags' ancestry, never from the order
-	// the model wrote them in.
-	//
-	// Recorded, never read: releasePair takes the stages from the reader's
-	// own words alone, because this field also carried a stage named only
-	// in a PREVIOUS turn, which is how a config follow-up was answered from
-	// commits. Kept because the turn's trace stores it and a disagreement
-	// with the reader's words is worth seeing.
-	Between Names `json:"between"`
 	// Terms are the question restated in business language, which is what the
 	// vector lane matches against doc comments and module names.
 	Terms []string `json:"terms"`
@@ -316,9 +305,6 @@ Fields:
   topic       for "changes" only: what the changes are about, as 1-4 words
               from the question ("snapshot handling", "login"), or "" when
               the question asks for every change. Every other intent is "".
-  between     for "release" only: the two deployment stages the question
-              compares, each written exactly as one of the names listed
-              below, else []. Every other intent is [].
   terms       2-4 rewordings of the question in domain language, as whole phrases
   code_terms  3-8 identifiers likely to occur in the source: class, method,
               package and protocol names, written the way a developer would
