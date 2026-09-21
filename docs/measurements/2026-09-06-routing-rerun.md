@@ -123,7 +123,7 @@ Written before any number landed, the way phase 4c fixed its criteria.
 
 ## Method
 
-`hack/run-eval.sh <arm>` in a clean worktree, `BACKEND_EVAL=1`,
+`scripts/run-eval.sh <arm>` in a clean worktree, `BACKEND_EVAL=1`,
 `BACKEND_EVAL_DB=/tmp/rongo-eval-small.db`, `BACKEND_REPO_ROOT=/tmp/rongo-eval-repos`.
 The previous corpus and database were gone, so this is a full re-clone and
 re-embed with no embedding-cache hits. Corpus is unchanged in shape: peeq,

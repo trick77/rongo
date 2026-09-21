@@ -13,8 +13,8 @@
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
-//	hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
-//	BACKEND_EVAL_ANSWER_RUNS=1 hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+//	scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+//	BACKEND_EVAL_ANSWER_RUNS=1 scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'
 //
 // The judge is a model, and a model at temperature zero still re-rolls one or
 // two questions in sixty (docs/measurements/2026-09-06-routing-rerun.md), so

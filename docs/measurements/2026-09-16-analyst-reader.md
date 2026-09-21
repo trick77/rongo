@@ -35,7 +35,7 @@ a string function rather than a prompt note; not a prompt change.
 
 ## The arms
 
-`hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'` on the flow corpus
+`scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'` on the flow corpus
 (`2026-09-10-flow-corpus.md`, ten questions, five German), two runs each,
 answer and judge on MiMo Pro. Before is the #174 branch (values paragraph,
 no role paragraph); after is this branch.

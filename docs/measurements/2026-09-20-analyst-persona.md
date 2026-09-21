@@ -36,7 +36,7 @@ predicted resolution was no picture. That is what this arm tests.
 
 ## The arms
 
-`hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'` on the flow corpus, ten
+`scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'` on the flow corpus, ten
 questions, one run per arm, answer and judge on MiMo Pro, defaults otherwise.
 Before is `17cb8bc` in its own worktree the same day; after is `1dd5304`.
 Both arms ran against ONE database, built once that morning.

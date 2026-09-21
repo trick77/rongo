@@ -28,7 +28,7 @@ Checks:
 
 ## Phase 4b — routing and clarification
 
-`make dev` (or `hack/dev.sh`); dev auth logs in automatically, no login form.
+`make dev` (or `scripts/dev.sh`); dev auth logs in automatically, no login form.
 UI at `http://127.0.0.1:5173/`.
 
 Checks:

@@ -5,7 +5,7 @@
 // weighing it accordingly find code the fused list was missing, and does it
 // cost anything where the lane already worked?
 //
-//	hack/run-eval.sh 'TestEvalMeasureFTS$'
+//	scripts/run-eval.sh 'TestEvalMeasureFTS$'
 //
 // Deterministic by construction: no reranker, no model call, one database. The
 // arms differ in one lane weight, nothing else.

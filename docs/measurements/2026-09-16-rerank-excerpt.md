@@ -17,7 +17,7 @@ The raw question stays the only query text the reranker sees.
 
 ## The arms
 
-Go corpus pinned 2026-08-20 (peeq bb04021 526/5694, rongo 0b989b6 142/1358, go-sqlite3 3fa3f30 293/2180), `hack/run-eval.sh 'TestEvalMeasureRerank$'`, unique cohort n=42. The baseline is `origin/master` at f38bb58 run the same evening, not the 2026-09-11 table, because this branch changes the prompt the 240 arm produces (the line-break cut and the start line are unconditional). Two runs each.
+Go corpus pinned 2026-08-20 (peeq bb04021 526/5694, rongo 0b989b6 142/1358, go-sqlite3 3fa3f30 293/2180), `scripts/run-eval.sh 'TestEvalMeasureRerank$'`, unique cohort n=42. The baseline is `origin/master` at f38bb58 run the same evening, not the 2026-09-11 table, because this branch changes the prompt the 240 arm produces (the line-break cut and the start line are unconditional). Two runs each.
 
 | arm | run | r@5 | r@20 | MRR | gathered | ambiguous | composition |
 |---|---|---|---|---|---|---|---|
@@ -32,7 +32,7 @@ Go corpus pinned 2026-08-20 (peeq bb04021 526/5694, rongo 0b989b6 142/1358, go-s
 
 Per question: the product misses the heavily-used helper, the follow-up options (fused rank 25) and how-far-from-a-hit (fused rank 49) in both runs. At 800 runes the follow-up options question is gathered in both runs and nothing is lost; the other two stay missed, the rank-49 one as the reranker's documented limit. The branch's own 240-rune arm is below the product's: cutting back to a line break at 240 leaves as little as 120 runes, so the width and the cut ship together, never the cut alone.
 
-Flow corpus (Sock Shop at pin20260910, 482 files / 3517 chunks), `hack/run-flow-eval.sh TestFlowGathered`, the product arm:
+Flow corpus (Sock Shop at pin20260910, 482 files / 3517 chunks), `scripts/run-flow-eval.sh TestFlowGathered`, the product arm:
 
 | arm | parts | questions whole | mean sources |
 |---|---|---|---|

@@ -1,7 +1,7 @@
 // The reranker arm: does one short-gate call over a deeper fused list move
 // the unique misses into the cut, and does the answer then have them?
 //
-//	hack/run-eval.sh 'TestEvalMeasureRerank$'
+//	scripts/run-eval.sh 'TestEvalMeasureRerank$'
 package eval
 
 import (

@@ -94,8 +94,8 @@ Measured in `2026-09-11-declared-structure.md`: 25/30 against 27/30. Off.
 ## Reproducing
 
 ```
-hack/run-eval.sh 'TestEvalRankOfMisses$'
-hack/run-eval.sh 'TestEvalMeasureRerank$'          # one short-gate call per unique question
-hack/run-eval.sh 'TestEvalMeasureGathered$'        # the whole-file arm is the last one
-hack/run-flow-eval.sh 'TestFlowGathered$'
+scripts/run-eval.sh 'TestEvalRankOfMisses$'
+scripts/run-eval.sh 'TestEvalMeasureRerank$'          # one short-gate call per unique question
+scripts/run-eval.sh 'TestEvalMeasureGathered$'        # the whole-file arm is the last one
+scripts/run-flow-eval.sh 'TestFlowGathered$'
 ```

@@ -14,7 +14,7 @@ Three answer-side gaps, none of them a number: the understanding step's `intent`
 
 ## The arms
 
-`hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'`, product defaults (MiMo 2.5 Pro answers, MiMo 2.5 gates, reranker on), Sock Shop corpus at `pin20260910`, 482 files / 3517 chunks, audience Analyst, two runs each. Baseline is `origin/master` at f38bb58 on the same day.
+`scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'`, product defaults (MiMo 2.5 Pro answers, MiMo 2.5 gates, reranker on), Sock Shop corpus at `pin20260910`, 482 files / 3517 chunks, audience Analyst, two runs each. Baseline is `origin/master` at f38bb58 on the same day.
 
 | arm | run | rubric present | contradicted | forbidden | cited parts | failed upstream | tokens |
 |---|---|---|---|---|---|---|---|

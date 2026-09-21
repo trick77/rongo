@@ -38,7 +38,7 @@ jobs:
     name: Backend (build + test)
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth: 0 — hack/patch-coverage.sh diffs the branch against the PR
+      # fetch-depth: 0 — scripts/patch-coverage.sh diffs the branch against the PR
       # base, which needs real history. The default shallow checkout leaves the
       # base ref unresolvable and the gate exits 2.
       - uses: actions/checkout@v7
@@ -68,7 +68,7 @@ jobs:
       - run: cd backend && go build ./...
       - run: cd backend && go vet ./...
       # gofmt is not covered by `go vet`. Run it from the repo root, not
-      # backend/: hack/strip-comment-lines.go is outside the module, so
+      # backend/: scripts/strip-comment-lines.go is outside the module, so
       # `go vet ./...` above never sees it, and patch-coverage.sh runs it on
       # every build.
       - name: gofmt
@@ -88,11 +88,11 @@ jobs:
       # explain why.
       - name: Gate self-tests
         run: |
-          ./hack/coverage-gate.test.sh
-          ./hack/strip-comment-lines.test.sh
+          ./scripts/coverage-gate.test.sh
+          ./scripts/strip-comment-lines.test.sh
       - run: make backend-coverage
       - name: Backend patch coverage
-        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+        run: ./scripts/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
 
   ui:
     name: UI (build + test)
@@ -116,4 +116,4 @@ jobs:
       - run: cd ui && npm run build
       - run: make fe-coverage
       - name: UI patch coverage
-        run: ./hack/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+        run: ./scripts/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"

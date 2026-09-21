@@ -809,7 +809,7 @@
 <section>
   <h2>Verification</h2>
   <ul>
-    <li><code>make test</code> (Go, <code>-race</code>) and <code>make fe-test</code> (Vitest), with coverage and diff-cover gates from peeq's <code>hack/</code>.</li>
+    <li><code>make test</code> (Go, <code>-race</code>) and <code>make fe-test</code> (Vitest), with coverage and diff-cover gates from peeq's <code>scripts/</code>.</li>
     <li>No test calls a real LLM, a real embedding endpoint or a real git remote: <code>httptest</code> fakes and a locally built fixture repository.</li>
     <li>A migration that touches data → tested on a database brought up to the state of the previous migration.</li>
     <li>End to end by hand: register a private repo → let it index → ask an ambiguous question → the clarification card appears → pick a candidate → the answer streams → open the source panel and actually look up a cited line → have it explained as Dev again and check that nothing is searched anew → the Cost page has moved.</li>

@@ -2,7 +2,7 @@
 # Runs the backend against a COPY of the evaluation index, for driving the
 # phase 4b clarification round trip by hand.
 #
-# Separate from hack/dev.sh because that one sources .env last and therefore
+# Separate from scripts/dev.sh because that one sources .env last and therefore
 # always wins with the app's own database path; this one deliberately points at
 # an already-indexed corpus and turns the poller off, so nothing re-fetches or
 # re-embeds while a human is clicking around.

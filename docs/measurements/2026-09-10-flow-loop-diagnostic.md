@@ -178,6 +178,6 @@ scratchpad/run-flow-eval.sh TestFlowLoopDiagnostic # the arm
 BACKEND_FLOW_BUDGET=12 scratchpad/run-flow-eval.sh TestFlowLoopDiagnostic
 ```
 
-Not `hack/run-eval.sh`: it hard-overrides `BACKEND_EVAL_DB` and
+Not `scripts/run-eval.sh`: it hard-overrides `BACKEND_EVAL_DB` and
 `BACKEND_REPO_ROOT` to the Go corpus's paths, and one database holding two
 corpora measures neither.

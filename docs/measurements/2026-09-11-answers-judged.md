@@ -142,11 +142,11 @@ Read across the two runs:
 ## Reproducing
 
 ```
-hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'                       # flow corpus, both runs
-BACKEND_EVAL_RERANK=0 hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'  # the fused-order baseline
+scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'                       # flow corpus, both runs
+BACKEND_EVAL_RERANK=0 scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'  # the fused-order baseline
 
 # a private estate: manifest, questions, expansions and rubrics under eval/private/
 EVAL_DB=/tmp/rongo-smd.db EVAL_REPOS_FILE=private/smd-repos.yaml EVAL_REPO_ROOT=/tmp/rongo-smd-repos \
 BACKEND_EVAL_FLOW_QUESTIONS=private/smd-questions.json BACKEND_EVAL_FLOW_EXPANSIONS=private/smd-expansions.json \
-BACKEND_EVAL_RUBRICS=private/smd-rubrics.json hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+BACKEND_EVAL_RUBRICS=private/smd-rubrics.json scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'
 ```

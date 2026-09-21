@@ -143,7 +143,7 @@ Of these, only `MaxSources` actually needed the rung; the other three reach rank
 
 ## Answers, measured 2026-09-21
 
-`TestEvalMeasureAnswers` runs against the **flow corpus** (Sock Shop), not the Go corpus — `hack/run-flow-eval.sh`, per the header of `answers_test.go`. Pointing it at the Go corpus answers Sock Shop questions out of peeq/rongo and scores 0/N on every rubric; that was done once here by mistake and the numbers discarded.
+`TestEvalMeasureAnswers` runs against the **flow corpus** (Sock Shop), not the Go corpus — `scripts/run-flow-eval.sh`, per the header of `answers_test.go`. Pointing it at the Go corpus answers Sock Shop questions out of peeq/rongo and scores 0/N on every rubric; that was done once here by mistake and the numbers discarded.
 
 Two runs, `BACKEND_EVAL_ANSWER_RUNS=2`, rung on at 0.85, BA audience, rerank pool 60, 800-rune excerpts:
 

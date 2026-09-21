@@ -5,9 +5,9 @@
 # variables in agreement, and getting one of them wrong costs an indexing run
 # rather than an error message.
 #
-# Usage: hack/run-eval.sh <go-test-run-pattern>
-#   hack/run-eval.sh TestEvalIndex             # build the corpus
-#   hack/run-eval.sh TestEvalMeasureRouting    # the phase 4b routing arms
+# Usage: scripts/run-eval.sh <go-test-run-pattern>
+#   scripts/run-eval.sh TestEvalIndex             # build the corpus
+#   scripts/run-eval.sh TestEvalMeasureRouting    # the phase 4b routing arms
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

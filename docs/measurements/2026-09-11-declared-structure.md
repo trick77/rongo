@@ -116,7 +116,7 @@ reason, the way `RepoDecay` does.
 
 ```
 sqlite3 /tmp/rongo-flow.db "UPDATE repo_state SET last_sha=''"   # the migration does this once on a real install
-hack/run-flow-eval.sh 'TestEvalIndex$'
-hack/run-flow-eval.sh 'TestFlowGathered$'
-hack/run-flow-eval.sh TestFlowEdges
+scripts/run-flow-eval.sh 'TestEvalIndex$'
+scripts/run-flow-eval.sh 'TestFlowGathered$'
+scripts/run-flow-eval.sh TestFlowEdges
 ```
