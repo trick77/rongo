@@ -227,6 +227,7 @@ func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
 	}
 
 	var out []Hit
+	spent := 0
 	seen := map[int64]bool{}
 	for _, term := range ask {
 		n := counts[strings.ToLower(term)]
@@ -247,7 +248,7 @@ func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
 			// generated file arrive whole at hop 0, where GatherSeeded adds
 			// them to the budget without a take — and a budget spent before
 			// the walk runs leaves the symbol hops and the crossing nothing.
-			if len(out) >= seedMaxTotal {
+			if spent += estimateSeedTokens(h.RawText); spent >= seedMaxTokens {
 				return out, nil
 			}
 		}
@@ -255,10 +256,23 @@ func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
 	return out, nil
 }
 
-// seedMaxTotal bounds every seed of one turn together. A seed is taken whole
-// and never evicted, so this is the most of the answer's budget the rung may
-// spend before the walk has run at all.
-const seedMaxTotal = 60
+// seedMaxTokens bounds every seed of one turn together, in TOKENS rather than
+// in chunks, because tokens are what the answer's budget is denominated in.
+//
+// A seed is taken whole at hop 0 and never evicted, so this is the most of
+// that budget the rung may spend before the symbol walk, the crossing reserve
+// and the gap pass have run at all. Counting chunks instead let the real cost
+// vary by a factor of ten with chunk size, which made "a wrong seed is paid
+// out of the answer budget" a claim the code did not actually enforce.
+//
+// 2000 against a 24000-token default: a twelfth, and roughly twice the 922
+// tokens the motivating question spends. A seed needing more than that is not
+// the selective evidence this rung is for.
+const seedMaxTokens = 2000
+
+// estimateSeedTokens is the same four-bytes-per-token rule the gatherer
+// budgets with, so the two agree about what a chunk costs.
+func estimateSeedTokens(text string) int { return len(text) / 4 }
 
 // seedMaxChunks bounds one term's seed. The file ceiling already bounds how
 // many FILES a seed may name; this stops one enormous file's worth of chunks

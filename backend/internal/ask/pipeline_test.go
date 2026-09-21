@@ -126,7 +126,10 @@ func withIndexedSearcher(indexed []string, fn func(retrieve.Query) ([]retrieve.H
 type fakeRouter struct {
 	d   Decision
 	err error
-	// named is what Run passed as the question's resolved repositories, so a
+	// gotHits is what Run handed the router to rank. A seed must never be in
+	// it: it has no score, and the routing floor cannot judge one.
+	gotHits []retrieve.Hit
+	// named is what Run passed as the question.s resolved repositories, so a
 	// test can check the rung's input reaches the router at all.
 	named []string
 	// all is the understanding's "the reader asked for every repository"
@@ -144,7 +147,8 @@ type fakeRouter struct {
 	stages stages.Set
 }
 
-func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, _ []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
+func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, hits []retrieve.Hit, namedRepos []string, allRepos bool) (Decision, error) {
+	f.gotHits = hits
 	f.named = namedRepos
 	f.all = allRepos
 	return f.d, f.err

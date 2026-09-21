@@ -81,6 +81,76 @@ func TestPipeline_aSeedAlreadyAmongTheHitsIsNotDoubled(t *testing.T) {
 	}
 }
 
+func TestPipeline_aSeedAloneNeverTurnsNothingFoundIntoACard(t *testing.T) {
+	// The seed has no score, because the scan that found it has no ranking.
+	// Handed to the router it would be the whole field on a turn the search
+	// came back empty from — and the floor that keeps a zero-score candidate
+	// off a card cannot apply when zero IS the lead. "Nothing found" is a true
+	// answer; a card, a judge call or "narrow your question" is not.
+	db := gatherDB(t)
+	seedID := seedChunk(t, db, "syrius/Converter.java", 0, 1, 20, "toType",
+		"ws.setAnzahlkinder(v.getAnzahlKinder());")
+	search := &fakeSearch{seeds: []retrieve.Hit{hitFor(t, db, seedID)}}
+	// A router that cards on anything it is given, so the assertion is about
+	// what reaches it rather than about the router's own thresholds.
+	router := &fakeRouter{d: Decision{Ask: true, Candidates: []Candidate{
+		{Repo: "estate", ModuleKey: "m0", Title: "One"},
+		{Repo: "other", ModuleKey: "m1", Title: "Two"},
+	}}}
+	c := twoStepUpstream(t, appleTVReply, "Nothing found.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), router)
+
+	_, clar, err := p.Run(context.Background(), "Wie wird die Anzahl Kinder übermittelt?",
+		AudienceBA, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(router.gotHits) != 0 {
+		t.Errorf("the router was handed %d hits, want the seeds kept out of routing",
+			len(router.gotHits))
+	}
+	_ = clar
+}
+
+func TestPipeline_aCardCarriesTheSeedIntoTheChosenCandidate(t *testing.T) {
+	// A turn that ends in a card resumes from what the card STORED — Resume
+	// replays the candidate's hits and searches for nothing more. So a seed
+	// computed after the card would be gone by the time the reader chooses,
+	// and the answer would be built without the chunk the seed exists to
+	// deliver: this rung's own failure, reached through a card.
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "entity/VersichertePerson.java", 0, 1, 20, "VersichertePerson",
+		"class VersichertePerson { Integer getAnzahlKinder() { return anzahlKinder; } }")
+	seedID := seedChunk(t, db, "syrius/Converter.java", 0, 1, 20, "toType",
+		"ws.setAnzahlkinder(v.getAnzahlKinder());")
+	hit, seed := hitFor(t, db, hitID), hitFor(t, db, seedID)
+	search := &fakeSearch{hits: []retrieve.Hit{hit}, seeds: []retrieve.Hit{seed}}
+	router := &fakeRouter{d: Decision{Ask: true, Candidates: []Candidate{
+		{Repo: hit.Repo, ModuleKey: "entity", Title: "Entity", Hits: []retrieve.Hit{hit}},
+	}}}
+	c := twoStepUpstream(t, appleTVReply, "Answer [1].")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), router)
+
+	_, clar, err := p.Run(context.Background(), "Wie wird die Anzahl Kinder übermittelt?",
+		AudienceBA, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if clar == nil {
+		t.Fatal("want a clarification")
+	}
+	found := false
+	for _, h := range clar.Candidates[0].Hits {
+		if h.ChunkID == seed.ChunkID {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the card's candidate holds %d hits without the seed, so choosing it loses the converter",
+			len(clar.Candidates[0].Hits))
+	}
+}
+
 func sourcePresent(sources []Source, path string) bool {
 	for _, s := range sources {
 		if strings.Contains(s.Path, path) {

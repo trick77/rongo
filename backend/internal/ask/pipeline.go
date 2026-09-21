@@ -379,6 +379,27 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	}
 	ev.detail("searching", searchDetail(hits))
 
+	// Seeded BEFORE routing so a card can carry them, and handed to the router
+	// NOT AT ALL. Both halves matter:
+	//
+	// Kept out of the routing input because a seed has no score — the scan
+	// that found it has no ranking. On a turn whose search found nothing the
+	// router would then read seeds as the field it must choose between: the
+	// floor that keeps a zero-score candidate off a card never applies when
+	// zero IS the lead, so "nothing found", a true answer, becomes a card, a
+	// paid judge call, or a "narrow your question" on the one turn where the
+	// seed is the answer.
+	//
+	// Computed before it because a turn that ends in a card resumes from what
+	// the card STORED. Seeding after the Ask return would leave the seed out
+	// of the stored hits, and the reader who picks a module gets an answer
+	// built without the chunk the seed exists to deliver — the failure this
+	// rung was written for, reached through a card instead of a search.
+	seeds := p.seedsFor(ctx, retrieve.Query{
+		Texts: texts, Code: u.CodeText(), Repos: known, Question: scopedQuestion,
+		Prior: u.Prior, Stage: declared.Prefixes(stage),
+	}, hits)
+
 	ev.status("routing")
 	d, err := p.router.Route(ctx, question, audience, lang, hits, known, all)
 	if err != nil {
@@ -389,7 +410,10 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		// The turn ends here. The understanding travels with it: a resumed
 		// turn that re-derives its own terms can search differently and
 		// answer from material the card never showed.
-		return Answer{}, &Clarification{Understanding: u, Candidates: d.Candidates, Scope: scope, TooBroad: d.TooBroad}, nil
+		return Answer{}, &Clarification{
+			Understanding: u, Candidates: withSeeds(d.Candidates, seeds),
+			Scope: scope, TooBroad: d.TooBroad,
+		}, nil
 	}
 
 	// Gathering keeps starting from ALL hits, never from a candidate's own
@@ -400,7 +424,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// is what the reader asked this turn, and the thread's older question is
 	// search material they did not type here. Naming it would say the turn
 	// went looking for something they asked a turn ago.
-	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
+	answer, err := p.gatherAndAnswerSeeded(ctx, question, audience, lang, hits, seeds, scope, withoutPrior(texts, u.Prior), t.Question, ev)
 	return answer, nil, err
 }
 
@@ -631,28 +655,35 @@ func withParts(structure, parts string) string {
 	return strings.TrimSuffix(structure, structureIsConfiguration) + parts + structureIsConfiguration
 }
 
-// gather is the reading step every entry point runs: the walk and the
+// gatherWithSeeds is the reading step every entry point runs: the walk and the
 // crossings, then the gap pass over what they produced, reported as one step
 // because a reader is told what was read, not how many lookups it took.
 //
 // One function rather than two copies: the gap pass has to run on a resumed
 // turn as well, and a step a resume skips is a turn answered from less code
 // than the same question answered a minute earlier.
-func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, ev Events) ([]Source, Scope, error) {
+//
+// Seeds arrive here rather than inside the hit list, so the ROUTER never sees
+// them; see seedsFor. Nil seeds is the gather every path ran before the rung
+// existed.
+func (p *Pipeline) gatherWithSeeds(ctx context.Context, question string, hits, seeds []retrieve.Hit, scope Scope, ev Events) ([]Source, Scope, error) {
 	ev.status("gathering")
 	census, err := p.census(ctx, scope)
 	if err != nil {
 		return nil, scope, err
 	}
 	scope.Links = census.Listing
-	sources, err := p.gatherSeeded(ctx, question, hits, scope, census, ev)
+	// Seeds reach GatherSeeded's settled-sources slot beside the census
+	// landings, but are NOT merged into census.Landings: `links` in the trace
+	// counts what the link census found, and a seed is not a link.
+	sources, err := p.gatherSeeded(ctx, question, hits, seedSources(seeds), scope, census, ev)
 	return sources, scope, err
 }
 
 // gatherSeeded is the gather under a census that has already been read.
-func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, census Census, ev Events) ([]Source, error) {
+func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, seeds []Source, scope Scope, census Census, ev Events) ([]Source, error) {
 	stage := scope.Stages.Prefixes(scope.Stage)
-	sources, err := p.gatherer.GatherSeeded(ctx, hits, census.Landings, stage)
+	sources, err := p.gatherer.GatherSeeded(ctx, hits, append(append([]Source{}, census.Landings...), seeds...), stage)
 	if err != nil {
 		return nil, err
 	}
@@ -702,10 +733,17 @@ func withCensusDetail(d map[string]any, c Census) map[string]any {
 // to report, having searched nothing.
 func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audience Audience, lang Language,
 	hits []retrieve.Hit, scope Scope, terms []string, followingUp string, ev Events) (Answer, error) {
+	return p.gatherAndAnswerSeeded(ctx, question, audience, lang, hits, nil, scope, terms, followingUp, ev)
+}
+
+// gatherAndAnswerSeeded is gatherAndAnswer with the selective-accessor seeds,
+// which reach the gatherer beside the hits and never the router.
+func (p *Pipeline) gatherAndAnswerSeeded(ctx context.Context, question string, audience Audience, lang Language,
+	hits, seeds []retrieve.Hit, scope Scope, terms []string, followingUp string, ev Events) (Answer, error) {
 
 	scope = p.describeProjects(ctx, scope)
 
-	sources, scope, err := p.gather(ctx, question, hits, scope, ev)
+	sources, scope, err := p.gatherWithSeeds(ctx, question, hits, seeds, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
@@ -882,6 +920,7 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	var hits, refs, crossings, gapped, tokens int
 	repos := map[string]bool{}
 	var crossed []map[string]string
+	seeded := 0
 	seenCrossing := map[string]bool{}
 	for _, s := range sources {
 		tokens += estimateTokens(s.Text)
@@ -907,6 +946,11 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 			// A census landing is not a reference either: it was seeded,
 			// not reached. Reported by withCensusDetail beside the count
 			// of sites it was drawn from.
+		case s.Reason == reasonAccessor:
+			// Nor is a selective-accessor seed. It was not reached by the
+			// walk and it was not ranked by the lanes, and counting it as a
+			// reference would report the walk finding code it never touched.
+			seeded++
 		default:
 			refs++
 		}
@@ -915,6 +959,11 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 	d["references"] = refs
 	d["crossings"] = crossings
 	d["tokens"] = tokens
+	if seeded > 0 {
+		// Only when it fired: the trace is stored per message, and
+		// "accessor_seeds: 0" on every turn is a record of an absence.
+		d["accessor_seeds"] = seeded
+	}
 	if budget > 0 {
 		d["budget"] = budget
 	}
@@ -973,7 +1022,7 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 		if err != nil {
 			return nil, err
 		}
-		return p.withSeeds(ctx, q, hits)
+		return hits, nil
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
@@ -1002,27 +1051,28 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 	if len(all) > comparisonK {
 		all = all[:comparisonK]
 	}
-	// Seeds AFTER the comparison cut, and scoped to every named repository at
-	// once: the cut bounds how much ranked material a comparison inlines, and
-	// a seed is not ranked material. Cutting it here would drop the one
-	// chunk the reader's own word pointed at to make room for a hit that
-	// merely scored.
-	return p.withSeeds(ctx, retrieve.Query{
-		Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, Stage: stage,
-	}, all)
+	return all, nil
 }
 
-// withSeeds appends the selective-accessor seeds for a query to its hits.
+// seedsFor returns the selective-accessor seeds for a query, minus anything
+// the hits already carry.
 //
-// Appended, never merged into the ranking: a seed is evidence the reader's own
-// word pointed at, and the gatherer takes a hit at hop 0 whole and never
-// evicts it, which is exactly what a seed needs. Ordering behind the hits
-// keeps every existing arm's first source the same when no seed fires, which
-// is the common case.
+// SEPARATE from the hits, and that separation is the whole design. A seed is
+// not ranked material: it has no score, because the scan that found it has no
+// ranking. Appending it to the hits hands it to the ROUTER as if it were a
+// ranked candidate, and on a turn the search found nothing the router then
+// reads seeds as the field it must choose between — turning "nothing found",
+// which is a true answer, into a clarification card, a paid judge call, or a
+// "narrow your question" on the one turn where the seed IS the answer.
 //
-// A seed already among the hits is dropped, so a chunk both paths found is one
+// So seeds travel past the router and reach the gatherer through
+// GatherSeeded's own parameter, which takes them at hop 0, whole, never
+// evicted. Routing is decided by the ranked lanes alone, exactly as it was
+// before seeds existed.
+//
+// A seed the hits already hold is dropped, so a chunk both paths found is one
 // source rather than two.
-func (p *Pipeline) withSeeds(ctx context.Context, q retrieve.Query, hits []retrieve.Hit) ([]retrieve.Hit, error) {
+func (p *Pipeline) seedsFor(ctx context.Context, q retrieve.Query, hits []retrieve.Hit) []retrieve.Hit {
 	seeds, err := p.search.SeedHits(ctx, q)
 	if err != nil {
 		// LOGGED, never returned. The search has already succeeded; the seed
@@ -1032,22 +1082,78 @@ func (p *Pipeline) withSeeds(ctx context.Context, q retrieve.Query, hits []retri
 		// error because an optional scan went wrong.
 		slog.Warn("the selective-accessor seed failed, answering from the search alone",
 			"thread", llm.ThreadID(ctx), "err", err)
-		return hits, nil
+		return nil
 	}
 	if len(seeds) == 0 {
-		return hits, nil
+		return nil
 	}
 	have := make(map[int64]bool, len(hits))
 	for _, h := range hits {
 		have[h.ChunkID] = true
 	}
+	out := seeds[:0:0]
 	for _, s := range seeds {
 		if !have[s.ChunkID] {
 			have[s.ChunkID] = true
-			hits = append(hits, s)
+			out = append(out, s)
 		}
 	}
-	return hits, nil
+	return out
+}
+
+// withSeeds gives every candidate on a clarification card the seeds that fall
+// in its OWN repository, so the answer built after a choice still holds them.
+//
+// Resume replays a candidate's stored hits and deliberately searches for
+// nothing more — "a resumed turn must not go looking for anything else" — so
+// the seed has to be in the card or it is gone. Per repository rather than on
+// every candidate, because a seed from another repository would be material
+// the reader's choice excluded.
+//
+// A candidate already holding the chunk keeps one copy.
+func withSeeds(candidates []Candidate, seeds []retrieve.Hit) []Candidate {
+	if len(seeds) == 0 || len(candidates) == 0 {
+		return candidates
+	}
+	out := make([]Candidate, len(candidates))
+	copy(out, candidates)
+	for i := range out {
+		have := make(map[int64]bool, len(out[i].Hits))
+		for _, h := range out[i].Hits {
+			have[h.ChunkID] = true
+		}
+		hits := out[i].Hits
+		for _, s := range seeds {
+			if s.Repo == out[i].Repo && !have[s.ChunkID] {
+				have[s.ChunkID] = true
+				hits = append(hits, s)
+			}
+		}
+		out[i].Hits = hits
+	}
+	return out
+}
+
+// reasonAccessor is the Source.Reason a selective-accessor seed carries. Its
+// own value, not "hit": a seed was neither ranked by the lanes nor reached by
+// the walk, and the trace counts the three apart.
+const reasonAccessor = "accessor"
+
+// seedSources turns seed hits into the sources GatherSeeded takes beside the
+// search hits. Same shape the census landings arrive in.
+func seedSources(seeds []retrieve.Hit) []Source {
+	if len(seeds) == 0 {
+		return nil
+	}
+	out := make([]Source, 0, len(seeds))
+	for _, h := range seeds {
+		out = append(out, Source{
+			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
+			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
+			SHA: h.SHA, Text: h.RawText, Reason: reasonAccessor, Hop: 0,
+		})
+	}
+	return out
 }
 
 // Resume continues a turn after the reader chose one candidate from a
@@ -1096,7 +1202,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 
 	texts := u.SearchTexts(question)
 	stage := p.declaredStages(ctx).Prefixes(scope.Stage)
-	var hits []retrieve.Hit
+	var hits, seeds []retrieve.Hit
 	if len(repos) > 0 {
 		// A restriction the index cannot resolve is not a narrow search, it is
 		// no search at all: knownRepos drops a name it does not carry, and an
@@ -1131,6 +1237,9 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
+		seeds = p.seedsFor(ctx, retrieve.Query{
+			Texts: texts, Code: u.CodeText(), Repos: known, Prior: u.Prior, Stage: stage,
+		}, hits)
 	} else {
 		ev.status("searching")
 		var err error
@@ -1139,16 +1248,13 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
-		hits, err = p.withSeeds(ctx, q, hits)
-		if err != nil {
-			return Answer{}, fmt.Errorf("seed: %w", err)
-		}
+		seeds = p.seedsFor(ctx, q, hits)
 	}
 
 	ev.detail("searching", searchDetail(hits))
 	scope = p.describeProjects(ctx, scope)
 
-	sources, scope, err := p.gather(ctx, question, hits, scope, ev)
+	sources, scope, err := p.gatherWithSeeds(ctx, question, hits, seeds, scope, ev)
 	if err != nil {
 		return Answer{}, err
 	}
