@@ -329,7 +329,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
 	ev.notice(ScopeNotice(lang, scope))
-	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin), stageDetail))
+	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin, t.Sources), stageDetail))
 
 	// A changes question leaves here: its sources are commits, and neither
 	// the fused search nor the routing ladder has anything to say about a
@@ -365,7 +365,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if len(pin) > 0 {
 		scopedQuestion = ""
 	}
-	hits, err := p.searchScoped(ctx, scopedQuestion, texts, u.CodeText(), known, declared.Prefixes(stage))
+	hits, err := p.searchScoped(ctx, scopedQuestion, u.Prior, texts, u.CodeText(), known, declared.Prefixes(stage))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -388,8 +388,51 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// subset. The published 0.955 was measured that way; narrowing here would
 	// be an unmeasured regression. Routing decides whether to ask, not what
 	// to read.
-	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, texts, t.Question, ev)
+	// Reported without the previous question: "nothing found, searched for:"
+	// is what the reader asked this turn, and the thread's older question is
+	// search material they did not type here. Naming it would say the turn
+	// went looking for something they asked a turn ago.
+	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
 	return answer, nil, err
+}
+
+// hitRepos is the repositories a turn's SEARCH HITS came from, deduplicated
+// and sorted. Hop 0 only: a reference walk and a crossing reach files the
+// question never asked for, and counting those would name a repository the
+// turn merely passed through.
+func hitRepos(sources []Source) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range sources {
+		if s.Hop != 0 || s.Repo == "" || seen[s.Repo] {
+			continue
+		}
+		seen[s.Repo] = true
+		out = append(out, s.Repo)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// withoutPrior drops the previous-question lane from the list a failed search
+// reports back. The lane earns its place in the search, never in the sentence.
+// Filtered from index 1 and at most once: texts[0] is the reader's own
+// question, and a reader who asks the same thing twice in one thread makes
+// the two strings equal. SearchTexts adds no lane in that case, so there is
+// nothing here to remove and removing by value would take the reader's own
+// question out of the sentence instead.
+func withoutPrior(texts []string, prior string) []string {
+	if prior = strings.TrimSpace(prior); prior == "" {
+		return texts
+	}
+	for i := 1; i < len(texts); i++ {
+		if texts[i] == prior {
+			out := make([]string, 0, len(texts)-1)
+			out = append(out, texts[:i]...)
+			return append(out, texts[i+1:]...)
+		}
+	}
+	return texts
 }
 
 // outsideThePin is the repositories the question named, the index carries, and
@@ -729,8 +772,17 @@ func writingDetail(answer Answer, sources int) map[string]any {
 // on. Terms and code terms are the model's; the scope is the index's answer
 // to them, which is why both are shown — a guess that missed the index is
 // exactly what a reader wants to see when a search came back thin.
-func understandingDetail(u Understanding, scope Scope, pin []string) map[string]any {
+func understandingDetail(u Understanding, scope Scope, pin []string, prior []Source) map[string]any {
 	d := map[string]any{}
+	// What the turn below this one actually answered out of, recorded so the
+	// question "should a follow-up inherit its predecessor's repository" can
+	// be settled with a number instead of an argument. Hop 0 is a search hit;
+	// Reason is rewritten on promoted hits and cannot be used for this.
+	// Reported only, never applied: scope is read from the question and never
+	// inferred from the hits.
+	if repos := hitRepos(prior); len(repos) > 0 {
+		d["prior_repos"] = repos
+	}
 	if u.Intent != "" {
 		d["intent"] = u.Intent
 	}
@@ -906,16 +958,16 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 // searchK per repository, not searchK divided among them: each side gets the
 // same depth it would have got as the only named one, and gather applies no
 // cap to hits by design.
-func (p *Pipeline) searchScoped(ctx context.Context, question string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
-		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, K: searchK, Stage: stage})
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: searchK, Stage: stage})
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
 		// Question is left out on purpose: it names every one of these
 		// repositories, and knownRepos would union them all back in, undoing
 		// the one-repository-at-a-time cut this exists for.
-		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, K: searchK, Stage: stage})
+		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
 		if err != nil {
 			return nil, err
 		}
@@ -1017,14 +1069,14 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		// question is left out for the reason the single-repository search
 		// left it out — knownRepos would union the other repositories back in
 		// and undo the choice.
-		hits, err = p.searchScoped(ctx, "", texts, u.CodeText(), known, stage)
+		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage)
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
 	} else {
 		ev.status("searching")
 		var err error
-		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, K: searchK, Stage: stage})
+		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, Prior: u.Prior, K: searchK, Stage: stage})
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
@@ -1038,7 +1090,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		return Answer{}, err
 	}
 	if len(sources) == 0 {
-		return Answer{Text: NothingFound(lang, texts), Scope: scope}, nil
+		return Answer{Text: NothingFound(lang, withoutPrior(texts, u.Prior)), Scope: scope}, nil
 	}
 
 	return p.answer(ctx, question, audience, lang, sources, scope, t.Question, ev)

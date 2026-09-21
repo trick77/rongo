@@ -58,6 +58,18 @@ type Rubric struct {
 	// Cite are the files the answer has to cite; empty means the question's
 	// candidate paths.
 	Cite []flowPart `json:"cite,omitempty"`
+	// Follows is a question asked FIRST, whose turn this one then continues.
+	// Empty is the ordinary case: a first turn, which is what every question
+	// in this arm was until follow-ups were measured at all.
+	//
+	// It exists because a follow-up is the one shape the arm could not see. A
+	// question like "and in which step does that happen?" names its subject
+	// nowhere, and the pipeline is supposed to carry it from the turn before;
+	// running every question against a zero Thread measured the half where
+	// there is nothing to carry. The preceding turn is run through the same
+	// pipeline, unjudged - it is setup, not a measurement - and what it
+	// answers becomes the Thread the measured turn inherits.
+	Follows string `json:"follows,omitempty"`
 }
 
 // rubricsFile is where the flow corpus's rubrics live. BACKEND_EVAL_RUBRICS
@@ -203,8 +215,12 @@ func excerpt(s string, n int) string {
 // answerRecord is one answered question, kept for reading after the run:
 // the numbers say how much was right, the text says what was wrong.
 type answerRecord struct {
-	Run       int      `json:"run"`
-	Question  string   `json:"question"`
+	Run      int    `json:"run"`
+	Question string `json:"question"`
+	// Follows is the question this turn continued, when the rubric named one.
+	// Empty on a first turn, which is every question the arm carried before
+	// follow-ups were measured.
+	Follows   string   `json:"follows,omitempty"`
 	Asked     bool     `json:"asked"`
 	Answer    string   `json:"answer"`
 	Cited     []string `json:"cited"`
@@ -304,7 +320,65 @@ func TestEvalMeasureAnswers(t *testing.T) {
 			}
 			rec := answerRecord{Run: run, Question: q.Text}
 			lang := ask.ParseLanguage(r.Lang)
-			a, clar, err := pipeline.Run(ctx, q.Text, audience, lang, ask.Thread{}, ask.Events{})
+			// A rubric naming a preceding question is measured as the SECOND
+			// turn of a thread: the first is run to have something to follow,
+			// and only what it leaves behind - the question, the answer and
+			// the sources it was written from - reaches the turn under test.
+			// A setup turn that fails or asks back is reported and the
+			// question skipped, never measured against a thread that is not
+			// the one the rubric describes.
+			thread := ask.Thread{}
+			if r.Follows != "" {
+				// In ITS own language, which need not be the follow-up's: the
+				// preceding turn is a real turn of the corpus and has a
+				// rubric of its own saying what it was asked in. A thread
+				// keeps one language in the product, and these two-turn pairs
+				// deliberately cross it to check the subject survives the
+				// crossing rather than riding on shared wording.
+				pr, ok := rubrics[r.Follows]
+				if !ok {
+					t.Fatalf("rubric for %q follows %q, which has no rubric in %s", q.Text, r.Follows, rubricsFile())
+				}
+				prevLang := lang
+				if pr.Lang != "" {
+					prevLang = ask.ParseLanguage(pr.Lang)
+				}
+				prev, prevClar, perr := pipeline.Run(ctx, r.Follows, audience, prevLang, ask.Thread{}, ask.Events{})
+				switch {
+				case perr != nil:
+					rec.Err = "preceding turn: " + perr.Error()
+					failed++
+					t.Logf("  %-70s SETUP FAILED: %v", short(q.Text), perr)
+					records = append(records, rec)
+					continue
+				case prevClar != nil:
+					rec.Err = "preceding turn asked back"
+					failed++
+					t.Logf("  %-70s SETUP ASKED BACK", short(q.Text))
+					records = append(records, rec)
+					continue
+				}
+				// Pin included, or the arm measures a shape the product does
+				// not run. threadPin reads the newest turn's stored
+				// scope.Known, and ResolveRepos unions in every indexed
+				// repository the question names as a whole word - "which
+				// service decides whether a PAYMENT is authorised" against a
+				// repository called payment pins the thread. Under a pin the
+				// raw question is dropped from the search, so the previous
+				// question is the only lane carrying the subject: exactly the
+				// shape this change is for, and the one an unpinned thread
+				// would quietly not test.
+				thread = ask.Thread{
+					Pin:          prev.Scope.Known,
+					Question:     r.Follows,
+					Answer:       prev.Text,
+					Sources:      prev.Sources,
+					SourcesTotal: len(prev.Sources),
+				}
+				rec.Follows = r.Follows
+				tokens += prev.Usage.Total
+			}
+			a, clar, err := pipeline.Run(ctx, q.Text, audience, lang, thread, ask.Events{})
 			if err != nil {
 				rec.Err = err.Error()
 				failed++
