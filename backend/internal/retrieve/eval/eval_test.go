@@ -582,6 +582,14 @@ type armMetrics struct {
 // with, never in how the result is read.
 func measureArm(ctx context.Context, t *testing.T, name string, g *ask.Gatherer,
 	questions []Question, search func(Question) []retrieve.Hit) armMetrics {
+	return measureArmSeeded(ctx, t, name, g, questions, search, nil)
+}
+
+// measureArmSeeded is measureArm with a seed source: chunks the arm has
+// already settled on, taken at hop 0 and never evicted. nil is measureArm.
+func measureArmSeeded(ctx context.Context, t *testing.T, name string, g *ask.Gatherer,
+	questions []Question, search func(Question) []retrieve.Hit,
+	seed func(Question) []retrieve.Hit) armMetrics {
 	t.Helper()
 	m := armMetrics{ranks: map[string]int{}}
 	for _, q := range questions {
@@ -594,7 +602,14 @@ func measureArm(ctx context.Context, t *testing.T, name string, g *ask.Gatherer,
 			}
 		}
 
-		sources, err := g.Gather(ctx, hits)
+		// Seeds are passed as HITS: the gatherer already takes a hit at hop 0,
+		// whole and never evicted, which is exactly what a seed is. Appended
+		// after the search hits and deduped by the gatherer.
+		gathered := hits
+		if seed != nil {
+			gathered = append(append([]retrieve.Hit{}, hits...), seed(q)...)
+		}
+		sources, err := g.Gather(ctx, gathered)
 		if err != nil {
 			t.Fatalf("%s: gather %q: %v", name, q.Text, err)
 		}

@@ -33,6 +33,14 @@ type Searcher interface {
 	// ResolveRepos splits the understanding's guessed repository names into
 	// the ones the index carries and the ones it does not.
 	ResolveRepos(ctx context.Context, want []string, question string) (known, unknown []string, err error)
+	// SeedHits are the chunks a SELECTIVE accessor of a question term lands
+	// on — evidence specific enough that ranking it against everything else
+	// is what loses it. Empty is the common case and is not an error: most
+	// questions name no field whose accessor is rare.
+	//
+	// They reach the gatherer beside the search hits rather than through
+	// fusion, which is the whole point. See retrieve.Retriever.SeedHits.
+	SeedHits(ctx context.Context, q retrieve.Query) ([]retrieve.Hit, error)
 }
 
 // Routes decides whether a turn can be answered from the gathered hits or
@@ -960,7 +968,12 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 // cap to hits by design.
 func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
-		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: searchK, Stage: stage})
+		q := retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: searchK, Stage: stage}
+		hits, err := p.search.Search(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		return p.withSeeds(ctx, q, hits)
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
@@ -989,7 +1002,45 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 	if len(all) > comparisonK {
 		all = all[:comparisonK]
 	}
-	return all, nil
+	// Seeds AFTER the comparison cut, and scoped to every named repository at
+	// once: the cut bounds how much ranked material a comparison inlines, and
+	// a seed is not ranked material. Cutting it here would drop the one
+	// chunk the reader's own word pointed at to make room for a hit that
+	// merely scored.
+	return p.withSeeds(ctx, retrieve.Query{
+		Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, Stage: stage,
+	}, all)
+}
+
+// withSeeds appends the selective-accessor seeds for a query to its hits.
+//
+// Appended, never merged into the ranking: a seed is evidence the reader's own
+// word pointed at, and the gatherer takes a hit at hop 0 whole and never
+// evicts it, which is exactly what a seed needs. Ordering behind the hits
+// keeps every existing arm's first source the same when no seed fires, which
+// is the common case.
+//
+// A seed already among the hits is dropped, so a chunk both paths found is one
+// source rather than two.
+func (p *Pipeline) withSeeds(ctx context.Context, q retrieve.Query, hits []retrieve.Hit) ([]retrieve.Hit, error) {
+	seeds, err := p.search.SeedHits(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	if len(seeds) == 0 {
+		return hits, nil
+	}
+	have := make(map[int64]bool, len(hits))
+	for _, h := range hits {
+		have[h.ChunkID] = true
+	}
+	for _, s := range seeds {
+		if !have[s.ChunkID] {
+			have[s.ChunkID] = true
+			hits = append(hits, s)
+		}
+	}
+	return hits, nil
 }
 
 // Resume continues a turn after the reader chose one candidate from a
@@ -1076,9 +1127,14 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	} else {
 		ev.status("searching")
 		var err error
-		hits, err = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, Prior: u.Prior, K: searchK, Stage: stage})
+		q := retrieve.Query{Texts: texts, Code: u.CodeText(), Question: question, Prior: u.Prior, K: searchK, Stage: stage}
+		hits, err = p.search.Search(ctx, q)
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
+		}
+		hits, err = p.withSeeds(ctx, q, hits)
+		if err != nil {
+			return Answer{}, fmt.Errorf("seed: %w", err)
 		}
 	}
 

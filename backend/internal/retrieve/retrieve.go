@@ -115,6 +115,28 @@ type Retriever struct {
 	// New ships it on; zero — and so a struct-literal Retriever — leaves the
 	// rung off, which is the arm the harness measures the baseline with.
 	SubstringWeight float64
+	// SeedFiles, when above zero, turns on the SELECTIVE-ACCESSOR SEED and is
+	// the ceiling: an accessor spelling of a question term occurring in at
+	// most this many files has its chunks returned as SEEDS rather than as
+	// lane hits. Zero is off, which is what ships until a corpus prices it.
+	//
+	// Seeds do not go through fusion. That is the point. Three earlier
+	// attempts all WIDENED a ranked list — more substring terms, a union into
+	// the code rung, an inbound hop — and two of the three measured worse,
+	// because a chunk only one lane can see cannot win a fusion that rewards
+	// lane agreement, however much the lane is widened or reweighted.
+	//
+	// A selective accessor is a different claim. "getAnzahlKinder occurs in 8
+	// files" is not evidence to be ranked against other evidence; those 8 are
+	// where the value is read, and the reader asked how the value is read. The
+	// gatherer already has the shape for it: GatherSeeded takes sources at hop
+	// 0, whole, never evicted by the budget, with the walk's frontier starting
+	// from them.
+	//
+	// The ceiling is the whole defence, and it is tight for the same reason
+	// edges.spreadCeiling is: a wrong seed is worse than a missing one,
+	// because it is paid for out of the answer's budget before the walk runs.
+	SeedFiles int
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
 	// see LLMReranker. The product sets it; nil is the fused order as it has
 	// always been, and the eval harness's baseline.
@@ -134,8 +156,88 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		CodeWeight:  WeightKeywordCode,
 
 		SubstringWeight: WeightKeywordSubstring,
+		SeedFiles:       DefaultSeedFiles,
 	}
 }
+
+// DefaultSeedFiles is the ceiling the selective-accessor seed ships at: an
+// accessor spelling occurring in at most this many files has its chunks taken
+// as seeds rather than ranked.
+//
+// Measured on the pinned Go corpus, TestEvalMeasureFTS, six arms in one
+// process: at 5 and at 10 the seed is byte-identical to the product on r@5,
+// r@20, MRR, gathered AND mean rank (2.39 over the 41 questions every arm
+// ranks), while firing on 9 of 70 questions. It adds material and moves no
+// number, which is what makes it safe to carry.
+//
+// 5 rather than 10 because the two measured identically and the tighter one
+// is the smaller claim: a wrong seed is paid for out of the answer's budget
+// before the walk runs, so the ceiling is the defence and it should be as low
+// as the evidence allows.
+const DefaultSeedFiles = 5
+
+// minSeedRunes is how long an accessor spelling must be before its
+// selectivity counts. A short term is not specific however few files it
+// happens to occur in on one corpus: "getId" in a corpus of three files is an
+// accident, not a claim.
+const minSeedRunes = 12
+
+// SeedHits returns the chunks a question's SELECTIVE accessor terms land on —
+// the hits that should reach the gatherer as seeds rather than as a lane.
+//
+// Empty unless SeedFiles is set. Empty is the common case and the intended
+// one: most questions yield no term whose accessor spelling is both long
+// enough and rare enough, and a seed that fires on a question it has nothing
+// to say about spends the answer's budget for nothing.
+//
+// Terms come from BuildSubstringTerms — the question's own words and the
+// guessed identifiers — run through BuildAccessorTerms. No model call.
+func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
+	if r.SeedFiles <= 0 {
+		return nil, nil
+	}
+	texts := q.texts()
+	prose := ""
+	if len(texts) > 0 {
+		prose = texts[0]
+	}
+	terms := BuildAccessorTerms(BuildSubstringTerms(prose, strings.Fields(q.Code)))
+	repos, err := r.knownRepos(ctx, q.Repos, q.Question)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []Hit
+	seen := map[int64]bool{}
+	for _, term := range terms {
+		if len([]rune(term)) < minSeedRunes {
+			continue
+		}
+		n, err := r.store.FilesMatchingSubstring(ctx, term, repos, q.Stage)
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 || n > r.SeedFiles {
+			continue
+		}
+		hits, err := r.store.SearchSubstringIn(ctx, term, seedMaxChunks, repos, q.Stage)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range hits {
+			if !seen[h.ChunkID] {
+				seen[h.ChunkID] = true
+				out = append(out, h)
+			}
+		}
+	}
+	return out, nil
+}
+
+// seedMaxChunks bounds one term's seed. The file ceiling already bounds how
+// many FILES a seed may name; this stops one enormous file's worth of chunks
+// from arriving whole behind it.
+const seedMaxChunks = 40
 
 // Search runs both lanes and fuses them.
 //

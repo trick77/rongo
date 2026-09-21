@@ -26,6 +26,11 @@ import (
 type ftsArm struct {
 	name string
 	r    *retrieve.Retriever
+	// seedFiles, when above zero, adds the SELECTIVE-ACCESSOR SEED at that
+	// ceiling: chunks reached by an accessor spelling of a question term that
+	// occurs in at most this many files, taken at hop 0 rather than ranked.
+	// Zero is every other arm.
+	seedFiles int
 }
 
 // TestEvalMeasureFTS reports, per arm, recall@5, recall@20, MRR and how much
@@ -76,9 +81,21 @@ func TestEvalMeasureFTS(t *testing.T) {
 		swept.SubstringWeight = f
 	}
 	arms := []ftsArm{
-		{"prose floor only (the lane before the rung)", plain},
-		{fmt.Sprintf("code rung %.1f, no substring rung", retrieve.WeightKeywordCode), noSub},
-		{fmt.Sprintf("code rung %.1f + substring rung %.2f", retrieve.WeightKeywordCode, subW), swept},
+		{"prose floor only (the lane before the rung)", plain, 0},
+		{fmt.Sprintf("code rung %.1f, no substring rung", retrieve.WeightKeywordCode), noSub, 0},
+		{fmt.Sprintf("code rung %.1f + substring rung %.2f", retrieve.WeightKeywordCode, subW), swept, 0},
+	}
+	// The seed arms. Not a lane: a selective accessor's chunks are taken at
+	// hop 0 and never ranked, which is the one shape the three earlier
+	// attempts did not try. Swept, because the ceiling IS the defence.
+	for _, ceiling := range []int{5, 10} {
+		seeded := retrieve.New(db, evalEmbedder(t))
+		seeded.SubstringWeight = subW
+		seeded.SeedFiles = ceiling
+		arms = append(arms, ftsArm{
+			fmt.Sprintf("product + selective-accessor seed, ceiling %d files", ceiling),
+			seeded, ceiling,
+		})
 	}
 	// Both arms always run: this test IS the comparison, so the switch every
 	// other arm in the package reads would only let one half of it disappear.
@@ -87,19 +104,35 @@ func TestEvalMeasureFTS(t *testing.T) {
 	ranks := make([]map[string]int, len(arms))
 	for i, a := range arms {
 		t.Logf("\n=== %s ===", a.name)
-		m := measureArm(ctx, t, a.name, g, questions, func(q Question) []retrieve.Hit {
-			hits, err := a.r.Search(ctx, retrieve.Query{
+		queryFor := func(q Question) retrieve.Query {
+			return retrieve.Query{
 				Texts:    expansionTextsOf(t, expansions, q),
 				Code:     expansionCodes[q.Text],
 				Repos:    expansionRepos[q.Text],
 				Question: q.Text,
 				K:        gatherSearchK,
-			})
+			}
+		}
+		var seed func(Question) []retrieve.Hit
+		if a.seedFiles > 0 {
+			seed = func(q Question) []retrieve.Hit {
+				hits, err := a.r.SeedHits(ctx, queryFor(q))
+				if err != nil {
+					t.Fatalf("%s: seed %q: %v", a.name, q.Text, err)
+				}
+				if len(hits) > 0 {
+					t.Logf("    seeded %d chunks %s", len(hits), short(q.Text))
+				}
+				return hits
+			}
+		}
+		m := measureArmSeeded(ctx, t, a.name, g, questions, func(q Question) []retrieve.Hit {
+			hits, err := a.r.Search(ctx, queryFor(q))
 			if err != nil {
 				t.Fatalf("%s: search %q: %v", a.name, q.Text, err)
 			}
 			return hits
-		})
+		}, seed)
 		m.log(t, a.name)
 		ranks[i] = m.ranks
 	}

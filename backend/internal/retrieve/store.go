@@ -256,6 +256,40 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	return out, rows.Err()
 }
 
+// FilesMatchingSubstring counts the ENABLED files whose raw text contains the
+// term, which is how selective that term is. It is the seed rung's whole
+// gate: a term in a handful of files is a claim about those files, a term in
+// ninety is the name of a field every form and translation mentions.
+//
+// Counted over files rather than chunks on purpose. A long accessor used
+// twice in one converter is one place, not two.
+func (s *Store) FilesMatchingSubstring(ctx context.Context, term string, repos []string, stage StagePrefixes) (int, error) {
+	term = strings.TrimSpace(strings.ToLower(term))
+	if term == "" {
+		return 0, nil
+	}
+	q := `SELECT COUNT(DISTINCT c.file_id)
+		FROM chunks c
+		JOIN files f ON f.id = c.file_id
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+		WHERE instr(lower(c.raw_text), ?) > 0`
+	args := []any{term}
+	if len(repos) > 0 {
+		q += " AND f.repo IN (" + placeholders(len(repos)) + ")"
+		args = append(args, toAny(repos)...)
+	}
+	stageQ, stageArgs := stage.clause("f")
+	q += stageQ
+	args = append(args, stageArgs...)
+
+	var n int
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count substring matches: %w", err)
+	}
+	return n, nil
+}
+
 // substringHubShare is the share of the corpus past which a term is treated as
 // a hub and skipped. A substring matching a fiftieth of every chunk is telling
 // the fusion nothing it did not already know, and it costs a lane slot that a

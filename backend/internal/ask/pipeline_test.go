@@ -30,12 +30,25 @@ type fakeSearch struct {
 	// scope wants: the guess passes through unchanged, as it did before
 	// ResolveRepos existed.
 	indexed []string
+	// seeds are the selective-accessor seeds this fake hands back, and
+	// seedQueries records what it was asked for. Nil seeds is every test that
+	// predates the seed.
+	seeds       []retrieve.Hit
+	seedQueries []retrieve.Query
 }
 
 func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
 	f.got = q
 	f.queries = append(f.queries, q)
 	return f.hits, nil
+}
+
+// SeedHits returns the seeds this fake was given, or none. Nil is the case
+// every test that predates the seed wants: no question here names a field
+// whose accessor is selective, and the pipeline must behave as it did.
+func (f *fakeSearch) SeedHits(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
+	f.seedQueries = append(f.seedQueries, q)
+	return f.seeds, nil
 }
 
 // ResolveRepos answers from indexed: the names it holds are the ones this
@@ -73,6 +86,13 @@ func (f searchFunc) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit,
 // that invented an index would hide a turn that searched the wrong scope.
 func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known, unknown []string, err error) {
 	return nil, nil, nil
+}
+
+// SeedHits seeds nothing. None of these questions names a field whose
+// accessor is selective, so the pipeline must behave exactly as it did before
+// the seed existed — which is what every assertion here still checks.
+func (f searchFunc) SeedHits(_ context.Context, _ retrieve.Query) ([]retrieve.Hit, error) {
+	return nil, nil
 }
 
 // indexedSearch is searchFunc plus an index that carries some repositories.

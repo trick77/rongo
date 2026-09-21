@@ -158,6 +158,44 @@ func BuildSubstringTerms(question string, codeTerms []string) []string {
 	return out
 }
 
+// AccessorPrefixes are the conventional verbs a field's accessor is spelled
+// with. Deliberately few: each costs one scan, and a wrong guess finds nothing
+// rather than the wrong file.
+//
+// They exist because the FIELD name is usually not selective while its
+// ACCESSOR is. Measured on a Java estate: "anzahlkinder" occurs in 90 files —
+// every DTO, form, validation and translation that names the field — while
+// getAnzahlKinder occurs in 8 and setAnzahlkinder in 2. The question yields
+// the field name, because that is the word a reader writes; the code reaches
+// the value through the accessor.
+var AccessorPrefixes = []string{"get", "set", "is", "has", "with"}
+
+// BuildAccessorTerms derives the accessor spellings of a question's substring
+// terms, DETERMINISTICALLY — no model call, the way BuildSubstringTerms
+// already derives the snake_case spelling.
+//
+// The result is not another lane. A term this selective is not a retrieval
+// candidate to be ranked against others; its hits ARE the answer, and they
+// belong in the gathered set the way a search hit does. Ranking them is what
+// loses them: a chunk only the substring scan can see carries one lane where
+// the chunks merely NAMING the field carry three, and fusion rewards
+// agreement.
+func BuildAccessorTerms(terms []string) []string {
+	out := make([]string, 0, len(terms)*len(AccessorPrefixes))
+	seen := map[string]bool{}
+	for _, t := range terms {
+		for _, p := range AccessorPrefixes {
+			c := p + t
+			if seen[c] {
+				continue
+			}
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // contentWords splits a question into its content words, folded, with function
 // words removed. Removal happens here rather than after pairing so that a
 // preposition between two nouns does not block the pair they form in code.
