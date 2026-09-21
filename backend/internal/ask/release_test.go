@@ -432,18 +432,27 @@ func TestRun_releaseTakesTheStagesFromTheReadersOwnWords(t *testing.T) {
 	}
 }
 
-func TestReleasePair_composesTheReadersWordAndTheModelsMapping(t *testing.T) {
+func TestReleasePair_takesTheReadersOwnWordsOnly(t *testing.T) {
 	declared := stages.Set{
 		{Repo: "infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production"}},
 		{Repo: "infra", Name: "intg", Prefix: "intg/"},
 	}
-	// "integration" is a refused alias, so only the model can map it; the
-	// reader's "production" still counts.
-	if got := releasePair("production vs. the integration environment", []string{"intg"}, declared); strings.Join(got, ",") != "prod,intg" {
-		t.Errorf("composed = %v", got)
+	// Two stages in the reader's own words are the pair.
+	if got := releasePair("release notes between production and intg", declared); strings.Join(got, ",") != "prod,intg" {
+		t.Errorf("two words = %v", got)
 	}
-	// The model repeating the reader's word is not a second stage.
-	if got := releasePair("what is on production", []string{"production", "prod"}, declared); got != nil {
+	// "integration" is a refused stage word, so it names no second stage and
+	// the turn is refused rather than completed from the model's mapping:
+	// that mapping is also what let a previous turn's stage complete a pair.
+	if got := releasePair("production vs. the integration environment", declared); got != nil {
+		t.Errorf("refused word mapped = %v", got)
+	}
+	// A stage named only in the recall block is not the reader's word.
+	if got := releasePair("and how is it configured on intg", declared); got != nil {
+		t.Errorf("stage from recall = %v", got)
+	}
+	// One stage named twice is one stage.
+	if got := releasePair("what is on production, that is prod", declared); got != nil {
 		t.Errorf("one stage twice = %v", got)
 	}
 	// A comma-separated string decodes like a list.

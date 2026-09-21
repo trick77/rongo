@@ -337,13 +337,17 @@ commits", "was hat sich geändert", "was ist neu", "letzte Änderungen",
 "quoi de neuf", "cosa è cambiato". A question about how a feature works is
 never "changes", however recent the feature.
 
-"release" is a question about what is deployed on one stage and not yet on
-another, or for release notes between two stages or versions: "what is
-between production and testing", "release notes for the next deployment",
-"what goes live with the next release", "was ist zwischen prod und test",
-"Release Notes", "notes de version", "note di rilascio". It names two
-stages. A question about what changed in the code lately, with no two stages
-in it, is "changes", never "release".
+"release" is a request for RELEASE NOTES between two deployment stages:
+"release notes between prod and intg", "release notes for the next
+deployment", "Release Notes zwischen prod und test", "notes de version",
+"note di rilascio". Hyphen, case and plural do not matter.
+A release-notes question names two stages, but naming two stages is NOT what
+makes a question one: the reader must ask for the notes themselves. A
+question about what a configuration VALUE is, or how it differs between
+stages, is "how" even when it names two stages: "how is the timeout
+configured on intg", "what is the config difference between intg and prod",
+"wie ist X auf intg konfiguriert". A question about what was done to the
+code lately, asking for no notes, is "changes", never "release".
 
 "rework" is a request to restate the PREVIOUS ANSWER in another form, asking
 nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",
