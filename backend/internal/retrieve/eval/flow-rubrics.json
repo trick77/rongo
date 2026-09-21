@@ -122,5 +122,63 @@
     "must_not": [
       "Rabatte oder Steuern werden berechnet."
     ]
+  },
+  {
+    "question": "Und wo wird diese Grenze festgelegt?",
+    "lang": "de",
+    "follows": "Which service decides whether a payment is authorised, and on what basis?",
+    "must": [
+      "The limit is a start-up parameter of the payment service, not a value computed per order.",
+      "It comes from a command-line flag named decline whose default is 105.",
+      "It is passed into the service at wiring time and kept as the field the authorisation compares against."
+    ],
+    "must_not": [
+      "The amount is read from the order or the cart.",
+      "The amount is stored in a database or fetched from another service."
+    ],
+    "cite": [
+      {
+        "repo": "payment",
+        "path": "cmd/paymentsvc/main.go"
+      }
+    ]
+  },
+  {
+    "question": "And what does the consumer actually do with it?",
+    "lang": "en",
+    "follows": "Wer wird benachrichtigt, wenn eine Sendung zum Versand ansteht?",
+    "must": [
+      "The queue-master's handler receives the shipment and prints its name.",
+      "Nothing further happens to the shipment: the container-spawning calls in the handler are commented out."
+    ],
+    "must_not": [
+      "The consumer spawns a Docker container for the shipment.",
+      "The consumer updates the shipment's status or writes it to a database."
+    ],
+    "cite": [
+      {
+        "repo": "queue-master",
+        "path": "src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"
+      }
+    ]
+  },
+  {
+    "question": "What happens to the old one afterwards?",
+    "lang": "en",
+    "follows": "What happens to a guest's shopping cart when they log in?",
+    "must": [
+      "The session cart is deleted once its contents have been merged into the customer's cart.",
+      "The delete happens in the same merge request, after the merge."
+    ],
+    "must_not": [
+      "The session cart is kept so the guest can return to it.",
+      "The session cart expires on its own after a timeout."
+    ],
+    "cite": [
+      {
+        "repo": "carts",
+        "path": "src/main/java/works/weave/socks/cart/controllers/CartsController.java"
+      }
+    ]
   }
 ]

@@ -212,5 +212,44 @@
    }
   ],
   "note": "The 4.99 shipping cost is a business rule living as a literal in a Java controller, while the unit prices come out of a Go service's SQL. Three repositories, and the question names none of them."
+ },
+ {
+  "question": "Und wo wird diese Grenze festgelegt?",
+  "kind": "where",
+  "resolution": "unique",
+  "candidates": [
+   {
+    "repo": "payment",
+    "paths": ["cmd/paymentsvc/main.go", "wiring.go", "service.go"],
+    "verified": "main.go:28 the -decline flag defaults to 105, :77 hands it to WireUp; wiring.go:27,39 WireUp passes it to NewAuthorisationService; service.go:31-33 stored as declineOverAmount"
+   }
+  ],
+  "note": "Follow-up. \"diese Grenze\" names nothing: the subject is the decline threshold the preceding turn established. An earlier wording, \"wo kommt dieser Betrag her?\", was ambiguous - the preceding answer names two amounts, the order total and the limit it is compared against - and was answered about the total, correctly and about the wrong one."
+ },
+ {
+  "question": "And what does the consumer actually do with it?",
+  "kind": "how",
+  "resolution": "unique",
+  "candidates": [
+   {
+    "repo": "queue-master",
+    "paths": ["src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"],
+    "verified": "ShippingTaskHandler.java:13-17 handleMessage prints the shipment name; the docker.init() and docker.spawn() calls are commented out, so nothing else happens"
+   }
+  ],
+  "note": "Follow-up across languages: the preceding turn is asked in German and this one in English, so the subject cannot ride on shared wording. The trap is inventing processing - the handler's only live statement is a println."
+ },
+ {
+  "question": "What happens to the old one afterwards?",
+  "kind": "how",
+  "resolution": "unique",
+  "candidates": [
+   {
+    "repo": "carts",
+    "paths": ["src/main/java/works/weave/socks/cart/controllers/CartsController.java"],
+    "verified": "CartsController.java:36-41 mergeCarts merges the session cart into the customer cart and then calls delete(sessionId), so the session cart is removed"
+   }
+  ],
+  "note": "Follow-up. \"the old one\" is the guest's session cart from the preceding turn. A turn that lost the subject answers about carts in general and never reaches the delete."
  }
 ]
