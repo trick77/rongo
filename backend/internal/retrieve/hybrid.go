@@ -44,6 +44,17 @@ const (
 	// number: moving it to 0.7 or 0.9 must not make the rung report itself as
 	// the prefix or the prose rung.
 	WeightKeywordCode = 0.8
+	// WeightKeywordSubstring is the substring rung: a term found INSIDE a
+	// larger token. It sits below the content rung (0.9) and above the code
+	// rung (0.8), because the claim is narrow — this chunk literally contains
+	// "anzahlkinder", even though no token equals it — while being weaker
+	// evidence than a whole-token match of the words the reader typed.
+	//
+	// Provisional, and the arm is off in a struct-literal Retriever so the
+	// baseline can be measured against it. It is NOT yet a swept number: it
+	// ships behind SubstringWeight for exactly that reason, and the sweep is
+	// what settles it.
+	WeightKeywordSubstring = 0.85
 )
 
 // DefaultMaxDistance is the L2 cutoff past which a semantic hit is treated as

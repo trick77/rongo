@@ -1082,5 +1082,80 @@
       }
     ],
     "note": "Doc-led, and the one where document and code are about the SAME fact: the rule is written down once, the practice is spread over every slog call. A demotion strong enough to hide the document answers this from a call site instead of from the rule."
+  },
+  {
+    "question": "CanChoose",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/route.go"
+        ],
+        "verified": "read 2026-09-21: route.go:205,723 roleCanChoose. The word CanChoose never occurs bare - only as the tail of roleCanChoose."
+      }
+    ],
+    "note": "Suffix-only: FTS5 tokenizes roleCanChoose whole, so the bare term matches 0 chunks and the prefix rung matches 0 (it opens leftward, the term sits at the token's right end). Measured 2026-09-21 over 1980 rongo chunks: FTS 0, prefix 0, substring 11 of which 9 in route.go."
+  },
+  {
+    "question": "GateDeployment",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/llm/client.go"
+        ],
+        "verified": "read 2026-09-21: client.go:43 ShortGateDeployment = \"mimo-v2.5\". Never written bare."
+      }
+    ],
+    "note": "Suffix-only. Measured 2026-09-21: FTS 0, prefix 0, substring 15 of which 4 in client.go."
+  },
+  {
+    "question": "FromClaims",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/auth/session.go"
+        ],
+        "verified": "read 2026-09-21: session.go:184 CreateSessionFromClaims. Zero bare occurrences in the file."
+      }
+    ],
+    "note": "Suffix-only. Measured 2026-09-21: FTS 0, prefix 0, substring 7 of which 2 in session.go."
+  },
+  {
+    "question": "MaxLandings",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/census.go"
+        ],
+        "verified": "read 2026-09-21: census.go:28 const censusMaxLandings = 40."
+      }
+    ],
+    "note": "Suffix-only, and a lowercase-prefixed constant rather than an exported name. Measured 2026-09-21: FTS 0, prefix 0, substring 8 of which 2 in census.go."
+  },
+  {
+    "question": "FileTokens",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "rongo",
+        "paths": [
+          "backend/internal/ask/gather.go"
+        ],
+        "verified": "read 2026-09-21: gather.go:87 WholeFileTokens int."
+      }
+    ],
+    "note": "Suffix-only struct field, the closest shape to the schadenmeldung anzahlKinder case that motivated the substring rung. Measured 2026-09-21: FTS 0, prefix 0, substring 9 of which 4 in gather.go."
   }
 ]

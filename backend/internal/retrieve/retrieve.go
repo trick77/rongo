@@ -97,6 +97,14 @@ type Retriever struct {
 	// New ships it at 0.8; zero — and so a struct-literal Retriever — is the
 	// prose floor, which is what the harness's baseline arm runs.
 	CodeWeight float64
+	// SubstringWeight, when above zero, runs the substring rung: a scan for
+	// identifier-shaped terms that occur only INSIDE a larger token, which the
+	// FTS lane cannot reach at all. See WeightKeywordSubstring and
+	// Store.SearchSubstringIn.
+	//
+	// New ships it on; zero — and so a struct-literal Retriever — leaves the
+	// rung off, which is the arm the harness measures the baseline with.
+	SubstringWeight float64
 	// Reranker, when set, reorders a deeper fused list before the cut to K;
 	// see LLMReranker. The product sets it; nil is the fused order as it has
 	// always been, and the eval harness's baseline.
@@ -114,6 +122,8 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 		TestDecay:   DefaultTestDecay,
 		DocDecay:    DefaultDocDecay,
 		CodeWeight:  WeightKeywordCode,
+
+		SubstringWeight: WeightKeywordSubstring,
 	}
 }
 
@@ -654,6 +664,88 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 				Name:   name,
 				Hits:   hits,
 				Weight: weight,
+			})
+		}
+	}
+
+	// The substring rung, last because it is the only lane that does not go
+	// through an index: a term that occurs solely INSIDE a larger token
+	// (getAnzahlKinder, setAnzahlkinder) is invisible to every rung above,
+	// whatever weight they carry, because unicode61 tokenizes those whole.
+	//
+	// Terms are derived in code from the question and the guessed identifiers,
+	// never asked of the model: one more model call to recover from a model
+	// guess that missed is a second chance at the same mistake.
+	// ONE lane for every term, not one per term. The terms are several guesses
+	// at a single claim — "this chunk contains the identifier" — and
+	// get<X>, set<X> and <X> routinely all match the same chunk. As separate
+	// lanes that chunk would be scored three times at SubstringWeight each,
+	// an effective 2.55: above WeightKeywordStrict, from a rung that is
+	// deliberately below it. Hits are deduped by ChunkID and keep the order
+	// the first term found them in, which is the kind-then-address order the
+	// store already applied.
+	if r.SubstringWeight > 0 {
+		// texts[0] and not q.Question: Query.Texts documents the raw question
+		// as its FIRST entry, while Question is deliberately empty on the
+		// multi-repo and chosen-repo paths (searchScoped leaves it out because
+		// it names every repository being searched). Reading Question here
+		// would switch the prose half of the rung off on exactly those paths
+		// while the lane still reported itself as running.
+		//
+		// Guarded rather than assumed: an empty first text means no prose
+		// candidates, and the code terms carry the rung alone.
+		prose := ""
+		if len(texts) > 0 {
+			prose = texts[0]
+		}
+		terms := BuildSubstringTerms(prose, strings.Fields(code))
+		// ROUND-ROBIN across the terms, never term after term. Lane rank is
+		// what fusion weighs, so concatenating gives the FIRST term's hits
+		// every slot near the top — and the first terms are the guessed code
+		// terms, which are by construction the guesses that MISSED when this
+		// rung is needed at all.
+		//
+		// Measured on the motivating question: the guessed term
+		// "schadenmeldung" alone returned 40 hits — the whole lane — while
+		// staying under the hub share, so "anzahlkinder" and its single
+		// chunk, the mapping the rung exists to recover, were cut before
+		// fusion ever saw them. A wide term must cost itself, not the lane.
+		perTerm := make([][]Hit, len(terms))
+		for i, term := range terms {
+			found, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
+			if err != nil {
+				return nil, err
+			}
+			perTerm[i] = found
+		}
+		var hits []Hit
+		seen := map[int64]bool{}
+		for depth := 0; len(hits) < candidates; depth++ {
+			progressed := false
+			for _, found := range perTerm {
+				if depth >= len(found) {
+					continue
+				}
+				progressed = true
+				h := found[depth]
+				if seen[h.ChunkID] {
+					continue
+				}
+				seen[h.ChunkID] = true
+				hits = append(hits, h)
+				if len(hits) >= candidates {
+					break
+				}
+			}
+			if !progressed {
+				break
+			}
+		}
+		if len(hits) > 0 {
+			lanes = append(lanes, Lane{
+				Name:   "keyword:substring",
+				Hits:   hits,
+				Weight: r.SubstringWeight,
 			})
 		}
 	}
