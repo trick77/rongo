@@ -256,10 +256,10 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	return out, rows.Err()
 }
 
-// FilesMatchingSubstring counts the ENABLED files whose raw text contains the
-// term, which is how selective that term is. It is the seed rung's whole
-// gate: a term in a handful of files is a claim about those files, a term in
-// ninety is the name of a field every form and translation mentions.
+// FilesMatchingSubstrings counts, per term, the ENABLED files whose raw text
+// contains it — which is how selective that term is. It is the seed rung's
+// whole gate: a term in a handful of files is a claim about those files, a
+// term in ninety is the name of a field every form and translation mentions.
 //
 // Counted over files rather than chunks on purpose. A long accessor used
 // twice in one converter is one place, not two.
