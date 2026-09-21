@@ -122,7 +122,7 @@ const (
 // answerRelease is the turn from the scope on: no search, no routing, no
 // walk. The two stages and the project ARE the scope.
 func (p *Pipeline) answerRelease(ctx context.Context, question string, audience Audience, lang Language,
-	u Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
+	_ Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
 
 	declared := p.declaredStages(ctx)
 	pair := releasePair(question, declared)
@@ -157,9 +157,11 @@ func (p *Pipeline) answerRelease(ctx context.Context, question string, audience 
 }
 
 // releasePair settles the two stages from the reader's own words in THIS
-// question, the first two distinct declared names. Order carries no
-// meaning: ancestry decides per component which stage is ahead. Anything
-// but two distinct declared names is no pair.
+// question. Order carries no meaning: ancestry decides per component which
+// stage is ahead. Anything but exactly two distinct declared names is no
+// pair: a question naming three is refused rather than truncated to the
+// first two, because which two were meant is a real ambiguity and guessing
+// it answers about a comparison nobody asked for.
 //
 // The model's guesses used to top this up, for "production vs. testing":
 // "testing" is a refused stage word (repos.Load), so that phrasing names
