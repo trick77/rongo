@@ -54,6 +54,16 @@ type Query struct {
 	// "the raw question" is a fact about the query, not a position in a slice,
 	// and a restriction must not depend on which lane happens to be first.
 	Question string
+	// Prior is the question this thread asked a turn ago, or empty on a first
+	// turn. It reaches the RERANKER and nothing else: a follow-up naming its
+	// subject nowhere - "in welchem Formularschritt passiert das?" - is a
+	// question the reranker cannot read either, and judging sixty chunks
+	// against it reads the ones the thread is actually about as irrelevant.
+	// The lane pulls them up and the cut would drop them again.
+	//
+	// Not part of the restriction: knownRepos reads Question alone, so a
+	// thread's older question can never widen what this turn searches.
+	Prior string
 	// K is how many hits to return. Zero means 10.
 	K int
 	// Stage narrows the repositories that declare stages to one stage's
@@ -137,7 +147,7 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 	if err != nil {
 		return nil, err
 	}
-	return r.searchTexts(ctx, texts, q.Code, repos, q.K, q.Stage)
+	return r.searchTexts(ctx, texts, q.Code, q.Prior, repos, q.K, q.Stage)
 }
 
 func containsText(texts []string, want string) bool {
@@ -574,7 +584,7 @@ func nameRune(r rune) bool {
 // code is the one of those phrasings that is guessed IDENTIFIERS rather than
 // prose, passed by name so the keyword rungs can tell it apart; empty means
 // there is none.
-func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string, repos []string, k int, stage StagePrefixes) ([]Hit, error) {
+func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior string, repos []string, k int, stage StagePrefixes) ([]Hit, error) {
 	if k <= 0 {
 		k = 10
 	}
@@ -667,9 +677,32 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 	if r.Reranker != nil {
 		// The raw question, never an expansion: the model reads what the
 		// reader wrote against what the lanes found for all three phrasings.
-		return r.Reranker.Rerank(ctx, texts[0], fused, k)
+		//
+		// On a follow-up the thread's previous question goes with it, for the
+		// reason it is a search lane at all: "in welchem Formularschritt
+		// passiert das?" cannot be judged against anything, and a reranker
+		// reading it alone scores the chunks the thread is about as
+		// irrelevant and cuts them. The record, not an expansion - the same
+		// distinction the rule above draws.
+		return r.Reranker.Rerank(ctx, rerankQuestion(texts[0], prior), fused, k)
 	}
 	return fused, nil
+}
+
+// rerankQuestion is what the reranker is asked to judge against: the reader's
+// question, and on a follow-up the turn it continues above it.
+//
+// Labelled rather than concatenated, so the model reads the current question
+// as the ask and the previous one as context. Empty prior, or a prior equal
+// to the question, leaves the string exactly as it was - a first turn's
+// rerank prompt is unchanged, which is what the measured 27/30 to 28/30 was
+// taken on.
+func rerankQuestion(question, prior string) string {
+	prior = strings.TrimSpace(prior)
+	if prior == "" || prior == strings.TrimSpace(question) {
+		return question
+	}
+	return "Earlier in this conversation: " + prior + "\n" + question
 }
 
 // laneName labels a keyword rung by what it means, so a result can explain

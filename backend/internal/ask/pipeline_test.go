@@ -1032,10 +1032,14 @@ func TestNothingFoundDoesNotQuoteThePreviousQuestion(t *testing.T) {
 	}
 }
 
-// TestWithoutPrior_keepsTheReadersOwnQuestion: a retry re-asks the question it
-// retries, so the previous question and this one are the same string. No lane
-// was added for it, and dropping it by value would take the reader's own
-// question out of "searched for" instead.
+// TestWithoutPrior_keepsTheReadersOwnQuestion: a reader can ask the same thing
+// twice in one thread, which makes the previous question and this one the same
+// string. No lane was added for it, and dropping it by value would take the
+// reader's own question out of "searched for" instead.
+//
+// Not a retry, whatever an earlier version of this comment said: a retry reads
+// the last ANSWERED turn strictly below the row it retries, never that row,
+// so its prior is a different question.
 func TestWithoutPrior_keepsTheReadersOwnQuestion(t *testing.T) {
 	q := "How is pricing resolved?"
 

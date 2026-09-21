@@ -335,8 +335,12 @@ func TestEvalMeasureAnswers(t *testing.T) {
 				// keeps one language in the product, and these two-turn pairs
 				// deliberately cross it to check the subject survives the
 				// crossing rather than riding on shared wording.
+				pr, ok := rubrics[r.Follows]
+				if !ok {
+					t.Fatalf("rubric for %q follows %q, which has no rubric in %s", q.Text, r.Follows, rubricsFile())
+				}
 				prevLang := lang
-				if pr, ok := rubrics[r.Follows]; ok && pr.Lang != "" {
+				if pr.Lang != "" {
 					prevLang = ask.ParseLanguage(pr.Lang)
 				}
 				prev, prevClar, perr := pipeline.Run(ctx, r.Follows, audience, prevLang, ask.Thread{}, ask.Events{})

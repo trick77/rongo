@@ -315,6 +315,40 @@ func TestLLMRerank_excerptWidthIsAField(t *testing.T) {
 	}
 }
 
+// TestRerankQuestion_aFollowUpBringsWhatItFollows: the reranker is asked
+// whether sixty chunks answer the question, and "in welchem Formularschritt
+// passiert das?" cannot be judged against anything on its own. Without the
+// turn it continues, the chunks the thread is actually about read as
+// irrelevant - so the lane that pulled them up would be undone by the cut.
+func TestRerankQuestion_aFollowUpBringsWhatItFollows(t *testing.T) {
+	got := rerankQuestion("In welchem Formularschritt passiert das?", "Wann genau und was genau macht der ZAS Check?")
+
+	if !strings.Contains(got, "ZAS Check") {
+		t.Errorf("rerank question = %q, want the subject the follow-up points at", got)
+	}
+	if !strings.Contains(got, "In welchem Formularschritt passiert das?") {
+		t.Errorf("rerank question = %q, want the question the reader asked", got)
+	}
+	// The reader's question is the ask; the previous turn is context above it.
+	if strings.Index(got, "ZAS Check") > strings.Index(got, "Formularschritt") {
+		t.Errorf("rerank question = %q, want the previous turn above the current question", got)
+	}
+}
+
+// TestRerankQuestion_aFirstTurnIsUnchanged: the measured 27/30 to 28/30 was
+// taken on the bare question, and a first turn still sends exactly that.
+func TestRerankQuestion_aFirstTurnIsUnchanged(t *testing.T) {
+	q := "How does an Apple TV get at the media file?"
+
+	if got := rerankQuestion(q, ""); got != q {
+		t.Errorf("rerank question = %q, want the bare question", got)
+	}
+	// A reader asking the same thing twice adds nothing to judge against.
+	if got := rerankQuestion(q, " "+q+" "); got != q {
+		t.Errorf("rerank question = %q, want no duplicate of the same question", got)
+	}
+}
+
 // TestLLMRerank_replyCapGrowsWithTheListAskedFor: the prompt bounds the reply
 // at k numbers, so the cap is keyed to k. A long list past the floor must get
 // the room, or the reply ends with finish_reason=length, which is an error, a
