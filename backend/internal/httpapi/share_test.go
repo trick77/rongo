@@ -135,6 +135,67 @@ func TestPublicShare_readsWithoutASession(t *testing.T) {
 	}
 }
 
+// TestPublicShare_doesNotServeATurnThatNeverFinished is the regression test
+// for a link that rendered a question with no body under it, while the
+// thread total still counted what that turn had paid for.
+//
+// The row is the one the store cannot sweep up: killed mid-stream, so no
+// answer, no error and no card, and a later finished turn leaves it stranded
+// below the ceiling.
+func TestPublicShare_doesNotServeATurnThatNeverFinished(t *testing.T) {
+	srv, st, _ := shareServer(t)
+	ctx := context.Background()
+	th := sharedTurn(t, st, testSubject)
+	msgs, err := st.Messages(ctx, testSubject, th.ID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 1000, Completion: 100, CostNanoUSD: usage.Nano(1_200_000)},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	// Asked, paid for, never finished.
+	orphan, err := st.AddQuestion(ctx, th.ID, "ba", "en", "What about that?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.SaveUsage(ctx, orphan.ID, []usage.Call{
+		{Step: "answer", Model: "mimo-v2.5", Prompt: 9000, Completion: 900, CostNanoUSD: usage.Nano(9_000_000)},
+	}); err != nil {
+		t.Fatalf("save usage: %v", err)
+	}
+	laterTurn(t, st, th.ID)
+	sh := share(t, srv, th.PublicID)
+
+	rec := getPublic(srv, "/api/shares/"+sh.Token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got struct {
+		Messages []struct {
+			Question string `json:"question"`
+			Answer   string `json:"answer"`
+			Error    string `json:"error"`
+		} `json:"messages"`
+		TotalTokens int `json:"total_tokens"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, m := range got.Messages {
+		if m.Answer == "" && m.Error == "" {
+			t.Fatalf("a turn with nothing in it reached the link: %q", m.Question)
+		}
+	}
+	// The total covers what the link serves, so the unfinished turn's 9.9k
+	// is not in it. laterTurn pays for nothing, so the first turn's 1.1k is
+	// the whole of it.
+	if got.TotalTokens != 1100 {
+		t.Errorf("total_tokens = %d, want 1100: only the turns the link serves", got.TotalTokens)
+	}
+}
+
 func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	// Given a shared thread of two turns that paid for priced calls, offered
 	// follow-ups and were watched through a timeline

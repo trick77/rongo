@@ -541,7 +541,24 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		if err != nil {
 			slog.Error("read last turn failed", "err", err)
-		} else if ok {
+		} else if !ok {
+			// Nothing to point at. That is ordinary for the first turn of a
+			// thread and a contradiction for anything else: rows exist, none
+			// of them finished, so the reader's "das" names something this
+			// turn cannot read. Going on would drop the subject, widen the
+			// scope to every repository and answer confidently out of
+			// whichever one the bare words happened to match: a funnel
+			// widening in silence. Refused instead, so the reader can retry
+			// once the turn below it is sound.
+			has, herr := s.deps.Threads.HasTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
+			if herr != nil {
+				slog.Error("count turns before failed", "err", herr)
+			} else if has {
+				slog.Warn("follow-up has no readable antecedent", "thread", followUpIn)
+				http.Error(w, "the turn this follows did not finish; ask again", http.StatusConflict)
+				return
+			}
+		} else {
 			prior.Question, prior.Answer = last.Question, last.Answer
 			// And what that answer was written from, for a rework. Read
 			// here rather than once the understanding has said the turn is

@@ -828,6 +828,44 @@ func TestAsk_aFollowUpInheritsWhatTheThreadNarrowedTo(t *testing.T) {
 	}
 }
 
+// TestAsk_aFollowUpWhoseAntecedentNeverFinishedIsRefused is the regression
+// test for a thread whose first turn left a row with no answer, no error and
+// no card. LastTurnBefore reads only finished turns, so the follow-up found
+// nothing to point at and ran as a FIRST turn: the subject dropped, the scope
+// widened to every repository, and the answer came back confident and about
+// the wrong thing entirely.
+//
+// A thread is a funnel. Refusing is the same answer a vanished pin gets.
+func TestAsk_aFollowUpWhoseAntecedentNeverFinishedIsRefused(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, _ := askDeps(t, a)
+	postAsk(t, deps, `{"question":"Was macht der ZAS Check?","audience":"ba"}`)
+
+	list, err := deps.Threads.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	// The turn that answered is struck from the record the way a process
+	// killed mid-stream leaves it: the row stays, its answer never lands.
+	msgs, err := deps.Threads.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("messages: %v (%d)", err, len(msgs))
+	}
+	if err := deps.Threads.Finish(context.Background(), msgs[0].ID, "", nil); err != nil {
+		t.Fatalf("blank the answer: %v", err)
+	}
+
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(`{"question":"In welchem Formularschritt passiert das?","audience":"ba","thread_id":%q}`, list[0].PublicID))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: a follow-up with no readable antecedent must not run", rec.Code)
+	}
+	if a.gotThread.Question != "" {
+		t.Errorf("the pipeline was reached with %+v, want the turn refused before any paid work", a.gotThread)
+	}
+}
+
 // TestAsk_theFirstTurnOfAThreadInheritsNothing: there is nothing to inherit,
 // and the whole ladder — repository card included — has to stay reachable.
 func TestAsk_theFirstTurnOfAThreadInheritsNothing(t *testing.T) {

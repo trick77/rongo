@@ -211,6 +211,65 @@ func TestSharedThread_deletingTheThreadTakesTheLinkWithIt(t *testing.T) {
 	}
 }
 
+// TestSharedThread_skipsAnUnfinishedRowBelowTheCeiling is the regression test
+// for a thread whose share served a turn with no answer at all.
+//
+// ceilingFor picks the newest FINISHED turn, so a row killed mid-stream is
+// correctly passed over when the ceiling is chosen. But the read is
+// "m.id <= ceiling", which is a distance, not a test of what a row is: an
+// unfinished row sitting BELOW a finished one is shipped anyway, and the
+// shared page renders its question with no body under it.
+func TestSharedThread_skipsAnUnfinishedRowBelowTheCeiling(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	// Killed mid-stream: no answer, no error, no card. Nothing sweeps these
+	// up, and a later turn leaves it stranded below the ceiling.
+	if _, err := s.AddQuestion(ctx, th, "ba", "en", "What about that?", 0); err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	answeredTurn(t, s, th, "And then?", "Then this.")
+
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	_, msgs, err := s.SharedThread(ctx, sh.Token)
+	if err != nil {
+		t.Fatalf("shared thread: %v", err)
+	}
+	for _, m := range msgs {
+		if m.Answer == "" && m.Error == "" && m.Clarification == nil {
+			t.Fatalf("a turn with nothing in it reached the link: %q", m.Question)
+		}
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("shared thread has %d turns, want the 2 that finished", len(msgs))
+	}
+}
+
+// TestMessages_theOwnerStillSeesAnUnfinishedRow guards the fix above: the
+// share must not show a hole, and the owner must still watch a turn arrive.
+// One function serves both reads, so excluding the row for everyone would
+// break the live view instead.
+func TestMessages_theOwnerStillSeesAnUnfinishedRow(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	if _, err := s.AddQuestion(ctx, th, "ba", "en", "In flight", 0); err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("owner sees %d turns, want both including the one in flight", len(msgs))
+	}
+	if msgs[1].Question != "In flight" {
+		t.Errorf("owner's newest turn = %q, want the in-flight one", msgs[1].Question)
+	}
+}
+
 func TestSharedCitation_servesOnlyWhatTheLinkCites(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
 	answeredTurn(t, s, th, "How?", "So [1].",

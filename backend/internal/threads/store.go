@@ -803,6 +803,28 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 	return m, true, nil
 }
 
+// HasTurnBefore says whether a thread holds ANY turn below the bound, finished
+// or not. LastTurnBefore answers "what can this follow-up point at" and reports
+// false for both an empty thread and one whose every prior row died
+// mid-stream; those two are the same answer to that question and opposite
+// answers to this one.
+//
+// A first turn may search the whole corpus. A follow-up whose antecedent is
+// merely unreadable must not: widening to every repository and answering
+// anyway is the quiet drop a thread is a funnel to prevent, and it reads as a
+// confident answer about whatever the corpus happened to match.
+func (s *Store) HasTurnBefore(ctx context.Context, subject string, threadID int64, before int) (bool, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.thread_id = ? AND t.user_subject = ? AND m.ordinal < ?`,
+		threadID, subject, before).Scan(&n); err != nil {
+		return false, fmt.Errorf("count turns before: %w", err)
+	}
+	return n > 0, nil
+}
+
 // Message returns one turn by id, or false when it does not belong to a
 // thread owned by subject. Re-explaining needs the original question text to
 // re-run the answerer from stored sources, without the caller having to load
@@ -870,6 +892,14 @@ func (s *Store) Messages(ctx context.Context, subject string, threadID int64) ([
 // apart in what a turn carries.
 //
 // ceiling caps the read at a message id; noCeiling reads the whole thread.
+//
+// A ceilinged read also drops rows that never finished. The ceiling is the
+// newest FINISHED turn, so it already steps over a row killed mid-stream --
+// but it is a distance, not a test of what a row is, and an unfinished row
+// sitting BELOW a finished one would still be served. On a link such a row
+// renders as a question with no body under it, which is the one thing a
+// frozen thread must never show. The owner's read keeps every row: a turn
+// being written is exactly what that view is for.
 func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling int64) ([]Message, error) {
 	// The subject is part of the query rather than checked afterwards: a thread
 	// belongs to the person who asked, and a mistake here hands someone else's
@@ -881,7 +911,9 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		LEFT JOIN memories mem ON mem.id = m.memory_id
 		WHERE m.thread_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3) AND m.id <= ?4
-		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling)
+		  AND (?4 = ?5 OR m.answer <> '' OR m.error <> ''
+		       OR EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id))
+		ORDER BY m.ordinal`, threadID, subject, anySubject, ceiling, noCeiling)
 	if err != nil {
 		return nil, fmt.Errorf("read thread: %w", err)
 	}
