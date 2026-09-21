@@ -16,6 +16,77 @@ func TestBuildAccessorTerms_prefixesTheConventionalVerbs(t *testing.T) {
 	}
 }
 
+func TestAccessorStems_keepsACompoundWhoseLettersLookLikeFunctionWords(t *testing.T) {
+	// The trap, pinned. "anzahlkinder" ENDS in "der" and "anzahlfahrzeuge"
+	// BEGINS with "an", so a rule reading the glued string's edges throws away
+	// the two identifiers the rung exists to find. Written that way first.
+	q := "wie wird die Anzahl Kinder an Syrius übermittelt"
+	got := AccessorStems(q, BuildSubstringTerms(q, nil), nil)
+
+	if !contains(got, "anzahlkinder") {
+		t.Errorf("AccessorStems = %v, want the compound kept", got)
+	}
+}
+
+func TestAccessorStems_dropsAPairGluedOutOfFunctionWords(t *testing.T) {
+	// The other half: "die anzahl" and "im backend" are prose the pairing
+	// glued, and an accessor of either occurs in no source. Each costs a full
+	// scan of the corpus for a guaranteed miss.
+	q := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge weitergegeben"
+	got := AccessorStems(q, BuildSubstringTerms(q, nil), nil)
+
+	for _, unwanted := range []string{"dieanzahl", "imbackend", "backendwie", "backendwird"} {
+		if contains(got, unwanted) {
+			t.Errorf("AccessorStems = %v, want %q dropped as prose", got, unwanted)
+		}
+	}
+	if !contains(got, "anzahlfahrzeuge") {
+		t.Errorf("AccessorStems = %v, want the real compound kept", got)
+	}
+}
+
+func TestAccessorStems_keepsAGuessedCodeTermWhateverItLooksLike(t *testing.T) {
+	// A code term is the understanding step's guess at an identifier, not a
+	// pair glued out of prose, so the prose rule does not apply to it.
+	q := "how is the value mapped"
+	code := []string{"isConfiguredValue"}
+	got := AccessorStems(q, BuildSubstringTerms(q, code), code)
+
+	if !contains(got, "isconfiguredvalue") {
+		t.Errorf("AccessorStems = %v, want the guessed identifier kept", got)
+	}
+}
+
+func TestBuildAccessorTerms_leavesAnAccessorAlone(t *testing.T) {
+	// A term that is ALREADY an accessor is taken as it is. Prefixing it spends
+	// five scans to guarantee five misses and throws away the one candidate
+	// most likely to be right.
+	got := BuildAccessorTerms([]string{"getanzahlkinder"})
+
+	if !contains(got, "getanzahlkinder") {
+		t.Errorf("BuildAccessorTerms = %v, want the accessor kept as it is", got)
+	}
+	if contains(got, "getgetanzahlkinder") {
+		t.Errorf("BuildAccessorTerms = %v, want no doubled prefix", got)
+	}
+}
+
+func TestBuildAccessorTerms_capsHowManyStemsItPrefixes(t *testing.T) {
+	// Each spelling is one instr() per row of the corpus, so the term count IS
+	// the cost whether the queries are batched or not. The terms arrive
+	// ordered, strongest first, so the cap keeps the front.
+	many := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"}
+	got := BuildAccessorTerms(many)
+
+	if len(got) > maxAccessorStems*len(AccessorPrefixes) {
+		t.Errorf("BuildAccessorTerms returned %d spellings from %d stems, want at most %d stems' worth",
+			len(got), len(many), maxAccessorStems)
+	}
+	if !contains(got, "getalpha") {
+		t.Errorf("BuildAccessorTerms = %v, want the first stem kept", got)
+	}
+}
+
 func TestBuildAccessorTerms_dropsDuplicates(t *testing.T) {
 	// Two question terms can derive the same accessor; a lane fused twice
 	// double-counts, and a seed taken twice pays twice.

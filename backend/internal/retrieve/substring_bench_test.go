@@ -134,3 +134,36 @@ func BenchmarkSearchKeywordIn(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkSeedGate is the seed rung's per-TURN cost, to be read next to
+// BenchmarkSubstringLane's — the scan work a turn already pays.
+//
+// Per turn and not per term on purpose: the gate is ONE query over the corpus
+// counting every accessor spelling at once, so a per-term figure would divide
+// a fixed cost by a number that does not change it. The note on
+// BenchmarkSubstringLane warns of the opposite mistake one lane up, where the
+// terms really are separate scans.
+func BenchmarkSeedGate(b *testing.B) {
+	question := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
+	code := []string{"Policenantrag", "getAnzahlFahrzeuge"}
+	terms := BuildAccessorTerms(
+		AccessorStems(question, BuildSubstringTerms(question, code), code))
+	var ask []string
+	for _, t := range terms {
+		if len([]rune(t)) >= minSeedRunes {
+			ask = append(ask, t)
+		}
+	}
+	for _, n := range []int{10000, 25000} {
+		b.Run(fmt.Sprintf("chunks=%d/terms=%d", n, len(ask)), func(b *testing.B) {
+			db := benchDB(b, n)
+			s := NewStore(db)
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := s.FilesMatchingSubstrings(b.Context(), ask, nil, nil); err != nil {
+					b.Fatalf("FilesMatchingSubstrings: %v", err)
+				}
+			}
+		})
+	}
+}

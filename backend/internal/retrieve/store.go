@@ -263,31 +263,82 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 //
 // Counted over files rather than chunks on purpose. A long accessor used
 // twice in one converter is one place, not two.
-func (s *Store) FilesMatchingSubstring(ctx context.Context, term string, repos []string, stage StagePrefixes) (int, error) {
-	term = strings.TrimSpace(strings.ToLower(term))
-	if term == "" {
-		return 0, nil
+func (s *Store) FilesMatchingSubstrings(ctx context.Context, terms []string, repos []string, stage StagePrefixes) (map[string]int, error) {
+	out := make(map[string]int, len(terms))
+	var want []string
+	for _, t := range terms {
+		t = strings.TrimSpace(strings.ToLower(t))
+		if t == "" || out[t] != 0 {
+			continue
+		}
+		out[t] = 0
+		want = append(want, t)
 	}
-	q := `SELECT COUNT(DISTINCT c.file_id)
+	if len(want) == 0 {
+		return out, nil
+	}
+
+	// ONE pass over the corpus for every term, not one pass per term. The scan
+	// is unindexed by construction — instr() over raw text is what reaches an
+	// identifier inside a larger token, and no index can answer that — so the
+	// cost is the corpus, and paying it once per TURN rather than once per
+	// TERM is the whole difference. Measured: 58 separate counts cost 1646
+	// ms/op against a 25k-chunk corpus where the existing substring rung
+	// costs 444.
+	//
+	// The row is counted per (term, file), so COUNT(DISTINCT) over the pairs
+	// gives each term its file count in one group-by.
+	//
+	// Matching is the same expression SearchSubstringIn uses, including the
+	// title-cased spelling for a non-ASCII term: SQLite's lower() is
+	// ASCII-only, so a gate testing only the folded spelling counts zero for
+	// exactly the German identifiers this rung exists for and skips the term
+	// before the fetch that would have found it.
+	var sel []string
+	args := []any{}
+	for i, t := range want {
+		if hasNonASCII(t) {
+			rs := []rune(t)
+			titled := string(unicode.ToUpper(rs[0])) + string(rs[1:])
+			sel = append(sel, fmt.Sprintf(
+				"COUNT(DISTINCT CASE WHEN instr(c.raw_text, ?) > 0 OR instr(c.raw_text, ?) > 0 THEN c.file_id END) AS t%d", i))
+			args = append(args, t, titled)
+			continue
+		}
+		sel = append(sel, fmt.Sprintf(
+			"COUNT(DISTINCT CASE WHEN instr(lower(c.raw_text), ?) > 0 THEN c.file_id END) AS t%d", i))
+		args = append(args, t)
+	}
+
+	q := "SELECT " + strings.Join(sel, ", ") + `
 		FROM chunks c
 		JOIN files f ON f.id = c.file_id
-		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
-		WHERE instr(lower(c.raw_text), ?) > 0`
-	args := []any{term}
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1`
+	where := ""
 	if len(repos) > 0 {
-		q += " AND f.repo IN (" + placeholders(len(repos)) + ")"
+		where += " WHERE f.repo IN (" + placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
 	stageQ, stageArgs := stage.clause("f")
-	q += stageQ
+	if stageQ != "" && where == "" {
+		// stage.clause emits a leading " AND"; it needs a WHERE to hang on.
+		where = " WHERE 1=1"
+	}
+	where += stageQ
 	args = append(args, stageArgs...)
 
-	var n int
-	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count substring matches: %w", err)
+	counts := make([]any, len(want))
+	for i := range counts {
+		counts[i] = new(int)
 	}
-	return n, nil
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	if err := s.db.QueryRowContext(ctx, q+where, args...).Scan(counts...); err != nil {
+		return nil, fmt.Errorf("count substring matches: %w", err)
+	}
+	for i, t := range want {
+		out[t] = *(counts[i].(*int))
+	}
+	return out, nil
 }
 
 // substringHubShare is the share of the corpus past which a term is treated as

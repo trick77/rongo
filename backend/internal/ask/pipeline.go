@@ -1025,7 +1025,14 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 func (p *Pipeline) withSeeds(ctx context.Context, q retrieve.Query, hits []retrieve.Hit) ([]retrieve.Hit, error) {
 	seeds, err := p.search.SeedHits(ctx, q)
 	if err != nil {
-		return nil, err
+		// LOGGED, never returned. The search has already succeeded; the seed
+		// is enrichment on top of it, and the rule the reranker ships under
+		// applies here for the same reason — it may never do worse than
+		// nothing. Failing the turn would turn a complete answer into an
+		// error because an optional scan went wrong.
+		slog.Warn("the selective-accessor seed failed, answering from the search alone",
+			"thread", llm.ThreadID(ctx), "err", err)
+		return hits, nil
 	}
 	if len(seeds) == 0 {
 		return hits, nil

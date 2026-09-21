@@ -180,10 +180,58 @@ var AccessorPrefixes = []string{"get", "set", "is", "has", "with"}
 // loses them: a chunk only the substring scan can see carries one lane where
 // the chunks merely NAMING the field carry three, and fusion rewards
 // agreement.
+// maxAccessorStems is how many of a question's terms may be prefixed at all.
+//
+// The gate counts every spelling against the corpus in one pass, but SQLite
+// still evaluates one instr() per term per ROW, so the scan's cost is the term
+// count whether the queries are batched or not. Measured on a 25k-chunk
+// corpus: 53 spellings cost 1260 ms against the substring lane's 443.
+//
+// The cap is small because the terms are ORDERED and the order is meaningful:
+// BuildSubstringTerms emits the guessed identifiers first, then the question's
+// adjacent word pairs, then the one-apart pairs. The identifier a reader wrote
+// is at the front; "backendwie" is at the back.
+const maxAccessorStems = 4
+
+// BuildAccessorTerms derives the accessor spellings of a question's substring
+// terms. See the type comment above for why it exists; this is what it costs.
 func BuildAccessorTerms(terms []string) []string {
+	if len(terms) > maxAccessorStems {
+		terms = terms[:maxAccessorStems]
+	}
 	out := make([]string, 0, len(terms)*len(AccessorPrefixes))
 	seen := map[string]bool{}
 	for _, t := range terms {
+		// A pair glued out of the question's PROSE is not a field name. The
+		// substring rung emits them because a German compound really is
+		// written as one identifier — anzahlfahrzeuge — but an accessor of
+		// "backendwie" or "dieanzahl" occurs in no source ever written, and
+		// each one costs a full instr() per row of the corpus.
+		//
+		// A stem is only worth prefixing if it could BE a field: no function
+		// word at either end. The list is the stopwords the keyword lane
+		// already keeps, in the languages a question arrives in.
+		// A term that is ALREADY an accessor is taken as it is, never prefixed
+		// again. getAnzahlKinder is the spelling a caller writes, and
+		// "getgetanzahlkinder" occurs in no source ever written — so prefixing
+		// it spends five scans to guarantee five misses, and throws away the
+		// one candidate most likely to be right. The guessed code terms are
+		// where this bites: the understanding step guesses accessors, which is
+		// exactly what it should do.
+		if p := accessorPrefixOf(t); p != "" {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
+			continue
+		}
+		// A separator spelling gets no glued prefix. BuildSubstringTerms emits
+		// anzahl_fahrzeuge for a corpus that writes underscores, and such a
+		// corpus writes get_anzahl_fahrzeuge, never getanzahl_fahrzeuge: the
+		// candidate cannot match, so it is a scan spent on a certainty.
+		if strings.ContainsRune(t, '_') {
+			continue
+		}
 		for _, p := range AccessorPrefixes {
 			c := p + t
 			if seen[c] {
@@ -195,6 +243,92 @@ func BuildAccessorTerms(terms []string) []string {
 	}
 	return out
 }
+
+// accessorStopwords are the function words that make a glued pair prose
+// rather than a field name. Deliberately short and deliberately NOT the
+// keyword lane's `stopwords`: that list is English by construction and is
+// about what to drop from a MATCH, while this is about what a compound
+// identifier never starts or ends with. German is here because the questions
+// are, and because the pairing that produces "dieanzahl" is exactly the sweep
+// `stopwords` does not cover.
+var accessorStopwords = map[string]bool{
+	// English
+	"the": true, "a": true, "an": true, "of": true, "in": true, "to": true,
+	"for": true, "and": true, "or": true, "is": true, "how": true, "what": true,
+	// German
+	"der": true, "die": true, "das": true, "den": true, "dem": true, "des": true,
+	"ein": true, "eine": true, "einen": true, "einem": true, "im": true, "am": true,
+	"wie": true, "wird": true, "wer": true, "was": true, "und": true, "oder": true,
+	"von": true, "auf": true, "bei": true, "mit": true, "zum": true,
+	// French, for the same reason German is here
+	"le": true, "la": true, "les": true, "du": true, "au": true,
+	"comment": true, "est": true,
+}
+
+// AccessorStems filters a question's substring terms down to the ones worth
+// prefixing, by rebuilding the pairs from the question's OWN words and keeping
+// only those whose halves are both content words.
+//
+// Reading the glued term cannot do this. The letters of a function word occur
+// inside real ones — "anzahlkinder" ends in "der", "anzahlfahrzeuge" begins
+// with "an" — so a rule testing the edges of the glued string throws away the
+// two identifiers this rung exists to find. That version was written first and
+// the tests caught it; this one asks the question the pairing already answered.
+//
+// A code term is kept whatever it looks like: it is the understanding step's
+// guess at an identifier, not a pair glued out of prose.
+func AccessorStems(question string, terms []string, codeTerms []string) []string {
+	code := map[string]bool{}
+	for _, c := range codeTerms {
+		code[fold(c)] = true
+	}
+	// Every pair the question's CONTENT words can form, at the gaps
+	// BuildSubstringTerms pairs at. A term in this set was built from two
+	// words that both survived `stopwords`, so neither half is an English
+	// function word; accessorStopwords then covers the languages that list
+	// does not.
+	fromContent := map[string]bool{}
+	words := contentWords(question)
+	for gap := 1; gap <= 2; gap++ {
+		for i := 0; i+gap < len(words); i++ {
+			a, b := words[i], words[i+gap]
+			if accessorStopwords[a] || accessorStopwords[b] {
+				continue
+			}
+			fromContent[a+b] = true
+		}
+	}
+	for _, w := range words {
+		if !accessorStopwords[w] {
+			fromContent[w] = true
+		}
+	}
+
+	var out []string
+	for _, t := range terms {
+		if code[t] || fromContent[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// accessorPrefixOf reports which conventional verb a term already begins with,
+// or empty. Length-guarded: "istanbul" starts with "is" and is a word, not an
+// accessor of "tanbul", so a prefix only counts when what follows it could be
+// an identifier in its own right.
+func accessorPrefixOf(term string) string {
+	for _, p := range AccessorPrefixes {
+		if len(term) > len(p)+minAccessorStem && strings.HasPrefix(term, p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// minAccessorStem is how much has to follow a verb before the term reads as an
+// accessor rather than as a word that happens to start with one.
+const minAccessorStem = 4
 
 // contentWords splits a question into its content words, folded, with function
 // words removed. Removal happens here rather than after pairing so that a

@@ -201,22 +201,35 @@ func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
 	if len(texts) > 0 {
 		prose = texts[0]
 	}
-	terms := BuildAccessorTerms(BuildSubstringTerms(prose, strings.Fields(q.Code)))
+	code := strings.Fields(q.Code)
+	terms := BuildAccessorTerms(
+		AccessorStems(prose, BuildSubstringTerms(prose, code), code))
 	repos, err := r.knownRepos(ctx, q.Repos, q.Question)
+	if err != nil {
+		return nil, err
+	}
+
+	// Long enough to be a claim, gathered BEFORE the scan: the counting query
+	// costs one pass over the corpus whatever it is asked, so the length floor
+	// has to remove a term from the question rather than from the loop.
+	var ask []string
+	for _, term := range terms {
+		if len([]rune(term)) >= minSeedRunes {
+			ask = append(ask, term)
+		}
+	}
+	if len(ask) == 0 {
+		return nil, nil
+	}
+	counts, err := r.store.FilesMatchingSubstrings(ctx, ask, repos, q.Stage)
 	if err != nil {
 		return nil, err
 	}
 
 	var out []Hit
 	seen := map[int64]bool{}
-	for _, term := range terms {
-		if len([]rune(term)) < minSeedRunes {
-			continue
-		}
-		n, err := r.store.FilesMatchingSubstring(ctx, term, repos, q.Stage)
-		if err != nil {
-			return nil, err
-		}
+	for _, term := range ask {
+		n := counts[strings.ToLower(term)]
 		if n == 0 || n > r.SeedFiles {
 			continue
 		}
@@ -229,10 +242,23 @@ func (r *Retriever) SeedHits(ctx context.Context, q Query) ([]Hit, error) {
 				seen[h.ChunkID] = true
 				out = append(out, h)
 			}
+			// Bounded in AGGREGATE, not only per term. seedMaxChunks caps one
+			// term; without a total a handful of selective terms landing in one
+			// generated file arrive whole at hop 0, where GatherSeeded adds
+			// them to the budget without a take — and a budget spent before
+			// the walk runs leaves the symbol hops and the crossing nothing.
+			if len(out) >= seedMaxTotal {
+				return out, nil
+			}
 		}
 	}
 	return out, nil
 }
+
+// seedMaxTotal bounds every seed of one turn together. A seed is taken whole
+// and never evicted, so this is the most of the answer's budget the rung may
+// spend before the walk has run at all.
+const seedMaxTotal = 60
 
 // seedMaxChunks bounds one term's seed. The file ceiling already bounds how
 // many FILES a seed may name; this stops one enormous file's worth of chunks
