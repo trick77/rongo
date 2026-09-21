@@ -417,10 +417,10 @@ func hitRepos(sources []Source) []string {
 // withoutPrior drops the previous-question lane from the list a failed search
 // reports back. The lane earns its place in the search, never in the sentence.
 // Filtered from index 1 and at most once: texts[0] is the reader's own
-// question, and when a retry re-asks the question it follows, the two are the
-// same string. SearchTexts adds no lane in that case, so there is nothing
-// here to remove and removing by value would take the reader's question out
-// of the sentence instead.
+// question, and a reader who asks the same thing twice in one thread makes
+// the two strings equal. SearchTexts adds no lane in that case, so there is
+// nothing here to remove and removing by value would take the reader's own
+// question out of the sentence instead.
 func withoutPrior(texts []string, prior string) []string {
 	if prior = strings.TrimSpace(prior); prior == "" {
 		return texts

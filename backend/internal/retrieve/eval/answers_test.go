@@ -354,7 +354,18 @@ func TestEvalMeasureAnswers(t *testing.T) {
 					records = append(records, rec)
 					continue
 				}
+				// Pin included, or the arm measures a shape the product does
+				// not run. threadPin reads the newest turn's stored
+				// scope.Known, and ResolveRepos unions in every indexed
+				// repository the question names as a whole word - "which
+				// service decides whether a PAYMENT is authorised" against a
+				// repository called payment pins the thread. Under a pin the
+				// raw question is dropped from the search, so the previous
+				// question is the only lane carrying the subject: exactly the
+				// shape this change is for, and the one an unpinned thread
+				// would quietly not test.
 				thread = ask.Thread{
+					Pin:          prev.Scope.Known,
 					Question:     r.Follows,
 					Answer:       prev.Text,
 					Sources:      prev.Sources,

@@ -440,7 +440,7 @@ func TestSearchTexts_aFollowUpSearchesThePreviousQuestion(t *testing.T) {
 func TestUnderstandPrompt_aFirstTurnCarriesNoFollowUpRule(t *testing.T) {
 	for _, withMemory := range []bool{false, true} {
 		first := understandPrompt(withMemory, false)
-		if strings.Contains(first, "EVERY entry of terms") {
+		if strings.Contains(strings.Join(strings.Fields(first), " "), "EVERY entry of terms") {
 			t.Errorf("memory=%v: a first turn is told to carry a subject it has none of:\n%s", withMemory, first)
 		}
 		// The paragraph the baseline was measured with stays, on every turn:
@@ -451,7 +451,9 @@ func TestUnderstandPrompt_aFirstTurnCarriesNoFollowUpRule(t *testing.T) {
 		}
 
 		followUp := understandPrompt(withMemory, true)
-		if !strings.Contains(followUp, "EVERY entry of terms and EVERY entry of code_terms carries it") {
+		// Whitespace-folded: the constant is hard-wrapped, and a rule split
+		// across two lines is still the rule.
+		if !strings.Contains(strings.Join(strings.Fields(followUp), " "), "EVERY entry of terms and EVERY entry of code_terms carries it") {
 			t.Errorf("memory=%v: a follow-up is never told to carry the subject:\n%s", withMemory, followUp)
 		}
 		// The follow-up prompt is the first-turn one plus the rule, nothing
@@ -516,7 +518,7 @@ func TestUnderstand_aFollowUpIsToldToCarryTheSubject(t *testing.T) {
 	if _, err := NewUnderstander(c).Understand(context.Background(), "In welchem Formularschritt passiert das?", prev, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
-	if !strings.Contains(*sys, "EVERY entry of terms") {
+	if !strings.Contains(strings.Join(strings.Fields(*sys), " "), "EVERY entry of terms") {
 		t.Errorf("the follow-up rule never reached the call:\n%s", *sys)
 	}
 
@@ -524,7 +526,10 @@ func TestUnderstand_aFollowUpIsToldToCarryTheSubject(t *testing.T) {
 	if _, err := NewUnderstander(c2).Understand(context.Background(), "How is pricing resolved?", Thread{}, nil); err != nil {
 		t.Fatalf("Understand: %v", err)
 	}
-	if strings.Contains(*sys2, "The previous turn of the conversation") {
+	// The same string the positive check above looks for: the paragraph about
+	// a previous turn is unconditional, so asserting on IT would pass whatever
+	// the gate did.
+	if strings.Contains(strings.Join(strings.Fields(*sys2), " "), "EVERY entry of terms") {
 		t.Errorf("a first turn carried the follow-up rule:\n%s", *sys2)
 	}
 }

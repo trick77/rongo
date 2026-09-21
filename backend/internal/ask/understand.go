@@ -243,7 +243,9 @@ func (d *Days) UnmarshalJSON(b []byte) error {
 // would make that equality a coincidence rather than a fact.
 func (u Understanding) SearchTexts(question string) []string {
 	texts := []string{question}
-	// Not when it IS this question: a retry re-asks the row it retries.
+	// Not when it IS this question, which is a reader asking the same thing
+	// twice in one thread. A retry does NOT land here: it reads the last
+	// answered turn strictly below the row it retries, never that row.
 	if prior := strings.TrimSpace(u.Prior); prior != "" && prior != strings.TrimSpace(question) {
 		texts = append(texts, prior)
 	}
@@ -368,12 +370,22 @@ const (
 //
 // Second line of defence only: the previous question reaches the search as
 // its own lane (Understanding.Prior) whatever this call returns.
+//
+// The last sentence is not decoration. Without it the rule reads as "carry
+// the old subject" on a follow-up that CHANGED subject, which would put the
+// old one into three of the four lanes instead of one: hits then span two
+// repositories with none named in the current question, and the deterministic
+// repository card fires where an answer belonged. The stamped lane costs one
+// lane and cannot be talked out of; this rule can, so it says when not to
+// apply.
 const understandFollowUp = `
-Name that thing to yourself, as the previous question named it, and then keep
-it: EVERY entry of terms and EVERY entry of code_terms carries it. A rewording
-that drops it is a rewording of a different question, and terms and code_terms
-are what the search runs on - the words of the current question alone are not
-enough to find what it points at.`
+So when the current question points at something without naming it, name that
+subject to yourself as the previous question named it, and then keep it: EVERY
+entry of terms and EVERY entry of code_terms carries it. A rewording that
+drops it is a rewording of a different question, and terms and code_terms are
+what the search runs on - the words of the current question alone are not
+enough to find what it points at. When the current question names its own
+subject, this does not apply: expand THAT one and let the previous turn go.`
 
 // understandMemory is the rule for the memory fields, in the system prompt
 // only when the deployment keeps memory. Written in English whatever the
