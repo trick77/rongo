@@ -8,7 +8,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - TDD: failing test first, then smallest implementation.
 - `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
 - No test hits a real LLM, embeddings endpoint or git remote. `httptest` fakes, fixture repo built locally.
-- Coverage floor 75%, both sides, plus 75% on changed lines. `hack/coverage-*` and `hack/strip-comment-lines.go` byte-identical with ../peeq — fix in the family, never fork.
+- Coverage floor 75%, both sides, plus 75% on changed lines. `scripts/coverage-*` and `scripts/strip-comment-lines.go` byte-identical with ../peeq's `hack/` copies — fix in the family, never fork. Directory renamed here first; peeq follows, then this note loses the `hack/`.
 - Tests need `-race` (cgo). Binary stays `CGO_ENABLED=0`.
 - New config → `BACKEND_*` env var, nowhere else.
 

@@ -13,8 +13,8 @@
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
-//	hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
-//	BACKEND_EVAL_ANSWER_RUNS=1 hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+//	scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'
+//	BACKEND_EVAL_ANSWER_RUNS=1 scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'
 //
 // The judge is a model, and a model at temperature zero still re-rolls one or
 // two questions in sixty (docs/measurements/2026-09-06-routing-rerun.md), so
@@ -312,7 +312,7 @@ func TestEvalMeasureAnswers(t *testing.T) {
 	var records []answerRecord
 	for run := 1; run <= runs; run++ {
 		var present, must, contra, asserted, citeHit, citeTotal, tokens, asked, failed, digraphs, diagrams int
-		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s ===", run, runs, audience, rerank, codeLaneLabel(), memoryArm)
+		t.Logf("\n=== run %d of %d, audience %s, rerank %s%s, memory %s ===", run, runs, audience, rerank, codeLaneLabel()+substringLaneLabel(), memoryArm)
 		for _, q := range questions {
 			r, ok := rubrics[q.Text]
 			if !ok {

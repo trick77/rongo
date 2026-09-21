@@ -24,8 +24,8 @@ export default defineConfig({
     setupFiles: ["./src/test-setup.ts"],
     coverage: {
       provider: "v8",
-      // json-summary is what hack/coverage-gate.sh reads (the project floor);
-      // lcov is what diff-cover reads in hack/patch-coverage.sh (patch
+      // json-summary is what scripts/coverage-gate.sh reads (the project floor);
+      // lcov is what diff-cover reads in scripts/patch-coverage.sh (patch
       // coverage); text-summary is for humans reading the CI log.
       reporter: ["text-summary", "json-summary", "lcov"],
       reportsDirectory: "../coverage/ui",

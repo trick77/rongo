@@ -2056,7 +2056,7 @@ git commit -m "feat: embed the SPA shell with an index.html fallback"
 
 **Files:**
 - Create: `Makefile`
-- Create: `hack/dev.sh`
+- Create: `scripts/dev.sh`
 - Create: `docs/manual-verification.md`
 
 **Interfaces:**
@@ -2087,12 +2087,12 @@ run:
 	cd backend && go run ./cmd/rongo
 
 dev:
-	./hack/dev.sh
+	./scripts/dev.sh
 ```
 
 - [ ] **Step 2: Write the dev script**
 
-`hack/dev.sh` — the dev environment runs without Docker, so this starts both processes natively and Vite proxies `/api` to the backend.
+`scripts/dev.sh` — the dev environment runs without Docker, so this starts both processes natively and Vite proxies `/api` to the backend.
 
 ```sh
 #!/bin/sh
@@ -2128,7 +2128,7 @@ npm run dev -- --host 127.0.0.1
 ```
 
 ```bash
-chmod +x hack/dev.sh
+chmod +x scripts/dev.sh
 ```
 
 - [ ] **Step 3: Write the manual verification doc**
@@ -2172,7 +2172,7 @@ Expected: backend logs `listening`, Vite serves on 5173, `curl -s localhost:5173
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Makefile hack/dev.sh docs/manual-verification.md
+git add Makefile scripts/dev.sh docs/manual-verification.md
 git commit -m "feat: one-command dev loop without Docker"
 ```
 

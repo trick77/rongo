@@ -276,10 +276,10 @@ const substringHubFloor = 500
 // larger token. It is the one lane that does not go through FTS5.
 //
 // The keyword lane cannot answer this: chunks_fts is fts5(raw_text) with the
-// default unicode61 tokenizer, so getAnzahlKinder and setAnzahlkinder are each a
-// single token and the bare word "anzahlkinder" matches neither. The prefix
+// default unicode61 tokenizer, so getAnzahlFahrzeuge and setAnzahlfahrzeuge are each a
+// single token and the bare word "anzahlfahrzeuge" matches neither. The prefix
 // rungs widen to the right, and the word is at the token's right end. Measured
-// over the schadenmeldung corpus: FTS 0, prefix rung 0, substring 145 chunks.
+// over the policenantrag corpus: FTS 0, prefix rung 0, substring 145 chunks.
 //
 // instr() rather than LIKE: LIKE would make % and _ in the term into syntax and
 // need an ESCAPE clause, while instr takes the needle literally. Both sides are
@@ -306,16 +306,16 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	// The needle is folded to letters and digits; the haystack is RAW source.
 	// So a match requires the identifier to appear in the code as one
 	// unbroken run of the needle's characters, differing at most in case:
-	// getAnzahlKinder, setAnzahlkinder, ANZAHLKINDER all contain
-	// "anzahlkinder" case-insensitively. That is the camelCase and PascalCase
+	// getAnzahlFahrzeuge, setAnzahlfahrzeuge, ANZAHLFAHRZEUGE all contain
+	// "anzahlfahrzeuge" case-insensitively. That is the camelCase and PascalCase
 	// case, which is what motivated the rung.
 	//
 	// It does NOT reach an identifier the source breaks up, because no case
 	// variant of a glued needle appears in the text at all:
 	//
-	//   set_anzahl_kinder   — separators; BuildSubstringTerms emits the
+	//   set_anzahl_fahrzeuge   — separators; BuildSubstringTerms emits the
 	//                         snake_case spelling separately for this
-	//   getÜbermittlungKinder with needle "übermittlungkinder" — SQLite's
+	//   getWeitergabeFahrzeuge with needle "weitergabefahrzeuge" — SQLite's
 	//                         lower() is ASCII-only, so the column cannot be
 	//                         folded over the umlaut, and the two spellings
 	//                         tried below only cover a leading capital, not a

@@ -126,6 +126,30 @@ func codeLaneOn() bool {
 	return envOr("BACKEND_EVAL_CODE_LANE", "1") != "0"
 }
 
+// substringLaneOn reads BACKEND_EVAL_SUBSTRING, the harness-only switch for the
+// substring rung: the scan that reaches an identifier occurring only INSIDE a
+// larger token, which no FTS rung can see at all.
+//
+// Reads the way BACKEND_EVAL_CODE_LANE does — "0" measures the lanes without
+// it, anything else is the product. BACKEND_EVAL_SUBSTRING_WEIGHT overrides the
+// weight itself, which is what a sweep varies; the rung's constant is not yet
+// a measured value (2026-09-21-substring-rung.md).
+func substringLaneOn() bool {
+	return envOr("BACKEND_EVAL_SUBSTRING", "1") != "0"
+}
+
+// substringLaneLabel marks an arm that is not the product's substring setting,
+// so a swept table cannot be read as the shipped one. Empty for the product.
+func substringLaneLabel() string {
+	if w := os.Getenv("BACKEND_EVAL_SUBSTRING_WEIGHT"); w != "" {
+		return fmt.Sprintf(" substring %s", w)
+	}
+	if substringLaneOn() {
+		return ""
+	}
+	return fmt.Sprintf(" without the substring rung %.2f", retrieve.WeightKeywordSubstring)
+}
+
 // codeLaneLabel marks an arm that is NOT the product, so a table run without
 // the rung cannot be read as one run with it. Empty for the product.
 func codeLaneLabel() string {
@@ -144,6 +168,16 @@ func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
 	r := retrieve.New(db, evalEmbedder(t))
 	if !codeLaneOn() {
 		r.CodeWeight = 0
+	}
+	if !substringLaneOn() {
+		r.SubstringWeight = 0
+	}
+	if w := os.Getenv("BACKEND_EVAL_SUBSTRING_WEIGHT"); w != "" {
+		f, err := strconv.ParseFloat(w, 64)
+		if err != nil {
+			t.Fatalf("BACKEND_EVAL_SUBSTRING_WEIGHT=%q: %v", w, err)
+		}
+		r.SubstringWeight = f
 	}
 	return r
 }

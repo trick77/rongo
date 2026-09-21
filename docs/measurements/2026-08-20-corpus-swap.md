@@ -33,7 +33,7 @@ its remote now, and `repos.example.yaml` says why.
 the clone URL the re-index reported the same 4 files, with the same duration to two decimals,
 because Go considered the package unchanged: these arms read the evaluation database, the
 clones under `BACKEND_REPO_ROOT` and a live model endpoint, none of which the test cache
-tracks. `hack/run-eval.sh` now passes `-count=1`, and that is not optional — a measurement that
+tracks. `scripts/run-eval.sh` now passes `-count=1`, and that is not optional — a measurement that
 can silently report an older run under a new heading is worse than no measurement.
 
 ## The corpus

@@ -604,5 +604,50 @@
       "peeq error log attribute key logging errorLog"
     ],
     "code": "peeq error log attribute key logging errorLog"
+  },
+  {
+    "question": "GateDeployment",
+    "texts": [
+      "GateDeployment",
+      "how does gate deployment work explain gate deployment process what is gate deployment",
+      "GateDeployment deploy gate release"
+    ],
+    "code": "GateDeployment deploy gate release"
+  },
+  {
+    "question": "MaxSources",
+    "texts": [
+      "MaxSources",
+      "What is MaxSources? How does MaxSources work? Explain MaxSources functionality",
+      "MaxSources maxSources MAX_SOURCES sourceLimit sourceCount"
+    ],
+    "code": "MaxSources maxSources MAX_SOURCES sourceLimit sourceCount"
+  },
+  {
+    "question": "CandidateIdx",
+    "texts": [
+      "CandidateIdx",
+      "what is CandidateIdx explain CandidateIdx how does CandidateIdx work",
+      "CandidateIdx Candidate Index"
+    ],
+    "code": "CandidateIdx Candidate Index"
+  },
+  {
+    "question": "ByModule",
+    "texts": [
+      "ByModule",
+      "ByModule module-based organization module structure",
+      "ByModule Module module"
+    ],
+    "code": "ByModule Module module"
+  },
+  {
+    "question": "FormatJulianDay",
+    "texts": [
+      "FormatJulianDay",
+      "how does FormatJulianDay work what does FormatJulianDay do explain the FormatJulianDay function",
+      "FormatJulianDay julianDay dateFormatter convertToJulianDay"
+    ],
+    "code": "FormatJulianDay julianDay dateFormatter convertToJulianDay"
   }
 ]

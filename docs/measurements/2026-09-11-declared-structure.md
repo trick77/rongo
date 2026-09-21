@@ -42,7 +42,7 @@ re-index):
 
 - **The module cut.** `modules.Cluster` emits one module per declared unit,
   whatever its size, and runs the directory rule over what no unit claims.
-  A card built over schadenmeldung-ui offers `claims`, `vorerfassung`,
+  A card built over policenantrag-ui offers `claims`, `vorerfassung`,
   `bagord`, not their `src/app` directories. Measured only by unit test: the
   analyst's repositories are private and not in any pinned corpus.
 - **Composition inside a repository.** `Router.anyDependency` reads
@@ -103,7 +103,7 @@ reason, the way `RepoDecay` does.
 - No measurement over an nx or Maven multi-module corpus exists: Sock Shop
   is one build per repository, so `units` is empty there and the cut,
   the composition rung and the prompt paragraph are covered by unit tests
-  over manifest fixtures shaped like the analyst's. The schadenmeldung
+  over manifest fixtures shaped like the analyst's. The policenantrag
   question set of the answer-quality harness is where those get a number.
 - The UI-to-service edge of the analyst's project is still not a token
   edge: the client's route is `/beruf`, the server's is `/api/beruf` under a
@@ -116,7 +116,7 @@ reason, the way `RepoDecay` does.
 
 ```
 sqlite3 /tmp/rongo-flow.db "UPDATE repo_state SET last_sha=''"   # the migration does this once on a real install
-hack/run-flow-eval.sh 'TestEvalIndex$'
-hack/run-flow-eval.sh 'TestFlowGathered$'
-hack/run-flow-eval.sh TestFlowEdges
+scripts/run-flow-eval.sh 'TestEvalIndex$'
+scripts/run-flow-eval.sh 'TestFlowGathered$'
+scripts/run-flow-eval.sh TestFlowEdges
 ```

@@ -41,6 +41,14 @@ backend/web/dist/*
 /data/
 /repos/
 
+# The evaluation corpus: the pinned clones the eval indexes, the checkouts it
+# makes from them, and the database it builds. Kept here rather than in /tmp,
+# which a reboot clears — rebuilding costs a full re-embed of ~9000 chunks
+# against a paid endpoint, so a reboot otherwise puts real money between a
+# session and its first number. Same class as /repos/: other people's source,
+# never this repo's content.
+/eval-corpus/
+
 # ---------- Secrets ----------
 .env
 # Any .env variant — backups, per-host copies, editor swap files. A bare `.env`
@@ -100,5 +108,5 @@ repos.yaml
 
 # Private evaluation material: a real estate's manifest, questions and rubrics.
 # Never committed; pointed at through EVAL_REPOS_FILE, BACKEND_EVAL_FLOW_QUESTIONS,
-# BACKEND_EVAL_FLOW_EXPANSIONS and BACKEND_EVAL_RUBRICS (hack/run-flow-eval.sh).
+# BACKEND_EVAL_FLOW_EXPANSIONS and BACKEND_EVAL_RUBRICS (scripts/run-flow-eval.sh).
 backend/internal/retrieve/eval/private/

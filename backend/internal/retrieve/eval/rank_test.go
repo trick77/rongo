@@ -8,7 +8,7 @@
 // expansion and reports, per question the product misses, where the expected
 // file sits — the same question the August document asked of the raw query.
 //
-//	hack/run-eval.sh 'TestEvalRankOfMisses$'
+//	scripts/run-eval.sh 'TestEvalRankOfMisses$'
 package eval
 
 import (

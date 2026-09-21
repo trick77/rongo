@@ -47,7 +47,7 @@ const (
 	// WeightKeywordSubstring is the substring rung: a term found INSIDE a
 	// larger token. It sits below the content rung (0.9) and above the code
 	// rung (0.8), because the claim is narrow — this chunk literally contains
-	// "anzahlkinder", even though no token equals it — while being weaker
+	// "anzahlfahrzeuge", even though no token equals it — while being weaker
 	// evidence than a whole-token match of the words the reader typed.
 	//
 	// Provisional, and the arm is off in a struct-literal Retriever so the

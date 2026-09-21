@@ -117,14 +117,14 @@ first 20000 tokens.
 ## Reproducing
 
 ```
-hack/run-flow-eval.sh TestEvalIndex            # once, builds the flow corpus
-hack/run-flow-eval.sh TestExpandFlowQuestions  # once, freezes the expansions
-hack/run-flow-eval.sh TestFlowGathered
-hack/run-flow-eval.sh 'TestFlowEdgeReach$'
-hack/run-eval.sh 'TestEvalMeasureGathered$'    # the Go corpus, pinned
+scripts/run-flow-eval.sh TestEvalIndex            # once, builds the flow corpus
+scripts/run-flow-eval.sh TestExpandFlowQuestions  # once, freezes the expansions
+scripts/run-flow-eval.sh TestFlowGathered
+scripts/run-flow-eval.sh 'TestFlowEdgeReach$'
+scripts/run-eval.sh 'TestEvalMeasureGathered$'    # the Go corpus, pinned
 ```
 
-`hack/run-flow-eval.sh` is committed now; the earlier documents named a
+`scripts/run-flow-eval.sh` is committed now; the earlier documents named a
 script that lived in a scratchpad and is gone. The flow manifest is
 `backend/internal/retrieve/eval/flow-repos.yaml`, pointing at the pinned
 clones under `/tmp/sockshop-pin`.

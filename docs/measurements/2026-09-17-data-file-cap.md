@@ -7,7 +7,7 @@ number moved, this fixes what enters the corpus. `DefaultSelectOptions().MaxData
 
 ## The problem
 
-`libs/schadenmeldung-lib/src/lib/i18n/generated-de-CH.json` was indexed and
+`libs/policenantrag-lib/src/lib/i18n/generated-de-CH.json` was indexed and
 cited. A translation catalogue matches every domain word in the question in
 both lanes, so it outranks the code that does the thing. The selector knew lock
 files, `.min.*`, build directories and the `Code generated ... DO NOT EDIT`

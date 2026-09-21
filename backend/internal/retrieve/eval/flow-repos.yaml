@@ -5,7 +5,7 @@
 # the cross-repository structure the flow questions exist to test.
 #
 # The clones are local, each carrying a branch pin20260910 at the sha the
-# measurement document lists. hack/run-flow-eval.sh points at this file.
+# measurement document lists. scripts/run-flow-eval.sh points at this file.
 projects:
   - name: sock-shop
     repositories:

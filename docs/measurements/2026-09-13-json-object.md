@@ -25,7 +25,7 @@ judge was untouched, being the instrument.
 
 ## The numbers
 
-`hack/run-flow-eval.sh 'TestEvalMeasureAnswers$'`, corpus rebuilt at the
+`scripts/run-flow-eval.sh 'TestEvalMeasureAnswers$'`, corpus rebuilt at the
 pinned shas (482 files, 3517 chunks, identical to
 `2026-09-10-flow-corpus.md`), llmwire v0.0.18, Analyst audience:
 

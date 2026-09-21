@@ -10,8 +10,8 @@
 // Run it after TestEvalIndex has built the flow corpus and
 // TestExpandFlowQuestions has frozen the expansions:
 //
-//	hack/run-flow-eval.sh TestExpandFlowQuestions
-//	hack/run-flow-eval.sh TestFlowGathered
+//	scripts/run-flow-eval.sh TestExpandFlowQuestions
+//	scripts/run-flow-eval.sh TestFlowGathered
 package eval
 
 import (

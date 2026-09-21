@@ -128,7 +128,7 @@ func TestSelect_decisionTable(t *testing.T) {
 		// however small, because its name says what it is.
 		{
 			name: "a file named generated is generated whatever its size",
-			path: "libs/schadenmeldung-lib/src/lib/i18n/generated-de-CH.json",
+			path: "libs/policenantrag-lib/src/lib/i18n/generated-de-CH.json",
 			body: `{"cart.title": "Warenkorb"}`,
 			want: SkipGenerated,
 		},
@@ -181,7 +181,7 @@ func TestSelect_decisionTable(t *testing.T) {
 			want: SkipGenerated,
 		},
 		{
-			// A TypeScript path alias, not a marker: schadenmeldung-ui
+			// A TypeScript path alias, not a marker: policenantrag-ui
 			// aliases its generated API client to "@generated", so every
 			// hand-written component importing it was dropped whole.
 			name: "an @generated import specifier is not generated",
@@ -199,8 +199,8 @@ func TestSelect_decisionTable(t *testing.T) {
 			// JPA's @GeneratedValue on the @Id of a hand-written entity.
 			// Without a word boundary it matched, and every entity went.
 			name: "@GeneratedValue on a JPA entity is not generated",
-			path: "lib/persistence/src/main/java/ch/suva/VersichertePersonEntity.java",
-			body: "@Entity\npublic class VersichertePersonEntity {\n  @Id\n  @GeneratedValue(strategy = GenerationType.IDENTITY)\n  private Long id;\n  private Integer anzahlKinder;\n}\n",
+			path: "lib/persistence/src/main/java/com/example/VertragsnehmerEntity.java",
+			body: "@Entity\npublic class VertragsnehmerEntity {\n  @Id\n  @GeneratedValue(strategy = GenerationType.IDENTITY)\n  private Long id;\n  private Integer anzahlFahrzeuge;\n}\n",
 			want: Include,
 		},
 		{
@@ -232,7 +232,7 @@ func TestSelect_decisionTable(t *testing.T) {
 		},
 		{
 			name: "an @Generated annotation is generated",
-			path: "src/main/java/ch/suva/ApiClient.java",
+			path: "src/main/java/com/example/ApiClient.java",
 			body: "@Generated(value = \"org.openapitools.codegen.languages.SpringCodegen\")\npublic class ApiClient {}\n",
 			want: SkipGenerated,
 		},
