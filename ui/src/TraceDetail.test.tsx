@@ -17,7 +17,7 @@ describe("Trace, what each step found", () => {
             detail: {
               terms: ["Vorerfassung abschicken"],
               code_terms: ["ControllerVorerfassung", "TOPIC_VORERFASSUNG"],
-              repos: ["schadenmeldung-service"],
+              repos: ["policenantrag-service"],
             },
           },
         ]}
@@ -27,7 +27,7 @@ describe("Trace, what each step found", () => {
     );
     expect(screen.getByText("Vorerfassung abschicken")).toBeTruthy();
     expect(screen.getByText("ControllerVorerfassung")).toBeTruthy();
-    expect(screen.getByText(/schadenmeldung-service, named by the question/)).toBeTruthy();
+    expect(screen.getByText(/policenantrag-service, named by the question/)).toBeTruthy();
   });
 
   it("says a rework reads the previous answer, never that it scoped every project", () => {
