@@ -1084,21 +1084,6 @@
     "note": "Doc-led, and the one where document and code are about the SAME fact: the rule is written down once, the practice is spread over every slog call. A demotion strong enough to hide the document answers this from a call site instead of from the rule."
   },
   {
-    "question": "CanChoose",
-    "kind": "identifier",
-    "resolution": "unique",
-    "candidates": [
-      {
-        "repo": "rongo",
-        "paths": [
-          "backend/internal/ask/route.go"
-        ],
-        "verified": "read 2026-09-21: route.go:205,723 roleCanChoose. The word CanChoose never occurs bare - only as the tail of roleCanChoose."
-      }
-    ],
-    "note": "Suffix-only: FTS5 tokenizes roleCanChoose whole, so the bare term matches 0 chunks and the prefix rung matches 0 (it opens leftward, the term sits at the token's right end). Measured 2026-09-21 over 1980 rongo chunks: FTS 0, prefix 0, substring 11 of which 9 in route.go."
-  },
-  {
     "question": "GateDeployment",
     "kind": "identifier",
     "resolution": "unique",
@@ -1114,48 +1099,63 @@
     "note": "Suffix-only. Measured 2026-09-21: FTS 0, prefix 0, substring 15 of which 4 in client.go."
   },
   {
-    "question": "FromClaims",
+    "question": "MaxSources",
     "kind": "identifier",
     "resolution": "unique",
     "candidates": [
       {
-        "repo": "rongo",
+        "repo": "peeq",
         "paths": [
-          "backend/internal/auth/session.go"
+          "backend/internal/httpapi/answer_handlers.go"
         ],
-        "verified": "read 2026-09-21: session.go:184 CreateSessionFromClaims. Zero bare occurrences in the file."
+        "verified": "read 2026-09-21 at pin20260820: answerMaxSources. MaxSources never occurs bare in the corpus (0 occurrences), only as the tail of answerMaxSources (14)."
       }
     ],
-    "note": "Suffix-only. Measured 2026-09-21: FTS 0, prefix 0, substring 7 of which 2 in session.go."
+    "note": "Suffix-only: FTS5 tokenizes answerMaxSources whole, so the bare term matches 0 chunks and the prefix rung matches 0 too, opening leftward while the term sits at the token's right end. Only the substring rung can reach it."
   },
   {
-    "question": "MaxLandings",
+    "question": "CandidateIdx",
     "kind": "identifier",
     "resolution": "unique",
     "candidates": [
       {
         "repo": "rongo",
         "paths": [
-          "backend/internal/ask/census.go"
+          "backend/internal/threads/store.go"
         ],
-        "verified": "read 2026-09-21: census.go:28 const censusMaxLandings = 40."
+        "verified": "read 2026-09-21 at pin20260820: FromCandidateIdx, 16 occurrences, 0 bare."
       }
     ],
-    "note": "Suffix-only, and a lowercase-prefixed constant rather than an exported name. Measured 2026-09-21: FTS 0, prefix 0, substring 8 of which 2 in census.go."
+    "note": "Suffix-only, and the tail is itself an abbreviation a reader would type."
   },
   {
-    "question": "FileTokens",
+    "question": "ByModule",
     "kind": "identifier",
     "resolution": "unique",
     "candidates": [
       {
         "repo": "rongo",
         "paths": [
-          "backend/internal/ask/gather.go"
+          "backend/internal/retrieve/rerank.go"
         ],
-        "verified": "read 2026-09-21: gather.go:87 WholeFileTokens int."
+        "verified": "read 2026-09-21 at pin20260820: RerankByModule, 10 occurrences, 0 bare."
       }
     ],
-    "note": "Suffix-only struct field, the closest shape to the schadenmeldung anzahlKinder case that motivated the substring rung. Measured 2026-09-21: FTS 0, prefix 0, substring 9 of which 4 in gather.go."
+    "note": "Suffix-only. The reader's likely word ('by module') is exactly the half that no FTS rung can see."
+  },
+  {
+    "question": "FormatJulianDay",
+    "kind": "identifier",
+    "resolution": "unique",
+    "candidates": [
+      {
+        "repo": "go-sqlite3",
+        "paths": [
+          "time.go"
+        ],
+        "verified": "read 2026-09-21 at pin20260820: TimeFormatJulianDay, 13 occurrences, 0 bare."
+      }
+    ],
+    "note": "Suffix-only in the dependency repository, so the rung is measured outside the two repositories it was designed against."
   }
 ]

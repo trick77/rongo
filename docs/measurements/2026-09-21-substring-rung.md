@@ -100,8 +100,48 @@ A non-ASCII letter MID-identifier followed by an internal capital is unreachable
 
 Closing it means folding the HAYSTACK: a generated folded column (a migration plus a full re-index) or a Unicode `lower()` registered on every connection. Both are larger than this rung and neither should be decided without a number. Stated in the code at the match site so the next reader does not rediscover it.
 
+## Retrieval, measured 2026-09-21
+
+Corpus pinned to `pin20260820` (peeq `bb04021`, rongo `0b989b6`, go-sqlite3 `3fa3f30`). **Files reproduce exactly — 526 / 142 / 293 — chunks do NOT: 5684 / 1217 / 2137 against the recorded 5694 / 1358 / 2180.** Same code, different chunking: the data-file cap and the extraction rules landed after 2026-08-20. So these numbers compare **arm against arm inside this one database** and must not be read against the older tables.
+
+`TestEvalMeasureFTS`, three arms in one run, deterministic (no reranker, no model call). Mean rank over the 41 questions every arm ranks.
+
+| arm | r@5 | r@20 | MRR | gathered | composition | mean rank |
+|---|---|---|---|---|---|---|
+| prose floor only | 0.787 (37) | 0.872 (41) | 0.713 | 0.894 (42) | 4/5 | 2.44 |
+| code rung 0.8, no substring | 0.809 (38) | 0.872 (41) | 0.728 | 0.894 (42) | 4/5 | **2.10** |
+| + substring 0.40 | 0.787 (37) | 0.894 (42) | 0.715 | 0.915 (43) | 4/5 | 2.24 |
+| + substring 0.60 | 0.787 (37) | 0.894 (42) | 0.716 | 0.915 (43) | 4/5 | 2.22 |
+| + substring 0.70 | 0.787 (37) | 0.894 (42) | 0.716 | 0.915 (43) | 4/5 | 2.27 |
+| **+ substring 0.85 (ships)** | 0.766 (36) | **0.915 (43)** | 0.698 | **0.936 (44)** | **5/5** | 2.39 |
+
+0.40 to 0.70 are one plateau: identical recall, mean rank within 0.05. **0.85 is the only weight that recovers the second question and fixes composition.**
+
+What it moves, question by question (0.85 against the same arm without the rung):
+
+- **Recovered from nothing:** `MaxSources` 0 → 7 (the suffix-only case the rung exists for), "from when on does a video count as old material" 0 → 17, and the composition question "are foreign key constraints active" completing 4/5 → 5/5.
+- **Cost:** eight already-working questions slip, six by a single place (11→12, 1→2, 4→5, 2→3, 13→14). Two slip further: "how is it recognised that one repository uses another" 1 → 4, "which attribute key does peeq use when it logs an error" 5 → 9. That is the r@5 loss and most of the mean-rank move.
+
+Trade accepted deliberately: the rung's job is to reach what no FTS rung can see at all, and a one-place slip on a question already answered is cheaper than a question that cannot be answered. Revisit if the reranked path disagrees.
+
+## Corrected: the first eval questions measured nothing
+
+The five questions added with the rung (`CanChoose`, `GateDeployment`, `FromClaims`, `MaxLandings`, `FileTokens`) were picked by scanning **today's** rongo. Four of their identifiers **do not exist in the pinned corpus** — `censusMaxLandings`, `WholeFileTokens`, `roleCanChoose` and `CreateSessionFromClaims` all postdate 2026-08-20, and `census.go` does not exist there at all. They were unanswerable by construction, not hard, and scored rank 0 in every arm.
+
+Replaced with four verified at the pin, each 0 bare occurrences and exactly one production file:
+
+| question | identifier | repo | file |
+|---|---|---|---|
+| `MaxSources` | `answerMaxSources` | peeq | `backend/internal/httpapi/answer_handlers.go` |
+| `CandidateIdx` | `FromCandidateIdx` | rongo | `backend/internal/threads/store.go` |
+| `ByModule` | `RerankByModule` | rongo | `backend/internal/retrieve/rerank.go` |
+| `FormatJulianDay` | `TimeFormatJulianDay` | go-sqlite3 | `time.go` |
+
+`GateDeployment` survives from the first set. The lesson is general: **an eval question must be verified against the CORPUS THE EVAL INDEXES, never against the working checkout.**
+
+Of these, only `MaxSources` actually needed the rung; the other three reach rank 1 through the prose lanes because their expansions happen to contain words the corpus spells bare. A question being suffix-only makes it *reachable only by substring in the keyword lane* — it does not make the semantic lane blind.
+
 ## Still open
 
-- `TestEvalMeasureAnswers` twice, per the model rule. Not run on this branch.
-- r@20 AND r@5 AND mean rank over the questions EVERY arm ranks, inside ONE database.
-- The sweep that settles `WeightKeywordSubstring`. 0.85 is reasoned (narrower than a prefix match, weaker than a whole-token match the reader typed), not measured.
+- `TestEvalMeasureAnswers` twice, per the model rule. Running; numbers to be appended.
+- The reranked path (`TestEvalMeasureRerank`), where the eight small slips may or may not survive the rerank.

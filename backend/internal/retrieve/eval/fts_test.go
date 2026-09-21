@@ -14,6 +14,8 @@ package eval
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -55,9 +57,28 @@ func TestEvalMeasureFTS(t *testing.T) {
 	// the prose floor the lane had before it.
 	plain := retrieve.New(db, evalEmbedder(t))
 	plain.CodeWeight = 0
+	plain.SubstringWeight = 0
+	// The substring rung gets its own pair, for the reason the code rung has
+	// one: it reaches chunks no FTS rung can see at all, so "with and without"
+	// is the only way to price it. Both arms otherwise the product's.
+	noSub := retrieve.New(db, evalEmbedder(t))
+	noSub.SubstringWeight = 0
+	// The swept arm reads BACKEND_EVAL_SUBSTRING_WEIGHT so the constant can be
+	// settled without a rebuild; unset, it is the product's.
+	swept := retrieve.New(db, evalEmbedder(t))
+	subW := swept.SubstringWeight
+	if w := os.Getenv("BACKEND_EVAL_SUBSTRING_WEIGHT"); w != "" {
+		f, err := strconv.ParseFloat(w, 64)
+		if err != nil {
+			t.Fatalf("BACKEND_EVAL_SUBSTRING_WEIGHT=%q: %v", w, err)
+		}
+		subW = f
+		swept.SubstringWeight = f
+	}
 	arms := []ftsArm{
 		{"prose floor only (the lane before the rung)", plain},
-		{fmt.Sprintf("code rung %.1f (the product)", retrieve.WeightKeywordCode), retrieve.New(db, evalEmbedder(t))},
+		{fmt.Sprintf("code rung %.1f, no substring rung", retrieve.WeightKeywordCode), noSub},
+		{fmt.Sprintf("code rung %.1f + substring rung %.2f", retrieve.WeightKeywordCode, subW), swept},
 	}
 	// Both arms always run: this test IS the comparison, so the switch every
 	// other arm in the package reads would only let one half of it disappear.
