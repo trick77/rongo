@@ -16,9 +16,9 @@ func TestLogInventory_announcesEveryRepositoryAndTheTotals(t *testing.T) {
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
-		{Name: "acme-core", Snapshot: true, Enabled: true, Project: "schadenmeldung",
+		{Name: "acme-core", Snapshot: true, Enabled: true, Project: "policenantrag",
 			Part: "backend"},
-		{Name: "acme-ui", Snapshot: true, Enabled: true, Project: "schadenmeldung",
+		{Name: "acme-ui", Snapshot: true, Enabled: true, Project: "policenantrag",
 			Part: "ui", Uses: []string{"acme-core"}},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)

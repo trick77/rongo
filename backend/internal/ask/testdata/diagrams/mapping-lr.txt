@@ -1,11 +1,11 @@
-Die Schadenmeldung-Anwendung produziert in fünf Kafka-Topics, jeweils ausgelöst durch ein Geschäftsereignis [12][3].
+Die Policenantrag-Anwendung produziert in fünf Kafka-Topics, jeweils ausgelöst durch ein Geschäftsereignis [12][3].
 
 Das Diagramm zeigt, welches Ereignis welches Topic bedient [3][7][15].
 
 ```mermaid
 flowchart LR
   subgraph Ereignis
-    e1["Schadenmeldung eingegangen"]
+    e1["Policenantrag eingegangen"]
     e2["Nachreichung eingegangen"]
     e3["Vorerfassung erstellt"]
   end

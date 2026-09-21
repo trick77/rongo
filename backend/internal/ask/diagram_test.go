@@ -19,7 +19,7 @@ func renumbered(t *testing.T, sources int, text string) (string, *renumberer) {
 
 const kafkaMap = "flowchart LR\n" +
 	"  subgraph Ereignis\n" +
-	"    e1[\"Schadenmeldung eingegangen\"]\n" +
+	"    e1[\"Policenantrag eingegangen\"]\n" +
 	"    e2[\"Nachreichung eingegangen\"]\n" +
 	"  end\n" +
 	"  subgraph Topic\n" +

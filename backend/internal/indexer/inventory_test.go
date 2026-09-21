@@ -60,7 +60,7 @@ func TestInventoryAttrs_describesAnIndexedRemote(t *testing.T) {
 // as a missing configuration rather than a deliberate kind of entry.
 func TestInventoryAttrs_namesASnapshotAsItsOwnSource(t *testing.T) {
 	// Given
-	st := RepoState{Name: "acme-core", Project: "schadenmeldung", Enabled: true,
+	st := RepoState{Name: "acme-core", Project: "policenantrag", Enabled: true,
 		Branch: "snapshot", LastSHA: "bb8df973717891d"}
 
 	// When
@@ -119,14 +119,14 @@ func TestInventoryAttrs_carriesTheLastFailure(t *testing.T) {
 // which is exactly how it was reported.
 func TestInventoryAttrs_statesTheDeclaredEdges(t *testing.T) {
 	// Given
-	st := RepoState{Name: "schadenmeldung-ui", Project: "schadenmeldung", Part: "ui",
-		Enabled: true, Uses: []string{"schadenmeldung-service"}}
+	st := RepoState{Name: "policenantrag-ui", Project: "policenantrag", Part: "ui",
+		Enabled: true, Uses: []string{"policenantrag-service"}}
 
 	// When
 	got := attrMap(t, InventoryAttrs(st))
 
 	// Then
-	if got["uses"] != "schadenmeldung-service" {
+	if got["uses"] != "policenantrag-service" {
 		t.Errorf("uses = %v, want the declared edge", got["uses"])
 	}
 }
@@ -136,7 +136,7 @@ func TestInventoryAttrs_statesTheDeclaredEdges(t *testing.T) {
 // would put `uses=` on most lines in most corpora.
 func TestInventoryAttrs_omitsUsesWhenThereAreNone(t *testing.T) {
 	// Given
-	st := RepoState{Name: "schadenmeldung-service", Project: "schadenmeldung", Enabled: true}
+	st := RepoState{Name: "policenantrag-service", Project: "policenantrag", Enabled: true}
 
 	// When
 	got := attrMap(t, InventoryAttrs(st))

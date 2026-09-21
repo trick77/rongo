@@ -239,9 +239,9 @@ var generatedSuffixes = []string{
 // A real tag opens a comment or an annotation, so "@generated" counts only
 // after start-of-text, whitespace, / , * or #. Bare, it also matched the name
 // of the thing rather than the tag, and dropped hand-written code whole:
-// `from '@generated'`, the TypeScript alias schadenmeldung-ui gives its
+// `from '@generated'`, the TypeScript alias policenantrag-ui gives its
 // generated client, took 278 files there, and without \b "@GeneratedValue"
-// on a JPA @Id took all 43 entities of schadenmeldung-service. Both times
+// on a JPA @Id took all 43 entities of policenantrag-service. Both times
 // the code answering the question was never indexed.
 //
 // An allowlist, not a quote denylist: the same workspace spells the alias
