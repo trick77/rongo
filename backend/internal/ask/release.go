@@ -122,10 +122,10 @@ const (
 // answerRelease is the turn from the scope on: no search, no routing, no
 // walk. The two stages and the project ARE the scope.
 func (p *Pipeline) answerRelease(ctx context.Context, question string, audience Audience, lang Language,
-	u Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
+	_ Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
 
 	declared := p.declaredStages(ctx)
-	pair := releasePair(question, u.Between, declared)
+	pair := releasePair(question, declared)
 	scope.Between = pair
 	scope = p.describeProjects(ctx, scope)
 	if len(pair) != 2 {
@@ -156,30 +156,26 @@ func (p *Pipeline) answerRelease(ctx context.Context, question string, audience 
 	return p.answer(ctx, question, audience, lang, sources, scope, followingUp, ev)
 }
 
-// releasePair settles the two stages: the reader's own words first, then
-// the model's guesses, the first two distinct declared names. The two
-// compose because they have to — "testing" is a refused stage word
-// (repos.Load), so "production vs. testing" names one stage by word and
-// the other only through the model's mapping. Order carries no meaning:
-// ancestry decides per component which stage is ahead. Anything but two
-// distinct declared names is no pair.
-func releasePair(question string, guessed []string, declared stages.Set) []string {
-	var out []string
-	seen := map[string]bool{}
-	add := func(name string) {
-		if !seen[name] && len(out) < 2 {
-			seen[name] = true
-			out = append(out, name)
-		}
-	}
-	for _, name := range declared.Mentioned(question) {
-		add(name)
-	}
-	for _, g := range guessed {
-		if name, ok := declared.Resolve(g); ok {
-			add(name)
-		}
-	}
+// releasePair settles the two stages from the reader's own words in THIS
+// question. Order carries no meaning: ancestry decides per component which
+// stage is ahead. Anything but exactly two distinct declared names is no
+// pair: a question naming three is refused rather than truncated to the
+// first two, because which two were meant is a real ambiguity and guessing
+// it answers about a comparison nobody asked for.
+//
+// The model's guesses used to top this up, for "production vs. testing":
+// "testing" is a refused stage word (repos.Load), so that phrasing names
+// one stage by word and reached the other only through the model. The
+// top-up is gone because it also completed a pair from a stage named in a
+// PREVIOUS turn — the recall block reaches the classifier, so a follow-up
+// naming one stage ("and how is it configured on intg") paired it with the
+// stage of the turn before and answered a config question from commits.
+// The two cases are indistinguishable here: in both, the second stage
+// resolves from nothing in the current question. Refusing both costs the
+// "vs. testing" phrasing one rephrase, against releaseNeedsTwoStages,
+// which names the declared stages.
+func releasePair(question string, declared stages.Set) []string {
+	out := declared.Mentioned(question)
 	if len(out) != 2 {
 		return nil
 	}

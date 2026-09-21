@@ -67,7 +67,13 @@ type Understanding struct {
 	// Between is the two deployment stages a release question compares, as
 	// declared names; empty on every other intent. A set, not a pair: which
 	// stage is ahead is read from the tags' ancestry, never from the order
-	// the model wrote them in. The reader's own stage words win over it.
+	// the model wrote them in.
+	//
+	// Recorded, never read: releasePair takes the stages from the reader's
+	// own words alone, because this field also carried a stage named only
+	// in a PREVIOUS turn, which is how a config follow-up was answered from
+	// commits. Kept because the turn's trace stores it and a disagreement
+	// with the reader's words is worth seeing.
 	Between Names `json:"between"`
 	// Terms are the question restated in business language, which is what the
 	// vector lane matches against doc comments and module names.
@@ -337,13 +343,19 @@ commits", "was hat sich geändert", "was ist neu", "letzte Änderungen",
 "quoi de neuf", "cosa è cambiato". A question about how a feature works is
 never "changes", however recent the feature.
 
-"release" is a question about what is deployed on one stage and not yet on
-another, or for release notes between two stages or versions: "what is
-between production and testing", "release notes for the next deployment",
-"what goes live with the next release", "was ist zwischen prod und test",
-"Release Notes", "notes de version", "note di rilascio". It names two
-stages. A question about what changed in the code lately, with no two stages
-in it, is "changes", never "release".
+"release" is a request for RELEASE NOTES between two deployment stages:
+"release notes between prod and intg", "Release Notes zwischen prod und
+test", "notes de version entre prod et intg", "note di rilascio tra prod e
+intg". Hyphen, case and plural do not matter. Every example names both
+stages, because a release-notes question without two of them is answered by
+asking which two: keep the intent and leave "between" to the words.
+A release-notes question names two stages, but naming two stages is NOT what
+makes a question one: the reader must ask for the notes themselves. A
+question about what a configuration VALUE is, or how it differs between
+stages, is "how" even when it names two stages: "how is the timeout
+configured on intg", "what is the config difference between intg and prod",
+"wie ist X auf intg konfiguriert". A question about what was done to the
+code lately, asking for no notes, is "changes", never "release".
 
 "rework" is a request to restate the PREVIOUS ANSWER in another form, asking
 nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",
