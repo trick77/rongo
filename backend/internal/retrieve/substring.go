@@ -15,7 +15,18 @@ const minSubstringRunes = 8
 // maxSubstringTerms caps how many candidates one question contributes. Each is
 // a separate scan of chunks, so a pasted paragraph must not become forty of
 // them.
-const maxSubstringTerms = 6
+const maxSubstringTerms = 12
+
+// maxSubstringCodeTerms is how much of that cap the GUESSED identifiers may
+// take. The two sources are budgeted apart on purpose: the rung exists for the
+// questions where the guess MISSED, and a shared budget lets the misses starve
+// the pairs that would have recovered them.
+//
+// Measured on the question that motivated the rung: the step guessed
+// schadenmeldung, kinderanzahl, uebermittlung and datenuebertragung, none of
+// them the identifier. Under one shared cap of six those four plus two leading
+// pairs filled it, and "anzahlkinder" — emitted around position nine — was cut.
+const maxSubstringCodeTerms = 4
 
 // BuildSubstringTerms derives the identifier-shaped candidates a question is
 // worth scanning the corpus for, DETERMINISTICALLY — no model call.
@@ -45,36 +56,80 @@ func BuildSubstringTerms(question string, codeTerms []string) []string {
 	var out []string
 	seen := map[string]bool{}
 
-	add := func(s string) bool {
+	// add takes a candidate and reports whether there is room for another
+	// under `limit`. The limit is passed per source rather than read from the
+	// slice, which is what keeps the two budgets apart.
+	add := func(s string, limit int) bool {
 		s = fold(s)
 		if len([]rune(s)) < minSubstringRunes || seen[s] {
-			return len(out) < maxSubstringTerms
+			return len(out) < limit
 		}
 		seen[s] = true
 		out = append(out, s)
-		return len(out) < maxSubstringTerms
+		return len(out) < limit
 	}
 
-	// Code terms first: a guessed identifier is a stronger candidate than a
-	// pair glued out of prose, and the cap should spend itself on those.
+	// addRaw is add for a candidate that is already in the exact spelling the
+	// source would use — a snake_case form, whose separators fold() would
+	// strip back into the glued shape it exists to differ from.
+	addRaw := func(s string, limit int) bool {
+		if len([]rune(s)) < minSubstringRunes || seen[s] {
+			return len(out) < limit
+		}
+		seen[s] = true
+		out = append(out, s)
+		return len(out) < limit
+	}
+
+	// Code terms first, under a budget of their own: a guessed identifier is a
+	// stronger candidate than a pair glued out of prose, but it is also the
+	// thing that missed when the rung is needed at all.
 	for _, c := range codeTerms {
-		if !add(c) {
-			return out
+		if !add(c, maxSubstringCodeTerms) {
+			break
 		}
 	}
 
 	words := contentWords(question)
+
 	// Adjacent pairs first, then pairs one word apart. The second sweep is what
 	// carries a question written in a language `stopwords` does not cover:
 	// that list is English by construction, so German "Anzahl der Kinder" and
 	// French "nombre des enfants" keep their article as an ordinary content
 	// word and would otherwise only ever yield anzahlder and derkinder.
 	//
-	// Adjacency stays the stronger signal and is emitted first, so the cap
+	// Adjacency stays the stronger signal and is emitted first, so the budget
 	// spends itself on pairs the question actually wrote side by side.
 	for gap := 1; gap <= 2; gap++ {
 		for i := 0; i+gap < len(words); i++ {
-			if !add(words[i] + words[i+gap]) {
+			if !add(words[i]+words[i+gap], maxSubstringTerms) {
+				return out
+			}
+		}
+	}
+
+	// Single content words LAST. A question that is one identifier
+	// ("CanChoose", and every identifier-kind question in the eval corpus) has
+	// no pair to form, and without this the rung never runs on exactly the
+	// questions written to measure it. They come after the pairs because a
+	// lone word is the weaker claim: "versicherter" is half the corpus, while
+	// "anzahlkinder" is a mapping.
+	for _, w := range words {
+		if !add(w, maxSubstringTerms) {
+			return out
+		}
+	}
+
+	// The snake_case spelling of each pair, so the rung is not silently dead
+	// over Python, Rust, C and Ruby. The haystack is raw source: a corpus
+	// writing set_anzahl_kinder contains no run of letters spelling
+	// "anzahlkinder", and no case variant of the glued needle can find it.
+	//
+	// Appended after everything else, and only while the budget allows: it is
+	// a spelling guess, weaker than the forms the question actually used.
+	for gap := 1; gap <= 2; gap++ {
+		for i := 0; i+gap < len(words); i++ {
+			if !addRaw(words[i]+"_"+words[i+gap], maxSubstringTerms) {
 				return out
 			}
 		}
@@ -103,13 +158,21 @@ func contentWords(q string) []string {
 	return out
 }
 
-// fold lowercases and strips everything that is not a letter or digit, which is
-// how a written identifier becomes the form the scan compares: SetAnzahlKinder,
-// set_anzahl_kinder and "Anzahl Kinder" all fold to the same needle.
+// fold lowercases and strips everything that is not a letter or digit. It
+// normalises the CANDIDATE only: "Anzahl Kinder", anzahlKinder and
+// getAnzahlKinder all fold to a needle of the same shape.
+//
+// The haystack is NOT folded. It is raw source text, matched by SQL instr, so
+// the needle has to appear in the code exactly as the code writes it. That is
+// what SeparatorVariants is for, and what bounds this rung: it reaches an
+// identifier written as one run of letters — camelCase, PascalCase, and the
+// separator forms that variant produces — and it does not reach one whose
+// letters are interrupted in a way no variant reproduces.
 //
 // strings.ToLower rather than SQL lower(): SQLite's lower() is ASCII-only, so
-// folding both sides in Go keeps a non-ASCII term from silently comparing
-// unfolded against the column.
+// folding the needle in Go and the column in SQL would disagree on any
+// non-ASCII letter. Matching is therefore done against the raw column, with the
+// case variants generated here instead.
 func fold(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -119,4 +182,16 @@ func fold(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// hasNonASCII reports whether s contains a rune SQL lower() will not fold.
+// SQLite's lower() is ASCII-only, so a needle carrying an umlaut cannot be
+// compared case-insensitively by the database and needs its cases spelled out.
+func hasNonASCII(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return true
+		}
+	}
+	return false
 }

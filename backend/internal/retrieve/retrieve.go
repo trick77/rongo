@@ -676,15 +676,34 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 	// Terms are derived in code from the question and the guessed identifiers,
 	// never asked of the model: one more model call to recover from a model
 	// guess that missed is a second chance at the same mistake.
+	// ONE lane for every term, not one per term. The terms are several guesses
+	// at a single claim — "this chunk contains the identifier" — and
+	// get<X>, set<X> and <X> routinely all match the same chunk. As separate
+	// lanes that chunk would be scored three times at SubstringWeight each,
+	// an effective 2.55: above WeightKeywordStrict, from a rung that is
+	// deliberately below it. Hits are deduped by ChunkID and keep the order
+	// the first term found them in, which is the kind-then-address order the
+	// store already applied.
 	if r.SubstringWeight > 0 {
+		var hits []Hit
+		seen := map[int64]bool{}
 		for _, term := range BuildSubstringTerms(texts[0], strings.Fields(code)) {
-			hits, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
+			found, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
 			if err != nil {
 				return nil, err
 			}
-			if len(hits) == 0 {
-				continue
+			for _, h := range found {
+				if seen[h.ChunkID] {
+					continue
+				}
+				seen[h.ChunkID] = true
+				hits = append(hits, h)
 			}
+		}
+		if len(hits) > candidates {
+			hits = hits[:candidates]
+		}
+		if len(hits) > 0 {
 			lanes = append(lanes, Lane{
 				Name:   "keyword:substring",
 				Hits:   hits,
