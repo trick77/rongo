@@ -77,6 +77,19 @@ type Understanding struct {
 	// says "Apple TV", the code says "AirPlay", and no embedding of the raw
 	// question closes that gap on its own.
 	CodeTerms []string `json:"code_terms"`
+	// Prior is the previous question of the thread, and it is NOT a model
+	// output: Understand overwrites whatever the reply carried with the text
+	// the record holds. A follow-up names its subject a turn ago - "in
+	// welchem Formularschritt passiert das?" - and the expansion is the one
+	// thing that cannot be trusted to keep it: the fields it fills are
+	// specified as rewordings of the CURRENT question, so "dieser Vorgang"
+	// satisfies them while naming nothing the index can match. Carried as its
+	// own search lane instead, where a wrong guess cannot lose it.
+	//
+	// Stored in the clarification blob with everything else, so a resumed
+	// turn searches what the thread was about; omitempty keeps rows written
+	// before this existed decoding unchanged.
+	Prior string `json:"prior,omitempty"`
 	// Repos narrows the search when the question names a system. Empty means
 	// the whole corpus.
 	Repos []string `json:"repos"`
@@ -215,11 +228,25 @@ func (d *Days) UnmarshalJSON(b []byte) error {
 // lanes are fused — so an expansion that adds nothing costs a lane, while one
 // that lands pulls its file up through a lane of its own.
 //
+// The previous question follows it on a follow-up, because a follow-up
+// references the turn before it by definition: "in welchem Formularschritt
+// passiert das?" names its subject nowhere, and the words it does carry find
+// whatever the corpus happens to match. The lane is not an embedding nudge —
+// BuildFTSQueries runs over every text, so the subject gets a literal keyword
+// match — and it is the one part of the search the expansion cannot lose. It
+// survives a pin, where the raw question is dropped and the model's guesses
+// would otherwise be the whole search, and it cannot widen one: knownRepos
+// reads Query.Question alone, never the lanes.
+//
 // The last entry is CodeText's, the same string Query.Code carries: the keyword
 // lane finds the code rung by comparing the two, and building the text twice
 // would make that equality a coincidence rather than a fact.
 func (u Understanding) SearchTexts(question string) []string {
 	texts := []string{question}
+	// Not when it IS this question: a retry re-asks the row it retries.
+	if prior := strings.TrimSpace(u.Prior); prior != "" && prior != strings.TrimSpace(question) {
+		texts = append(texts, prior)
+	}
 	if terms := strings.Join(u.Terms, " "); strings.TrimSpace(terms) != "" {
 		texts = append(texts, terms)
 	}
@@ -304,15 +331,7 @@ It exists only when a previous turn is above; with none, or when the question
 asks about anything the previous answer does not already say, it is not
 "rework". A rework has terms [], code_terms [] and repos [].%s
 
-A question may arrive with the previous turn of the conversation above it. That
-material is there for ONE purpose: to resolve what the current question leaves
-out - "that", "this", "it", "and how about the other one", a question with no
-subject at all. Everything you answer with describes the CURRENT question. A
-follow-up that stays on the subject inherits it; a follow-up that changes the
-subject gets the new one, and the previous turn contributes nothing to it. A
-follow-up that only moves the window of a changes question ("only the last
-two days") keeps intent "changes" and the topic.
-
+%s
 code_terms is the most important part. The question is phrased in the language
 of the business domain, the code is not: someone asking about an "Apple TV"
 means "AirPlay" in the code; someone asking about "disk almost full" means
@@ -326,6 +345,35 @@ const (
 	understandIntentsOff = ` or "rework"`
 	understandIntentsOn  = `, "rework" or "memory"`
 )
+
+// understandFollowUp is the rule for a question that continues a thread, in
+// the system prompt ONLY when a previous turn is actually above it. A first
+// turn never reads a paragraph about material it does not have, and its
+// prompt stays byte-identical to what the evaluation baseline was measured
+// on.
+//
+// It says to CARRY the subject rather than merely to resolve it, because the
+// fields it governs are specified as rewordings of the current question and a
+// pronoun rewritten as "dieser Vorgang" satisfies that while naming nothing
+// the index can match. The search carries the previous question on its own
+// account either way (Understanding.Prior); this is what makes the model's
+// own lanes point at the same thing.
+const understandFollowUp = `
+The previous turn of the conversation is above the question. It is there for
+ONE purpose: to resolve what the current question leaves out - "that", "this",
+"it", "dies", "dieser Vorgang", a question with no subject at all.
+
+Name that thing to yourself, as the previous question named it, and then keep
+it: EVERY entry of terms and EVERY entry of code_terms carries it. A rewording
+that drops it is a rewording of a different question, and terms and code_terms
+are what the search runs on - the words of the current question alone are not
+enough to find what it points at.
+
+A follow-up that names its own subject inherits nothing, and the previous turn
+contributes nothing to it. A follow-up that changes the subject gets the new
+one. A follow-up that only moves the window of a changes question ("only the
+last two days") keeps intent "changes" and the topic.
+`
 
 // understandMemory is the rule for the memory fields, in the system prompt
 // only when the deployment keeps memory. Written in English whatever the
@@ -420,7 +468,7 @@ func recall(question string, t Thread) string {
 func (u *Understander) Understand(ctx context.Context, question string, t Thread, stageNames []string) (Understanding, error) {
 	holder := memory.From(ctx)
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
-		{Role: "system", Content: understandPrompt(holder != nil) + stageList(stageNames)},
+		{Role: "system", Content: understandPrompt(holder != nil, t.Question != "") + stageList(stageNames)},
 		{Role: "user", Content: recall(question, t) + memoryList(holder)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
@@ -449,17 +497,27 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 	if got.Census = strings.Trim(strings.ToLower(got.Census), " \t\n\"'`.,:;!?"); got.Census != CensusLink {
 		got.Census = ""
 	}
+	// Stamped, never read: overwriting whatever the reply carried is the
+	// point. The thread's own question is a fact the record holds, and the
+	// one part of a follow-up's search that must not depend on the model
+	// having kept the subject. Empty for a first turn, so its lanes are
+	// exactly what they were.
+	got.Prior = strings.TrimSpace(t.Question)
 	return got, nil
 }
 
 // understandPrompt is the system prompt with or without the memory fields.
 // Without them the prompt is byte for byte what it was before memory
 // existed, which is what keeps the eval baseline comparable.
-func understandPrompt(withMemory bool) string {
-	if !withMemory {
-		return fmt.Sprintf(understandSystem, understandIntentsOff, "", "")
+func understandPrompt(withMemory, withPrior bool) string {
+	followUp := ""
+	if withPrior {
+		followUp = understandFollowUp
 	}
-	return fmt.Sprintf(understandSystem, understandIntentsOn, understandMemoryFields, understandMemoryIntent)
+	if !withMemory {
+		return fmt.Sprintf(understandSystem, understandIntentsOff, "", "", followUp)
+	}
+	return fmt.Sprintf(understandSystem, understandIntentsOn, understandMemoryFields, understandMemoryIntent, followUp)
 }
 
 // memoryList closes the user message with the saved rules, ids first, so

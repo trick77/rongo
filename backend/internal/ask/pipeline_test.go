@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -949,5 +950,84 @@ func TestResumeRepoRunsTheGapPassToo(t *testing.T) {
 	}
 	if d := details["gathering"]; d == nil || d["gaps"] != 1 {
 		t.Errorf("gathering detail = %v, want one gap", d)
+	}
+}
+
+// TestAPinnedFollowUpStillSearchesWhatThePreviousQuestionAsked is the
+// regression test for a thread that answered about the ZAS check and was then
+// asked "in welchem Formularschritt passiert das?". The expansion rewrote the
+// pronoun instead of resolving it - "dieser Vorgang", no subject - and under a
+// pin the raw question is dropped, so the model's guesses were the entire
+// search. The previous question has to be in there on its own account.
+func TestAPinnedFollowUpStillSearchesWhatThePreviousQuestionAsked(t *testing.T) {
+	var got retrieve.Query
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
+		got = q
+		return nil, nil
+	}))
+	prev := Thread{
+		Pin:      []string{"peeq"},
+		Question: "Wann genau und was genau macht der ZAS Check?",
+		Answer:   "ServiceZas prüft die Versichertennummer.",
+	}
+
+	if _, _, err := p.Run(context.Background(), "In welchem Formularschritt passiert das?",
+		AudienceBA, LanguageDE, prev, Events{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// The pin drops the raw question, which is what leaves the guesses alone.
+	if got.Question != "" {
+		t.Errorf("Query.Question = %q, want it dropped under a pin", got.Question)
+	}
+	if !slices.Contains(got.Texts, prev.Question) {
+		t.Errorf("Texts = %v, want the previous question among them", got.Texts)
+	}
+}
+
+// TestAFirstTurnSearchesExactlyWhatItDidBefore: the lane above exists only
+// where there is a turn to carry. A question with no thread behind it is the
+// eval baseline and must be untouched.
+func TestAFirstTurnSearchesExactlyWhatItDidBefore(t *testing.T) {
+	var got retrieve.Query
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(q retrieve.Query) ([]retrieve.Hit, error) {
+		got = q
+		return nil, nil
+	}))
+
+	q := "How does an Apple TV get at the media file without signing in?"
+	if _, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if len(got.Texts) != 3 {
+		t.Errorf("Texts = %v, want the question, the terms and the code and nothing else", got.Texts)
+	}
+	if got.Texts[0] != q {
+		t.Errorf("first lane = %q, want the question as asked", got.Texts[0])
+	}
+}
+
+// TestNothingFoundDoesNotQuoteThePreviousQuestion: the previous question is
+// search material, not something the reader asked this turn. Listing it under
+// "searched for" would tell them the turn went looking for the question they
+// asked a turn ago, which reads as a bug and is not what they want to know.
+func TestNothingFoundDoesNotQuoteThePreviousQuestion(t *testing.T) {
+	p := newTestPipeline(t, withIndexedSearcher([]string{"peeq"}, func(retrieve.Query) ([]retrieve.Hit, error) {
+		return nil, nil
+	}))
+	prev := Thread{
+		Question: "Wann genau und was genau macht der ZAS Check?",
+		Answer:   "ServiceZas prüft die Versichertennummer.",
+	}
+
+	answer, _, err := p.Run(context.Background(), "In welchem Formularschritt passiert das?",
+		AudienceBA, LanguageDE, prev, Events{})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if strings.Contains(answer.Text, prev.Question) {
+		t.Errorf("nothing-found text names the previous question:\n%s", answer.Text)
 	}
 }

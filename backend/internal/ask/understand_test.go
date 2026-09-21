@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -342,14 +343,153 @@ func TestUnderstand_afirstTurnCarriesNothing(t *testing.T) {
 // subject must be expanded as the new subject, not as the old one. That is a
 // prompt rule, so this is the test that it is written down at all.
 func TestUnderstand_theSystemPromptSaysThePreviousTurnOnlyResolvesTheQuestion(t *testing.T) {
-	if !strings.Contains(strings.Join(strings.Fields(understandSystem), " "),
-		"resolve what the current question leaves out") {
+	// Read off the assembled follow-up prompt, not off understandSystem: the
+	// rule is only in the prompt of a turn that HAS a previous turn, and a
+	// first turn's prompt must not carry it at all.
+	flat := strings.Join(strings.Fields(understandPrompt(false, true)), " ")
+	if !strings.Contains(flat, "resolve what the current question leaves out") {
 		t.Error("the prompt never says what the previous turn is for")
 	}
 	// Whitespace-folded: the constant is hard-wrapped, and a rule split across
 	// two lines is still the rule.
-	flat := strings.Join(strings.Fields(understandSystem), " ")
 	if !strings.Contains(flat, "changes the subject gets the new one") {
 		t.Error("the prompt never says a follow-up may change the subject")
+	}
+}
+
+// TestUnderstand_thePriorQuestionIsStampedNotRead: the previous question
+// reaches the search because Go puts it there, not because the model chose to
+// keep it. A reply that volunteers "prior" cannot influence the field, and a
+// first turn leaves it empty.
+func TestUnderstand_thePriorQuestionIsStampedNotRead(t *testing.T) {
+	c, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"prior":"nonsense the model made up"}`)
+	prev := Thread{Question: "Wann genau und was genau macht der ZAS Check?", Answer: "ServiceZas prüft die Versichertennummer."}
+
+	got, err := NewUnderstander(c).Understand(context.Background(), "In welchem Formularschritt passiert das?", prev, nil)
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if got.Prior != prev.Question {
+		t.Errorf("Prior = %q, want the previous question the record holds, never the model's own word", got.Prior)
+	}
+
+	c2, _, _ := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"prior":"nonsense"}`)
+	first, err := NewUnderstander(c2).Understand(context.Background(), "How is pricing resolved?", Thread{}, nil)
+	if err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if first.Prior != "" {
+		t.Errorf("Prior = %q on a first turn, want empty", first.Prior)
+	}
+}
+
+// TestSearchTexts_aFirstTurnIsUnchanged: the lanes a question with no thread
+// behind it searches are exactly what they were. This is the eval baseline.
+func TestSearchTexts_aFirstTurnIsUnchanged(t *testing.T) {
+	u := Understanding{Terms: []string{"pricing", "cost per token"}, CodeTerms: []string{"Price", "CostNanoUSD"}}
+	q := "How is pricing resolved?"
+
+	texts := u.SearchTexts(q)
+
+	want := []string{q, "pricing cost per token", u.CodeText()}
+	if !slices.Equal(texts, want) {
+		t.Errorf("search texts = %v, want %v", texts, want)
+	}
+	if texts[len(texts)-1] != u.CodeText() {
+		t.Error("the last lane must stay CodeText's: the keyword lane finds the code rung by comparing the two")
+	}
+}
+
+// TestSearchTexts_aFollowUpSearchesThePreviousQuestion is the whole fix. A
+// follow-up names its subject a turn ago, so the search has to carry it -
+// whatever the expansion came back with.
+func TestSearchTexts_aFollowUpSearchesThePreviousQuestion(t *testing.T) {
+	// Terms and code terms that lost the subject entirely, which is the
+	// failure this exists for.
+	u := Understanding{
+		Prior:     "Wann genau und was genau macht der ZAS Check?",
+		Terms:     []string{"Wo im Formularablauf findet dieser Vorgang statt?"},
+		CodeTerms: []string{"FormStep", "StepSequence"},
+	}
+	q := "In welchem Formularschritt passiert das?"
+
+	texts := u.SearchTexts(q)
+
+	if len(texts) != 4 {
+		t.Fatalf("search texts = %v, want the question, the previous question, the terms and the code", texts)
+	}
+	if texts[0] != q {
+		t.Errorf("first lane = %q, want the question as asked", texts[0])
+	}
+	if texts[1] != u.Prior {
+		t.Errorf("second lane = %q, want the previous question", texts[1])
+	}
+	if !strings.Contains(strings.Join(texts, " "), "ZAS") {
+		t.Error("the subject the follow-up points at never reaches the search")
+	}
+	if texts[len(texts)-1] != u.CodeText() {
+		t.Error("the last lane must stay CodeText's")
+	}
+}
+
+// TestUnderstandPrompt_aFirstTurnCarriesNoFollowUpRule: the follow-up rule is
+// about material a first turn does not have, and a prompt that explains an
+// absent previous turn is what the evaluation baseline was NOT measured on.
+// Proven here rather than by an eval run, which cannot see a first turn's
+// prompt at all.
+func TestUnderstandPrompt_aFirstTurnCarriesNoFollowUpRule(t *testing.T) {
+	for _, withMemory := range []bool{false, true} {
+		first := understandPrompt(withMemory, false)
+		if strings.Contains(first, "The previous turn of the conversation") {
+			t.Errorf("memory=%v: a first turn is told about a turn that does not exist:\n%s", withMemory, first)
+		}
+		// The old unconditional wording is gone too, not merely moved behind
+		// the gate under another name.
+		if strings.Contains(first, "A question may arrive with the previous turn") {
+			t.Errorf("memory=%v: the old unconditional paragraph is still in a first turn's prompt", withMemory)
+		}
+
+		followUp := understandPrompt(withMemory, true)
+		if !strings.Contains(followUp, "EVERY entry of terms and EVERY entry of code_terms carries it") {
+			t.Errorf("memory=%v: a follow-up is never told to carry the subject:\n%s", withMemory, followUp)
+		}
+		if len(followUp) <= len(first) {
+			t.Errorf("memory=%v: the follow-up prompt is not longer than the first-turn one", withMemory)
+		}
+	}
+}
+
+// TestUnderstand_aFollowUpIsToldToCarryTheSubject: the gate is driven by the
+// thread, not by a flag a caller might forget.
+func TestUnderstand_aFollowUpIsToldToCarryTheSubject(t *testing.T) {
+	c, _, sys := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+	prev := Thread{Question: "Wann genau und was genau macht der ZAS Check?", Answer: "ServiceZas prüft."}
+
+	if _, err := NewUnderstander(c).Understand(context.Background(), "In welchem Formularschritt passiert das?", prev, nil); err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if !strings.Contains(*sys, "EVERY entry of terms") {
+		t.Errorf("the follow-up rule never reached the call:\n%s", *sys)
+	}
+
+	c2, _, sys2 := modelUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`)
+	if _, err := NewUnderstander(c2).Understand(context.Background(), "How is pricing resolved?", Thread{}, nil); err != nil {
+		t.Fatalf("Understand: %v", err)
+	}
+	if strings.Contains(*sys2, "The previous turn of the conversation") {
+		t.Errorf("a first turn carried the follow-up rule:\n%s", *sys2)
+	}
+}
+
+// TestSearchTexts_aRetryDoesNotSearchTheSameTextTwice: a retry re-asks the
+// question it retries, so the previous question IS this one.
+func TestSearchTexts_aRetryDoesNotSearchTheSameTextTwice(t *testing.T) {
+	q := "How is pricing resolved?"
+	u := Understanding{Prior: " " + q + " ", Terms: []string{"cost"}, CodeTerms: []string{"Price"}}
+
+	texts := u.SearchTexts(q)
+
+	if len(texts) != 3 {
+		t.Errorf("search texts = %v, want no lane for a previous question identical to this one", texts)
 	}
 }

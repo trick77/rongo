@@ -329,7 +329,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// here, and a turn that goes on to fail or to ask has still told the
 	// reader what its scope was.
 	ev.notice(ScopeNotice(lang, scope))
-	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin), stageDetail))
+	ev.detail("understanding", withStageDetail(understandingDetail(u, scope, pin, t.Sources), stageDetail))
 
 	// A changes question leaves here: its sources are commits, and neither
 	// the fused search nor the routing ladder has anything to say about a
@@ -388,8 +388,45 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// subset. The published 0.955 was measured that way; narrowing here would
 	// be an unmeasured regression. Routing decides whether to ask, not what
 	// to read.
-	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, texts, t.Question, ev)
+	// Reported without the previous question: "nothing found, searched for:"
+	// is what the reader asked this turn, and the thread's older question is
+	// search material they did not type here. Naming it would say the turn
+	// went looking for something they asked a turn ago.
+	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
 	return answer, nil, err
+}
+
+// hitRepos is the repositories a turn's SEARCH HITS came from, deduplicated
+// and sorted. Hop 0 only: a reference walk and a crossing reach files the
+// question never asked for, and counting those would name a repository the
+// turn merely passed through.
+func hitRepos(sources []Source) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range sources {
+		if s.Hop != 0 || s.Repo == "" || seen[s.Repo] {
+			continue
+		}
+		seen[s.Repo] = true
+		out = append(out, s.Repo)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// withoutPrior drops the previous-question lane from the list a failed search
+// reports back. The lane earns its place in the search, never in the sentence.
+func withoutPrior(texts []string, prior string) []string {
+	if prior = strings.TrimSpace(prior); prior == "" {
+		return texts
+	}
+	out := make([]string, 0, len(texts))
+	for _, t := range texts {
+		if t != prior {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // outsideThePin is the repositories the question named, the index carries, and
@@ -729,8 +766,17 @@ func writingDetail(answer Answer, sources int) map[string]any {
 // on. Terms and code terms are the model's; the scope is the index's answer
 // to them, which is why both are shown — a guess that missed the index is
 // exactly what a reader wants to see when a search came back thin.
-func understandingDetail(u Understanding, scope Scope, pin []string) map[string]any {
+func understandingDetail(u Understanding, scope Scope, pin []string, prior []Source) map[string]any {
 	d := map[string]any{}
+	// What the turn below this one actually answered out of, recorded so the
+	// question "should a follow-up inherit its predecessor's repository" can
+	// be settled with a number instead of an argument. Hop 0 is a search hit;
+	// Reason is rewritten on promoted hits and cannot be used for this.
+	// Reported only, never applied: scope is read from the question and never
+	// inferred from the hits.
+	if repos := hitRepos(prior); len(repos) > 0 {
+		d["prior_repos"] = repos
+	}
 	if u.Intent != "" {
 		d["intent"] = u.Intent
 	}
