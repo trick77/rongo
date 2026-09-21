@@ -247,6 +247,33 @@ func TestSharedThread_skipsAnUnfinishedRowBelowTheCeiling(t *testing.T) {
 	}
 }
 
+// TestShare_countsOnlyTheTurnsTheLinkServes: the Shared page prints this
+// number beside the link, so counting a row the link does not serve would
+// promise a turn that is not there.
+func TestShare_countsOnlyTheTurnsTheLinkServes(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	if _, err := s.AddQuestion(ctx, th, "ba", "en", "Killed mid-stream", 0); err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	answeredTurn(t, s, th, "And then?", "Then this.")
+
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	if sh.Turns != 2 {
+		t.Errorf("turns = %d, want the 2 the link serves", sh.Turns)
+	}
+	_, msgs, err := s.SharedThread(ctx, sh.Token)
+	if err != nil {
+		t.Fatalf("shared thread: %v", err)
+	}
+	if sh.Turns != len(msgs) {
+		t.Errorf("turns = %d but the link serves %d: the count and the page disagree", sh.Turns, len(msgs))
+	}
+}
+
 // TestMessages_theOwnerStillSeesAnUnfinishedRow guards the fix above: the
 // share must not show a hole, and the owner must still watch a turn arrive.
 // One function serves both reads, so excluding the row for everyone would

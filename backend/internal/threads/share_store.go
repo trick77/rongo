@@ -175,9 +175,20 @@ func (s *Store) RevokeShare(ctx context.Context, subject string, threadID int64)
 // Newer are counted in the same statement rather than looked up afterwards:
 // both are shown on every row of the Shared page, and a per-row query there
 // would be one round trip per link.
+//
+// Turns tests what a row IS, the way the ceilinged read does: a turn killed
+// mid-stream is not served on the link, so counting it would print "3 turns"
+// beside a page showing two. Newer does NOT: it is how many turns stand above
+// the ceiling, and a turn still being written is one of them — it arrives as
+// "1 question newer" with Update beside it the moment it lands, which is the
+// whole point of freezing below it.
+const finishedTurn = `m.answer <> '' OR m.error <> ''
+	          OR EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id)`
+
 const shareColumns = `
 	SELECT sh.token, t.public_id, sh.thread_id, t.title, sh.up_to_message_id, sh.shared_at, sh.updated_at,
-	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id <= sh.up_to_message_id),
+	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id <= sh.up_to_message_id
+	         AND (` + finishedTurn + `)),
 	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id > sh.up_to_message_id)
 	FROM shared_threads sh JOIN threads t ON t.id = sh.thread_id`
 

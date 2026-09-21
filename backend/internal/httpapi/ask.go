@@ -542,19 +542,24 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Error("read last turn failed", "err", err)
 		} else if !ok {
-			// Nothing to point at. That is ordinary for the first turn of a
-			// thread and a contradiction for anything else: rows exist, none
-			// of them finished, so the reader's "das" names something this
-			// turn cannot read. Going on would drop the subject, widen the
-			// scope to every repository and answer confidently out of
-			// whichever one the bare words happened to match: a funnel
-			// widening in silence. Refused instead, so the reader can retry
-			// once the turn below it is sound.
-			has, herr := s.deps.Threads.HasTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
+			// Nothing to point at. That is ordinary for a first turn, and for
+			// one asked past a turn that failed or past an open card, all of
+			// which are finished rows. It is a fault only when a row below
+			// never finished at all: the reader's "das" then names something
+			// this turn cannot read, and going on would drop the subject,
+			// widen the scope to every repository and answer confidently out
+			// of whichever one the bare words happened to match — a funnel
+			// widening in silence.
+			//
+			// The stranded row is closed as it is found. Nothing else
+			// collects one, and while it reads as still running the browser
+			// offers no retry, so refusing without closing it would leave the
+			// thread stuck for good and make "ask again" a lie.
+			closed, herr := s.deps.Threads.FailUnfinishedTurnsBefore(ctx, u.Subject, followUpIn, followUpBefore, turnFailed)
 			if herr != nil {
-				slog.Error("count turns before failed", "err", herr)
-			} else if has {
-				slog.Warn("follow-up has no readable antecedent", "thread", followUpIn)
+				slog.Error("close unfinished turns failed", "err", herr)
+			} else if closed > 0 {
+				slog.Warn("follow-up ran into a turn that never finished", "thread", followUpIn, "closed", closed)
 				http.Error(w, "the turn this follows did not finish; ask again", http.StatusConflict)
 				return
 			}

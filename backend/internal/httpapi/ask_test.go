@@ -864,6 +864,76 @@ func TestAsk_aFollowUpWhoseAntecedentNeverFinishedIsRefused(t *testing.T) {
 	if a.gotThread.Question != "" {
 		t.Errorf("the pipeline was reached with %+v, want the turn refused before any paid work", a.gotThread)
 	}
+
+	// And the stranded row is closed on the way out. Nothing else collects
+	// one, and the browser gates retry on an error, so leaving it as it was
+	// would make "ask again" a lie and strand the thread for good.
+	after, err := deps.Threads.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(after) != 1 {
+		t.Fatalf("messages: %v (%d)", err, len(after))
+	}
+	if after[0].Error == "" {
+		t.Error("the turn that never finished is still open: the thread stays stuck and offers no retry")
+	}
+
+	// So the reader's next attempt runs, instead of meeting the same 409.
+	again := postAsk(t, deps, fmt.Sprintf(`{"question":"In welchem Formularschritt passiert das?","audience":"ba","thread_id":%q}`, list[0].PublicID))
+	if again.Code != http.StatusOK {
+		t.Errorf("asking again = %d, want 200: the refusal told the reader to", again.Code)
+	}
+}
+
+// TestAsk_aTurnAskedPastAnUnanchorableButFinishedTurnStillRuns guards the
+// refusal above against over-reach. LastTurnBefore reports "nothing to point
+// at" for several shapes, and only one of them is a fault: a turn that FAILED
+// and an open clarification card are both finished rows, and asking past
+// either is ordinary. Refusing them would strand a thread after any upstream
+// error, which is the common case, not the rare one.
+func TestAsk_aTurnAskedPastAnUnanchorableButFinishedTurnStillRuns(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  func(t *testing.T, deps Deps, msgID int64)
+	}{
+		{"a turn that failed", func(t *testing.T, deps Deps, msgID int64) {
+			if err := deps.Threads.Fail(context.Background(), msgID, "the turn failed"); err != nil {
+				t.Fatalf("fail: %v", err)
+			}
+		}},
+		{"an open clarification card", func(t *testing.T, deps Deps, msgID int64) {
+			if _, err := deps.Threads.Clarify(context.Background(), msgID, ask.Clarification{
+				Candidates: []ask.Candidate{{Repo: "rongo", Branch: "master", ModuleKey: "a", Title: "A", Summary: "the a"}},
+			}); err != nil {
+				t.Fatalf("clarify: %v", err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &fakeAsker{tokens: []string{"x"}}
+			deps, _ := askDeps(t, a)
+			postAsk(t, deps, `{"question":"Was macht der ZAS Check?","audience":"ba"}`)
+
+			list, err := deps.Threads.List(context.Background(), testSubject)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("list threads: %v (%d)", err, len(list))
+			}
+			msgs, err := deps.Threads.Messages(context.Background(), testSubject, list[0].ID)
+			if err != nil || len(msgs) != 1 {
+				t.Fatalf("messages: %v (%d)", err, len(msgs))
+			}
+			// Blank the answer the fake wrote, then end the turn the way this
+			// case ends it: what is left is finished, and still not something
+			// a follow-up can point at.
+			if err := deps.Threads.Finish(context.Background(), msgs[0].ID, "", nil); err != nil {
+				t.Fatalf("blank the answer: %v", err)
+			}
+			tc.end(t, deps, msgs[0].ID)
+
+			rec := postAsk(t, deps, fmt.Sprintf(`{"question":"Und wie schnell?","audience":"ba","thread_id":%q}`, list[0].PublicID))
+			if rec.Code != http.StatusOK {
+				t.Errorf("status = %d, want 200: asking past a finished turn is ordinary", rec.Code)
+			}
+		})
+	}
 }
 
 // TestAsk_theFirstTurnOfAThreadInheritsNothing: there is nothing to inherit,

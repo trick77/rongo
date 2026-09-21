@@ -803,26 +803,36 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 	return m, true, nil
 }
 
-// HasTurnBefore says whether a thread holds ANY turn below the bound, finished
-// or not. LastTurnBefore answers "what can this follow-up point at" and reports
-// false for both an empty thread and one whose every prior row died
-// mid-stream; those two are the same answer to that question and opposite
-// answers to this one.
+// FailUnfinishedTurnsBefore marks every unfinished turn below the bound as
+// failed, and reports how many it closed.
 //
-// A first turn may search the whole corpus. A follow-up whose antecedent is
-// merely unreadable must not: widening to every repository and answering
-// anyway is the quiet drop a thread is a funnel to prevent, and it reads as a
-// confident answer about whatever the corpus happened to match.
-func (s *Store) HasTurnBefore(ctx context.Context, subject string, threadID int64, before int) (bool, error) {
-	var n int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.thread_id = ? AND t.user_subject = ? AND m.ordinal < ?`,
-		threadID, subject, before).Scan(&n); err != nil {
-		return false, fmt.Errorf("count turns before: %w", err)
+// This is the sweep the record otherwise lacks. A process killed mid-stream
+// leaves a row with no answer, no error and no card, and nothing collects it:
+// the turn is over, the row says it is still running, and the browser offers
+// no retry because retry is gated on an error. The thread is then stuck for
+// good.
+//
+// Called when a later turn runs into one, so the row is closed at the moment
+// something is known to be wrong with it rather than on a timer: a turn this
+// far below a live request is not still being written. The message is the
+// ordinary failure text, so the row reads as what it is and the reader gets
+// the retry every other failed turn has.
+func (s *Store) FailUnfinishedTurnsBefore(ctx context.Context, subject string, threadID int64, before int, msg string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE messages SET error = ?
+		WHERE thread_id = ? AND ordinal < ?
+		  AND answer = '' AND error = ''
+		  AND NOT EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = messages.id)
+		  AND EXISTS (SELECT 1 FROM threads t WHERE t.id = messages.thread_id AND t.user_subject = ?)`,
+		msg, threadID, before, subject)
+	if err != nil {
+		return 0, fmt.Errorf("close unfinished turns: %w", err)
 	}
-	return n > 0, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("close unfinished turns: %w", err)
+	}
+	return n, nil
 }
 
 // Message returns one turn by id, or false when it does not belong to a
