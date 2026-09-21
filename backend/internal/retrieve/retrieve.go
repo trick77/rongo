@@ -685,23 +685,61 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 	// the first term found them in, which is the kind-then-address order the
 	// store already applied.
 	if r.SubstringWeight > 0 {
-		var hits []Hit
-		seen := map[int64]bool{}
-		for _, term := range BuildSubstringTerms(texts[0], strings.Fields(code)) {
+		// texts[0] and not q.Question: Query.Texts documents the raw question
+		// as its FIRST entry, while Question is deliberately empty on the
+		// multi-repo and chosen-repo paths (searchScoped leaves it out because
+		// it names every repository being searched). Reading Question here
+		// would switch the prose half of the rung off on exactly those paths
+		// while the lane still reported itself as running.
+		//
+		// Guarded rather than assumed: an empty first text means no prose
+		// candidates, and the code terms carry the rung alone.
+		prose := ""
+		if len(texts) > 0 {
+			prose = texts[0]
+		}
+		terms := BuildSubstringTerms(prose, strings.Fields(code))
+		// ROUND-ROBIN across the terms, never term after term. Lane rank is
+		// what fusion weighs, so concatenating gives the FIRST term's hits
+		// every slot near the top — and the first terms are the guessed code
+		// terms, which are by construction the guesses that MISSED when this
+		// rung is needed at all.
+		//
+		// Measured on the motivating question: the guessed term
+		// "schadenmeldung" alone returned 40 hits — the whole lane — while
+		// staying under the hub share, so "anzahlkinder" and its single
+		// chunk, the mapping the rung exists to recover, were cut before
+		// fusion ever saw them. A wide term must cost itself, not the lane.
+		perTerm := make([][]Hit, len(terms))
+		for i, term := range terms {
 			found, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
 			if err != nil {
 				return nil, err
 			}
-			for _, h := range found {
+			perTerm[i] = found
+		}
+		var hits []Hit
+		seen := map[int64]bool{}
+		for depth := 0; len(hits) < candidates; depth++ {
+			progressed := false
+			for _, found := range perTerm {
+				if depth >= len(found) {
+					continue
+				}
+				progressed = true
+				h := found[depth]
 				if seen[h.ChunkID] {
 					continue
 				}
 				seen[h.ChunkID] = true
 				hits = append(hits, h)
+				if len(hits) >= candidates {
+					break
+				}
 			}
-		}
-		if len(hits) > candidates {
-			hits = hits[:candidates]
+			if !progressed {
+				break
+			}
 		}
 		if len(hits) > 0 {
 			lanes = append(lanes, Lane{

@@ -58,6 +58,15 @@ Five questions were added, each an identifier that occurs ONLY inside a larger t
 
 The scan and the indexed lookup are within noise of each other: at this shape the join and row materialisation dominate, not the matching. A native sqlite3 figure over 21,952 chunks was 47 ms, so the wasm penalty is smaller here than assumed when the plan was written.
 
+**Per TERM, not per turn.** The lane issues one query per generated term, and each does two scans — the hub-guard count and the fetch. The number that matters for a turn is `BenchmarkSubstringLane`:
+
+| chunks | terms | per turn |
+|---|---|---|
+| 10,000 | 12 | 172 ms |
+| 25,000 | 12 | 431 ms |
+
+431 ms against a turn that measured 114 s end to end. Tolerable, and NOT "within noise of the indexed lane" — that claim holds per term only, and the first version of this document let it read as if it held per turn. Read the weight sweep against 431 ms, not 56 ms.
+
 `tokenize='trigram'` stays the named fallback if a larger corpus moves this. It costs a mirror-managed virtual table, a migration and a full backfill, so it is not the first move.
 
 ## Decisions the code carries
@@ -76,6 +85,14 @@ The scan and the indexed lookup are within noise of each other: at this shape th
 - **One lane for every term, not one per term.** `get<X>`, `set<X>` and `<X>` routinely all match the same chunk — it is what code terms plus word pairing PRODUCE. As separate lanes that chunk scored 3 × (0.85/60) = an effective weight of **2.55**, above `WeightKeywordStrict` (1.0), from a rung deliberately placed below it. And `Hit.Lanes` dedups the NAME, so the hit reported one lane while carrying the score of three — the activity trace and any lane-based measurement would have misattributed the movement. Hits are now deduped by `ChunkID` into a single lane. The regression test was checked by reverting the fix: it reads 0.028333 against a one-lane 0.014167.
 - **The hub guard's denominator now carries the same filters as its numerator.** It counted matches against every chunk in the database while the numerator was scoped, so one large parked or out-of-scope repository permanently disarmed the guard for every live one — the mistake the vec lane's `rowid IN (…)` rule exists to stop.
 - **snake_case spellings are emitted.** The haystack is raw source: a corpus writing `set_anzahl_kinder` contains no run of letters spelling `anzahlkinder`, so no case variant of the glued needle could find it. The rung was silently dead over Python, Rust, C and Ruby.
+
+## Found in a second review, fixed
+
+- **A wide early term evicted the narrow one's hits.** The lane took each term's hits in turn and cut at `candidates`, so lane rank was decided by TERM ORDER — and code terms run first, being by construction the guesses that missed. Measured on the motivating question: the guessed term `schadenmeldung` returned 40 hits on its own, filling the lane while staying under the hub share, and `anzahlkinder` with its single chunk — the mapping the rung exists to recover — **was evicted entirely**. The rung failed on the exact question it was built for. Now round-robin across terms: a wide term costs itself, not the lane. Converter goes from absent to lane rank 1.
+  - The earlier test proved only that `anzahlkinder` was IN the terms list, not that its hits survived the lane. A term-list assertion is not a retrieval assertion.
+- **A correctly guessed separator code term was destroyed by folding.** `set_anzahl_kinder` folded to `setanzahlkinder`, which cannot occur in a source that writes the underscores; same for `max-retry-count` and `com.acme.Converter`. The rung was dead exactly when the model guessed RIGHT in a separator language — the opposite of the failure it was built for. A code term already carrying separators is now emitted in both spellings.
+- **`texts[0]` guarded and its contract named.** `Query.Texts` documents the raw question as its first entry, while `Question` is deliberately empty on the multi-repo and chosen-repo paths, so reading `Question` would have switched the prose half off there while the lane still reported itself as running.
+- **The "two budgets" claim corrected to what the code does.** Both sources share one counter, so `maxSubstringCodeTerms` is a CEILING on the guesses (at most 4 of 12), not a reserved allocation for prose. Right shape, wrong description.
 
 ## Known limit, measured and left open
 

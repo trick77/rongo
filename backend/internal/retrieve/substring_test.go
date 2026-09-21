@@ -392,6 +392,71 @@ func TestSearch_severalTermsHittingOneChunkScoreItOnce(t *testing.T) {
 	}
 }
 
+func TestSearch_aWideTermDoesNotEvictANarrowOnesHits(t *testing.T) {
+	// Lane rank is what fusion weighs. Taking each term's hits in turn and
+	// cutting at `candidates` gives the FIRST term every slot near the top —
+	// and the first terms are the guessed code terms, which are by
+	// construction the guesses that MISSED when this rung is needed at all.
+	//
+	// Measured on the motivating question before the fix: the guessed term
+	// "schadenmeldung" returned 40 hits on its own, the whole lane, while
+	// staying under the hub share. "anzahlkinder" and its single chunk — the
+	// mapping the rung exists to recover — were cut before fusion saw them.
+	db := testDB(t)
+	addRepo(t, db, "schadenmeldung", "master")
+	for i := range 200 {
+		addChunkAt(t, db, "schadenmeldung", fmt.Sprintf("lib/persistence/F%04d.java", i), 0, 1, 2,
+			"sym", "package ch.suva.schadenmeldung; // persistence entity filler", farVec)
+	}
+	// The mapping, on a path that sorts LAST so nothing but the term's own
+	// narrowness can carry it.
+	addChunkAt(t, db, "schadenmeldung", "zzz/Converter.java", 0, 1, 2, "sym", converterCodeOnly, farVec)
+
+	question := "Im Schadenmeldung Backend, wie wird die Anzahl Kinder an Syrius uebermittelt"
+	code := "Schadenmeldung Datenuebertragung"
+	terms := BuildSubstringTerms(question, strings.Fields(code))
+
+	// The premise: one early, wide term fills the lane by itself.
+	s := NewStore(db)
+	wide, err := s.SearchSubstringIn(t.Context(), terms[0], defaultCandidates, nil, nil)
+	if err != nil {
+		t.Fatalf("SearchSubstringIn(%q): %v", terms[0], err)
+	}
+	if len(wide) < defaultCandidates {
+		t.Fatalf("the first term returned %d hits, want it to saturate %d — the test no longer "+
+			"exercises eviction", len(wide), defaultCandidates)
+	}
+
+	hits, err := New(db, fixedEmbedder{vec: queryVec}).Search(t.Context(),
+		Query{Texts: []string{question, code}, Question: question, Code: code, K: 60})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	for _, h := range hits {
+		if h.Path == "zzz/Converter.java" {
+			return
+		}
+	}
+	t.Errorf("the converter is absent from %d fused hits: a wide early term evicted the narrow "+
+		"term's only chunk", len(hits))
+}
+
+func TestBuildSubstringTerms_keepsASeparatorCodeTermInItsOwnSpelling(t *testing.T) {
+	// The haystack is raw source, so folding a guess that was RIGHT destroys
+	// it: set_anzahl_kinder becomes setanzahlkinder, which cannot occur in a
+	// source that writes the underscores. Without both spellings the rung is
+	// dead exactly when the model guessed correctly in a separator language.
+	for _, c := range []string{"set_anzahl_kinder", "max-retry-count"} {
+		got := BuildSubstringTerms("how is it set", []string{c})
+		if !contains(got, strings.ToLower(c)) {
+			t.Errorf("BuildSubstringTerms(%q) = %v, want the separator spelling kept", c, got)
+		}
+		if !contains(got, fold(c)) {
+			t.Errorf("BuildSubstringTerms(%q) = %v, want the folded spelling too", c, got)
+		}
+	}
+}
+
 func TestSearchSubstringIn_weighsTheHubShareAgainstTheScopedCorpus(t *testing.T) {
 	// The share must be computed over the population the TURN can see. With
 	// the denominator taken from the whole chunks table, one large parked or

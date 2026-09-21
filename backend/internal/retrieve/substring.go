@@ -57,8 +57,16 @@ func BuildSubstringTerms(question string, codeTerms []string) []string {
 	seen := map[string]bool{}
 
 	// add takes a candidate and reports whether there is room for another
-	// under `limit`. The limit is passed per source rather than read from the
-	// slice, which is what keeps the two budgets apart.
+	// under `limit`, counting against the SHARED length of out.
+	//
+	// That shared counter is what makes maxSubstringCodeTerms a CEILING on the
+	// code terms rather than a reserved allocation: the guesses may take at
+	// most 4 of the 12, and the prose candidates then run against the full 12
+	// with whatever the guesses spent already on the clock. It is the right
+	// shape here — the point is that a bad guess cannot spend the whole
+	// budget, not that prose is entitled to exactly 8 — but a THIRD source
+	// added between them would silently share the same counter and get no
+	// ceiling of its own. Give one its own limit constant if that day comes.
 	add := func(s string, limit int) bool {
 		s = fold(s)
 		if len([]rune(s)) < minSubstringRunes || seen[s] {
@@ -85,6 +93,19 @@ func BuildSubstringTerms(question string, codeTerms []string) []string {
 	// stronger candidate than a pair glued out of prose, but it is also the
 	// thing that missed when the rung is needed at all.
 	for _, c := range codeTerms {
+		// A guessed term that ALREADY carries separators is kept in that
+		// spelling as well as folded. The haystack is raw source, so folding
+		// alone destroys a guess that was RIGHT: set_anzahl_kinder becomes
+		// setanzahlkinder, which cannot occur in a source that writes the
+		// underscores. Same for a kebab-case key (max-retry-count) and a
+		// dotted name (com.acme.Converter). Without this the rung is dead
+		// exactly when the model guessed correctly in a separator language —
+		// the opposite of the failure it was built for.
+		if c != fold(c) {
+			if !addRaw(strings.ToLower(c), maxSubstringCodeTerms) {
+				break
+			}
+		}
 		if !add(c, maxSubstringCodeTerms) {
 			break
 		}

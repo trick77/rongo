@@ -94,6 +94,29 @@ func BenchmarkSearchSubstringIn(b *testing.B) {
 	}
 }
 
+// BenchmarkSubstringLane is the number that actually matters: one TURN, not one
+// term. The lane issues a query per generated term, and each does two scans (the
+// count guard and the fetch), so a per-term figure understates the per-turn cost
+// by the number of terms.
+func BenchmarkSubstringLane(b *testing.B) {
+	question := "Im Schadenmeldung Backend, wie wird die Anzahl Kinder an Syrius uebermittelt"
+	terms := BuildSubstringTerms(question, []string{"Schadenmeldung", "Datenuebertragung"})
+	for _, n := range []int{10000, 25000} {
+		b.Run(fmt.Sprintf("chunks=%d/terms=%d", n, len(terms)), func(b *testing.B) {
+			db := benchDB(b, n)
+			s := NewStore(db)
+			b.ResetTimer()
+			for b.Loop() {
+				for _, term := range terms {
+					if _, err := s.SearchSubstringIn(b.Context(), term, 40, nil, nil); err != nil {
+						b.Fatalf("SearchSubstringIn: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkSearchKeywordIn is the same shape against the FTS lane, so the scan's
 // cost is read next to an indexed lookup rather than in isolation.
 func BenchmarkSearchKeywordIn(b *testing.B) {
