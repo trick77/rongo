@@ -6,37 +6,37 @@ import (
 	"testing"
 )
 
-// The line that motivated the rung. The identifier "anzahlkinder" occurs in it
-// only INSIDE getAnzahlKinder and setAnzahlkinder, never as a word of its own,
+// The line that motivated the rung. The identifier "anzahlfahrzeuge" occurs in it
+// only INSIDE getAnzahlFahrzeuge and setAnzahlfahrzeuge, never as a word of its own,
 // so FTS5 — which tokenizes each of those whole — cannot reach it.
-const converterLine = `    // Element Anzahl Kinder ist in Syrius optional, z.B. beim Bagatellfall kennen wir die Anzahl nicht
-    Optional.ofNullable(versicherter.getAnzahlKinder()).ifPresent(wsVersicherter::setAnzahlkinder);`
+const converterLine = `    // Element Anzahl Fahrzeuge ist in Kernsystem optional, z.B. beim Kleinvorgang kennen wir die Anzahl nicht
+    Optional.ofNullable(vertragsnehmer.getAnzahlFahrzeuge()).ifPresent(wsVertragsnehmer::setAnzahlfahrzeuge);`
 
 // converterCodeOnly is the same mapping without its German comment. The comment
-// spells "Anzahl" and "Kinder" as separate words, so a prose rung can reach the
+// spells "Anzahl" and "Fahrzeuge" as separate words, so a prose rung can reach the
 // real chunk THROUGH THE COMMENT rather than through the mapping — which is
 // luck, not retrieval: the same converter with an English comment, or none, is
 // invisible to every FTS rung. Code is truth, so the rung is measured against
 // the code.
-const converterCodeOnly = `    Optional.ofNullable(versicherter.getAnzahlKinder()).ifPresent(wsVersicherter::setAnzahlkinder);`
+const converterCodeOnly = `    Optional.ofNullable(vertragsnehmer.getAnzahlFahrzeuge()).ifPresent(wsVertragsnehmer::setAnzahlfahrzeuge);`
 
 func TestBuildSubstringTerms_pairsAdjacentContentWords(t *testing.T) {
 	// Given: the question that failed, in the reader's own German. "Anzahl"
-	// and "Kinder" are adjacent content words; the code writes them as one
+	// and "Fahrzeuge" are adjacent content words; the code writes them as one
 	// identifier, in that order.
-	got := BuildSubstringTerms("wie wird die Anzahl Kinder an Syrius uebermittelt", nil)
+	got := BuildSubstringTerms("wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben", nil)
 
-	if !contains(got, "anzahlkinder") {
-		t.Errorf("BuildSubstringTerms = %v, want it to contain %q", got, "anzahlkinder")
+	if !contains(got, "anzahlfahrzeuge") {
+		t.Errorf("BuildSubstringTerms = %v, want it to contain %q", got, "anzahlfahrzeuge")
 	}
 }
 
 func TestBuildSubstringTerms_takesCodeTermsAsGiven(t *testing.T) {
 	// A code term is already identifier-shaped: it is folded and stripped of
 	// punctuation, never split into pairs.
-	got := BuildSubstringTerms("how is the value mapped", []string{"WsVersicherterType", "setAnzahlkinder"})
+	got := BuildSubstringTerms("how is the value mapped", []string{"WsVertragsnehmerType", "setAnzahlfahrzeuge"})
 
-	for _, want := range []string{"wsversichertertype", "setanzahlkinder"} {
+	for _, want := range []string{"wsvertragsnehmertype", "setanzahlfahrzeuge"} {
 		if !contains(got, want) {
 			t.Errorf("BuildSubstringTerms = %v, want it to contain %q", got, want)
 		}
@@ -45,13 +45,13 @@ func TestBuildSubstringTerms_takesCodeTermsAsGiven(t *testing.T) {
 
 func TestBuildSubstringTerms_reachesAcrossAWordStopwordsDoNotCover(t *testing.T) {
 	// `stopwords` is English by construction, and rongo answers German
-	// questions. "Anzahl der Kinder" keeps its article as an ordinary content
+	// questions. "Anzahl der Fahrzeuge" keeps its article as an ordinary content
 	// word, so only the one-apart sweep recovers the identifier the code
 	// actually writes.
-	got := BuildSubstringTerms("how is the Anzahl der Kinder sent", nil)
+	got := BuildSubstringTerms("how is the Anzahl der Fahrzeuge sent", nil)
 
-	if !contains(got, "anzahlkinder") {
-		t.Errorf("BuildSubstringTerms = %v, want %q across the uncovered article", got, "anzahlkinder")
+	if !contains(got, "anzahlfahrzeuge") {
+		t.Errorf("BuildSubstringTerms = %v, want %q across the uncovered article", got, "anzahlfahrzeuge")
 	}
 	for _, g := range got {
 		if len([]rune(g)) < minSubstringRunes {
@@ -93,11 +93,11 @@ func TestBuildSubstringTerms_keepsAProsePairWhenCodeTermsFillTheCap(t *testing.T
 	// them is the identifier, and if they spend the whole budget the pair
 	// that IS the identifier never reaches the lane.
 	got := BuildSubstringTerms(
-		"Im Schadenmeldung Backend, wie wird die Anzahl Kinder an Syrius uebermittelt",
-		[]string{"Schadenmeldung", "Backend", "Syrius", "KinderAnzahl", "Uebermittlung", "API", "Datenuebertragung"})
+		"Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben",
+		[]string{"Policenantrag", "Backend", "Kernsystem", "FahrzeugAnzahl", "Weitergabe", "API", "Datenweitergabe"})
 
-	if !contains(got, "anzahlkinder") {
-		t.Errorf("BuildSubstringTerms = %v, want %q: the guessed code terms must not starve the prose pairs", got, "anzahlkinder")
+	if !contains(got, "anzahlfahrzeuge") {
+		t.Errorf("BuildSubstringTerms = %v, want %q: the guessed code terms must not starve the prose pairs", got, "anzahlfahrzeuge")
 	}
 }
 
@@ -112,9 +112,9 @@ func TestBuildSubstringTerms_capsTheCandidates(t *testing.T) {
 func TestBuildSubstringTerms_isDeterministic(t *testing.T) {
 	// Two calls on one question must agree: the lane's order feeds fusion,
 	// and a set iteration would reshuffle the arm between runs.
-	q := "wie wird die Anzahl Kinder an Syrius uebermittelt"
-	a := BuildSubstringTerms(q, []string{"WsVersicherterType"})
-	b := BuildSubstringTerms(q, []string{"WsVersicherterType"})
+	q := "wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
+	a := BuildSubstringTerms(q, []string{"WsVertragsnehmerType"})
+	b := BuildSubstringTerms(q, []string{"WsVertragsnehmerType"})
 
 	if len(a) != len(b) {
 		t.Fatalf("lengths differ across calls: %d vs %d", len(a), len(b))
@@ -130,7 +130,7 @@ func TestBuildSubstringTerms_noDuplicates(t *testing.T) {
 	// The same term reaching the lane twice would fuse the same rows in
 	// twice, double-counting them against the other lanes — the reason
 	// BuildFTSQueries drops its redundant rungs.
-	got := BuildSubstringTerms("anzahl kinder anzahl kinder", []string{"anzahlKinder"})
+	got := BuildSubstringTerms("anzahl fahrzeuge anzahl fahrzeuge", []string{"anzahlFahrzeuge"})
 
 	seen := map[string]bool{}
 	for _, g := range got {
@@ -155,16 +155,16 @@ func TestBuildSubstringTerms_emptyWhenNothingUsable(t *testing.T) {
 // chunk.
 func TestSubstringFindsWhatFTSCannot(t *testing.T) {
 	db := testDB(t)
-	addRepo(t, db, "schadenmeldung", "master")
-	addChunk(t, db, "schadenmeldung", "src/ConverterEreignisregistrierung.java", "toVersicherterType",
+	addRepo(t, db, "policenantrag", "master")
+	addChunk(t, db, "policenantrag", "src/ConverterVorgangsregistrierung.java", "toVertragsnehmerType",
 		converterLine, farVec)
 
 	s := NewStore(db)
 	ctx := t.Context()
 
-	// The keyword lane, given the exact identifier: nothing. getAnzahlKinder
-	// and setAnzahlkinder are each ONE token to unicode61.
-	fts, err := s.SearchKeywordIn(ctx, BuildFTSMatch("anzahlkinder"), 10, nil, nil)
+	// The keyword lane, given the exact identifier: nothing. getAnzahlFahrzeuge
+	// and setAnzahlfahrzeuge are each ONE token to unicode61.
+	fts, err := s.SearchKeywordIn(ctx, BuildFTSMatch("anzahlfahrzeuge"), 10, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchKeywordIn: %v", err)
 	}
@@ -174,26 +174,26 @@ func TestSubstringFindsWhatFTSCannot(t *testing.T) {
 	}
 
 	// The same term as a substring: the chunk.
-	sub, err := s.SearchSubstringIn(ctx, "anzahlkinder", 10, nil, nil)
+	sub, err := s.SearchSubstringIn(ctx, "anzahlfahrzeuge", 10, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchSubstringIn: %v", err)
 	}
 	if len(sub) != 1 {
 		t.Fatalf("SearchSubstringIn found %d hits, want 1", len(sub))
 	}
-	if !strings.Contains(sub[0].RawText, "setAnzahlkinder") {
+	if !strings.Contains(sub[0].RawText, "setAnzahlfahrzeuge") {
 		t.Errorf("SearchSubstringIn returned the wrong chunk: %q", sub[0].RawText)
 	}
 }
 
 func TestSearchSubstringIn_foldsCase(t *testing.T) {
-	// The corpus writes setAnzahlkinder; the reader may type any casing.
+	// The corpus writes setAnzahlfahrzeuge; the reader may type any casing.
 	db := testDB(t)
-	addRepo(t, db, "schadenmeldung", "master")
-	addChunk(t, db, "schadenmeldung", "src/C.java", "sym", converterLine, farVec)
+	addRepo(t, db, "policenantrag", "master")
+	addChunk(t, db, "policenantrag", "src/C.java", "sym", converterLine, farVec)
 
 	s := NewStore(db)
-	for _, term := range []string{"anzahlkinder", "AnzahlKinder", "ANZAHLKINDER"} {
+	for _, term := range []string{"anzahlfahrzeuge", "AnzahlFahrzeuge", "ANZAHLFAHRZEUGE"} {
 		hits, err := s.SearchSubstringIn(t.Context(), term, 10, nil, nil)
 		if err != nil {
 			t.Fatalf("SearchSubstringIn(%q): %v", term, err)
@@ -215,7 +215,7 @@ func TestSearchSubstringIn_honoursTheRepoFilter(t *testing.T) {
 	addChunk(t, db, "parked", "b.java", "sym", converterLine, farVec)
 
 	s := NewStore(db)
-	hits, err := s.SearchSubstringIn(t.Context(), "anzahlkinder", 10, []string{"kept"}, nil)
+	hits, err := s.SearchSubstringIn(t.Context(), "anzahlfahrzeuge", 10, []string{"kept"}, nil)
 	if err != nil {
 		t.Fatalf("SearchSubstringIn: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestSearchSubstringIn_ordersDeterministically(t *testing.T) {
 	addChunk(t, db, "r", "a/first.java", "sym", converterLine, farVec)
 
 	s := NewStore(db)
-	hits, err := s.SearchSubstringIn(t.Context(), "anzahlkinder", 10, nil, nil)
+	hits, err := s.SearchSubstringIn(t.Context(), "anzahlfahrzeuge", 10, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchSubstringIn: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestSearchSubstringIn_putsCodeAheadOfDocsAndTests(t *testing.T) {
 	addChunk(t, db, "r", "bbb/src/test/java/ConverterTest.java", "sym", converterCodeOnly, farVec)
 	addChunk(t, db, "r", "zzz/src/main/java/Converter.java", "sym", converterCodeOnly, farVec)
 
-	hits, err := NewStore(db).SearchSubstringIn(t.Context(), "anzahlkinder", 10, nil, nil)
+	hits, err := NewStore(db).SearchSubstringIn(t.Context(), "anzahlfahrzeuge", 10, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchSubstringIn: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestSearch_severalTermsHittingOneChunkScoreItOnce(t *testing.T) {
 	// lane that can reach it — the vector is far, and no FTS rung sees a word
 	// that is only ever part of a longer token — so the fused score is the
 	// rung's own contribution and nothing else's.
-	question := "wie wird getAnzahlKinder und setAnzahlkinder an Syrius uebermittelt"
+	question := "wie wird getAnzahlFahrzeuge und setAnzahlfahrzeuge an Kernsystem weitergegeben"
 	q := Query{Texts: []string{question}, Question: question, K: 5}
 
 	// Several of the generated terms match this one chunk — the overlap the
@@ -399,21 +399,21 @@ func TestSearch_aWideTermDoesNotEvictANarrowOnesHits(t *testing.T) {
 	// construction the guesses that MISSED when this rung is needed at all.
 	//
 	// Measured on the motivating question before the fix: the guessed term
-	// "schadenmeldung" returned 40 hits on its own, the whole lane, while
-	// staying under the hub share. "anzahlkinder" and its single chunk — the
+	// "policenantrag" returned 40 hits on its own, the whole lane, while
+	// staying under the hub share. "anzahlfahrzeuge" and its single chunk — the
 	// mapping the rung exists to recover — were cut before fusion saw them.
 	db := testDB(t)
-	addRepo(t, db, "schadenmeldung", "master")
+	addRepo(t, db, "policenantrag", "master")
 	for i := range 200 {
-		addChunkAt(t, db, "schadenmeldung", fmt.Sprintf("lib/persistence/F%04d.java", i), 0, 1, 2,
-			"sym", "package ch.suva.schadenmeldung; // persistence entity filler", farVec)
+		addChunkAt(t, db, "policenantrag", fmt.Sprintf("lib/persistence/F%04d.java", i), 0, 1, 2,
+			"sym", "package ch.example.policenantrag; // persistence entity filler", farVec)
 	}
 	// The mapping, on a path that sorts LAST so nothing but the term's own
 	// narrowness can carry it.
-	addChunkAt(t, db, "schadenmeldung", "zzz/Converter.java", 0, 1, 2, "sym", converterCodeOnly, farVec)
+	addChunkAt(t, db, "policenantrag", "zzz/Converter.java", 0, 1, 2, "sym", converterCodeOnly, farVec)
 
-	question := "Im Schadenmeldung Backend, wie wird die Anzahl Kinder an Syrius uebermittelt"
-	code := "Schadenmeldung Datenuebertragung"
+	question := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
+	code := "Policenantrag Datenweitergabe"
 	terms := BuildSubstringTerms(question, strings.Fields(code))
 
 	// The premise: one early, wide term fills the lane by itself.
@@ -443,10 +443,10 @@ func TestSearch_aWideTermDoesNotEvictANarrowOnesHits(t *testing.T) {
 
 func TestBuildSubstringTerms_keepsASeparatorCodeTermInItsOwnSpelling(t *testing.T) {
 	// The haystack is raw source, so folding a guess that was RIGHT destroys
-	// it: set_anzahl_kinder becomes setanzahlkinder, which cannot occur in a
+	// it: set_anzahl_fahrzeuge becomes setanzahlfahrzeuge, which cannot occur in a
 	// source that writes the underscores. Without both spellings the rung is
 	// dead exactly when the model guessed correctly in a separator language.
-	for _, c := range []string{"set_anzahl_kinder", "max-retry-count"} {
+	for _, c := range []string{"set_anzahl_fahrzeuge", "max-retry-count"} {
 		got := BuildSubstringTerms("how is it set", []string{c})
 		if !contains(got, strings.ToLower(c)) {
 			t.Errorf("BuildSubstringTerms(%q) = %v, want the separator spelling kept", c, got)
@@ -488,19 +488,19 @@ func TestSearchSubstringIn_weighsTheHubShareAgainstTheScopedCorpus(t *testing.T)
 }
 
 func TestSearchSubstringIn_reachesASnakeCaseSpelling(t *testing.T) {
-	// The haystack is raw source: a corpus writing set_anzahl_kinder contains
-	// no run of letters spelling "anzahlkinder", so no case variant of the
+	// The haystack is raw source: a corpus writing set_anzahl_fahrzeuge contains
+	// no run of letters spelling "anzahlfahrzeuge", so no case variant of the
 	// glued needle can find it. Without the separator spelling the rung is
 	// silently dead over Python, Rust, C and Ruby.
 	db := testDB(t)
 	addRepo(t, db, "r", "master")
-	addChunk(t, db, "r", "a.py", "sym", "ws.set_anzahl_kinder(v)", farVec)
+	addChunk(t, db, "r", "a.py", "sym", "ws.set_anzahl_fahrzeuge(v)", farVec)
 
 	s := NewStore(db)
-	if hits, _ := s.SearchSubstringIn(t.Context(), "anzahlkinder", 10, nil, nil); len(hits) != 0 {
+	if hits, _ := s.SearchSubstringIn(t.Context(), "anzahlfahrzeuge", 10, nil, nil); len(hits) != 0 {
 		t.Errorf("the glued needle found %d hits in snake_case source; the test's premise is stale", len(hits))
 	}
-	hits, err := s.SearchSubstringIn(t.Context(), "anzahl_kinder", 10, nil, nil)
+	hits, err := s.SearchSubstringIn(t.Context(), "anzahl_fahrzeuge", 10, nil, nil)
 	if err != nil {
 		t.Fatalf("SearchSubstringIn: %v", err)
 	}
@@ -509,8 +509,8 @@ func TestSearchSubstringIn_reachesASnakeCaseSpelling(t *testing.T) {
 	}
 
 	// And the builder emits that spelling for a question written in prose.
-	if got := BuildSubstringTerms("how is anzahl kinder set", nil); !contains(got, "anzahl_kinder") {
-		t.Errorf("BuildSubstringTerms = %v, want it to contain %q", got, "anzahl_kinder")
+	if got := BuildSubstringTerms("how is anzahl fahrzeuge set", nil); !contains(got, "anzahl_fahrzeuge") {
+		t.Errorf("BuildSubstringTerms = %v, want it to contain %q", got, "anzahl_fahrzeuge")
 	}
 }
 
@@ -531,18 +531,18 @@ func TestSearch_theSubstringRungReachesInsideAToken(t *testing.T) {
 	// whose identifier exists only inside a larger token reaches the chunk
 	// with the rung on, and does not without it.
 	db := testDB(t)
-	addRepo(t, db, "schadenmeldung", "master")
+	addRepo(t, db, "policenantrag", "master")
 	// The CODE line alone, without the German comment that happens to sit
-	// above it in the real file. That comment spells "Anzahl" and "Kinder" as
+	// above it in the real file. That comment spells "Anzahl" and "Fahrzeuge" as
 	// separate words, so a prose rung can reach the real chunk through it —
 	// by luck of a comment, not through the mapping. Code is truth: a
 	// converter whose comment is in English, or absent, is the ordinary case,
 	// and this fixture is that case.
-	addChunk(t, db, "schadenmeldung", "src/Converter.java", "toVersicherterType", converterCodeOnly, farVec)
+	addChunk(t, db, "policenantrag", "src/Converter.java", "toVertragsnehmerType", converterCodeOnly, farVec)
 
 	q := Query{
-		Texts:    []string{"wie wird die Anzahl Kinder an Syrius uebermittelt"},
-		Question: "wie wird die Anzahl Kinder an Syrius uebermittelt",
+		Texts:    []string{"wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"},
+		Question: "wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben",
 		K:        5,
 	}
 

@@ -670,7 +670,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 
 	// The substring rung, last because it is the only lane that does not go
 	// through an index: a term that occurs solely INSIDE a larger token
-	// (getAnzahlKinder, setAnzahlkinder) is invisible to every rung above,
+	// (getAnzahlFahrzeuge, setAnzahlfahrzeuge) is invisible to every rung above,
 	// whatever weight they carry, because unicode61 tokenizes those whole.
 	//
 	// Terms are derived in code from the question and the guessed identifiers,
@@ -706,8 +706,8 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code string
 		// rung is needed at all.
 		//
 		// Measured on the motivating question: the guessed term
-		// "schadenmeldung" alone returned 40 hits — the whole lane — while
-		// staying under the hub share, so "anzahlkinder" and its single
+		// "policenantrag" alone returned 40 hits — the whole lane — while
+		// staying under the hub share, so "anzahlfahrzeuge" and its single
 		// chunk, the mapping the rung exists to recover, were cut before
 		// fusion ever saw them. A wide term must cost itself, not the lane.
 		perTerm := make([][]Hit, len(terms))

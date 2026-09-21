@@ -34,9 +34,9 @@ func benchDB(b *testing.B, n int) *sql.DB {
 	if err != nil {
 		b.Fatalf("begin: %v", err)
 	}
-	filler := `public WsVersicherterType toVersicherterType(final Schadenmeldung s) {
-		val versicherter = s.getVersicherter();
-		return new WsVersicherterType().withName(versicherter.getNachname());
+	filler := `public WsVertragsnehmerType toVertragsnehmerType(final Policenantrag s) {
+		val vertragsnehmer = s.getVertragsnehmer();
+		return new WsVertragsnehmerType().withName(vertragsnehmer.getNachname());
 	}`
 	for i := range n {
 		raw := filler
@@ -86,7 +86,7 @@ func BenchmarkSearchSubstringIn(b *testing.B) {
 			s := NewStore(db)
 			b.ResetTimer()
 			for b.Loop() {
-				if _, err := s.SearchSubstringIn(b.Context(), "anzahlkinder", 40, nil, nil); err != nil {
+				if _, err := s.SearchSubstringIn(b.Context(), "anzahlfahrzeuge", 40, nil, nil); err != nil {
 					b.Fatalf("SearchSubstringIn: %v", err)
 				}
 			}
@@ -99,8 +99,8 @@ func BenchmarkSearchSubstringIn(b *testing.B) {
 // count guard and the fetch), so a per-term figure understates the per-turn cost
 // by the number of terms.
 func BenchmarkSubstringLane(b *testing.B) {
-	question := "Im Schadenmeldung Backend, wie wird die Anzahl Kinder an Syrius uebermittelt"
-	terms := BuildSubstringTerms(question, []string{"Schadenmeldung", "Datenuebertragung"})
+	question := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
+	terms := BuildSubstringTerms(question, []string{"Policenantrag", "Datenweitergabe"})
 	for _, n := range []int{10000, 25000} {
 		b.Run(fmt.Sprintf("chunks=%d/terms=%d", n, len(terms)), func(b *testing.B) {
 			db := benchDB(b, n)
@@ -124,7 +124,7 @@ func BenchmarkSearchKeywordIn(b *testing.B) {
 		b.Run(fmt.Sprintf("chunks=%d", n), func(b *testing.B) {
 			db := benchDB(b, n)
 			s := NewStore(db)
-			match := BuildFTSMatch("versicherter")
+			match := BuildFTSMatch("vertragsnehmer")
 			b.ResetTimer()
 			for b.Loop() {
 				if _, err := s.SearchKeywordIn(b.Context(), match, 40, nil, nil); err != nil {
