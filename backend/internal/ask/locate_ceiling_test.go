@@ -11,44 +11,101 @@ import (
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
-// A turn naming no repository still has a project once its search landed:
-// the loop may look anywhere in that product and in the libraries it declares
-// it uses, and nowhere else. An empty restriction reads as the whole corpus,
-// so without this a grep matching in a second product admits and cites it.
-func TestLocateCeiling_isTheProjectTheSearchLandedInPlusItsUsedLibraries(t *testing.T) {
+// The turn's ceiling: the projects of what the question named or its search
+// hit, with the libraries those projects declare in uses. Nothing else: the
+// walk, the crossings, the gap pass and the loop all run under it.
+func TestTurnCeiling_isTheProjectPlusItsUsedLibraries(t *testing.T) {
 	pm := libraryMap(t)
 	cases := []struct {
-		name    string
-		known   []string
-		sources []Source
-		want    []string
+		name       string
+		known, hit []string
+		want       []string
 	}{
 		{"a product hit opens the product and the library it uses",
-			nil, []Source{{Repo: "shop-backend", Hop: 0}},
-			[]string{"acme-commons", "shop-backend", "shop-ui"}},
+			nil, []string{"shop-backend"}, []string{"acme-commons", "shop-backend", "shop-ui"}},
 		{"a product declaring no uses gets no library",
-			nil, []Source{{Repo: "legacy-crm", Hop: 0}},
-			[]string{"legacy-crm"}},
-		{"a walk hop into another product does not open it",
-			nil, []Source{{Repo: "shop-ui", Hop: 0}, {Repo: "billing-api", Hop: 1}},
-			[]string{"acme-commons", "shop-backend", "shop-ui"}},
+			nil, []string{"legacy-crm"}, []string{"legacy-crm"}},
 		{"a library hit alone opens only the library",
-			nil, []Source{{Repo: "acme-commons", Hop: 0}},
-			[]string{"acme-commons"}},
-		{"a restriction already set is the ceiling, never widened to its project",
-			[]string{"shop-ui"}, []Source{{Repo: "shop-ui", Hop: 0}},
-			[]string{"shop-ui"}},
-		{"no hop-0 source falls back to the repositories gathered",
-			nil, []Source{{Repo: "billing-api", Hop: 2}},
-			[]string{"acme-commons", "billing-api"}},
+			nil, []string{"acme-commons"}, []string{"acme-commons"}},
+		{"a named member opens its project and the libraries it uses",
+			[]string{"shop-ui"}, []string{"shop-ui"}, []string{"acme-commons", "shop-backend", "shop-ui"}},
+		{"a named product without uses stays alone",
+			[]string{"legacy-crm"}, nil, []string{"legacy-crm"}},
+		{"nothing named and nothing hit is no ceiling",
+			nil, nil, nil},
+		{"a repository no project map knows is no ceiling",
+			nil, []string{"unknown-repo"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := locateCeiling(c.known, c.sources, pm)
+			got := turnCeiling(c.known, c.hit, pm)
 			if !slices.Equal(got, c.want) {
 				t.Errorf("ceiling = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestGather_withinACeilingNeverWalksOutOfIt(t *testing.T) {
+	// A symbol the hit references is defined only in another project. Under
+	// the turn's ceiling the walk does not follow it there.
+	db := gatherDB(t)
+	seedRepo(t, db, "go-sqlite3")
+	hitID := seedChunkIn(t, db, "peeq", "backend/internal/store/store.go", 0, 1, 20, "Open",
+		"func Open(p string) error { return ZeroBlob(p) }")
+	seedChunkIn(t, db, "go-sqlite3", "blob.go", 0, 40, 60, "ZeroBlob",
+		"func ZeroBlob(p string) error { return nil }")
+	seedSymbolIn(t, db, "go-sqlite3", "blob.go", "ZeroBlob", 40)
+	hits := []retrieve.Hit{hitInFor(t, db, hitID)}
+
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000})
+	confined, err := g.within([]string{"peeq"}).Gather(context.Background(), hits)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if hasIn(confined, "go-sqlite3", "blob.go") {
+		t.Errorf("sources = %v, want nothing outside the ceiling", repoPaths(confined))
+	}
+	open, err := g.within([]string{"peeq", "go-sqlite3"}).Gather(context.Background(), hits)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !hasIn(open, "go-sqlite3", "blob.go") {
+		t.Errorf("sources = %v, want the definition when its repository is inside", repoPaths(open))
+	}
+}
+
+// Run applies the ceiling to the walk, not only to the loop: a turn naming
+// nothing whose search landed in one project never gathers from another.
+func TestPipeline_theWalkStaysInTheProjectTheSearchLandedIn(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "go-sqlite3")
+	if _, err := db.Exec(`UPDATE repo_state SET project = name`); err != nil {
+		t.Fatalf("set projects: %v", err)
+	}
+	pm, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load: %v", err)
+	}
+	hitID := seedChunkIn(t, db, "peeq", "backend/internal/store/store.go", 0, 1, 20, "Open",
+		"func Open(p string) error { return ZeroBlob(p) }")
+	seedChunkIn(t, db, "go-sqlite3", "blob.go", 0, 40, 60, "ZeroBlob",
+		"func ZeroBlob(p string) error { return nil }")
+	seedSymbolIn(t, db, "go-sqlite3", "blob.go", "ZeroBlob", 40)
+
+	namesNothing := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
+	c := twoStepUpstream(t, namesNothing, "So [1].")
+	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+
+	answer, _, err := p.Run(context.Background(), "How?", AudienceDev, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, s := range answer.Sources {
+		if s.Repo == "go-sqlite3" {
+			t.Errorf("sources reached %s %s, outside the project the search landed in", s.Repo, s.Path)
+		}
 	}
 }
 

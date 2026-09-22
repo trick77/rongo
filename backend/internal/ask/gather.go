@@ -102,6 +102,9 @@ type Gatherer struct {
 	// locateRounds caps the loop for the harness arm that measures one look
 	// against the loop; zero means locateMaxRounds.
 	locateRounds int
+	// ceiling is the turn's repositories, set per turn by within; empty
+	// admits from anywhere.
+	ceiling []string
 	// Log receives the warning when the gap pass keeps the sources it was
 	// given; nil means the default logger.
 	Log *slog.Logger
@@ -146,7 +149,7 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 		return nil, nil
 	}
 
-	a := &admitter{seen: map[int64]bool{}}
+	a := &admitter{seen: map[int64]bool{}, allowed: g.allowed()}
 
 	for _, h := range hits {
 		if a.seen[h.ChunkID] {
@@ -364,12 +367,20 @@ type admitter struct {
 	spent  int
 	budget int
 	out    []Source
+	// allowed is the turn's ceiling; nil admits from any repository.
+	allowed map[string]bool
 }
 
 // take admits s at hop, or reports false when the budget cannot hold it. A
 // chunk already taken is not admitted twice and is not a refusal.
 func (a *admitter) take(s Source, hop int) bool {
 	if a.seen[s.ChunkID] {
+		return true
+	}
+	// Outside the turn's ceiling: skipped, and not a refusal. A refusal
+	// means the budget is spent and stops the caller; this landing was
+	// never the turn's to take.
+	if a.allowed != nil && !a.allowed[s.Repo] {
 		return true
 	}
 	cost := estimateTokens(s.Text)

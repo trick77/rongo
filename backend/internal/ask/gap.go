@@ -184,7 +184,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	if g.locate != nil {
 		budget -= g.opts.TokenBudget / locateReserve
 	}
-	a := &admitter{seen: map[int64]bool{}, budget: budget}
+	a := &admitter{seen: map[int64]bool{}, budget: budget, allowed: g.allowed()}
 	for _, s := range sources {
 		a.seen[s.ChunkID] = true
 		a.spent += estimateTokens(s.Text)

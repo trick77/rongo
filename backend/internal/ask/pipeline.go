@@ -400,6 +400,19 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	return answer, nil, err
 }
 
+// hitRepoNames is the repositories the search hits came from, deduplicated.
+func hitRepoNames(hits []retrieve.Hit) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, h := range hits {
+		if h.Repo != "" && !seen[h.Repo] {
+			seen[h.Repo] = true
+			out = append(out, h.Repo)
+		}
+	}
+	return out
+}
+
 // hitRepos is the repositories a turn's SEARCH HITS came from, deduplicated
 // and sorted. Hop 0 only: a reference walk and a crossing reach files the
 // question never asked for, and counting those would name a repository the
@@ -653,7 +666,16 @@ func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.
 // about what it found: a pointer the answer prompt carries.
 func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, census Census, ev Events) ([]Source, string, error) {
 	stage := scope.Stages.Prefixes(scope.Stage)
-	g := p.gatherer.forTurn(scope.Resumed)
+	// The turn's ceiling, from what the question named or what its search
+	// hit, before anything is gathered: the walk, the crossings, the gap pass
+	// and the loop all run under it. See turnCeiling.
+	pm, perr := p.router.Projects(ctx)
+	if perr != nil {
+		slog.Warn("projects unavailable, gathering confined to the repositories named or hit",
+			"thread", llm.ThreadID(ctx), "err", perr)
+	}
+	ceiling := turnCeiling(scope.Known, hitRepoNames(hits), pm)
+	g := p.gatherer.forTurn(scope.Resumed).within(ceiling)
 	sources, err := g.GatherSeeded(ctx, hits, census.Landings, stage)
 	if err != nil {
 		return nil, "", err
@@ -665,19 +687,13 @@ func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []ret
 	// The locate loop runs last: it reads what everything before it gathered
 	// and looks again for the one place a locate question turns on. Off
 	// unless a client was given, and it never fails the turn.
-	ceiling := scope.Known
-	if len(ceiling) == 0 && p.gatherer.locating() && !scope.Resumed {
-		// A turn naming nothing is confined to the project its search
-		// landed in, plus the libraries that project uses: see locateCeiling.
-		// Read only when the loop will run, so a turn with it off pays nothing.
-		pm, perr := p.router.Projects(ctx)
-		if perr != nil {
-			slog.Warn("projects unavailable, locate confined to the repositories gathered",
-				"thread", llm.ThreadID(ctx), "err", perr)
-		}
-		ceiling = locateCeiling(nil, sources, pm)
+	// The loop's search tools stay narrowed to what the question named or
+	// the thread pinned; what it admits stays inside the turn's ceiling.
+	searchIn := scope.Known
+	if len(searchIn) == 0 {
+		searchIn = ceiling
 	}
-	sources, locate, err := p.gatherer.Locate(ctx, question, sources, ceiling, scope.Resumed, stage)
+	sources, locate, err := p.gatherer.within(ceiling).Locate(ctx, question, sources, searchIn, scope.Resumed, stage)
 	if err != nil {
 		return nil, "", err
 	}
