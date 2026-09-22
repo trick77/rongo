@@ -775,6 +775,32 @@ func TestTheLoopsNotFoundNeverOverridesASourceThatAnswers(t *testing.T) {
 	}
 }
 
+// An Analyst answer carries no paths or code on purpose. The loop's pointer
+// must not override that: the Analyst opening names the place in the reader's
+// words, the Developer one names file, line and code.
+func TestTheLoopsOpeningFollowsTheAudience(t *testing.T) {
+	for _, c := range []struct {
+		audience  Audience
+		want, not string
+	}{
+		{AudienceBA, "without paths or code", "the file, the line and the code there"},
+		{AudienceDev, "the file, the line and the code there", "without paths or code"},
+	} {
+		cl, prompt, _ := streamUpstream(t, "x")
+		sc := Scope{Located: "FOUND: ConverterPetRegistry.java:150 setAnzahlhaustiere"}
+		if _, err := NewAnswerer(cl).Answer(context.Background(), "wo?",
+			c.audience, LanguageEN, twoSources(), sc, "", nil); err != nil {
+			t.Fatalf("Answer: %v", err)
+		}
+		if !strings.Contains(*prompt, c.want) {
+			t.Errorf("%s: prompt lacks %q", c.audience, c.want)
+		}
+		if strings.Contains(*prompt, c.not) {
+			t.Errorf("%s: prompt carries %q", c.audience, c.not)
+		}
+	}
+}
+
 // TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer holds the line
 // this whole feature has to stay behind. The previous QUESTION is what a
 // pronoun points at, so it goes in. The previous ANSWER is prose the model
