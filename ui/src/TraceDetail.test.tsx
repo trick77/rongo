@@ -181,6 +181,10 @@ describe("Trace, what each step found", () => {
       />,
     );
     expect(screen.getByText(/Located in 2 rounds/)).toBeTruthy();
+    // Landed and empty are told apart by a label, not by shade alone.
+    expect(screen.getByText("landed")).toBeTruthy();
+    expect(screen.getByText("empty")).toBeTruthy();
+    expect(screen.getByText("not run")).toBeTruthy();
     expect(screen.getByText("grep(over the call limit)")).toBeTruthy();
     expect(screen.getByText(/ConverterPetRegistry\.java:162 sets it/)).toBeTruthy();
   });

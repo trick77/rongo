@@ -329,9 +329,23 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               <span className="trace-k">
                 Located in {locateRounds} {locateRounds === 1 ? "round" : "rounds"}
                 {locateStop !== "" && `, ${locateStop}`}
-              </span>{" "}
-              <Chips values={locateLanded} /> <Chips values={locateCalls} /> <Chips values={locateEmpty} dim />{" "}
-              <Chips values={locateRefused} dim />
+              </span>
+              {(
+                [
+                  ["landed", locateLanded, false],
+                  ["nothing new", locateCalls, true],
+                  ["empty", locateEmpty, true],
+                  ["not run", locateRefused, true],
+                ] as const
+              ).map(
+                ([label, values, dim]) =>
+                  values.length > 0 && (
+                    <span key={label}>
+                      {" · "}
+                      <span className="trace-k">{label}</span> <Chips values={[...values]} dim={dim} />
+                    </span>
+                  ),
+              )}
               {locateFound !== "" && (
                 <>
                   <br />
