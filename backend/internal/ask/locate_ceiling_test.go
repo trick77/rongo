@@ -104,3 +104,18 @@ func TestWithLocateDetail_carriesThePointer(t *testing.T) {
 		t.Errorf("locate_rounds = %v, want 1", d["locate_rounds"])
 	}
 }
+
+// A turn the loop never looked at leaves no locate block: "Located in 0
+// rounds, resumed" is the record of an absence.
+func TestWithLocateDetail_isSilentWhenTheLoopNeverLooked(t *testing.T) {
+	for _, skipped := range []string{"off", "resumed", "no sources"} {
+		d := withLocateDetail(map[string]any{}, LocateReport{Skipped: skipped})
+		if len(d) != 0 {
+			t.Errorf("skipped %q: detail = %v, want nothing", skipped, d)
+		}
+	}
+	d := withLocateDetail(map[string]any{}, LocateReport{Skipped: "call failed", Rounds: 1})
+	if d["locate"] != "call failed" {
+		t.Errorf("a failed round lost its reason: %v", d)
+	}
+}

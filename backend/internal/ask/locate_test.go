@@ -336,8 +336,11 @@ func TestLocate_aToolItCannotParseIsNothingFoundNotAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Locate: %v", err)
 	}
-	if len(report.Empty) != 1 || !strings.Contains(report.Empty[0], "unparseable") {
-		t.Errorf("Empty = %v, want the unparseable call reported", report.Empty)
+	if len(report.Refused) != 1 || !strings.Contains(report.Refused[0], "unparseable") {
+		t.Errorf("Refused = %v, want the unparseable call reported as not run", report.Refused)
+	}
+	if len(report.Empty) != 0 {
+		t.Errorf("Empty = %v, want nothing: an unparseable call never searched", report.Empty)
 	}
 }
 
@@ -481,8 +484,8 @@ func TestLocate_honoursTheTurnsRepositoriesAsACeiling(t *testing.T) {
 	if len(asked) != 0 {
 		t.Errorf("the scan was asked %v, want nothing outside the turn's repositories", asked)
 	}
-	if len(report.Empty) != 1 || !strings.Contains(report.Empty[0], "outside") {
-		t.Errorf("Empty = %v, want the call reported as outside the turn", report.Empty)
+	if len(report.Refused) != 1 || !strings.Contains(report.Refused[0], "outside") {
+		t.Errorf("Refused = %v, want the call reported as outside the turn", report.Refused)
 	}
 }
 
@@ -652,8 +655,8 @@ func TestLocate_searchAndReadLandAndEmptyArgumentsAreToldApart(t *testing.T) {
 			t.Errorf("%s arrived as %q, want a locate reason", path, s.Reason)
 		}
 	}
-	if len(report.Landed) != 2 || len(report.Empty) != 4 {
-		t.Errorf("Landed = %v, Empty = %v, want two landings and four empty calls", report.Landed, report.Empty)
+	if len(report.Landed) != 2 || len(report.Refused) != 4 {
+		t.Errorf("Landed = %v, Refused = %v, want two landings and four calls not run", report.Landed, report.Refused)
 	}
 	if len(told) != 6 {
 		t.Fatalf("tool results = %q, want one per call", told)
@@ -865,7 +868,7 @@ func TestLocate_putsTheSourceThePointerNamesFirst(t *testing.T) {
 	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
 		WithLocateLoop(locateLLM(t, []locateRound{
 			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
-			{content: "ConverterPetRegistry.java:150 calls wsHousehold::setAnzahlhaustiere."},
+			{content: "FOUND: ConverterPetRegistry.java:150 calls wsHousehold::setAnzahlhaustiere."},
 		}, nil), searcher).WithLocateRounds(1)
 
 	got, _, err := g.Locate(context.Background(), "wo?", []Source{
@@ -899,5 +902,65 @@ func TestLocate_aPointerNamingNoSourceLeavesTheOrderAlone(t *testing.T) {
 	}
 	if got[0].ChunkID != a || got[1].ChunkID != b {
 		t.Errorf("order = %s, %s, want A then B unchanged", got[0].Path, got[1].Path)
+	}
+}
+
+func TestPointedFirst_actsOnlyOnAFoundPlace(t *testing.T) {
+	// A conclusion naming a file it rejected must not promote it: "only
+	// reads it; not found" put the wrong file first and told the answer to
+	// open with it.
+	sources := []Source{
+		{ChunkID: 1, Path: "a/HouseholdEntity.java", StartLine: 1, EndLine: 50},
+		{ChunkID: 2, Path: "a/UserService.java", StartLine: 1, EndLine: 80},
+		{ChunkID: 3, Path: "a/ConverterPetRegistry.java", StartLine: 140, EndLine: 170},
+	}
+	cases := []struct {
+		name  string
+		found string
+		first int64
+	}{
+		{"a found place with its line", "FOUND: ConverterPetRegistry.java:150 calls the setter.", 3},
+		{"not found naming a file", "NOT FOUND: UserService.java:12 only reads it.", 1},
+		{"found without a line", "FOUND: UserService.java sets it.", 1},
+		{"found at a line no gathered chunk holds", "FOUND: UserService.java:400 sets it.", 1},
+		{"free text naming a file", "UserService.java:12 sets it.", 1},
+		{"a longer name is not the file", "FOUND: MyConverterPetRegistry.java:150", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := pointedFirst(append([]Source(nil), sources...), c.found)
+			if got[0].ChunkID != c.first {
+				t.Errorf("first = %s, want chunk %d", got[0].Path, c.first)
+			}
+		})
+	}
+}
+
+func TestLocate_roundsAboveTheCeilingAreCapped(t *testing.T) {
+	db := gatherDB(t)
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).WithLocateRounds(20)
+	if got := g.rounds(); got != locateMaxRounds {
+		t.Errorf("rounds() = %d, want the ceiling %d", got, locateMaxRounds)
+	}
+}
+
+func TestLocate_onlyRefusedCallsDoNotCountAsLooking(t *testing.T) {
+	// A reply after calls that were all refused before any lookup is the
+	// model talking about sources it was handed, not about what it read.
+	db := gatherDB(t)
+	id := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 10, "anzahlHaustiere", "private Integer anzahlHaustiere;")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":`)}},
+			{content: "FOUND: HouseholdEntity.java:1"},
+		}, nil), locateSearcher{})
+
+	_, report, err := g.Locate(context.Background(), "wo?",
+		[]Source{sourceOf(t, db, id)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if report.Found != "" {
+		t.Errorf("Found = %q, want nothing: no tool ran", report.Found)
 	}
 }

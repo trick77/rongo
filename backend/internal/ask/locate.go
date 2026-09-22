@@ -93,11 +93,11 @@ whether the specific place the question asks about is among them, and if it
 is not, to look for it.
 
 Call tools to look, and READ what comes back. When you have found the place,
-call nothing and reply with the file, the line and the exact code that does
-it — one or two sentences, no more. Something else writes the answer the
-reader sees; your sentence is what tells it which of many sources is the one
-that matters, so name the place precisely or say plainly that it is not in
-the index.
+call nothing and reply in one or two sentences starting with
+"FOUND: FileName.ext:LINE" and the exact code on that line. If it is not in
+the index, reply starting with "NOT FOUND:". Something else writes the answer
+the reader sees; your sentence is what tells it which of many sources is the
+one that matters.
 
 Use the vocabulary of the CODE, not of the question. A German question about
 "Anzahl Haustiere" is answered by code spelling it anzahlHaustiere, getAnzahlHaustiere
@@ -242,9 +242,12 @@ func (g *Gatherer) forTurn(resumed bool) *Gatherer {
 
 // rounds is the ceiling this gatherer runs the loop under.
 func (g *Gatherer) rounds() int {
-	if g.locateRounds > 0 {
+	if g.locateRounds > 0 && g.locateRounds < locateMaxRounds {
 		return g.locateRounds
 	}
+	// Zero means the default, and anything above the ceiling is capped to
+	// it: each round may run locateMaxCalls calls, so an unbounded setting
+	// is an unbounded bill.
 	return locateMaxRounds
 }
 
@@ -362,6 +365,14 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			if err != nil {
 				return sources, LocateReport{}, err
 			}
+			if refused != "" {
+				// Refused before any lookup: not a search that came back
+				// empty, and not looking. Reported as not run, and kept out
+				// of Calls, which is what "a tool ran" is read from.
+				report.Refused = append(report.Refused, label)
+				msgs = append(msgs, llm.ToolResult(call.ID, refused))
+				continue
+			}
 			report.Calls = append(report.Calls, label)
 			if len(landings) == 0 {
 				report.Empty = append(report.Empty, label)
@@ -476,26 +487,24 @@ func completeCalls(err error, calls []llm.ToolCall) []llm.ToolCall {
 //
 // The answer writes from the sources in order, and the order is retrieval's:
 // fused lanes and a reranker scoring excerpts, none of which ever read the
-// line that answers and decided it was the answer. The loop did. A chunk
-// holding the named line wins over another chunk of the same file; a file
-// named without a line takes its first chunk. A conclusion naming no source,
-// or "not found", leaves the order alone.
+// line that answers and decided it was the answer. The loop did.
+//
+// Only a conclusion starting "FOUND:" and naming File:LINE moves anything,
+// and only to the gathered chunk of that file holding that line. A file named
+// in passing, in a "NOT FOUND:" conclusion or without a line is not a place
+// the loop stood behind, and promoting it would turn a rejection into the
+// answer's opening.
 func pointedFirst(sources []Source, found string) []Source {
-	if found == "" {
+	claim, ok := strings.CutPrefix(strings.TrimSpace(found), "FOUND:")
+	if !ok {
 		return sources
 	}
 	best := -1
 	for i, s := range sources {
-		line, ok := namedAt(found, path.Base(s.Path))
-		if !ok {
-			continue
-		}
-		if line >= s.StartLine && line <= s.EndLine {
+		line, named := namedAt(claim, path.Base(s.Path))
+		if named && line > 0 && line >= s.StartLine && line <= s.EndLine {
 			best = i
 			break
-		}
-		if best < 0 {
-			best = i
 		}
 	}
 	if best <= 0 {
@@ -556,10 +565,9 @@ func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string 
 	return strings.TrimSpace(turn.Content)
 }
 
-const locateConclude = `Stop looking. In one or two sentences, name the place that answers the
-question, from what you have read: write it as FileName.ext:LINE, followed by
-the exact code on that line. If you did not find it, say so plainly instead of
-guessing.`
+const locateConclude = `Stop looking. In one or two sentences, from what you have read, start with
+"FOUND: FileName.ext:LINE" followed by the exact code on that line. If you did
+not find it, start with "NOT FOUND:" and say so plainly instead of guessing.`
 
 // runLocateTool executes one call and returns a label for the trace, what it
 // landed, and — for a call refused before any lookup — what the model is told

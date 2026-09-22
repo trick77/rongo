@@ -691,7 +691,9 @@ func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []ret
 // loop is off for would be a record of an absence. Every key is a fact the
 // loop already held — no second model call describes it.
 func withLocateDetail(d map[string]any, r LocateReport) map[string]any {
-	if r.Skipped == "off" {
+	// A turn the loop never looked at leaves no block: "Located in 0 rounds,
+	// resumed" would be the record of an absence.
+	if r.Skipped == "off" || r.Skipped == "resumed" || r.Skipped == "no sources" {
 		return d
 	}
 	// A reason and the counts TOGETHER, never the reason alone: a round that
