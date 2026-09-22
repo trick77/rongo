@@ -89,3 +89,18 @@ func TestPipeline_locateOnATurnNamingNothingStaysInTheProject(t *testing.T) {
 		t.Errorf("grep ran under %v, want the landed project peeq alone", repos)
 	}
 }
+
+// The trace carries the loop's pointer sentence beside its calls, so a turn
+// read back shows what the answer was pointed at.
+func TestWithLocateDetail_carriesThePointer(t *testing.T) {
+	d := withLocateDetail(map[string]any{}, LocateReport{
+		Rounds: 1, Calls: []string{"grep(setAnzahlhaustiere)"},
+		Found: "ConverterPetRegistry.java:162 sets it.", Concluded: true,
+	})
+	if d["locate_found"] != "ConverterPetRegistry.java:162 sets it." {
+		t.Errorf("locate_found = %v, want the pointer sentence", d["locate_found"])
+	}
+	if d["locate_rounds"] != 1 {
+		t.Errorf("locate_rounds = %v, want 1", d["locate_rounds"])
+	}
+}

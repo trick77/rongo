@@ -157,6 +157,52 @@ describe("Trace, what each step found", () => {
     expect(screen.getByText("+40 of 57 link sites")).toBeTruthy();
   });
 
+  it("shows what the locate loop called, landed and pointed the answer at", () => {
+    strict(
+      <Trace
+        steps={[
+          {
+            step: "gathering",
+            at: t0,
+            detail: {
+              hits: 20, references: 3, crossings: 0, sources: 40, repos: 1, tokens: 9000, budget: 24000,
+              locate_rounds: 2,
+              locate_calls: ["grep(setAnzahlHaustiere)", "grep(setAnzahlhaustiere)"],
+              locate_landed: ["grep(setAnzahlhaustiere)"],
+              locate_empty: ["grep(setAnzahlHaustiere)"],
+              locate_refused: ["grep(over the call limit)"],
+              locate_found: "ConverterPetRegistry.java:162 sets it via setAnzahlhaustiere.",
+            },
+          },
+        ]}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 100}
+      />,
+    );
+    expect(screen.getByText(/Located in 2 rounds/)).toBeTruthy();
+    expect(screen.getByText("grep(over the call limit)")).toBeTruthy();
+    expect(screen.getByText(/ConverterPetRegistry\.java:162 sets it/)).toBeTruthy();
+  });
+
+  it("says why the locate loop stopped", () => {
+    strict(
+      <Trace
+        steps={[
+          {
+            step: "gathering",
+            at: t0,
+            detail: { hits: 1, references: 0, crossings: 0, sources: 1, repos: 1, locate: "call failed", locate_rounds: 1 },
+          },
+        ]}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 100}
+      />,
+    );
+    expect(screen.getByText(/call failed/)).toBeTruthy();
+  });
+
   it("draws no detail row for a step that reported none", () => {
     // Every turn stored before the detail existed, and every step that has
     // nothing to say: the label and the duration alone, as before.

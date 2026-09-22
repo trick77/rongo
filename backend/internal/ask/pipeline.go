@@ -723,6 +723,12 @@ func withLocateDetail(d map[string]any, r LocateReport) map[string]any {
 	if r.Concluded {
 		d["locate_concluded"] = true
 	}
+	// The pointer the answer prompt carried, so a turn read back shows what
+	// the answer was pointed at. A debug record like the rest of the trace:
+	// never embedded, never handed to a model, never on a shared page.
+	if r.Found != "" {
+		d["locate_found"] = r.Found
+	}
 	return d
 }
 

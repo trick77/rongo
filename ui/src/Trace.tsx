@@ -86,8 +86,8 @@ const asNumber = (v: unknown): number | null => (typeof v === "number" ? v : nul
 function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
   return (
     <>
-      {values.map((v) => (
-        <span key={v} className={"trace-chip" + (dim ? " trace-chip-dim" : "")}>
+      {values.map((v, i) => (
+        <span key={i + v} className={"trace-chip" + (dim ? " trace-chip-dim" : "")}>
           {v}
         </span>
       ))}
@@ -274,6 +274,18 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       // turn that ran none.
       const linkSites = asNumber(detail.link_sites) ?? 0;
       const links = asNumber(detail.links) ?? 0;
+      // The locate loop: what it called, what landed, what came back empty or
+      // was refused, why it stopped, and the pointer it handed the answer.
+      // Absent on every turn it did not run.
+      const locateRounds = asNumber(detail.locate_rounds) ?? 0;
+      const locateStop = typeof detail.locate === "string" ? detail.locate : "";
+      const locateFound = typeof detail.locate_found === "string" ? detail.locate_found : "";
+      const locateLanded = asStrings(detail.locate_landed);
+      const locateEmpty = asStrings(detail.locate_empty);
+      const locateRefused = asStrings(detail.locate_refused);
+      const locateCalls = asStrings(detail.locate_calls).filter(
+        (c) => !locateLanded.includes(c) && !locateEmpty.includes(c),
+      );
       return (
         <div className="trace-detail">
           {hits} hits
@@ -311,6 +323,23 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               <span className="trace-k">Crossed</span> {c.from} → {c.to} <span className="trace-k">on the</span> {c.via}
             </span>
           ))}
+          {(locateRounds > 0 || locateStop !== "") && (
+            <>
+              <br />
+              <span className="trace-k">
+                Located in {locateRounds} {locateRounds === 1 ? "round" : "rounds"}
+                {locateStop !== "" && `, ${locateStop}`}
+              </span>{" "}
+              <Chips values={locateLanded} /> <Chips values={locateCalls} /> <Chips values={locateEmpty} dim />{" "}
+              <Chips values={locateRefused} dim />
+              {locateFound !== "" && (
+                <>
+                  <br />
+                  <span className="trace-k">Pointed the answer at</span> {locateFound}
+                </>
+              )}
+            </>
+          )}
         </div>
       );
     }
