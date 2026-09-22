@@ -33,6 +33,10 @@ type Searcher interface {
 	// ResolveRepos splits the understanding's guessed repository names into
 	// the ones the index carries and the ones it does not.
 	ResolveRepos(ctx context.Context, want []string, question string) (known, unknown []string, err error)
+	// Substring scans the raw source for one literal term, for the locate
+	// loop's grep tool: it tells the model that nothing found means the
+	// spelling was wrong, so the scan has to be of the text it asked for.
+	Substring(ctx context.Context, term string, n int, repos []string, question string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error)
 }
 
 // Routes decides whether a turn can be answered from the gathered hits or
@@ -637,23 +641,97 @@ func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.
 		return nil, scope, err
 	}
 	scope.Links = census.Listing
-	sources, err := p.gatherSeeded(ctx, question, hits, scope, census, ev)
+	sources, located, err := p.gatherSeeded(ctx, question, hits, scope, census, ev)
+	// What the locate loop concluded, carried to the answer prompt. Empty
+	// whenever the loop is off or looked at nothing.
+	scope.Located = located
 	return sources, scope, err
 }
 
-// gatherSeeded is the gather under a census that has already been read.
-func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, census Census, ev Events) ([]Source, error) {
+// gatherSeeded is the gather under a census that has already been read. It
+// returns the sources and, when the locate loop ran, the sentence it wrote
+// about what it found: a pointer the answer prompt carries.
+func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []retrieve.Hit, scope Scope, census Census, ev Events) ([]Source, string, error) {
 	stage := scope.Stages.Prefixes(scope.Stage)
-	sources, err := p.gatherer.GatherSeeded(ctx, hits, census.Landings, stage)
+	g := p.gatherer.forTurn(scope.Resumed)
+	sources, err := g.GatherSeeded(ctx, hits, census.Landings, stage)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	sources, report, err := p.gatherer.FillGaps(ctx, question, sources, stage)
+	sources, report, err := g.FillGaps(ctx, question, sources, stage)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	ev.detail("gathering", withCensusDetail(gatherDetail(sources, p.gatherer.opts.TokenBudget, report), census))
-	return sources, nil
+	// The locate loop runs last: it reads what everything before it gathered
+	// and looks again for the one place a locate question turns on. Off
+	// unless a client was given, and it never fails the turn.
+	ceiling := scope.Known
+	if len(ceiling) == 0 && p.gatherer.locating() && !scope.Resumed {
+		// A turn naming nothing is confined to the project its search
+		// landed in, plus the libraries that project uses: see locateCeiling.
+		// Read only when the loop will run, so a turn with it off pays nothing.
+		pm, perr := p.router.Projects(ctx)
+		if perr != nil {
+			slog.Warn("projects unavailable, locate confined to the repositories gathered",
+				"thread", llm.ThreadID(ctx), "err", perr)
+		}
+		ceiling = locateCeiling(nil, sources, pm)
+	}
+	sources, locate, err := p.gatherer.Locate(ctx, question, sources, ceiling, scope.Resumed, stage)
+	if err != nil {
+		return nil, "", err
+	}
+	ev.detail("gathering", withLocateDetail(
+		withCensusDetail(gatherDetail(sources, p.gatherer.opts.TokenBudget, report), census), locate))
+	return sources, locate.Found, nil
+}
+
+// withLocateDetail adds what the loop did, and only on a turn that ran one:
+// the trace is stored per message, and "locate_rounds: 0" on every turn the
+// loop is off for would be a record of an absence. Every key is a fact the
+// loop already held — no second model call describes it.
+func withLocateDetail(d map[string]any, r LocateReport) map[string]any {
+	// A turn the loop never looked at leaves no block: "Located in 0 rounds,
+	// resumed" would be the record of an absence.
+	if r.Skipped == "off" || r.Skipped == "resumed" || r.Skipped == "no sources" {
+		return d
+	}
+	// A reason and the counts TOGETHER, never the reason alone: a round that
+	// landed something and a later round that failed both happen on the same
+	// turn, and reporting only "call failed" leaves the step saying it found
+	// nothing beside an answer citing what it found. Every step reports what
+	// it found.
+	if r.Skipped != "" {
+		d["locate"] = r.Skipped
+	}
+	if r.Rounds == 0 {
+		return d
+	}
+	d["locate_rounds"] = r.Rounds
+	if len(r.Calls) > 0 {
+		d["locate_calls"] = r.Calls
+	}
+	if len(r.Landed) > 0 {
+		d["locate_landed"] = r.Landed
+	}
+	// What found nothing is the half a reader most wants: it is why the next
+	// call was spelled differently.
+	if len(r.Empty) > 0 {
+		d["locate_empty"] = r.Empty
+	}
+	if len(r.Refused) > 0 {
+		d["locate_refused"] = r.Refused
+	}
+	if r.Concluded {
+		d["locate_concluded"] = true
+	}
+	// The pointer the answer prompt carried, so a turn read back shows what
+	// the answer was pointed at. A debug record like the rest of the trace:
+	// never embedded, never handed to a model, never on a shared page.
+	if r.Found != "" {
+		d["locate_found"] = r.Found
+	}
+	return d
 }
 
 // census reads the link sites of the named repositories when the question
@@ -899,6 +977,11 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 			// A census landing is not a reference either: it was seeded,
 			// not reached. Reported by withCensusDetail beside the count
 			// of sites it was drawn from.
+		case strings.HasPrefix(s.Reason, "locate:"):
+			// Nor is a locate landing: the model asked for it by name after
+			// reading the sources. withLocateDetail reports the loop's own
+			// calls beside this, so counting it here too would inflate the
+			// walk's number.
 		default:
 			refs++
 		}
@@ -1007,6 +1090,9 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language,
 	hits []retrieve.Hit, scope Scope, t Thread, ev Events) (Answer, error) {
 
+	// Marked as resumed so the locate loop stays out of it: this path replays
+	// the candidate's stored hits and searches for nothing more.
+	scope.Resumed = true
 	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, t.Question, ev)
 }
 

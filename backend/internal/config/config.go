@@ -129,6 +129,9 @@ type Config struct {
 	LLMTimeout         time.Duration
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
+	// LocateRounds is how many times the locate loop may look again after the
+	// walk; 0 switches it off. See ask.Gatherer.WithLocateLoop.
+	LocateRounds      int
 	GatherMaxHops     int
 	GatherTokenBudget int
 	// TurnMaxTokens is the most one turn may spend across its model and
@@ -191,16 +194,21 @@ func Load() (Config, error) {
 		IndexMaxDataFileBytes: envIntOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
 		// 500 commits: a year of a busy repository, bounded for a monorepo's
 		// first run. A "what changed" question looks back a year at most.
-		HistoryDepth:      envIntOr("BACKEND_HISTORY_DEPTH", 500),
-		IndexEnabled:      envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:     envBoolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:      envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		GitSSHKey:         strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
-		GitSSHKnownHosts:  strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
-		GitCAFile:         strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
-		ModuleMinChunks:   envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:   envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:       envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		HistoryDepth:     envIntOr("BACKEND_HISTORY_DEPTH", 500),
+		IndexEnabled:     envBoolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:    envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:     envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		GitSSHKey:        strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
+		GitSSHKnownHosts: strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
+		GitCAFile:        strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
+		ModuleMinChunks:  envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:  envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:      envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		// The locate loop, on at one look. It looks again after the walk with
+		// search, grep, symbol and read, and carries what it found to the
+		// answer. One look reached the same files as three, so a higher value
+		// buys latency until a measurement says otherwise; 0 switches it off.
+		LocateRounds:      envIntOrOff("BACKEND_LOCATE_ROUNDS", 1),
 		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
 		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
 		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),

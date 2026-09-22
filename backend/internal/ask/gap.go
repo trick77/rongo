@@ -175,7 +175,16 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	// The full budget, with what the sources already cost recomputed rather
 	// than carried: FillGaps is called with what the walk returned, and the
 	// reserve exists precisely so there is room left under that ceiling.
-	a := &admitter{seen: map[int64]bool{}, budget: g.opts.TokenBudget}
+	budget := g.opts.TokenBudget
+	// The locate loop runs AFTER this pass and has a reserve of its own, so
+	// the gap pass leaves it alone the way the walk and the crossing leave
+	// the gap reserve alone. Without this the loop is paid for in model calls
+	// and then admits nothing, which is the failure both earlier reserves
+	// were written to prevent.
+	if g.locate != nil {
+		budget -= g.opts.TokenBudget / locateReserve
+	}
+	a := &admitter{seen: map[int64]bool{}, budget: budget}
 	for _, s := range sources {
 		a.seen[s.ChunkID] = true
 		a.spent += estimateTokens(s.Text)
@@ -232,7 +241,7 @@ func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, sta
 	case edges.KindRoute, edges.KindDestination, edges.KindProperty:
 		return g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, stage)
 	default:
-		return g.symbolLandings(ctx, n.Name, sources)
+		return g.symbolLandings(ctx, n.Name, sources, nil)
 	}
 }
 
@@ -245,12 +254,26 @@ func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, sta
 // landings are capped, with tests last: an overload lands twice in one file,
 // and a name four files define would otherwise spend the whole reserve on one
 // entry of the reply.
-func (g *Gatherer) symbolLandings(ctx context.Context, name string, sources []Source) ([]Source, error) {
+//
+// keep, when set, drops definers BEFORE the home repository is chosen: atHome
+// keeps one repository, and a filter applied after it would drop that
+// repository's out-of-scope definitions and report nothing for a name another
+// repository defines in scope.
+func (g *Gatherer) symbolLandings(ctx context.Context, name string, sources []Source, keep func(Source) bool) ([]Source, error) {
 	// No home and no near side: the caller has a name and no file, so every
 	// selective definer over the enabled repositories is a candidate.
 	rows, err := g.definers(ctx, []string{name}, "", "", "")
 	if err != nil {
 		return nil, err
+	}
+	if keep != nil {
+		kept := rows[:0]
+		for _, r := range rows {
+			if keep(r) {
+				kept = append(kept, r)
+			}
+		}
+		rows = kept
 	}
 	if len(rows) == 0 {
 		return nil, nil

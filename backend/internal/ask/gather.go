@@ -94,6 +94,14 @@ type Gatherer struct {
 	// gap is the short-gate client the gap pass calls; nil is off, and off is
 	// what the product ships until the arm is measured. See gap.go.
 	gap *llm.Client
+	// locate is the client the locate loop calls and locateSearch the
+	// retriever its search and grep tools use; nil is off, on the same terms
+	// as gap. Both are set together by WithLocateLoop. See locate.go.
+	locate       *llm.Client
+	locateSearch Searcher
+	// locateRounds caps the loop for the harness arm that measures one look
+	// against the loop; zero means locateMaxRounds.
+	locateRounds int
 	// Log receives the warning when the gap pass keeps the sources it was
 	// given; nil means the default logger.
 	Log *slog.Logger
@@ -174,12 +182,19 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 	if g.gap != nil {
 		symbolBudget -= g.opts.TokenBudget / gapReserve
 	}
+	if g.locate != nil {
+		symbolBudget -= g.opts.TokenBudget / locateReserve
+	}
 	// The crossing runs under the full budget less the gap reserve — the
 	// crossing arm spends whatever it is given on the flow corpus, and a gap
-	// pass under the same ceiling would land nothing.
+	// pass under the same ceiling would land nothing. The locate loop runs
+	// last of all and is reserved for on the same terms.
 	crossingBudget := g.opts.TokenBudget
 	if g.gap != nil {
 		crossingBudget -= g.opts.TokenBudget / gapReserve
+	}
+	if g.locate != nil {
+		crossingBudget -= g.opts.TokenBudget / locateReserve
 	}
 	a.budget = symbolBudget
 
@@ -550,7 +565,14 @@ func (g *Gatherer) chunkAt(ctx context.Context, repo, path string, line int) (So
 	err := g.db.QueryRowContext(ctx, `
 		SELECT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
 		FROM files f
-		JOIN repo_state r ON r.name = f.repo
+		-- enabled = 1 like every other lookup here: a parked repository is
+		-- not a hop target. It was harmless while every caller passed a
+		-- repo and path taken from already-filtered rows; the locate loop's
+		-- read tool is the first to pass a repo the MODEL named, and a
+		-- parked one would be admitted as a source and cited in a fresh
+		-- answer. Parking stops new answers, it does not revise old ones,
+		-- so the source viewer and stored thread sources still do not filter.
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 		JOIN chunks c ON c.file_id = f.id
 		WHERE f.repo = ? AND f.path = ? AND ? BETWEEN c.start_line AND c.end_line
 		-- Chunk windows OVERLAP, so a token's line is covered by more

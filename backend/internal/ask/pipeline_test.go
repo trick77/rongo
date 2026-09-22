@@ -22,6 +22,10 @@ import (
 type fakeSearch struct {
 	hits []retrieve.Hit
 	got  retrieve.Query
+	// substrings is what the raw scan finds, keyed on the literal term, and
+	// substringTerms is every term it was asked for, in order.
+	substrings     map[string][]retrieve.Hit
+	substringTerms []string
 	// queries is every query the turn ran, in order. A comparison turn runs
 	// one per named repository, and only the sequence shows that.
 	queries []retrieve.Query
@@ -36,6 +40,13 @@ func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit
 	f.got = q
 	f.queries = append(f.queries, q)
 	return f.hits, nil
+}
+
+// Substring answers from a table keyed on the literal term, so a test can say
+// what the raw scan sees. Nothing derived: that is the point of the method.
+func (f *fakeSearch) Substring(_ context.Context, term string, _ int, _ []string, _ string, _ retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+	f.substringTerms = append(f.substringTerms, term)
+	return f.substrings[term], nil
 }
 
 // ResolveRepos answers from indexed: the names it holds are the ones this
@@ -73,6 +84,12 @@ func (f searchFunc) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit,
 // that invented an index would hide a turn that searched the wrong scope.
 func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known, unknown []string, err error) {
 	return nil, nil, nil
+}
+
+// Substring scans nothing: the locate loop is off in these tests, and a
+// pipeline with no loop must behave exactly as it did before the loop existed.
+func (f searchFunc) Substring(_ context.Context, _ string, _ int, _ []string, _ string, _ retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+	return nil, nil
 }
 
 // indexedSearch is searchFunc plus an index that carries some repositories.
@@ -732,6 +749,29 @@ func TestTheAnswerPromptForbidsClaimsAboutARepositoryTheThreadLeftOut(t *testing
 	}
 	if !strings.Contains(*prompt, "make no claim of any kind about their code") {
 		t.Errorf("the prompt never forbids inventing that repository's side:\n%s", *prompt)
+	}
+}
+
+// TestTheLoopsNotFoundNeverOverridesASourceThatAnswers: the loop runs last,
+// over sources the walk already gathered, and reads clipped excerpts, so a
+// false "not found" is its expected failure. A prompt telling the answer to
+// report "not in the index" on the note's word would throw away a source that
+// answers the question.
+func TestTheLoopsNotFoundNeverOverridesASourceThatAnswers(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	sc := Scope{Located: "Not found in the index."}
+	if _, err := NewAnswerer(c).Answer(context.Background(), "wo wird das gesetzt?",
+		AudienceDev, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if strings.Contains(*prompt, "say so plainly rather than answering") {
+		t.Errorf("the prompt lets the loop's \"not found\" override the sources:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "weakest evidence") {
+		t.Errorf("the prompt never ranks the loop's note below the sources:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Open the answer with that place") {
+		t.Errorf("the prompt never tells the answer to lead with the place the loop read:\n%s", *prompt)
 	}
 }
 
