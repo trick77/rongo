@@ -146,8 +146,8 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 		t.Fatalf("messages: %v", err)
 	}
 	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
-		{Step: "route", Model: "mimo-v2.5", Prompt: 100, Completion: 10, CostNanoUSD: usage.Nano(120_000)},
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 1000, Completion: 100, CostNanoUSD: usage.Nano(1_200_000)},
+		{Step: "route", Model: "mimo-v2.6-flash", Prompt: 100, Completion: 10, CostNanoUSD: usage.Nano(120_000)},
+		{Step: "answer", Model: "mimo-v2.6-flash", Prompt: 1000, Completion: 100, CostNanoUSD: usage.Nano(1_200_000)},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	}
 	later := laterTurn(t, st, th.ID)
 	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 2000, Completion: 200, CostNanoUSD: usage.Nano(2_400_000)},
+		{Step: "answer", Model: "mimo-v2.6-flash", Prompt: 2000, Completion: 200, CostNanoUSD: usage.Nano(2_400_000)},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestPublicShare_carriesTheThreadTotalAndNothingPerTurn(t *testing.T) {
 	}
 	// And thread_id, the row number the card used to carry: the same counter
 	// Message.ThreadID and the thread's public_id exist to keep off the wire.
-	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `mimo-v2.5`, `"route"`, `"thread_id"`} {
+	for _, leak := range []string{`"usage"`, `"followups":[`, `"calls"`, `"steps"`, `gathering`, `mimo-v2.6-flash`, `"route"`, `"thread_id"`} {
 		if strings.Contains(body, leak) {
 			t.Errorf("the public payload carries %s:\n%s", leak, body)
 		}
@@ -225,7 +225,7 @@ func TestPublicShare_carriesTokensOnlyWhenNothingIsPriced(t *testing.T) {
 		t.Fatalf("messages: %v", err)
 	}
 	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 500, Completion: 50},
+		{Step: "answer", Model: "mimo-v2.6-flash", Prompt: 500, Completion: 50},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
@@ -272,14 +272,14 @@ func TestPublicShare_stopsAtTheCeiling(t *testing.T) {
 		t.Fatalf("messages: %v", err)
 	}
 	if err := st.SaveUsage(ctx, msgs[0].ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 300, Completion: 30},
+		{Step: "answer", Model: "mimo-v2.6-flash", Prompt: 300, Completion: 30},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}
 	sh := share(t, srv, th.PublicID)
 	later := laterTurn(t, st, th.ID)
 	if err := st.SaveUsage(ctx, later.ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5", Prompt: 5000, Completion: 500},
+		{Step: "answer", Model: "mimo-v2.6-flash", Prompt: 5000, Completion: 500},
 	}); err != nil {
 		t.Fatalf("save usage: %v", err)
 	}

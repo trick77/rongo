@@ -15,14 +15,14 @@ func TestRecord_withoutAMeterOnTheContextIsANoop(_ *testing.T) {
 func TestMeter_collectsEveryCallInOrderAndIsSafeForConcurrentCallers(t *testing.T) {
 	m := New()
 	ctx := WithMeter(context.Background(), m)
-	Record(ctx, Call{Step: "understand", Model: "mimo-v2.5", Prompt: 10, Completion: 2})
+	Record(ctx, Call{Step: "understand", Model: "mimo-v2.6-flash", Prompt: 10, Completion: 2})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			Record(ctx, Call{Step: "name", Model: "mimo-v2.5", Prompt: 5, Completion: 1})
+			Record(ctx, Call{Step: "name", Model: "mimo-v2.6-flash", Prompt: 5, Completion: 1})
 		}()
 	}
 	wg.Wait()
@@ -41,9 +41,9 @@ func TestMeter_collectsEveryCallInOrderAndIsSafeForConcurrentCallers(t *testing.
 
 func TestReport_sumsTokensAndPricesOnlyTheCallsLlmwirePriced(t *testing.T) {
 	calls := []Call{
-		{Step: "route", Model: "mimo-v2.5-pro", Prompt: 1000, Completion: 10},
+		{Step: "route", Model: "mimo-v2.6-pro", Prompt: 1000, Completion: 10},
 		{Step: "embed", Model: "text-embedding-3-small", Prompt: 500},
-		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 2000, Completion: 1000},
+		{Step: "answer", Model: "mimo-v2.6-pro", Prompt: 2000, Completion: 1000},
 	}
 
 	// No call priced: tokens only, no money anywhere. This is every turn
@@ -83,7 +83,7 @@ func TestReport_theWindowComesFromLlmwiresProfile(t *testing.T) {
 	// Given a call to a deployment llmwire sizes, and one to a model it has
 	// never heard of
 	r := Price([]Call{
-		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 10, Completion: 2, Cached: Int(9)},
+		{Step: "answer", Model: "mimo-v2.6-pro", Prompt: 10, Completion: 2, Cached: Int(9)},
 		{Step: "answer", Model: "nobody-knows", Prompt: 10, Completion: 2},
 	})
 

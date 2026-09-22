@@ -28,11 +28,11 @@ function turnOf(question: string, usage: Usage | null, steps: unknown[] = []): T
  * duration, and a registry that sizes the model. */
 const full: Usage = {
   calls: [
-    { step: "understand", model: "mimo-v2.5", prompt_tokens: 420, completion_tokens: 90, cached_tokens: 380, ms: 880, cost_usd: 0.0001 },
+    { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 420, completion_tokens: 90, cached_tokens: 380, ms: 880, cost_usd: 0.0001 },
     { step: "embed", model: "text-embedding-3-small", prompt_tokens: 36, completion_tokens: 0, ms: 190, cost_usd: 0 },
     {
       step: "answer",
-      model: "mimo-v2.5-pro",
+      model: "mimo-v2.6-pro",
       prompt_tokens: 22010,
       completion_tokens: 420,
       cached_tokens: 19840,
@@ -51,8 +51,8 @@ const full: Usage = {
 /** A turn from before any of it was recorded: tokens and nothing else. */
 const plain: Usage = {
   calls: [
-    { step: "understand", model: "mimo-v2.5", prompt_tokens: 400, completion_tokens: 40 },
-    { step: "answer", model: "mimo-v2.5-pro", prompt_tokens: 2000, completion_tokens: 500 },
+    { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40 },
+    { step: "answer", model: "mimo-v2.6-pro", prompt_tokens: 2000, completion_tokens: 500 },
   ],
   prompt_tokens: 2400,
   completion_tokens: 540,

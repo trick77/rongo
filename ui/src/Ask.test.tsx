@@ -943,9 +943,9 @@ function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
 describe("Ask, what a turn cost", () => {
   const usage = {
     calls: [
-      { step: "understand", model: "mimo-v2.5", prompt_tokens: 400, completion_tokens: 40 },
+      { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40 },
       { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0 },
-      { step: "answer", model: "mimo-v2.5-pro", prompt_tokens: 2000, completion_tokens: 500 },
+      { step: "answer", model: "mimo-v2.6-pro", prompt_tokens: 2000, completion_tokens: 500 },
     ],
     prompt_tokens: 2412,
     completion_tokens: 540,
@@ -975,7 +975,7 @@ describe("Ask, what a turn cost", () => {
     // its deployment.
     const pane = await screen.findByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("understand");
-    expect(pane.textContent).toContain("mimo-v2.5-pro");
+    expect(pane.textContent).toContain("mimo-v2.6-pro");
     expect(pane.textContent).toContain("embed");
     // And the counts, split by what was paid for.
     expect(pane.textContent).toContain("model calls");
@@ -1009,11 +1009,11 @@ describe("Ask, what a turn cost", () => {
         cost_usd: 0.004,
         cached_tokens: 1800,
         calls: [
-          { step: "understand", model: "mimo-v2.5", prompt_tokens: 400, completion_tokens: 40, ms: 900, cached_tokens: 0 },
+          { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40, ms: 900, cached_tokens: 0 },
           { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0, ms: 120 },
           {
             step: "answer",
-            model: "mimo-v2.5-pro",
+            model: "mimo-v2.6-pro",
             prompt_tokens: 2000,
             completion_tokens: 500,
             ms: 38600,

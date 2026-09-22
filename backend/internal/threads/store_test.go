@@ -395,14 +395,14 @@ func TestSaveUsage_everyCallOfATurnComesBackWithTheThreadEvenWhenItAskedOrFailed
 		t.Fatalf("Fail: %v", err)
 	}
 	if err := s.SaveUsage(ctx, failed.ID, []usage.Call{
-		{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20},
+		{Step: "understand", Model: "mimo-v2.6-flash", Prompt: 100, Completion: 20},
 		{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
 	}); err != nil {
 		t.Fatalf("SaveUsage: %v", err)
 	}
 	if err := s.SaveUsage(ctx, answered.ID, []usage.Call{
-		{Step: "understand", Model: "mimo-v2.5", Prompt: 110, Completion: 22},
-		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 2000, Completion: 400},
+		{Step: "understand", Model: "mimo-v2.6-flash", Prompt: 110, Completion: 22},
+		{Step: "answer", Model: "mimo-v2.6-pro", Prompt: 2000, Completion: 400},
 	}); err != nil {
 		t.Fatalf("SaveUsage: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestSaveUsage_aFigureTheEndpointNeverSentComesBackAbsentNotZero(t *testing.
 	th, _ := s.Create(ctx, "anna", "How?")
 	msg, _ := s.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
 	if err := s.SaveUsage(ctx, msg.ID, []usage.Call{
-		{Step: "answer", Model: "mimo-v2.5-pro", Prompt: 3267, Completion: 64,
+		{Step: "answer", Model: "mimo-v2.6-pro", Prompt: 3267, Completion: 64,
 			Cached: usage.Int(3264), Reasoning: usage.Int(0), Ms: usage.Int(38600)},
 		{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
 	}); err != nil {

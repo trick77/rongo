@@ -63,7 +63,7 @@ func flowToolBudget() int {
 // considered and dropped, which means a DOUBLE failure here cannot separate
 // "agentic search does not work for this" from "this model family cannot hold
 // a six-call trajectory". Any conclusion drawn from two failures must say so.
-var flowDeployments = []string{"mimo-v2.5-pro", "mimo-v2.5"}
+var flowDeployments = []string{"mimo-v2.6-pro", "mimo-v2.6-flash"}
 
 // flowQuestion mirrors Question, but the candidates carry the evidence string
 // that says what was verified in the pinned corpus.

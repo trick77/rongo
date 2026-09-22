@@ -1093,7 +1093,7 @@
         "paths": [
           "backend/internal/llm/client.go"
         ],
-        "verified": "read 2026-09-21: client.go:43 ShortGateDeployment = \"mimo-v2.5\". Never written bare."
+        "verified": "read 2026-09-22: client.go:45 ShortGateDeployment = \"mimo-v2.6-flash\". Never written bare."
       }
     ],
     "note": "Suffix-only. Measured 2026-09-21: FTS 0, prefix 0, substring 15 of which 4 in client.go."
