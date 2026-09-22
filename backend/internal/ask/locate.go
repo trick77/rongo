@@ -49,8 +49,8 @@ import (
 //     crossingReserve and gapReserve were each written to prevent, and
 //     reproducing it a third time is not interesting.
 //
-// Off until measured: WithLocateLoop(nil) is what the product ships, the same
-// way the gap pass ships off.
+// On in the product at one round (BACKEND_LOCATE_ROUNDS); WithLocateLoop(nil)
+// switches it off.
 
 // locateReserve is the share of the token budget the walk, the crossing and
 // the gap pass all leave untouched for the loop: one part in eight, 3000 of
@@ -205,8 +205,7 @@ type LocateReport struct {
 }
 
 // WithLocateLoop gives the gatherer the client the locate loop calls, and the
-// searcher its search tool needs. Nil is off, which is what the product ships
-// until the arm is measured.
+// searcher its search tool needs. Nil is off.
 func (g *Gatherer) WithLocateLoop(c *llm.Client, s Searcher) *Gatherer {
 	g.locate, g.locateSearch = c, s
 	return g
@@ -215,8 +214,8 @@ func (g *Gatherer) WithLocateLoop(c *llm.Client, s Searcher) *Gatherer {
 // WithLocateRounds caps how many times the model may look, for the harness
 // arm that measures ONE look against the loop. A loop is only worth its
 // rounds if acting on what came back beats not acting on it, and that
-// comparison needs both halves on the same corpus. Zero or less is the
-// default; the product does not set it.
+// comparison needs both halves on the same corpus. Zero or less means
+// locateMaxRounds; the product sets it from BACKEND_LOCATE_ROUNDS.
 func (g *Gatherer) WithLocateRounds(n int) *Gatherer {
 	g.locateRounds = n
 	return g

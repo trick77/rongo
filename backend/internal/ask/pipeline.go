@@ -643,7 +643,7 @@ func (p *Pipeline) gather(ctx context.Context, question string, hits []retrieve.
 	scope.Links = census.Listing
 	sources, located, err := p.gatherSeeded(ctx, question, hits, scope, census, ev)
 	// What the locate loop concluded, carried to the answer prompt. Empty
-	// whenever the loop is off, which is every turn the product ships today.
+	// whenever the loop is off or looked at nothing.
 	scope.Located = located
 	return sources, scope, err
 }

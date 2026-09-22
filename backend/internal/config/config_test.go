@@ -572,3 +572,40 @@ func TestLoad_sshKeyAndKnownHostsComeTogether(t *testing.T) {
 		t.Fatal("Load() err = nil, want a refusal of a key without known_hosts")
 	}
 }
+
+func TestLoad_locateLoopIsOnByDefault(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.LocateRounds != 1 {
+		t.Errorf("LocateRounds = %d, want 1: one look is the default", cfg.LocateRounds)
+	}
+}
+
+func TestLoad_locateLoopCanBeSwitchedOff(t *testing.T) {
+	// Given
+	setEnv(t, map[string]string{
+		"BACKEND_SESSION_SECRET": validSecret,
+		"BACKEND_LOCATE_ROUNDS":  "0",
+	})
+
+	// When
+	cfg, err := Load()
+
+	// Then
+	if err != nil {
+		t.Fatalf("Load() err = %v, want nil", err)
+	}
+	if cfg.LocateRounds != 0 {
+		t.Errorf("LocateRounds = %d, want 0 when set off", cfg.LocateRounds)
+	}
+}
