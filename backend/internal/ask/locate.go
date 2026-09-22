@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
@@ -330,7 +333,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			if errors.As(err, &cut) && len(report.Calls) > 0 {
 				report.Found, report.Concluded = g.conclude(ctx, msgs), true
 			}
-			return a.out, report, nil
+			return pointedFirst(a.out, report.Found), report, nil
 		}
 		if turn.Done() {
 			// What it concluded, having read what it found. Kept only when a
@@ -374,6 +377,14 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				continue
 			}
 			before := len(a.out)
+			// Which matches the turn already held, read BEFORE admitting:
+			// the model is shown those too, marked, because the chunk that
+			// answers is usually among them and hiding it hid the one line
+			// the model needed to read.
+			gathered := make([]bool, len(landings))
+			for i, l := range landings {
+				gathered[i] = a.seen[l.ChunkID]
+			}
 			for _, l := range landings {
 				// Hop MaxHops+2: past the walk, the crossings and the gap
 				// pass. Never hop 0 — hitRepos reads hop 0 to say which
@@ -387,10 +398,12 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			if len(a.out) > before {
 				report.Landed = append(report.Landed, label)
 			}
-			// What the model reads is each address with a clipped excerpt of
-			// the code at it: reading is what lets it tell the line that
-			// answers from a file that merely contains the name.
-			msgs = append(msgs, llm.ToolResult(call.ID, locateResult(a.out[before:])))
+			// What the model reads is every match, gathered or not: for grep
+			// the matching lines with their numbers, as a terminal grep shows
+			// them; for the other tools a clipped excerpt. Reading is what
+			// lets it tell the line that answers from a file that merely
+			// contains the name.
+			msgs = append(msgs, llm.ToolResult(call.ID, locateResult(landings, gathered, grepPattern(call))))
 			if stop {
 				// The reserve ran out mid-call. Every call this turn
 				// ADVERTISED still needs a result: the assistant message
@@ -437,7 +450,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			break
 		}
 	}
-	return a.out, report, nil
+	return pointedFirst(a.out, report.Found), report, nil
 }
 
 // completeCalls is what survives of a turn cut at the output cap: the calls
@@ -458,6 +471,73 @@ func completeCalls(err error, calls []llm.ToolCall) []llm.ToolCall {
 	return out
 }
 
+// pointedFirst moves the source the loop's conclusion names to the front,
+// so the answer's first source is the place the loop read and named.
+//
+// The answer writes from the sources in order, and the order is retrieval's:
+// fused lanes and a reranker scoring excerpts, none of which ever read the
+// line that answers and decided it was the answer. The loop did. A chunk
+// holding the named line wins over another chunk of the same file; a file
+// named without a line takes its first chunk. A conclusion naming no source,
+// or "not found", leaves the order alone.
+func pointedFirst(sources []Source, found string) []Source {
+	if found == "" {
+		return sources
+	}
+	best := -1
+	for i, s := range sources {
+		line, ok := namedAt(found, path.Base(s.Path))
+		if !ok {
+			continue
+		}
+		if line >= s.StartLine && line <= s.EndLine {
+			best = i
+			break
+		}
+		if best < 0 {
+			best = i
+		}
+	}
+	if best <= 0 {
+		return sources
+	}
+	out := make([]Source, 0, len(sources))
+	out = append(out, sources[best])
+	out = append(out, sources[:best]...)
+	return append(out, sources[best+1:]...)
+}
+
+// namedAt reports whether text names the file base as a whole word, and the
+// line number written right after it as "base:123", or 0 when none is.
+func namedAt(text, base string) (int, bool) {
+	for from := 0; ; {
+		i := strings.Index(text[from:], base)
+		if i < 0 {
+			return 0, false
+		}
+		i += from
+		from = i + len(base)
+		if i > 0 && isIdentRune(rune(text[i-1])) {
+			continue
+		}
+		rest := text[from:]
+		if !strings.HasPrefix(rest, ":") {
+			return 0, true
+		}
+		digits := rest[1:]
+		n := 0
+		for n < len(digits) && digits[n] >= '0' && digits[n] <= '9' {
+			n++
+		}
+		line, _ := strconv.Atoi(digits[:n])
+		return line, true
+	}
+}
+
+func isIdentRune(r rune) bool {
+	return r == '_' || r == '-' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
 // conclude asks the model what it found, with no tools to call, after a round
 // budget spent entirely on looking. Its sentence is the pointer the answer
 // prompt carries.
@@ -476,9 +556,10 @@ func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string 
 	return strings.TrimSpace(turn.Content)
 }
 
-const locateConclude = `Stop looking. In one or two sentences, name the file, the line and the exact
-code that answers the question, from what you have read. If you did not find
-it, say so plainly instead of guessing.`
+const locateConclude = `Stop looking. In one or two sentences, name the place that answers the
+question, from what you have read: write it as FileName.ext:LINE, followed by
+the exact code on that line. If you did not find it, say so plainly instead of
+guessing.`
 
 // runLocateTool executes one call and returns a label for the trace, what it
 // landed, and — for a call refused before any lookup — what the model is told
@@ -719,38 +800,88 @@ func capLandings(ss []Source, n int) []Source {
 	return ss
 }
 
-// locateResult is what one call reports back to the model: the address AND
-// the code at it.
+// locateResult is what one call reports back to the model: every match,
+// with the ones the turn already held marked as such.
 //
-// The code, not only the address. An earlier version returned addresses
-// alone, on the reasoning that the chunks were already in the sources the
-// answer would be written from — which is true and beside the point. A model
-// that never reads what it found cannot tell the line that answers the
-// question from the file that merely contains it, so it stops as soon as a
-// path looks plausible, and the answer call then starts cold in front of
-// ninety sources with no idea which one mattered. Reading is what makes the
-// NEXT call different, and it is what a bare agent harness does on the same
-// index to answer the same question.
+// The code, not only the address, and for grep only the LINES that match.
+// A model that never reads what it found cannot tell the line that answers
+// the question from the file that merely contains it; a bare agent harness
+// answering the same question from the same code reads grep's output, which
+// is file, line number and line. Showing "nothing new" for a match already
+// gathered hid exactly that line on the question the loop exists for, where
+// the answering chunk is gathered long before the loop runs.
 //
-// Clipped per chunk: the loop is choosing where to look, not writing the
-// answer, and a round that pasted six whole files would spend the reply cap
-// on quotation.
-func locateResult(landed []Source) string {
+// Clipped: the loop is choosing where to look, not writing the answer, and a
+// round that pasted six whole files would spend the reply cap on quotation.
+func locateResult(landed []Source, gathered []bool, pattern string) string {
 	if len(landed) == 0 {
-		return "Nothing new; every match was already among the sources."
+		return "Nothing found."
 	}
 	var b strings.Builder
-	for _, s := range landed {
+	for i, s := range landed {
 		fmt.Fprintf(&b, "%s %s:%d-%d", s.Repo, s.Path, s.StartLine, s.EndLine)
 		if s.Symbol != "" {
 			fmt.Fprintf(&b, " (%s)", s.Symbol)
 		}
+		if i < len(gathered) && gathered[i] {
+			b.WriteString(" [already among the sources]")
+		}
 		b.WriteByte('\n')
-		b.WriteString(clipRunes(s.Text, locateExcerpt))
-		b.WriteString("\n\n")
+		if lines := matchingLines(s, pattern); lines != "" {
+			b.WriteString(lines)
+		} else {
+			b.WriteString(clipRunes(s.Text, locateExcerpt))
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
+
+// matchingLines renders the lines of s containing pattern, case-insensitive,
+// each as "<line number>: <line>", the way grep prints them. Empty when there
+// is no pattern or no line holds it whole, and the caller shows an excerpt.
+func matchingLines(s Source, pattern string) string {
+	if pattern == "" {
+		return ""
+	}
+	needle := strings.ToLower(pattern)
+	var b strings.Builder
+	n := 0
+	for i, line := range strings.Split(s.Text, "\n") {
+		if !strings.Contains(strings.ToLower(line), needle) {
+			continue
+		}
+		fmt.Fprintf(&b, "%d: %s\n", s.StartLine+i, clipRunes(strings.TrimSpace(line), locateLineMax))
+		if n++; n == locateLinesPerMatch {
+			break
+		}
+	}
+	return b.String()
+}
+
+// grepPattern is the pattern a grep call asked for, or empty for any other
+// tool or arguments that do not parse.
+func grepPattern(call llm.ToolCall) string {
+	if call.Name != "grep" {
+		return ""
+	}
+	var args struct {
+		Pattern string `json:"pattern"`
+	}
+	if json.Unmarshal([]byte(call.Arguments), &args) != nil {
+		return ""
+	}
+	return args.Pattern
+}
+
+// locateLinesPerMatch and locateLineMax bound what one grep match shows: a
+// handful of lines, each clipped, so a name repeated down a long chunk
+// cannot fill the round.
+const (
+	locateLinesPerMatch = 8
+	locateLineMax       = 240
+)
 
 // locateExcerpt is how much of a landed chunk the model reads per call.
 const locateExcerpt = 1200

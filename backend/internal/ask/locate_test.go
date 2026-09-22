@@ -814,3 +814,90 @@ func TestLocate_aTurnCutMidCallKeepsTheCompleteCalls(t *testing.T) {
 		t.Errorf("Found = %q, want the conclusion", report.Found)
 	}
 }
+
+func TestLocate_grepShowsTheMatchingLineEvenWhenAlreadyGathered(t *testing.T) {
+	// The chunk that answers is usually gathered already. Answering "nothing
+	// new" hid the one line the model needed to read; it gets the line with
+	// its number, the way a grep in a terminal would show it.
+	db := gatherDB(t)
+	converter := seedChunk(t, db, "ConverterPetRegistry.java", 0, 150, 170, "toHouseholdType",
+		"void toHouseholdType() {\n  mapName();\n  Optional.ofNullable(household.getAnzahlHaustiere()).ifPresent(wsHousehold::setAnzahlhaustiere);\n}")
+	var told []string
+	searcher := locateSearcher{seeds: map[string][]retrieve.Hit{
+		"setAnzahlhaustiere": {hitInFor(t, db, converter)},
+	}}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLMSeeing(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
+			{content: "ConverterPetRegistry.java:152"},
+		}, nil, &told), searcher).WithLocateRounds(1)
+
+	if _, _, err := g.Locate(context.Background(), "wo?",
+		[]Source{sourceOf(t, db, converter)}, nil, false, nil); err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if len(told) == 0 {
+		t.Fatal("no tool result reached the model")
+	}
+	got := told[0]
+	for _, want := range []string{"ConverterPetRegistry.java", "152:", "wsHousehold::setAnzahlhaustiere", "already among the sources"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tool result = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "mapName") {
+		t.Errorf("tool result = %q, want only the matching line, not the whole chunk", got)
+	}
+}
+
+func TestLocate_putsTheSourceThePointerNamesFirst(t *testing.T) {
+	// The answer writes from sources in order. The place the loop read and
+	// named goes to [1], so the answer's first source is the one that answers.
+	db := gatherDB(t)
+	entity := seedChunk(t, db, "HouseholdEntity.java", 0, 100, 120, "anzahlHaustiere", "private Integer anzahlHaustiere;")
+	ui := seedChunk(t, db, "household.component.ts", 0, 1, 20, "form", "anzahlHaustiere: new FormControl()")
+	first := seedChunk(t, db, "ConverterPetRegistry.java", 0, 100, 140, "fromHouseholdType", "void fromHouseholdType() {}")
+	second := seedChunk(t, db, "ConverterPetRegistry.java", 1, 150, 170, "toHouseholdType",
+		"ifPresent(wsHousehold::setAnzahlhaustiere);")
+	searcher := locateSearcher{seeds: map[string][]retrieve.Hit{
+		"setAnzahlhaustiere": {hitInFor(t, db, second)},
+	}}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
+			{content: "ConverterPetRegistry.java:150 calls wsHousehold::setAnzahlhaustiere."},
+		}, nil), searcher).WithLocateRounds(1)
+
+	got, _, err := g.Locate(context.Background(), "wo?", []Source{
+		sourceOf(t, db, entity), sourceOf(t, db, ui), sourceOf(t, db, first), sourceOf(t, db, second),
+	}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got[0].ChunkID != second {
+		t.Errorf("first source = %s:%d, want the converter chunk holding line 150", got[0].Path, got[0].StartLine)
+	}
+	if len(got) != 4 {
+		t.Errorf("sources = %d, want the same four, reordered", len(got))
+	}
+}
+
+func TestLocate_aPointerNamingNoSourceLeavesTheOrderAlone(t *testing.T) {
+	db := gatherDB(t)
+	a := seedChunk(t, db, "A.java", 0, 1, 10, "a", "class A {}")
+	b := seedChunk(t, db, "B.java", 0, 1, 10, "b", "class B {}")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"x"}`)}},
+			{content: "Not in the index."},
+		}, nil), locateSearcher{seeds: map[string][]retrieve.Hit{}}).WithLocateRounds(1)
+
+	got, _, err := g.Locate(context.Background(), "wo?",
+		[]Source{sourceOf(t, db, a), sourceOf(t, db, b)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got[0].ChunkID != a || got[1].ChunkID != b {
+		t.Errorf("order = %s, %s, want A then B unchanged", got[0].Path, got[1].Path)
+	}
+}

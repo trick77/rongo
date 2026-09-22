@@ -499,7 +499,12 @@ was written from excerpts and may have landed on a near miss. It is the
 weakest evidence in front of you. If it says the place was not found, that is
 its expected failure, not a finding: it read clipped excerpts after the
 sources were gathered. A source that answers the question wins, and the
-answer is written from it.`
+answer is written from it.
+
+When the note names a place and a source bears it out, the sources have been
+ordered to put it first. Open the answer with that place: the file, the line
+and the code there, cited to the source holding it, in the opening sentence.
+Then explain the rest.`
 
 const answerProcesses = `
 

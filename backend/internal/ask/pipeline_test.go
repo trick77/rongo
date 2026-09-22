@@ -770,6 +770,9 @@ func TestTheLoopsNotFoundNeverOverridesASourceThatAnswers(t *testing.T) {
 	if !strings.Contains(*prompt, "weakest evidence") {
 		t.Errorf("the prompt never ranks the loop's note below the sources:\n%s", *prompt)
 	}
+	if !strings.Contains(*prompt, "Open the answer with that place") {
+		t.Errorf("the prompt never tells the answer to lead with the place the loop read:\n%s", *prompt)
+	}
 }
 
 // TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer holds the line
