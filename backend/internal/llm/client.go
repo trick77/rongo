@@ -36,11 +36,13 @@ import (
 // the failure would look like a quality problem rather than a configuration
 // one; a profile id cannot, because llmwire validates every call against it.
 //
-// ShortGateDeployment is the SAME reasoning family as Pro. It is picked because
-// it queues less, not because it cannot think — see ShortGate.
+// ShortGateDeployment is the SAME reasoning family as Pro. It is picked on
+// price — 0.14 against 0.435 per 1M input — not because it cannot think, and
+// no longer because it queues less: llmwire measures V2.6-pro at 1-5 seconds
+// per call against the 25-64 the V2.5 notes recorded. See ShortGate.
 const (
-	ProDeployment       = "mimo-v2.5-pro"
-	ShortGateDeployment = "mimo-v2.5"
+	ProDeployment       = "mimo-v2.6-pro"
+	ShortGateDeployment = "mimo-v2.6-flash"
 )
 
 // defaultMaxTokens caps a call that names no budget of its own. Every request
@@ -57,9 +59,13 @@ type Config struct {
 	BaseURL string
 	APIKey  string
 	// Timeout bounds the whole call, and also how long the endpoint may take
-	// to send response headers: Pro queues at the endpoint before it answers,
-	// and llmwire's one-minute header default would end a queued call that
-	// was about to be served. Zero takes llmwire's defaults.
+	// to send response headers: Pro has queued at the endpoint before it
+	// answers, and llmwire's one-minute header default would end a queued call
+	// that was about to be served. V2.6 measures far faster than the V2.5 pair
+	// this was written for (1-5 seconds against 25-64), but the header
+	// allowance is kept: it costs nothing on a fast reply and a queue is a
+	// property of the deployment's load, not of the model. Zero takes
+	// llmwire's defaults.
 	Timeout time.Duration
 	// IdleTimeout aborts a stream when no frame arrives within the window.
 	// Zero takes llmwire's default of ninety seconds.
@@ -284,7 +290,8 @@ func record(ctx context.Context, o callOptions, model string, u Usage, took time
 // Option adjusts a single call.
 type Option func(*callOptions)
 
-// ShortGate routes this call to the non-Pro deployment, which queues less.
+// ShortGate routes this call to the non-Pro deployment, which costs a third of
+// Pro per token.
 //
 // It says nothing about reasoning. Both deployments are the same reasoning
 // family and both think when asked to; suppressing thought is WithoutThinking,

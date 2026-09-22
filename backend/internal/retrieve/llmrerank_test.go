@@ -14,7 +14,7 @@ import (
 
 // rerankSeen is what the fake read off the request: the prompt the model was
 // shown and the reply cap it was sent. The gate profile spells the cap
-// max_completion_tokens (llmwire profiles.yaml, mimo-v2.5).
+// max_completion_tokens (llmwire profiles.yaml, mimo-v2.6-flash).
 type rerankSeen struct {
 	prompt   string
 	replyCap int

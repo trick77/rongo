@@ -184,7 +184,7 @@ func TestAsk_theSuggestionCallIsPartOfWhatTheTurnPaid(t *testing.T) {
 	// the number under the answer is what the answer cost, pills included.
 	sp := &suggesterSpy{
 		reply: []string{"What happens on a re-index?"},
-		pays:  &usage.Call{Step: "followups", Model: "mimo-v2.5", Prompt: 400, Completion: 20},
+		pays:  &usage.Call{Step: "followups", Model: "mimo-v2.6-flash", Prompt: 400, Completion: 20},
 	}
 	srv, store, _ := newSuggestingServer(t, sp, withAskerAnswering())
 

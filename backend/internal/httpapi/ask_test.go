@@ -755,8 +755,8 @@ func TestAsk_aFailedTurnKeepsItsQuestionAndSaysNothingSecret(t *testing.T) {
 func TestAsk_aTurnStoppedByTheTokenCeilingSaysSoAndStillReportsWhatItPaidFor(t *testing.T) {
 	// Given a pipeline whose next call the ceiling refused, after two paid ones
 	paid := []usage.Call{
-		{Step: "understand", Model: "mimo-v2.5", Prompt: 200000, Completion: 100},
-		{Step: "rerank", Model: "mimo-v2.5", Prompt: 60000, Completion: 50},
+		{Step: "understand", Model: "mimo-v2.6-flash", Prompt: 200000, Completion: 100},
+		{Step: "rerank", Model: "mimo-v2.6-flash", Prompt: 60000, Completion: 50},
 	}
 	deps, st := askDeps(t, &fakeAsker{
 		calls: paid,
@@ -951,7 +951,7 @@ func TestAsk_withoutAPipelineAnswers503(t *testing.T) {
 // gateCalls is what a fake turn paid for: one priced call, as llmwire
 // prices them on the way in, and one the wire had no rate for.
 var gateCalls = []usage.Call{
-	{Step: "understand", Model: "mimo-v2.5", Prompt: 100, Completion: 20, CostNanoUSD: usage.Nano(140_000)},
+	{Step: "understand", Model: "mimo-v2.6-flash", Prompt: 100, Completion: 20, CostNanoUSD: usage.Nano(140_000)},
 	{Step: "embed", Model: "text-embedding-3-small", Prompt: 12},
 }
 

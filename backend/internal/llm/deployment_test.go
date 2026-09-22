@@ -98,7 +98,7 @@ func TestConfigOverridesMustShareAHost(t *testing.T) {
 		t.Fatal("gate on MiMo's host with Pro on the gateway must be refused")
 	}
 
-	t.Setenv(llmwire.GatewayModelsEnv, "gpt-5.4-mini=proxy,mimo-v2.5=proxy-gate")
+	t.Setenv(llmwire.GatewayModelsEnv, "gpt-5.4-mini=proxy,mimo-v2.6-flash=proxy-gate")
 	if _, err := NewClient(Config{Pro: "gpt-5.4-mini"}, nil); err != nil {
 		t.Fatalf("both lanes on the gateway: %v", err)
 	}
