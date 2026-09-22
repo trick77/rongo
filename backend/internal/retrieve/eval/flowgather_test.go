@@ -119,6 +119,13 @@ type flowGatherArm struct {
 	// after the walk and the crossings, whose landings are resolved without a
 	// second call. BACKEND_EVAL_GAP=0 leaves the gap arms out.
 	gap bool
+	// locate turns the locate loop on: after the walk, the crossings and the
+	// gap pass, the model may look again with tools. BACKEND_EVAL_LOCATE=0
+	// leaves the arm out.
+	locate bool
+	// oneLook caps the loop at a single round: the cheaper hypothesis the
+	// loop has to beat.
+	oneLook bool
 }
 
 // TestFlowGathered reports, per arm and per question, which parts of the flow
@@ -167,6 +174,24 @@ func TestFlowGathered(t *testing.T) {
 				},
 				flowGatherArm{name: "symbol walk + crossings + gap pass", hops: deployed.MaxHops, gap: true})
 		}
+		// The locate loop, on the reranked hit list — the product's own
+		// order, so the arm measures what the loop adds to what ships rather
+		// than to a list the product does not have.
+		if envOr("BACKEND_EVAL_LOCATE", "1") != "0" {
+			arms = append(arms, flowGatherArm{
+				name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings + locate loop",
+					rr.Pool, rr.Excerpt),
+				hops: deployed.MaxHops, rerank: true, locate: true})
+			// ONE round of the same loop, as the cheaper hypothesis the loop
+			// has to beat: the model guesses identifiers once and the scan
+			// resolves them, with no chance to act on what came back. If this
+			// arm reaches what the loop reaches, the rounds are paying for
+			// nothing and the loop is a gap pass with extra steps.
+			arms = append(arms, flowGatherArm{
+				name: fmt.Sprintf("short-gate rerank over %d, %d-rune excerpts + symbol walk + crossings + one look (no loop)",
+					rr.Pool, rr.Excerpt),
+				hops: deployed.MaxHops, rerank: true, locate: true, oneLook: true})
+		}
 	}
 	// Every arm here searches with the same keyword lane, so the rung belongs
 	// in every label: a table run with a lane the product does not have must
@@ -211,6 +236,14 @@ func TestFlowGathered(t *testing.T) {
 		if arm.gap {
 			g = evalGatherer(t, db, opts, gapClient)
 		}
+		if arm.locate {
+			// The retriever the loop's own search and grep tools use is the
+			// product's, so the tools reach the same index the arm searched.
+			g = evalLocateGatherer(t, db, opts, gapClient, retriever)
+			if arm.oneLook {
+				g = g.WithLocateRounds(1)
+			}
+		}
 		var totalParts, totalReached, totalSources, whole int
 		t.Logf("\n=== arm: %s", arm.name)
 		for _, q := range questions {
@@ -230,6 +263,22 @@ func TestFlowGathered(t *testing.T) {
 				}
 				t.Logf("    gap asked %v landed %v unresolved %v refused %v %s",
 					asked, report.Landed, report.Unresolved, report.Refused, report.Skipped)
+			}
+			if arm.locate {
+				var lr ask.LocateReport
+				// The turn's repository restriction, the same one the search
+				// ran under: the loop is a ceiling, not a fresh lookup, so an
+				// arm that let it roam wider would measure a product that
+				// does not exist.
+				sources, lr, err = g.Locate(ctx, q.Text, sources, expansions[q.Text].Repos, false, nil)
+				if err != nil {
+					t.Fatalf("locate %q: %v", q.Text, err)
+				}
+				// Empty beside landed: a call that found nothing is why the
+				// next one was spelled differently, and it is the half that
+				// says whether the loop is doing what it exists to do.
+				t.Logf("    locate rounds %d calls %v landed %v empty %v refused %v %s",
+					lr.Rounds, lr.Calls, lr.Landed, lr.Empty, lr.Refused, lr.Skipped)
 			}
 			parts := q.parts()
 			reached := 0

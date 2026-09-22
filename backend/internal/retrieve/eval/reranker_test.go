@@ -48,6 +48,19 @@ func evalGatherer(t *testing.T, db *sql.DB, opts ask.GatherOptions, c *llm.Clien
 	return g
 }
 
+// evalLocateGatherer is the gatherer with the locate loop on. Its own helper
+// rather than a flag on evalGatherer: the loop needs a Searcher as well as a
+// client, and the two arms are measured against each other.
+//
+// The log is NOT failOnWarn here. The loop warns and keeps going when a round
+// fails or a tool finds nothing resolvable — that is its never-fail contract,
+// and an arm that failed the run on it would measure a product that does not
+// exist.
+func evalLocateGatherer(t *testing.T, db *sql.DB, opts ask.GatherOptions, c *llm.Client, s ask.Searcher) *ask.Gatherer {
+	t.Helper()
+	return ask.NewGatherer(db, opts).WithLocateLoop(c, s)
+}
+
 // TestEvalReranker_readsPoolAndExcerptFromEnv: the pool and the excerpt width
 // are the arm's knobs, so a sweep needs no recompile. No endpoint is touched;
 // the client is only used once Rerank calls it.

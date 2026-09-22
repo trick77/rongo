@@ -137,6 +137,26 @@ func New(db *sql.DB, embedder Embedder) *Retriever {
 	}
 }
 
+// Substring scans the raw source for one literal term and returns the chunks
+// it occurs in, at most n of them.
+//
+// For a caller that means "find this exact text" — the locate loop's grep
+// tool, which tells the model that nothing found means the spelling was
+// wrong — the term is scanned as written, with nothing derived from it.
+//
+// The hub guard inside SearchSubstringIn still applies: a term in more than
+// a fiftieth of the corpus comes back empty. The loop reads that as "not
+// found" and re-spells a name that was right, which is worth telling apart —
+// but the counting query that would tell them apart is not on this branch, so
+// for now the two look the same to the caller.
+func (r *Retriever) Substring(ctx context.Context, term string, n int, repos []string, question string, stage StagePrefixes) ([]Hit, error) {
+	known, err := r.knownRepos(ctx, repos, question)
+	if err != nil {
+		return nil, err
+	}
+	return r.store.SearchSubstringIn(ctx, term, n, known, stage)
+}
+
 // Search runs both lanes and fuses them.
 //
 // No match anywhere returns an EMPTY SLICE and NO ERROR. "No hit means no hit"
@@ -680,7 +700,7 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior
 
 	// The substring rung, last because it is the only lane that does not go
 	// through an index: a term that occurs solely INSIDE a larger token
-	// (getAnzahlFahrzeuge, setAnzahlfahrzeuge) is invisible to every rung above,
+	// (getAnzahlGeraete, setAnzahlgeraete) is invisible to every rung above,
 	// whatever weight they carry, because unicode61 tokenizes those whole.
 	//
 	// Terms are derived in code from the question and the guessed identifiers,
@@ -716,8 +736,8 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior
 		// rung is needed at all.
 		//
 		// Measured on the motivating question: the guessed term
-		// "policenantrag" alone returned 40 hits — the whole lane — while
-		// staying under the hub share, so "anzahlfahrzeuge" and its single
+		// "antrag" alone returned 40 hits — the whole lane — while
+		// staying under the hub share, so "anzahlgeraete" and its single
 		// chunk, the mapping the rung exists to recover, were cut before
 		// fusion ever saw them. A wide term must cost itself, not the lane.
 		perTerm := make([][]Hit, len(terms))

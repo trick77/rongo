@@ -477,6 +477,30 @@ quoted as written, never paraphrased or reassembled from memory.`
 // strongest signal the prompt has that the answer is a process. It wins over
 // the sequence the comparison blocks ask for, and they say so, because both
 // can land in one prompt under "at most one diagram".
+// answerLocated carries what the locate loop concluded after reading what it
+// found. It is a pointer into the sources, so the rules on it are the rules on
+// a pointer: follow it, cite the source it names, and if the sources do not
+// bear it out, the sources win. The loop read excerpts and may have been
+// looking at the wrong one; the numbered sources are what the answer stands on.
+// A "not found" from it never overrides a source that answers: the loop runs
+// last, over sources the walk already gathered, so a false negative is its
+// expected failure shape.
+const answerLocated = `
+
+Before this answer was written, the question was traced through the index by
+searching and reading, and that search concluded:
+
+%s
+Treat this as a POINTER to the place among the sources that matters, not as
+the answer and not as a source. Find the source it names, read it, and write
+from THAT - the citation is to the source, never to this note. Where the
+sources do not bear it out, the sources are right and this note is wrong: it
+was written from excerpts and may have landed on a near miss. It is the
+weakest evidence in front of you. If it says the place was not found, that is
+its expected failure, not a finding: it read clipped excerpts after the
+sources were gathered. A source that answers the question wins, and the
+answer is written from it.`
+
 const answerProcesses = `
 
 The process models among the sources are wired as follows, read from the model
@@ -836,6 +860,29 @@ type Scope struct {
 	// the index at answer time. Derived per turn like Processes, never
 	// persisted, for the same reason.
 	Links string `json:"-"`
+	// Located is what the locate loop concluded after reading what it found:
+	// the file, the line and the code that does the thing asked about. Empty
+	// when the loop is off or looked at nothing.
+	//
+	// A POINTER into the sources, never a substitute for them. The answer is
+	// still written from the numbered sources and every claim still cites
+	// one; this says which of ninety is the one that matters, which is what
+	// something that just read the code knows and a cold answer call does
+	// not. Derived per turn, never persisted, like Processes.
+	//
+	// So a re-explain answers WITHOUT it: the loop does not run again, and
+	// storing the sentence would keep model prose about code, which the
+	// index and the record never hold. The re-explained answer stands on the
+	// same sources and may point at a different one.
+	Located string `json:"-"`
+	// Resumed is this turn continuing a clarification card rather than
+	// answering a fresh question. It stops the locate loop: a module card
+	// replays exactly the hits its candidate was built from, and a loop that
+	// searched past them would answer from code the card never offered.
+	//
+	// Per turn, never persisted: the stored scope belongs to the turn that
+	// asked, and a re-explain of it is not itself a resume.
+	Resumed bool `json:"-"`
 }
 
 // DocsOnly reports whether every source is documentation — prose about the
@@ -1251,6 +1298,9 @@ func systemPrompt(audience Audience, lang Language, sources []Source, scope Scop
 	if scope.Links != "" {
 		system += fmt.Sprintf(answerLinks, scope.Links)
 	}
+	if scope.Located != "" {
+		system += fmt.Sprintf(answerLocated, scope.Located)
+	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))
 	}
@@ -1368,6 +1418,12 @@ func reachedVia(reason string) string {
 	// A census landing: the index recorded a navigation site here.
 	if rest, ok := strings.CutPrefix(reason, "link:"); ok {
 		return "link site " + rest
+	}
+	// The locate loop: looked for deliberately, after the first look had been
+	// read, and the tool and its argument say what was asked for. The
+	// argument is the index's spelling, never the model's prose.
+	if rest, ok := strings.CutPrefix(reason, "locate:"); ok {
+		return "looked for after reading the sources, by " + rest
 	}
 	return "reached via " + strings.TrimPrefix(reason, "reference:")
 }
