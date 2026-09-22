@@ -165,7 +165,7 @@ func codeLaneLabel() string {
 // decay — set it on top of this.
 func evalRetriever(t *testing.T, db *sql.DB) *retrieve.Retriever {
 	t.Helper()
-	r := retrieve.New(db, evalEmbedder(t))
+	r := retrieve.New(db, evalQueryEmbedder(t, db))
 	if !codeLaneOn() {
 		r.CodeWeight = 0
 	}
@@ -270,39 +270,95 @@ func TestEvalIndex(t *testing.T) {
 		t.Fatalf("read the repository state: %v", err)
 	}
 	for _, st := range active {
-		spec := specToIndex(st)
-		token := os.Getenv(tokenEnvOf(specs, st.Name))
-		if err := gitc.EnsureCloned(ctx, spec, token); err != nil {
-			t.Fatalf("clone %s: %v", st.Name, err)
-		}
-		branch := st.Branch
-		if branch == "" {
-			branch, err = gitc.DefaultBranch(ctx, spec, token)
+		var head string
+		var paths []string
+		if st.Snapshot() {
+			var unchanged bool
+			head, paths, unchanged, err = snapshotHead(ctx, gitc, state, &st)
 			if err != nil {
-				t.Fatalf("resolve the branch of %s: %v", st.Name, err)
+				t.Fatalf("snapshot %s: %v", st.Name, err)
 			}
-			if err := state.SetBranch(ctx, st.Name, branch); err != nil {
-				t.Fatalf("record the branch of %s: %v", st.Name, err)
+			if unchanged {
+				t.Logf("unchanged %-12s sha=%s", st.Name, gitrepo.ShortSHA(head))
+				continue
 			}
-			st.Branch = branch
-			spec.Branch = branch
+		} else {
+			head = cloneHead(ctx, t, gitc, state, specs, &st)
 		}
-		if err := gitc.Fetch(ctx, spec, token); err != nil {
-			t.Fatalf("fetch %s: %v", st.Name, err)
-		}
-		head, err := gitc.HeadSHA(ctx, spec, branch)
-		if err != nil {
-			t.Fatalf("head of %s: %v", st.Name, err)
-		}
-		counts, err := pipeline.IndexRepo(ctx, st, head, nil)
+		counts, err := pipeline.IndexRepo(ctx, st, head, paths)
 		if err != nil {
 			t.Fatalf("index %s: %v", st.Name, err)
 		}
 		if err := state.MarkIndexed(ctx, st.Name, head, counts); err != nil {
 			t.Fatalf("record %s: %v", st.Name, err)
 		}
-		t.Logf("indexed %-12s branch=%-8s files=%-5d chunks=%d", st.Name, branch, counts.Files, counts.Chunks)
+		t.Logf("indexed %-12s branch=%-8s files=%-5d chunks=%d", st.Name, st.Branch, counts.Files, counts.Chunks)
 	}
+}
+
+// cloneHead clones or fetches one repository and returns the head to index.
+func cloneHead(ctx context.Context, t *testing.T, gitc *gitrepo.Client, state *indexer.StateStore,
+	specs []repos.Spec, st *indexer.RepoState) string {
+	t.Helper()
+	spec := specToIndex(*st)
+	token := os.Getenv(tokenEnvOf(specs, st.Name))
+	if err := gitc.EnsureCloned(ctx, spec, token); err != nil {
+		t.Fatalf("clone %s: %v", st.Name, err)
+	}
+	if st.Branch == "" {
+		branch, err := gitc.DefaultBranch(ctx, spec, token)
+		if err != nil {
+			t.Fatalf("resolve the branch of %s: %v", st.Name, err)
+		}
+		if err := state.SetBranch(ctx, st.Name, branch); err != nil {
+			t.Fatalf("record the branch of %s: %v", st.Name, err)
+		}
+		st.Branch = branch
+		spec.Branch = branch
+	}
+	if err := gitc.Fetch(ctx, spec, token); err != nil {
+		t.Fatalf("fetch %s: %v", st.Name, err)
+	}
+	head, err := gitc.HeadSHA(ctx, spec, st.Branch)
+	if err != nil {
+		t.Fatalf("head of %s: %v", st.Name, err)
+	}
+	return head
+}
+
+// snapshotHead readies an extracted drop the way the poller does: commit it,
+// record the snapshot branch, and say what to index. unchanged means the drop
+// is exactly what was indexed last; paths is nil for a full index. A drop
+// extracted afresh has a new object store without the recorded commit, so its
+// index is reset and read whole rather than diffed against a bad object.
+func snapshotHead(ctx context.Context, gitc *gitrepo.Client, state *indexer.StateStore,
+	st *indexer.RepoState) (sha string, paths []string, unchanged bool, err error) {
+	spec := repos.Spec{Name: st.Name, Snapshot: true, Enabled: true}
+	sha, err = gitc.EnsureSnapshot(ctx, spec)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if st.Branch != gitrepo.SnapshotBranch {
+		if err := state.SetBranch(ctx, st.Name, gitrepo.SnapshotBranch); err != nil {
+			return "", nil, false, err
+		}
+		st.Branch = gitrepo.SnapshotBranch
+	}
+	if sha == st.LastSHA {
+		return sha, nil, true, nil
+	}
+	if st.LastSHA == "" {
+		return sha, nil, false, nil
+	}
+	if gitc.HasCommit(ctx, spec, st.LastSHA) {
+		paths, err = gitc.ChangedPaths(ctx, spec, st.LastSHA, sha)
+		return sha, paths, false, err
+	}
+	if err := state.ResetRepo(ctx, st.Name); err != nil {
+		return "", nil, false, err
+	}
+	st.LastSHA = ""
+	return sha, nil, false, nil
 }
 
 func specToIndex(st indexer.RepoState) repos.Spec {
@@ -356,7 +412,7 @@ func TestEvalMeasure(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	client := evalEmbedder(t)
+	client := evalQueryEmbedder(t, db)
 	r := retrieve.New(db, client)
 	if v := os.Getenv("BACKEND_SEARCH_MAX_DISTANCE"); v != "" {
 		d, err := strconv.ParseFloat(v, 64)

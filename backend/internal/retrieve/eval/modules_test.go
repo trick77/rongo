@@ -151,7 +151,7 @@ func TestEvalMeasureModules(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	client := evalEmbedder(t)
+	client := evalQueryEmbedder(t, db)
 	r := retrieve.New(db, client)
 
 	o := moduleOpts(t)

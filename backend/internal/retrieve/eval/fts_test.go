@@ -55,17 +55,17 @@ func TestEvalMeasureFTS(t *testing.T) {
 	// an arm compared against a remembered baseline measures the memory. The
 	// rung ships, so the baseline is the one that has to be configured: zero is
 	// the prose floor the lane had before it.
-	plain := retrieve.New(db, evalEmbedder(t))
+	plain := retrieve.New(db, evalQueryEmbedder(t, db))
 	plain.CodeWeight = 0
 	plain.SubstringWeight = 0
 	// The substring rung gets its own pair, for the reason the code rung has
 	// one: it reaches chunks no FTS rung can see at all, so "with and without"
 	// is the only way to price it. Both arms otherwise the product's.
-	noSub := retrieve.New(db, evalEmbedder(t))
+	noSub := retrieve.New(db, evalQueryEmbedder(t, db))
 	noSub.SubstringWeight = 0
 	// The swept arm reads BACKEND_EVAL_SUBSTRING_WEIGHT so the constant can be
 	// settled without a rebuild; unset, it is the product's.
-	swept := retrieve.New(db, evalEmbedder(t))
+	swept := retrieve.New(db, evalQueryEmbedder(t, db))
 	subW := swept.SubstringWeight
 	if w := os.Getenv("BACKEND_EVAL_SUBSTRING_WEIGHT"); w != "" {
 		f, err := strconv.ParseFloat(w, 64)
