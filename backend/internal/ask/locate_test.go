@@ -197,7 +197,7 @@ func TestLocate_grepLandsTheConverterTheRankedLanesMissed(t *testing.T) {
 	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
 		WithLocateLoop(locateLLM(t, []locateRound{
 			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
-			{content: "Gefunden im Converter."},
+			{content: "FOUND: ConverterPetRegistry.java:150 ifPresent(wsHousehold::setAnzahlhaustiere)"},
 		}, nil), searcher)
 	sources := []Source{sourceOf(t, db, namingID)}
 
@@ -213,16 +213,16 @@ func TestLocate_grepLandsTheConverterTheRankedLanesMissed(t *testing.T) {
 	}
 	// The reason says how it arrived and carries the index's spelling, never
 	// the model's prose: reachedVia renders it for the answer prompt.
-	if s.Reason != "locate:grep setAnzahlhaustiere" {
-		t.Errorf("reason = %q, want the tool and the pattern", s.Reason)
+	if s.Reason != "locate:found" {
+		t.Errorf("reason = %q, want locate:found: grep shows lines, the conclusion admits", s.Reason)
 	}
 	// Never hop 0: hitRepos reads hop 0 to say which repositories the
 	// question's own search reached, and a loop landing is not that.
 	if s.Hop != 3 {
 		t.Errorf("hop = %d, want MaxHops+2", s.Hop)
 	}
-	if len(report.Landed) != 1 || !strings.Contains(report.Landed[0], "setAnzahlhaustiere") {
-		t.Errorf("Landed = %v, want the grep that found it", report.Landed)
+	if len(report.Calls) != 1 || !strings.Contains(report.Calls[0], "grep(setAnzahlhaustiere) 1 lines") {
+		t.Errorf("Calls = %v, want the grep with its line count", report.Calls)
 	}
 }
 
@@ -248,7 +248,7 @@ func TestLocate_anEmptyCallIsReportedSoTheNextQueryCanDiffer(t *testing.T) {
 		WithLocateLoop(locateLLM(t, []locateRound{
 			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlHaustiere"}`)}},
 			{calls: []llm.ToolCall{call("c2", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
-			{content: "Gefunden."},
+			{content: "FOUND: ConverterPetRegistry.java:150 ifPresent(wsHousehold::setAnzahlhaustiere)"},
 		}, nil), searcher)
 	sources := []Source{sourceOf(t, db, namingID)}
 
@@ -352,21 +352,19 @@ func TestLocate_refusesTheCallsAfterTheOneTheReserveRanOutOn(t *testing.T) {
 	db := gatherDB(t)
 	id := seedChunk(t, db, "HouseholdEntity.java", 0, 100, 120, "anzahlHaustiere",
 		"private Integer anzahlHaustiere;")
-	big := seedChunk(t, db, "ConverterPetRegistry.java", 0, 1, 400, "toHouseholdType",
+	seedChunk(t, db, "ConverterPetRegistry.java", 0, 1, 400, "toHouseholdType",
 		strings.Repeat("wsHousehold.setAnzahlhaustiere(household.getAnzahlHaustiere()); ", 400))
 
 	searcher := locateSearcher{seeds: map[string][]retrieve.Hit{
-		"nichtVorhanden":     {},
-		"setAnzahlhaustiere": {hitInFor(t, db, big)},
-		"getAnzahlHaustiere": {hitInFor(t, db, big)},
+		"nichtVorhanden": {},
 	}}
 	// A budget with almost no room past the source it is given, so the second
 	// call's landing cannot be admitted.
 	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 120}).
 		WithLocateLoop(locateLLM(t, []locateRound{{calls: []llm.ToolCall{
 			call("c1", "grep", `{"pattern":"nichtVorhanden"}`),
-			call("c2", "grep", `{"pattern":"setAnzahlhaustiere"}`),
-			call("c3", "grep", `{"pattern":"getAnzahlHaustiere"}`),
+			call("c2", "read", `{"repo":"peeq","path":"ConverterPetRegistry.java","line":1}`),
+			call("c3", "read", `{"repo":"peeq","path":"ConverterPetRegistry.java","line":2}`),
 		}}}, nil), searcher)
 
 	_, report, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, id)}, nil, false, nil)
@@ -590,7 +588,7 @@ func TestLocate_aRoundCutAtTheCapKeepsTheLandingsAndThePointer(t *testing.T) {
 		WithLocateLoop(locateLLM(t, []locateRound{
 			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
 			{calls: []llm.ToolCall{call("c2", "grep", `{"pattern":"half`)}, finish: "length"},
-			{content: "ConverterPetRegistry.java:162 setzt den Wert."},
+			{content: "FOUND: ConverterPetRegistry.java:150 setzt den Wert."},
 		}, nil), searcher)
 	g.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -795,7 +793,7 @@ func TestLocate_aTurnCutMidCallKeepsTheCompleteCalls(t *testing.T) {
 				call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`),
 				call("c2", "grep", `{"pattern":"anzahl`),
 			}, finish: "length"},
-			{content: "ConverterPetRegistry.java:162"},
+			{content: "FOUND: ConverterPetRegistry.java:150"},
 		}, nil), searcher).WithLocateRounds(1)
 	g.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -843,7 +841,7 @@ func TestLocate_grepShowsTheMatchingLineEvenWhenAlreadyGathered(t *testing.T) {
 		t.Fatal("no tool result reached the model")
 	}
 	got := told[0]
-	for _, want := range []string{"ConverterPetRegistry.java", "152:", "wsHousehold::setAnzahlhaustiere", "already among the sources"} {
+	for _, want := range []string{"ConverterPetRegistry.java", "Line 152:", "wsHousehold::setAnzahlhaustiere", "[among the sources]"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("tool result = %q, want it to contain %q", got, want)
 		}
@@ -962,5 +960,130 @@ func TestLocate_onlyRefusedCallsDoNotCountAsLooking(t *testing.T) {
 	}
 	if report.Found != "" {
 		t.Errorf("Found = %q, want nothing: no tool ran", report.Found)
+	}
+}
+
+func TestLocate_grepListsMatchingLinesGroupedByFileLikeATerminalGrep(t *testing.T) {
+	// opencode's first grep on the flagship returned 100 matching lines,
+	// grouped by file, and the answering line was among them. The loop's
+	// grep shows the same shape: every matching line, deduplicated across
+	// overlapping chunks, the files the turn already holds marked.
+	db := gatherDB(t)
+	entity := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 20, "HouseholdEntity",
+		"class HouseholdEntity {\n  private Integer anzahlHaustiere;\n}")
+	conv1 := seedChunk(t, db, "ConverterPetRegistry.java", 0, 150, 165, "toHouseholdType",
+		"void toHouseholdType() {\n  x();\n  Optional.ofNullable(h.getAnzahlHaustiere()).ifPresent(ws::setAnzahlhaustiere);\n}")
+	// An overlapping window over the same line must not list it twice.
+	conv2 := seedChunk(t, db, "ConverterPetRegistry.java", 1, 152, 170, "toHouseholdType",
+		"  Optional.ofNullable(h.getAnzahlHaustiere()).ifPresent(ws::setAnzahlhaustiere);\n}")
+	var told []string
+	searcher := locateSearcher{seeds: map[string][]retrieve.Hit{
+		"anzahlhaustiere": {hitInFor(t, db, entity), hitInFor(t, db, conv1), hitInFor(t, db, conv2)},
+	}}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLMSeeing(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"anzahlhaustiere"}`)}},
+			{content: "NOT FOUND: still looking"},
+		}, nil, &told), searcher).WithLocateRounds(1)
+
+	got, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, entity)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if len(told) == 0 {
+		t.Fatal("no tool result reached the model")
+	}
+	out := told[0]
+	for _, want := range []string{
+		"Found 2 matching lines",
+		"peeq HouseholdEntity.java [among the sources]",
+		"  Line 2: private Integer anzahlHaustiere;",
+		"peeq ConverterPetRegistry.java\n",
+		"  Line 152: Optional.ofNullable(h.getAnzahlHaustiere()).ifPresent(ws::setAnzahlhaustiere);",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("grep output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "Line 152:") != 1 {
+		t.Errorf("line 152 listed %d times, want once across overlapping chunks:\n%s", strings.Count(out, "Line 152:"), out)
+	}
+	if len(got) != 1 {
+		t.Errorf("sources = %v, want grep to admit nothing by itself", repoPaths(got))
+	}
+}
+
+func TestLocate_grepStopsAtAHundredLinesAndSaysMoreExist(t *testing.T) {
+	db := gatherDB(t)
+	var body strings.Builder
+	for i := 0; i < 130; i++ {
+		body.WriteString("setAnzahlhaustiere(1);\n")
+	}
+	big := seedChunk(t, db, "Many.java", 0, 1, 130, "many", body.String())
+	var told []string
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLMSeeing(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
+			{content: "NOT FOUND:"},
+		}, nil, &told), locateSearcher{seeds: map[string][]retrieve.Hit{
+			"setAnzahlhaustiere": {hitInFor(t, db, big)},
+		}}).WithLocateRounds(1)
+
+	if _, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, big)}, nil, false, nil); err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got := strings.Count(told[0], "  Line "); got != locateGrepLines {
+		t.Errorf("listed %d lines, want %d", got, locateGrepLines)
+	}
+	if !strings.Contains(told[0], "more matches available") {
+		t.Errorf("grep output never says more exist:\n%.300s", told[0])
+	}
+}
+
+func TestLocate_readShowsTheFileAroundTheLineAcrossChunks(t *testing.T) {
+	db := gatherDB(t)
+	a := seedChunk(t, db, "ConverterPetRegistry.java", 0, 100, 102, "a", "line100\nline101\nline102")
+	seedChunk(t, db, "ConverterPetRegistry.java", 1, 103, 105, "b", "line103\nline104\nline105")
+	var told []string
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLMSeeing(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "read", `{"repo":"peeq","path":"ConverterPetRegistry.java","line":101}`)}},
+			{content: "NOT FOUND:"},
+		}, nil, &told), locateSearcher{}).WithLocateRounds(1)
+
+	if _, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, a)}, nil, false, nil); err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	for _, want := range []string{"100: line100", "102: line102", "103: line103", "105: line105"} {
+		if !strings.Contains(told[0], want) {
+			t.Errorf("read output missing %q:\n%s", want, told[0])
+		}
+	}
+}
+
+func TestLocate_aFoundPlaceOnlyGrepShowedIsAdmittedAndPutFirst(t *testing.T) {
+	// grep admits nothing; the model decides. The place its conclusion
+	// names is fetched, admitted and put first, so the answer can cite it.
+	db := gatherDB(t)
+	entity := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 20, "HouseholdEntity", "private Integer anzahlHaustiere;")
+	conv := seedChunk(t, db, "svc/ConverterPetRegistry.java", 0, 150, 170, "toHouseholdType",
+		"x();\nx();\nOptional.ofNullable(h.getAnzahlHaustiere()).ifPresent(ws::setAnzahlhaustiere);")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
+			{content: "FOUND: svc/ConverterPetRegistry.java:152 ifPresent(ws::setAnzahlhaustiere)"},
+		}, nil), locateSearcher{seeds: map[string][]retrieve.Hit{
+			"setAnzahlhaustiere": {hitInFor(t, db, conv)},
+		}}).WithLocateRounds(1)
+
+	got, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, entity)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got[0].ChunkID != conv {
+		t.Errorf("first source = %s, want the converter the conclusion named", got[0].Path)
+	}
+	if got[0].Reason != "locate:found" {
+		t.Errorf("reason = %q, want locate:found", got[0].Reason)
 	}
 }

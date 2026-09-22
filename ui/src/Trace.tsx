@@ -333,7 +333,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               {(
                 [
                   ["landed", locateLanded, false],
-                  ["nothing new", locateCalls, true],
+                  ["looked", locateCalls, true],
                   ["empty", locateEmpty, true],
                   ["not run", locateRefused, true],
                 ] as const

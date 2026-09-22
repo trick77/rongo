@@ -390,11 +390,10 @@ func main() {
 	// order, so the gate lane going down never fails a search.
 	retriever := retrieve.New(db, embedder)
 	retriever.Reranker = retrieve.NewLLMReranker(models, retrieve.DefaultRerankPool)
-	// The locate loop, on by default at one look. It is measured on gathering
-	// and not yet on answers: on a private corpus it reached one more part and
-	// one more question than the product arm, and a ONE-ROUND version of
-	// itself reached exactly the same files, so the extra rounds have not yet
-	// earned their latency. BACKEND_LOCATE_ROUNDS=0 switches it off.
+	// The locate loop, on by default at three rounds. One round measured the
+	// same files as three when grep admitted chunks by address; now grep shows
+	// every matching line and the model decides, which takes a look, a narrowing
+	// and a confirmation. BACKEND_LOCATE_ROUNDS=0 switches it off.
 	gatherer := ask.NewGatherer(db, ask.GatherOptions{MaxHops: cfg.GatherMaxHops, TokenBudget: cfg.GatherTokenBudget})
 	if cfg.LocateRounds > 0 {
 		gatherer = gatherer.WithLocateLoop(models, retriever).WithLocateRounds(cfg.LocateRounds)

@@ -499,12 +499,23 @@ was written from excerpts and may have landed on a near miss. It is the
 weakest evidence in front of you. If it says the place was not found, that is
 its expected failure, not a finding: it read clipped excerpts after the
 sources were gathered. A source that answers the question wins, and the
-answer is written from it.
+answer is written from it.`
 
+// answerLocatedOpenDev and answerLocatedOpenBA say how the answer opens on
+// the place the loop named. Split by audience because an Analyst answer
+// carries no paths or code on purpose, and a rule naming the file and the
+// line overrode that: the first live turn opened an Analyst answer with a
+// full path and a line of Java.
+const answerLocatedOpenDev = `
 When the note names a place and a source bears it out, the sources have been
-ordered to put it first. Open the answer with that place: the file, the line
-and the code there, cited to the source holding it, in the opening sentence.
+ordered to put it first. Open the answer with that place: the file, the line and the code there, cited to the source holding it, in the opening sentence.
 Then explain the rest.`
+
+const answerLocatedOpenBA = `
+When the note names a place and a source bears it out, the sources have been
+ordered to put it first. Open the answer with what happens at that place, in
+the reader's words and without paths or code, cited to the source holding it,
+in the opening sentence. Then explain the rest.`
 
 const answerProcesses = `
 
@@ -1305,6 +1316,11 @@ func systemPrompt(audience Audience, lang Language, sources []Source, scope Scop
 	}
 	if scope.Located != "" {
 		system += fmt.Sprintf(answerLocated, scope.Located)
+		if audience == AudienceBA {
+			system += answerLocatedOpenBA
+		} else {
+			system += answerLocatedOpenDev
+		}
 	}
 	if len(scope.Unknown) > 0 {
 		system += fmt.Sprintf(answerMissingRepo, strings.Join(scope.Unknown, ", "))

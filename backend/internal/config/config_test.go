@@ -586,8 +586,8 @@ func TestLoad_locateLoopIsOnByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() err = %v, want nil", err)
 	}
-	if cfg.LocateRounds != 1 {
-		t.Errorf("LocateRounds = %d, want 1: one look is the default", cfg.LocateRounds)
+	if cfg.LocateRounds != 3 {
+		t.Errorf("LocateRounds = %d, want 3: look, narrow, confirm", cfg.LocateRounds)
 	}
 }
 
