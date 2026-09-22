@@ -503,7 +503,7 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	}
 	env := &flowEnv{
 		t:         t,
-		retriever: retrieve.New(db, evalEmbedder(t)),
+		retriever: retrieve.New(db, evalQueryEmbedder(t, db)),
 		db:        db,
 		repoRoot:  envOr("BACKEND_REPO_ROOT", "/tmp/rongo-flow-repos"),
 		rg:        rg,
