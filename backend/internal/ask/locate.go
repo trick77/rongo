@@ -94,7 +94,8 @@ is not, to look for it.
 
 Call tools to look, and READ what comes back. When you have found the place,
 call nothing and reply in one or two sentences starting with
-"FOUND: FileName.ext:LINE" and the exact code on that line. If it is not in
+"FOUND: <repository> <path>:LINE", written as the tools showed them, and the
+exact code on that line. If it is not in
 the index, reply starting with "NOT FOUND:". Something else writes the answer
 the reader sees; your sentence is what tells it which of many sources is the
 one that matters.
@@ -298,7 +299,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 	var report LocateReport
 	// Every file the model was shown, path to repository, so the place its
 	// conclusion names can be fetched even when no call admitted it.
-	shown := map[string]string{}
+	shown := shownFiles{}
 
 	for round := 0; round < g.rounds(); round++ {
 		// Counted BEFORE the call: a round that failed was still paid for,
@@ -339,7 +340,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			if errors.As(err, &cut) && len(report.Calls) > 0 {
 				report.Found, report.Concluded = g.conclude(ctx, msgs), true
 			}
-			return pointedFirst(g.admitFound(ctx, a, report.Found, shown, stage), report.Found), report, nil
+			return g.finishLocate(ctx, a, &report, shown, stage), report, nil
 		}
 		if turn.Done() {
 			// What it concluded, having read what it found. Kept only when a
@@ -424,7 +425,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			// lets it tell the line that answers from a file that merely
 			// contains the name.
 			for _, l := range landings {
-				shown[l.Path] = l.Repo
+				shown[repoPath{l.Repo, l.Path}] = true
 			}
 			result := display
 			if result == "" {
@@ -477,7 +478,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			break
 		}
 	}
-	return pointedFirst(g.admitFound(ctx, a, report.Found, shown, stage), report.Found), report, nil
+	return g.finishLocate(ctx, a, &report, shown, stage), report, nil
 }
 
 // completeCalls is what survives of a turn cut at the output cap: the calls
@@ -515,10 +516,21 @@ func pointedFirst(sources []Source, found string) []Source {
 	if !ok {
 		return sources
 	}
+	files := make([]repoPath, 0, len(sources))
+	seen := map[repoPath]bool{}
+	for _, s := range sources {
+		if f := (repoPath{s.Repo, s.Path}); !seen[f] {
+			seen[f] = true
+			files = append(files, f)
+		}
+	}
+	f, line, ok := resolvePlace(claim, files)
+	if !ok {
+		return sources
+	}
 	best := -1
 	for i, s := range sources {
-		line, named := namedAt(claim, path.Base(s.Path))
-		if named && line > 0 && line >= s.StartLine && line <= s.EndLine {
+		if s.Repo == f.repo && s.Path == f.path && line >= s.StartLine && line <= s.EndLine {
 			best = i
 			break
 		}
@@ -582,8 +594,9 @@ func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string 
 }
 
 const locateConclude = `Stop looking. In one or two sentences, from what you have read, start with
-"FOUND: FileName.ext:LINE" followed by the exact code on that line. If you did
-not find it, start with "NOT FOUND:" and say so plainly instead of guessing.`
+"FOUND: <repository> <path>:LINE", written as the tools showed them, followed by
+the exact code on that line. If you did not find it, start with "NOT FOUND:"
+and say so plainly instead of guessing.`
 
 // runLocateTool executes one call and returns a label for the trace, what it
 // landed, and — for a call refused before any lookup — what the model is told
@@ -591,7 +604,7 @@ not find it, start with "NOT FOUND:" and say so plainly instead of guessing.`
 // known, never re-derived by the caller from the label. An argument the model
 // got wrong is not an error: it is a call that found nothing, and the model is
 // told why.
-func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources []Source, known []string, stage retrieve.StagePrefixes, shown map[string]string) (label, refused, display string, landings []Source, err error) {
+func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources []Source, known []string, stage retrieve.StagePrefixes, shown shownFiles) (label, refused, display string, landings []Source, err error) {
 	var args struct {
 		Query   string `json:"query"`
 		Pattern string `json:"pattern"`
@@ -672,7 +685,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		// place its conclusion names is what gets admitted (admitFound).
 		// Admitting the first few chunks instead admitted them in ADDRESS
 		// order, which is no order at all for this question.
-		listing, n := grepListing(hits, args.Pattern, sources, shown)
+		listing, n := grepListing(hits, args.Pattern, sources, shown, len(hits) >= locateGrepChunks)
 		if n == 0 {
 			return "grep(" + args.Pattern + ")", "", "", nil, nil
 		}
@@ -719,7 +732,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		if err != nil {
 			return "", "", "", nil, err
 		}
-		shown[args.Path] = args.Repo
+		shown[repoPath{args.Repo, args.Path}] = true
 		display := fmt.Sprintf("%s %s:%d-%d\n%s", args.Repo, args.Path, from, to, text)
 		return label, "", display, reasoned(landed, "locate:read "+args.Path), nil
 	}
@@ -875,7 +888,7 @@ func locateResult(landed []Source, gathered []bool) string {
 // terminal grep prints: a count, then each file, then "Line N: code". Files
 // the turn already holds are marked. At most locateGrepLines lines, with a
 // note when more exist. It records every listed file in shown.
-func grepListing(hits []retrieve.Hit, pattern string, sources []Source, shown map[string]string) (string, int) {
+func grepListing(hits []retrieve.Hit, pattern string, sources []Source, shown shownFiles, capped bool) (string, int) {
 	held := map[string]bool{}
 	for _, s := range sources {
 		held[s.Repo+"\x00"+s.Path] = true
@@ -887,7 +900,9 @@ func grepListing(hits []retrieve.Hit, pattern string, sources []Source, shown ma
 	}
 	var files []*file
 	byKey := map[string]*file{}
-	total, more := 0, false
+	// The store stops at locateGrepChunks without saying so; a listing
+	// that reached it may be missing matches past the cut.
+	total, more := 0, capped
 	for _, h := range hits {
 		for i, line := range strings.Split(h.RawText, "\n") {
 			if !strings.Contains(strings.ToLower(line), needle) {
@@ -925,7 +940,7 @@ func grepListing(hits []retrieve.Hit, pattern string, sources []Source, shown ma
 		if len(f.lines) == 0 {
 			continue
 		}
-		shown[f.path] = f.repo
+		shown[repoPath{f.repo, f.path}] = true
 		fmt.Fprintf(&b, "%s %s", f.repo, f.path)
 		if held[f.repo+"\x00"+f.path] {
 			b.WriteString(" [among the sources]")
@@ -988,46 +1003,98 @@ func (g *Gatherer) fileLines(ctx context.Context, repo, path string, from, to in
 	return b.String(), nil
 }
 
+// finishLocate admits the place the conclusion names, reports it, and puts it
+// first. Every way out of the loop that carries a conclusion ends here.
+func (g *Gatherer) finishLocate(ctx context.Context, a *admitter, report *LocateReport, shown shownFiles, stage retrieve.StagePrefixes) []Source {
+	if label := g.admitFound(ctx, a, report.Found, shown, stage); label != "" {
+		report.Landed = append(report.Landed, label)
+	}
+	return pointedFirst(a.out, report.Found)
+}
+
 // admitFound fetches and admits the place a FOUND conclusion names when no
 // call admitted it: grep shows lines and admits nothing, so the chunk the
 // model chose is usually not among the sources yet. It is resolved against
-// the files the model was actually shown, never guessed from the name alone,
-// and admitted under the loop's reserve like any landing.
-func (g *Gatherer) admitFound(ctx context.Context, a *admitter, found string, shown map[string]string, stage retrieve.StagePrefixes) []Source {
+// the files the model was actually shown (resolvePlace), never guessed, and
+// admitted under the loop's reserve like any landing. The label it returns
+// names the place for the trace; empty when nothing was admitted.
+func (g *Gatherer) admitFound(ctx context.Context, a *admitter, found string, shown shownFiles, stage retrieve.StagePrefixes) string {
 	claim, ok := strings.CutPrefix(strings.TrimSpace(found), "FOUND:")
 	if !ok {
-		return a.out
+		return ""
 	}
-	paths := make([]string, 0, len(shown))
-	for p := range shown {
-		paths = append(paths, p)
+	files := make([]repoPath, 0, len(shown))
+	for f := range shown {
+		files = append(files, f)
 	}
-	sort.Strings(paths)
-	for _, p := range paths {
-		line, named := namedAt(claim, path.Base(p))
-		if !named || line <= 0 {
-			continue
+	f, line, ok := resolvePlace(claim, files)
+	if !ok {
+		return ""
+	}
+	for _, s := range a.out {
+		if s.Repo == f.repo && s.Path == f.path && line >= s.StartLine && line <= s.EndLine {
+			return ""
 		}
-		repo := shown[p]
-		for _, s := range a.out {
-			if s.Repo == repo && s.Path == p && line >= s.StartLine && line <= s.EndLine {
-				return a.out
+	}
+	s, ok, err := g.chunkAt(ctx, f.repo, f.path, line)
+	if err != nil {
+		g.logger().Warn("locate could not fetch the place it found", "path", f.path, "err", err)
+		return ""
+	}
+	if !ok || len(within([]Source{s}, stage)) == 0 {
+		return ""
+	}
+	s.Reason = "locate:found"
+	if !a.take(s, g.opts.MaxHops+2) {
+		g.logger().Warn("locate found a place the budget cannot hold", "path", f.path, "line", line)
+		return ""
+	}
+	return fmt.Sprintf("found(%s:%d)", f.path, line)
+}
+
+// repoPath is one file of one repository: the same path in two repositories
+// is two files.
+type repoPath struct{ repo, path string }
+
+// shownFiles is every file the model was shown during the loop.
+type shownFiles map[repoPath]bool
+
+// resolvePlace finds the one file a conclusion names, with its line.
+//
+// The full path wins over the file name, and a repository named in the
+// conclusion narrows the candidates. More than one candidate left is no
+// answer: citing a same-named file from another directory or repository as
+// "the place" is worse than citing none.
+func resolvePlace(claim string, files []repoPath) (repoPath, int, bool) {
+	type hit struct {
+		f    repoPath
+		line int
+	}
+	var full, base []hit
+	for _, f := range files {
+		if line, named := namedAt(claim, f.path); named && line > 0 {
+			full = append(full, hit{f, line})
+		} else if line, named := namedAt(claim, path.Base(f.path)); named && line > 0 {
+			base = append(base, hit{f, line})
+		}
+	}
+	cands := full
+	if len(cands) == 0 {
+		cands = base
+	}
+	if len(cands) > 1 {
+		var inRepo []hit
+		for _, c := range cands {
+			if _, named := namedAt(claim, c.f.repo); named {
+				inRepo = append(inRepo, c)
 			}
 		}
-		s, ok, err := g.chunkAt(ctx, repo, p, line)
-		if err != nil || !ok || len(within([]Source{s}, stage)) == 0 {
-			if err != nil {
-				g.logger().Warn("locate could not fetch the place it found", "path", p, "err", err)
-			}
-			return a.out
-		}
-		s.Reason = "locate:found"
-		if !a.take(s, g.opts.MaxHops+2) {
-			g.logger().Warn("locate found a place the budget cannot hold", "path", p, "line", line)
-		}
-		return a.out
+		cands = inRepo
 	}
-	return a.out
+	if len(cands) != 1 {
+		return repoPath{}, 0, false
+	}
+	return cands[0].f, cands[0].line, true
 }
 
 // locateGrepChunks is how many matching chunks one grep reads, and

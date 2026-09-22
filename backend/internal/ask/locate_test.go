@@ -1087,3 +1087,80 @@ func TestLocate_aFoundPlaceOnlyGrepShowedIsAdmittedAndPutFirst(t *testing.T) {
 		t.Errorf("reason = %q, want locate:found", got[0].Reason)
 	}
 }
+
+func TestLocate_grepSaysMoreExistWhenItHitsTheChunkCap(t *testing.T) {
+	// The store cuts silently at the chunk limit. A listing that says
+	// "Found 80" and nothing else tells the model it saw everything.
+	db := gatherDB(t)
+	var hits []retrieve.Hit
+	for i := 0; i < locateGrepChunks; i++ {
+		id := seedChunk(t, db, fmt.Sprintf("F%03d.java", i), 0, 1, 1, "f", "setAnzahlhaustiere(1);")
+		hits = append(hits, hitInFor(t, db, id))
+	}
+	var told []string
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLMSeeing(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"setAnzahlhaustiere"}`)}},
+			{content: "NOT FOUND:"},
+		}, nil, &told), locateSearcher{seeds: map[string][]retrieve.Hit{"setAnzahlhaustiere": hits}}).WithLocateRounds(1)
+
+	if _, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, hits[0].ChunkID)}, nil, false, nil); err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if !strings.Contains(told[0], "more matches available") {
+		t.Errorf("a grep at the chunk cap never says more exist:\n%.200s", told[0])
+	}
+}
+
+func TestLocate_aFoundPlaceResolvesToTheRepositoryItNames(t *testing.T) {
+	// The same path in two repositories: the conclusion names the repository,
+	// and that one is admitted, never whichever the listing wrote last.
+	db := gatherDB(t)
+	seedRepo(t, db, "loom")
+	entity := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 20, "HouseholdEntity", "private Integer anzahlHaustiere;")
+	inPeeq := seedChunkIn(t, db, "peeq", "src/app.yaml", 0, 1, 20, "", "anzahlhaustiere: peeq")
+	inLoom := seedChunkIn(t, db, "loom", "src/app.yaml", 0, 1, 20, "", "anzahlhaustiere: loom")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"anzahlhaustiere"}`)}},
+			{content: "FOUND: peeq src/app.yaml:1 anzahlhaustiere: peeq"},
+		}, nil), locateSearcher{seeds: map[string][]retrieve.Hit{
+			"anzahlhaustiere": {hitInFor(t, db, inLoom), hitInFor(t, db, inPeeq)},
+		}}).WithLocateRounds(1)
+
+	got, report, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, entity)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if got[0].ChunkID != inPeeq {
+		t.Errorf("first source = %s %s, want peeq's", got[0].Repo, got[0].Path)
+	}
+	// The place the answer opens on shows in the trace.
+	if len(report.Landed) != 1 || !strings.Contains(report.Landed[0], "found(src/app.yaml:1)") {
+		t.Errorf("Landed = %v, want the found place", report.Landed)
+	}
+}
+
+func TestLocate_anAmbiguousFoundPlaceAdmitsNothing(t *testing.T) {
+	// Two shown files sharing a name and a conclusion naming only the name:
+	// a guess would cite the wrong file as the place.
+	db := gatherDB(t)
+	entity := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 20, "HouseholdEntity", "private Integer anzahlHaustiere;")
+	a := seedChunk(t, db, "a/index.ts", 0, 1, 20, "", "anzahlHaustiere = 1")
+	b := seedChunk(t, db, "b/index.ts", 0, 1, 20, "", "anzahlHaustiere = 2")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "grep", `{"pattern":"anzahlHaustiere"}`)}},
+			{content: "FOUND: index.ts:1 anzahlHaustiere = 1"},
+		}, nil), locateSearcher{seeds: map[string][]retrieve.Hit{
+			"anzahlHaustiere": {hitInFor(t, db, a), hitInFor(t, db, b)},
+		}}).WithLocateRounds(1)
+
+	got, _, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, entity)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if len(got) != 1 || got[0].ChunkID != entity {
+		t.Errorf("sources = %v, want nothing admitted for an ambiguous name", repoPaths(got))
+	}
+}
