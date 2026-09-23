@@ -236,7 +236,10 @@ symbols:
 				return nil, err
 			}
 			for _, ref := range mechanismFirst(refs) {
-				if a.seen[ref.ChunkID] {
+				// Outside the ceiling: never admitted, and never followed,
+				// or the next hop would gather by a reason the answer never
+				// shows.
+				if a.seen[ref.ChunkID] || !a.permits(ref) {
 					continue
 				}
 				if !a.take(ref, hop) {
@@ -286,7 +289,9 @@ symbols:
 	// reports false when the budget is spent — and stopping means stopping,
 	// for the reason take gives.
 	land := func(landing, from Source) (bool, error) {
-		if a.seen[landing.ChunkID] {
+		// Outside the ceiling: not a landing, and its far-side hop is not
+		// taken either.
+		if a.seen[landing.ChunkID] || !a.permits(landing) {
 			return true, nil
 		}
 		if !a.take(landing, from.Hop+1) {
@@ -392,6 +397,14 @@ func (a *admitter) take(s Source, hop int) bool {
 	a.spent += cost
 	a.out = append(a.out, s)
 	return true
+}
+
+// permits reports whether s lies inside the turn's ceiling. Callers that go
+// on to follow what they admitted check it first: take skips an outside
+// chunk silently, which is right for admission and wrong for a walk that
+// would then follow it.
+func (a *admitter) permits(s Source) bool {
+	return a.allowed == nil || a.allowed[s.Repo]
 }
 
 // crossing is a landing held back for the second pass, with the source it

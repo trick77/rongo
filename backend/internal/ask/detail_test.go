@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -18,9 +19,18 @@ func TestPipeline_reportsWhatEachStepFound(t *testing.T) {
 	seedTokenIn(t, db, "peeq", "send.go", "destination", "shipping-task", 1)
 	seedChunkIn(t, db, "queue-master", "listen.go", 0, 1, 10, "listen", `subscribe("shipping-task")`)
 	seedTokenIn(t, db, "queue-master", "listen.go", "destination", "shipping-task", 1)
+	// One project holds both sides of the queue, as a real configuration
+	// declares it: a turn gathers only inside its projects.
+	if _, err := db.Exec(`UPDATE repo_state SET project = 'shipping'`); err != nil {
+		t.Fatalf("set project: %v", err)
+	}
+	pm, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load: %v", err)
+	}
 	c := twoStepUpstream(t, appleTVReply, "So [1] and [2].")
 	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
 	details := map[string]map[string]any{}
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{},

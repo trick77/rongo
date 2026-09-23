@@ -804,9 +804,10 @@ func reasoned(ss []Source, reason string) []Source {
 // its own project for the walk, because the walk follows what the code
 // references; the search itself stays narrowed to the member.
 //
-// No ceiling (nil) when nothing was named or hit, or when the project map
-// knows none of the repositories: projects unavailable is a warning, never a
-// reason to cut every crossing.
+// No ceiling (nil) only when nothing was named or hit. A project map that
+// knows none of the repositories (project data unavailable) confines the turn
+// to what was named or hit: narrower than the project, never the whole
+// corpus.
 func turnCeiling(known, hits []string, pm projects.Map) []string {
 	seeds := known
 	if len(seeds) == 0 {
@@ -820,11 +821,11 @@ func turnCeiling(known, hits []string, pm projects.Map) []string {
 			set[m] = true
 		}
 	}
-	if len(set) == 0 {
-		return nil
-	}
 	for _, r := range seeds {
 		set[r] = true
+	}
+	if len(set) == 0 {
+		return nil
 	}
 	out := make([]string, 0, len(set))
 	for r := range set {

@@ -33,8 +33,10 @@ func TestTurnCeiling_isTheProjectPlusItsUsedLibraries(t *testing.T) {
 			[]string{"legacy-crm"}, nil, []string{"legacy-crm"}},
 		{"nothing named and nothing hit is no ceiling",
 			nil, nil, nil},
-		{"a repository no project map knows is no ceiling",
-			nil, []string{"unknown-repo"}, nil},
+		{"no project data confines to what was hit, never to nothing",
+			nil, []string{"unknown-repo"}, []string{"unknown-repo"}},
+		{"no project data confines to what was named",
+			[]string{"unknown-a", "unknown-b"}, nil, []string{"unknown-a", "unknown-b"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -174,5 +176,53 @@ func TestWithLocateDetail_isSilentWhenTheLoopNeverLooked(t *testing.T) {
 	d := withLocateDetail(map[string]any{}, LocateReport{Skipped: "call failed", Rounds: 1})
 	if d["locate"] != "call failed" {
 		t.Errorf("a failed round lost its reason: %v", d)
+	}
+}
+
+func TestGather_neverFollowsAChunkItSkippedForTheCeiling(t *testing.T) {
+	// The hit references a symbol defined only outside the ceiling. That
+	// definition is skipped; what IT references must not be followed on the
+	// next hop, or the turn gathers by a reason the answer never shows.
+	db := gatherDB(t)
+	seedRepo(t, db, "go-sqlite3")
+	hitID := seedChunkIn(t, db, "peeq", "store.go", 0, 1, 20, "Open",
+		"func Open(p string) error { return ZeroBlob(p) }")
+	seedChunkIn(t, db, "go-sqlite3", "blob.go", 0, 40, 60, "ZeroBlob",
+		"func ZeroBlob(p string) error { return helperInPeeq(p) }")
+	seedSymbolIn(t, db, "go-sqlite3", "blob.go", "ZeroBlob", 40)
+	seedChunkIn(t, db, "peeq", "helper.go", 0, 1, 10, "helperInPeeq",
+		"func helperInPeeq(p string) error { return nil }")
+	seedSymbolIn(t, db, "peeq", "helper.go", "helperInPeeq", 1)
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 2, TokenBudget: 10000, NoCrossings: true}).
+		within([]string{"peeq"}).Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if hasIn(got, "peeq", "helper.go") {
+		t.Errorf("sources = %v, want nothing reached through a skipped chunk", repoPaths(got))
+	}
+}
+
+func TestGather_neverFollowsACrossingItSkippedForTheCeiling(t *testing.T) {
+	// A queue crossing lands outside the ceiling. It is skipped, and its
+	// one far-side hop is not taken either.
+	db := gatherDB(t)
+	seedRepo(t, db, "queue-master")
+	hitID := seedChunk(t, db, "send.go", 0, 1, 10, "send", `publish("shipping-task")`)
+	seedTokenIn(t, db, "peeq", "send.go", "destination", "shipping-task", 1)
+	seedChunkIn(t, db, "queue-master", "listen.go", 0, 1, 10, "listen",
+		`func listen() { subscribe("shipping-task"); handleInPeeq() }`)
+	seedTokenIn(t, db, "queue-master", "listen.go", "destination", "shipping-task", 1)
+	seedChunkIn(t, db, "peeq", "handle.go", 0, 1, 10, "handleInPeeq", "func handleInPeeq() {}")
+	seedSymbolIn(t, db, "peeq", "handle.go", "handleInPeeq", 1)
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		within([]string{"peeq"}).Gather(context.Background(), []retrieve.Hit{hitFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if hasIn(got, "queue-master", "listen.go") || hasIn(got, "peeq", "handle.go") {
+		t.Errorf("sources = %v, want neither the skipped crossing nor its far-side hop", repoPaths(got))
 	}
 }
