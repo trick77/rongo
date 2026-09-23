@@ -675,7 +675,7 @@ func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []ret
 			"thread", llm.ThreadID(ctx), "err", perr)
 	}
 	ceiling := turnCeiling(scope.Known, hitRepoNames(hits), pm)
-	g := p.gatherer.forTurn(scope.Resumed).within(ceiling)
+	g := p.gatherer.forTurn(scope.Resumed).within(ceiling).withTerms(question)
 	sources, err := g.GatherSeeded(ctx, hits, census.Landings, stage)
 	if err != nil {
 		return nil, "", err

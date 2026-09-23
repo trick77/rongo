@@ -3,9 +3,11 @@ package ask
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -505,5 +507,136 @@ func TestReferenced_onePathInTwoRepositoriesOrdersByRepository(t *testing.T) {
 					refs[0].Repo, refs[1].Repo)
 			}
 		})
+	}
+}
+
+// configToConfig is an infra properties file that the search hit, sharing a
+// framework key with a service's properties file: the shape that filled a live
+// turn's budget with crossings nobody asked about.
+func configToConfig(t *testing.T) (*sql.DB, int64) {
+	t.Helper()
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-service")
+	seedRepo(t, db, "acme-infra")
+	hitID := seedChunkIn(t, db, "acme-infra", "prod/intranet/application.properties", 0, 1, 10, "",
+		"spring.h2.console.enabled=false\n")
+	seedTokenIn(t, db, "acme-infra", "prod/intranet/application.properties", "property", "spring.h2.console.enabled", 1)
+	seedChunkIn(t, db, "acme-service", "src/main/resources/application.properties", 0, 1, 10, "",
+		"spring.h2.console.enabled=true\n")
+	seedTokenIn(t, db, "acme-service", "src/main/resources/application.properties", "property", "spring.h2.console.enabled", 1)
+	return db, hitID
+}
+
+// Config crosses to config only on a word of the question: a key sharing no
+// word with it is not a reason to read another repository's settings.
+func TestGather_configCrossesToConfigOnlyOnAQuestionWord(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		question string
+		want     bool
+	}{
+		{"a question about something else", "how is the pet count sent to the ledger", false},
+		{"a question naming the key's word", "is the h2 console enabled in production", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db, hitID := configToConfig(t)
+			got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+				withTerms(c.question).Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+			if err != nil {
+				t.Fatalf("Gather: %v", err)
+			}
+			if has := hasIn(got, "acme-service", "src/main/resources/application.properties"); has != c.want {
+				t.Errorf("crossed = %v, want %v: %v", has, c.want, repoPaths(got))
+			}
+		})
+	}
+}
+
+// Code reading a key crosses as before, whatever the question says: that is
+// the measured digest case, and the code is the reason.
+func TestGather_codeReadingAKeyCrossesWithoutAQuestionWord(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-service")
+	seedRepo(t, db, "acme-infra")
+	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/Job.java", 0, 1, 20, "Job",
+		`@Scheduled(cron = "${acme.cron.send-digest}") public void run() {}`)
+	seedTokenIn(t, db, "acme-service", "src/main/java/acme/Job.java", "property", "acme.cron.send-digest", 1)
+	seedChunkIn(t, db, "acme-infra", "prod/intranet/application.properties", 0, 1, 10, "",
+		"acme.cron.send-digest=0 5 * ? * * *\n")
+	seedTokenIn(t, db, "acme-infra", "prod/intranet/application.properties", "property", "acme.cron.send-digest", 1)
+
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		withTerms("how is the pet count sent to the ledger").Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !hasIn(got, "acme-infra", "prod/intranet/application.properties") {
+		t.Errorf("sources = %v, want the stage file the code reads", repoPaths(got))
+	}
+}
+
+// Property landings spend at most the crossing reserve, never the whole
+// crossing budget: on a live turn they took 22.9k of 24k tokens.
+func TestGather_propertyLandingsStopAtTheCrossingReserve(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "acme-service")
+	seedRepo(t, db, "acme-infra")
+	var reads strings.Builder
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&reads, `"${acme.key%d}" `, i)
+	}
+	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/Settings.java", 0, 1, 20, "Settings", reads.String())
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("acme.key%d", i)
+		seedTokenIn(t, db, "acme-service", "src/main/java/acme/Settings.java", "property", key, 1)
+		path := fmt.Sprintf("stage%d/application.properties", i)
+		seedChunkIn(t, db, "acme-infra", path, 0, 1, 10, "", key+"="+strings.Repeat("x ", 300)+"\n")
+		seedTokenIn(t, db, "acme-infra", path, "property", key, 1)
+	}
+	const budget = 6000
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: budget}).
+		Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	spent := 0
+	for _, s := range got {
+		if isPropertyEdge(s.Reason) {
+			spent += estimateTokens(s.Text)
+		}
+	}
+	if spent == 0 {
+		t.Fatal("no property landing at all; the fixture no longer crosses")
+	}
+	if limit := budget / crossingReserve; spent > limit {
+		t.Errorf("property landings spent %d tokens, want at most the reserve %d", spent, limit)
+	}
+}
+
+// Run hands the question's words to the gatherer: a live turn's config-to-
+// config crossings stop without anyone setting terms by hand.
+func TestPipeline_configDoesNotCrossToConfigOnAnUnrelatedQuestion(t *testing.T) {
+	db, hitID := configToConfig(t)
+	if _, err := db.Exec(`UPDATE repo_state SET project = 'acme'`); err != nil {
+		t.Fatalf("set project: %v", err)
+	}
+	pm, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load: %v", err)
+	}
+	namesNothing := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
+	p := NewPipeline(twoStepUpstream(t, namesNothing, "So [1]."),
+		&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}},
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+
+	answer, _, err := p.Run(context.Background(), "How is the pet count sent to the ledger?",
+		AudienceDev, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, s := range answer.Sources {
+		if s.Repo == "acme-service" {
+			t.Errorf("crossed into %s %s on a key the question never names", s.Repo, s.Path)
+		}
 	}
 }
