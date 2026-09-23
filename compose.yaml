@@ -35,11 +35,14 @@
 #                               mode auto-logs in an admin with no credentials.
 #      the BACKEND_OIDC_* block, whose client secret comes from
 #      ../authelia/gen-clients.sh
+#      BACKEND_LLM_MODEL       llmwire profile id that answers (mimo-v2.6-flash)
+#      BACKEND_LLM_GATE_MODEL  llmwire profile id for routing and titles (same)
 #      LLMWIRE_MIMO_*          endpoint and key that answer questions
 #      LLMWIRE_OPENAI_*        endpoint and key that build the index
 #
-#    The session secret is mandatory here: `up` stops with the message next to
-#    it. A missing model key stops rongo at boot, naming the variable.
+#    The session secret and both models are mandatory here: `up` stops with
+#    the message next to them. A missing model key stops rongo at boot, naming
+#    the variable.
 services:
   rongo:
     build:
@@ -96,8 +99,8 @@ services:
       # let through is an admin. Set it only once a second tier exists here.
       BACKEND_OIDC_ADMIN_GROUP: ${BACKEND_OIDC_ADMIN_GROUP:-}
       # The provider keys, one per host llmwire's profiles name. Which ones
-      # are needed follows from the models chosen below: MiMo and OpenAI by
-      # default, and the process refuses to start naming the missing one,
+      # are needed follows from the models chosen below: MiMo and OpenAI in
+      # .env.example, and the process refuses to start naming the missing one,
       # rather than answering every question with 503. Every key is passed
       # through so choosing another model is a .env edit.
       LLMWIRE_MIMO_API_KEY: ${LLMWIRE_MIMO_API_KEY:-}
@@ -105,11 +108,12 @@ services:
       LLMWIRE_ZAI_API_KEY: ${LLMWIRE_ZAI_API_KEY:-}
       # Read by llmwire itself, never by rongo: forwarded so it reaches it.
       LLMWIRE_EMULATE_OPENCODE: ${LLMWIRE_EMULATE_OPENCODE:-}
-      # Which models answer, by llmwire profile id; empty is MiMo. And a
-      # self-hosted gateway in front of them, llmwire's variables, passed
-      # through so a deployment behind one is a .env edit; see .env.example.
-      BACKEND_LLM_MODEL: ${BACKEND_LLM_MODEL:-}
-      BACKEND_LLM_GATE_MODEL: ${BACKEND_LLM_GATE_MODEL:-}
+      # Which models answer, by llmwire profile id; required, rongo has no
+      # default. And a self-hosted gateway in front of them, llmwire's
+      # variables, passed through so a deployment behind one is a .env edit;
+      # see .env.example.
+      BACKEND_LLM_MODEL: ${BACKEND_LLM_MODEL:?set it in .env, an llmwire profile id such as mimo-v2.6-flash}
+      BACKEND_LLM_GATE_MODEL: ${BACKEND_LLM_GATE_MODEL:?set it in .env, an llmwire profile id such as mimo-v2.6-flash}
       BACKEND_LLM_GATE_TEMPERATURE: ${BACKEND_LLM_GATE_TEMPERATURE:-}
       BACKEND_LLM_GATE_REASONING: ${BACKEND_LLM_GATE_REASONING:-}
       BACKEND_LLM_REASONING: ${BACKEND_LLM_REASONING:-}

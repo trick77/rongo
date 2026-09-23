@@ -41,8 +41,6 @@ import (
 	"time"
 
 	"github.com/trick77/llmwire"
-
-	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -59,11 +57,20 @@ func flowToolBudget() int {
 	return 6
 }
 
-// flowDeployments are the two arms. Both are MiMo: a frontier arm was
-// considered and dropped, which means a DOUBLE failure here cannot separate
-// "agentic search does not work for this" from "this model family cannot hold
-// a six-call trajectory". Any conclusion drawn from two failures must say so.
-var flowDeployments = []string{"mimo-v2.6-pro", "mimo-v2.6-flash"}
+// flowModels are the arms: the configured answer model, plus
+// BACKEND_EVAL_ANSWER_MODEL when it names another. The first table ran
+// mimo-v2.6-pro and -flash; pro was dropped 2026-09-23 as too slow to use. A
+// failure on one model family cannot separate "agentic search does not work
+// for this" from "this model cannot hold a six-call trajectory"; any
+// conclusion drawn from it must say so.
+func flowModels(t *testing.T) []string {
+	answer, _ := evalModels(t)
+	models := []string{answer}
+	if other := os.Getenv("BACKEND_EVAL_ANSWER_MODEL"); other != "" && other != answer {
+		models = append(models, other)
+	}
+	return models
+}
 
 // flowQuestion mirrors Question, but the candidates carry the evidence string
 // that says what was verified in the pinned corpus.
@@ -391,14 +398,12 @@ func atoiOr(s string, def int) int {
 // --- the tool-calling client ----------------------------------------------
 
 // flowWire is the llmwire client the loop talks through, built once per run
-// from the same environment the product reads. The deployment names come from
-// internal/llm and are not configurable there; they are passed in per call
-// rather than exported, so the product's rule that a deployment is never an
-// environment variable stays intact.
+// from the same environment the product reads, for the configured answer
+// model's host. Each arm passes its model per call.
 func flowWire(t *testing.T) *llmwire.Client {
 	t.Helper()
 	cfg := evalLLMConfig(t, 5*time.Minute)
-	wire, err := llmwire.FromEnv(llm.ProDeployment, llmwire.Config{
+	wire, err := llmwire.FromEnv(cfg.Answer, llmwire.Config{
 		HeaderTimeout: cfg.Timeout,
 		CallTimeout:   cfg.Timeout,
 	})
@@ -490,9 +495,6 @@ func runFlowQuestion(ctx context.Context, _ *testing.T, env *flowEnv, wire *llmw
 // rate: WHERE a loop lost the thread is the finding, not how many it got.
 func TestFlowLoopDiagnostic(t *testing.T) {
 	requireEval(t)
-	if os.Getenv("LLMWIRE_MIMO_API_KEY") == "" {
-		t.Skip("LLMWIRE_MIMO_API_KEY is not set")
-	}
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()
@@ -512,7 +514,7 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 
 	questions := loadFlowQuestions(t)
 	wire := flowWire(t)
-	for _, deployment := range flowDeployments {
+	for _, deployment := range flowModels(t) {
 		t.Run(deployment, func(t *testing.T) {
 			var totalParts, totalReached int
 			for _, q := range questions {

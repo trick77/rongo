@@ -67,6 +67,8 @@ var mandatoryEnv = map[string]string{
 	"BACKEND_SESSION_SECRET": validSecret,
 	"LLMWIRE_OPENAI_API_KEY": "embed-key",
 	"LLMWIRE_MIMO_API_KEY":   "llm-key",
+	"BACKEND_LLM_MODEL":      "mimo-v2.6-flash",
+	"BACKEND_LLM_GATE_MODEL": "mimo-v2.6-flash",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {

@@ -151,10 +151,10 @@ func TestFlowGathered(t *testing.T) {
 		{name: "symbol walk + crossings + whole file", hops: deployed.MaxHops, wholeFile: 1500},
 	}
 	// The reranker reorders the search itself, so it is an arm over a second
-	// hit list; it needs a model and is skipped when none is configured.
+	// hit list; it needs a model and is left out when none is configured.
 	var reranked *retrieve.Retriever
 	var gapClient *llm.Client
-	if os.Getenv("LLMWIRE_MIMO_API_KEY") != "" {
+	if os.Getenv("BACKEND_LLM_MODEL") != "" {
 		reranked = evalRetriever(t, db)
 		// The pool is the reranker's; searchTexts lifts the lanes to it.
 		rr := evalReranker(t, evalLLM(t, 2*time.Minute))

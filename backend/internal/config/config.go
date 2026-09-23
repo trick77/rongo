@@ -114,10 +114,10 @@ type Config struct {
 	// each model's profile and the LLMWIRE_* variables llmwire reads itself
 	// when internal/llm builds its client, so a missing key is a boot error
 	// there. What a deployment may choose is the MODEL, by llmwire profile
-	// id: LLMModel answers, LLMGateModel is the cheap lane (routing,
-	// follow-ups, titles). Empty means internal/llm's MiMo defaults. Checked
-	// against llmwire's registry in main, not here: config stays a
-	// stdlib-only leaf.
+	// id: LLMModel answers, LLMGateModel is the lane whose output is an id
+	// or a label (routing, follow-ups, titles). Both required: rongo has no
+	// model of its own. Checked against llmwire's registry in main, not here:
+	// config stays a stdlib-only leaf.
 	LLMModel     string
 	LLMGateModel string
 	// The call policy, measured on MiMo and therefore a setting once the
@@ -263,6 +263,13 @@ func Load() (Config, error) {
 	if len(cfg.SessionSecret) < 16 {
 		return Config{}, fmt.Errorf(
 			"BACKEND_SESSION_SECRET must be at least 16 characters; generate one with `openssl rand -base64 32`")
+	}
+
+	if cfg.LLMModel == "" {
+		return Config{}, fmt.Errorf("BACKEND_LLM_MODEL is required: the llmwire profile id that answers, e.g. mimo-v2.6-flash")
+	}
+	if cfg.LLMGateModel == "" {
+		return Config{}, fmt.Errorf("BACKEND_LLM_GATE_MODEL is required: the llmwire profile id for routing, titles and follow-ups, e.g. mimo-v2.6-flash")
 	}
 
 	switch cfg.AuthMode {

@@ -27,9 +27,6 @@ import (
 // side and seeing whether the second names the converter.
 func TestLocateAnswer(t *testing.T) {
 	requireEval(t)
-	if os.Getenv("LLMWIRE_MIMO_API_KEY") == "" {
-		t.Skip("LLMWIRE_MIMO_API_KEY is unset")
-	}
 	dim := embedDim(t)
 	db := evalDB(t, dim)
 	ctx := context.Background()

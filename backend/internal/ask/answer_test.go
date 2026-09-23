@@ -602,12 +602,19 @@ func TestReachedVia_namesHowEachSourceArrived(t *testing.T) {
 	}
 }
 
+// The lanes' models in tests: two different profiles on one host, so a test
+// can tell from the wire which lane a call took.
+const (
+	testAnswerModel = "mimo-v2.6-pro"
+	testGateModel   = "mimo-v2.6-flash"
+)
+
 // fakeLLM is the model client pointed at a test server. With BaseURL set,
 // llm.NewClient consults no environment variable, so the only way this can
 // fail is a bug in the constructor.
 func fakeLLM(t testing.TB, srv *httptest.Server) *llm.Client {
 	t.Helper()
-	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL}, srv.Client())
+	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, Answer: testAnswerModel, Gate: testGateModel}, srv.Client())
 	if err != nil {
 		t.Fatalf("llm.NewClient: %v", err)
 	}

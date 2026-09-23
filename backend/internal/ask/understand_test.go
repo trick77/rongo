@@ -138,7 +138,7 @@ func TestUnderstand_searchTextsCarryBothLanguages(t *testing.T) {
 	}
 }
 
-func TestUnderstand_runsOnTheShortGateDeployment(t *testing.T) {
+func TestUnderstand_runsOnTheGateLane(t *testing.T) {
 	// Nobody reads this output; it is an id-and-label step. Running it on Pro
 	// would pay the expensive queue for a JSON blob.
 	c, model, prompt := modelUpstream(t, appleTVReply)
@@ -147,7 +147,7 @@ func TestUnderstand_runsOnTheShortGateDeployment(t *testing.T) {
 		t.Fatalf("Understand: %v", err)
 	}
 
-	if *model != llm.ShortGateDeployment {
+	if *model != testGateModel {
 		t.Errorf("model = %q, want the short-gate deployment", *model)
 	}
 	if !strings.Contains(*prompt, "How does shipping work?") {

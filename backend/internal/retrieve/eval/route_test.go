@@ -113,10 +113,8 @@ func rankRoute(ctx context.Context, t *testing.T, r *ask.Router, question string
 	return all, false, judged
 }
 
-// llmClientForRouting builds the model client the routing arms share. Skips —
-// never fails — when no endpoint is configured, exactly like
-// TestExpandQuestions: a routing arm without LLMWIRE_MIMO_API_KEY cannot call
-// the judge at all.
+// llmClientForRouting builds the model client the routing arms share, on the
+// configured models; an unset one fails the run.
 func llmClientForRouting(t *testing.T) *llm.Client {
 	t.Helper()
 	return evalLLM(t, 2*time.Minute)
@@ -308,13 +306,14 @@ func reportRouting(t *testing.T, label string, rows []routingRow) {
 	}
 }
 
-// TestEvalMeasureRouting measures the routing decision on both judge
-// deployments, over all 65 questions. The comparison is standing work, not a
-// one-off: phase 4b made it mandatory before non-Pro could be written in,
-// phase 4c overturned its result, and 2026-09-06 overturned that one and moved
-// the judge back to the cheap lane. Whichever lane NewRouter builds, this arm
-// keeps measuring the other — which is why both arms name their deployment
-// rather than letting one inherit the default.
+// TestEvalMeasureRouting measures the routing decision on both judge lanes,
+// over all 65 questions. The comparison is standing work, not a one-off:
+// phase 4b made it mandatory before non-Pro could be written in, phase 4c
+// overturned its result, and 2026-09-06 overturned that one and moved the
+// judge back to the gate lane. Whichever lane NewRouter builds, this arm
+// keeps measuring the other — which is why both arms name their lane rather
+// than letting one inherit the default. Both lanes on one model is one arm:
+// the second would re-pay for the same decisions.
 //
 // Both arms share one Rank per question (no margin dependency, no database
 // or model call) and call Related/Judge only when the ladder would actually
@@ -334,17 +333,19 @@ func TestEvalMeasureRouting(t *testing.T) {
 	margin := routeMargin(t)
 	mo := moduleOpts(t)
 
-	// ShortGate is what NewRouter builds now — 2026-09-06 measured the two
-	// deployments deciding every question identically and moved the judge back
-	// to the cheap lane, see the comment on Router.judgeDeployment. BOTH arms
-	// name their deployment rather than letting one of them inherit the
-	// default: an arm labelled "Pro" that silently follows NewRouter would
-	// compare the default against itself the next time the default moves, and
-	// report it as agreement.
+	// The gate lane is what NewRouter builds now — 2026-09-06 measured the
+	// two deciding every question identically and moved the judge back to it,
+	// see the comment on Router.judgeDeployment. BOTH arms name their lane
+	// rather than letting one of them inherit the default: an arm labelled
+	// "answer" that silently follows NewRouter would compare the default
+	// against itself the next time the default moves, and report it as
+	// agreement.
+	gateModel, answerModel := client.Deployment(llm.LaneGate), client.Deployment(llm.LaneAnswer)
 	pro := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.Pro())
 	shortGate := ask.NewRouter(client, db, margin, mo).WithJudgeDeployment(llm.ShortGate())
+	both := answerModel != gateModel
 
-	t.Logf("questions=%d margin=%.2f", len(questions), margin)
+	t.Logf("questions=%d margin=%.2f gate=%s answer=%s", len(questions), margin, gateModel, answerModel)
 
 	var shortRows, proRows []routingRow
 	for _, q := range questions {
@@ -355,15 +356,20 @@ func TestEvalMeasureRouting(t *testing.T) {
 		sGot, sRung := ask.DecideWhy(sAll, margin, sRelated, sJudged, len(named), false, true, projects.Map{})
 		shortRows = append(shortRows, routingRow{q: q, want: want, got: sGot, rung: sRung})
 
+		if !both {
+			continue
+		}
 		pAll, pRelated, pJudged := rankRoute(ctx, t, pro, q.Text, hits, []float64{margin}, len(named))
 		pGot, pRung := ask.DecideWhy(pAll, margin, pRelated, pJudged, len(named), false, true, projects.Map{})
 		proRows = append(proRows, routingRow{q: q, want: want, got: pGot, rung: pRung})
 	}
 
 	t.Logf("")
-	reportRouting(t, "judge on ShortGate (non-Pro)", shortRows)
-	t.Logf("")
-	reportRouting(t, "judge on Pro", proRows)
+	reportRouting(t, "judge on the gate lane ("+gateModel+")", shortRows)
+	if both {
+		t.Logf("")
+		reportRouting(t, "judge on the answer lane ("+answerModel+")", proRows)
+	}
 }
 
 // TestEvalMeasureRoutingMarginSweep reports routing accuracy at every margin

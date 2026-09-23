@@ -840,7 +840,7 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 	return fakeLLM(t, srv), &models
 }
 
-func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
+func TestRouteJudgeDefaultsToTheGateLane(t *testing.T) {
 	// Matches what is deployed. The judge is a one-word decision, which is the
 	// bar for the cheap lane, and the exception that bought it on Pro is gone:
 	// re-measured 2026-09-06 and run twice, the two deployments land within one
@@ -861,8 +861,8 @@ func TestRouteJudgeDefaultsToTheShortGateDeployment(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
-		t.Errorf("judge ran on %v, want a single call on %q", *models, llm.ShortGateDeployment)
+	if len(*models) != 1 || (*models)[0] != testGateModel {
+		t.Errorf("judge ran on %v, want a single call on %q", *models, testGateModel)
 	}
 }
 
@@ -888,8 +888,8 @@ func TestRouteWithJudgeDeploymentOverridesTheJudgeOnly(t *testing.T) {
 	if !got.Ask {
 		t.Fatal("the judge said ask")
 	}
-	if len(*models) == 0 || (*models)[0] != llm.ProDeployment {
-		t.Errorf("judge ran on %v, want the first call on %q", *models, llm.ProDeployment)
+	if len(*models) == 0 || (*models)[0] != testAnswerModel {
+		t.Errorf("judge ran on %v, want the first call on %q", *models, testAnswerModel)
 	}
 }
 
@@ -914,9 +914,9 @@ func TestRouteWithJudgeDeploymentDoesNotMutateTheReceiver(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if len(*models) != 1 || (*models)[0] != llm.ShortGateDeployment {
+	if len(*models) != 1 || (*models)[0] != testGateModel {
 		t.Errorf("the original Router ran the judge on %v, want it still on %q — WithJudgeDeployment must not mutate it",
-			*models, llm.ShortGateDeployment)
+			*models, testGateModel)
 	}
 }
 
@@ -1147,10 +1147,10 @@ func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {
 		t.Fatalf("route: %v", err)
 	}
 
-	if models["judge"] != llm.ShortGateDeployment {
+	if models["judge"] != testGateModel {
 		t.Errorf("judge ran on %q, want the short-gate deployment", models["judge"])
 	}
-	if models["name"] != llm.ShortGateDeployment {
+	if models["name"] != testGateModel {
 		t.Errorf("naming ran on %q, want the short-gate deployment — a title is not worth the expensive queue", models["name"])
 	}
 
@@ -1163,7 +1163,7 @@ func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {
 	}, nil, false); err != nil {
 		t.Fatalf("route on the expensive lane: %v", err)
 	}
-	if models["judge"] != llm.ProDeployment {
+	if models["judge"] != testAnswerModel {
 		t.Errorf("overridden judge ran on %q, want the Pro deployment", models["judge"])
 	}
 }

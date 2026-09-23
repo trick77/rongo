@@ -1,4 +1,4 @@
-// Package llm talks to rongo's two MiMo deployments over an OpenAI-compatible
+// Package llm talks to rongo's two model lanes over an OpenAI-compatible
 // chat completions endpoint.
 //
 // The wire is github.com/trick77/llmwire: it renders the request the way each
@@ -28,21 +28,24 @@ import (
 	"github.com/trick77/rongo/internal/usage"
 )
 
-// The two default deployments. rongo is built and measured against MiMo;
-// BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL replace them for a deployment
-// that has a different model (Config.Pro, Config.ShortGate), and the name
-// must be one llmwire's registry knows, checked at boot. A free-form host
-// would let a misconfigured endpoint answer with a model nobody chose, and
-// the failure would look like a quality problem rather than a configuration
-// one; a profile id cannot, because llmwire validates every call against it.
+// Lane is which of the two configured models a call goes to. rongo names no
+// model itself: BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL say which
+// llmwire profile serves each lane (Config.Answer, Config.Gate), both
+// mandatory, checked at boot. A free-form host would let a misconfigured
+// endpoint answer with a model nobody chose, and the failure would look like
+// a quality problem rather than a configuration one; a profile id cannot,
+// because llmwire validates every call against it.
 //
-// ShortGateDeployment is the SAME reasoning family as Pro. It is picked on
-// price — 0.14 against 0.435 per 1M input — not because it cannot think, and
-// no longer because it queues less: llmwire measures V2.6-pro at 1-5 seconds
-// per call against the 25-64 the V2.5 notes recorded. See ShortGate.
+// The lanes are told apart by name, never by model: both may be the same
+// profile, and each still moves alone.
+type Lane int
+
 const (
-	ProDeployment       = "mimo-v2.6-pro"
-	ShortGateDeployment = "mimo-v2.6-flash"
+	// LaneAnswer writes what a person reads, and is what a call naming no
+	// lane gets.
+	LaneAnswer Lane = iota
+	// LaneGate returns an id or a label. See ShortGate.
+	LaneGate
 )
 
 // defaultMaxTokens caps a call that names no budget of its own. Every request
@@ -50,16 +53,15 @@ const (
 // where that shows up first.
 const defaultMaxTokens = 4096
 
-// Config holds the endpoint settings. The deployment names are not here on
-// purpose. BaseURL and APIKey override the deployment's llmwire profile; left
-// empty, the production case, llmwire uses the host its profile ships and
-// reads LLMWIRE_MIMO_API_KEY itself. A test points BaseURL at its fake and no
-// variable is consulted.
+// Config holds the endpoint settings. BaseURL and APIKey override the answer
+// model's llmwire profile; left empty, the production case, llmwire uses the
+// host its profile ships and reads the key variable that profile names. A
+// test points BaseURL at its fake and no variable is consulted.
 type Config struct {
 	BaseURL string
 	APIKey  string
 	// Timeout bounds the whole call, and also how long the endpoint may take
-	// to send response headers: Pro has queued at the endpoint before it
+	// to send response headers: MiMo's pro has queued at the endpoint before it
 	// answers, and llmwire's one-minute header default would end a queued call
 	// that was about to be served. V2.6 measures far faster than the V2.5 pair
 	// this was written for (1-5 seconds against 25-64), but the header
@@ -71,14 +73,14 @@ type Config struct {
 	// Zero takes llmwire's default of ninety seconds.
 	IdleTimeout time.Duration
 	Logger      *slog.Logger
-	// Pro and ShortGate, when set, replace the two deployment names on the
-	// wire: the product from BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the
-	// evaluation harness from its own variables when it asks whether the
-	// next model answers better than this one. The name must be one llmwire's
-	// registry knows, and both lanes must be served by the one host the
-	// client is built for; NewClient refuses anything else.
-	Pro       string
-	ShortGate string
+	// Answer and Gate are the llmwire profile ids of the two lanes: the
+	// product's from BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the
+	// evaluation harness's from its own variables when it measures another
+	// model. Both are required, both must be ids llmwire's registry knows,
+	// and both lanes must be served by the one host the client is built for;
+	// NewClient refuses anything else.
+	Answer string
+	Gate   string
 	// Policy is what the call sites' intents mean on the wire for the models
 	// in use. Zero value = DefaultPolicy, the one rongo was measured with.
 	Policy Policy
@@ -218,7 +220,7 @@ func (e *FinishError) Error() string {
 
 // callOptions is what the Option funcs assemble.
 type callOptions struct {
-	model       string
+	lane        Lane
 	thinkingOff bool
 	maxTokens   int
 	temperature *float64
@@ -290,31 +292,30 @@ func record(ctx context.Context, o callOptions, model string, u Usage, took time
 // Option adjusts a single call.
 type Option func(*callOptions)
 
-// ShortGate routes this call to the non-Pro deployment, which costs a third of
-// Pro per token.
+// ShortGate routes this call to the gate lane, the one configured for calls
+// whose output is an id or a label.
 //
-// It says nothing about reasoning. Both deployments are the same reasoning
-// family and both think when asked to; suppressing thought is WithoutThinking,
-// a separate switch. Never describe this as "the model that cannot think" — the
+// It says nothing about reasoning. The lane may think when asked to;
+// suppressing thought is WithoutThinking, a separate switch. Never describe this as "the model that cannot think" — the
 // bar for using it is "the output is an id or a label", not "no thought needed".
 func ShortGate() Option {
-	return func(o *callOptions) { o.model = ShortGateDeployment }
+	return func(o *callOptions) { o.lane = LaneGate }
 }
 
-// Pro routes this call to the Pro deployment, which is also what a call that
-// names no deployment gets (see resolve). It exists so a caller can say Pro
-// rather than say nothing: "the default" and "Pro on purpose" read the same in
-// code and mean different things to whoever changes the default next. The eval
-// harness needs the deliberate form, because it measures the two lanes against
-// each other and a lane selected by omission silently follows the default it
-// is supposed to be compared with.
+// Pro routes this call to the answer lane, which is also what a call that
+// names no lane gets (see resolve). It exists so a caller can say so rather
+// than say nothing: "the default" and "the answer lane on purpose" read the
+// same in code and mean different things to whoever changes the default next.
+// The eval harness needs the deliberate form, because it measures the two
+// lanes against each other and a lane selected by omission silently follows
+// the default it is supposed to be compared with.
 func Pro() Option {
-	return func(o *callOptions) { o.model = ProDeployment }
+	return func(o *callOptions) { o.lane = LaneAnswer }
 }
 
 // WithoutThinking disables MiMo's native reasoning for this call. It does not
-// change the deployment: a Pro call can be asked not to think, and a short-gate
-// call can be asked to.
+// change the lane: an answer-lane call can be asked not to think, and a
+// short-gate call can be asked to.
 func WithoutThinking() Option {
 	return func(o *callOptions) { o.thinkingOff = true }
 }
@@ -350,10 +351,10 @@ func WithTemperature(v float64) Option {
 type Client struct {
 	wire *llmwire.Client
 	log  *slog.Logger
-	// pro and shortGate are the wire names for the two lanes; see Config.
-	pro, shortGate string
-	policy         Policy
-	turnMaxTokens  int
+	// answer and gate are the profile ids of the two lanes; see Config.
+	answer, gate  string
+	policy        Policy
+	turnMaxTokens int
 	// demoted records the features warn has already reported, keyed by
 	// feature name; see warn.
 	demoted sync.Map
@@ -377,19 +378,15 @@ func (c *Client) underBudget(ctx context.Context) error {
 	return nil
 }
 
-// Deployment reports which profile a lane (ProDeployment or
-// ShortGateDeployment) is served by, override applied.
-func (c *Client) Deployment(lane string) string { return c.deployment(lane) }
+// Deployment reports which profile a lane is served by.
+func (c *Client) Deployment(lane Lane) string { return c.deployment(lane) }
 
 // deployment maps a lane to the name sent on the wire.
-func (c *Client) deployment(lane string) string {
-	switch {
-	case lane == ProDeployment && c.pro != "":
-		return c.pro
-	case lane == ShortGateDeployment && c.shortGate != "":
-		return c.shortGate
+func (c *Client) deployment(lane Lane) string {
+	if lane == LaneGate {
+		return c.gate
 	}
-	return lane
+	return c.answer
 }
 
 // NewClient builds a Client. hc may be nil, in which case llmwire makes one.
@@ -397,25 +394,25 @@ func (c *Client) deployment(lane string) string {
 // body reads too and would cut a long answer mid-stream, which is what the
 // named timeouts in Config exist to prevent.
 //
-// The error is a missing key variable, named. The client is built for the
-// Pro lane's profile, whose host and key then serve the gate lane as well:
-// one client, one host. A gate profile that llmwire would reach through a
-// different host is refused here, at boot, because the alternative is a gate
-// call that leaves for the Pro host under the gate's name and comes back as
-// an unknown-model 400 on the first question.
+// The error is an unconfigured lane or a missing key variable, named. The
+// client is built for the answer lane's profile, whose host and key then serve
+// the gate lane as well: one client, one host. A gate profile that llmwire
+// would reach through a different host is refused here, at boot, because the
+// alternative is a gate call that leaves for the answer host under the gate's
+// name and comes back as an unknown-model 400 on the first question.
 func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
 	}
-	pro, gate := ProDeployment, ShortGateDeployment
-	if cfg.Pro != "" {
-		pro = cfg.Pro
+	answer, gate := cfg.Answer, cfg.Gate
+	if answer == "" {
+		return nil, errors.New("llm: no answer model; set BACKEND_LLM_MODEL to an llmwire profile id")
 	}
-	if cfg.ShortGate != "" {
-		gate = cfg.ShortGate
+	if gate == "" {
+		return nil, errors.New("llm: no gate model; set BACKEND_LLM_GATE_MODEL to an llmwire profile id")
 	}
-	wire, err := llmwire.FromEnv(pro, llmwire.Config{
+	wire, err := llmwire.FromEnv(answer, llmwire.Config{
 		BaseURL:       cfg.BaseURL,
 		APIKey:        cfg.APIKey,
 		HeaderTimeout: cfg.Timeout,
@@ -430,7 +427,7 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	// stand-in endpoint), so the provider comparison would only ever send
 	// its author to a variable that is not in play.
 	if cfg.BaseURL == "" {
-		if err := sameHost(wire.Registry(), pro, gate); err != nil {
+		if err := sameHost(wire.Registry(), answer, gate); err != nil {
 			return nil, err
 		}
 	} else if _, err := wire.Registry().Lookup(gate); err != nil {
@@ -451,8 +448,9 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	// (the levels it has), and a deployment should hear that at boot, not
 	// run for a week with every gate call silently demoted. Both settings
 	// against both models: WithoutThinking is a property of the call, not
-	// of the lane, so a Pro call may be a gate call and receive GateReasoning.
-	for _, model := range []string{pro, gate} {
+	// of the lane, so an answer-lane call may be a gate call and receive
+	// GateReasoning.
+	for _, model := range []string{answer, gate} {
 		if err := checkReasoning(wire.Registry(), model, "BACKEND_LLM_GATE_REASONING", pol.GateReasoning); err != nil {
 			return nil, err
 		}
@@ -463,8 +461,8 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	return &Client{
 		wire:          wire,
 		log:           log,
-		pro:           cfg.Pro,
-		shortGate:     cfg.ShortGate,
+		answer:        answer,
+		gate:          gate,
 		policy:        pol,
 		turnMaxTokens: cfg.TurnMaxTokens,
 	}, nil
@@ -525,7 +523,7 @@ func sameHost(reg *llmwire.Registry, pro, gate string) error {
 }
 
 func resolve(opts []Option) callOptions {
-	o := callOptions{model: ProDeployment, maxTokens: defaultMaxTokens}
+	o := callOptions{lane: LaneAnswer, maxTokens: defaultMaxTokens}
 	for _, fn := range opts {
 		fn(&o)
 	}
@@ -551,7 +549,7 @@ func resolve(opts []Option) callOptions {
 // special keeps llmwire's strict validation.
 func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	req := llmwire.ChatRequest{
-		Model:     c.deployment(o.model),
+		Model:     c.deployment(o.lane),
 		Messages:  make([]llmwire.Message, 0, len(msgs)),
 		MaxTokens: &o.maxTokens,
 	}
@@ -629,12 +627,12 @@ func (c *Client) complete(ctx context.Context, o callOptions, msgs []Message) (s
 	// generating.
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
-	c.warn(c.deployment(o.model), warnings)
+	c.warn(c.deployment(o.lane), warnings)
 	if err != nil {
 		return "", Usage{}, err
 	}
 	u := usageFrom(resp.Usage)
-	record(ctx, o, c.deployment(o.model), u, time.Since(started))
+	record(ctx, o, c.deployment(o.lane), u, time.Since(started))
 	// A reply cut at the cap is not a reply. Every caller here parses the
 	// content, and a truncated JSON body read as "unparseable" would hide
 	// that the budget was the cause.
@@ -686,7 +684,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
-	c.warn(c.deployment(o.model), warnings)
+	c.warn(c.deployment(o.lane), warnings)
 	if err != nil {
 		return Usage{}, 0, err
 	}
@@ -704,7 +702,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	res, err := stream.Collect(onToken)
 	got := usageFrom(res.Usage)
 	if _, ok := res.Usage.Total(); ok {
-		record(ctx, o, c.deployment(o.model), got, time.Since(started))
+		record(ctx, o, c.deployment(o.lane), got, time.Since(started))
 	}
 	if err != nil {
 		return got, res.Chars, err

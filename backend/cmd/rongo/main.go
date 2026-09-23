@@ -524,8 +524,8 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 	models, err := llm.NewClient(llm.Config{
 		Timeout:       cfg.LLMTimeout,
 		TurnMaxTokens: cfg.TurnMaxTokens,
-		Pro:           cfg.LLMModel,
-		ShortGate:     cfg.LLMGateModel,
+		Answer:        cfg.LLMModel,
+		Gate:          cfg.LLMGateModel,
 		Policy: llm.Policy{
 			GateTemperature: cfg.LLMGateTemperature,
 			GateReasoning:   cfg.LLMGateReasoning,
@@ -540,7 +540,7 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 		gateTemp = fmt.Sprint(*cfg.LLMGateTemperature)
 	}
 	slog.Info("model lanes",
-		"pro", models.Deployment(llm.ProDeployment), "gate", models.Deployment(llm.ShortGateDeployment),
+		"answer", models.Deployment(llm.LaneAnswer), "gate", models.Deployment(llm.LaneGate),
 		"gate_temperature", gateTemp, "gate_reasoning", cfg.LLMGateReasoning, "reasoning", cfg.LLMReasoning,
 		"timeout", cfg.LLMTimeout)
 	return embedder, models, nil

@@ -223,7 +223,7 @@ func TestCallTools_recordsEveryRoundIntoTheMeterUnderItsStep(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
-	if calls[0].Step != "locate" || calls[0].Model != ShortGateDeployment {
+	if calls[0].Step != "locate" || calls[0].Model != testGateModel {
 		t.Errorf("call = %+v, want step locate on the short-gate deployment", calls[0])
 	}
 	if calls[0].Prompt != 11 || calls[0].Completion != 7 {

@@ -55,7 +55,7 @@ func TestPolicy_defaultIsWhatRongoWasMeasuredWith(t *testing.T) {
 // (pin, gate); the policy decides what reaches the wire.
 func TestPolicy_rendersTheDeploymentsAnswers(t *testing.T) {
 	srv, body := wireRecorder(t)
-	c := mustClient(t, Config{BaseURL: srv.URL, Pro: "gpt-5.4-mini", ShortGate: "gpt-5.4-mini",
+	c := mustClient(t, Config{BaseURL: srv.URL, Answer: "gpt-5.4-mini", Gate: "gpt-5.4-mini",
 		Policy: Policy{GateTemperature: nil, GateReasoning: "low", ProReasoning: "medium"}}, srv.Client())
 
 	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}},
@@ -87,11 +87,11 @@ func TestPolicy_isCheckedAgainstTheModelAtBoot(t *testing.T) {
 		want string
 	}{
 		"level the gate model lacks": {
-			Config{BaseURL: srv.URL, Policy: Policy{GateReasoning: "xhigh"}},
+			Config{BaseURL: srv.URL, Answer: testAnswerModel, Gate: testGateModel, Policy: Policy{GateReasoning: "xhigh"}},
 			"BACKEND_LLM_GATE_REASONING",
 		},
 		"off on a model that cannot stop": {
-			Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash", Policy: Policy{ProReasoning: ReasoningOff}},
+			Config{BaseURL: srv.URL, Answer: "glm-5.3-flash", Gate: "glm-5.3-flash", Policy: Policy{ProReasoning: ReasoningOff}},
 			"cannot stop thinking",
 		},
 	} {
@@ -103,7 +103,7 @@ func TestPolicy_isCheckedAgainstTheModelAtBoot(t *testing.T) {
 		})
 	}
 	// default always passes, whatever the model.
-	if _, err := NewClient(Config{BaseURL: srv.URL, Pro: "glm-5.3-flash", ShortGate: "glm-5.3-flash",
+	if _, err := NewClient(Config{BaseURL: srv.URL, Answer: "glm-5.3-flash", Gate: "glm-5.3-flash",
 		Policy: Policy{GateReasoning: ReasoningDefault, ProReasoning: ReasoningDefault}}, srv.Client()); err != nil {
 		t.Fatal(err)
 	}

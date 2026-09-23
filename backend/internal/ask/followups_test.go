@@ -137,7 +137,7 @@ func TestFollowups_runsOnTheShortGateLaneWithThePinnedTemperature(t *testing.T) 
 
 	Followups(context.Background(), c, "q", "a", AudienceBA, followupsSources(), Scope{}, LanguageEN)
 
-	if up.model != llm.ShortGateDeployment {
+	if up.model != testGateModel {
 		t.Errorf("model = %q, want the short-gate deployment", up.model)
 	}
 	if up.temperature == nil || *up.temperature != gateTemperature {
