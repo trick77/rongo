@@ -155,7 +155,7 @@ func (c *Client) worthAnother(ctx context.Context, o callOptions, err error, u U
 		return false
 	}
 	c.log.Warn("llm: call retried, nothing was delivered",
-		"step", o.step, "model", c.deployment(o.model), "reason", retryReason(err),
+		"step", o.step, "model", c.deployment(o.lane), "reason", retryReason(err),
 		"wait", wait.String(), "completion_tokens", u.Completion)
 	return true
 }

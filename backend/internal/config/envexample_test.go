@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/trick77/llmwire"
-	"github.com/trick77/rongo/internal/llm"
 )
 
 // activeEnvExampleVars returns the BACKEND_* names that .env.example leaves
@@ -39,12 +38,13 @@ func activeEnvExampleVars(t *testing.T) []string {
 // endpointEnv is the mandatory set Load does not read: the model and
 // embedding endpoints are named by their llmwire profiles and read by
 // llmwire when main builds the clients, and a missing one stops the boot
-// there rather than in Load. Derived from the profiles, not listed, so a
-// llmwire bump that renames a variable fails here and not at the boot.
+// there rather than in Load. Derived from the profiles of the model the
+// example configures, not listed, so a llmwire bump that renames a variable
+// fails here and not at the boot.
 func endpointEnv(t *testing.T) map[string]bool {
 	t.Helper()
 	names := map[string]bool{}
-	for _, id := range []string{llm.ProDeployment, "text-embedding-3-small"} {
+	for _, id := range []string{mandatoryEnv["BACKEND_LLM_MODEL"], "text-embedding-3-small"} {
 		p, err := llmwire.Default().Lookup(id)
 		if err != nil {
 			t.Fatalf("profile %s: %v", id, err)

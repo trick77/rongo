@@ -5,9 +5,10 @@
 // decisions. Nothing read an answer. This does, against a rubric per question
 // written from the verified code: the claims a correct answer makes, the
 // claims it must not make, and the files it has to cite. It is what a change
-// upstream of the answer call is measured by, and it is the model-swap test:
-// BACKEND_EVAL_PRO_MODEL and BACKEND_EVAL_GATE_MODEL point the two lanes at
-// another deployment for the harness alone, BACKEND_EVAL_GATE_REASONING and
+// upstream of the answer call is measured by, and it is the model-swap test.
+// The lanes run on BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the product's
+// own; BACKEND_EVAL_ANSWER_MODEL and BACKEND_EVAL_GATE_MODEL point them at
+// another model for the harness alone, BACKEND_EVAL_GATE_REASONING and
 // BACKEND_EVAL_REASONING set that model's policy per lane. The judge runs on
 // its own client
 // without those overrides, so a swapped gate model is graded by the same
@@ -98,8 +99,12 @@ func loadRubrics(t *testing.T) map[string]Rubric {
 func answerLLM(t *testing.T) *llm.Client {
 	t.Helper()
 	cfg := evalLLMConfig(t, 15*time.Minute)
-	cfg.Pro = os.Getenv("BACKEND_EVAL_PRO_MODEL")
-	cfg.ShortGate = os.Getenv("BACKEND_EVAL_GATE_MODEL")
+	if m := os.Getenv("BACKEND_EVAL_ANSWER_MODEL"); m != "" {
+		cfg.Answer = m
+	}
+	if m := os.Getenv("BACKEND_EVAL_GATE_MODEL"); m != "" {
+		cfg.Gate = m
+	}
 	// The policy per lane for the swapped model, the values
 	// BACKEND_LLM_GATE_REASONING and BACKEND_LLM_REASONING take in the
 	// product; unset keeps the default policy.
@@ -108,27 +113,36 @@ func answerLLM(t *testing.T) *llm.Client {
 	return mustLLM(t, cfg)
 }
 
-// judgeLLM is the judge's client: the deployments the product reads, never
-// the overrides, so the grader does not change with the candidate.
+// judgeLLM is the judge's client: the models the product reads, never the
+// overrides, so the grader does not change with the candidate.
 func judgeLLM(t *testing.T) *llm.Client {
 	t.Helper()
 	return evalLLM(t, 15*time.Minute)
 }
 
 // evalLLMConfig builds the model config the same way the product does: the
-// host, the key variable and the opencode identity are all llmwire's, from
-// the deployment's provider entry. evalLLM skips when the key is unset.
+// models from BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the host, the key
+// variable and the opencode identity llmwire's, from the model's provider
+// entry. An unset model FAILS the run rather than skipping it: a skipped
+// eval reads as "nothing to see", and rongo has no model to fall back to.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
-	if os.Getenv("LLMWIRE_MIMO_API_KEY") == "" {
-		t.Skip("LLMWIRE_MIMO_API_KEY is unset")
-	}
-	return llm.Config{Timeout: timeout}
+	answer, gate := evalModels(t)
+	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate}
 }
 
-// evalLLM is the model client on the product's deployments. A missing
-// endpoint variable is llmwire's named error, and fatal: evalLLMConfig has
-// already skipped the unset case.
+// evalModels is the configured pair, or a failed run naming what is unset.
+func evalModels(t *testing.T) (answer, gate string) {
+	t.Helper()
+	answer, gate = os.Getenv("BACKEND_LLM_MODEL"), os.Getenv("BACKEND_LLM_GATE_MODEL")
+	if answer == "" || gate == "" {
+		t.Fatal("set BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL (the eval .env): the eval runs on the configured models")
+	}
+	return answer, gate
+}
+
+// evalLLM is the model client on the product's models. A missing key
+// variable is llmwire's named error, and fatal.
 func evalLLM(t *testing.T, timeout time.Duration) *llm.Client {
 	t.Helper()
 	return mustLLM(t, evalLLMConfig(t, timeout))

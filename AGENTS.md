@@ -26,8 +26,10 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 
 ## Models
 - **Model change is judged by `TestEvalMeasureAnswers`**, run twice. Retrieval numbers say what the answer was written from, never whether it was right.
-- **Pro where a human reads: the answer. non-Pro + `ShortGate` everywhere else.** Bar is "output is an id or a label", not "doesn't think". `WithoutThinking`, `ShortGate`, `WithTemperature` are separate switches. Don't couple them.
-- **Routing judge is non-Pro.** Two measurements went opposite ways (`2026-08-19-candidates.md`, `2026-09-06-routing-rerun.md`). No move back without a corpus and a number.
+- **No model id in code.** Both lanes from `BACKEND_LLM_MODEL` / `BACKEND_LLM_GATE_MODEL`, mandatory, no fallback; evals read the same two. Lanes told apart by `llm.Lane`, never by model string: both may be one model.
+- **Flash on both lanes (2026-09-23), chosen on speed** — pro was unusably slow. Quality not the criterion; no eval number behind it.
+- **Answer lane where a human reads; gate lane + `ShortGate` everywhere else.** Bar is "output is an id or a label", not "doesn't think". `WithoutThinking`, `ShortGate`, `WithTemperature` are separate switches. Don't couple them.
+- **Routing judge on the gate lane.** Two measurements went opposite ways (`2026-08-19-candidates.md`, `2026-09-06-routing-rerun.md`). No move back without a corpus and a number.
 - **Pin `WithTemperature` on every call returning an id, label or decision.** Unpinned, the judge re-rolls between runs. Answer call stays unpinned; a person reads it.
 - **Pinning narrows the re-roll, never removes it** — two pinned runs still differ by one question. Never conclude from a one-question gap. Run twice.
 - **Never rank routing by accuracy.** Most questions want no card, so never-asking scores well and accuracy drifts every threshold toward silence. Price errors apart: needless card = 1, missed ambiguity = W (`2026-09-06-routing-cost-metric.md`).

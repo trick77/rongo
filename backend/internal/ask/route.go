@@ -485,9 +485,10 @@ type Router struct {
 	// from config, not a value this package invents for itself, so routing
 	// never sees a module nobody else in the product can see.
 	clusterOpts modules.Opts
-	// judgeDeployment selects which MiMo deployment decides ask-vs-compose.
+	// judgeDeployment selects which lane decides ask-vs-compose. The history
+	// below measured the MiMo pro/flash pair on the two lanes.
 	//
-	// It runs on the cheap lane, which is where the bar puts it — the output
+	// It runs on the gate lane, which is where the bar puts it — the output
 	// is one word — and it took two measurements to get back here.
 	//
 	// Phase 4b measured the deployments a question apart and wrote non-Pro in.
@@ -519,17 +520,17 @@ type Router struct {
 	judgeDeployment llm.Option
 }
 
-// NewRouter builds a Router. The judge runs on the cheap lane, matching what
+// NewRouter builds a Router. The judge runs on the gate lane, matching what
 // is deployed; see WithJudgeDeployment to change that for a measurement.
 func NewRouter(c *llm.Client, db *sql.DB, margin float64, mo modules.Opts) *Router {
 	return &Router{llm: c, db: db, margin: margin, clusterOpts: mo, judgeDeployment: llm.ShortGate()}
 }
 
 // WithJudgeDeployment returns a COPY of the Router with the ask-vs-compose
-// judge's deployment overridden — pass llm.Pro() for the expensive lane,
-// llm.ShortGate() for the cheap one. nil means "name no deployment", which
-// leaves the client's own default, Pro; prefer llm.Pro() to say so, because a
-// lane chosen by omission follows whatever the default becomes next.
+// judge's lane overridden — pass llm.Pro() for the answer lane,
+// llm.ShortGate() for the gate lane. nil means "name no lane", which leaves
+// the client's own default, the answer lane; prefer llm.Pro() to say so,
+// because a lane chosen by omission follows whatever the default becomes next.
 // It does not mutate the receiver: nothing in the product may change the
 // shared, production Router's deployment by accident, so selecting a
 // different judge deployment means deliberately building a second Router

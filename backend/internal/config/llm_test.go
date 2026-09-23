@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,8 +20,19 @@ func TestLoad_llmPolicyDefaults(t *testing.T) {
 	if cfg.LLMGateReasoning != "off" || cfg.LLMReasoning != "default" || cfg.LLMTimeout != 15*time.Minute {
 		t.Errorf("policy = %q/%q/%v, want off/default/15m", cfg.LLMGateReasoning, cfg.LLMReasoning, cfg.LLMTimeout)
 	}
-	if cfg.LLMModel != "" || cfg.LLMGateModel != "" {
-		t.Errorf("models = %q/%q, want empty (internal/llm's defaults)", cfg.LLMModel, cfg.LLMGateModel)
+}
+
+// rongo has no model of its own: both lanes are configured or it does not
+// start, and the error names the variable.
+func TestLoad_requiresBothModels(t *testing.T) {
+	for _, name := range []string{"BACKEND_LLM_MODEL", "BACKEND_LLM_GATE_MODEL"} {
+		t.Run(name, func(t *testing.T) {
+			setEnv(t, map[string]string{name: " "})
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("Load() err = %v, want one naming %s", err, name)
+			}
+		})
 	}
 }
 

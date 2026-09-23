@@ -33,7 +33,7 @@ func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
-	want := usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: 11, Completion: 7}
+	want := usage.Call{Step: "understand", Model: testGateModel, Prompt: 11, Completion: 7}
 	// The duration is measured here rather than reported by the endpoint,
 	// and the cost is llmwire's from its own table: 11 in at 0.14 and 7 out
 	// at 0.28 USD per million. Each checked on its own and then cleared:
@@ -68,7 +68,7 @@ func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("recorded %d calls, want 1", len(calls))
 	}
-	want := usage.Call{Step: "answer", Model: ProDeployment, Prompt: 3, Completion: 4}
+	want := usage.Call{Step: "answer", Model: testAnswerModel, Prompt: 3, Completion: 4}
 	got := calls[0]
 	// Priced by llmwire as the stream closed: 3 in at 0.435 and 4 out at
 	// 0.87 USD per million.
@@ -126,7 +126,7 @@ func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
 func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 	t.Run("complete", func(t *testing.T) {
 		srv, _ := wireRecorder(t)
-		c := mustClient(t, Config{BaseURL: srv.URL, Pro: "gpt-5.4", ShortGate: "gpt-5.4-mini"}, srv.Client())
+		c := mustClient(t, Config{BaseURL: srv.URL, Answer: "gpt-5.4", Gate: "gpt-5.4-mini"}, srv.Client())
 		m := usage.New()
 		ctx := usage.WithMeter(context.Background(), m)
 
@@ -152,7 +152,7 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 			writeSSE(w, []string{"a"}, "", 1)
 		}))
 		t.Cleanup(srv.Close)
-		c := mustClient(t, Config{BaseURL: srv.URL, Pro: "gpt-5.4", ShortGate: "gpt-5.4-mini"}, srv.Client())
+		c := mustClient(t, Config{BaseURL: srv.URL, Answer: "gpt-5.4", Gate: "gpt-5.4-mini"}, srv.Client())
 		m := usage.New()
 		ctx := usage.WithMeter(context.Background(), m)
 
@@ -256,7 +256,7 @@ func TestStream_recordsTheDetailsFromTheTrailingUsageFrame(t *testing.T) {
 // spentMeter is a turn that has already paid for n tokens.
 func spentMeter(n int) context.Context {
 	m := usage.New()
-	m.Record(usage.Call{Step: "understand", Model: ShortGateDeployment, Prompt: n, Completion: 0})
+	m.Record(usage.Call{Step: "understand", Model: testGateModel, Prompt: n, Completion: 0})
 	return usage.WithMeter(context.Background(), m)
 }
 
@@ -396,7 +396,7 @@ func TestComplete_usesProAndReturnsUsage(t *testing.T) {
 	if out != "the answer" {
 		t.Errorf("content = %q", out)
 	}
-	if got.Model != ProDeployment {
+	if got.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment", got.Model)
 	}
 	if usage.Prompt != 11 || usage.Completion != 7 || usage.Total != 18 {
@@ -412,7 +412,7 @@ func TestShortGate_changesTheDeploymentButNotThinking(t *testing.T) {
 
 	ask(t, c, ShortGate())
 
-	if got.Model != ShortGateDeployment {
+	if got.Model != testGateModel {
 		t.Errorf("model = %q, want the non-Pro deployment", got.Model)
 	}
 	if got.Thinking != nil {
@@ -429,7 +429,7 @@ func TestWithoutThinking_suppressesThoughtButKeepsTheDeployment(t *testing.T) {
 	if got.Thinking == nil || got.Thinking.Type != "disabled" {
 		t.Errorf("thinking = %+v, want disabled", got.Thinking)
 	}
-	if got.Model != ProDeployment {
+	if got.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment — WithoutThinking must not reroute", got.Model)
 	}
 }
@@ -486,7 +486,7 @@ func TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
 		t.Errorf("temperature = %v, want 0", *got2.Temperature)
 	}
 	// And it reroutes nothing and suppresses nothing.
-	if got2.Model != ProDeployment {
+	if got2.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment — WithTemperature must not reroute", got2.Model)
 	}
 	if got2.Thinking != nil {
@@ -692,10 +692,25 @@ func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	}
 }
 
+// The lanes' models in tests: two different profiles on one host, so a test
+// can tell from the wire which lane a call took. Test fixtures only; rongo
+// itself has no model of its own.
+const (
+	testAnswerModel = "mimo-v2.6-pro"
+	testGateModel   = "mimo-v2.6-flash"
+)
+
 // mustClient is NewClient for a test whose Config names its fake server, so
-// the only way it can fail is a bug in the constructor.
+// the only way it can fail is a bug in the constructor. A lane the test
+// leaves unset gets its test model.
 func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 	t.Helper()
+	if cfg.Answer == "" {
+		cfg.Answer = testAnswerModel
+	}
+	if cfg.Gate == "" {
+		cfg.Gate = testGateModel
+	}
 	c, err := NewClient(cfg, hc)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -707,7 +722,7 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 // and a missing key comes back named rather than as a client that dials "".
 func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
 	t.Setenv("LLMWIRE_MIMO_API_KEY", "")
-	_, err := NewClient(Config{}, nil)
+	_, err := NewClient(Config{Answer: testAnswerModel, Gate: testGateModel}, nil)
 	var me *llmwire.MissingEnvError
 	if !errors.As(err, &me) || me.Var != "LLMWIRE_MIMO_API_KEY" {
 		t.Fatalf("got %v", err)
@@ -731,7 +746,7 @@ func TestWithJSONObject_asksForAJSONObjectAndIsOtherwiseAbsent(t *testing.T) {
 	if got2.ResponseFormat == nil || got2.ResponseFormat.Type != "json_object" {
 		t.Errorf("response_format = %+v, want json_object", got2.ResponseFormat)
 	}
-	if got2.Model != ProDeployment || got2.Thinking != nil {
+	if got2.Model != testAnswerModel || got2.Thinking != nil {
 		t.Errorf("model = %q thinking = %+v, want the call otherwise unchanged", got2.Model, got2.Thinking)
 	}
 }

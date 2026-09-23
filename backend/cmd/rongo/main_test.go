@@ -20,7 +20,7 @@ func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
 	for _, v := range vars {
 		t.Setenv(v, "x")
 	}
-	cfg := config.Config{}
+	cfg := config.Config{LLMModel: "mimo-v2.6-flash", LLMGateModel: "mimo-v2.6-flash"}
 	if _, _, err := newModelClients(cfg); err != nil {
 		t.Fatalf("both keys set: %v", err)
 	}
