@@ -746,9 +746,21 @@ func NothingFound(lang Language, terms []string) string {
 // been asked which of those names it carries. It travels from the pipeline to
 // the answer prompt and, for Unknown, to the reader.
 type Scope struct {
+	// words are the turn's search texts joined, the question's words a
+	// property crossing is matched against. Unexported, never persisted: a
+	// resumed turn falls back to its question.
+	words string
+
 	// Known are the named repositories the index carries, in the order the
-	// question named them. Two or more means the turn is a comparison.
+	// question named them. Two or more means the turn is a comparison,
+	// unless they are exactly one product's members (onlyOneProduct).
 	Known []string
+	// pm is the project map, read once per turn by projectsOf and reused by
+	// the search, the structure block and the gather ceiling. Unexported,
+	// so it is never persisted: a resumed or re-explained turn reads it
+	// afresh.
+	pm       projects.Map
+	pmLoaded bool
 	// Unknown are the named repositories the index does not carry. The search
 	// silently ignores them — it has to, or a mishearing would wipe the whole
 	// result — so this is the only thing that keeps a turn from answering
