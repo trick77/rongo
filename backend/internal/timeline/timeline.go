@@ -60,10 +60,12 @@ type Recorder struct {
 func New() *Recorder { return &Recorder{started: time.Now()} }
 
 // Record appends one step, at now.
-func (r *Recorder) Record(step string) {
+func (r *Recorder) Record(step string) int64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.steps = append(r.steps, Step{Step: step, At: time.Now().UnixMilli()})
+	at := time.Now().UnixMilli()
+	r.steps = append(r.steps, Step{Step: step, At: at})
+	return at
 }
 
 // Detail attaches what a step found to the LATEST step of that name. A
@@ -115,11 +117,15 @@ func From(ctx context.Context) *Recorder {
 	return r
 }
 
-// Record writes one step into the context's recorder, if there is one.
-func Record(ctx context.Context, step string) {
+// Record writes one step into the context's recorder, if there is one, and
+// returns the server's time for it either way: the status event carries it,
+// so a live trace measures steps on this clock rather than on when each event
+// happened to arrive in the browser.
+func Record(ctx context.Context, step string) int64 {
 	if r := From(ctx); r != nil {
-		r.Record(step)
+		return r.Record(step)
 	}
+	return time.Now().UnixMilli()
 }
 
 // Detail attaches a step's detail in the context's recorder, if there is one.

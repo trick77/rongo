@@ -18,6 +18,7 @@ import {
   storedRetries,
   storedTurn,
   threadUsage,
+  withStep,
   type Audience,
   type Citation,
   type Message,
@@ -616,7 +617,9 @@ export default function Ask({
             // header read the list, so refreshing it is the whole update.
             onActivity();
           } else if (name === "status") {
-            patchLast((t) => ({ ...t, steps: [...t.steps, { step: payload.step, at: Date.now() }] }));
+            const now = Date.now();
+            const serverAt = typeof payload.at === "number" ? payload.at : undefined;
+            patchLast((t) => withStep(t, payload.step, now, serverAt));
           } else if (name === "detail") {
             // What the step found, attached to the LATEST step of that name:
             // a step's detail arrives once the step is done, and "searching"

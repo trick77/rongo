@@ -693,7 +693,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// finishTurn then sends its text whole.
 	var streamed bool
 	events := ask.Events{
-		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
+		OnStatus: func(step string) { send("status", map[string]any{"step": step, "at": timeline.Record(ctx, step)}) },
 		OnDetail: func(step string, d map[string]any) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})
@@ -943,8 +943,7 @@ func (s *Server) suggestFollowups(
 	if s.deps.Suggester == nil || len(answer.Sources) == 0 || threadWasDeleted(ctx) {
 		return
 	}
-	timeline.Record(ctx, "suggesting")
-	send("status", map[string]any{"step": "suggesting"})
+	send("status", map[string]any{"step": "suggesting", "at": timeline.Record(ctx, "suggesting")})
 	// record, not ctx: a reader who closes the tab, reloads, or loses the
 	// connection between the last word and this call cancelled the request,
 	// and with it the only chance this answer ever had at suggestions - the
@@ -1193,7 +1192,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	var streamed bool
 	events := ask.Events{
-		OnStatus: func(step string) { timeline.Record(ctx, step); send("status", map[string]any{"step": step}) },
+		OnStatus: func(step string) { send("status", map[string]any{"step": step, "at": timeline.Record(ctx, step)}) },
 		OnDetail: func(step string, d map[string]any) {
 			timeline.Detail(ctx, step, d)
 			send("detail", map[string]any{"step": step, "detail": d})

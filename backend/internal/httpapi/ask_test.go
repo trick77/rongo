@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -1826,5 +1827,36 @@ func TestChoosingAProjectSearchesTheMembersTheCardOffered(t *testing.T) {
 	// stored members and not the project name, which no f.repo ever equals.
 	if len(asker.gotScope.Known) != 2 || asker.gotScope.Known[0] != "shop-backend" {
 		t.Errorf("scope.Known = %v, want the stored members", asker.gotScope.Known)
+	}
+}
+
+// Every status event carries the server's time for its step: the browser's
+// arrival time moves with any buffering between here and it, so a live trace
+// drew a 0.0s search beside a 90s "understanding" that contained it.
+func TestAsk_statusEventsCarryTheServersTime(t *testing.T) {
+	deps, _ := askDeps(t, &fakeAsker{tokens: []string{"x"}})
+	before := time.Now().UnixMilli()
+	rec := postAsk(t, deps, `{"question":"How does shipping work?","audience":"ba"}`)
+	after := time.Now().UnixMilli()
+
+	seen := 0
+	for _, e := range events(rec.Body.String()) {
+		if e[0] != "status" {
+			continue
+		}
+		var payload struct {
+			Step string `json:"step"`
+			At   int64  `json:"at"`
+		}
+		if err := json.Unmarshal([]byte(e[1]), &payload); err != nil {
+			t.Fatalf("status payload %q: %v", e[1], err)
+		}
+		if payload.At < before || payload.At > after {
+			t.Errorf("status %q at = %d, want the server's time between %d and %d", payload.Step, payload.At, before, after)
+		}
+		seen++
+	}
+	if seen == 0 {
+		t.Fatal("no status event at all")
 	}
 }
