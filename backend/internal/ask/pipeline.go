@@ -370,7 +370,8 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	if len(pin) > 0 {
 		scopedQuestion = ""
 	}
-	hits, err := p.searchScoped(ctx, scopedQuestion, u.Prior, texts, u.CodeText(), known, declared.Prefixes(stage))
+	hits, err := p.searchScoped(ctx, scopedQuestion, u.Prior, texts, u.CodeText(), known, declared.Prefixes(stage),
+		p.onlyOneProduct(ctx, &scope))
 	if err != nil {
 		return Answer{}, nil, fmt.Errorf("search: %w", err)
 	}
@@ -399,6 +400,69 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// went looking for something they asked a turn ago.
 	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
 	return answer, nil, err
+}
+
+// projectsOf is the turn's project map, read on first use and kept on the
+// scope, so one turn reads it once however many steps need it.
+func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, error) {
+	if scope.pmLoaded {
+		return scope.pm, nil
+	}
+	pm, err := p.router.Projects(ctx)
+	if err != nil {
+		return projects.Map{}, err
+	}
+	scope.pm, scope.pmLoaded = pm, true
+	return pm, nil
+}
+
+// onlyOneProduct reports whether the turn's repositories are exactly ALL the
+// members of one product, its libraries included: what naming the project
+// expands to, a project turn searched as one. Naming some members is a
+// comparison of those members even when Covered, which treats a library as
+// optional, calls them the whole product: "compare how the ui and the backend
+// retry" must search each side, or one fills the cut and the other has nothing
+// to compare. Two products, or a product beside a loose repository, is a
+// comparison. Project data unavailable is not one product.
+func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope) bool {
+	if len(scope.Known) < 2 {
+		return false
+	}
+	pm, err := p.projectsOf(ctx, scope)
+	if err != nil {
+		return false
+	}
+	covered := pm.Covered(scope.Known)
+	if len(covered) != 1 || len(looseOf(scope.Known, covered, pm)) != 0 {
+		return false
+	}
+	have := make(map[string]bool, len(scope.Known))
+	for _, r := range scope.Known {
+		have[r] = true
+	}
+	for _, m := range pm.Members(covered[0]) {
+		if !have[m] {
+			return false
+		}
+	}
+	return true
+}
+
+// looseOf is the repositories in known that no covered project accounts for.
+func looseOf(known, covered []string, pm projects.Map) []string {
+	accounted := map[string]bool{}
+	for _, name := range covered {
+		for _, m := range pm.Members(name) {
+			accounted[m] = true
+		}
+	}
+	var loose []string
+	for _, r := range known {
+		if !accounted[r] {
+			loose = append(loose, r)
+		}
+	}
+	return loose
 }
 
 // hitRepoNames is the repositories the search hits came from, deduplicated.
@@ -517,7 +581,7 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 	if len(scope.Known) == 0 {
 		return scope
 	}
-	pm, err := p.router.Projects(ctx)
+	pm, err := p.projectsOf(ctx, &scope)
 	if err != nil {
 		slog.Warn("projects unavailable, answering without the structure block",
 			"thread", llm.ThreadID(ctx), "err", err)
@@ -525,23 +589,12 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 	}
 	scope.Projects = pm.Covered(scope.Known)
 	var ps []projects.Project
-	accounted := map[string]bool{}
 	for _, name := range scope.Projects {
-		pr, ok := pm.Project(name)
-		if !ok {
-			continue
-		}
-		ps = append(ps, pr)
-		for _, m := range pr.Members {
-			accounted[m.Name] = true
+		if pr, ok := pm.Project(name); ok {
+			ps = append(ps, pr)
 		}
 	}
-	scope.Loose = nil
-	for _, r := range scope.Known {
-		if !accounted[r] {
-			scope.Loose = append(scope.Loose, r)
-		}
-	}
+	scope.Loose = looseOf(scope.Known, scope.Projects, pm)
 	// What each repository in scope is built from: the apps and services a
 	// person names, and which uses which. Templated from the manifests the
 	// indexer read (internal/units), never a source, closed by the same rule
@@ -670,7 +723,7 @@ func (p *Pipeline) gatherSeeded(ctx context.Context, question string, hits []ret
 	// The turn's ceiling, from what the question named or what its search
 	// hit, before anything is gathered: the walk, the crossings, the gap pass
 	// and the loop all run under it. See turnCeiling.
-	pm, perr := p.router.Projects(ctx)
+	pm, perr := p.projectsOf(ctx, &scope)
 	if perr != nil {
 		slog.Warn("projects unavailable, gathering confined to the repositories named or hit",
 			"thread", llm.ThreadID(ctx), "err", perr)
@@ -1062,9 +1115,21 @@ func gatherDetail(sources []Source, budget int, gaps GapReport) map[string]any {
 // searchK per repository, not searchK divided among them: each side gets the
 // same depth it would have got as the only named one, and gather applies no
 // cap to hits by design.
-func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, texts []string, code string, known []string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, texts []string, code string, known []string, stage retrieve.StagePrefixes, oneProduct bool) ([]retrieve.Hit, error) {
 	if len(known) < 2 {
 		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: searchK, Stage: stage})
+	}
+	if oneProduct {
+		// A project turn is one product, not a comparison of its own
+		// repositories: ONE fused search over its members, so every hit is
+		// ranked on one scale and the reranker's order survives. Searched per
+		// repository, each member's rank-0 chunk scored like any other's
+		// (RRF ranks are per search), and a small off-topic repository filled
+		// half the cut on a live turn, one hit left for the service holding
+		// the answer. comparisonK keeps the depth a project turn had, so only
+		// the merge changes. The question may ride along: every repository it
+		// names is already a member, so knownRepos adds nothing.
+		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: comparisonK, Stage: stage})
 	}
 	var all []retrieve.Hit
 	for _, repo := range known {
@@ -1171,12 +1236,13 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 				strings.Join(repos, ", "))
 		}
 		ev.status("searching")
-		// searchScoped, not one fused search: more than one chosen repository
-		// is a comparison, and a single cut lets one side fill it. The
-		// question is left out for the reason the single-repository search
-		// left it out — knownRepos would union the other repositories back in
-		// and undo the choice.
-		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage)
+		// searchScoped: more than one chosen repository is a comparison, one
+		// search per side so one cannot fill the cut, unless the choice is
+		// one whole product, which is searched as one. The question is left
+		// out for the reason the single-repository search left it out:
+		// knownRepos would union the other repositories back in and undo the
+		// choice.
+		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage, p.onlyOneProduct(ctx, &scope))
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)
 		}
