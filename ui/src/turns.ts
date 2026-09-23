@@ -59,8 +59,13 @@ export type Turn = {
   language: string;
   text: string;
   citations: Citation[];
-  // Every "status" event in order, with its arrival time, for the timeline.
+  // Every "status" event in order, for the timeline: on the server's time
+  // shifted onto the browser's clock (withStep), or the arrival time when
+  // the server sent none.
   steps: Step[];
+  // The smallest (arrival - server time) seen this turn: the clock offset,
+  // since buffering only ever adds delay.
+  clockSkew?: number;
   error: string;
   // The request this turn was made with, kept so a failure can be asked
   // again. Set while the turn streams, so it is there whichever way the turn
@@ -172,6 +177,23 @@ export type Usage = {
   // The turn's cached share, summed over the calls that reported one.
   cached_tokens?: number;
 };
+
+/**
+ * The turn with one more step. With the server's time for it, every
+ * server-timed step keeps the server's gaps and is placed on the browser's
+ * clock by the least delayed arrival so far, so a running step still ticks
+ * against Date.now(). Without it, the arrival time, as before.
+ */
+export function withStep(t: Turn, step: string, now: number, serverAt?: number): Turn {
+  if (serverAt === undefined) {
+    return { ...t, steps: [...t.steps, { step, at: now }] };
+  }
+  const skew = Math.min(t.clockSkew ?? Infinity, now - serverAt);
+  const steps = [...t.steps, { step, at: now, serverAt }].map((s) =>
+    s.serverAt === undefined ? s : { ...s, at: s.serverAt + skew },
+  );
+  return { ...t, clockSkew: skew, steps };
+}
 
 /** tokens formats a count the way the pill shows it. */
 export function tokens(n: number): string {

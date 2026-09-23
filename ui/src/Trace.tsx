@@ -14,7 +14,10 @@ export type TraceState = "running" | "done" | "waiting" | "decided" | "failed";
 export type StepDetail = Record<string, unknown>;
 
 /** One status event, with the moment it arrived, and what the step found. */
-export type Step = { step: string; at: number; detail?: StepDetail };
+// at is on the browser's clock. serverAt, on a live step, is the server's time
+// for it: the gaps between steps come from it, so buffering on the way cannot
+// move time from one step into another.
+export type Step = { step: string; at: number; serverAt?: number; detail?: StepDetail };
 
 const doneLabel = "Done";
 const waitingLabel = "Waiting for a choice";

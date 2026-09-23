@@ -72,3 +72,16 @@ func TestRecorder_recordsFromSeveralGoroutinesAtOnce(t *testing.T) {
 		t.Errorf("Steps = %d, want 50", got)
 	}
 }
+
+func TestRecord_returnsTheTimeItStamped(t *testing.T) {
+	r := New()
+	ctx := With(context.Background(), r)
+	at := Record(ctx, "searching")
+	steps := r.Close().Steps
+	if len(steps) != 1 || steps[0].At != at || at == 0 {
+		t.Errorf("Record returned %d, stored %+v; want the same non-zero time", at, steps)
+	}
+	if bare := Record(context.Background(), "searching"); bare == 0 {
+		t.Error("Record without a recorder returned 0; want the server's time anyway")
+	}
+}
