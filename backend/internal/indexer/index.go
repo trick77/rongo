@@ -287,6 +287,9 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		// and its generic XML output would be nothing or noise. Decided here,
 		// on the language, so the ctags extractor stays a ctags extractor.
 		syms, err = symbols.ExtractBPMN(body)
+	} else if isSchemaLang(lang) {
+		// Same for a schema: ctags' XML parser tags nothing a type is named by.
+		syms, err = symbols.ExtractXSD(body)
 	} else {
 		syms, err = ix.symbols.Extract(ctx, path, body)
 	}

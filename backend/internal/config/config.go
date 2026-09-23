@@ -54,6 +54,10 @@ type Config struct {
 	// (pom.xml, package.json, project.json, ...) are exempt: the repository's
 	// structure is read from them. BACKEND_INDEX_MAX_DATA_FILE_BYTES.
 	IndexMaxDataFileBytes int
+	// IndexMaxSchemaFileBytes is the ceiling for xsd and wsdl: a schema is a
+	// hand-written contract, so it is not held to the data ceiling. Above it
+	// sits a code table. BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES.
+	IndexMaxSchemaFileBytes int
 	// HistoryDepth is how many first-parent commits a full index records
 	// for the commit lane. BACKEND_HISTORY_DEPTH.
 	HistoryDepth int
@@ -192,6 +196,10 @@ func Load() (Config, error) {
 		// fixture) stay under 1 KB; a data blob or a translation catalogue
 		// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
 		IndexMaxDataFileBytes: envIntOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
+		// 256 KiB: the syrius service schemas run to 69 KB; what stays above
+		// is two code tables and one VO catalogue (2026-09-17-data-file-cap.md,
+		// Schemas).
+		IndexMaxSchemaFileBytes: envIntOr("BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
 		// 500 commits: a year of a busy repository, bounded for a monorepo's
 		// first run. A "what changed" question looks back a year at most.
 		HistoryDepth:     envIntOr("BACKEND_HISTORY_DEPTH", 500),

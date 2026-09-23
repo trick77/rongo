@@ -91,6 +91,23 @@ var structuralKinds = func() map[string]bool {
 	return kinds
 }()
 
+// schemaKinds are what a chunk anchors on in an xsd or wsdl: the kinds
+// symbols.ExtractXSD emits. Kept apart from structuralKinds because message,
+// service, group and element are ctags kinds of Protobuf, SQL, Cobol and DTD
+// too, and merging them would move how those files chunk.
+var schemaKinds = func() map[string]bool {
+	kinds := map[string]bool{}
+	for _, k := range symbols.XSDStructuralKinds() {
+		kinds[k] = true
+	}
+	return kinds
+}()
+
+// isSchemaLang reports a language symbols.ExtractXSD reads.
+func isSchemaLang(lang string) bool {
+	return lang == "xsd" || lang == "wsdl"
+}
+
 // commentPrefixes are the line-comment openers rongo recognises when pulling a
 // doc comment into its symbol's chunk. It is deliberately a small, syntax-blind
 // set rather than a per-language grammar: a wrong guess costs a comment line
@@ -120,7 +137,11 @@ func ChunkFile(repo, _, path string, body []byte, syms []symbols.Symbol, opts Ch
 	}
 
 	lines := strings.Split(strings.TrimSuffix(string(body), "\n"), "\n")
-	regions := symbolRegions(lines, syms)
+	kinds := structuralKinds
+	if isSchemaLang(LanguageOf(path)) {
+		kinds = schemaKinds
+	}
+	regions := symbolRegions(lines, syms, kinds)
 
 	var out []Chunk
 	for _, r := range regions {
@@ -183,8 +204,8 @@ type region struct {
 
 // symbolRegions partitions the file at symbol boundaries. A file with no usable
 // symbol is one region covering everything, which the caller then windows.
-func symbolRegions(lines []string, syms []symbols.Symbol) []region {
-	anchors := anchorSymbols(syms, len(lines))
+func symbolRegions(lines []string, syms []symbols.Symbol, kinds map[string]bool) []region {
+	anchors := anchorSymbols(syms, len(lines), kinds)
 	if len(anchors) == 0 {
 		return []region{{start: 1, end: len(lines)}}
 	}
@@ -229,10 +250,10 @@ func symbolRegions(lines []string, syms []symbols.Symbol) []region {
 // whole Java class would put three unrelated answers into one result and make
 // every citation point at the class rather than the method. Where a symbol has
 // no children (a Go struct with only fields), it stays the anchor itself.
-func anchorSymbols(syms []symbols.Symbol, lineCount int) []symbols.Symbol {
+func anchorSymbols(syms []symbols.Symbol, lineCount int, kinds map[string]bool) []symbols.Symbol {
 	var structural []symbols.Symbol
 	for _, s := range syms {
-		if s.Line <= 0 || s.Line > lineCount || !structuralKinds[s.Kind] {
+		if s.Line <= 0 || s.Line > lineCount || !kinds[s.Kind] {
 			continue
 		}
 		structural = append(structural, s)
