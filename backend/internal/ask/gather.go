@@ -102,6 +102,9 @@ type Gatherer struct {
 	// locateRounds caps the loop for the harness arm that measures one look
 	// against the loop; zero means locateMaxRounds.
 	locateRounds int
+	// ceiling is the turn's repositories, set per turn by within; empty
+	// admits from anywhere.
+	ceiling []string
 	// Log receives the warning when the gap pass keeps the sources it was
 	// given; nil means the default logger.
 	Log *slog.Logger
@@ -146,7 +149,7 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 		return nil, nil
 	}
 
-	a := &admitter{seen: map[int64]bool{}}
+	a := &admitter{seen: map[int64]bool{}, allowed: g.allowed()}
 
 	for _, h := range hits {
 		if a.seen[h.ChunkID] {
@@ -233,7 +236,10 @@ symbols:
 				return nil, err
 			}
 			for _, ref := range mechanismFirst(refs) {
-				if a.seen[ref.ChunkID] {
+				// Outside the ceiling: never admitted, and never followed,
+				// or the next hop would gather by a reason the answer never
+				// shows.
+				if a.seen[ref.ChunkID] || !a.permits(ref) {
 					continue
 				}
 				if !a.take(ref, hop) {
@@ -283,7 +289,9 @@ symbols:
 	// reports false when the budget is spent — and stopping means stopping,
 	// for the reason take gives.
 	land := func(landing, from Source) (bool, error) {
-		if a.seen[landing.ChunkID] {
+		// Outside the ceiling: not a landing, and its far-side hop is not
+		// taken either.
+		if a.seen[landing.ChunkID] || !a.permits(landing) {
 			return true, nil
 		}
 		if !a.take(landing, from.Hop+1) {
@@ -364,12 +372,20 @@ type admitter struct {
 	spent  int
 	budget int
 	out    []Source
+	// allowed is the turn's ceiling; nil admits from any repository.
+	allowed map[string]bool
 }
 
 // take admits s at hop, or reports false when the budget cannot hold it. A
 // chunk already taken is not admitted twice and is not a refusal.
 func (a *admitter) take(s Source, hop int) bool {
 	if a.seen[s.ChunkID] {
+		return true
+	}
+	// Outside the turn's ceiling: skipped, and not a refusal. A refusal
+	// means the budget is spent and stops the caller; this landing was
+	// never the turn's to take.
+	if a.allowed != nil && !a.allowed[s.Repo] {
 		return true
 	}
 	cost := estimateTokens(s.Text)
@@ -381,6 +397,14 @@ func (a *admitter) take(s Source, hop int) bool {
 	a.spent += cost
 	a.out = append(a.out, s)
 	return true
+}
+
+// permits reports whether s lies inside the turn's ceiling. Callers that go
+// on to follow what they admitted check it first: take skips an outside
+// chunk silently, which is right for admission and wrong for a walk that
+// would then follow it.
+func (a *admitter) permits(s Source) bool {
+	return a.allowed == nil || a.allowed[s.Repo]
 }
 
 // crossing is a landing held back for the second pass, with the source it

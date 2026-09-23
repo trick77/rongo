@@ -225,8 +225,26 @@ func (g *Gatherer) WithLocateRounds(n int) *Gatherer {
 	return g
 }
 
-// locating reports whether the loop is wired: a client was given.
-func (g *Gatherer) locating() bool { return g.locate != nil }
+// within is the gatherer confined to repos, the turn's ceiling: every
+// admission outside it is skipped. A copy, so the shared gatherer is never
+// changed. Empty repos is no ceiling.
+func (g *Gatherer) within(repos []string) *Gatherer {
+	c := *g
+	c.ceiling = repos
+	return &c
+}
+
+// allowed is the ceiling as the admitter reads it, nil for none.
+func (g *Gatherer) allowed() map[string]bool {
+	if len(g.ceiling) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(g.ceiling))
+	for _, r := range g.ceiling {
+		set[r] = true
+	}
+	return set
+}
 
 // forTurn is the gatherer a turn gathers with. A resumed turn never runs the
 // loop (see Locate), so it gathers through a copy without it, and the walk,
@@ -285,7 +303,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 
 	// The full budget with the sources' cost recomputed, the way FillGaps
 	// rebuilds it: the reserve exists so there is room left under the ceiling.
-	a := &admitter{seen: map[int64]bool{}, budget: g.opts.TokenBudget}
+	a := &admitter{seen: map[int64]bool{}, budget: g.opts.TokenBudget, allowed: g.allowed()}
 	for _, s := range sources {
 		a.seen[s.ChunkID] = true
 		a.spent += estimateTokens(s.Text)
@@ -775,57 +793,45 @@ func reasoned(ss []Source, reason string) []Source {
 	return ss
 }
 
-// locateCeiling is the set of repositories the loop may look in.
+// turnCeiling is the set of repositories a turn may gather from: the walk,
+// the crossings, the gap pass and the loop all run under it.
 //
-// A turn that already has a restriction keeps it: a named member or a pin
-// narrows, and the loop never widens it to the rest of the project. A turn
-// naming nothing has no restriction, which the lookups read as the whole
-// corpus — but its search has landed by now, and the router answers such a
-// turn without a card only because the landing sits in one place. So the
-// PROJECTS the question's own hits (hop 0) belong to are the ceiling, with
-// the libraries those projects declare in uses and nothing else: a grep
-// matching in a second product would otherwise admit and cite it, the
-// cross-repo answer the repository card exists to stop. The walk's later
-// hops do not open a project; they are the walk's reasons, not the
-// question's.
+// The PROJECTS of what the question named, or else of what its search hit,
+// with the libraries those projects declare in uses. Once the project is
+// known the turn does not leave it, except into a library it is built on: a
+// walk or a crossing reaching a second product would admit and cite it, the
+// cross-repo answer the repository card exists to stop. A named member opens
+// its own project for the walk, because the walk follows what the code
+// references; the search itself stays narrowed to the member.
 //
-// No hop-0 source, or no project map, falls back to the repositories
-// already gathered. Never empty for non-empty sources: empty means the whole
+// No ceiling (nil) only when nothing was named or hit. A project map that
+// knows none of the repositories (project data unavailable) confines the turn
+// to what was named or hit: narrower than the project, never the whole
 // corpus.
-func locateCeiling(known []string, sources []Source, pm projects.Map) []string {
-	if len(known) > 0 {
-		return known
-	}
-	seed := hitRepos(sources)
-	if len(seed) == 0 {
-		seed = sourceRepos(sources)
+func turnCeiling(known, hits []string, pm projects.Map) []string {
+	seeds := known
+	if len(seeds) == 0 {
+		seeds = hits
 	}
 	set := map[string]bool{}
-	for _, r := range seed {
-		set[r] = true
+	for _, r := range seeds {
 		// Members carries a library only through a declared uses edge, and a
 		// library's own project of one lists only itself.
 		for _, m := range pm.Members(pm.Of(r)) {
 			set[m] = true
 		}
 	}
+	for _, r := range seeds {
+		set[r] = true
+	}
+	if len(set) == 0 {
+		return nil
+	}
 	out := make([]string, 0, len(set))
 	for r := range set {
 		out = append(out, r)
 	}
 	sort.Strings(out)
-	return out
-}
-
-func sourceRepos(sources []Source) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, s := range sources {
-		if s.Repo != "" && !seen[s.Repo] {
-			seen[s.Repo] = true
-			out = append(out, s.Repo)
-		}
-	}
 	return out
 }
 
