@@ -105,6 +105,10 @@ type Gatherer struct {
 	// ceiling is the turn's repositories, set per turn by within; empty
 	// admits from anywhere.
 	ceiling []string
+	// terms are the question's words, set per turn by withTerms. A config
+	// file crosses to another config file only on a key sharing one of
+	// them. Nil (the harness, a bare Gather) keeps every crossing.
+	terms map[string]bool
 	// Log receives the warning when the gap pass keeps the sources it was
 	// given; nil means the default logger.
 	Log *slog.Logger
@@ -345,7 +349,22 @@ symbols:
 			}
 		}
 	}
+	// Config-to-config landings share the crossing reserve, never the
+	// whole crossing budget: on a live turn they took 22.9k of 24k tokens
+	// with settings nobody asked about. Code reading a key is not capped:
+	// every stage it reads is reported by name, the measured digest case
+	// (docs/measurements/2026-09-13-infra-stages.md). Without question words
+	// nothing is capped, so the harness measures what it always measured.
+	configSpent, configLimit := 0, g.opts.TokenBudget/crossingReserve
 	for _, c := range later {
+		configToConfig := g.terms != nil && isConfigPath(c.from.Path) && isConfigPath(c.landing.Path)
+		cost := estimateTokens(c.landing.Text)
+		if configToConfig {
+			if a.seen[c.landing.ChunkID] || configSpent+cost > configLimit {
+				continue
+			}
+			configSpent += cost
+		}
 		more, err := land(c.landing, c.from)
 		if err != nil {
 			return nil, err
@@ -567,6 +586,9 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 	sort.SliceStable(ns, func(i, j int) bool { return kindRank(ns[i].Kind) < kindRank(ns[j].Kind) })
 	var out []Source
 	for _, n := range ns {
+		if !g.crossReason(n, from) {
+			continue
+		}
 		s, ok, err := g.chunkAt(ctx, n.Repo, n.Path, n.Line)
 		if err != nil {
 			return nil, fmt.Errorf("read the far side of %s %q: %w", n.Kind, n.Value, err)
@@ -578,6 +600,94 @@ func (g *Gatherer) crossings(ctx context.Context, from Source) ([]Source, error)
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// crossReason reports whether a neighbour is worth crossing to. Code reading
+// a key, a route and a destination always are: the code is the reason. A
+// config file crossing to another config file on a shared key is only when
+// the key shares a word with the question: two repositories both setting
+// spring.h2.console.enabled says nothing about a question on how a field is
+// sent. Without question words (terms nil) every crossing stays.
+func (g *Gatherer) crossReason(n edges.Neighbour, from Source) bool {
+	if g.terms == nil || n.Kind != edges.KindProperty {
+		return true
+	}
+	if !isConfigPath(from.Path) || !isConfigPath(n.Path) {
+		return true
+	}
+	for _, w := range words(n.Value) {
+		if g.terms[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// isConfigPath is a file property keys are SET in: the one kind the edge
+// extractor reads keys from (edges.propertyKeys).
+func isConfigPath(path string) bool {
+	return strings.HasSuffix(path, ".properties")
+}
+
+// withTerms is the gatherer that knows the turn's words (the search texts:
+// question, previous question, the understanding's English terms and code
+// terms), for crossReason. A copy, so the shared gatherer is never changed.
+func (g *Gatherer) withTerms(question string) *Gatherer {
+	c := *g
+	c.terms = map[string]bool{}
+	for _, w := range words(question) {
+		if !questionStopword[w] {
+			c.terms[w] = true
+		}
+	}
+	// No words is no filter, never "every key misses": the least informed
+	// question must not get the strictest rule.
+	if len(c.terms) == 0 {
+		c.terms = nil
+	}
+	return &c
+}
+
+// words splits text into lowercase words: on anything not a letter or digit,
+// and on a lower-to-upper case change, so "sendDigest", "send-digest" and
+// "send.digest" all read as send and digest. Words of one rune are dropped.
+func words(text string) []string {
+	var out []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 1 {
+			out = append(out, strings.ToLower(string(cur)))
+		}
+		cur = cur[:0]
+	}
+	prevLower := false
+	for _, r := range text {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if prevLower && unicode.IsUpper(r) {
+				flush()
+			}
+			cur = append(cur, r)
+			prevLower = unicode.IsLower(r) || unicode.IsDigit(r)
+		default:
+			flush()
+			prevLower = false
+		}
+	}
+	flush()
+	return out
+}
+
+// questionStopword are words too common in a question to count as a reason
+// to cross: two letters and function words, in the two languages questions
+// arrive in.
+var questionStopword = map[string]bool{
+	"is": true, "in": true, "to": true, "an": true, "of": true, "on": true, "at": true,
+	"it": true, "be": true, "by": true, "or": true, "the": true, "and": true, "how": true,
+	"what": true, "where": true, "when": true, "does": true, "for": true, "with": true,
+	"im": true, "am": true, "zu": true, "wo": true, "wie": true, "der": true, "die": true,
+	"das": true, "und": true, "ist": true, "wird": true, "den": true, "dem": true,
+	"ein": true, "eine": true, "mit": true, "von": true, "für": true, "auf": true,
 }
 
 // chunkAt is the chunk of repo/path covering line, with no reason set: what a
