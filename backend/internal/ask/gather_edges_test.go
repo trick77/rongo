@@ -575,41 +575,103 @@ func TestGather_codeReadingAKeyCrossesWithoutAQuestionWord(t *testing.T) {
 	}
 }
 
-// Property landings spend at most the crossing reserve, never the whole
-// crossing budget: on a live turn they took 22.9k of 24k tokens.
-func TestGather_propertyLandingsStopAtTheCrossingReserve(t *testing.T) {
+// eightKeys is a near side reading or setting eight keys, each set in its own
+// infra stage file of about 300 tokens: more than the crossing reserve holds.
+func eightKeys(t *testing.T, nearPath string, asConfig bool) (*sql.DB, int64) {
+	t.Helper()
 	db := gatherDB(t)
 	seedRepo(t, db, "acme-service")
 	seedRepo(t, db, "acme-infra")
-	var reads strings.Builder
+	var body strings.Builder
 	for i := 0; i < 8; i++ {
-		fmt.Fprintf(&reads, `"${acme.key%d}" `, i)
+		if asConfig {
+			fmt.Fprintf(&body, "acme.key%d=1\n", i)
+		} else {
+			fmt.Fprintf(&body, `"${acme.key%d}" `, i)
+		}
 	}
-	hitID := seedChunkIn(t, db, "acme-service", "src/main/java/acme/Settings.java", 0, 1, 20, "Settings", reads.String())
+	hitID := seedChunkIn(t, db, "acme-service", nearPath, 0, 1, 20, "", body.String())
 	for i := 0; i < 8; i++ {
 		key := fmt.Sprintf("acme.key%d", i)
-		seedTokenIn(t, db, "acme-service", "src/main/java/acme/Settings.java", "property", key, 1)
+		seedTokenIn(t, db, "acme-service", nearPath, "property", key, 1)
 		path := fmt.Sprintf("stage%d/application.properties", i)
 		seedChunkIn(t, db, "acme-infra", path, 0, 1, 10, "", key+"="+strings.Repeat("x ", 300)+"\n")
 		seedTokenIn(t, db, "acme-infra", path, "property", key, 1)
 	}
-	const budget = 6000
-	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: budget}).
-		Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
-	if err != nil {
-		t.Fatalf("Gather: %v", err)
-	}
+	return db, hitID
+}
+
+// propertySpent is what the property landings among got cost.
+func propertySpent(got []Source) int {
 	spent := 0
 	for _, s := range got {
 		if isPropertyEdge(s.Reason) {
 			spent += estimateTokens(s.Text)
 		}
 	}
+	return spent
+}
+
+// Config-to-config landings spend at most the crossing reserve: on a live
+// turn they took 22.9k of 24k tokens.
+func TestGather_configToConfigLandingsStopAtTheCrossingReserve(t *testing.T) {
+	const budget = 6000
+	db, hitID := eightKeys(t, "src/main/resources/application.properties", true)
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: budget}).
+		withTerms("which acme key").Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	spent := propertySpent(got)
 	if spent == 0 {
 		t.Fatal("no property landing at all; the fixture no longer crosses")
 	}
 	if limit := budget / crossingReserve; spent > limit {
-		t.Errorf("property landings spent %d tokens, want at most the reserve %d", spent, limit)
+		t.Errorf("config-to-config landings spent %d tokens, want at most the reserve %d", spent, limit)
+	}
+}
+
+// Code reading keys is not capped: every stage the code reads is reported by
+// name, and that is the measured case.
+func TestGather_codeToConfigLandingsAreNotCapped(t *testing.T) {
+	const budget = 6000
+	db, hitID := eightKeys(t, "src/main/java/acme/Settings.java", false)
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: budget}).
+		withTerms("which acme key").Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if spent := propertySpent(got); spent <= budget/crossingReserve {
+		t.Errorf("code-to-config landings spent %d tokens, want past the reserve: they are not capped", spent)
+	}
+}
+
+// Without question words (the harness, a bare Gather) nothing changes: no
+// filter and no cap, so measured numbers stay comparable.
+func TestGather_withoutQuestionWordsNothingIsCapped(t *testing.T) {
+	const budget = 6000
+	db, hitID := eightKeys(t, "src/main/resources/application.properties", true)
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: budget}).
+		Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if spent := propertySpent(got); spent <= budget/crossingReserve {
+		t.Errorf("spent %d tokens, want past the reserve: a bare Gather is not capped", spent)
+	}
+}
+
+// A question of stopwords alone carries no words, which keeps every crossing
+// rather than blocking every one.
+func TestGather_aQuestionWithoutWordsKeepsTheCrossing(t *testing.T) {
+	db, hitID := configToConfig(t)
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		withTerms("and it?").Gather(context.Background(), []retrieve.Hit{hitInFor(t, db, hitID)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !hasIn(got, "acme-service", "src/main/resources/application.properties") {
+		t.Errorf("sources = %v, want the crossing kept when the question has no words", repoPaths(got))
 	}
 }
 
@@ -638,5 +700,39 @@ func TestPipeline_configDoesNotCrossToConfigOnAnUnrelatedQuestion(t *testing.T) 
 		if s.Repo == "acme-service" {
 			t.Errorf("crossed into %s %s on a key the question never names", s.Repo, s.Path)
 		}
+	}
+}
+
+// The words come from the search texts, not the raw question alone: a German
+// question never shares a word with an English key, and the understanding's
+// code terms do.
+func TestPipeline_theUnderstandingsWordsReachTheCrossing(t *testing.T) {
+	db, hitID := configToConfig(t)
+	if _, err := db.Exec(`UPDATE repo_state SET project = 'acme'`); err != nil {
+		t.Fatalf("set project: %v", err)
+	}
+	pm, err := projects.Load(context.Background(), db)
+	if err != nil {
+		t.Fatalf("projects.Load: %v", err)
+	}
+	reply := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
+	reply = strings.Replace(reply, `"AirPlay"`, `"consoleEnabled"`, 1)
+	p := NewPipeline(twoStepUpstream(t, reply, "So [1]."),
+		&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}},
+		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+
+	answer, _, err := p.Run(context.Background(), "Ist die Konsole in Produktion aktiviert?",
+		AudienceDev, LanguageEN, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	crossed := false
+	for _, s := range answer.Sources {
+		if s.Repo == "acme-service" {
+			crossed = true
+		}
+	}
+	if !crossed {
+		t.Error("the code terms name the key's words, and the crossing was still refused")
 	}
 }

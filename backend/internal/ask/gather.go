@@ -349,14 +349,21 @@ symbols:
 			}
 		}
 	}
-	// Property landings share the crossing reserve, never the whole
-	// crossing budget: on a live turn they took 22.9k of 24k tokens with
-	// settings nobody asked about. The reserve is what the digest-mail
-	// measurement ran under (docs/measurements/2026-09-13-infra-stages.md).
-	propertyStart, propertyLimit := a.spent, g.opts.TokenBudget/crossingReserve
+	// Config-to-config landings share the crossing reserve, never the
+	// whole crossing budget: on a live turn they took 22.9k of 24k tokens
+	// with settings nobody asked about. Code reading a key is not capped:
+	// every stage it reads is reported by name, the measured digest case
+	// (docs/measurements/2026-09-13-infra-stages.md). Without question words
+	// nothing is capped, so the harness measures what it always measured.
+	configSpent, configLimit := 0, g.opts.TokenBudget/crossingReserve
 	for _, c := range later {
-		if a.spent-propertyStart+estimateTokens(c.landing.Text) > propertyLimit {
-			continue
+		configToConfig := g.terms != nil && isConfigPath(c.from.Path) && isConfigPath(c.landing.Path)
+		cost := estimateTokens(c.landing.Text)
+		if configToConfig {
+			if a.seen[c.landing.ChunkID] || configSpent+cost > configLimit {
+				continue
+			}
+			configSpent += cost
 		}
 		more, err := land(c.landing, c.from)
 		if err != nil {
@@ -622,8 +629,9 @@ func isConfigPath(path string) bool {
 	return strings.HasSuffix(path, ".properties")
 }
 
-// withTerms is the gatherer that knows the question's words, for
-// crossReason. A copy, so the shared gatherer is never changed.
+// withTerms is the gatherer that knows the turn's words (the search texts:
+// question, previous question, the understanding's English terms and code
+// terms), for crossReason. A copy, so the shared gatherer is never changed.
 func (g *Gatherer) withTerms(question string) *Gatherer {
 	c := *g
 	c.terms = map[string]bool{}
@@ -631,6 +639,11 @@ func (g *Gatherer) withTerms(question string) *Gatherer {
 		if !questionStopword[w] {
 			c.terms[w] = true
 		}
+	}
+	// No words is no filter, never "every key misses": the least informed
+	// question must not get the strictest rule.
+	if len(c.terms) == 0 {
+		c.terms = nil
 	}
 	return &c
 }
