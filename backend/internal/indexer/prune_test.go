@@ -68,6 +68,24 @@ func TestIndexRepo_logsNothingWhenNothingWasPruned(t *testing.T) {
 	}
 }
 
+func TestPruneEmbedCacheAndLog_aFailureIsAWarningNotAnError(t *testing.T) {
+	// The index is complete when the prune runs; a database that refuses the
+	// DELETE is logged and the caller carries on.
+	h := newHarness(t, nil)
+	logs := &capture{}
+	h.db.Close()
+
+	PruneEmbedCacheAndLog(context.Background(), h.db, slog.New(logs), "purged", 1)
+
+	r, ok := logs.find("pruning the embedding cache failed")
+	if !ok {
+		t.Fatalf("no warning logged; got %q", logs.messages())
+	}
+	if v, _ := attr(r, "purged"); v.Int64() != 1 {
+		t.Errorf("the occasion was dropped from the line: purged = %v", v)
+	}
+}
+
 func TestPruneEmbedCache_leavesTheEvalQueryVectorsAlone(t *testing.T) {
 	// The eval harness caches its questions' vectors under a "query:" key so a
 	// rerun embeds nothing and cannot drift. No chunk carries such a key, and

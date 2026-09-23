@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/store"
@@ -296,11 +297,25 @@ func PruneEmbedCache(ctx context.Context, db *sql.DB) (removed, kept int64, err 
 	if err != nil {
 		return 0, 0, fmt.Errorf("prune embedding cache: %w", err)
 	}
-	if removed, err = res.RowsAffected(); err != nil {
-		return 0, 0, fmt.Errorf("prune embedding cache: %w", err)
-	}
+	// SQLite always reports the rows a DELETE touched.
+	removed, _ = res.RowsAffected()
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embed_cache`).Scan(&kept); err != nil {
 		return 0, 0, fmt.Errorf("count embedding cache: %w", err)
 	}
 	return removed, kept, nil
+}
+
+// PruneEmbedCacheAndLog prunes and says so: rows removed and kept when any
+// went, a warning when the prune failed, nothing on a run that orphaned
+// nothing. args name the occasion (the repository, the purge). A failure is
+// never the caller's: the index is complete, a stale vector only costs space.
+func PruneEmbedCacheAndLog(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) {
+	removed, kept, err := PruneEmbedCache(ctx, db)
+	if err != nil {
+		log.Warn("pruning the embedding cache failed", append(args, "err", err)...)
+		return
+	}
+	if removed > 0 {
+		log.Info("embedding cache pruned", append(args, "removed", removed, "kept", kept)...)
+	}
 }
