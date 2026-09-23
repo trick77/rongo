@@ -397,13 +397,14 @@ func atoiOr(s string, def int) int {
 
 // --- the tool-calling client ----------------------------------------------
 
-// flowWire is the llmwire client the loop talks through, built once per run
-// from the same environment the product reads, for the configured answer
-// model's host. Each arm passes its model per call.
-func flowWire(t *testing.T) *llmwire.Client {
+// flowWire is the llmwire client one arm talks through, built from the same
+// environment the product reads, for THAT arm's model: an arm on another
+// provider sent to the answer model's host would fail every question with an
+// unknown-model 400 and read as a trajectory failure.
+func flowWire(t *testing.T, model string) *llmwire.Client {
 	t.Helper()
 	cfg := evalLLMConfig(t, 5*time.Minute)
-	wire, err := llmwire.FromEnv(cfg.Answer, llmwire.Config{
+	wire, err := llmwire.FromEnv(model, llmwire.Config{
 		HeaderTimeout: cfg.Timeout,
 		CallTimeout:   cfg.Timeout,
 	})
@@ -513,9 +514,9 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	}
 
 	questions := loadFlowQuestions(t)
-	wire := flowWire(t)
 	for _, deployment := range flowModels(t) {
 		t.Run(deployment, func(t *testing.T) {
+			wire := flowWire(t, deployment)
 			var totalParts, totalReached int
 			for _, q := range questions {
 				traj := runFlowQuestion(ctx, t, env, wire, deployment, q)
