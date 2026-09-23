@@ -276,14 +276,16 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 }
 
 // PruneEmbedCache deletes every cached vector no chunk uses any more: the old
-// text of an edited file, a deleted file, a purged or reset repository, a
-// previous embedding model. The cache is keyed on content, not on a
+// text of an edited file, a deleted file, a purged repository, whatever a
+// reset's re-index no longer produced. Matched on content hash alone, whatever
+// the model: embed.Model is a constant of the build, a different one is a new
+// database. The cache is keyed on content, not on a
 // repository, so a vector another repository's chunk still carries stays.
 // It reports how many rows went and how many are left.
 //
-// A reset followed by a re-index therefore embeds the repository again. That
-// is accepted: a repository rongo was told to forget must not live on in the
-// database as vectors.
+// It runs after a run completes, so a reset's re-index still finds unchanged
+// content in the cache. A purged repository re-embeds if it returns, which is
+// accepted: a repository rongo was told to forget must not live on as vectors.
 //
 // The eval harness's question vectors, keyed "query:<sha>", are no chunk's and
 // stay: pruning them would re-embed every question after an index run, and
