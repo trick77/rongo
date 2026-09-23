@@ -318,7 +318,7 @@ func TestPipelineCapsWhatAComparisonCarriesOutOfRetrieval(t *testing.T) {
 	c := twoStepUpstream(t, threeReposReply, "x")
 	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
-	got, err := p.searchScoped(context.Background(), "q", "", []string{"q"}, "", []string{"peeq", "rongo", "go-sqlite3"}, nil)
+	got, err := p.searchScoped(context.Background(), "q", "", []string{"q"}, "", []string{"peeq", "rongo", "go-sqlite3"}, nil, false)
 	if err != nil {
 		t.Fatalf("searchScoped: %v", err)
 	}

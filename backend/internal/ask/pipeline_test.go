@@ -133,6 +133,8 @@ type fakeRouter struct {
 	// "nothing declared", which is what almost every test here wants.
 	projects    projects.Map
 	projectsErr error
+	// projectReads counts Projects calls: one turn reads the map once.
+	projectReads int
 	// units and unitDeps are what each repository is built from, per
 	// repository name. Nil is a repository of one build.
 	units    map[string][]units.Unit
@@ -151,6 +153,7 @@ func (f *fakeRouter) Route(_ context.Context, _ string, _ Audience, _ Language, 
 // which answers every repository with its own name, so a test that says nothing
 // about projects gets the behaviour rongo had before they existed.
 func (f *fakeRouter) Projects(context.Context) (projects.Map, error) {
+	f.projectReads++
 	return f.projects, f.projectsErr
 }
 
