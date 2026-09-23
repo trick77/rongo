@@ -108,6 +108,23 @@ func TestExtractXSDRejectsNonXML(t *testing.T) {
 	}
 }
 
+func TestExtractXSDReadsALatin1Schema(t *testing.T) {
+	// Older contracts declare ISO-8859-1 or windows-1252. The names that
+	// anchor are ASCII; the documentation around them is not, and must not
+	// cost the file its anchors or shift a line.
+	body := "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<xsd:schema xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">\n" +
+		"\t<xsd:complexType name=\"ParcelType\">\n\t\t<xsd:annotation><xsd:documentation>Gr\xf6sse des Pakets</xsd:documentation></xsd:annotation>\n\t</xsd:complexType>\n" +
+		"\t<xsd:simpleType name=\"WeightType\">\n\t\t<xsd:restriction base=\"xsd:decimal\"/>\n\t</xsd:simpleType>\n</xsd:schema>\n"
+	syms, err := ExtractXSD([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSymbols(t, syms, []wantSym{
+		{"ParcelType", "complexType", "", "", 3, 5},
+		{"WeightType", "simpleType", "", "", 6, 8},
+	})
+}
+
 func TestExtractXSDEmpty(t *testing.T) {
 	syms, err := ExtractXSD([]byte("  \n"))
 	if err != nil || syms != nil {

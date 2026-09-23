@@ -114,6 +114,11 @@ ctags has no schema parser (its XML parser tags `id` attributes, namespace
 prefixes, root elements; zero tags on the 69 KB file), so `symbols.ExtractXSD`
 anchors one chunk per named top-level definition, like the BPMN reader.
 
+**Needs a forced re-index.** The sweep only retires, and an incremental run
+only visits changed paths: schemas skipped as `data` stay skipped, and small
+ones already indexed keep their ctags line windows, until the repository is
+reset.
+
 ## What would change the number
 
 A workspace whose useful json lands between 8 and 30 KB. `angular.json` of a

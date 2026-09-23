@@ -50,6 +50,7 @@ func ExtractXSD(body []byte) ([]Symbol, error) {
 	)
 	dec := xml.NewDecoder(bytes.NewReader(body))
 	dec.Strict = false
+	dec.CharsetReader = asciiCharset
 	for {
 		tok, err := dec.Token()
 		if errors.Is(err, io.EOF) {
@@ -91,6 +92,29 @@ func ExtractXSD(body []byte) ([]Symbol, error) {
 		return nil, fmt.Errorf("xsd: %d elements unclosed at end of file", len(stack))
 	}
 	return out, nil
+}
+
+// asciiCharset accepts any declared non-UTF-8 encoding (the decoder
+// only asks for those). Older contracts declare ISO-8859-1; without a
+// CharsetReader the decoder refuses them outright. Converting is not wanted
+// either: a Latin-1 "ö" becomes two bytes, and every offset after it would
+// point at the wrong line. So each byte above ASCII becomes one "?", byte
+// for byte: the names that anchor are ASCII, only the documentation around
+// them loses its umlauts here, and the chunk keeps the file's own bytes.
+func asciiCharset(_ string, in io.Reader) (io.Reader, error) {
+	return asciiOnly{in}, nil
+}
+
+type asciiOnly struct{ r io.Reader }
+
+func (a asciiOnly) Read(p []byte) (int, error) {
+	n, err := a.r.Read(p)
+	for i := range p[:n] {
+		if p[i] >= 0x80 {
+			p[i] = '?'
+		}
+	}
+	return n, err
 }
 
 // xsdAnchors maps a parent's local name to the children of it that become
