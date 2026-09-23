@@ -415,10 +415,14 @@ func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, 
 	return pm, nil
 }
 
-// onlyOneProduct reports whether the turn's repositories are exactly the
-// members of one product, its libraries included: a project turn, searched as
-// one. Two products, or a product beside a loose repository, is a comparison.
-// Project data unavailable is not one product.
+// onlyOneProduct reports whether the turn's repositories are exactly ALL the
+// members of one product, its libraries included: what naming the project
+// expands to, a project turn searched as one. Naming some members is a
+// comparison of those members even when Covered, which treats a library as
+// optional, calls them the whole product: "compare how the ui and the backend
+// retry" must search each side, or one fills the cut and the other has nothing
+// to compare. Two products, or a product beside a loose repository, is a
+// comparison. Project data unavailable is not one product.
 func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope) bool {
 	if len(scope.Known) < 2 {
 		return false
@@ -428,7 +432,19 @@ func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope) bool {
 		return false
 	}
 	covered := pm.Covered(scope.Known)
-	return len(covered) == 1 && len(looseOf(scope.Known, covered, pm)) == 0
+	if len(covered) != 1 || len(looseOf(scope.Known, covered, pm)) != 0 {
+		return false
+	}
+	have := make(map[string]bool, len(scope.Known))
+	for _, r := range scope.Known {
+		have[r] = true
+	}
+	for _, m := range pm.Members(covered[0]) {
+		if !have[m] {
+			return false
+		}
+	}
+	return true
 }
 
 // looseOf is the repositories in known that no covered project accounts for.
@@ -1215,11 +1231,12 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 				strings.Join(repos, ", "))
 		}
 		ev.status("searching")
-		// searchScoped, not one fused search: more than one chosen repository
-		// is a comparison, and a single cut lets one side fill it. The
-		// question is left out for the reason the single-repository search
-		// left it out — knownRepos would union the other repositories back in
-		// and undo the choice.
+		// searchScoped: more than one chosen repository is a comparison, one
+		// search per side so one cannot fill the cut, unless the choice is
+		// one whole product, which is searched as one. The question is left
+		// out for the reason the single-repository search left it out:
+		// knownRepos would union the other repositories back in and undo the
+		// choice.
 		hits, err = p.searchScoped(ctx, "", u.Prior, texts, u.CodeText(), known, stage, p.onlyOneProduct(ctx, &scope))
 		if err != nil {
 			return Answer{}, fmt.Errorf("search: %w", err)

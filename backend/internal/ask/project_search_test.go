@@ -37,6 +37,7 @@ func TestRun_aNamedProjectIsOneSearchOverItsMembers(t *testing.T) {
 	}{
 		{"one whole product, library included", []string{"shop-ui", "shop-backend", "acme-commons"}, 1},
 		{"two products are a comparison", []string{"shop-ui", "shop-backend", "acme-commons", "legacy-crm"}, 4},
+		{"named members without the library are a comparison of those members", []string{"shop-ui", "shop-backend"}, 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
