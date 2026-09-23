@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/store"
@@ -272,4 +273,51 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 		return err
 	}
 	return nil
+}
+
+// PruneEmbedCache deletes every cached vector no chunk uses any more: the old
+// text of an edited file, a deleted file, a purged repository, whatever a
+// reset's re-index no longer produced. Matched on content hash alone, whatever
+// the model: embed.Model is a constant of the build, a different one is a new
+// database. The cache is keyed on content, not on a
+// repository, so a vector another repository's chunk still carries stays.
+// It reports how many rows went and how many are left.
+//
+// It runs after a run completes, so a reset's re-index still finds unchanged
+// content in the cache. A purged repository re-embeds if it returns, which is
+// accepted: a repository rongo was told to forget must not live on as vectors.
+//
+// The eval harness's question vectors, keyed "query:<sha>", are no chunk's and
+// stay: pruning them would re-embed every question after an index run, and
+// the endpoint's drift would then move measurements that compare within one
+// database. The product itself never caches a query.
+func PruneEmbedCache(ctx context.Context, db *sql.DB) (removed, kept int64, err error) {
+	res, err := db.ExecContext(ctx, `
+		DELETE FROM embed_cache
+		WHERE content_hash NOT LIKE 'query:%'
+		  AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.content_hash = embed_cache.content_hash)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prune embedding cache: %w", err)
+	}
+	// SQLite always reports the rows a DELETE touched.
+	removed, _ = res.RowsAffected()
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embed_cache`).Scan(&kept); err != nil {
+		return 0, 0, fmt.Errorf("count embedding cache: %w", err)
+	}
+	return removed, kept, nil
+}
+
+// PruneEmbedCacheAndLog prunes and says so: rows removed and kept when any
+// went, a warning when the prune failed, nothing on a run that orphaned
+// nothing. args name the occasion (the repository, the purge). A failure is
+// never the caller's: the index is complete, a stale vector only costs space.
+func PruneEmbedCacheAndLog(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) {
+	removed, kept, err := PruneEmbedCache(ctx, db)
+	if err != nil {
+		log.Warn("pruning the embedding cache failed", append(args, "err", err)...)
+		return
+	}
+	if removed > 0 {
+		log.Info("embedding cache pruned", append(args, "removed", removed, "kept", kept)...)
+	}
 }

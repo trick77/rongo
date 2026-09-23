@@ -258,6 +258,10 @@ func main() {
 				slog.Error("removing the purged checkout failed", "repo", p.Name, "err", err)
 			}
 		}
+		// A purged repository's vectors go with its index.
+		if len(purged) > 0 {
+			indexer.PruneEmbedCacheAndLog(ctx, db, slog.Default(), "purged", len(purged))
+		}
 		listLoaded = true
 	}
 

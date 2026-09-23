@@ -124,6 +124,9 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		}
 	}
 	ix.linkUnits(ctx, st, declared)
+	// The run replaced chunks; their old vectors, and those of a reset that
+	// preceded it, go now.
+	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", st.Name)
 	return ix.totals(ctx, st.Name)
 }
 

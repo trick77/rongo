@@ -93,8 +93,8 @@ func NewStateStore(db *sql.DB) *StateStore {
 // nothing filters retrieval on that column, so a "deactivated" repository went
 // on answering questions out of an index the Repos page said was retired, and
 // the explicit purge the comments promised was never implemented. The cost of
-// the reversal is that a mistyped name: re-indexes instead of resuming — cheap,
-// because embed_cache is keyed on content hash and not on the repository.
+// the reversal is that a mistyped name: re-indexes and re-embeds instead of
+// resuming, since PruneEmbedCache drops the purged repository's vectors too.
 func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purged, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
