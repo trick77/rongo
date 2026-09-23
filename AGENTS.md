@@ -33,7 +33,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - **Never rank routing by accuracy.** Most questions want no card, so never-asking scores well and accuracy drifts every threshold toward silence. Price errors apart: needless card = 1, missed ambiguity = W (`2026-09-06-routing-cost-metric.md`).
 - Cap every call with `WithMaxTokens` unless truncation is worse than length.
 - **Retry once when nothing was delivered** — never a stream that delivered, a 4xx, a spent budget, a window run out.
-- Embeddings cached by content hash. Never re-embed unchanged content.
+- Embeddings cached by content hash. Never re-embed unchanged content. Cache holds only what a chunk uses: pruned after every index run and every purge, logged. A reset or purge re-embeds on return, accepted: a forgotten repository must not live on as vectors. Eval `query:` rows exempt: pruning them re-embeds questions and drift moves the number.
 
 ## Invariants
 

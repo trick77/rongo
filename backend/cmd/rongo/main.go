@@ -258,6 +258,15 @@ func main() {
 				slog.Error("removing the purged checkout failed", "repo", p.Name, "err", err)
 			}
 		}
+		// A purged repository's vectors go with its index. Not fatal, like the
+		// checkout above: the index is gone, a stale vector is space.
+		if len(purged) > 0 {
+			if removed, kept, err := indexer.PruneEmbedCache(ctx, db); err != nil {
+				slog.Error("pruning the embedding cache failed", "err", err)
+			} else {
+				slog.Info("embedding cache pruned", "removed", removed, "kept", kept, "purged", len(purged))
+			}
+		}
 		listLoaded = true
 	}
 

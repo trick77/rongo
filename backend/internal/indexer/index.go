@@ -124,6 +124,14 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		}
 	}
 	ix.linkUnits(ctx, st, declared)
+	// The run replaced chunks; their old vectors, and those of a reset that
+	// preceded it, go now. A failed prune is logged, never the run's failure:
+	// the index is complete, a stale vector only costs space.
+	if removed, kept, err := PruneEmbedCache(ctx, ix.db); err != nil {
+		ix.log.Warn("pruning the embedding cache failed", "repo", st.Name, "err", err)
+	} else if removed > 0 {
+		ix.log.Info("embedding cache pruned", "repo", st.Name, "removed", removed, "kept", kept)
+	}
 	return ix.totals(ctx, st.Name)
 }
 

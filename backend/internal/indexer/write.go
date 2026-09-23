@@ -273,3 +273,34 @@ func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 	}
 	return nil
 }
+
+// PruneEmbedCache deletes every cached vector no chunk uses any more: the old
+// text of an edited file, a deleted file, a purged or reset repository, a
+// previous embedding model. The cache is keyed on content, not on a
+// repository, so a vector another repository's chunk still carries stays.
+// It reports how many rows went and how many are left.
+//
+// A reset followed by a re-index therefore embeds the repository again. That
+// is accepted: a repository rongo was told to forget must not live on in the
+// database as vectors.
+//
+// The eval harness's question vectors, keyed "query:<sha>", are no chunk's and
+// stay: pruning them would re-embed every question after an index run, and
+// the endpoint's drift would then move measurements that compare within one
+// database. The product itself never caches a query.
+func PruneEmbedCache(ctx context.Context, db *sql.DB) (removed, kept int64, err error) {
+	res, err := db.ExecContext(ctx, `
+		DELETE FROM embed_cache
+		WHERE content_hash NOT LIKE 'query:%'
+		  AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.content_hash = embed_cache.content_hash)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("prune embedding cache: %w", err)
+	}
+	if removed, err = res.RowsAffected(); err != nil {
+		return 0, 0, fmt.Errorf("prune embedding cache: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM embed_cache`).Scan(&kept); err != nil {
+		return 0, 0, fmt.Errorf("count embedding cache: %w", err)
+	}
+	return removed, kept, nil
+}
