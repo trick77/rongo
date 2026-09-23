@@ -178,7 +178,6 @@ export type Usage = {
   cached_tokens?: number;
 };
 
-/** tokens formats a count the way the pill shows it. */
 /**
  * The turn with one more step. With the server's time for it, every
  * server-timed step keeps the server's gaps and is placed on the browser's
@@ -196,6 +195,7 @@ export function withStep(t: Turn, step: string, now: number, serverAt?: number):
   return { ...t, clockSkew: skew, steps };
 }
 
+/** tokens formats a count the way the pill shows it. */
 export function tokens(n: number): string {
   return n.toLocaleString("en-GB") + " tok";
 }
