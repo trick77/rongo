@@ -69,8 +69,9 @@ size:
    `.geojson`, `.parquet`, `.avro`, `.map`, `.snap`, `.har`, `.log`, `.xlf`,
    `.xliff`, `.po`, `.pot`, `.mo`, `.resx`, `.strings`, `.svg`, `.pdf`,
    `.ipynb`.
-3. **Long data file** (`data`): `.json`, `.json5`, `.xml`, `.xsd`, `.wsdl`,
-   `.plist` above the ceiling. Exempt: manifests (`pom.xml`, `package.json`,
+3. **Long data file** (`data`): `.json`, `.json5`, `.xml`, `.plist` above
+   the ceiling. `.xsd` and `.wsdl` sit under the schema ceiling instead,
+   see Schemas below. Exempt: manifests (`pom.xml`, `package.json`,
    `project.json`, `nx.json`, `angular.json`, `tsconfig*.json`, ...), since
    the repository's structure is read from them and a parent pom outgrows any
    ceiling; and hand-written configuration that routinely runs past 8 KiB
@@ -80,6 +81,43 @@ size:
 
 Every one of these needs only the path and the size, so the boot sweep
 (`Indexer.Sweep`) retires what an older build embedded without reading git.
+
+## Schemas: their own ceiling of 256 KiB (2026-09-23)
+
+`.xsd` and `.wsdl` started under the data ceiling. "Which fields of
+Ausfallstunden are optional" then found nothing in
+`schadenmeldung-service-syrius-lib`: the answer is
+`UvgEreignismeldungAktualisierungService.xsd`, 69 KB, and its KTG sibling,
+46 KB, both skipped as data. The JAXB classes are generated at build time and
+not tracked, so no code carried the answer either.
+
+Sizes of the library's 109 xsd and 41 wsdl:
+
+| bucket | files | what they are |
+|---|---|---|
+| up to 8 KiB | 104 | small service contracts, common types |
+| 8 KiB to 256 KiB | 43 | service contracts, the Ausfallstunden ones among them |
+| `syrius.modul_bl.sys_def.vo.xsd` | 1 (272 KB) | 90 system-definition value objects |
+| `syrius.metas.xsd` | 1 (560 KB) | VOKey code tables, one restriction per row |
+| `syrius.system_codes.xsd` | 1 (1.5 MB) | code table; above the 1 MB file ceiling anyway |
+
+A schema is a contract written by hand, like a yaml config and unlike a json
+export: its bulk is the answer, `minOccurs` beside each field. 256 KiB admits
+every service contract and keeps both code tables out. It also cuts the
+272 KB system-definition VO catalogue; 512 KiB would admit it, with 48 KB of
+margin under `syrius.metas.xsd`. Kept at 256: nothing asked about lives there
+(no Ausfallstunden in it). A question about those VOs is the case that moves
+this number.
+`BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES`, skip reason names "schema ceiling".
+
+ctags has no schema parser (its XML parser tags `id` attributes, namespace
+prefixes, root elements; zero tags on the 69 KB file), so `symbols.ExtractXSD`
+anchors one chunk per named top-level definition, like the BPMN reader.
+
+**Needs a forced re-index.** The sweep only retires, and an incremental run
+only visits changed paths: schemas skipped as `data` stay skipped, and small
+ones already indexed keep their ctags line windows, until the repository is
+reset.
 
 ## What would change the number
 

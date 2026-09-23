@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="urn:example:shop:order:v1"
+            targetNamespace="urn:example:shop:order:v1">
+
+	<xsd:import namespace="urn:example:shop:common:v1" schemaLocation="../common/common.xsd"/>
+
+	<xsd:element name="placeOrderRequest" type="tns:OrderType"/>
+
+	<xsd:complexType name="OrderType">
+		<xsd:annotation>
+			<xsd:documentation xml:lang="en">An order as the shop submits it.</xsd:documentation>
+		</xsd:annotation>
+		<xsd:sequence>
+			<xsd:element name="customerId" type="xsd:string"/>
+			<xsd:element name="lines" type="tns:OrderLineType" maxOccurs="unbounded"/>
+			<xsd:element name="delivery" minOccurs="0">
+				<xsd:complexType>
+					<xsd:sequence>
+						<xsd:element name="street" type="xsd:string"/>
+					</xsd:sequence>
+				</xsd:complexType>
+			</xsd:element>
+		</xsd:sequence>
+	</xsd:complexType>
+
+	<xsd:complexType name="OrderLineType">
+		<xsd:complexContent>
+			<xsd:extension base="tns:LineBaseType">
+				<xsd:sequence>
+					<xsd:element name="quantity" type="xsd:int"/>
+					<xsd:element name="giftWrap" type="xsd:boolean" minOccurs="0"/>
+				</xsd:sequence>
+			</xsd:extension>
+		</xsd:complexContent>
+	</xsd:complexType>
+
+	<xsd:simpleType name="OrderStatusType">
+		<xsd:restriction base="xsd:string">
+			<xsd:enumeration value="OPEN"/>
+			<xsd:enumeration value="SHIPPED"/>
+		</xsd:restriction>
+	</xsd:simpleType>
+
+	<xsd:group name="AuditGroup">
+		<xsd:sequence>
+			<xsd:element name="createdBy" type="xsd:string"/>
+		</xsd:sequence>
+	</xsd:group>
+
+	<xsd:attributeGroup name="TraceAttributes">
+		<xsd:attribute name="traceId" type="xsd:string"/>
+	</xsd:attributeGroup>
+</xsd:schema>

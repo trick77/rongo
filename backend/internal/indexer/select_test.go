@@ -305,6 +305,27 @@ func TestSelect_decisionTable(t *testing.T) {
 			body: `{"name": "client"}`,
 			want: SkipGenerated,
 		},
+		// Schemas are contracts, written by hand: an xsd or wsdl of 70 KB is
+		// the answer to "which fields are required", so they sit under their
+		// own ceiling, far above the data one.
+		{
+			name: "an xsd above the data ceiling is included",
+			path: "src/main/resources/wsdl/order/v1/OrderService.xsd",
+			body: xsdOfSize(70 << 10),
+			want: Include,
+		},
+		{
+			name: "a wsdl above the data ceiling is included",
+			path: "src/main/resources/wsdl/order/v1/OrderService.wsdl",
+			body: xsdOfSize(70 << 10),
+			want: Include,
+		},
+		{
+			name: "an xsd above the schema ceiling is data",
+			path: "src/main/resources/wsdl/global/system_codes.xsd",
+			body: xsdOfSize(300 << 10),
+			want: SkipData,
+		},
 		{
 			name: "yaml is never capped by the data ceiling",
 			path: "deploy/helm/values.yaml",
@@ -325,6 +346,29 @@ func TestSelect_decisionTable(t *testing.T) {
 				t.Error("a skipped file must carry a reason, so the answer layer can say why it was not indexed")
 			}
 		})
+	}
+}
+
+// xsdOfSize is a schema of at least n bytes: element declarations of an
+// invented order service, repeated.
+func xsdOfSize(n int) string {
+	el := "<xsd:element name=\"quantity\" type=\"xsd:int\" minOccurs=\"0\"/>\n"
+	return "<xsd:schema>" + strings.Repeat(el, n/len(el)+1) + "</xsd:schema>"
+}
+
+func TestSelect_schemaCeilingIsConfigurable(t *testing.T) {
+	// The schema ceiling is its own knob, and its reason names it, so the
+	// operator raises the right number.
+	s := NewSelector(SelectOptions{MaxSchemaBytes: 128})
+	got, reason := s.Select("wsdl/OrderService.xsd", []byte(xsdOfSize(256)))
+	if got != SkipData {
+		t.Fatalf("Select() = %v, want %v", got, SkipData)
+	}
+	if !strings.Contains(reason, "128") || !strings.Contains(reason, "schema ceiling") {
+		t.Errorf("reason = %q, want the schema ceiling and its value in it", reason)
+	}
+	if got, _ := s.Select("wsdl/OrderService.xsd", []byte("<xsd:schema/>")); got != Include {
+		t.Errorf("Select(small) = %v, want include", got)
 	}
 }
 

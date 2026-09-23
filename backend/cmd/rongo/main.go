@@ -282,9 +282,10 @@ func main() {
 		Cache:    embed.NewCache(db, embed.Model, embed.Dim()),
 		Writer:   indexer.NewWriter(db),
 		Selector: indexer.NewSelector(indexer.SelectOptions{
-			MaxBytes:     cfg.IndexMaxFileBytes,
-			MaxDataBytes: cfg.IndexMaxDataFileBytes,
-			Exclude:      cfg.IndexExclude,
+			MaxBytes:       cfg.IndexMaxFileBytes,
+			MaxDataBytes:   cfg.IndexMaxDataFileBytes,
+			MaxSchemaBytes: cfg.IndexMaxSchemaFileBytes,
+			Exclude:        cfg.IndexExclude,
 		}),
 		Chunk: chunkOptions(cfg),
 	})

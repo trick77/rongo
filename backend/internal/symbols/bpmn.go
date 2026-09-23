@@ -45,21 +45,8 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil
 	}
-	lines := lineStarts(body)
-	lineOf := func(offset int64) int {
-		// The line holding the byte at offset, 1-based.
-		return sort.Search(len(lines), func(i int) bool { return lines[i] > int(offset) })
-	}
-	tagStart := func(end int64) int {
-		// InputOffset after a start tag is the byte past its ">"; the tag's
-		// own line is where its "<" sits. A "<" cannot occur inside a tag, so
-		// the last one before end is it.
-		i := bytes.LastIndexByte(body[:end], '<')
-		if i < 0 {
-			return lineOf(end - 1)
-		}
-		return lineOf(int64(i))
-	}
+	lm := newLineMap(body)
+	lineOf, tagStart := lm.lineOf, lm.tagStart
 
 	type open struct {
 		sym   int // index into out, -1 for elements that are not symbols
@@ -234,14 +221,34 @@ func attr(el xml.StartElement, name string) string {
 	return ""
 }
 
-// lineStarts returns the byte offset each line begins at, so a byte offset
-// maps to a line by binary search.
-func lineStarts(body []byte) []int {
+// lineMap maps a decoder's byte offsets back to 1-based lines.
+type lineMap struct {
+	body   []byte
+	starts []int // byte offset each line begins at
+}
+
+func newLineMap(body []byte) lineMap {
 	starts := []int{0}
 	for i, b := range body {
 		if b == '\n' && i+1 < len(body) {
 			starts = append(starts, i+1)
 		}
 	}
-	return starts
+	return lineMap{body: body, starts: starts}
+}
+
+// lineOf is the line holding the byte at offset.
+func (m lineMap) lineOf(offset int64) int {
+	return sort.Search(len(m.starts), func(i int) bool { return m.starts[i] > int(offset) })
+}
+
+// tagStart is the line a start tag opens on. InputOffset after a start tag is
+// the byte past its ">"; the tag's own line is where its "<" sits. A "<"
+// cannot occur inside a tag, so the last one before end is it.
+func (m lineMap) tagStart(end int64) int {
+	i := bytes.LastIndexByte(m.body[:end], '<')
+	if i < 0 {
+		return m.lineOf(end - 1)
+	}
+	return m.lineOf(int64(i))
 }

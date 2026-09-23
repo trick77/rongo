@@ -48,6 +48,11 @@ type SelectOptions struct {
 	// data, not configuration. Manifests are exempt, whatever their size,
 	// because the repository's structure is read from them.
 	MaxDataBytes int
+	// MaxSchemaBytes is the ceiling for xsd and wsdl: a schema is a contract
+	// written by hand, and one of 70 KB answers "which fields are required",
+	// so it gets a ceiling of its own far above the data one. What stays
+	// above it is code tables and catalogues nobody asks about.
+	MaxSchemaBytes int
 	// Exclude lists path globs, relative to the repository root, whose files
 	// are skipped as SkipExcluded. Matched segment by segment: "*" and "?"
 	// apply within one segment, "**" spans zero or more segments. The
@@ -58,11 +63,12 @@ type SelectOptions struct {
 }
 
 // DefaultSelectOptions is 1 MB, overridable via BACKEND_INDEX_MAX_FILE_BYTES,
-// 8 KiB for data (BACKEND_INDEX_MAX_DATA_FILE_BYTES), and no exclusions: the
+// 8 KiB for data (BACKEND_INDEX_MAX_DATA_FILE_BYTES), 256 KiB for schemas
+// (BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES), and no exclusions: the
 // default exclusion list is the config package's, so a caller that builds a
 // Selector directly gets the plain rule set.
 func DefaultSelectOptions() SelectOptions {
-	return SelectOptions{MaxBytes: 1 << 20, MaxDataBytes: 8 << 10}
+	return SelectOptions{MaxBytes: 1 << 20, MaxDataBytes: 8 << 10, MaxSchemaBytes: 256 << 10}
 }
 
 // ValidateExclude reports the first malformed exclusion pattern. It runs at
@@ -121,6 +127,9 @@ func NewSelector(opts SelectOptions) *Selector {
 	}
 	if opts.MaxDataBytes <= 0 {
 		opts.MaxDataBytes = DefaultSelectOptions().MaxDataBytes
+	}
+	if opts.MaxSchemaBytes <= 0 {
+		opts.MaxSchemaBytes = DefaultSelectOptions().MaxSchemaBytes
 	}
 	s := &Selector{opts: opts}
 	for _, pat := range opts.Exclude {
@@ -264,8 +273,14 @@ var dataExts = map[string]bool{
 // and is exactly the hand-written configuration that answers questions,
 // whereas json and xml of that size are exports, fixtures or translations.
 var sizedDataExts = map[string]bool{
-	".json": true, ".json5": true, ".xml": true, ".xsd": true, ".wsdl": true, ".plist": true,
+	".json": true, ".json5": true, ".xml": true, ".plist": true,
 }
+
+// schemaExts are the formats under the schema ceiling instead: an XSD or
+// WSDL is a hand-written contract, and a syrius service schema of 46-69 KB
+// is exactly what "which fields are optional" is answered from. At 8 KiB
+// the data ceiling dropped 46 of 150 (2026-09-17-data-file-cap.md).
+var schemaExts = map[string]bool{".xsd": true, ".wsdl": true}
 
 // manifestFiles are exempt from the data ceiling: internal/units reads the
 // repository's structure from the manifests, and a parent pom or a workspace
@@ -381,7 +396,7 @@ func (s *Selector) selectByPath(p string, size int) (Decision, string) {
 	if reason := generatedByName(p); reason != "" {
 		return SkipGenerated, reason
 	}
-	if reason := dataReason(p, size, s.opts.MaxDataBytes); reason != "" {
+	if reason := dataReason(p, size, s.opts.MaxDataBytes, s.opts.MaxSchemaBytes); reason != "" {
 		return SkipData, reason
 	}
 	return Include, ""
@@ -477,13 +492,20 @@ func catalogueSegment(p string) string {
 }
 
 // dataReason reports why a path is data: a format that only ever holds rows,
-// or json/xml above the ceiling. The detail names the ceiling for the index
-// log; the row keeps the decision alone, like every other skip.
-func dataReason(p string, size, maxDataBytes int) string {
+// json/xml above the data ceiling, or a schema above the schema ceiling. The
+// detail names the ceiling for the index log; the row keeps the decision
+// alone, like every other skip.
+func dataReason(p string, size, maxDataBytes, maxSchemaBytes int) string {
 	base := path.Base(p)
 	ext := strings.ToLower(path.Ext(base))
 	if dataExts[ext] {
 		return "is a data file (" + ext + ")"
+	}
+	if schemaExts[ext] {
+		if size <= maxSchemaBytes {
+			return ""
+		}
+		return fmt.Sprintf("%d bytes of %s, above the schema ceiling of %d", size, ext[1:], maxSchemaBytes)
 	}
 	if !sizedDataExts[ext] || size <= maxDataBytes || isManifest(base) {
 		return ""
@@ -523,6 +545,9 @@ var extLang = map[string]string{
 	// A BPMN process model. Not a ctags language: the indexer hands it to
 	// symbols.ExtractBPMN and the chunker anchors on its flow nodes.
 	".bpmn": "bpmn",
+	// A service contract. Not a ctags language either: symbols.ExtractXSD
+	// reads it and the chunker anchors on its top-level definitions.
+	".xsd": "xsd", ".wsdl": "wsdl",
 }
 
 // LanguageOf maps a path to a language by extension, returning "" when it does
