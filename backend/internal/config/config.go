@@ -308,6 +308,11 @@ func Load() (Config, error) {
 				"BACKEND_ADMIN_PASSWORD_HASH is not a bcrypt hash; generate one with `rongo -hash-password`")
 		}
 		cfg.CookieSecure = r.boolOr("BACKEND_COOKIE_SECURE", true)
+		// Read after the one check above, so its own malformed value is
+		// refused like every other setting's.
+		if r.err != nil {
+			return Config{}, r.err
+		}
 		if !cfg.CookieSecure && !isLoopback(cfg.Addr) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)

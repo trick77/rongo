@@ -53,30 +53,37 @@ func (s *Service) WithCommits(r CommitReader) *Service {
 // one query rather than one per file.
 func (s *Service) indexedPaths(ctx context.Context, repo string, files []gitrepo.FileChange) (map[string]bool, error) {
 	out := map[string]bool{}
-	if len(files) == 0 {
-		return out, nil
-	}
-	args := make([]any, 0, 1+len(files))
-	args = append(args, repo)
-	for _, f := range files {
-		args = append(args, f.Path)
-	}
-	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT path FROM files WHERE repo = ? AND skip_reason = '' AND path IN (`+
-			strings.TrimSuffix(strings.Repeat("?,", len(files)), ",")+`)`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("look up the indexed files of %s: %w", repo, err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
+	// A few hundred bound parameters per statement: a commit that touches a
+	// whole vendored tree must not run into SQLite's variable limit.
+	const batch = 500
+	for start := 0; start < len(files); start += batch {
+		part := files[start:min(start+batch, len(files))]
+		args := make([]any, 0, 1+len(part))
+		args = append(args, repo)
+		for _, f := range part {
+			args = append(args, f.Path)
+		}
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT path FROM files WHERE repo = ? AND skip_reason = '' AND path IN (`+
+				strings.TrimSuffix(strings.Repeat("?,", len(part)), ",")+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("look up the indexed files of %s: %w", repo, err)
+		}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[p] = true
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		out[p] = true
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Commit returns the commit sha of repo. The commits row is the permission,

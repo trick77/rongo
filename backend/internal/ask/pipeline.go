@@ -403,8 +403,6 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	return answer, nil, err
 }
 
-// projectsOf is the turn's project map, read on first use and kept on the
-// scope, so one turn reads it once however many steps need it.
 // stagesOf is the declared stages for this turn, read once and kept on the
 // scope: every entry point — a fresh turn, a resume, a re-explain, a release
 // — needs them, and each used to read them again.
@@ -416,6 +414,8 @@ func (p *Pipeline) stagesOf(ctx context.Context, scope *Scope) stages.Set {
 	return scope.stages
 }
 
+// projectsOf is the turn's project map, read on first use and kept on the
+// scope, so one turn reads it once however many steps need it.
 func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, error) {
 	if scope.pmLoaded {
 		return scope.pm, nil

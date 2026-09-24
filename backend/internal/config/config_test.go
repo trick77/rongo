@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // validSecret satisfies the length and placeholder checks so tests that don't
@@ -666,5 +668,29 @@ func TestLoad_aMalformedSettingRefusesToStart(t *testing.T) {
 				t.Errorf("err = %q, want it to name %s and %q", err, key, value)
 			}
 		})
+	}
+}
+
+// TestLoad_aMalformedCookieSecureRefusesToStart: the cookie flag is read
+// inside the password and oidc branches, after the general check, and so
+// needs a check of its own — silently true, a plain-HTTP dev box would mint
+// a Secure cookie the browser drops and every login would 401 on the next
+// request.
+func TestLoad_aMalformedCookieSecureRefusesToStart(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setEnv(t, map[string]string{
+		"BACKEND_AUTH_MODE":           "password",
+		"BACKEND_ADMIN_USER":          "jan",
+		"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
+		"BACKEND_COOKIE_SECURE":       "flase",
+	})
+
+	_, err = Load()
+
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") {
+		t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE", err)
 	}
 }

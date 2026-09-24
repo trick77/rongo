@@ -235,3 +235,28 @@ func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
 		t.Errorf("a changed email wrote the user %d times in all, want 2", n)
 	}
 }
+
+func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
+	svc := newService(t)
+	if _, err := svc.Admit("old", "old@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+	svc.admitMu.Lock()
+	a := svc.admitted["old"]
+	a.at = a.at.Add(-2 * admitTTL)
+	svc.admitted["old"] = a
+	svc.admitMu.Unlock()
+
+	if _, err := svc.Admit("new", "new@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.admitMu.Lock()
+	defer svc.admitMu.Unlock()
+	if _, ok := svc.admitted["old"]; ok {
+		t.Error("a subject past the interval is still remembered")
+	}
+	if _, ok := svc.admitted["new"]; !ok {
+		t.Error("the subject just admitted is not remembered")
+	}
+}

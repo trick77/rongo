@@ -255,10 +255,18 @@ type Mermaid = typeof import("mermaid").default;
 let loading: Promise<Mermaid> | null = null;
 function renderer(): Promise<Mermaid> {
   if (!loading) {
-    loading = import("mermaid").then((m) => {
-      init(m.default);
-      return m.default;
-    });
+    loading = import("mermaid").then(
+      (m) => {
+        init(m.default);
+        return m.default;
+      },
+      (e: unknown) => {
+        // A load that failed (a redeploy took the chunk away, a blip) is
+        // tried again by the next fence, not remembered for the session.
+        loading = null;
+        throw e;
+      },
+    );
   }
   return loading;
 }
@@ -301,8 +309,8 @@ export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
   if (!p) {
     p = (async (): Promise<Drawn> => {
-      const mermaid = await renderer();
       try {
+        const mermaid = await renderer();
         await mermaid.parse(src);
         const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);
         return { svg };

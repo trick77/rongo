@@ -82,6 +82,13 @@ func (s *Service) Admit(subject, email string, isAdmin bool) (User, error) {
 		return User{}, err
 	}
 	s.admitMu.Lock()
+	// Evicted on the write path, so the map holds the subjects seen lately
+	// and not every subject a proxy ever sent.
+	for k, a := range s.admitted {
+		if now.Sub(a.at) >= admitTTL {
+			delete(s.admitted, k)
+		}
+	}
 	s.admitted[subject] = admission{user: u, at: now}
 	s.admitMu.Unlock()
 	return u, nil
