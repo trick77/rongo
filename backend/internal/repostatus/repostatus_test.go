@@ -124,10 +124,11 @@ func TestRepoStatus_aRepositoryThatLeftTheListIsGoneFromThePage(t *testing.T) {
 	}
 }
 
-func TestRepoStatus_anExplicitlyDisabledRepositoryKeepsItsIndexAndItsRow(t *testing.T) {
+func TestRepoStatus_aParkedRepositoryKeepsItsIndexAndLeavesThePage(t *testing.T) {
 	// Given: peeq indexed, then marked `enabled: false` in the YAML. That is a
-	// repository being left alone, not one being retired: it stays listed with
-	// everything it has.
+	// repository being parked, not retired: its index and its row stay for
+	// the citations already made, but it is not polled, not retrieved and
+	// not on the Repos page.
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
@@ -146,13 +147,48 @@ func TestRepoStatus_anExplicitlyDisabledRepositoryKeepsItsIndexAndItsRow(t *test
 	}
 
 	// Then
-	if len(got) != 1 {
-		t.Fatalf("got %d repositories, want the disabled one kept", len(got))
+	if len(got) != 0 {
+		t.Errorf("got %+v, want the parked repository off the page", got)
 	}
-	if got[0].Enabled {
-		t.Error("Enabled = true, want false")
+	var files int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files WHERE repo = 'peeq'`).Scan(&files); err != nil {
+		t.Fatal(err)
 	}
-	if got[0].Modules != 1 {
-		t.Errorf("Modules = %d, want 1 — the index survives being disabled", got[0].Modules)
+	if files != 1 {
+		t.Errorf("files = %d, want the index kept while parked", files)
+	}
+}
+
+func TestRepoStatus_clustersOnceUntilTheIndexMoves(t *testing.T) {
+	// The page is read on every turn and the clustering scans every file
+	// and chunk, so the numbers are kept until the index state they were
+	// read at changes.
+	db := statusDB(t)
+	state := indexer.NewStateStore(db)
+	ctx := context.Background()
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	s := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100})
+
+	for i := 0; i < 3; i++ {
+		if _, err := s.RepoStatus(ctx); err != nil {
+			t.Fatalf("RepoStatus %d: %v", i, err)
+		}
+	}
+	if s.clusters != 1 {
+		t.Errorf("clustered %d times over three reads of an unchanged index, want 1", s.clusters)
+	}
+
+	// The index moved: the totals changed.
+	if err := state.SetCounts(ctx, "peeq", indexer.Counts{Files: 2, Chunks: 9}); err != nil {
+		t.Fatalf("SetCounts: %v", err)
+	}
+	if _, err := s.RepoStatus(ctx); err != nil {
+		t.Fatalf("RepoStatus: %v", err)
+	}
+	if s.clusters != 2 {
+		t.Errorf("clustered %d times after the index moved, want 2", s.clusters)
 	}
 }

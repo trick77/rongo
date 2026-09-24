@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Narrow from "./Narrow";
@@ -150,9 +150,26 @@ export default function ThreadView({
   useEffect(() => {
     setOpenFailure(new Set());
     setCopied(null);
+    setCopiedQuestion(null);
   }, [threadKey]);
 
-  const setHot = (marker: number | null) => onHot?.(marker);
+  // The "Copied" feedback times out through these, cleared on unmount so a
+  // reader who leaves within the moment does not have state set on a view
+  // that is gone.
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyQuestionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      if (copyQuestionTimer.current) clearTimeout(copyQuestionTimer.current);
+    },
+    [],
+  );
+
+  // Stable, or the memoized Markdown of the source turn — the previous
+  // answer while the next one streams — re-rendered and re-highlighted on
+  // every token.
+  const setHot = useCallback((marker: number | null) => onHot?.(marker), [onHot]);
   const showSource = onOpenSource;
 
   // Markdown is memoized, and a fresh arrow per render would defeat it on
@@ -195,14 +212,16 @@ export default function ThreadView({
     // plain lie — and the reader would paste whatever was there before.
     if (!(await actions.onCopy(turnIndex))) return;
     setCopied(turnIndex);
-    setTimeout(() => setCopied(null), 1500);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 1500);
   }
 
   async function copyQuestion(turnIndex: number) {
     if (!actions) return;
     if (!(await actions.onCopyQuestion(turnIndex))) return;
     setCopiedQuestion(turnIndex);
-    setTimeout(() => setCopiedQuestion(null), 1500);
+    if (copyQuestionTimer.current) clearTimeout(copyQuestionTimer.current);
+    copyQuestionTimer.current = setTimeout(() => setCopiedQuestion(null), 1500);
   }
 
   // One article per question. The list itself stays flat — every action here

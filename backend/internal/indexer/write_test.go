@@ -447,3 +447,43 @@ func TestReplaceFile_keepsSqlTablesButNotColumns(t *testing.T) {
 		t.Errorf("symbols = %v, want %v", got, want)
 	}
 }
+
+// TestDeleteFile_survivesAWriterOnAnotherConnection: the HTTP side writes
+// titles, usage and steps while an incremental run deletes paths. In WAL a
+// transaction that opens with a read holds a snapshot, and its first write
+// after another connection has committed fails at once with "database is
+// locked" — the busy timeout never runs for a stale snapshot. Writing first
+// takes the lock and waits instead.
+func TestDeleteFile_survivesAWriterOnAnotherConnection(t *testing.T) {
+	db := writeDB(t)
+	testee := NewWriter(db)
+	ctx := context.Background()
+	if err := testee.ReplaceFile(ctx, "shop", "src/Other.java", "abc", "java", 8,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = db.Exec(`UPDATE files SET size = ? WHERE path = 'src/Other.java'`, i)
+		}
+	}()
+	for i := 0; i < 30; i++ {
+		if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
+			sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
+			t.Fatalf("ReplaceFile %d beside another writer: %v", i, err)
+		}
+		if err := testee.DeleteFile(ctx, "shop", "src/A.java"); err != nil {
+			t.Fatalf("DeleteFile %d beside another writer: %v", i, err)
+		}
+	}
+	close(stop)
+	<-done
+}

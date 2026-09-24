@@ -898,3 +898,42 @@ func TestGather_reservesForTheGapPassOnlyWhenItIsOn(t *testing.T) {
 		t.Errorf("sources = %v, want the gap reserve held back from the walk", paths(on))
 	}
 }
+
+// TestFillGaps_capsLandingsAfterTheCeiling: two repositories outside the
+// turn's ceiling hold a route in three files each, and one inside holds it
+// once. The per-name cap counts admissible landings: filled with the outside
+// ones and filtered after, the inside landing was dropped and the name
+// reported neither landed, unresolved nor refused.
+func TestFillGaps_capsLandingsAfterTheCeiling(t *testing.T) {
+	db := gatherDB(t)
+	hitID := seedChunk(t, db, "client.go", 0, 1, 10, "call", `get("/shared")`)
+	for _, repo := range []string{"a1", "a2"} {
+		seedRepo(t, db, repo)
+		for _, file := range []string{"X.java", "Y.java", "Z.java"} {
+			seedChunkIn(t, db, repo, file, 0, 1, 10, "", "class Handler {}")
+			seedTokenIn(t, db, repo, file, "route", "/shared", 1)
+		}
+	}
+	seedRepo(t, db, "loom")
+	seedChunkIn(t, db, "loom", "Handler.java", 0, 1, 10, "", `@GetMapping("/shared") void shared() {}`)
+	seedTokenIn(t, db, "loom", "Handler.java", "route", "/shared", 1)
+	g := gapGatherer(t, db, GatherOptions{MaxHops: 1, TokenBudget: 10000}, missing(name("/shared", "route"))).
+		within([]string{"peeq", "loom"})
+
+	got, report, err := g.FillGaps(context.Background(), "who serves /shared?", []Source{sourceOf(t, db, hitID)}, nil)
+	if err != nil {
+		t.Fatalf("FillGaps: %v", err)
+	}
+
+	if !hasIn(got, "loom", "Handler.java") {
+		t.Errorf("sources = %v, want the landing inside the ceiling", repoPaths(got))
+	}
+	for _, repo := range []string{"a1", "a2"} {
+		if hasIn(got, repo, "X.java") || hasIn(got, repo, "Y.java") || hasIn(got, repo, "Z.java") {
+			t.Errorf("sources = %v, want nothing from outside the ceiling", repoPaths(got))
+		}
+	}
+	if len(report.Landed) != 1 || report.Landed[0] != "/shared" {
+		t.Errorf("report = %+v, want /shared landed", report)
+	}
+}

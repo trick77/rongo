@@ -28,7 +28,7 @@ func TestResolve_acceptsUniversalCtags(t *testing.T) {
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
 	fakeBin(t, dir, "rg", "ripgrep 15.2.0")
-	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024")
+	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\njson supports json format output")
 	onlyPath(t, dir)
 
 	// When
@@ -80,5 +80,29 @@ func TestResolve_reportsMissingBinary(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rg") {
 		t.Errorf("error = %q, want it to name rg", err)
+	}
+}
+
+func TestResolve_rejectsAUniversalCtagsBuiltWithoutJSON(t *testing.T) {
+	// Given: the right ctags, built without the json feature. Every extraction
+	// asks for --output-format=json, so this one fails on every file, the
+	// caller falls back to line windows, and the symbol index ends up empty
+	// with nothing at startup saying so — the silent outcome the banner check
+	// exists to prevent.
+	dir := t.TempDir()
+	fakeBin(t, dir, "git", "git version 2.48.0")
+	fakeBin(t, dir, "rg", "ripgrep 15.2.0")
+	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\nregex can use regular expression based pattern matching")
+	onlyPath(t, dir)
+
+	// When
+	_, err := Resolve()
+
+	// Then
+	if err == nil {
+		t.Fatal("Resolve() err = nil, want a rejection of a ctags without json output")
+	}
+	if !strings.Contains(err.Error(), "json") {
+		t.Errorf("error = %q, want it to name the missing json feature", err)
 	}
 }

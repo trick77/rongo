@@ -16,6 +16,7 @@ fi
 
 DB_PATH=${BACKEND_DB_PATH:-./data/rongo.db}
 REPO_ROOT=${BACKEND_REPO_ROOT:-./repos}
+REPOS_FILE=${BACKEND_REPOS_FILE:-./repos.yaml}
 
 # A relative path (e.g. from .env, copied from .env.example) is meant to
 # resolve against the repo root. The backend subshell below cd's into
@@ -31,6 +32,13 @@ esac
 case "$REPO_ROOT" in
   /*) ;;
   *) REPO_ROOT="$ROOT/${REPO_ROOT#./}" ;;
+esac
+# The repository list too: left relative it resolved to backend/repos.yaml,
+# and dev booted with "no repository list on disk" against a file that was
+# sitting at the repo root all along.
+case "$REPOS_FILE" in
+  /*) ;;
+  *) REPOS_FILE="$ROOT/${REPOS_FILE#./}" ;;
 esac
 
 # Enable job control so the backend subshell gets its own process group;
@@ -55,6 +63,7 @@ mkdir -p "$REPO_ROOT"
   BACKEND_ADDR=127.0.0.1:8080 \
   BACKEND_DB_PATH="$DB_PATH" \
   BACKEND_REPO_ROOT="$REPO_ROOT" \
+  BACKEND_REPOS_FILE="$REPOS_FILE" \
   go run ./cmd/rongo
 ) &
 BACKEND_PID=$!

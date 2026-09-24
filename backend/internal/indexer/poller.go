@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -321,12 +320,9 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 
 	head, err := p.git.HeadSHA(ctx, spec, branch)
 	if err != nil {
-		// ErrBranchGone is passed through deliberately: the caller records it,
-		// and the Repos page shows it. A silent stop here would freeze the
+		// ErrBranchGone included, deliberately: the caller records it, and
+		// the Repos page shows it. A silent stop here would freeze the
 		// index while every status looked healthy.
-		if errors.Is(err, gitrepo.ErrBranchGone) {
-			return pollResult{}, err
-		}
 		return pollResult{}, err
 	}
 
@@ -353,22 +349,29 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 			"paths", len(changed))
 	}
 
-	counts, err := p.index(ctx, st, head, paths)
+	return p.indexAndMark(ctx, st, head, paths, func() error {
+		// After the index and before last_sha moves: a failure here leaves
+		// the commit un-recorded, and the next cycle records it again.
+		return p.recordHistory(ctx, spec, head)
+	})
+}
+
+// indexAndMark runs the index over paths (nil for a full run), then between
+// (nil for nothing), then moves last_sha. Deliberately NOT on a failed index:
+// recording the new SHA after one would make the next run see "unchanged"
+// and leave the repository permanently un-indexed while looking healthy.
+func (p *Poller) indexAndMark(ctx context.Context, st RepoState, sha string, paths []string, between func() error) (pollResult, error) {
+	counts, err := p.index(ctx, st, sha, paths)
 	if err != nil {
-		// Deliberately do NOT advance last_sha here. Recording the new SHA
-		// after a failed index would make the next run see "unchanged" and
-		// leave the repository permanently un-indexed while looking healthy.
 		return pollResult{}, err
 	}
-
-	// After the index and before last_sha moves: a failure here leaves the
-	// commit un-recorded, and the next cycle records it again.
-	if err := p.recordHistory(ctx, spec, head); err != nil {
-		return pollResult{}, err
+	if between != nil {
+		if err := between(); err != nil {
+			return pollResult{}, err
+		}
 	}
-
-	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: head, Counts: counts}
-	return res, p.state.MarkIndexed(ctx, st.Name, head, counts)
+	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts}
+	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
 }
 
 // recordHistory makes the lane the branch's first-parent history from head,
@@ -451,15 +454,7 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 		}
 	}
 
-	counts, err := p.index(ctx, st, sha, paths)
-	if err != nil {
-		// Same reason as pollRepo: recording the sha after a failed index would
-		// make the next cycle see "unchanged" and leave the repository
-		// permanently un-indexed while looking healthy.
-		return pollResult{}, err
-	}
-	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts}
-	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
+	return p.indexAndMark(ctx, st, sha, paths, nil)
 }
 
 // warnEmptyStages puts a declared stage that no indexed path lies under on

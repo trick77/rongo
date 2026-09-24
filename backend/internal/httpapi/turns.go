@@ -116,3 +116,39 @@ func recordMissed(ctx context.Context, msg string, err error) {
 	}
 	slog.Warn(msg, "err", err)
 }
+
+// claims is the clarifications being answered right now. A card is closed by
+// the answer that came out of it, and that link is written only once the
+// answer has landed — so between the choice and the answer the card looks
+// open, and a second choice (a double-click, a second tab) would pass the
+// "already answered" check, run a second full resume and link both rows to
+// the card. The claim closes that window in process: one rongo, one
+// database, so a map is the whole lock. A failed resume releases it, which
+// keeps the rule that a failed turn leaves the card open for a retry.
+type claims struct {
+	mu   sync.Mutex
+	held map[int64]struct{}
+}
+
+func newClaims() *claims {
+	return &claims{held: map[int64]struct{}{}}
+}
+
+// claim takes the clarification for the turn about to answer it. ok is false
+// when another turn holds it; release must be called exactly once when ok.
+func (c *claims) claim(id int64) (release func(), ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, taken := c.held[id]; taken {
+		return nil, false
+	}
+	c.held[id] = struct{}{}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			delete(c.held, id)
+			c.mu.Unlock()
+		})
+	}, true
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -169,7 +170,7 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 	// searched, so a Code that is not one of them switches it off silently —
 	// and a caller that built the two separately would never notice. Says so
 	// once, rather than answering from a lane the operator thinks is running.
-	if q.Code != "" && !containsText(texts, q.Code) {
+	if q.Code != "" && !slices.Contains(texts, q.Code) {
 		slog.Warn("code text is not among the query texts, the code rung is off for this search",
 			"code", q.Code, "texts", len(texts))
 	}
@@ -178,15 +179,6 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 		return nil, err
 	}
 	return r.searchTexts(ctx, texts, q.Code, q.Prior, repos, q.K, q.Stage)
-}
-
-func containsText(texts []string, want string) bool {
-	for _, t := range texts {
-		if t == want {
-			return true
-		}
-	}
-	return false
 }
 
 // ResolveRepos sorts what a question said about repositories into the names
@@ -214,18 +206,16 @@ func containsText(texts []string, want string) bool {
 // as before: not known, so it narrows nothing, and not unknown, so nothing is
 // claimed about it. Only a name resembling nothing in the index is reported.
 func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question string) (known, unknown []string, err error) {
-	known, err = r.knownRepos(ctx, want, question)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(want) == 0 {
-		return known, nil, nil
-	}
-	// Both halves of the addressable namespace: a reader may name a repository
-	// or the project it belongs to, and neither is a name the index lacks.
+	// Both halves of the addressable namespace, read once for both answers:
+	// a reader may name a repository or the project it belongs to, and
+	// neither is a name the index lacks.
 	repos, project, err := r.reposAndProjects(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	known = knownReposIn(want, question, repos, project)
+	if len(want) == 0 {
+		return known, nil, nil
 	}
 	indexed := repos
 	for p := range project {
@@ -458,6 +448,15 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 	if err != nil {
 		return nil, err
 	}
+	return knownReposIn(want, question, known, project), nil
+}
+
+// knownReposIn is knownRepos over an already-read namespace, so a caller
+// that needs the namespace for a second answer reads it once.
+func knownReposIn(want []string, question string, known []string, project map[string][]string) []string {
+	if len(want) == 0 && strings.TrimSpace(question) == "" {
+		return nil
+	}
 
 	guessed := map[string]bool{}
 	for _, w := range want {
@@ -494,7 +493,7 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 			out = append(out, name)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // reposAndProjects reads the repository names and the projects they group into.

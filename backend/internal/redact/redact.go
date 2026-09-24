@@ -30,6 +30,7 @@ const Marker = "<redacted>"
 var configExt = map[string]bool{
 	".properties": true, ".yaml": true, ".yml": true, ".conf": true,
 	".env": true, ".toml": true, ".ini": true, ".json": true,
+	".tfvars": true, ".cfg": true, ".xml": true, ".config": true,
 }
 
 // IsConfigPath reports whether a path is a configuration file this package
@@ -42,7 +43,7 @@ func IsConfigPath(p string) bool {
 	// .env, .env.prod, .env.local: path.Ext reads the stage suffix as the
 	// extension, and a stage-suffixed env file is exactly the file at stake.
 	base := strings.ToLower(path.Base(p))
-	return base == ".env" || strings.HasPrefix(base, ".env.")
+	return base == ".env" || strings.HasPrefix(base, ".env.") || base == ".npmrc"
 }
 
 // keyLine is the one shape every supported format shares: optional indent
@@ -50,7 +51,39 @@ func IsConfigPath(p string) bool {
 // key's character class is deliberately narrow so "https://host/x" is never
 // read as key "https" with value "//host/x" — the URL sits in the VALUE of a
 // line like "acme.url=https://…", where the regex has already stopped at "=".
-var keyLine = regexp.MustCompile(`^(\s*(?:-\s+)?)("?)([\w.\-\[\]]+)("?)(\s*[=:]\s*)(.*)$`)
+var keyLine = regexp.MustCompile(`^(\s*(?:-\s+)?(?:export\s+)?)(["']?)([\w.\-\[\]]+)(["']?)(\s*[=:]\s*)(.*)$`)
+
+// scopedLine is an .npmrc key: a registry URL, a colon, then the key —
+// "//registry.npmjs.org/:_authToken=…". The URL part is carried as the
+// indent so the key is judged on its own.
+var scopedLine = regexp.MustCompile(`^(\s*//[^=\s]*:)()([\w.\-]+)()(\s*=\s*)(.*)$`)
+
+// propsSpaceLine is the Java properties separator nobody uses on purpose: a
+// run of whitespace with no "=" or ":" at all. Only read in .properties
+// files, where it is the format; anywhere else two words are prose.
+var propsSpaceLine = regexp.MustCompile(`^(\s*)()([\w.\-\[\]]+)()(\s+)(\S.*)$`)
+
+// secretNames are the key names an inline rule looks for where the line has
+// no key of its own: inside minified JSON, a yaml flow mapping, an XML
+// attribute list. Narrower than isSecretKey on purpose — mid-line, "pass"
+// and "key" are everywhere.
+const secretNames = `\w*(?:password|passwd|passphrase|passwort|secret|token|apikey|api_key|api-key|credential|accesskey|access_key)\w*`
+
+// inlineKeyed is `password: x`, `"password":"x"`, `password="x"` wherever it
+// stands in a line that has no key of its own. The value stops at a quote,
+// a comma, a brace or whitespace, and never starts with "$": a placeholder
+// is a pointer, not a value.
+var inlineKeyed = regexp.MustCompile(`(?i)(["']?)(` + secretNames + `)(["']?)(\s*[:=]\s*)(["']?)([^"'\s,;}{$][^"'\s,;}]*)`)
+
+// xmlNamedValue is a name/value attribute pair whose NAME says secret:
+// Spring's <property name="password" value="…"/>, web.config's <add
+// key="ApiToken" value="…"/>. The key is in one attribute and the value in
+// the next, the XML shape of the Kubernetes env pair.
+var xmlNamedValue = regexp.MustCompile(`(?i)\b(name|key)=(["'])(` + secretNames + `)(["'])(\s+value=)(["'])([^"']*)(["'])`)
+
+// xmlElement is <password>…</password>: Maven's settings.xml, and every
+// hand-written XML config with a credential element.
+var xmlElement = regexp.MustCompile(`(?i)<(` + secretNames + `)>([^<]+)</`)
 
 // secretKeyWords are matched inside the key with "-" and "_" removed and the
 // case folded, so consumer-key, consumerKey and CONSUMER_KEY are one word.
@@ -84,15 +117,15 @@ var segmentSplit = regexp.MustCompile(`[.\-_\[\]]+|(?:[a-z0-9])(?:[A-Z])`)
 // registry image name or a URL path, which are exactly the values an infra
 // answer is made of.
 var secretValueShapes = []*regexp.Regexp{
-	regexp.MustCompile(`^ENC\(.*\)$`),                                              // jasypt
-	regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`),  // JWT
-	regexp.MustCompile(`^[A-Za-z0-9+/]{40,}={0,2}$`),                               // base64 blob
-	regexp.MustCompile(`^[0-9a-fA-F]{32,}$`),                                       // hex digest or key
-	regexp.MustCompile(`(?i)(password|secret)\s*=`),                                // a JAAS line carries its password inline
-	regexp.MustCompile(`^(?i)(basic|bearer)\s+\S+$`),                               // an Authorization header value
-	regexp.MustCompile(`://[^/\s@:]+:[^/\s@]+@`),                                   // credentials inside a URL
-	regexp.MustCompile(`^(?i)(AKIA|ASIA)[0-9A-Z]{16}$`),                            // AWS access key id
-	regexp.MustCompile(`^(?i)(gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)\S+$`), // vendor token prefixes
+	regexp.MustCompile(`^ENC\(.*\)$`),                                                   // jasypt
+	regexp.MustCompile(`^eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`),       // JWT
+	regexp.MustCompile(`^[A-Za-z0-9+/]{40,}={0,2}$`),                                    // base64 blob
+	regexp.MustCompile(`^[0-9a-fA-F]{32,}$`),                                            // hex digest or key
+	regexp.MustCompile(`(?i)(password|secret)\s*=`),                                     // a JAAS line carries its password inline
+	regexp.MustCompile(`^(?i)(basic|bearer)\s+\S+$`),                                    // an Authorization header value
+	regexp.MustCompile(`://[^/\s@:]+:[^/\s@]+@`),                                        // credentials inside a URL
+	regexp.MustCompile(`^(?i)(AKIA|ASIA)[0-9A-Z]{16}$`),                                 // AWS access key id
+	regexp.MustCompile(`^(?i)(gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-|npm_)\S+$`), // vendor token prefixes
 }
 
 // inlineShapes are credentials recognisable wherever they stand in a line
@@ -107,7 +140,7 @@ var inlineShapes = regexp.MustCompile(`\bENC\([^)]*\)` +
 	`|\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*` +
 	`|\b(?i:basic)\s+[A-Za-z0-9+/]{12,}={0,2}` +
 	`|\b(?i:bearer)\s+[A-Za-z0-9._~+/-]{20,}` +
-	`|\b(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-)[A-Za-z0-9_-]{16,}` +
+	`|\b(?:gh[pousr]_|github_pat_|glpat-|xox[baprs]-|sk-|npm_)[A-Za-z0-9_-]{16,}` +
 	`|\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)
 
 // urlCredentials is user:password inside a URL, on ANY line: a key line's
@@ -141,9 +174,15 @@ func Redact(p string, body []byte) []byte {
 		return body
 	}
 	yaml := isYAML(p)
+	properties := strings.ToLower(path.Ext(p)) == ".properties"
 	lines := strings.Split(string(body), "\n")
 	out := make([]string, 0, len(lines))
 	changed := false
+	// envName is the indent of a yaml `- name: DB_PASSWORD` list item whose
+	// `value:` is still to come, or -1. The Kubernetes env shape puts the key
+	// in one line and the value in the next, under a key ("value") that
+	// says nothing by itself.
+	envName := -1
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSuffix(lines[i], "\r")
 		crlf := len(line) != len(lines[i])
@@ -153,10 +192,25 @@ func Redact(p string, body []byte) []byte {
 			changed = true
 		}
 		m := keyLine.FindStringSubmatch(line)
+		if m == nil {
+			m = scopedLine.FindStringSubmatch(line)
+		}
+		if m == nil && properties {
+			m = propsSpaceLine.FindStringSubmatch(line)
+		}
 		if m == nil || isComment(m[1], line) {
-			// No key to judge by: only the unmistakable shapes, in place.
-			if inlineShapes.MatchString(line) {
-				out = append(out, inlineShapes.ReplaceAllString(line, Marker)+eol(crlf))
+			// No key to judge by: the shapes that carry their own key
+			// mid-line, then the unmistakable values — never in a comment,
+			// where "password=notreally" is what it says.
+			redacted := line
+			if !isComment(leadingSpace(line), line) {
+				redacted = xmlNamedValue.ReplaceAllString(redacted, "${1}=${2}${3}${4}${5}${6}"+Marker+"${8}")
+				redacted = xmlElement.ReplaceAllString(redacted, "<${1}>"+Marker+"</")
+				redacted = inlineKeyed.ReplaceAllString(redacted, "${1}${2}${3}${4}${5}"+Marker)
+			}
+			redacted = inlineShapes.ReplaceAllString(redacted, Marker)
+			if redacted != line {
+				out = append(out, redacted+eol(crlf))
 				changed = true
 				continue
 			}
@@ -164,9 +218,16 @@ func Redact(p string, body []byte) []byte {
 			continue
 		}
 		indent, key, sep, rest := m[1], m[3], m[5], m[6]
-		secretKey := isSecretKey(key)
+		if envName >= 0 && indentWidth(indent) <= envName {
+			// The next list item, or a dedent: the name no longer applies.
+			envName = -1
+		}
+		secretKey := isSecretKey(key) || (envName >= 0 && key == "value")
 		value, trail := splitTrail(rest)
 		unquoted, quote := unquote(value)
+		if yaml && key == "name" && isSecretKey(unquoted) {
+			envName = indentWidth(indent)
+		}
 
 		if yaml && secretKey && blockScalar.MatchString(unquoted) {
 			// The value is the indented block below. Drop it whole; the
@@ -186,6 +247,15 @@ func Redact(p string, body []byte) []byte {
 		if unquoted == "" || placeholder.MatchString(unquoted) {
 			out = append(out, lines[i])
 			continue
+		}
+		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) {
+			// A flow mapping or an inline object: the keys are inside the
+			// value, and each is judged where it stands.
+			if inner := inlineKeyed.ReplaceAllString(rest, "${1}${2}${3}${4}${5}"+Marker); inner != rest {
+				out = append(out, m[1]+m[2]+key+m[4]+sep+inner+eol(crlf))
+				changed = true
+				continue
+			}
 		}
 		if !secretKey && (isVersionKey(key) || !isSecretValue(unquoted)) {
 			out = append(out, lines[i])
@@ -213,7 +283,8 @@ func SecretManifest(p string, body []byte) bool {
 		if !strings.HasPrefix(line, "kind:") {
 			continue
 		}
-		switch strings.TrimSpace(strings.TrimPrefix(line, "kind:")) {
+		kind, _ := unquote(strings.TrimSpace(strings.TrimPrefix(line, "kind:")))
+		switch kind {
 		case "Secret", "SealedSecret":
 			return true
 		}
@@ -232,6 +303,11 @@ func isYAML(p string) bool {
 func isComment(indent, line string) bool {
 	rest := line[len(indent):]
 	return strings.HasPrefix(rest, "#") || strings.HasPrefix(rest, "!") || strings.HasPrefix(rest, "//")
+}
+
+// leadingSpace is the indent of a line that matched no key rule.
+func leadingSpace(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
 func isSecretKey(key string) bool {

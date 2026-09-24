@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useEscape, useFocusOnOpen } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { type SourceRef } from "./SourceView";
 
@@ -39,19 +40,8 @@ export default function CommitView({
   const closeButton = useRef<HTMLButtonElement>(null);
   const dismiss = useBackdropDismiss(onClose);
 
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
-    return () => before?.focus?.();
-  }, []);
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useFocusOnOpen(closeButton);
+  useEscape(onClose);
 
   useEffect(() => {
     let cancelled = false;

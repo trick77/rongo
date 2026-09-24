@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { shortSha } from "./turns";
 import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
 
@@ -231,10 +232,6 @@ type State =
   | { kind: "loading" }
   | { kind: "failed"; message: string }
   | { kind: "loaded"; repos: Repo[] };
-
-function shortSha(sha: string): string {
-  return sha.slice(0, 7);
-}
 
 function ago(iso: string | null): string {
   if (!iso) return "never";

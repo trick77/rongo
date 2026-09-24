@@ -77,17 +77,38 @@ func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32,
 // Put stores one vector. Re-storing a hash overwrites it rather than failing,
 // because a re-index legitimately arrives at content that is already cached.
 func (c *Cache) Put(ctx context.Context, hash string, vec []float32) error {
-	if c.dim > 0 && len(vec) != c.dim {
-		return fmt.Errorf("embed cache put %s: vector has %d dimensions, want %d", hash, len(vec), c.dim)
+	return c.PutAll(ctx, []string{hash}, [][]float32{vec})
+}
+
+// PutAll stores the vectors of one embedding call in one transaction: a
+// file's misses arrive together, and one autocommit per vector was one fsync
+// per vector.
+func (c *Cache) PutAll(ctx context.Context, hashes []string, vecs [][]float32) error {
+	if len(hashes) != len(vecs) {
+		return fmt.Errorf("embed cache put: %d hashes for %d vectors", len(hashes), len(vecs))
 	}
-	_, err := c.db.ExecContext(ctx,
-		`INSERT INTO embed_cache (content_hash, model, dim, embedding) VALUES (?,?,?,?)
-		 ON CONFLICT (content_hash, model) DO UPDATE SET dim = excluded.dim, embedding = excluded.embedding`,
-		hash, c.model, len(vec), encodeVector(vec))
+	if len(hashes) == 0 {
+		return nil
+	}
+	for i, vec := range vecs {
+		if c.dim > 0 && len(vec) != c.dim {
+			return fmt.Errorf("embed cache put %s: vector has %d dimensions, want %d", hashes[i], len(vec), c.dim)
+		}
+	}
+	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("embed cache put %s: %w", hash, err)
+		return fmt.Errorf("embed cache put: %w", err)
 	}
-	return nil
+	defer func() { _ = tx.Rollback() }()
+	for i, vec := range vecs {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO embed_cache (content_hash, model, dim, embedding) VALUES (?,?,?,?)
+			 ON CONFLICT (content_hash, model) DO UPDATE SET dim = excluded.dim, embedding = excluded.embedding`,
+			hashes[i], c.model, len(vec), encodeVector(vec)); err != nil {
+			return fmt.Errorf("embed cache put %s: %w", hashes[i], err)
+		}
+	}
+	return tx.Commit()
 }
 
 // encodeVector stores a vector as little-endian float32, the same layout vec0

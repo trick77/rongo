@@ -205,3 +205,58 @@ func TestMiddleware_acceptsSessionCookie(t *testing.T) {
 		t.Fatalf("handler not reached; status = %d", rec.Code)
 	}
 }
+
+func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
+	// Every request in dev, token and proxy mode used to upsert the user on
+	// its way in — one write beside the indexer's per request. The row is
+	// written once and remembered for a while.
+	svc := newService(t)
+	var reached int
+	h := svc.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached++ }))
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/me", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("request %d: status %d", i, rec.Code)
+		}
+	}
+	if reached != 5 {
+		t.Fatalf("reached the handler %d times, want 5", reached)
+	}
+	if n := svc.upserts.Load(); n != 1 {
+		t.Errorf("wrote the user %d times, want once", n)
+	}
+	// A changed identity is written again: the proxy's say wins over the
+	// memory of it.
+	if _, err := svc.Admit(devSubject, "other@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+	if n := svc.upserts.Load(); n != 2 {
+		t.Errorf("a changed email wrote the user %d times in all, want 2", n)
+	}
+}
+
+func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
+	svc := newService(t)
+	if _, err := svc.Admit("old", "old@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+	svc.admitMu.Lock()
+	a := svc.admitted["old"]
+	a.at = a.at.Add(-2 * admitTTL)
+	svc.admitted["old"] = a
+	svc.admitMu.Unlock()
+
+	if _, err := svc.Admit("new", "new@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.admitMu.Lock()
+	defer svc.admitMu.Unlock()
+	if _, ok := svc.admitted["old"]; ok {
+		t.Error("a subject past the interval is still remembered")
+	}
+	if _, ok := svc.admitted["new"]; !ok {
+		t.Error("the subject just admitted is not remembered")
+	}
+}

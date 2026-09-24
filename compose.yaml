@@ -50,6 +50,10 @@ services:
       dockerfile: backend/Containerfile
     image: ghcr.io/trick77/rongo:latest
     restart: unless-stopped
+    # Longer than the server's own 20 s drain (cmd/rongo/shutdown.go): a stop
+    # must never SIGKILL rongo while an answer is still being cut short and
+    # the poller's transaction rolled back.
+    stop_grace_period: 30s
     user: "1000:1000"
     cap_drop: [ALL]
     security_opt:

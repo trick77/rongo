@@ -452,7 +452,7 @@ func TestComplete_everyCallCarriesACompletionCap(t *testing.T) {
 	}
 }
 
-// TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault pins the third
+// TestWithGateTemperature_isSentAndIsOtherwiseTheEndpointsDefault pins the third
 // switch, separate from the other two the way ShortGate and WithoutThinking
 // are separate from each other.
 //
@@ -462,7 +462,7 @@ func TestComplete_everyCallCarriesACompletionCap(t *testing.T) {
 // sampling, because no request carried a temperature at all and the endpoint's
 // default applied. A gate whose whole output is one word out of two must not
 // re-roll it.
-func TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
+func TestWithGateTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
 	// Given a call that names no temperature
 	c, got := fakeUpstream(t, "x")
 
@@ -477,7 +477,7 @@ func TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
 
 	// When a call does name one
 	c2, got2 := fakeUpstream(t, "x")
-	ask(t, c2, WithTemperature(0))
+	ask(t, c2, WithGateTemperature())
 
 	if got2.Temperature == nil {
 		t.Fatal("temperature = absent, want the explicit 0 to reach the endpoint")
@@ -487,7 +487,7 @@ func TestWithTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.T) {
 	}
 	// And it reroutes nothing and suppresses nothing.
 	if got2.Model != testAnswerModel {
-		t.Errorf("model = %q, want the Pro deployment — WithTemperature must not reroute", got2.Model)
+		t.Errorf("model = %q, want the Pro deployment — WithGateTemperature must not reroute", got2.Model)
 	}
 	if got2.Thinking != nil {
 		t.Errorf("thinking = %+v, want it untouched", got2.Thinking)

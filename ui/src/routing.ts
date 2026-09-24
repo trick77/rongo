@@ -25,6 +25,18 @@ export type Route =
 export const sharePrefix = "/share/";
 const threadPrefix = "/thread/";
 
+// decoded is the percent-decoded rest of a path, or null where it is not
+// valid percent-encoding at all ("/thread/%E0"). decodeURIComponent throws
+// on that, and it runs at module load: unguarded, one bad link rendered
+// nothing, not even the shell.
+function decoded(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 export function routeFromPath(path: string): Route {
   if (path.startsWith(threadPrefix)) {
     // The exact shape the server mints — 22 URL-safe characters, 128 bits —
@@ -37,12 +49,12 @@ export function routeFromPath(path: string): Route {
     // /thread/19 is rejected by this too, which is the point. Threads were
     // addressed by row number for one release; those URLs are not redirected,
     // because a redirect would keep the counter reachable for good.
-    const raw = decodeURIComponent(path.slice(threadPrefix.length));
-    if (/^[A-Za-z0-9_-]{22}$/.test(raw)) return { view: "thread", id: raw };
+    const raw = decoded(path.slice(threadPrefix.length));
+    if (raw !== null && /^[A-Za-z0-9_-]{22}$/.test(raw)) return { view: "thread", id: raw };
   }
   if (path.startsWith(sharePrefix)) {
-    const token = decodeURIComponent(path.slice(sharePrefix.length));
-    if (token !== "") return { view: "share", token };
+    const token = decoded(path.slice(sharePrefix.length));
+    if (token !== null && token !== "") return { view: "share", token };
   }
   if (path === "/threads") return { view: "threads" };
   if (path === "/projects") return { view: "projects" };

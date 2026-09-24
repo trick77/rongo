@@ -10,6 +10,12 @@ describe("routeFromPath", () => {
     expect(routeFromPath(`/thread/${address}`)).toEqual({ view: "thread", id: address });
   });
 
+  it("lands a malformed address on the unasked question rather than a blank page", () => {
+    // decodeURIComponent throws on these, and it runs at module load.
+    expect(routeFromPath("/thread/%E0")).toEqual({ view: "new" });
+    expect(routeFromPath("/share/%E0")).toEqual({ view: "new" });
+  });
+
   it("reads the three pages and the share link", () => {
     expect(routeFromPath("/threads")).toEqual({ view: "threads" });
     expect(routeFromPath("/projects")).toEqual({ view: "projects" });

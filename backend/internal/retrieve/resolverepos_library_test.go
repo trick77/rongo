@@ -2,6 +2,7 @@ package retrieve
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestResolveReposExpandsAProjectNameToItsMembersAndTheLibraryTheyUse(t *test
 	if err != nil {
 		t.Fatalf("ResolveRepos: %v", err)
 	}
-	if len(known) != 3 || !contains(known, "shop-backend") || !contains(known, "shop-ui") || !contains(known, "acme-commons") {
+	if len(known) != 3 || !slices.Contains(known, "shop-backend") || !slices.Contains(known, "shop-ui") || !slices.Contains(known, "acme-commons") {
 		t.Errorf("known = %v, want shop's repositories and the library", known)
 	}
 	if len(unknown) != 0 {

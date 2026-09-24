@@ -220,12 +220,12 @@ func (e *FinishError) Error() string {
 
 // callOptions is what the Option funcs assemble.
 type callOptions struct {
-	lane        Lane
-	thinkingOff bool
-	maxTokens   int
-	temperature *float64
-	step        string
-	jsonObject  bool
+	lane           Lane
+	thinkingOff    bool
+	maxTokens      int
+	pinTemperature bool
+	step           string
+	jsonObject     bool
 	// attemptTimeout bounds ONE attempt, under whatever the caller's context
 	// already allows. Zero means the caller's ceiling is the only bound,
 	// which is what the answer call wants: there is one attempt worth making
@@ -326,9 +326,17 @@ func WithMaxTokens(n int) Option {
 	return func(o *callOptions) { o.maxTokens = n }
 }
 
-// WithTemperature pins the sampling temperature for this call. A call that
-// does not name one sends no temperature at all, and the endpoint's default
-// applies — which is what every call did before this existed.
+// WithGateTemperature pins the sampling temperature for this call to what the
+// policy says a gate call sends. A call that does not ask for it sends no
+// temperature at all, and the endpoint's default applies — which is what
+// every call did before this existed. It takes no value on purpose: the pin
+// is the policy's (tuned per model, BACKEND_LLM_GATE_TEMPERATURE), and an
+// argument here was ignored for a release while every caller passed one.
+//
+// Every call in internal/ask whose output is an id, a label or a one-word
+// decision pins — the understanding, the routing judge, the candidate
+// naming, the thread title, the reranker. None of them is read as prose, and
+// a re-roll on any of them is a defect rather than variety.
 //
 // It is a THIRD switch, independent of the deployment and of thinking. Use it
 // where a re-roll is a defect rather than variety: the routing judge, the
@@ -343,8 +351,8 @@ func WithMaxTokens(n int) Option {
 // The answer call deliberately does not use it. That one is written for a
 // person to read, and pinning it to make a routing measurement reproducible
 // would change what everybody reads.
-func WithTemperature(v float64) Option {
-	return func(o *callOptions) { o.temperature = &v }
+func WithGateTemperature() Option {
+	return func(o *callOptions) { o.pinTemperature = true }
 }
 
 // Client calls the chat completions endpoint.
@@ -556,7 +564,7 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	for _, m := range msgs {
 		req.Messages = append(req.Messages, llmwire.TextMessage(llmwire.Role(m.Role), m.Content))
 	}
-	if o.temperature != nil {
+	if o.pinTemperature {
 		req.Temperature = c.policy.GateTemperature
 	}
 	reasoning := c.policy.ProReasoning

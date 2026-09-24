@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useFocusOnOpen } from "./dialog";
 import { MermaidSvg, diagramTitle } from "./diagram";
 import { download, fileName, toSvgFile } from "./diagramExport";
 import { useBackdropDismiss } from "./dismiss";
@@ -28,13 +29,7 @@ export default function DiagramView({
   const body = useRef<HTMLDivElement>(null);
   const title = diagramTitle(src);
 
-  // Focus moves into the dialog on open and back to where it was on close, as
-  // SourceView does.
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
-    return () => before?.focus?.();
-  }, []);
+  useFocusOnOpen(closeButton);
 
   // Escape closes, and Tab stays inside. SourceView has one control and can
   // simply refocus it; this dialog has several, so the ends of the ring wrap

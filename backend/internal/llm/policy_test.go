@@ -30,7 +30,7 @@ func TestPolicy_defaultIsWhatRongoWasMeasuredWith(t *testing.T) {
 	c := mustClient(t, Config{BaseURL: srv.URL}, srv.Client())
 
 	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}},
-		ShortGate(), WithoutThinking(), WithTemperature(0)); err != nil {
+		ShortGate(), WithoutThinking(), WithGateTemperature()); err != nil {
 		t.Fatal(err)
 	}
 	if (*body)["temperature"] != 0.0 {
@@ -59,7 +59,7 @@ func TestPolicy_rendersTheDeploymentsAnswers(t *testing.T) {
 		Policy: Policy{GateTemperature: nil, GateReasoning: "low", ProReasoning: "medium"}}, srv.Client())
 
 	if _, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}},
-		ShortGate(), WithoutThinking(), WithTemperature(0)); err != nil {
+		ShortGate(), WithoutThinking(), WithGateTemperature()); err != nil {
 		t.Fatal(err)
 	}
 	if _, has := (*body)["temperature"]; has {

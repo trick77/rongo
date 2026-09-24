@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -325,7 +326,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		// is a record disagreeing with the bill.
 		report.Rounds = round + 1
 		turn, err := g.locate.CallTools(ctx, msgs, locateTools(),
-			llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+			llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 			llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
 		if err != nil && ctx.Err() == nil {
 			// A fan-out that ran into the output cap still carries every call
@@ -403,16 +404,11 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				continue
 			}
 			if len(landings) == 0 {
+				// A refusal took the other branch above, so this is a lookup
+				// that ran and found nothing, and the model is told exactly
+				// that.
 				report.Empty = append(report.Empty, label)
-				// What the model is told has to match what happened. A call
-				// refused for its repository, its arguments or its tool was
-				// not a spelling that missed, and "try another spelling"
-				// would send it away from a pattern that was right.
-				result := refused
-				if result == "" {
-					result = "Nothing found. Try a different spelling or another tool."
-				}
-				msgs = append(msgs, llm.ToolResult(call.ID, result))
+				msgs = append(msgs, llm.ToolResult(call.ID, "Nothing found. Try a different spelling or another tool."))
 				continue
 			}
 			before := len(a.out)
@@ -602,7 +598,7 @@ func isIdentRune(r rune) bool {
 func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string {
 	msgs = append(msgs, llm.ToolMessage{Role: "user", Content: locateConclude})
 	turn, err := g.locate.CallTools(ctx, msgs, nil,
-		llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+		llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 		llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
 	if err != nil {
 		g.logger().Warn("locate conclusion failed; the landings are kept", "err", err)
@@ -642,7 +638,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 	// wrong "not in the index".
 	repos := known
 	if args.Repo != "" {
-		if len(known) > 0 && !contains(known, args.Repo) {
+		if len(known) > 0 && !slices.Contains(known, args.Repo) {
 			return call.Name + "(" + args.Repo + ": outside this turn's repositories)",
 				"That repository is outside this turn. Search the ones already in front of you.", "", nil, nil
 		}
@@ -721,7 +717,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		// dropped whole and the tool would report "nothing found" for a name
 		// another repository in scope defines.
 		landings, err = g.symbolLandings(ctx, args.Name, sources, func(s Source) bool {
-			return inStage(s.Repo, s.Path, stage) && (len(repos) == 0 || contains(repos, s.Repo))
+			return inStage(s.Repo, s.Path, stage) && (len(repos) == 0 || slices.Contains(repos, s.Repo))
 		})
 		if err != nil {
 			return "", "", "", nil, err
@@ -843,15 +839,6 @@ func (g *Gatherer) indexed(ctx context.Context, repo string) bool {
 	err := g.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM repo_state WHERE name = ? AND enabled = 1`, repo).Scan(&n)
 	return err == nil && n > 0
-}
-
-func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // capLandings trims landings to at most n, so one broad call cannot spend the

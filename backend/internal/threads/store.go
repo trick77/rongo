@@ -307,6 +307,32 @@ func (s *Store) SettleTitles(ctx context.Context) error {
 	return nil
 }
 
+// FailOrphaned marks every turn no process is writing as failed, and is meant
+// for boot and nowhere else. A turn cannot outlive the process answering it,
+// so whatever is unfinished when rongo starts was left by the last shutdown or
+// crash. Left alone such a row reads as "still streaming" for good and, worse,
+// holds a share's ceiling below it for ever. A card is a finished turn and is
+// not touched. Reports how many rows it marked.
+func (s *Store) FailOrphaned(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE messages SET error = ?
+		WHERE answer = '' AND error = ''
+		  AND NOT EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = messages.id)`,
+		orphanedTurn)
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned turns: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned turns: %w", err)
+	}
+	return n, nil
+}
+
+// orphanedTurn is what a turn interrupted by a restart says where its answer
+// would be. English like every other stored failure text.
+const orphanedTurn = "This answer was interrupted by a restart. Ask again."
+
 // Rename gives a thread the title its owner typed. Reports whether a row
 // matched: a thread that is gone, or was never this reader's, is not an error
 // here, it is a 404 at the edge.
@@ -623,30 +649,40 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 	return tx.Commit()
 }
 
-func (s *Store) calls(ctx context.Context, messageID int64) ([]usage.Call, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd
-		 FROM message_usage WHERE message_id = ? ORDER BY id`, messageID)
-	if err != nil {
-		return nil, fmt.Errorf("read usage: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := []usage.Call{}
-	for rows.Next() {
-		var c usage.Call
-		var cached, reasoning, ms, cost sql.NullInt64
-		if err := rows.Scan(&c.Step, &c.Model, &c.Prompt, &c.Completion, &cached, &reasoning, &ms, &cost); err != nil {
-			return nil, fmt.Errorf("scan usage: %w", err)
+// callsFor reads the calls of every message in ids, keyed by message.
+func (s *Store) callsFor(ctx context.Context, ids []int64) (map[int64][]usage.Call, error) {
+	out := map[int64][]usage.Call{}
+	for _, part := range inChunks(ids) {
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd
+			 FROM message_usage WHERE message_id IN (`+inList(len(part))+`) ORDER BY message_id, id`, idArgs(part)...)
+		if err != nil {
+			return nil, fmt.Errorf("read usage: %w", err)
 		}
-		// A turn answered before the columns existed reads back with these
-		// absent, which is what it is: not measured, rather than zero.
-		c.Cached, c.Reasoning, c.Ms = counted(cached), counted(reasoning), counted(ms)
-		if cost.Valid {
-			c.CostNanoUSD = usage.Nano(cost.Int64)
+		for rows.Next() {
+			var id int64
+			var c usage.Call
+			var cached, reasoning, ms, cost sql.NullInt64
+			if err := rows.Scan(&id, &c.Step, &c.Model, &c.Prompt, &c.Completion, &cached, &reasoning, &ms, &cost); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan usage: %w", err)
+			}
+			// A turn answered before the columns existed reads back with
+			// these absent, which is what it is: not measured, rather than
+			// zero.
+			c.Cached, c.Reasoning, c.Ms = counted(cached), counted(reasoning), counted(ms)
+			if cost.Valid {
+				c.CostNanoUSD = usage.Nano(cost.Int64)
+			}
+			out[id] = append(out[id], c)
 		}
-		out = append(out, c)
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // nullable writes an absent count as NULL.
@@ -774,33 +810,66 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 // be the newest thing in the thread — two cards can stand open, and a fresh
 // turn can be asked past one.
 func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int64, before int) (Message, bool, error) {
-	var m Message
-	var created string
-	var fromClar sql.NullInt64
-	var scope string
-	var followups string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+	m, err := scanMessage(s.db.QueryRowContext(ctx, `
+		SELECT `+messageColumns+`
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ? AND m.answer != ''
 		  AND m.ordinal < ?
 		  AND NOT (json_valid(m.scope) AND json_extract(m.scope, '$.intent') IS 'memory')
 		ORDER BY m.ordinal DESC
-		LIMIT 1`, threadID, subject, before).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
-	if err == sql.ErrNoRows {
+		LIMIT 1`, threadID, subject, before))
+	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read last turn: %w", err)
 	}
+	return m, true, nil
+}
+
+// messageColumns is every column a Message is read from, in the order
+// scanMessage reads them, with the messages table aliased m. Every SELECT
+// that feeds scanMessage names them through this, so a column added here is
+// added everywhere at once.
+const messageColumns = `m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error,
+	m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at`
+
+// scanner is *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+// scanMessage reads messageColumns off one row, plus extra, and derives the
+// fields a Message carries beside its columns. The side tables — citations,
+// the card, the calls — are the caller's.
+func scanMessage(row scanner, extra ...any) (Message, error) {
+	var m Message
+	var created, scope, followups, pasted, steps string
+	var fromClar sql.NullInt64
+	dest := []any{&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error,
+		&scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
+		return Message{}, err
+	}
 	m.FromClarificationID = fromClar.Int64
 	m.Scope = scanScope(scope)
 	m.Followups = scanFollowups(followups)
+	m.PastedTexts = scanPastedTexts(pasted)
+	m.Steps = scanSteps(steps)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.NarrowedTo = narrowedTo(m)
-	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-	return m, true, nil
+	m.CreatedAt = parseStamp(created)
+	return m, nil
+}
+
+// sqliteStamp is the layout datetime('now') writes.
+const sqliteStamp = "2006-01-02 15:04:05"
+
+// parseStamp reads a stored stamp; an unreadable one is the zero time, as
+// every read here has always treated it.
+func parseStamp(s string) time.Time {
+	t, _ := time.Parse(sqliteStamp, s)
+	return t
 }
 
 // Message returns one turn by id, or false when it does not belong to a
@@ -808,30 +877,16 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 // re-run the answerer from stored sources, without the caller having to load
 // the whole thread to find one message in it.
 func (s *Store) Message(ctx context.Context, subject string, messageID int64) (Message, bool, error) {
-	var m Message
-	var created string
-	var fromClar sql.NullInt64
-	var scope string
-	var followups string
-	var pasted string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+	m, err := scanMessage(s.db.QueryRowContext(ctx, `
+		SELECT `+messageColumns+`
 		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read message: %w", err)
 	}
-	m.FromClarificationID = fromClar.Int64
-	m.Scope = scanScope(scope)
-	m.Followups = scanFollowups(followups)
-	m.PastedTexts = scanPastedTexts(pasted)
-	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
-	m.NarrowedTo = narrowedTo(m)
-	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
 		return Message{}, false, err
@@ -875,7 +930,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at,
+		SELECT `+messageColumns+`,
 		       COALESCE(mem.id, 0), COALESCE(mem.text, ''),
 		       NOT EXISTS (SELECT 1 FROM message_sources ms WHERE ms.message_id = m.id)
 		FROM messages m JOIN threads t ON t.id = m.thread_id
@@ -889,73 +944,121 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 
 	out := []Message{}
 	for rows.Next() {
-		var m Message
-		var created string
-		var fromClar sql.NullInt64
-		var scope string
-		var followups string
-		var pasted string
-		var steps string
 		var memID int64
 		var memText string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created, &memID, &memText, &m.Sourceless); err != nil {
+		var sourceless bool
+		m, err := scanMessage(rows, &memID, &memText, &sourceless)
+		if err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if memID != 0 {
 			m.Memory = &MemoryRef{ID: memID, Text: memText}
 		}
-		m.FromClarificationID = fromClar.Int64
-		m.Scope = scanScope(scope)
-		m.Followups = scanFollowups(followups)
-		m.PastedTexts = scanPastedTexts(pasted)
-		m.Steps = scanSteps(steps)
-		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
-		m.NarrowedTo = narrowedTo(m)
-		m.ThreadID = threadID
-		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		m.Sourceless = sourceless
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	// The side reads go per THREAD, not per message: citations, cards and
+	// calls each in one query over every id, where a per-message loop cost a
+	// twenty-turn thread sixty round trips on every open and every share view.
+	ids := make([]int64, len(out))
 	for i := range out {
-		cites, err := s.citations(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Citations = cites
-		clar, err := s.Clarification(ctx, subject, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Clarification = clar
-		calls, err := s.calls(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Calls = calls
+		ids[i] = out[i].ID
+	}
+	cites, err := s.citationsFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	cards, err := s.clarificationsFor(ctx, subject, ids)
+	if err != nil {
+		return nil, err
+	}
+	calls, err := s.callsFor(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		// Non-nil when empty, so the wire says [] rather than null.
+		out[i].Citations = orEmpty(cites[out[i].ID])
+		out[i].Clarification = cards[out[i].ID]
+		out[i].Calls = orEmpty(calls[out[i].ID])
 	}
 	return out, nil
 }
 
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
+// inList is a placeholder list of n bound parameters.
+func inList(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+}
+
+// inChunks cuts ids into lists a statement can bind: SQLite's variable limit
+// is far above this, and one thread never comes near it, but a read that
+// grows with the thread should not be the one that finds the limit.
+func inChunks(ids []int64) [][]int64 {
+	const size = 500
+	var out [][]int64
+	for len(ids) > size {
+		out = append(out, ids[:size])
+		ids = ids[size:]
+	}
+	if len(ids) > 0 {
+		out = append(out, ids)
+	}
+	return out
+}
+
+func idArgs(ids []int64) []any {
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	return args
+}
+
 func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT marker, repo, branch, path, start_line, end_line, sha, kind, subject, committed_at FROM citations
-		 WHERE message_id = ? ORDER BY marker`, messageID)
+	by, err := s.citationsFor(ctx, []int64{messageID})
 	if err != nil {
-		return nil, fmt.Errorf("read citations: %w", err)
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := []ask.Citation{}
-	for rows.Next() {
-		var c ask.Citation
-		if err := rows.Scan(&c.Marker, &c.Repo, &c.Branch, &c.Path, &c.StartLine, &c.EndLine, &c.SHA,
-			&c.Kind, &c.Subject, &c.CommittedAt); err != nil {
-			return nil, fmt.Errorf("scan citation: %w", err)
+	return orEmpty(by[messageID]), nil
+}
+
+// citationsFor reads the citations of every message in ids, keyed by message.
+func (s *Store) citationsFor(ctx context.Context, ids []int64) (map[int64][]ask.Citation, error) {
+	out := map[int64][]ask.Citation{}
+	for _, part := range inChunks(ids) {
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT message_id, marker, repo, branch, path, start_line, end_line, sha, kind, subject, committed_at FROM citations
+			 WHERE message_id IN (`+inList(len(part))+`) ORDER BY message_id, marker`, idArgs(part)...)
+		if err != nil {
+			return nil, fmt.Errorf("read citations: %w", err)
 		}
-		out = append(out, c)
+		for rows.Next() {
+			var id int64
+			var c ask.Citation
+			if err := rows.Scan(&id, &c.Marker, &c.Repo, &c.Branch, &c.Path, &c.StartLine, &c.EndLine, &c.SHA,
+				&c.Kind, &c.Subject, &c.CommittedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan citation: %w", err)
+			}
+			out[id] = append(out[id], c)
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // Resolve turns a thread's public id into the row id everything inside this
@@ -970,8 +1073,11 @@ func (s *Store) Resolve(ctx context.Context, publicID string) (int64, bool, erro
 		return 0, false, nil
 	}
 	var id int64
+	// "AND public_id != ''" is what lets the partial index (idx_threads_public_id,
+	// WHERE public_id != '') answer this; on a bound parameter alone the
+	// planner cannot prove the predicate and scans the table on every route.
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM threads WHERE public_id = ?`, publicID).Scan(&id)
+		`SELECT id FROM threads WHERE public_id = ? AND public_id != ''`, publicID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -1105,57 +1211,94 @@ func (s *Store) Clarify(ctx context.Context, messageID int64, c ask.Clarificatio
 // takes a bare id off the wire re-checks it here rather than trusting a
 // handler to have done so.
 func (s *Store) Clarification(ctx context.Context, subject string, messageID int64) (*Clarification, error) {
-	var c Clarification
-	var understanding string
-	// Whether the card was answered is asked of the messages, not of a flag on
-	// the card: a clarification is closed by the answer that came out of it,
-	// and that link already exists on the answering turn.
-	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, m.thread_id, c.understanding, c.too_broad,
-		       EXISTS (SELECT 1 FROM messages a WHERE a.from_clarification_id = c.id)
-		FROM clarifications c
-		JOIN messages m ON m.id = c.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE c.message_id = ?1 AND (t.user_subject = ?2 OR ?2 = ?3)`, messageID, subject, anySubject).
-		Scan(&c.ID, &c.ThreadID, &understanding, &c.TooBroad, &c.Answered)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	by, err := s.clarificationsFor(ctx, subject, []int64{messageID})
 	if err != nil {
-		return nil, fmt.Errorf("read clarification: %w", err)
-	}
-	if err := json.Unmarshal([]byte(understanding), &c.Understanding); err != nil {
-		return nil, fmt.Errorf("unmarshal understanding: %w", err)
-	}
-
-	// hits is deliberately not selected here: it is large JSON, never sent to
-	// the browser, and only the resumed turn reads it, via CandidateHits.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT idx, repo, branch, module_key, title, summary, members
-		FROM clarification_candidates WHERE clarification_id = ? ORDER BY idx`, c.ID)
-	if err != nil {
-		return nil, fmt.Errorf("read candidates: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	c.Candidates = []Candidate{}
-	for rows.Next() {
-		var cand Candidate
-		var members string
-		if err := rows.Scan(&cand.Idx, &cand.Repo, &cand.Branch, &cand.ModuleKey,
-			&cand.Title, &cand.Summary, &members); err != nil {
-			return nil, fmt.Errorf("scan candidate: %w", err)
-		}
-		if members != "" {
-			if err := json.Unmarshal([]byte(members), &cand.Members); err != nil {
-				return nil, fmt.Errorf("unmarshal candidate members: %w", err)
-			}
-		}
-		c.Candidates = append(c.Candidates, cand)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return &c, nil
+	return by[messageID], nil
+}
+
+// clarificationsFor reads the cards of every message in ids that ended in
+// one, keyed by message: two queries per thread rather than two per message.
+func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int64) (map[int64]*Clarification, error) {
+	out := map[int64]*Clarification{}
+	byCard := map[int64]*Clarification{}
+	var cardIDs []int64
+	for _, part := range inChunks(ids) {
+		// Whether the card was answered is asked of the messages, not of a
+		// flag on the card: a clarification is closed by the answer that came
+		// out of it, and that link already exists on the answering turn.
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT c.message_id, c.id, m.thread_id, c.understanding, c.too_broad,
+			       EXISTS (SELECT 1 FROM messages a WHERE a.from_clarification_id = c.id)
+			FROM clarifications c
+			JOIN messages m ON m.id = c.message_id
+			JOIN threads t ON t.id = m.thread_id
+			WHERE c.message_id IN (`+inList(len(part))+`) AND (t.user_subject = ? OR ? = ?)`,
+			append(idArgs(part), subject, subject, anySubject)...)
+		if err != nil {
+			return nil, fmt.Errorf("read clarification: %w", err)
+		}
+		for rows.Next() {
+			var messageID int64
+			var c Clarification
+			var understanding string
+			if err := rows.Scan(&messageID, &c.ID, &c.ThreadID, &understanding, &c.TooBroad, &c.Answered); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("read clarification: %w", err)
+			}
+			if err := json.Unmarshal([]byte(understanding), &c.Understanding); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("unmarshal understanding: %w", err)
+			}
+			c.Candidates = []Candidate{}
+			card := c
+			out[messageID] = &card
+			byCard[card.ID] = &card
+			cardIDs = append(cardIDs, card.ID)
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	if len(cardIDs) == 0 {
+		return out, nil
+	}
+	// hits is deliberately not selected here: it is large JSON, never sent to
+	// the browser, and only the resumed turn reads it, via CandidateHits.
+	for _, part := range inChunks(cardIDs) {
+		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT clarification_id, idx, repo, branch, module_key, title, summary, members
+			FROM clarification_candidates WHERE clarification_id IN (`+inList(len(part))+`) ORDER BY clarification_id, idx`, idArgs(part)...)
+		if err != nil {
+			return nil, fmt.Errorf("read candidates: %w", err)
+		}
+		for rows.Next() {
+			var cardID int64
+			var cand Candidate
+			var members string
+			if err := rows.Scan(&cardID, &cand.Idx, &cand.Repo, &cand.Branch, &cand.ModuleKey,
+				&cand.Title, &cand.Summary, &members); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan candidate: %w", err)
+			}
+			if members != "" {
+				if err := json.Unmarshal([]byte(members), &cand.Members); err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("unmarshal candidate members: %w", err)
+				}
+			}
+			byCard[cardID].Candidates = append(byCard[cardID].Candidates, cand)
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // CandidateHits returns the understanding and the hits one candidate on a

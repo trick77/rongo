@@ -85,7 +85,10 @@ func (g *Gatherer) LinkCensus(ctx context.Context, repos []string) (Census, erro
 		}
 		cost := estimateTokens(s.Text)
 		if spent+cost > budget {
-			break
+			// This site's chunk does not fit; a smaller one further down
+			// still may. Stopping here on one oversized early chunk ended
+			// the seeding with most of the share unspent.
+			continue
 		}
 		files[key] = true
 		spent += cost

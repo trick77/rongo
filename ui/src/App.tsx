@@ -6,7 +6,8 @@ import { Icon } from "./Icon";
 import { RailResizer } from "./RailResizer";
 import RepoList, { lastRunAt, relative, type Repo } from "./RepoList";
 import Threads, { type Thread } from "./Threads";
-import ThreadMenu from "./ThreadMenu";
+import { ThreadMenuFor } from "./ThreadMenu";
+import { PageShell } from "./page";
 import ThreadsPage from "./ThreadsPage";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
@@ -527,25 +528,11 @@ export default function App() {
                     />
                   </button>
                   {headerMenu && (
-                    <ThreadMenu
+                    <ThreadMenuFor
                       className="right-0"
-                      starred={openThread.starred}
-                      onStar={() => {
-                        setHeaderMenu(false);
-                        headerActions.startStar(openThread);
-                      }}
-                      onShare={() => {
-                        setHeaderMenu(false);
-                        headerActions.startShare(openThread);
-                      }}
-                      onRename={() => {
-                        setHeaderMenu(false);
-                        headerActions.startRename(openThread);
-                      }}
-                      onDelete={() => {
-                        setHeaderMenu(false);
-                        headerActions.startDelete(openThread);
-                      }}
+                      thread={openThread}
+                      actions={headerActions}
+                      onPick={() => setHeaderMenu(false)}
                     />
                   )}
                 </span>
@@ -808,80 +795,70 @@ export default function App() {
             />
           </div>
           {page === "threads" && (
-            <div className="h-full overflow-auto">
-              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-                <h2 className="mb-6 font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  Threads
-                </h2>
-                <ThreadsPage
-                  activeId={threadId}
-                  version={threadsVersion}
-                  onSelect={(id) => selectThread(id)}
-                  onChanged={refreshThreads}
-                  onDeleted={(id) => {
-                    if (id === threadId) closeDeadThread();
-                    refreshThreads();
-                  }}
-                />
-              </div>
-            </div>
+            <PageShell title="Threads">
+              <ThreadsPage
+                activeId={threadId}
+                version={threadsVersion}
+                onSelect={(id) => selectThread(id)}
+                onChanged={refreshThreads}
+                onDeleted={(id) => {
+                  if (id === threadId) closeDeadThread();
+                  refreshThreads();
+                }}
+              />
+            </PageShell>
           )}
           {page === "projects" && (
-            <div className="h-full overflow-auto">
-              {/* The same measure as Threads and Shared: a page that is
-                  half again as wide as its neighbours reads as a different
-                  tool. The table keeps its six columns inside it because
-                  only the name column flexes; below that, it scrolls. */}
-              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-                {/* leading-tight like Ask's welcome heading: without it the
-                    taller line box puts this title 3px below the other page's. */}
-                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  Projects
-                </h2>
-                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+            /* The same measure as Threads and Shared: a page that is half
+               again as wide as its neighbours reads as a different tool. The
+               table keeps its six columns inside it because only the name
+               column flexes; below that, it scrolls. */
+            <PageShell
+              title="Projects"
+              intro={
+                <>
                   Read-only. A project is one product and the repositories it is built from; the list is
                   maintained in <code className="font-mono">repos.yaml</code>, and credentials never live
                   in it. A repo that drops out of the file is removed here too, index and checkout with it.
-                </p>
-                <RepoList />
-              </div>
-            </div>
+                </>
+              }
+            >
+              <RepoList />
+            </PageShell>
           )}
           {page === "memory" && (
-            <div className="h-full overflow-auto">
-              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  Memory
-                </h2>
-                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+            <PageShell
+              title="Memory"
+              intro={
+                <>
                   What rongo keeps in mind for every answer you get. Tell it in chat: “never …”, “from now
                   on …”, “don't mention … anymore”. A rule outranks the answer's own style rules and never
                   its sources, its language or your role. A rule stays until you delete it here.
-                </p>
-                <MemoryPage onCount={setMemoryCount} onOpenThread={(id) => selectThread(id)} />
-              </div>
-            </div>
+                </>
+              }
+            >
+              <MemoryPage onCount={setMemoryCount} onOpenThread={(id) => selectThread(id)} />
+            </PageShell>
           )}
           {page === "shared" && (
-            <div className="h-full overflow-auto">
-              <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
-                <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  Shared threads
-                </h2>
-                <p className="mt-1 mb-6 text-[14.5px] text-muted">
+            <PageShell
+              title="Shared threads"
+              intro={
+                <>
                   Every link below is readable by anyone who has it, without signing in. A link is frozen at
                   the turn it was made: later questions are not on it until you update it. Revoking is
                   immediate, and sharing again returns the same link.
-                </p>
-                <SharedLinks
-                  onCount={setSharedCount}
-                  onChange={() => {
-                    refreshThreads();
-                  }}
-                  onOpenThread={(id) => selectThread(id)}
-                />
-              </div>
-            </div>
+                </>
+              }
+            >
+              <SharedLinks
+                onCount={setSharedCount}
+                onChange={() => {
+                  refreshThreads();
+                }}
+                onOpenThread={(id) => selectThread(id)}
+              />
+            </PageShell>
           )}
         </main>
       </div>

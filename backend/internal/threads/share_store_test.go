@@ -516,3 +516,92 @@ func TestShare_aTurnThatFailedCanBeShared(t *testing.T) {
 		t.Fatalf("the failure did not travel with the link: %+v", msgs)
 	}
 }
+
+func TestShare_freezesBelowATurnStillBeingWrittenEvenWhenALaterOneFinished(t *testing.T) {
+	// Two tabs: the older turn is still streaming when the newer one lands and
+	// the owner shares. The ceiling must sit below the one in flight, or its
+	// answer appears on the public page the moment it lands — a link growing
+	// behind the owner's back.
+	s, ctx, th, _ := newThreadStore(t)
+	first := answeredTurn(t, s, th, "How?", "So.")
+	inFlight, err := s.AddQuestion(ctx, th, "ba", "en", "Still streaming", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	later := answeredTurn(t, s, th, "And then?", "That.")
+
+	sh, err := s.Share(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("share: %v", err)
+	}
+	if sh.UpToMessageID != first {
+		t.Errorf("ceiling = %d, want %d — the newest finished turn BELOW the one in flight (later finished turn is %d)", sh.UpToMessageID, first, later)
+	}
+
+	// When the streaming turn lands, the link does not grow on its own.
+	if err := s.Finish(ctx, inFlight.ID, "Landed.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	_, msgs, err := s.SharedThread(ctx, sh.Token)
+	if err != nil {
+		t.Fatalf("shared thread: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Errorf("public page shows %d turns, want 1 until the owner raises the ceiling", len(msgs))
+	}
+	raised, err := s.RaiseShare(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	if raised.UpToMessageID != later {
+		t.Errorf("after raising: ceiling %d, want %d", raised.UpToMessageID, later)
+	}
+}
+
+func TestFailOrphaned_marksTurnsNoProcessIsWriting(t *testing.T) {
+	// A turn cannot outlive the process answering it, so at boot every
+	// unfinished row is one a crash left behind. Left alone it would hold a
+	// share's ceiling below it for ever; marked failed it is a record like
+	// any other, and the card rows — a card IS a finished turn — are untouched.
+	s, ctx, th, _ := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So.")
+	orphan, err := s.AddQuestion(ctx, th, "ba", "en", "Never answered", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	card, err := s.AddQuestion(ctx, th, "ba", "en", "Which one?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := s.Clarify(ctx, card.ID, twoCandidateClarification()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	n, err := s.FailOrphaned(ctx)
+	if err != nil {
+		t.Fatalf("FailOrphaned: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("failed %d rows, want 1", n)
+	}
+	msgs, err := s.Messages(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	for _, m := range msgs {
+		switch m.ID {
+		case orphan.ID:
+			if m.Error == "" {
+				t.Error("the orphaned turn is still unfinished")
+			}
+		case card.ID:
+			if m.Error != "" {
+				t.Errorf("the card was marked failed: %q", m.Error)
+			}
+		}
+	}
+	again, err := s.FailOrphaned(ctx)
+	if err != nil || again != 0 {
+		t.Errorf("second run failed %d rows, %v; want 0", again, err)
+	}
+}

@@ -45,13 +45,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 
 		switch s.mode {
 		case "dev":
-			u, err := s.UpsertUser(devSubject, "dev@example.invalid", true)
-			if err != nil {
-				slog.Error("dev auto-login failed", "err", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			s.admit(w, r, next, "dev auto-login", devSubject, "dev@example.invalid")
 			return
 
 		case "token":
@@ -62,13 +56,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			u, err := s.UpsertUser("admin-token", "", true)
-			if err != nil {
-				slog.Error("admin token login failed", "err", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			s.admit(w, r, next, "admin token login", "admin-token", "")
 			return
 
 		case "proxy":
@@ -82,13 +70,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			u, err := s.UpsertUser(subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)), true)
-			if err != nil {
-				slog.Error("proxy login failed", "err", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+			s.admit(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)))
 			return
 
 		case "password":
@@ -149,4 +131,16 @@ func bearerToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return h[len(prefix):], true
+}
+
+// admit lets the request through as the admin subject, writing the user
+// once per interval (see Admit). what names the mode for the log line.
+func (s *Service) admit(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string) {
+	u, err := s.Admit(subject, email, true)
+	if err != nil {
+		slog.Error(what+" failed", "err", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
 }

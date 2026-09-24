@@ -1220,8 +1220,10 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 			t.Errorf("call %d sent no temperature; the endpoint's default would re-roll a one-word decision", i)
 			continue
 		}
-		if *temp != gateTemperature {
-			t.Errorf("call %d sent temperature %v, want %v", i, *temp, gateTemperature)
+		// The policy's pin, 0 by default: the call asks for it, llm.Policy
+		// says what it is.
+		if *temp != 0 {
+			t.Errorf("call %d sent temperature %v, want the policy's pin of 0", i, *temp)
 		}
 	}
 }
@@ -1323,5 +1325,35 @@ func TestRouteAsksToNarrowWhenMoreRepositoriesMatchThanACardCanShow(t *testing.T
 		if c.Title != "" {
 			t.Errorf("title = %q, want none — the panel prints repository names, not written titles", c.Title)
 		}
+	}
+}
+
+// TestRouteNamedRepositoryMakesNoClusterQuery: a question that named a
+// repository has answered the only question a card could put to it, so the
+// module clustering — a GROUP BY scan per hit repository — is not paid for.
+// Without the chunks table the clustering cannot run, so reaching it fails
+// the route.
+func TestRouteNamedRepositoryMakesNoClusterQuery(t *testing.T) {
+	db := testDBWithDeps(t, nil)
+	if _, err := db.Exec(`DROP TABLE chunks`); err != nil {
+		t.Fatalf("drop chunks: %v", err)
+	}
+	r := newTestRouter(t, testLLM(t, func(prompt string) string {
+		t.Fatalf("no model call may happen when a repository was named; got %q", prompt)
+		return ""
+	}), db)
+
+	got, err := r.Route(context.Background(), "how does peeq check disk space?", AudienceDev, LanguageEN, []retrieve.Hit{
+		{Repo: "peeq", Path: "backend/internal/download/freebytes.go", Score: 0.9},
+		{Repo: "peeq", Path: "backend/internal/httpapi/a.go", Score: 0.85},
+	}, []string{"peeq"}, false)
+	if err != nil {
+		t.Fatalf("route: %v — the named path must never reach the clustering, which cannot run without chunks", err)
+	}
+	if got.Ask {
+		t.Error("a named repository must not produce a question")
+	}
+	if got.Repos != 1 {
+		t.Errorf("Repos = %d, want the one repository counted for the trace", got.Repos)
 	}
 }

@@ -2,6 +2,7 @@ package ask
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -298,10 +299,19 @@ func TestPipelineSearchesEachNamedRepositoryOnItsOwn(t *testing.T) {
 	if len(search.queries) != 2 {
 		t.Fatalf("ran %d searches, want one per named repository", len(search.queries))
 	}
-	for i, want := range []string{"peeq", "rongo"} {
-		if len(search.queries[i].Repos) != 1 || search.queries[i].Repos[0] != want {
-			t.Errorf("search %d restricted to %v, want only %q", i, search.queries[i].Repos, want)
+	// The two run at once, so their order in the record is whichever
+	// finished first; each is restricted to exactly one of the two.
+	var restricted []string
+	for _, q := range search.queries {
+		if len(q.Repos) != 1 {
+			t.Errorf("search restricted to %v, want exactly one repository", q.Repos)
+			continue
 		}
+		restricted = append(restricted, q.Repos[0])
+	}
+	slices.Sort(restricted)
+	if strings.Join(restricted, ",") != "peeq,rongo" {
+		t.Errorf("searches restricted to %v, want one for peeq and one for rongo", restricted)
 	}
 }
 

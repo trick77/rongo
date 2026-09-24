@@ -204,3 +204,24 @@ func TestSyncReplacesTheRepositorysRows(t *testing.T) {
 
 	assertDepends(t, db, "peeq", "go-sqlite3", false)
 }
+
+func TestAnyDependency_isDependsOnOverEveryPair(t *testing.T) {
+	db := testDB(t)
+	mustSync(t, db, "peeq", "module github.com/trick77/peeq\n\nrequire github.com/ncruces/go-sqlite3 v0.23.3\n")
+	mustSync(t, db, "go-sqlite3", "module github.com/ncruces/go-sqlite3\n")
+	mustSync(t, db, "loom", "module github.com/trick77/loom\n")
+	ctx := context.Background()
+
+	ok, err := AnyDependency(ctx, db, []string{"loom", "go-sqlite3", "peeq"})
+	if err != nil || !ok {
+		t.Errorf("AnyDependency over a list holding a dependent pair = %v, %v; want true", ok, err)
+	}
+	ok, err = AnyDependency(ctx, db, []string{"loom", "go-sqlite3"})
+	if err != nil || ok {
+		t.Errorf("AnyDependency over unrelated repositories = %v, %v; want false", ok, err)
+	}
+	ok, err = AnyDependency(ctx, db, []string{"peeq"})
+	if err != nil || ok {
+		t.Errorf("AnyDependency over one repository = %v, %v; want false", ok, err)
+	}
+}

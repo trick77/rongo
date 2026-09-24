@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // validSecret satisfies the length and placeholder checks so tests that don't
@@ -125,8 +127,6 @@ func TestLoad_turnMaxTokens(t *testing.T) {
 	}{
 		{"a figure is kept", "500000", 500000},
 		{"zero switches the ceiling off", "0", 0},
-		{"a malformed value falls back", "lots", 250000},
-		{"a negative value falls back", "-5", 250000},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -158,8 +158,6 @@ func TestLoad_indexMaxDataFileBytes(t *testing.T) {
 	}{
 		{name: "unset means 8 KiB", env: "", want: 8192},
 		{name: "a number is taken", env: "16384", want: 16384},
-		{name: "zero falls back, there is no switching the ceiling off", env: "0", want: 8192},
-		{name: "garbage falls back", env: "lots", want: 8192},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -188,7 +186,6 @@ func TestLoad_indexMaxSchemaFileBytes(t *testing.T) {
 	}{
 		{name: "unset means 256 KiB", env: "", want: 262144},
 		{name: "a number is taken", env: "524288", want: 524288},
-		{name: "zero falls back, there is no switching the ceiling off", env: "0", want: 262144},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -639,5 +636,61 @@ func TestLoad_locateLoopCanBeSwitchedOff(t *testing.T) {
 	}
 	if cfg.LocateRounds != 0 {
 		t.Errorf("LocateRounds = %d, want 0 when set off", cfg.LocateRounds)
+	}
+}
+
+// TestLoad_aMalformedSettingRefusesToStart: a typo in a typed setting is a
+// misconfiguration, not a tunable that may quietly fall back. Silently
+// defaulted, BACKEND_MEMORY=disabled left memory on and
+// BACKEND_ROUTE_MARGIN=0 routed at 0.25 while both looked right in the
+// environment.
+func TestLoad_aMalformedSettingRefusesToStart(t *testing.T) {
+	cases := map[string]string{
+		"BACKEND_MEMORY":                    "disabled",
+		"BACKEND_ROUTE_MARGIN":              "0",
+		"BACKEND_LOG_LEVEL":                 "verbose",
+		"BACKEND_GATHER_MAX_HOPS":           "two",
+		"BACKEND_LOCATE_ROUNDS":             "off",
+		"BACKEND_TURN_MAX_TOKENS":           "lots",
+		"BACKEND_INDEX_ENABLED":             "flase",
+		"BACKEND_INDEX_MAX_DATA_FILE_BYTES": "-5",
+	}
+	for key, value := range cases {
+		t.Run(key+"="+value, func(t *testing.T) {
+			setEnv(t, map[string]string{key: value})
+
+			_, err := Load()
+
+			if err == nil {
+				t.Fatalf("Load() err = nil, want a refusal of %s=%q", key, value)
+			}
+			if !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), value) {
+				t.Errorf("err = %q, want it to name %s and %q", err, key, value)
+			}
+		})
+	}
+}
+
+// TestLoad_aMalformedCookieSecureRefusesToStart: the cookie flag is read
+// inside the password and oidc branches, after the general check, and so
+// needs a check of its own — silently true, a plain-HTTP dev box would mint
+// a Secure cookie the browser drops and every login would 401 on the next
+// request.
+func TestLoad_aMalformedCookieSecureRefusesToStart(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setEnv(t, map[string]string{
+		"BACKEND_AUTH_MODE":           "password",
+		"BACKEND_ADMIN_USER":          "jan",
+		"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
+		"BACKEND_COOKIE_SECURE":       "flase",
+	})
+
+	_, err = Load()
+
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") {
+		t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE", err)
 	}
 }

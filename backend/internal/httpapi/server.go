@@ -23,6 +23,8 @@ import (
 // carrying a whole database through it. *threads.Store satisfies this
 // structurally.
 type Threads interface {
+	// List is read by the tests through deps; no handler lists a reader's threads whole.
+	List(ctx context.Context, subject string) ([]threads.Thread, error)
 	Create(ctx context.Context, subject, question string) (threads.Thread, error)
 	// SetTitle replaces `from` with `to`, and only while the row still holds
 	// `from`: the title is written in the background and must not overwrite a
@@ -34,7 +36,6 @@ type Threads interface {
 	AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (threads.Message, error)
 	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
 	Fail(ctx context.Context, messageID int64, msg string) error
-	List(ctx context.Context, subject string) ([]threads.Thread, error)
 	// ListPage, Get and Search are the Threads page's reads: the rail and the
 	// page read the list a page at a time, the header asks for one thread the
 	// rail's page does not carry, and the search box asks by title and by
@@ -97,9 +98,7 @@ type Threads interface {
 	Share(ctx context.Context, subject string, threadID int64) (threads.Share, error)
 	RaiseShare(ctx context.Context, subject string, threadID int64) (threads.Share, error)
 	RevokeShare(ctx context.Context, subject string, threadID int64) (bool, error)
-	ShareFor(ctx context.Context, subject string, threadID int64) (threads.Share, error)
 	Shares(ctx context.Context, subject string) ([]threads.Share, error)
-	SharedIDs(ctx context.Context, subject string) (map[int64]bool, error)
 	SharedThread(ctx context.Context, token string) (threads.Share, []threads.Message, error)
 	// SharedTitle is the same read cut down to one column, for the link
 	// preview in the served HTML: that runs on every page view of a share
@@ -182,12 +181,15 @@ type Server struct {
 	// turns is the answers being streamed right now, so a thread deleted
 	// mid-answer stops the turn writing into it instead of paying for it.
 	turns *turns
+	// claims is the clarifications being answered right now, so a card
+	// cannot be chosen twice before its first answer has closed it.
+	claims *claims
 }
 
 // NewServer builds the router and wraps it in the middleware chain once,
 // rather than per request.
 func NewServer(deps Deps) *Server {
-	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns()}
+	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims()}
 	s.routes()
 	// logging outermost: a panicked request must still produce an access-log
 	// line (as a 500), so recovery has to run inside logging, not around it.

@@ -158,6 +158,28 @@ func Load(ctx context.Context, db *sql.DB, repo string) ([]Unit, []Dep, error) {
 	return us, deps, drows.Err()
 }
 
+// AnyLinked reports whether any two distinct keys among keys are joined by a
+// declared edge in repo, either way: Linked over every pair, in one query.
+func AnyLinked(ctx context.Context, db *sql.DB, repo string, keys []string) (bool, error) {
+	if len(keys) < 2 {
+		return false, nil
+	}
+	in := strings.TrimSuffix(strings.Repeat("?,", len(keys)), ",")
+	args := make([]any, 0, 1+2*len(keys))
+	args = append(args, repo)
+	for i := 0; i < 2; i++ {
+		for _, k := range keys {
+			args = append(args, k)
+		}
+	}
+	var n int
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+	err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM unit_deps
+		WHERE repo = ? AND from_key IN (`+in+`) AND to_key IN (`+in+`) AND from_key <> to_key`, args...).Scan(&n)
+	return n > 0, err
+}
+
 // Linked reports whether two units of one repository are joined by a
 // declared dependency in either direction — the in-repository form of the
 // manifest edge routing reads across repositories: parts of one build that

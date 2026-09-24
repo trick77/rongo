@@ -464,19 +464,6 @@ one sentence that the other stages were not looked at. Every value is copied
 character for character from the line that sets it - a cron expression is
 quoted as written, never paraphrased or reassembled from memory.`
 
-// answerProcesses carries the wiring of the process models among the sources.
-// It exists because a model's nodes and flows reach the prompt as separate
-// chunks, in retrieval order, and a list of sourceRef/targetRef pairs is not
-// something the answer orders into a walk: measured, every trace question was
-// answered as a paragraph per chunk with no sequence. The listing gives the
-// order and the branching; the claims still come from the sources, which is
-// why the block ends with the same rule the structure block does.
-//
-// The last sentence asks for the walk as the diagram: the listing is already
-// order plus branch conditions, which is a flowchart in text, and it is the
-// strongest signal the prompt has that the answer is a process. It wins over
-// the sequence the comparison blocks ask for, and they say so, because both
-// can land in one prompt under "at most one diagram".
 // answerLocated carries what the locate loop concluded after reading what it
 // found. It is a pointer into the sources, so the rules on it are the rules on
 // a pointer: follow it, cite the source it names, and if the sources do not
@@ -517,6 +504,19 @@ ordered to put it first. Open the answer with what happens at that place, in
 the reader's words and without paths or code, cited to the source holding it,
 in the opening sentence. Then explain the rest.`
 
+// answerProcesses carries the wiring of the process models among the sources.
+// It exists because a model's nodes and flows reach the prompt as separate
+// chunks, in retrieval order, and a list of sourceRef/targetRef pairs is not
+// something the answer orders into a walk: measured, every trace question was
+// answered as a paragraph per chunk with no sequence. The listing gives the
+// order and the branching; the claims still come from the sources, which is
+// why the block ends with the same rule the structure block does.
+//
+// The last sentence asks for the walk as the diagram: the listing is already
+// order plus branch conditions, which is a flowchart in text, and it is the
+// strongest signal the prompt has that the answer is a process. It wins over
+// the sequence the comparison blocks ask for, and they say so, because both
+// can land in one prompt under "at most one diagram".
 const answerProcesses = `
 
 The process models among the sources are wired as follows, read from the model
@@ -761,6 +761,10 @@ type Scope struct {
 	// afresh.
 	pm       projects.Map
 	pmLoaded bool
+	// stages is the declared stage set, read once per turn by stagesOf the
+	// way pm is by projectsOf.
+	stages       stages.Set
+	stagesLoaded bool
 	// Unknown are the named repositories the index does not carry. The search
 	// silently ignores them — it has to, or a mishearing would wipe the whole
 	// result — so this is the only thing that keeps a turn from answering

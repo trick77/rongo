@@ -56,7 +56,32 @@ func verifyUniversalCtags(path string) error {
 			"%s is not universal-ctags (reports %q); install universal-ctags (brew install universal-ctags) and make sure it precedes /usr/bin on PATH",
 			path, banner)
 	}
+	// The banner is not enough: every extraction asks for
+	// --output-format=json, and a universal-ctags built without the json
+	// feature fails on every file. The caller falls back to line windows, so
+	// the symbol index would end up empty with nothing at startup saying so.
+	features, err := exec.Command(path, "--list-features").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s --list-features failed (%q); install universal-ctags (brew install universal-ctags)",
+			path, firstLine(string(features)))
+	}
+	if !hasFeature(string(features), "json") {
+		return fmt.Errorf(
+			"%s is universal-ctags built without the json feature, which rongo needs for --output-format=json; install a build with json (brew install universal-ctags)",
+			path)
+	}
 	return nil
+}
+
+// hasFeature reads `ctags --list-features`, one feature per line with its
+// name first, and reports whether name is among them.
+func hasFeature(listing, name string) bool {
+	for _, line := range strings.Split(listing, "\n") {
+		if f := strings.Fields(line); len(f) > 0 && f[0] == name {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLine(s string) string {

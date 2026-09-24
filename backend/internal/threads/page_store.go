@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // The rail asks for 30, the Threads page for 50 at a time; nothing needs
@@ -224,7 +223,7 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 			continue
 		}
 		t.TitlePending = !settled
-		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		t.CreatedAt = parseStamp(created)
 		hits = append(hits, Hit{Thread: t, Snippet: snippet})
 	}
 	if err := content.Err(); err != nil {
@@ -233,12 +232,15 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	shared, err := s.SharedIDs(ctx, subject)
-	if err != nil {
+	items := make([]Thread, len(hits))
+	for i := range hits {
+		items[i] = hits[i].Thread
+	}
+	if err := s.markShared(ctx, subject, items); err != nil {
 		return nil, err
 	}
 	for i := range hits {
-		hits[i].Shared = shared[hits[i].ID]
+		hits[i].Shared = items[i].Shared
 	}
 	return hits, nil
 }
@@ -260,7 +262,7 @@ func scanThreads(rows *sql.Rows) ([]Thread, error) {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
 		t.TitlePending = !settled
-		t.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		t.CreatedAt = parseStamp(created)
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {

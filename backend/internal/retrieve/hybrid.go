@@ -2,6 +2,7 @@ package retrieve
 
 import (
 	"math"
+	"slices"
 	"sort"
 )
 
@@ -191,7 +192,7 @@ func FuseWeightedDecayed(lanes []Lane, k int, d Decays) []Hit {
 				a.hit.Distance = h.Distance
 			}
 			a.score += lane.Weight / float64(rrfK+rank)
-			if lane.Name != "" && !contains(a.lanes, lane.Name) {
+			if lane.Name != "" && !slices.Contains(a.lanes, lane.Name) {
 				a.lanes = append(a.lanes, lane.Name)
 			}
 		}
@@ -366,13 +367,4 @@ func lessByAddress(a, b Hit) bool {
 		return a.Ordinal < b.Ordinal
 	}
 	return a.ChunkID < b.ChunkID
-}
-
-func contains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }

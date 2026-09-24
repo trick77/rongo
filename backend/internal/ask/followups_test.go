@@ -140,8 +140,10 @@ func TestFollowups_runsOnTheShortGateLaneWithThePinnedTemperature(t *testing.T) 
 	if up.model != testGateModel {
 		t.Errorf("model = %q, want the short-gate deployment", up.model)
 	}
-	if up.temperature == nil || *up.temperature != gateTemperature {
-		t.Errorf("temperature = %v, want the pinned %v", up.temperature, float64(gateTemperature))
+	// The policy's pin, 0 by default: the value is llm.Policy's, the call
+	// only asks for it.
+	if up.temperature == nil || *up.temperature != 0 {
+		t.Errorf("temperature = %v, want the policy's pin of 0", up.temperature)
 	}
 	if up.maxTokens != followupsMaxTokens {
 		t.Errorf("max tokens = %d, want %d", up.maxTokens, followupsMaxTokens)

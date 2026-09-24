@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -412,11 +413,17 @@ func TestSweep_removesWhatAnEarlierRunIndexed(t *testing.T) {
 	h.ix.selector = NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
 
 	// When
+	cacheBefore := countOf(t, h.db, `SELECT COUNT(*) FROM embed_cache`)
 	changed, counts, err := h.ix.Sweep(context.Background(), "shop")
 
 	// Then
 	if err != nil {
 		t.Fatalf("Sweep() err = %v, want nil", err)
+	}
+	// And the vectors of what was swept are gone from the cache: a boot purge
+	// is one of the two moments the invariant prunes at.
+	if after := countOf(t, h.db, `SELECT COUNT(*) FROM embed_cache`); after >= cacheBefore {
+		t.Errorf("embed_cache holds %d rows after the sweep, want fewer than %d", after, cacheBefore)
 	}
 	if changed != len(retired) {
 		t.Errorf("changed = %d, want %d", changed, len(retired))
@@ -616,5 +623,89 @@ func TestIndexRepoSurvivesAnUnparsableGoMod(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("repo_deps has %d rows for a broken manifest, want 0", n)
+	}
+}
+
+// failingRead is the harness's git with one path that cannot be read: a
+// transient failure on the object store, not a submodule or a symlink.
+type failingRead struct {
+	GitClient
+	path string
+}
+
+func (f failingRead) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
+	if path == f.path {
+		return nil, errors.New("fatal: unable to read object")
+	}
+	return f.GitClient.ReadFile(ctx, spec, sha, path)
+}
+
+// TestIndexRepo_anUnreadableModifiedFileFailsTheRun: a modified path whose
+// read fails must fail the run, so last_sha does not advance and the next
+// poll retries. Logged and skipped, the file kept its previous commit's
+// chunks and sha for good — nothing revisits a path the index says is current.
+func TestIndexRepo_anUnreadableModifiedFileFailsTheRun(t *testing.T) {
+	h := newHarness(t, nil)
+	st := h.stateOf(t)
+	firstSHA := h.head(t)
+	if _, err := h.ix.IndexRepo(context.Background(), st, firstSHA, nil); err != nil {
+		t.Fatalf("full IndexRepo() err = %v", err)
+	}
+	before := countOf(t, h.db, `SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'README.md'`)
+	write(t, h.src, "README.md", "# shop backend\n\nNew text about the cart.\n")
+	git(t, h.src, "add", "-A")
+	git(t, h.src, "commit", "-qm", "change")
+	st.LastSHA = firstSHA
+	nextSHA := h.head(t)
+	h.ix.git = failingRead{GitClient: h.gitc, path: "README.md"}
+
+	_, err := h.ix.IndexRepo(context.Background(), st, nextSHA, []string{"README.md"})
+
+	if err == nil {
+		t.Fatal("IndexRepo() err = nil, want the read failure so the commit is retried")
+	}
+	if after := countOf(t, h.db, `SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'README.md'`); after != before {
+		t.Errorf("README chunks went %d -> %d on a failed run", before, after)
+	}
+}
+
+// TestIndexRepo_aSymlinkIsNotAFile: `git show` of a symlink returns the link
+// target as if it were the file's text, so without the tree entry's mode a
+// symlink is indexed as a one-line file naming a path. Only regular blobs are
+// read; a symlink or submodule pointer takes no index row and no error, on a
+// full run and on an incremental one alike.
+func TestIndexRepo_aSymlinkIsNotAFile(t *testing.T) {
+	h := newHarness(t, nil)
+	st := h.stateOf(t)
+	if err := os.Symlink("README.md", filepath.Join(h.src, "LINK.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, h.src, "add", "-A")
+	git(t, h.src, "commit", "-qm", "add a symlink")
+	sha := h.head(t)
+
+	if _, err := h.ix.IndexRepo(context.Background(), st, sha, nil); err != nil {
+		t.Fatalf("full IndexRepo() err = %v", err)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM files WHERE path = 'LINK.md'`); n != 0 {
+		t.Errorf("the symlink took %d files rows, want none", n)
+	}
+
+	// And on an incremental run, as a modified path.
+	if err := os.Remove(filepath.Join(h.src, "LINK.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("go.mod", filepath.Join(h.src, "LINK.md")); err != nil {
+		t.Fatal(err)
+	}
+	git(t, h.src, "add", "-A")
+	git(t, h.src, "commit", "-qm", "repoint the symlink")
+	st.LastSHA = sha
+	next := h.head(t)
+	if _, err := h.ix.IndexRepo(context.Background(), st, next, []string{"LINK.md"}); err != nil {
+		t.Fatalf("incremental IndexRepo() err = %v", err)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM files WHERE path = 'LINK.md'`); n != 0 {
+		t.Errorf("the repointed symlink took %d files rows, want none", n)
 	}
 }

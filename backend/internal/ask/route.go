@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -571,12 +572,30 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 	if err != nil {
 		return Ranked{}, err
 	}
+	return rankWith(hits, moduleOf), nil
+}
+
+// rankByPath is Rank without the clustering: hits grouped by their directory,
+// the same fallback moduleLookup uses for a path no cluster holds. For the
+// turns that never reach a card — a named repository, all repositories — the
+// grouping only feeds the trace's counts, and a GROUP BY scan per repository
+// is not worth paying for a number nobody decides on.
+func (r *Router) rankByPath(hits []retrieve.Hit) Ranked {
+	return rankWith(hits, func(_, path string) string {
+		if i := lastSlash(path); i >= 0 {
+			return path[:i]
+		}
+		return "."
+	})
+}
+
+func rankWith(hits []retrieve.Hit, moduleOf func(repo, path string) string) Ranked {
 	all := worthOffering(candidates(hits, moduleOf))
 	capped := all
 	if len(capped) > maxCandidates {
 		capped = capped[:maxCandidates]
 	}
-	return Ranked{All: all, Capped: capped}, nil
+	return Ranked{All: all, Capped: capped}
 }
 
 // Dominates reports whether the leading candidate in cs is far enough ahead of
@@ -822,11 +841,14 @@ type ladder struct {
 	dominates      bool
 	relatedChecked bool
 	related        bool
-	judgeRan       bool
-	judged         bool
-	roleGate       bool
-	allNamed       bool
-	roleCanChoose  bool
+	// rankedBy says how the candidates were grouped: "modules" by the
+	// clustering, "paths" by directory on the turns that never reach a card.
+	rankedBy      string
+	judgeRan      bool
+	judged        bool
+	roleGate      bool
+	allNamed      bool
+	roleCanChoose bool
 }
 
 // rank records what the grouping rung produced. The two scores are logged raw
@@ -869,6 +891,7 @@ func (l ladder) log(ctx context.Context, margin float64, ask bool) {
 		"rung", l.rung,
 		"candidates", l.candidates,
 		"capped", l.capped,
+		"ranked_by", l.rankedBy,
 		"repos", l.repos,
 		"projects", l.projects,
 		"named", l.named,
@@ -924,10 +947,6 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// incomplete, and a card the role gate does not apply to was refused by
 	// nobody. Logging false for either would read as a rung that said no.
 	l := ladder{allNamed: true, roleCanChoose: true}
-	ranked, err := r.Rank(ctx, hits)
-	if err != nil {
-		return Decision{}, l, err
-	}
 	// The grouping every rung below counts by. Read before the named-repository
 	// short-circuit so one turn asks for it once, and cheap enough to pay for
 	// on the fast path: a handful of rows, no model call.
@@ -935,14 +954,25 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	if err != nil {
 		return Decision{}, l, err
 	}
-	l.rank(ranked, namedRepos, allRepos, r.margin, pm)
 	// Named a repository, or asked for all of them: the reader has already
 	// answered the only question a card could put to them, so no rung below
-	// can change the outcome and none is worth a query or a model call.
+	// can change the outcome and none is worth a query or a model call — the
+	// module clustering included, a GROUP BY scan per hit repository that
+	// only a card needs. The ladder still counts repositories and projects
+	// for the trace, grouped by directory instead; the log line says so.
 	if len(namedRepos) >= 1 || allRepos {
+		ranked := r.rankByPath(hits)
+		l.rank(ranked, namedRepos, allRepos, r.margin, pm)
+		l.rankedBy = "paths"
 		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true, pm)
 		return Decision{Ask: false, Candidates: ranked.All}, l, nil
 	}
+	ranked, err := r.Rank(ctx, hits)
+	if err != nil {
+		return Decision{}, l, err
+	}
+	l.rank(ranked, namedRepos, allRepos, r.margin, pm)
+	l.rankedBy = "modules"
 
 	// The repository rung is live when the question named no repository and
 	// the candidates span more than one. It is the only reason Related is
@@ -1101,38 +1131,51 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 // among the candidates is joined by a manifest edge. This is a hard signal:
 // when one repo requires what another publishes, the two are parts of one
 // mechanism, and no model needs to be asked.
+//
+// One query over every repository and one per repository over its module
+// keys, not one per ordered pair: the pair loop ran n² sequential reads on
+// a wide candidate list for a yes/no the tables answer in one pass.
 func (r *Router) anyDependency(ctx context.Context, cs []Candidate) (bool, error) {
-	for i, a := range cs {
-		for j, b := range cs {
-			if i == j {
-				continue
-			}
-			if a.Repo == b.Repo {
-				// Inside one repository the manifest edge is a declared
-				// unit dependency (internal/units): an app and the library
-				// it imports, a service and the persistence module it
-				// builds against. Two directories that are not units have
-				// no such edge and fall through to the margin and the judge,
-				// exactly as before units existed.
-				if a.ModuleKey == "" || b.ModuleKey == "" || a.ModuleKey == b.ModuleKey || r.db == nil {
-					continue
-				}
-				ok, err := units.Linked(ctx, r.db, a.Repo, a.ModuleKey, b.ModuleKey)
-				if err != nil {
-					return false, fmt.Errorf("units linked %s: %s -> %s: %w", a.Repo, a.ModuleKey, b.ModuleKey, err)
-				}
-				if ok {
-					return true, nil
-				}
-				continue
-			}
-			ok, err := repodeps.DependsOn(ctx, r.db, a.Repo, b.Repo)
-			if err != nil {
-				return false, fmt.Errorf("depends on %s -> %s: %w", a.Repo, b.Repo, err)
-			}
-			if ok {
-				return true, nil
-			}
+	if r.db == nil {
+		return false, nil
+	}
+	var repos []string
+	keysOf := map[string][]string{}
+	seenRepo := map[string]bool{}
+	for _, c := range cs {
+		if !seenRepo[c.Repo] {
+			seenRepo[c.Repo] = true
+			repos = append(repos, c.Repo)
+		}
+		// Inside one repository the manifest edge is a declared unit
+		// dependency (internal/units): an app and the library it imports, a
+		// service and the persistence module it builds against. Two
+		// directories that are not units have no such edge and fall through
+		// to the margin and the judge, exactly as before units existed.
+		if c.ModuleKey != "" && !slices.Contains(keysOf[c.Repo], c.ModuleKey) {
+			keysOf[c.Repo] = append(keysOf[c.Repo], c.ModuleKey)
+		}
+	}
+	if len(repos) > 1 {
+		ok, err := repodeps.AnyDependency(ctx, r.db, repos)
+		if err != nil {
+			return false, fmt.Errorf("depends on among %v: %w", repos, err)
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	for _, repo := range repos {
+		keys := keysOf[repo]
+		if len(keys) < 2 {
+			continue
+		}
+		ok, err := units.AnyLinked(ctx, r.db, repo, keys)
+		if err != nil {
+			return false, fmt.Errorf("units linked %s among %v: %w", repo, keys, err)
+		}
+		if ok {
+			return true, nil
 		}
 	}
 	return false, nil
@@ -1166,7 +1209,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
-	opts := []llm.Option{llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
 	if r.judgeDeployment != nil {
 		opts = append(opts, r.judgeDeployment)
 	}
@@ -1219,7 +1262,7 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: choosableSystem},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 		llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route"))
 	if err != nil {
 		return false, fmt.Errorf("judge whether the role can choose: %w", err)
@@ -1295,7 +1338,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: b.String()},
-			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
 			if err != nil {
 				return
 			}

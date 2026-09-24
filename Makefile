@@ -8,8 +8,9 @@ VERSION ?= dev
 tidy:
 	cd backend && go mod tidy
 
+# -race needs cgo; that is independent of the app's CGO_ENABLED=0 build.
 test:
-	cd backend && go test ./...
+	cd backend && CGO_ENABLED=1 go test -race ./...
 
 # Line coverage with the same floor and scripts as ../peeq and ../loom
 # (scripts/coverage-floors, scripts/coverage-gate.sh). CI runs the patch gate on top

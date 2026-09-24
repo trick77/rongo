@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -224,7 +225,7 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 	}
 	// --quiet exits 1 for "differences found" and says nothing on stderr;
 	// anything else is a real failure and must not read as "there are changes".
-	if strings.Contains(err.Error(), "exit status 1") {
+	if exitCode(err) == 1 {
 		return true, nil
 	}
 	return false, err
@@ -421,7 +422,7 @@ func (c *Client) HeadSHA(ctx context.Context, spec repos.Spec, branch string) (s
 	out, err := c.run(ctx, c.Dir(spec), "rev-parse", "--verify", "--quiet",
 		"refs/remotes/origin/"+branch)
 	if err != nil {
-		if !strings.Contains(err.Error(), "exit status 1") {
+		if exitCode(err) != 1 {
 			return "", err
 		}
 		if _, checkErr := c.run(ctx, c.Dir(spec), "rev-parse", "--git-dir"); checkErr != nil {
@@ -456,35 +457,71 @@ func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toS
 type Change struct {
 	Path    string
 	Deleted bool
+	// Mode is the entry's mode at the newer commit, "" when deleted: the one
+	// fact that tells a symlink (120000) or a submodule pointer (160000) from
+	// a file BEFORE it is read. `git show` of a symlink returns the link
+	// target as if it were the file's text.
+	Mode string
+}
+
+// Indexable reports whether a tree entry of this mode is a file to read:
+// regular and executable blobs, never a symlink or a submodule pointer.
+func Indexable(mode string) bool {
+	return mode == "100644" || mode == "100755"
 }
 
 // ChangedEntries is ChangedPaths with the delete/modify distinction the indexer
-// needs: a deleted path must have its rows removed, a modified one re-read.
+// needs, and each entry's mode: a deleted path must have its rows removed, a
+// modified one re-read, and a symlink or submodule pointer neither.
 //
 // --name-only cannot tell the two apart, and treating a failed read as a
 // deletion would conflate a broken checkout with code that is genuinely gone —
-// the index would quietly drop files that still exist. --no-renames is
-// deliberate: to an indexer a rename IS a delete plus an add, and asking git to
-// detect renames only produces a three-field record to parse for the same
-// outcome.
+// the index would quietly drop files that still exist. --raw carries the modes
+// --name-status does not. --no-renames is deliberate: to an indexer a rename
+// IS a delete plus an add, and asking git to detect renames only produces a
+// three-field record to parse for the same outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--name-status", "--no-renames", fromSHA+".."+toSHA)
+		"diff", "--raw", "--no-renames", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
 	changes := []Change{}
 	for _, line := range nonEmptyLines(out) {
-		status, path, ok := strings.Cut(line, "\t")
-		if !ok {
+		// :<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>
+		meta, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(strings.TrimPrefix(meta, ":"))
+		if !ok || len(fields) != 5 {
 			return nil, fmt.Errorf("unparseable diff record %q", line)
 		}
-		changes = append(changes, Change{
-			Path:    strings.TrimSpace(path),
-			Deleted: strings.HasPrefix(status, "D"),
-		})
+		ch := Change{Path: strings.TrimSpace(path), Deleted: strings.HasPrefix(fields[4], "D")}
+		if !ch.Deleted {
+			ch.Mode = fields[1]
+		}
+		changes = append(changes, ch)
 	}
 	return changes, nil
+}
+
+// ListEntries lists every tracked entry at a commit with its mode, for the
+// initial full index. ListPaths is the same listing without the modes.
+func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]Change, error) {
+	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
+		"ls-tree", "-r", sha)
+	if err != nil {
+		return nil, err
+	}
+	entries := []Change{}
+	for _, line := range nonEmptyLines(out) {
+		// <mode> <type> <sha>\t<path>
+		meta, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 {
+			return nil, fmt.Errorf("unparseable tree record %q", line)
+		}
+		entries = append(entries, Change{Path: path, Mode: fields[0]})
+	}
+	return entries, nil
 }
 
 // ListPaths lists every tracked path at a commit, for the initial full index.
@@ -501,17 +538,11 @@ func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]
 // the working tree keeps every chunk attributable to an exact SHA, which is
 // what makes a citation verifiable later.
 func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
-	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "show", sha+":"+path)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("read %s at %s: %w: %s", path, ShortSHA(sha), err,
-			redact(stderr.String()))
+	out, err := c.runIn(ctx, c.Dir(spec), nil, nil, "show", sha+":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), err)
 	}
-	return stdout.Bytes(), nil
+	return out, nil
 }
 
 // Object reports what "sha:path" names — "blob", "tree", "commit" — and its
@@ -519,20 +550,14 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 // non-file object asks here first, so the refusal costs nothing: ReadFile
 // buffers the whole object before returning it.
 func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) (kind string, size int64, err error) {
-	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "cat-file", "--batch-check")...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
-	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader(sha + ":" + path + "\n")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", 0, fmt.Errorf("stat %s at %s: %w: %s", path, ShortSHA(sha), err, redact(stderr.String()))
+	out, err := c.runIn(ctx, c.Dir(spec), strings.NewReader(sha+":"+path+"\n"), nil, "cat-file", "--batch-check")
+	if err != nil {
+		return "", 0, fmt.Errorf("stat %s at %s: %w", path, ShortSHA(sha), err)
 	}
 	// "<oid> <type> <size>" for an object, "<name> missing" otherwise.
-	fields := strings.Fields(stdout.String())
+	fields := strings.Fields(string(out))
 	if len(fields) != 3 {
-		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(stdout.String()))
+		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(string(out)))
 	}
 	n, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil {
@@ -570,8 +595,18 @@ func (c *Client) runRemote(ctx context.Context, dir string, spec repos.Spec, tok
 }
 
 func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
+	out, err := c.runIn(ctx, dir, nil, extra, args...)
+	return string(out), err
+}
+
+// runIn is every git command: the ownership exemption, no prompting, the
+// configured auth in the environment, stdin where a command reads one, and
+// the raw bytes back. ReadFile and Object used to build their own exec and so
+// missed GIT_TERMINAL_PROMPT and the auth environment.
+func (c *Client) runIn(ctx context.Context, dir string, stdin io.Reader, extra []string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
+	cmd.Stdin = stdin
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -582,10 +617,10 @@ func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ..
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// redact keeps an injected token out of an error that will be logged.
-		return stdout.String(), fmt.Errorf("git %s: %w: %s", subcommand(args), err,
+		return stdout.Bytes(), fmt.Errorf("git %s: %w: %s", subcommand(args), err,
 			redact(stderr.String()))
 	}
-	return stdout.String(), nil
+	return stdout.Bytes(), nil
 }
 
 // env is what run adds to git's environment for the remote. Nothing when

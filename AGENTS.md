@@ -10,7 +10,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - No test hits a real LLM, embeddings endpoint or git remote. `httptest` fakes, fixture repo built locally.
 - Coverage floor 75%, both sides, plus 75% on changed lines. `scripts/coverage-*` and `scripts/strip-comment-lines.go` byte-identical with ../peeq's `hack/` copies — fix in the family, never fork. Directory renamed here first; peeq follows, then this note loses the `hack/`.
 - Tests need `-race` (cgo). Binary stays `CGO_ENABLED=0`.
-- New config → `BACKEND_*` env var, nowhere else.
+- New config → `BACKEND_*` env var, nowhere else. **A malformed value refuses to start; empty means the default.** `BACKEND_MEMORY=disabled` left memory on and `BACKEND_ROUTE_MARGIN=0` routed at 0.25 while both looked right in the environment.
 
 ## Locked choices (no change without agreement)
 - Pure-Go SQLite: `ncruces/go-sqlite3` + `asg017/sqlite-vec-go-bindings/ncruces` (wasm) + FTS5.
@@ -70,7 +70,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - **The block outranks the prompt**: overrides form, length, diagrams, what to mention. Never citing, inventing, "nothing found", language, audience. Empty memory leaves the prompt byte-identical — that is the eval baseline. Contradiction REPLACES, a rule never expires, one past the cap is refused, never fitted in by dropping one. Never on a shared page.
 
 ### Routing
-- **Clarification answered once.** Choice starts a new turn, card becomes a record: collapsed, reopenable, inert. The answer closes it, so a failed turn leaves it open for retry.
+- **Clarification answered once.** The answer closes it on the record, so between the choice and the answer the card is claimed in process (`Server.claims`); a second choice mid-turn is refused, a failed resume releases it. Choice starts a new turn, card becomes a record: collapsed, reopenable, inert. The answer closes it, so a failed turn leaves it open for retry.
 - **Card offers PROJECTS, never repositories.** A project is a product — the one option an Analyst can tell apart. Backend-vs-ui is a *layer*, never a card. Naming a MEMBER narrows to it: a thread narrows, never widens.
 - **Fold by project AFTER `repoCandidates`, never inside it** — dependency lookup joins on a repository name, a project name has no rows. The eval cannot catch it: its corpus is one project per repository.
 - **`part`, `description`, `uses` declared, never inferred**, and reach the answer prompt. Members nothing calls are named too — that absence is the disambiguating half. Configuration: never cited, never presented as read from code.
@@ -122,6 +122,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 
 ### Sharing and routes
 - **A share link exposes ONE thread, frozen where shared.** Later turns stay invisible until the owner raises the ceiling — a link never grows behind their back. Ceiling is the newest FINISHED turn, never the newest row.
+- **The ceiling sits below the oldest UNFINISHED turn**, not at the newest finished one: a turn still streaming in another tab under a later finished turn would otherwise land on the public page the moment it finished. A turn cannot outlive the process answering it, so boot marks every unfinished row failed (`FailOrphaned`), or a crash would hold a ceiling down for good.
 - **Revoking is a flag, not a delete** — re-sharing returns the SAME link instead of stranding the one already sent. Shared page lists live links only: an audit, not a history.
 - **Unknown, revoked and deleted are ONE 404.** Never an existence oracle. Public routes set `X-Robots-Tag: noindex`.
 - **A shared page carries the thread's total tokens and cost; no per-turn usage, model name or follow-up.** Citations serve only what a turn under the ceiling cites. Only unauthenticated output path in the product.

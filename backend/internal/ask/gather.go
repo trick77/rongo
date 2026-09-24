@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/llm"
@@ -233,24 +234,31 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 	frontier := a.out
 symbols:
 	for hop := 1; hop <= g.opts.MaxHops; hop++ {
-		var next []Source
+		// The hop's references are gathered from every frontier source
+		// FIRST and ordered once: tests come last within a hop, not within
+		// each source's own list, or a test the first source references is
+		// admitted ahead of the mechanism the second one references and a
+		// tight budget spends itself on the harness.
+		var refs []Source
 		for _, from := range frontier {
-			refs, err := g.referenced(ctx, from)
+			r, err := g.referenced(ctx, from)
 			if err != nil {
 				return nil, err
 			}
-			for _, ref := range mechanismFirst(refs) {
-				// Outside the ceiling: never admitted, and never followed,
-				// or the next hop would gather by a reason the answer never
-				// shows.
-				if a.seen[ref.ChunkID] || !a.permits(ref) {
-					continue
-				}
-				if !a.take(ref, hop) {
-					break symbols
-				}
-				next = append(next, ref)
+			refs = append(refs, r...)
+		}
+		var next []Source
+		for _, ref := range mechanismFirst(refs) {
+			// Outside the ceiling: never admitted, and never followed,
+			// or the next hop would gather by a reason the answer never
+			// shows.
+			if a.seen[ref.ChunkID] || !a.permits(ref) {
+				continue
 			}
+			if !a.take(ref, hop) {
+				break symbols
+			}
+			next = append(next, ref)
 		}
 		if len(next) == 0 {
 			break
@@ -781,13 +789,13 @@ func (g *Gatherer) definers(ctx context.Context, names []string, home, notRepo, 
 -- the threshold, and drop it from selective — costing a LIVE repository a hop
 -- it should have made. Parked code influences nothing.
 WITH selective AS (
-    SELECT s.name
+    SELECT s.name, COUNT(DISTINCT s.file_id) AS definers
     FROM symbols s
     JOIN files sf ON sf.id = s.file_id
     JOIN repo_state sr ON sr.name = sf.repo AND sr.enabled = 1
     WHERE s.name IN (` + placeholders(len(names)) + `)
     GROUP BY s.name
-    HAVING COUNT(DISTINCT s.file_id) <= ?
+    HAVING definers <= ?
 ),
 home AS (
     SELECT DISTINCT s.name
@@ -796,11 +804,11 @@ home AS (
     JOIN files f ON f.id = s.file_id
     WHERE f.repo = ?
 )
+-- The definer count comes from the CTE that already computed it over the
+-- same enabled-only population; a correlated subquery here recounted it
+-- once per row.
 SELECT DISTINCT c.id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text, s.name,
-       (SELECT COUNT(DISTINCT s2.file_id) FROM symbols s2
-          JOIN files f2 ON f2.id = s2.file_id
-          JOIN repo_state r2 ON r2.name = f2.repo AND r2.enabled = 1
-        WHERE s2.name = s.name) AS definers
+       sel.definers
 FROM symbols s
 JOIN selective sel ON sel.name = s.name
 JOIN files f  ON f.id = s.file_id
@@ -884,7 +892,7 @@ func placeholders(n int) string {
 // estimateTokens is the same ~4-characters-per-token heuristic the chunker
 // uses, so a budget here means the same thing it does there.
 func estimateTokens(s string) int {
-	n := len([]rune(s))
+	n := utf8.RuneCountInString(s)
 	if n == 0 {
 		return 0
 	}

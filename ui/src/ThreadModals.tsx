@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useEscape } from "./dialog";
 import { createPortal } from "react-dom";
 
 /**
@@ -24,13 +25,7 @@ export function ModalShell({
   onCancel: () => void;
 }) {
   const titleID = useId();
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  useEscape(onCancel);
   // Mounted on the body, not where it is written. The rail these dialogs
   // open from is a drawer that slides, and a translated ancestor is the
   // containing block for everything fixed inside it — `inset-0` resolved to

@@ -196,3 +196,26 @@ func TestResumedTurnSaysItStoodOnDocumentationAlone(t *testing.T) {
 		t.Error("scope.DocsOnly = false, want the resumed turn to carry its own footing out")
 	}
 }
+
+func TestResumeRepoSaysItStoodOnDocumentationAlone(t *testing.T) {
+	// The repository card's resume searches again and gathers afresh, and
+	// its footing is only known after that gather — the same as Resume, so
+	// the notice and the stored flag must come out the same way.
+	db := gatherDB(t)
+	var notices []string
+	c := twoStepUpstream(t, "{}", "AGENTS.md states two deployments [1].")
+	p := NewPipeline(c, &fakeSearch{hits: docOnlyHits()}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	got, err := p.ResumeRepo(context.Background(), "How are the models chosen?", Understanding{}, nil,
+		AudienceBA, LanguageEN, Scope{}, Thread{}, Events{OnNotice: func(text string) { notices = append(notices, text) }})
+	if err != nil {
+		t.Fatalf("ResumeRepo: %v", err)
+	}
+
+	if len(notices) != 1 || !strings.Contains(notices[0], "documentation alone") {
+		t.Fatalf("notices = %v, want the documentation-only sentence", notices)
+	}
+	if !got.Scope.DocsOnly {
+		t.Error("scope.DocsOnly = false, want the resumed turn to carry its own footing out")
+	}
+}

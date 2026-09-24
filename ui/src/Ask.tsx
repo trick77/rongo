@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { pageColumn } from "./page";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView, { isCommit } from "./SourceView";
 import CommitView from "./CommitView";
@@ -359,6 +360,12 @@ export default function Ask({
   }
 
   useEffect(() => {
+    // The gone panel belongs to the address that was refused, and any change
+    // of address takes it down — including the two that change nothing else
+    // below: leaving for the unasked question after the refusal, and the
+    // thread this composer just opened from under the panel, which the
+    // stream adopted before its id came back down as a prop.
+    setGone(false);
     if (openThread === shown.current) return;
     // Bumped FIRST, on every run — including the one that opens a fresh thread.
     // A load already in the air belongs to the thread that was just left, and
@@ -367,7 +374,6 @@ export default function Ask({
     const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
-    setGone(false);
     // The total in the header belongs to the old thread until the new one has
     // loaded. The per-turn state that is also an index into the thread being
     // left — the open breakdown, the unfolded failure — is ThreadView's, and
@@ -431,6 +437,11 @@ export default function Ask({
     const closed = () => {
       setGone(true);
       threadId.current = null;
+      // The screen is not standing in that thread any more either: the next
+      // question's thread event adopts its new id only when nothing is
+      // shown, and the stream repaints only the thread on screen. Left on
+      // the dead id, the answer streamed into a turn nobody could see.
+      shown.current = null;
     };
     const arrive = (next: Turn[]) => {
       setTurns(next);
@@ -601,6 +612,10 @@ export default function Ask({
             if (shown.current === null) {
               threadId.current = payload.thread_id;
               shown.current = payload.thread_id;
+              // A live thread is on screen now, so the panel of the address
+              // refused before it comes down here, not only when the id
+              // comes back as a prop.
+              setGone(false);
               onThread(payload.thread_id);
             }
             // The turn is on record now, in the language the record took. That
@@ -958,6 +973,11 @@ export default function Ask({
   // that still holds whatever was there before is a plain lie. Nothing else is
   // said about it — the text is on screen to select, and a banner would be
   // noise.
+  // Stable, so the overlays' keydown listeners are attached once rather
+  // than on every streamed token.
+  const closeViewer = useCallback(() => setViewing(null), []);
+  const closeSources = useCallback(() => setSourcesOpen(false), []);
+
   const actions = useMemo(
     () => ({
       onRetry: retry,
@@ -1081,7 +1101,7 @@ export default function Ask({
             aria-hidden="true"
             className="pointer-events-none sticky top-0 z-20 h-5 shrink-0 -mb-5 bg-gradient-to-b from-bg to-transparent lg:h-8 lg:-mb-8 [@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3"
           />
-          <div className="mx-auto w-full max-w-[900px] flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
+          <div className={`${pageColumn} w-full flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3`}>
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. That
                 rule is now a shared cap and a shared centring rather than a
@@ -1185,7 +1205,7 @@ export default function Ask({
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
-            className="sticky bottom-0 z-10 mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+            className={`sticky bottom-0 z-10 ${pageColumn} w-full bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2`}
             >
             {/* The foot of the column, ../loom's way round: the composer is
                 opaque and the fade is a strip immediately above it, so prose
@@ -1324,16 +1344,16 @@ export default function Ask({
       </div>
 
       {showSources && (
-        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
+        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={closeSources} />
       )}
 
       {/* A commit citation opens the commit view, whose touched files open
           the source viewer in turn, whole, at their indexed commit. */}
       {viewing &&
         (isCommit(viewing) ? (
-          <CommitView source={viewing} onClose={() => setViewing(null)} onOpenFile={setViewing} />
+          <CommitView source={viewing} onClose={closeViewer} onOpenFile={setViewing} />
         ) : (
-          <SourceView source={viewing} onClose={() => setViewing(null)} />
+          <SourceView source={viewing} onClose={closeViewer} />
         ))}
     </div>
   );
