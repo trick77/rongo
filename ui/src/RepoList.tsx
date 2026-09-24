@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { shortSha } from "./turns";
 import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
+import { ModalShell, cancelButton, saveButton } from "./ThreadModals";
 
 /** One row of GET /api/repos. */
 export type Repo = {
@@ -22,6 +23,8 @@ export type Repo = {
    * index reads exactly like a poller that stopped. */
   snapshot: boolean;
   last_error: string;
+  /** An admin asked for a full re-index and the poller has not run it yet. */
+  reindex_queued?: boolean;
   /** The product this repository belongs to. A repository standing alone is a
    * project of one named after itself, so this is never empty in practice. */
   project: string;
@@ -307,8 +310,107 @@ function Stat({
   );
 }
 
-export default function RepoList() {
+/** What a re-index confirmation is about: one repository, one project's
+ * members, or every active repository. */
+export type ReindexScope =
+  | { kind: "repo"; name: string }
+  | { kind: "project"; name: string; repos: string[] }
+  | { kind: "all"; count: number };
+
+/** reindexCopy is what the modal says the click costs. Honest about it: a
+ * full re-index re-reads every file, but only content whose bytes changed
+ * is embedded again — unchanged chunks hit the cache by content hash — so
+ * after a rule change it is the files that rule touched, a fraction of a
+ * first index. "All" is the same fact over the whole corpus, said louder. */
+export function reindexCopy(scope: ReindexScope): { title: string; body: string; button: string } {
+  const cost =
+    "Every file is read and selected again, and every chunk whose text changed is embedded again at the " +
+    "embedding endpoint's price. Unchanged content is not re-embedded. The run starts with the next poll cycle.";
+  switch (scope.kind) {
+    case "repo":
+      return { title: `Re-index ${scope.name}`, body: cost, button: "Re-index" };
+    case "project":
+      return {
+        title: `Re-index ${scope.name}`,
+        body: `${scope.repos.length} ${scope.repos.length === 1 ? "repository" : "repositories"} (${scope.repos.join(", ")}). ${cost}`,
+        button: `Re-index ${scope.repos.length === 1 ? "1 repository" : `${scope.repos.length} repositories`}`,
+      };
+    case "all":
+      return {
+        title: "Re-index every repository",
+        body:
+          `All ${scope.count} active repositories, in one cycle. ${cost} ` +
+          "This is the widest thing the page can ask for; the cost grows with every repository whose files changed under a new rule.",
+        button: `Re-index all ${scope.count}`,
+      };
+  }
+}
+
+/** reindexPaths is the request the confirmation sends: one POST per
+ * repository, or the one that covers the corpus. */
+export function reindexPaths(scope: ReindexScope): string[] {
+  switch (scope.kind) {
+    case "repo":
+      return [`/api/repos/${encodeURIComponent(scope.name)}/reindex`];
+    case "project":
+      return scope.repos.map((r) => `/api/repos/${encodeURIComponent(r)}/reindex`);
+    case "all":
+      return ["/api/repos/reindex"];
+  }
+}
+
+function ReindexModal({
+  scope,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  scope: ReindexScope;
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const copy = reindexCopy(scope);
+  return (
+    <ModalShell title={copy.title} onCancel={onCancel}>
+      <p className="mt-3 text-sm/6 text-ink-dim">{copy.body}</p>
+      {scope.kind === "all" && (
+        <p className="mt-2 text-sm/6 font-medium text-accent-strong">
+          This incurs embedding costs across the whole corpus.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-sm/6 text-accent-strong">
+          {error}
+        </p>
+      )}
+      {/* Cancel takes the focus: the safe half of a paid choice is the one
+          Enter should land on. */}
+      <div className="mt-4 flex justify-end gap-2">
+        <button autoFocus type="button" className={cancelButton} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className={saveButton} disabled={busy} onClick={onConfirm}>
+          {copy.button}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+const smallButton =
+  "rounded-ui-sm border border-border px-2 py-0.5 text-[11px] font-medium text-ink-dim transition-colors hover:bg-elevated disabled:opacity-50";
+
+export default function RepoList({ admin = false }: { admin?: boolean }) {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [reindex, setReindex] = useState<ReindexScope | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reindexError, setReindexError] = useState<string | null>(null);
+  // Bumped after a request lands, so the queued marks come back from the
+  // record rather than being guessed.
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -330,7 +432,44 @@ export default function RepoList() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [version]);
+
+  async function confirmReindex() {
+    if (!reindex) return;
+    setBusy(true);
+    setReindexError(null);
+    try {
+      for (const path of reindexPaths(reindex)) {
+        const res = await fetch(path, { method: "POST" });
+        if (!res.ok) {
+          setReindexError(`The request was refused (status ${res.status}).`);
+          return;
+        }
+      }
+      setReindex(null);
+    } catch {
+      setReindexError("The request did not reach the server.");
+    } finally {
+      setBusy(false);
+      // Reloaded whatever happened: a project's members are requested one
+      // by one, and the ones queued before a refusal are queued on the
+      // record and have to show as such.
+      setVersion((v) => v + 1);
+    }
+  }
+  const modal = reindex && (
+    <ReindexModal
+      scope={reindex}
+      busy={busy}
+      error={reindexError}
+      onCancel={() => {
+        setReindex(null);
+        setReindexError(null);
+      }}
+      onConfirm={confirmReindex}
+    />
+  );
+  const ask = admin ? (scope: ReindexScope) => setReindex(scope) : undefined;
 
   if (state.kind === "loading") {
     return <p className="text-muted">Loading…</p>;
@@ -431,12 +570,25 @@ export default function RepoList() {
           <span className="text-muted">{parked.count}</span> {parked.note}
         </p>
       )}
+      {/* The page's one action, for an administrator: a full re-index, of
+          every active repository from here, of one project or one
+          repository from the panels. Each asks first and says what it
+          costs. */}
+      {ask && (
+        <p className="mb-5 -mt-2 flex items-center gap-3 px-0.5 text-[12.5px] text-faint">
+          <button type="button" className={smallButton} onClick={() => ask({ kind: "all", count: shown.length })}>
+            Re-index all
+          </button>
+          <span>Re-reads every repository; embeds only what changed.</span>
+        </p>
+      )}
       {projects.map((p) => (
-        <ProjectPanel key={p.name} project={p} libraries={libraries} />
+        <ProjectPanel key={p.name} project={p} libraries={libraries} ask={ask} />
       ))}
       {shared.map((p) => (
-        <ProjectPanel key={p.name} project={p} libraries={libraries} usedBy={usedBy(p.name, shown)} />
+        <ProjectPanel key={p.name} project={p} libraries={libraries} usedBy={usedBy(p.name, shown)} ask={ask} />
       ))}
+      {modal}
     </>
   );
 }
@@ -461,11 +613,14 @@ function ProjectPanel({
   project,
   libraries,
   usedBy,
+  ask,
 }: {
   project: Project;
   libraries: Set<string>;
   /** Set for a library's own panel: the repositories naming it. */
   usedBy?: string[];
+  /** Set for an administrator: opens the re-index confirmation. */
+  ask?: (scope: ReindexScope) => void;
 }) {
   const spec = wiringSpec(project, libraries);
   const loose = unconnected(project, libraries);
@@ -499,6 +654,15 @@ function ProjectPanel({
               </>
             )}
           </span>
+        )}
+        {ask && project.repos.length > 1 && (
+          <button
+            type="button"
+            className={smallButton + " ml-auto"}
+            onClick={() => ask({ kind: "project", name: project.name, repos: project.repos.map((r) => r.name) })}
+          >
+            Re-index project
+          </button>
         )}
       </header>
 
@@ -591,6 +755,16 @@ function ProjectPanel({
                       ) : (
                         <span>{r.branch}</span>
                       )}
+                      {ask && !r.reindex_queued && (
+                        <button
+                          type="button"
+                          className={smallButton}
+                          aria-label={`Re-index ${r.name}`}
+                          onClick={() => ask({ kind: "repo", name: r.name })}
+                        >
+                          Re-index
+                        </button>
+                      )}
                     </div>
                     {r.last_error && (
                       <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>
@@ -608,6 +782,18 @@ function ProjectPanel({
                       {r.last_error && (
                         <span className="rounded-full bg-ochre-wash px-2.5 py-0.5 text-xs font-medium text-ochre">
                           Error
+                        </span>
+                      )}
+                      {/* Muted, not ochre: ochre is "your move", and a
+                          request standing until the next cycle asks nothing
+                          of the reader. From the record, so a reload shows
+                          it too. */}
+                      {r.reindex_queued && (
+                        <span
+                          className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
+                          title="A full re-index was requested and runs with the next poll cycle."
+                        >
+                          Re-index queued
                         </span>
                       )}
                       {/* Unreachable from this page since parked repositories

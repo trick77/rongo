@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // The diagram renderer measures text, which jsdom cannot; see diagram.test.tsx.
 vi.mock("mermaid", () => ({
@@ -10,7 +11,7 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-import RepoList, { byProject, historyLine, unconnected, wiringSpec } from "./RepoList";
+import RepoList, { byProject, historyLine, reindexCopy, reindexPaths, unconnected, wiringSpec } from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
 function respondWith(status: number, body: unknown) {
@@ -428,5 +429,85 @@ describe("the Projects page", () => {
 
     await screen.findByRole("heading", { name: "peeq" });
     expect(screen.queryByRole("img", { name: /project wiring/i })).toBeNull();
+  });
+});
+
+describe("re-index", () => {
+  it("offers nothing to a reader who is not an administrator", async () => {
+    respondWith(200, [peeq]);
+    render(<RepoList />);
+    await screen.findAllByText("peeq");
+    expect(screen.queryByRole("button", { name: /re-index/i })).toBeNull();
+  });
+
+  it("asks first, says what it costs, then posts the one repository and reloads", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${url}`);
+        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
+        const queued = calls.filter((c) => c.startsWith("POST")).length > 0;
+        return { ok: true, status: 200, json: async () => [{ ...peeq, reindex_queued: queued }] };
+      }),
+    );
+    render(<RepoList admin />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Re-index peeq" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/embedded again/)).toBeTruthy();
+    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index" }));
+
+    await waitFor(() => expect(calls).toContain("POST /api/repos/peeq/reindex"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Reloaded from the record: the row says the request is queued and the
+    // button is gone until it is served.
+    expect(await screen.findByText("Re-index queued")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Re-index peeq" })).toBeNull();
+  });
+
+  it("warns louder about the cost of re-indexing everything and posts the corpus request", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${url}`);
+        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 2 }) };
+        return { ok: true, status: 200, json: async () => [peeq, { ...peeq, name: "loom", project: "loom" }] };
+      }),
+    );
+    render(<RepoList admin />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Re-index all" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/incurs embedding costs across the whole corpus/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index all 2" }));
+
+    await waitFor(() => expect(calls).toContain("POST /api/repos/reindex"));
+  });
+
+  it("keeps the dialog open and says so when the server refuses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === "POST") return { ok: false, status: 403, json: async () => null };
+        return { ok: true, status: 200, json: async () => [peeq] };
+      }),
+    );
+    render(<RepoList admin />);
+    await userEvent.click(await screen.findByRole("button", { name: "Re-index peeq" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Re-index" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("phrases a project as its members and sends one request per member", () => {
+    const scope = { kind: "project" as const, name: "shop", repos: ["shop-api", "shop-ui"] };
+    expect(reindexCopy(scope).body).toContain("2 repositories (shop-api, shop-ui)");
+    expect(reindexPaths(scope)).toEqual(["/api/repos/shop-api/reindex", "/api/repos/shop-ui/reindex"]);
+    expect(reindexPaths({ kind: "all", count: 3 })).toEqual(["/api/repos/reindex"]);
   });
 });

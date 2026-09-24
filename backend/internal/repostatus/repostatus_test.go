@@ -192,3 +192,22 @@ func TestRepoStatus_clustersOnceUntilTheIndexMoves(t *testing.T) {
 		t.Errorf("clustered %d times after the index moved, want 2", s.clusters)
 	}
 }
+
+func TestRepoStatus_carriesAQueuedReindex(t *testing.T) {
+	db := statusDB(t)
+	state := indexer.NewStateStore(db)
+	ctx := context.Background()
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if _, err := state.RequestReindex(ctx, "peeq"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100}).RepoStatus(ctx)
+	if err != nil {
+		t.Fatalf("RepoStatus: %v", err)
+	}
+	if len(got) != 1 || !got[0].ReindexQueued {
+		t.Errorf("got %+v, want the queued request on the page", got)
+	}
+}

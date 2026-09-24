@@ -199,3 +199,122 @@ func TestRepos_isNeverCached(t *testing.T) {
 		t.Errorf("Cache-Control = %q, want %q", got, "no-store")
 	}
 }
+
+type fakeReindex struct {
+	names []string
+	all   int
+	known map[string]bool
+}
+
+func (f *fakeReindex) RequestReindex(_ context.Context, name string) (bool, error) {
+	if !f.known[name] {
+		return false, nil
+	}
+	f.names = append(f.names, name)
+	return true, nil
+}
+
+func (f *fakeReindex) RequestReindexAll(context.Context) (int, error) {
+	f.all++
+	return len(f.known), nil
+}
+
+func postReindex(t *testing.T, deps Deps, name string, admin bool) *httptest.ResponseRecorder {
+	t.Helper()
+	path := "/api/repos/reindex"
+	if name != "" {
+		path = "/api/repos/" + name + "/reindex"
+	}
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	req = req.WithContext(auth.WithUser(req.Context(), auth.User{ID: 1, Subject: "someone", IsAdmin: admin}))
+	req.SetPathValue("name", name)
+	rec := httptest.NewRecorder()
+	// Straight at the handler, not through the middleware: every header mode
+	// of the middleware admits an admin, and it is the handler's own gate that
+	// is under test here. The middleware's admission is tested in internal/auth.
+	NewServer(deps).handleReindex(rec, req)
+	return rec
+}
+
+func TestReindex_isTheAdminsToAsk(t *testing.T) {
+	f := &fakeReindex{known: map[string]bool{"peeq": true}}
+	deps := Deps{Auth: devAuth(t), Reindex: f}
+
+	if rec := postReindex(t, deps, "peeq", false); rec.Code != http.StatusForbidden {
+		t.Errorf("non-admin: status %d, want 403", rec.Code)
+	}
+	if len(f.names) != 0 {
+		t.Fatal("a non-admin's request reached the poller")
+	}
+	rec := postReindex(t, deps, "peeq", true)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("admin: status %d (%s), want 202", rec.Code, rec.Body.String())
+	}
+	var body map[string]int
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil || body["queued"] != 1 {
+		t.Errorf("body = %v, %v; want queued 1", body, err)
+	}
+	if len(f.names) != 1 || f.names[0] != "peeq" {
+		t.Errorf("requested %v, want peeq", f.names)
+	}
+}
+
+func TestReindex_unknownOrParkedIs404AndAllCountsWhatItQueued(t *testing.T) {
+	f := &fakeReindex{known: map[string]bool{"peeq": true, "loom": true}}
+	deps := Deps{Auth: devAuth(t), Reindex: f}
+
+	if rec := postReindex(t, deps, "nobody", true); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown: status %d, want 404", rec.Code)
+	}
+	rec := postReindex(t, deps, "", true)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("all: status %d, want 202", rec.Code)
+	}
+	var body map[string]int
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil || body["queued"] != 2 {
+		t.Errorf("body = %v, %v; want queued 2", body, err)
+	}
+	if f.all != 1 {
+		t.Errorf("RequestReindexAll called %d times, want 1", f.all)
+	}
+	// No poller here: the page offers nothing and the endpoint says so.
+	if rec := postReindex(t, Deps{Auth: devAuth(t)}, "", true); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("without a poller: status %d, want 503", rec.Code)
+	}
+}
+
+func TestRepos_saysWhenAReindexIsQueued(t *testing.T) {
+	deps := Deps{Auth: devAuth(t), Repos: fakeRepos{out: []RepoStatus{{Name: "peeq", ReindexQueued: true}}}}
+	rec := getRepos(t, deps)
+	var out []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 1 || out[0]["reindex_queued"] != true {
+		t.Errorf("body = %v, want reindex_queued true", out)
+	}
+}
+
+type failingReindex struct{}
+
+func (failingReindex) RequestReindex(context.Context, string) (bool, error) {
+	return false, errors.New("locked")
+}
+
+func (failingReindex) RequestReindexAll(context.Context) (int, error) { return 0, errors.New("locked") }
+
+func TestReindex_aStoreFailureIs500AndNoUserIs401(t *testing.T) {
+	deps := Deps{Auth: devAuth(t), Reindex: failingReindex{}}
+	if rec := postReindex(t, deps, "peeq", true); rec.Code != http.StatusInternalServerError {
+		t.Errorf("one repository, store failing: status %d, want 500", rec.Code)
+	}
+	if rec := postReindex(t, deps, "", true); rec.Code != http.StatusInternalServerError {
+		t.Errorf("all, store failing: status %d, want 500", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/repos/reindex", nil)
+	rec := httptest.NewRecorder()
+	NewServer(deps).handleReindex(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no user on the request: status %d, want 401", rec.Code)
+	}
+}

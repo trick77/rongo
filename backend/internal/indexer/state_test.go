@@ -926,3 +926,63 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestReindex_isAGenerationClearedOnlyByTheRunThatReadIt(t *testing.T) {
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "live", CloneURL: "https://example.invalid/live.git", Enabled: true},
+		{Name: "parked", CloneURL: "https://example.invalid/parked.git", Enabled: false},
+	}); err != nil {
+		t.Fatalf("SyncSpecs: %v", err)
+	}
+
+	// A parked or unknown repository is refused: parked means not polled.
+	for _, name := range []string{"parked", "nobody"} {
+		if ok, err := s.RequestReindex(ctx, name); err != nil || ok {
+			t.Errorf("RequestReindex(%s) = %v, %v; want false", name, ok, err)
+		}
+	}
+	ok, err := s.RequestReindex(ctx, "live")
+	if err != nil || !ok {
+		t.Fatalf("RequestReindex(live) = %v, %v; want true", ok, err)
+	}
+	gen := func() int {
+		all, err := s.All(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, st := range all {
+			if st.Name == "live" {
+				return st.ReindexRequested
+			}
+		}
+		t.Fatal("live is gone")
+		return 0
+	}
+	if gen() != 1 {
+		t.Fatalf("generation = %d after one request, want 1", gen())
+	}
+	// A second request while the first is being served bumps it; the run
+	// that read generation 1 clears nothing, and the request stays.
+	if _, err := s.RequestReindex(ctx, "live"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearReindex(ctx, "live", 1); err != nil {
+		t.Fatal(err)
+	}
+	if gen() != 2 {
+		t.Errorf("generation = %d after clearing a stale one, want 2 kept", gen())
+	}
+	if err := s.ClearReindex(ctx, "live", 2); err != nil {
+		t.Fatal(err)
+	}
+	if gen() != 0 {
+		t.Errorf("generation = %d after the run that read it, want 0", gen())
+	}
+	n, err := s.RequestReindexAll(ctx)
+	if err != nil || n != 1 {
+		t.Errorf("RequestReindexAll = %d, %v; want the one active repository", n, err)
+	}
+}

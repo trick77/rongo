@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/trick77/rongo/internal/auth"
 )
 
 // RepoStatus is one row of the Repos page. The page is read-only status, never
@@ -59,6 +61,16 @@ type RepoStatus struct {
 	// how the page draws it inside their wiring without listing it as a member.
 	Library bool
 	Stages  []string
+	// ReindexQueued says an admin asked for a full re-index and the poller
+	// has not run it yet.
+	ReindexQueued bool
+}
+
+// Reindexer takes the Repos page's one action: a full re-index of a
+// repository, or of every active one, at the poller's next pass.
+type Reindexer interface {
+	RequestReindex(ctx context.Context, name string) (bool, error)
+	RequestReindexAll(ctx context.Context) (int, error)
 }
 
 // RepoStatusSource reports the state of every repository rongo knows about.
@@ -123,6 +135,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 			"uses":             uses(st.Uses),
 			"library":          st.Library,
 			"stages":           uses(st.Stages),
+			"reindex_queued":   st.ReindexQueued,
 		})
 	}
 	// no-store, because this is a STATUS page and a cached status page lies.
@@ -135,4 +148,53 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleReindex queues a full re-index of one repository, or of every active
+// one when the path names none. Admin only: it is the page's one action, and
+// it costs an embedding call for every file whose text changed. 202, because
+// the poller runs it on its next pass; the page shows the request queued
+// until then.
+func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
+	u, ok := auth.UserFrom(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !u.IsAdmin {
+		http.Error(w, "re-indexing is for an administrator", http.StatusForbidden)
+		return
+	}
+	if s.deps.Reindex == nil {
+		http.Error(w, "re-indexing unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	queued := 0
+	if name := r.PathValue("name"); name != "" {
+		found, err := s.deps.Reindex.RequestReindex(r.Context(), name)
+		if err != nil {
+			slog.Error("re-index request failed", "repo", name, "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			// Unknown and parked read the same: neither is a repository the
+			// poller serves.
+			http.Error(w, "no such active repository", http.StatusNotFound)
+			return
+		}
+		queued = 1
+	} else {
+		n, err := s.deps.Reindex.RequestReindexAll(r.Context())
+		if err != nil {
+			slog.Error("re-index request failed", "err", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		queued = n
+	}
+	slog.Info("full re-index requested", "by", u.Subject, "repositories", queued)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{"queued": queued})
 }
