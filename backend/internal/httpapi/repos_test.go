@@ -294,3 +294,27 @@ func TestRepos_saysWhenAReindexIsQueued(t *testing.T) {
 		t.Errorf("body = %v, want reindex_queued true", out)
 	}
 }
+
+type failingReindex struct{}
+
+func (failingReindex) RequestReindex(context.Context, string) (bool, error) {
+	return false, errors.New("locked")
+}
+
+func (failingReindex) RequestReindexAll(context.Context) (int, error) { return 0, errors.New("locked") }
+
+func TestReindex_aStoreFailureIs500AndNoUserIs401(t *testing.T) {
+	deps := Deps{Auth: devAuth(t), Reindex: failingReindex{}}
+	if rec := postReindex(t, deps, "peeq", true); rec.Code != http.StatusInternalServerError {
+		t.Errorf("one repository, store failing: status %d, want 500", rec.Code)
+	}
+	if rec := postReindex(t, deps, "", true); rec.Code != http.StatusInternalServerError {
+		t.Errorf("all, store failing: status %d, want 500", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/repos/reindex", nil)
+	rec := httptest.NewRecorder()
+	NewServer(deps).handleReindex(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("no user on the request: status %d, want 401", rec.Code)
+	}
+}

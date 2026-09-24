@@ -719,3 +719,29 @@ func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
 	cancel()
 	<-done
 }
+
+func TestRequestReindex_throughThePollerRefusesWhatItDoesNotServeAndCountsAll(t *testing.T) {
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+		{Name: "parked", CloneURL: src, Branch: "main", Enabled: false},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	p := newPoller(t, s, (&recordingIndex{}).fn)
+
+	if ok, err := p.RequestReindex(ctx, "parked"); err != nil || ok {
+		t.Errorf("RequestReindex(parked) = %v, %v; want refused", ok, err)
+	}
+	n, err := p.RequestReindexAll(ctx)
+	if err != nil || n != 1 {
+		t.Errorf("RequestReindexAll = %d, %v; want the one active repository", n, err)
+	}
+	// Nudged: the next wait ends now.
+	if !p.wait(ctx, time.Hour) {
+		t.Error("the wait ended for the context, not the nudge")
+	}
+}
