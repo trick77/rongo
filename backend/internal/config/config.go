@@ -184,6 +184,7 @@ type Config struct {
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
+	r := &envReader{}
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
 		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
@@ -191,36 +192,36 @@ func Load() (Config, error) {
 		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
-		IndexMaxFileBytes: envIntOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexMaxFileBytes: r.intOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
 		// 8 KiB. The json and xml that answer questions (tsconfig, a small
 		// fixture) stay under 1 KB; a data blob or a translation catalogue
 		// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
-		IndexMaxDataFileBytes: envIntOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
+		IndexMaxDataFileBytes: r.intOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
 		// 256 KiB: the syrius service schemas run to 69 KB; what stays above
 		// is two code tables and one VO catalogue (2026-09-17-data-file-cap.md,
 		// Schemas).
-		IndexMaxSchemaFileBytes: envIntOr("BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
+		IndexMaxSchemaFileBytes: r.intOr("BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
 		// 500 commits: a year of a busy repository, bounded for a monorepo's
 		// first run. A "what changed" question looks back a year at most.
-		HistoryDepth:     envIntOr("BACKEND_HISTORY_DEPTH", 500),
-		IndexEnabled:     envBoolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:    envBoolOr("BACKEND_INDEX_COMMENTS", true),
+		HistoryDepth:     r.intOr("BACKEND_HISTORY_DEPTH", 500),
+		IndexEnabled:     r.boolOr("BACKEND_INDEX_ENABLED", true),
+		IndexComments:    r.boolOr("BACKEND_INDEX_COMMENTS", true),
 		IndexExclude:     envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
 		GitSSHKey:        strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
 		GitSSHKnownHosts: strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
 		GitCAFile:        strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
-		ModuleMinChunks:  envIntOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:  envIntOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:      envFloatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		ModuleMinChunks:  r.intOr("BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:  r.intOr("BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:      r.floatOr("BACKEND_ROUTE_MARGIN", 0.25),
 		// The locate loop, on at three rounds: look, narrow, confirm. opencode
 		// answered the flagship in 38 calls; one round of six never had room
 		// to read what its grep showed. 0 switches it off, and more than
 		// three is capped.
-		LocateRounds:      envIntOrOff("BACKEND_LOCATE_ROUNDS", 3),
-		GatherMaxHops:     envIntOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget: envIntOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:     envIntOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		Memory:            envBoolOr("BACKEND_MEMORY", true),
+		LocateRounds:      r.intOrOff("BACKEND_LOCATE_ROUNDS", 3),
+		GatherMaxHops:     r.intOr("BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget: r.intOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:     r.intOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
+		Memory:            r.boolOr("BACKEND_MEMORY", true),
 		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
 		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
 		LLMGateReasoning:  envOr("BACKEND_LLM_GATE_REASONING", "off"),
@@ -230,7 +231,7 @@ func Load() (Config, error) {
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
 		AdminPasswordHash: strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
-		LogLevel:          envOr("BACKEND_LOG_LEVEL", "info"),
+		LogLevel:          r.oneOf("BACKEND_LOG_LEVEL", "info", "debug", "info", "warn", "error"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.
@@ -239,6 +240,9 @@ func Load() (Config, error) {
 		OIDCClientSecret: strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_SECRET")),
 		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
 		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
+	}
+	if r.err != nil {
+		return Config{}, r.err
 	}
 	var err error
 	if cfg.LLMGateTemperature, err = envOptionalFloat("BACKEND_LLM_GATE_TEMPERATURE", 0); err != nil {
@@ -303,7 +307,7 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_ADMIN_PASSWORD_HASH is not a bcrypt hash; generate one with `rongo -hash-password`")
 		}
-		cfg.CookieSecure = envBoolOr("BACKEND_COOKIE_SECURE", true)
+		cfg.CookieSecure = r.boolOr("BACKEND_COOKIE_SECURE", true)
 		if !cfg.CookieSecure && !isLoopback(cfg.Addr) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
@@ -390,52 +394,63 @@ func envListOr(key string, fallback []string) []string {
 	return out
 }
 
-// envIntOr reads a positive integer setting. A malformed or non-positive value
-// falls back to the default rather than failing the boot: an indexing tunable
-// is not worth refusing to start over, and the value is logged at debug level
-// by the caller if it matters.
-func envIntOr(key string, fallback int) int {
+// envReader reads the typed settings and keeps the first malformed one. Empty
+// means the default; anything else that does not parse is an error, and Load
+// refuses to start on it. A fallback here would let BACKEND_MEMORY=disabled
+// leave memory on and BACKEND_ROUTE_MARGIN=0 route at 0.25, each looking
+// right in the environment and wrong in every decision — the same reason an
+// invalid repos.yaml refuses to boot.
+type envReader struct {
+	err error
+}
+
+func (r *envReader) fail(err error) {
+	if r.err == nil {
+		r.err = err
+	}
+}
+
+// intOr reads a positive integer setting.
+func (r *envReader) intOr(key string, fallback int) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return fallback
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
+		r.fail(fmt.Errorf("%s=%q is not a positive integer", key, v))
 		return fallback
 	}
 	return n
 }
 
-// envIntOrOff is envIntOr for a limit that can be switched off: an explicit
-// 0 means off and is kept, where envIntOr would read it as malformed and put
-// the default back. Anything else that is not a positive integer falls back
-// like envIntOr does.
-func envIntOrOff(key string, fallback int) int {
+// intOrOff is intOr for a limit that can be switched off: an explicit 0
+// means off and is kept.
+func (r *envReader) intOrOff(key string, fallback int) int {
 	if strings.TrimSpace(os.Getenv(key)) == "0" {
 		return 0
 	}
-	return envIntOr(key, fallback)
+	return r.intOr(key, fallback)
 }
 
-// envFloatOr reads a positive float setting. A malformed or non-positive
-// value falls back to the default rather than failing the boot, for the same
-// reason envIntOr does.
-func envFloatOr(key string, fallback float64) float64 {
+// floatOr reads a positive float setting.
+func (r *envReader) floatOr(key string, fallback float64) float64 {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return fallback
 	}
 	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f <= 0 {
+	if err != nil || f <= 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+		r.fail(fmt.Errorf("%s=%q is not a positive number", key, v))
 		return fallback
 	}
 	return f
 }
 
-// envBoolOr reads an on/off setting. Anything unrecognised falls back to the
-// default rather than failing the boot.
-func envBoolOr(key string, fallback bool) bool { //nolint:unparam // a general on/off reader: every current setting happens to default to true, which is not a property of the function
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+// boolOr reads an on/off setting.
+func (r *envReader) boolOr(key string, fallback bool) bool { //nolint:unparam // a general on/off reader: every current setting happens to default to true, which is not a property of the function
+	v := strings.TrimSpace(os.Getenv(key))
+	switch strings.ToLower(v) {
 	case "":
 		return fallback
 	case "1", "true", "yes", "on":
@@ -443,8 +458,25 @@ func envBoolOr(key string, fallback bool) bool { //nolint:unparam // a general o
 	case "0", "false", "no", "off":
 		return false
 	default:
+		r.fail(fmt.Errorf("%s=%q is not on or off; want true or false", key, v))
 		return fallback
 	}
+}
+
+// oneOf reads a setting that must be one of a fixed set of words, case
+// folded, and returns it lower-cased.
+func (r *envReader) oneOf(key, fallback string, allowed ...string) string {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	r.fail(fmt.Errorf("%s=%q is not one of %s", key, v, strings.Join(allowed, ", ")))
+	return fallback
 }
 
 // envOptionalFloat reads a float setting that may also be switched off:

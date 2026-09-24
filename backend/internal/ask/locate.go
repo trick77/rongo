@@ -325,7 +325,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		// is a record disagreeing with the bill.
 		report.Rounds = round + 1
 		turn, err := g.locate.CallTools(ctx, msgs, locateTools(),
-			llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+			llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 			llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
 		if err != nil && ctx.Err() == nil {
 			// A fan-out that ran into the output cap still carries every call
@@ -403,16 +403,11 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				continue
 			}
 			if len(landings) == 0 {
+				// A refusal took the other branch above, so this is a lookup
+				// that ran and found nothing, and the model is told exactly
+				// that.
 				report.Empty = append(report.Empty, label)
-				// What the model is told has to match what happened. A call
-				// refused for its repository, its arguments or its tool was
-				// not a spelling that missed, and "try another spelling"
-				// would send it away from a pattern that was right.
-				result := refused
-				if result == "" {
-					result = "Nothing found. Try a different spelling or another tool."
-				}
-				msgs = append(msgs, llm.ToolResult(call.ID, result))
+				msgs = append(msgs, llm.ToolResult(call.ID, "Nothing found. Try a different spelling or another tool."))
 				continue
 			}
 			before := len(a.out)
@@ -602,7 +597,7 @@ func isIdentRune(r rune) bool {
 func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string {
 	msgs = append(msgs, llm.ToolMessage{Role: "user", Content: locateConclude})
 	turn, err := g.locate.CallTools(ctx, msgs, nil,
-		llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+		llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 		llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
 	if err != nil {
 		g.logger().Warn("locate conclusion failed; the landings are kept", "err", err)

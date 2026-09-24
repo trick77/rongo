@@ -6,8 +6,9 @@
 // meant would force the reader to pick half an answer. Deriving that from a
 // model's opinion about two module names would be a guess; a manifest is not.
 //
-// Only go.mod is parsed. The corpus holds no Maven, npm or .NET repository, and
-// a parser no test can drive against real input is a liability rather than
+// go.mod is parsed here. Maven and npm coordinates come in through SyncWith,
+// read by internal/units from those manifests; .NET is not read, because a
+// parser no test can drive against real input is a liability rather than
 // coverage.
 package repodeps
 

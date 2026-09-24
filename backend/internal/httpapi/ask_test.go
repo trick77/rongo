@@ -154,6 +154,9 @@ func (f *fakeAsker) Resume(ctx context.Context, _ string, aud ask.Audience, lang
 	f.gotScope = gotScope
 	f.gotLang = lang
 	f.gotThread = t
+	if f.during != nil {
+		f.during(ctx)
+	}
 	for _, c := range f.calls {
 		usage.Record(ctx, c)
 	}
@@ -1482,6 +1485,48 @@ func TestAClarificationIsAnsweredOnceAndASecondChoiceIsRefused(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Errorf("the refused choice wrote %d extra messages", len(after)-len(before))
+	}
+}
+
+// TestAClarificationBeingAnsweredRefusesASecondChoice is the double-click.
+// The answer closes the card, and until it lands the card looks open — so
+// a second choice arriving mid-turn used to pass the "already answered"
+// check, run a second full resume and link both rows to the card.
+func TestAClarificationBeingAnsweredRefusesASecondChoice(t *testing.T) {
+	srv, store := newTestServerWithStore(t, withAskerResuming())
+	msgID, _ := seedClarification(t, store)
+	threadID := threadOf(t, store, msgID)
+	asker := srv.deps.Ask.(*fakeAsker)
+	var second int
+	asker.during = func(context.Context) {
+		asker.during = nil
+		second = doStatus(t, srv, "/api/ask",
+			fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":0}`, msgID))
+	}
+
+	// When the same card is chosen again while the first choice is answering
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
+
+	// Then the first answers, the second is refused, and only one row links to the card
+	if !strings.Contains(body, "event: token") {
+		t.Fatalf("the first choice must answer:\n%s", body)
+	}
+	if second != http.StatusConflict {
+		t.Errorf("second choice mid-turn: status %d, want 409", second)
+	}
+	msgs, err := store.Messages(context.Background(), testSubject, threadID)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	var linked int
+	for _, m := range msgs {
+		if m.FromClarificationID != 0 {
+			linked++
+		}
+	}
+	if linked != 1 {
+		t.Errorf("%d rows link to the card, want 1", linked)
 	}
 }
 

@@ -67,7 +67,7 @@ func Followups(
 	out, _, err := c.Complete(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(followupsSystem, name, name)},
 		{Role: "user", Content: followupsPrompt(question, answer, audience, sources, scope)},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(followupsMaxTokens), llm.WithStep("followups"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(followupsMaxTokens), llm.WithStep("followups"))
 	if err != nil {
 		return nil
 	}

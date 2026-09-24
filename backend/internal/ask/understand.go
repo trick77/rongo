@@ -32,22 +32,6 @@ import (
 // here and not read by anyone.
 const understandMaxTokens = 512
 
-// gateTemperature pins every call in this package whose output is an id, a
-// label or a one-word decision — the understanding, the routing judge, the
-// candidate naming, the thread title. None of them is read as prose, and a
-// re-roll on any of them is a defect rather than variety: phase 4c measured
-// two runs of the routing arm over frozen expansions and an unchanged corpus
-// deciding three of sixty-one questions differently, a spread wider than the
-// difference phase 4b published between the two deployments. The reader meets
-// the same thing as "ask twice, get a card once and an answer the other time".
-//
-// The answer call is NOT pinned. A person reads that one.
-//
-// The value is the intent, not the wire: llm.Policy (BACKEND_LLM_GATE_TEMPERATURE)
-// decides what a pinned call actually sends, because 0 was measured on MiMo
-// and another model may refuse it or want none.
-const gateTemperature = 0
-
 // Understanding is what the first step produces. Nobody reads it — it exists to
 // aim the search.
 type Understanding struct {
@@ -479,10 +463,10 @@ var fenceRe = regexp.MustCompile("(?s)```.*?(```|$)")
 //
 // The previous answer arrives stripped and cut short. Citation markers number
 // sources this call cannot see and will not use. Fenced blocks are worse than
-// useless: an answer's diagram fence is a JSON spec, and 1200 characters of
-// {"nodes":[{"id":...}]} is what the excerpt would otherwise consist of for
-// any follow-up to a turn that drew one. What is left is the prose, which is
-// the only part that says what the turn was about.
+// useless: an answer's diagram is a mermaid fence, and 1200 characters of
+// `flowchart TD` node and edge lines is what the excerpt would otherwise
+// consist of for any follow-up to a turn that drew one. What is left is the
+// prose, which is the only part that says what the turn was about.
 func recall(question string, t Thread) string {
 	if t.Question == "" {
 		return question
@@ -513,7 +497,7 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: understandPrompt(holder != nil, t.Question != "") + stageList(stageNames)},
 		{Role: "user", Content: recall(question, t) + memoryList(holder)},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
 		return Understanding{}, fmt.Errorf("understand the question: %w", err)
 	}

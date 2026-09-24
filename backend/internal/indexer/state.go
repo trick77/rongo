@@ -299,15 +299,14 @@ func purgeRepoTx(ctx context.Context, tx *sql.Tx, name string) error {
 	return nil
 }
 
-// purgeContent removes every file the index holds for one repository.
-//
-// The rows go one file at a time, each preceded by clearFileContent, and NOT as
-// a single "DELETE FROM files WHERE repo = ?". The FK cascade reaches chunks,
-// but chunks_vec (vec0) and chunks_fts (fts5) can take part in neither a
-// cascade nor a trigger, so a bulk delete would leave both mirrors holding rows
-// whose chunks are gone. An orphaned vector is not inert: the semantic lane
-// keeps returning it, and rowid == chunks.id then resolves it against whatever
-// chunk is written next.
+// purgeContent removes every file the index holds for one repository, in the
+// order the mirrors demand: chunks_vec and chunks_fts by the repository's
+// chunk ids FIRST, then the files rows, whose FK cascade takes chunks and
+// symbols. The two mirrors can take part in neither a cascade nor a trigger,
+// so a bare "DELETE FROM files WHERE repo = ?" would leave both holding rows
+// whose chunks are gone — and an orphaned vector is not inert: the semantic
+// lane keeps returning it, and rowid == chunks.id then resolves it against
+// whatever chunk is written next.
 func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	// The mirrors go FIRST and by hand. Deleting the files rows cascades to
 	// chunks and symbols, but a cascade cannot reach chunks_vec (vec0) or
@@ -317,8 +316,8 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	// resolves it against whatever chunk is written next.
 	for _, mirror := range []string{"chunks_vec", "chunks_fts"} {
 		// mirror is one of the two literals above, never caller input.
-		if _, err := tx.ExecContext(ctx, //nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-			//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
+		if _, err := tx.ExecContext(ctx,
+			//nolint:gosec // only fixed SQL structure is interpolated (a literal table name); every value is a bound ? parameter
 			`DELETE FROM `+mirror+` WHERE rowid IN (
 			SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?)`,
 			name); err != nil {

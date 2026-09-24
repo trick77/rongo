@@ -686,6 +686,28 @@ describe("Ask, a stored thread", () => {
     expect(JSON.parse(String(post![1]?.body)).thread_id).toBe("");
   });
 
+  // And the new thread is the one on screen: its id is adopted and the turn
+  // is drawn. With the screen still standing in the dead thread, the thread
+  // event was ignored and every token streamed into a turn nobody saw.
+  it("shows the answer of the new thread asked from a thread that is gone", async () => {
+    routedFetch([], [
+      ev("thread", { thread_id: "v76BBy2b1nMYOFl2Lnm9JQ", message_id: 7, language: "en" }),
+      ev("token", { text: "Shipping is " }),
+      ev("token", { text: "by boat." }),
+      ev("done", {}),
+    ]);
+    const onThread = vi.fn();
+    strict(<Ask threadId="999" onThread={onThread} />);
+    await screen.findByText(/no longer available/);
+
+    await userEvent.type(screen.getByRole("textbox"), "How does shipping work?");
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    await waitFor(() => expect(onThread).toHaveBeenCalledWith("v76BBy2b1nMYOFl2Lnm9JQ"));
+    expect(await screen.findByText(/by boat/)).toBeTruthy();
+    expect(screen.queryByText(/no longer available/)).toBeNull();
+  });
+
   // Leaving for the unasked question has to take the panel with it, or it
   // stands over the welcome — and then over the next answer, because the
   // thread event makes the effect return before anything clears it.

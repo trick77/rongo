@@ -182,12 +182,15 @@ type Server struct {
 	// turns is the answers being streamed right now, so a thread deleted
 	// mid-answer stops the turn writing into it instead of paying for it.
 	turns *turns
+	// claims is the clarifications being answered right now, so a card
+	// cannot be chosen twice before its first answer has closed it.
+	claims *claims
 }
 
 // NewServer builds the router and wraps it in the middleware chain once,
 // rather than per request.
 func NewServer(deps Deps) *Server {
-	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns()}
+	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims()}
 	s.routes()
 	// logging outermost: a panicked request must still produce an access-log
 	// line (as a 500), so recovery has to run inside logging, not around it.

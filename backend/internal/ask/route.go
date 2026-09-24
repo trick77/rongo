@@ -1166,7 +1166,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
-	opts := []llm.Option{llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
 	if r.judgeDeployment != nil {
 		opts = append(opts, r.judgeDeployment)
 	}
@@ -1219,7 +1219,7 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 	out, _, err := r.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: choosableSystem},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 		llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route"))
 	if err != nil {
 		return false, fmt.Errorf("judge whether the role can choose: %w", err)
@@ -1295,7 +1295,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: b.String()},
-			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
 			if err != nil {
 				return
 			}

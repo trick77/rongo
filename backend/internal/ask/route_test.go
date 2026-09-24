@@ -1220,8 +1220,10 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 			t.Errorf("call %d sent no temperature; the endpoint's default would re-roll a one-word decision", i)
 			continue
 		}
-		if *temp != gateTemperature {
-			t.Errorf("call %d sent temperature %v, want %v", i, *temp, gateTemperature)
+		// The policy's pin, 0 by default: the call asks for it, llm.Policy
+		// says what it is.
+		if *temp != 0 {
+			t.Errorf("call %d sent temperature %v, want the policy's pin of 0", i, *temp)
 		}
 	}
 }

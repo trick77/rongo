@@ -364,6 +364,15 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "this clarification was already answered", http.StatusConflict)
 			return
 		}
+		// Answered is read off the record, and the record closes the card
+		// only once the answer has landed. Until then the claim holds it,
+		// so a second choice arriving mid-turn is refused the same way.
+		release, ok := s.claims.claim(c.ID)
+		if !ok {
+			http.Error(w, "this clarification is being answered", http.StatusConflict)
+			return
+		}
+		defer release()
 		// An empty module key is what a repository card writes: the choice was
 		// a repository, not a module, and there are no stored hits to replay —
 		// the resumed turn searches that repository instead. Reading the

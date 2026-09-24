@@ -736,3 +736,31 @@ func TestPipeline_theUnderstandingsWordsReachTheCrossing(t *testing.T) {
 		t.Error("the code terms name the key's words, and the crossing was still refused")
 	}
 }
+
+// TestGather_readsTestFilesAfterTheMechanismAcrossTheWholeHop: the ordering
+// is per HOP, not per source. Two hits in one hop, the first referencing a
+// test and the second the mechanism: with room for one, the mechanism is the
+// one taken, whichever hit referenced it.
+func TestGather_readsTestFilesAfterTheMechanismAcrossTheWholeHop(t *testing.T) {
+	db := gatherDB(t)
+	first := seedChunk(t, db, "handler.go", 0, 1, 10, "handle", "func handle() { Authorise() }")
+	second := seedChunk(t, db, "other.go", 0, 1, 10, "other", "func other() { Decline() }")
+	body := strings.Repeat("x ", 400)
+	seedChunk(t, db, "a_test.go", 0, 1, 10, "TestAuthorise", "func Authorise() { "+body+" }")
+	seedSymbol(t, db, "a_test.go", "Authorise", 1)
+	seedChunk(t, db, "service.go", 0, 1, 10, "Decline", "func Decline() { "+body+" }")
+	seedSymbol(t, db, "service.go", "Decline", 1)
+
+	// Room for the two hits and ONE reference under the symbol walk's share.
+	got, err := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 400}).
+		Gather(context.Background(), []retrieve.Hit{hitFor(t, db, first), hitFor(t, db, second)})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if !has(got, "service.go") {
+		t.Errorf("sources = %v, want the mechanism taken before the test file of the hop", paths(got))
+	}
+	if has(got, "a_test.go") {
+		t.Errorf("sources = %v, want the test file left for lack of room", paths(got))
+	}
+}

@@ -317,3 +317,33 @@ func TestRunWithoutANamedRepositoryRunsNoCensus(t *testing.T) {
 		t.Errorf("a census ran over the corpus:\n%s", *prompt)
 	}
 }
+
+// TestCensus_anOversizedSiteDoesNotEndTheSeeding: the share is spent site by
+// site, and a chunk that does not fit is passed over, not the end of the
+// listing's landings. One large early site used to leave every smaller one
+// after it unseeded with most of the share unspent.
+func TestCensus_anOversizedSiteDoesNotEndTheSeeding(t *testing.T) {
+	db := gatherDB(t)
+	seedRepo(t, db, "claims-ui")
+	opts := GatherOptions{MaxHops: 1, TokenBudget: 2400}
+	share := opts.TokenBudget / censusShare
+	// "x " is two runes, half a token: 4*share repeats is twice the share.
+	seedChunkIn(t, db, "claims-ui", "src/a.html", 0, 1, 20, "",
+		`<a href="https://a.example.ch">A</a> `+strings.Repeat("x ", 4*share))
+	seedTokenIn(t, db, "claims-ui", "src/a.html", "link", "https://a.example.ch", 1)
+	seedChunkIn(t, db, "claims-ui", "src/b.html", 0, 1, 20, "",
+		`<a href="https://b.example.ch">B</a>`)
+	seedTokenIn(t, db, "claims-ui", "src/b.html", "link", "https://b.example.ch", 1)
+
+	census, err := NewGatherer(db, opts).LinkCensus(context.Background(), []string{"claims-ui"})
+	if err != nil {
+		t.Fatalf("LinkCensus: %v", err)
+	}
+
+	if hasIn(census.Landings, "claims-ui", "src/a.html") {
+		t.Errorf("the oversized site landed: %v", repoPaths(census.Landings))
+	}
+	if !hasIn(census.Landings, "claims-ui", "src/b.html") {
+		t.Errorf("the site after the oversized one did not land: %v", repoPaths(census.Landings))
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,6 +36,7 @@ import (
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
@@ -64,6 +66,18 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 			slog.Warn("recording the swept totals failed", "repo", st.Name, "err", err)
 		}
 		slog.Info("skipped files removed from the index", "repo", st.Name, "files", changed)
+	}
+}
+
+// sweepSessions deletes expired sessions once a day until ctx ends. The boot
+// already ran one; this is for a rongo that stays up for months.
+func sweepSessions(ctx context.Context, authSvc *auth.Service) {
+	for sched.Sleep(ctx, 24*time.Hour) {
+		if n, err := authSvc.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+			slog.Warn("delete expired sessions", "err", err)
+		} else if n > 0 {
+			slog.Info("expired sessions removed", "sessions", n)
+		}
 	}
 }
 
@@ -117,7 +131,9 @@ func main() {
 	}
 
 	if *healthcheck {
-		resp, err := http.Get("http://" + cfg.Addr + "/healthz")
+		// Bounded: a healthcheck that hangs is a container never reported
+		// unhealthy.
+		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + cfg.Addr + "/healthz")
 		if err != nil {
 			os.Exit(1)
 		}
@@ -171,9 +187,19 @@ func main() {
 	// A title call cannot outlive the process that started it, so a thread
 	// still waiting for one was orphaned by the last shutdown. Left pending it
 	// would hold "New question" in its header for good.
-	if err := threads.NewStore(db).SettleTitles(ctx); err != nil {
+	threadStore := threads.NewStore(db)
+	if err := threadStore.SettleTitles(ctx); err != nil {
 		slog.Error("settle orphaned thread titles", "err", err)
 		os.Exit(1)
+	}
+	// The same for the turns themselves: a row still unfinished now was left
+	// by a crash, and a share's ceiling sits below the oldest unfinished row,
+	// so an orphan would hold every later turn off the public page for good.
+	if n, err := threadStore.FailOrphaned(ctx); err != nil {
+		slog.Error("fail orphaned turns", "err", err)
+		os.Exit(1)
+	} else if n > 0 {
+		slog.Warn("marked turns left unfinished by the last shutdown as failed", "turns", n)
 	}
 	// Every thread needs an address before a single request is served: it is
 	// what /thread/… and every /api/threads/… path is written in, and a thread
@@ -186,6 +212,15 @@ func main() {
 	}
 
 	authSvc := auth.NewService(db, string(cfg.AuthMode), cfg.AdminToken)
+	// Expired sessions are deleted at boot and once a day after; nothing
+	// else ever removes them, and a table that only grows is a table that
+	// one day does not fit.
+	if n, err := authSvc.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		slog.Error("delete expired sessions", "err", err)
+		os.Exit(1)
+	} else if n > 0 {
+		slog.Info("expired sessions removed", "sessions", n)
+	}
 	if cfg.AuthMode == config.AuthModePassword {
 		authSvc.SetPasswordAccount(cfg.AdminUser, cfg.AdminPasswordHash)
 	}
@@ -314,6 +349,11 @@ func main() {
 	pollCtx, stopPolling := context.WithCancel(ctx)
 	defer stopPolling()
 	var workers sync.WaitGroup
+	// Decided here, started below: the workers begin only after the last
+	// step that can still exit the process (provider discovery, the listen),
+	// so a fetch or an index transaction is never killed by a boot that
+	// failed for an unrelated reason.
+	indexing := false
 	switch {
 	case cfg.IndexEnabled && !listLoaded:
 		// No list on disk, but possibly a whole corpus in the database. The
@@ -335,12 +375,7 @@ func main() {
 		// failure is logged, not fatal: the next poll still indexes correctly.
 		// It runs on the poller's goroutine so the HTTP side comes up without
 		// waiting for it, and so a shutdown cancels it like any other index work.
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			sweepExcluded(pollCtx, state, pipeline)
-			poller.Run(pollCtx)
-		}()
+		indexing = true
 	default:
 		slog.Warn("indexing is disabled; no repository will be fetched or embedded",
 			"fix", "set BACKEND_INDEX_ENABLED=true")
@@ -429,9 +464,15 @@ func main() {
 	}
 	srv := httpapi.NewServer(deps)
 
+	// Every handler's context hangs off this one, so a shutdown that runs
+	// out of patience can cancel the answers still streaming instead of
+	// abandoning them to os.Exit.
+	handlerCtx, cancelHandlers := context.WithCancel(ctx)
+	defer cancelHandlers()
 	httpServer := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: srv,
+		Addr:        cfg.Addr,
+		Handler:     srv,
+		BaseContext: func(net.Listener) context.Context { return handlerCtx },
 		// Reap connections that dawdle on headers or sit idle, e.g. a
 		// misbehaving client or a scanner. Deliberately no WriteTimeout:
 		// phase 4 streams SSE responses for minutes, and a global
@@ -442,10 +483,30 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
+	// The listen is the last thing that can refuse to boot, so it happens
+	// before the workers start.
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		slog.Error("listen failed", "addr", cfg.Addr, "err", err)
+		os.Exit(1)
+	}
+	if indexing {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			sweepExcluded(pollCtx, state, pipeline)
+			poller.Run(pollCtx)
+		}()
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		sweepSessions(pollCtx, authSvc)
+	}()
 	serveErr := make(chan error, 1)
 	go func() {
 		slog.Info("listening", "addr", cfg.Addr, "auth_mode", string(cfg.AuthMode))
-		serveErr <- httpServer.ListenAndServe()
+		serveErr <- httpServer.Serve(ln)
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -459,16 +520,19 @@ func main() {
 		}
 	case sig := <-sigCh:
 		slog.Info("shutting down", "signal", sig.String())
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		cut, err := shutdown(httpServer, cancelHandlers, stopPolling, &workers, shutdownLimit)
+		if cut {
+			slog.Warn("answers still streaming were cut short", "limit", shutdownLimit.String())
+		}
+		if err != nil {
 			slog.Error("graceful shutdown failed", "err", err)
 			os.Exit(1)
 		}
 	}
 
 	// Stop the background workers and wait for them, so a shutdown cannot leave
-	// a git command or a half-written transaction behind.
+	// a git command or a half-written transaction behind. A no-op after
+	// shutdown above; here for the server stopping on its own.
 	stopPolling()
 	workers.Wait()
 }

@@ -207,7 +207,7 @@ func judgeAnswer(ctx context.Context, c *llm.Client, r Rubric, answer string) (v
 	out, _, err := c.Complete(ctx, []llm.Message{
 		{Role: "system", Content: judgeAnswerSystem},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(0), llm.WithMaxTokens(512), llm.WithStep("judge-answer"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(512), llm.WithStep("judge-answer"))
 	if err != nil {
 		return verdict{}, err
 	}

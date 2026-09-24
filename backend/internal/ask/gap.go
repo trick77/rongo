@@ -148,7 +148,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	out, _, err := g.gap.Complete(ctx, []llm.Message{
 		{Role: "system", Content: gapSystem},
 		{Role: "user", Content: gapPrompt(question, sources)},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithTemperature(gateTemperature),
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
 		llm.WithMaxTokens(gapMaxTokens), llm.WithStep("gap"))
 	if err != nil {
 		if ctx.Err() != nil {
@@ -191,15 +191,19 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	}
 	a.out = append(a.out, sources...)
 
+	// The stage and the turn's ceiling go INTO the lookups, before the
+	// per-name cap: applied after, four out-of-scope definitions fill the cap
+	// and the one in scope is dropped, with the name reported neither landed,
+	// unresolved nor refused.
+	keep := func(s Source) bool { return inStage(s.Repo, s.Path, stage) && a.permits(s) }
 	for i, n := range report.Asked {
-		landings, err := g.resolve(ctx, n, sources, stage)
+		landings, err := g.resolve(ctx, n, sources, keep)
 		if err != nil {
 			return sources, GapReport{}, err
 		}
-		// The stage restriction before the emptiness check: a name only
-		// another stage holds is one this turn could not resolve, and
-		// dropping it silently would leave the report short a name.
-		landings = within(landings, stage)
+		// A name only another stage or repository holds is one this turn
+		// could not resolve, and dropping it silently would leave the
+		// report short a name.
 		if len(landings) == 0 {
 			report.Unresolved = append(report.Unresolved, n.Name)
 			continue
@@ -236,12 +240,12 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 // resolve turns one name into landings, deterministically: the kind says
 // which index holds it, and a name that index does not know is reported,
 // never guessed at.
-func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, stage retrieve.StagePrefixes) ([]Source, error) {
+func (g *Gatherer) resolve(ctx context.Context, n GapName, sources []Source, keep func(Source) bool) ([]Source, error) {
 	switch edges.Kind(n.Kind) {
 	case edges.KindRoute, edges.KindDestination, edges.KindProperty:
-		return g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, stage)
+		return g.tokenLandings(ctx, edges.Kind(n.Kind), n.Name, keep)
 	default:
-		return g.symbolLandings(ctx, n.Name, sources, nil)
+		return g.symbolLandings(ctx, n.Name, sources, keep)
 	}
 }
 
@@ -329,7 +333,7 @@ func atHome(rows []Source, sources []Source) []Source {
 // per stage, and counting the stages the turn did not ask about towards the
 // cap spends it on landings that are then filtered away — a turn narrowed to
 // production would lose the one file it was allowed to read.
-func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name string, stage retrieve.StagePrefixes) ([]Source, error) {
+func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name string, keep func(Source) bool) ([]Source, error) {
 	var out []Source
 	files := map[string]bool{}
 	for _, v := range gapValues(kind, name) {
@@ -338,7 +342,7 @@ func (g *Gatherer) tokenLandings(ctx context.Context, kind edges.Kind, name stri
 			return nil, fmt.Errorf("look up the holders of %s %q: %w", kind, v, err)
 		}
 		for _, h := range ns {
-			if !inStage(h.Repo, h.Path, stage) {
+			if keep != nil && !keep(Source{Repo: h.Repo, Path: h.Path}) {
 				continue
 			}
 			key := h.Repo + "\x00" + h.Path

@@ -3,7 +3,6 @@ package indexer
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -196,22 +195,30 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var fileID int64
-	err = tx.QueryRowContext(ctx, `SELECT id FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&fileID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
-	}
+	// The transaction WRITES first. In WAL mode a transaction that opens with
+	// a read holds a snapshot, and its first write after another connection
+	// has committed fails at once with "database is locked" — the busy timeout
+	// never runs for a stale snapshot. The HTTP side writes titles, usage and
+	// steps all the time, so the old "SELECT id, then delete" shape failed
+	// whole incremental runs on a race every test missed.
+	//
 	// The mirrors go first: foreign_keys is ON, so deleting the files row
 	// cascades chunks away, and chunks_vec and chunks_fts are NOT part of that
 	// cascade. Letting it fire first would orphan them permanently, and an
 	// orphaned vector keeps answering questions about deleted code.
-	if err := clearFileContent(ctx, tx, fileID); err != nil {
-		return err
+	const owned = `SELECT id FROM chunks WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`
+	for _, q := range []string{
+		`DELETE FROM chunks_vec WHERE rowid IN (` + owned + `)`,
+		`DELETE FROM chunks_fts WHERE rowid IN (` + owned + `)`,
+		`DELETE FROM chunks WHERE id IN (` + owned + `)`,
+		`DELETE FROM symbols WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`,
+		`DELETE FROM integration_tokens WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, repo, path); err != nil {
+			return fmt.Errorf("delete %s/%s: %w", repo, path, err)
+		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE id = ?`, fileID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE repo = ?1 AND path = ?2`, repo, path); err != nil {
 		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
 	}
 	return tx.Commit()

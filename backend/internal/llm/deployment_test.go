@@ -114,7 +114,7 @@ func TestGateKnobsAreBestEffort(t *testing.T) {
 		Logger: slog.New(slog.NewTextHandler(&logged, nil))}, srv.Client())
 	for range 2 {
 		_, _, err := c.Complete(context.Background(), []Message{{Role: "user", Content: "x"}},
-			ShortGate(), WithoutThinking(), WithTemperature(0))
+			ShortGate(), WithoutThinking(), WithGateTemperature())
 		if err != nil {
 			t.Fatalf("the call must go out with the nearest accepted request: %v", err)
 		}

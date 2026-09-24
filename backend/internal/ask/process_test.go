@@ -167,3 +167,31 @@ func TestDescribeProcessesStopsAtTheCap(t *testing.T) {
 		t.Errorf("cap not applied as expected:\n%.300s", got)
 	}
 }
+
+// TestReexplainRebuildsTheProcessListing: the listing is never persisted, so
+// a re-explain that does not rebuild it answers the same question from the
+// same sources with the flowchart walk missing — present in the first
+// answer, gone from the second.
+func TestReexplainRebuildsTheProcessListing(t *testing.T) {
+	db := gatherDB(t)
+	c, prompt, _ := streamUpstream(t, "So.")
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p.models = fakeModels{files: map[string]map[string]string{
+		"shop": {"workflow/order-intake.bpmn": orderIntakeModel(t)},
+	}}
+	sources := []Source{
+		{ChunkID: 1, Repo: "shop", Branch: "main", Path: "workflow/order-intake.bpmn", Symbol: "Validate order",
+			StartLine: 1, EndLine: 10, Text: "<serviceTask name=\"Validate order\"/>", Reason: "hit"},
+	}
+
+	got, err := p.Reexplain(context.Background(), "Walk me through order intake", AudienceDev, LanguageEN, sources, Scope{}, Events{})
+	if err != nil {
+		t.Fatalf("Reexplain: %v", err)
+	}
+	if !strings.Contains(*prompt, `Process "order-intake"`) {
+		t.Errorf("the re-explained answer was written without the process walk:\n%s", *prompt)
+	}
+	if got.Scope.Processes == "" {
+		t.Error("scope.Processes is empty on the re-explained turn")
+	}
+}

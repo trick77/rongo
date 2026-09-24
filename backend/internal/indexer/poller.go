@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -321,12 +320,9 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 
 	head, err := p.git.HeadSHA(ctx, spec, branch)
 	if err != nil {
-		// ErrBranchGone is passed through deliberately: the caller records it,
-		// and the Repos page shows it. A silent stop here would freeze the
+		// ErrBranchGone included, deliberately: the caller records it, and
+		// the Repos page shows it. A silent stop here would freeze the
 		// index while every status looked healthy.
-		if errors.Is(err, gitrepo.ErrBranchGone) {
-			return pollResult{}, err
-		}
 		return pollResult{}, err
 	}
 

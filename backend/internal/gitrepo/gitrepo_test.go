@@ -495,3 +495,71 @@ func TestRemoveCheckout_refusesANameThatWouldLeaveTheRoot(t *testing.T) {
 		}
 	}
 }
+
+// TestChangedEntries_carriesTheModeOfEachEntry: the indexer reads only regular
+// blobs, and the mode is the one fact that tells a symlink or a submodule
+// pointer from a file BEFORE the read. A deleted entry has no mode to speak
+// of and says so.
+func TestChangedEntries_carriesTheModeOfEachEntry(t *testing.T) {
+	src := fixtureRepo(t)
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	first, err := c.HeadSHA(context.Background(), spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+	if err := os.Symlink("a.txt", filepath.Join(src, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(src, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, src, "add", "-A")
+	gitRun(t, src, "commit", "-qm", "link, script, delete")
+	if err := c.Fetch(context.Background(), spec, ""); err != nil {
+		t.Fatalf("Fetch() err = %v", err)
+	}
+	second, err := c.HeadSHA(context.Background(), spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+
+	changes, err := c.ChangedEntries(context.Background(), spec, first, second)
+	if err != nil {
+		t.Fatalf("ChangedEntries() err = %v", err)
+	}
+	got := map[string]Change{}
+	for _, ch := range changes {
+		got[ch.Path] = ch
+	}
+	if ch := got["link"]; ch.Mode != "120000" || ch.Deleted {
+		t.Errorf("link = %+v, want a symlink mode", ch)
+	}
+	if ch := got["run.sh"]; ch.Mode != "100755" || ch.Deleted {
+		t.Errorf("run.sh = %+v, want an executable blob", ch)
+	}
+	if ch := got["a.txt"]; !ch.Deleted || ch.Mode != "" {
+		t.Errorf("a.txt = %+v, want deleted with no mode", ch)
+	}
+	if !Indexable("100644") || !Indexable("100755") || Indexable("120000") || Indexable("160000") {
+		t.Error("Indexable must admit regular blobs only")
+	}
+
+	entries, err := c.ListEntries(context.Background(), spec, second)
+	if err != nil {
+		t.Fatalf("ListEntries() err = %v", err)
+	}
+	listed := map[string]string{}
+	for _, e := range entries {
+		listed[e.Path] = e.Mode
+	}
+	if listed["link"] != "120000" || listed["run.sh"] != "100755" {
+		t.Errorf("ListEntries() modes = %v", listed)
+	}
+}

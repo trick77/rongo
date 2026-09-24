@@ -307,6 +307,32 @@ func (s *Store) SettleTitles(ctx context.Context) error {
 	return nil
 }
 
+// FailOrphaned marks every turn no process is writing as failed, and is meant
+// for boot and nowhere else. A turn cannot outlive the process answering it,
+// so whatever is unfinished when rongo starts was left by the last shutdown or
+// crash. Left alone such a row reads as "still streaming" for good and, worse,
+// holds a share's ceiling below it for ever. A card is a finished turn and is
+// not touched. Reports how many rows it marked.
+func (s *Store) FailOrphaned(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE messages SET error = ?
+		WHERE answer = '' AND error = ''
+		  AND NOT EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = messages.id)`,
+		orphanedTurn)
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned turns: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("fail orphaned turns: %w", err)
+	}
+	return n, nil
+}
+
+// orphanedTurn is what a turn interrupted by a restart says where its answer
+// would be. English like every other stored failure text.
+const orphanedTurn = "This answer was interrupted by a restart. Ask again."
+
 // Rename gives a thread the title its owner typed. Reports whether a row
 // matched: a thread that is gone, or was never this reader's, is not an error
 // here, it is a 404 at the edge.

@@ -124,10 +124,11 @@ func TestRepoStatus_aRepositoryThatLeftTheListIsGoneFromThePage(t *testing.T) {
 	}
 }
 
-func TestRepoStatus_anExplicitlyDisabledRepositoryKeepsItsIndexAndItsRow(t *testing.T) {
+func TestRepoStatus_aParkedRepositoryKeepsItsIndexAndLeavesThePage(t *testing.T) {
 	// Given: peeq indexed, then marked `enabled: false` in the YAML. That is a
-	// repository being left alone, not one being retired: it stays listed with
-	// everything it has.
+	// repository being parked, not retired: its index and its row stay for
+	// the citations already made, but it is not polled, not retrieved and
+	// not on the Repos page.
 	db := statusDB(t)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
@@ -146,13 +147,14 @@ func TestRepoStatus_anExplicitlyDisabledRepositoryKeepsItsIndexAndItsRow(t *test
 	}
 
 	// Then
-	if len(got) != 1 {
-		t.Fatalf("got %d repositories, want the disabled one kept", len(got))
+	if len(got) != 0 {
+		t.Errorf("got %+v, want the parked repository off the page", got)
 	}
-	if got[0].Enabled {
-		t.Error("Enabled = true, want false")
+	var files int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files WHERE repo = 'peeq'`).Scan(&files); err != nil {
+		t.Fatal(err)
 	}
-	if got[0].Modules != 1 {
-		t.Errorf("Modules = %d, want 1 — the index survives being disabled", got[0].Modules)
+	if files != 1 {
+		t.Errorf("files = %d, want the index kept while parked", files)
 	}
 }

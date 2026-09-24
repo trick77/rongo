@@ -221,3 +221,28 @@ func TestEnsureSnapshot_dropWithGitignoreSkipsWhatItNames(t *testing.T) {
 		t.Errorf("ListPaths() = %v, want dist/ left out", paths)
 	}
 }
+
+// TestSnapshotDiffers_aBrokenIndexIsAnErrorNotAChange: `diff --cached --quiet`
+// exits 1 for "differences found" and 128 for a real failure, and "exit
+// status 128" contains "exit status 1". Read as a change, a broken index
+// would send the poller into a commit it cannot make, every poll, with the
+// real error text discarded.
+func TestSnapshotDiffers_aBrokenIndexIsAnErrorNotAChange(t *testing.T) {
+	c := newClient(t)
+	spec := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	if _, err := c.EnsureSnapshot(context.Background(), spec); err != nil {
+		t.Fatalf("EnsureSnapshot() err = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(c.Dir(spec), ".git", "index"), []byte("garbage"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := c.snapshotDiffers(context.Background(), c.Dir(spec))
+
+	if err == nil {
+		t.Fatalf("snapshotDiffers() = %v, nil; want the git failure", changed)
+	}
+	if !strings.Contains(err.Error(), "index") {
+		t.Errorf("snapshotDiffers() err = %v, want git's own text about the index", err)
+	}
+}

@@ -75,14 +75,25 @@ const SharePath = "/share/"
 // in flight can be told "not yet" rather than "nothing here".
 func (s *Store) ceilingFor(ctx context.Context, subject string, threadID int64) (id int64, found, live bool, err error) {
 	var rows int
+	// The ceiling is the newest finished row BELOW the oldest unfinished one,
+	// not the newest finished row: a turn still streaming in another tab sits
+	// under a later finished turn, and a ceiling above it would let its answer
+	// onto the public page the moment it lands — a link growing behind the
+	// owner's back. FailOrphaned at boot is what keeps a crashed row from
+	// holding the ceiling down for good.
 	err = s.db.QueryRowContext(ctx, `
+		WITH turn AS (
+			SELECT m.id,
+			       (m.answer <> '' OR m.error <> ''
+			        OR EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id)) AS done
+			FROM messages m JOIN threads t ON t.id = m.thread_id
+			WHERE m.thread_id = ? AND t.user_subject = ?
+		),
+		open AS (SELECT COALESCE(MIN(id), 0) AS first FROM turn WHERE NOT done)
 		SELECT
-			COALESCE(MAX(CASE WHEN m.answer <> '' OR m.error <> ''
-			                    OR EXISTS (SELECT 1 FROM clarifications c WHERE c.message_id = m.id)
-			                  THEN m.id END), 0),
+			COALESCE(MAX(CASE WHEN done AND (open.first = 0 OR id < open.first) THEN id END), 0),
 			COUNT(*)
-		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.thread_id = ? AND t.user_subject = ?`, threadID, subject).Scan(&id, &rows)
+		FROM turn, open`, threadID, subject).Scan(&id, &rows)
 	if err != nil {
 		return 0, false, false, fmt.Errorf("read thread ceiling: %w", err)
 	}

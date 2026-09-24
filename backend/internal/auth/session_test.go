@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -92,5 +93,32 @@ func TestUserByToken_rejectsUnknownToken(t *testing.T) {
 
 	if ok {
 		t.Error("UserByToken() ok = true for an unknown token, want false")
+	}
+}
+
+func TestDeleteExpiredSessions_takesOnlyWhatHasExpired(t *testing.T) {
+	svc := newService(t)
+	u, err := svc.UpsertUser("jan", "jan@example.invalid", true)
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	live, err := svc.CreateSession(u.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.CreateSession(u.ID, time.Second); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	n, err := svc.DeleteExpiredSessions(context.Background(), time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+
+	if n != 1 {
+		t.Errorf("deleted %d sessions, want the one that expired", n)
+	}
+	if _, ok := svc.UserByToken(live); !ok {
+		t.Error("the live session went with it")
 	}
 }

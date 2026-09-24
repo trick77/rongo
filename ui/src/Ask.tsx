@@ -359,6 +359,12 @@ export default function Ask({
   }
 
   useEffect(() => {
+    // The gone panel belongs to the address that was refused, and any change
+    // of address takes it down — including the two that change nothing else
+    // below: leaving for the unasked question after the refusal, and the
+    // thread this composer just opened from under the panel, which the
+    // stream adopted before its id came back down as a prop.
+    setGone(false);
     if (openThread === shown.current) return;
     // Bumped FIRST, on every run — including the one that opens a fresh thread.
     // A load already in the air belongs to the thread that was just left, and
@@ -367,7 +373,6 @@ export default function Ask({
     const seq = ++loadSeq.current;
     shown.current = openThread;
     threadId.current = openThread;
-    setGone(false);
     // The total in the header belongs to the old thread until the new one has
     // loaded. The per-turn state that is also an index into the thread being
     // left — the open breakdown, the unfolded failure — is ThreadView's, and
@@ -431,6 +436,11 @@ export default function Ask({
     const closed = () => {
       setGone(true);
       threadId.current = null;
+      // The screen is not standing in that thread any more either: the next
+      // question's thread event adopts its new id only when nothing is
+      // shown, and the stream repaints only the thread on screen. Left on
+      // the dead id, the answer streamed into a turn nobody could see.
+      shown.current = null;
     };
     const arrive = (next: Turn[]) => {
       setTurns(next);
@@ -601,6 +611,10 @@ export default function Ask({
             if (shown.current === null) {
               threadId.current = payload.thread_id;
               shown.current = payload.thread_id;
+              // A live thread is on screen now, so the panel of the address
+              // refused before it comes down here, not only when the id
+              // comes back as a prop.
+              setGone(false);
               onThread(payload.thread_id);
             }
             // The turn is on record now, in the language the record took. That

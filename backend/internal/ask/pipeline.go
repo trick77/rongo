@@ -1256,17 +1256,11 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	}
 
 	ev.detail("searching", searchDetail(hits))
-	scope = p.describeProjects(ctx, scope)
-
-	sources, scope, err := p.gather(ctx, question, hits, scope, ev)
-	if err != nil {
-		return Answer{}, err
-	}
-	if len(sources) == 0 {
-		return Answer{Text: NothingFound(lang, withoutPrior(texts, u.Prior)), Scope: scope}, nil
-	}
-
-	return p.answer(ctx, question, audience, lang, sources, scope, t.Question, ev)
+	// The same tail as a fresh turn's, so the process listing and the
+	// documentation-only footing come out of a resumed turn the way they come
+	// out of any other: a copy of it here once left both off exactly the
+	// turns a repository card sent the reader into.
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -1286,6 +1280,9 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	// the project structure missing — the two-backends disambiguation present
 	// in the first answer and gone from the second.
 	scope = p.describeProjects(ctx, scope)
+	// And the process listing, never persisted either: without it the answer
+	// for the other audience loses the flowchart walk the first one had.
+	scope.Processes = p.describeProcesses(ctx, sources)
 	// The link listing too, for the same reason: it is never persisted, and
 	// the record says the turn was a census. Read again from the index, not
 	// re-gathered — the sources are the first turn's.

@@ -233,24 +233,31 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 	frontier := a.out
 symbols:
 	for hop := 1; hop <= g.opts.MaxHops; hop++ {
-		var next []Source
+		// The hop's references are gathered from every frontier source
+		// FIRST and ordered once: tests come last within a hop, not within
+		// each source's own list, or a test the first source references is
+		// admitted ahead of the mechanism the second one references and a
+		// tight budget spends itself on the harness.
+		var refs []Source
 		for _, from := range frontier {
-			refs, err := g.referenced(ctx, from)
+			r, err := g.referenced(ctx, from)
 			if err != nil {
 				return nil, err
 			}
-			for _, ref := range mechanismFirst(refs) {
-				// Outside the ceiling: never admitted, and never followed,
-				// or the next hop would gather by a reason the answer never
-				// shows.
-				if a.seen[ref.ChunkID] || !a.permits(ref) {
-					continue
-				}
-				if !a.take(ref, hop) {
-					break symbols
-				}
-				next = append(next, ref)
+			refs = append(refs, r...)
+		}
+		var next []Source
+		for _, ref := range mechanismFirst(refs) {
+			// Outside the ceiling: never admitted, and never followed,
+			// or the next hop would gather by a reason the answer never
+			// shows.
+			if a.seen[ref.ChunkID] || !a.permits(ref) {
+				continue
 			}
+			if !a.take(ref, hop) {
+				break symbols
+			}
+			next = append(next, ref)
 		}
 		if len(next) == 0 {
 			break

@@ -224,7 +224,7 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 	}
 	// --quiet exits 1 for "differences found" and says nothing on stderr;
 	// anything else is a real failure and must not read as "there are changes".
-	if strings.Contains(err.Error(), "exit status 1") {
+	if exitCode(err) == 1 {
 		return true, nil
 	}
 	return false, err
@@ -421,7 +421,7 @@ func (c *Client) HeadSHA(ctx context.Context, spec repos.Spec, branch string) (s
 	out, err := c.run(ctx, c.Dir(spec), "rev-parse", "--verify", "--quiet",
 		"refs/remotes/origin/"+branch)
 	if err != nil {
-		if !strings.Contains(err.Error(), "exit status 1") {
+		if exitCode(err) != 1 {
 			return "", err
 		}
 		if _, checkErr := c.run(ctx, c.Dir(spec), "rev-parse", "--git-dir"); checkErr != nil {
@@ -456,35 +456,71 @@ func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toS
 type Change struct {
 	Path    string
 	Deleted bool
+	// Mode is the entry's mode at the newer commit, "" when deleted: the one
+	// fact that tells a symlink (120000) or a submodule pointer (160000) from
+	// a file BEFORE it is read. `git show` of a symlink returns the link
+	// target as if it were the file's text.
+	Mode string
+}
+
+// Indexable reports whether a tree entry of this mode is a file to read:
+// regular and executable blobs, never a symlink or a submodule pointer.
+func Indexable(mode string) bool {
+	return mode == "100644" || mode == "100755"
 }
 
 // ChangedEntries is ChangedPaths with the delete/modify distinction the indexer
-// needs: a deleted path must have its rows removed, a modified one re-read.
+// needs, and each entry's mode: a deleted path must have its rows removed, a
+// modified one re-read, and a symlink or submodule pointer neither.
 //
 // --name-only cannot tell the two apart, and treating a failed read as a
 // deletion would conflate a broken checkout with code that is genuinely gone —
-// the index would quietly drop files that still exist. --no-renames is
-// deliberate: to an indexer a rename IS a delete plus an add, and asking git to
-// detect renames only produces a three-field record to parse for the same
-// outcome.
+// the index would quietly drop files that still exist. --raw carries the modes
+// --name-status does not. --no-renames is deliberate: to an indexer a rename
+// IS a delete plus an add, and asking git to detect renames only produces a
+// three-field record to parse for the same outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--name-status", "--no-renames", fromSHA+".."+toSHA)
+		"diff", "--raw", "--no-renames", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
 	changes := []Change{}
 	for _, line := range nonEmptyLines(out) {
-		status, path, ok := strings.Cut(line, "\t")
-		if !ok {
+		// :<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>
+		meta, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(strings.TrimPrefix(meta, ":"))
+		if !ok || len(fields) != 5 {
 			return nil, fmt.Errorf("unparseable diff record %q", line)
 		}
-		changes = append(changes, Change{
-			Path:    strings.TrimSpace(path),
-			Deleted: strings.HasPrefix(status, "D"),
-		})
+		ch := Change{Path: strings.TrimSpace(path), Deleted: strings.HasPrefix(fields[4], "D")}
+		if !ch.Deleted {
+			ch.Mode = fields[1]
+		}
+		changes = append(changes, ch)
 	}
 	return changes, nil
+}
+
+// ListEntries lists every tracked entry at a commit with its mode, for the
+// initial full index. ListPaths is the same listing without the modes.
+func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]Change, error) {
+	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
+		"ls-tree", "-r", sha)
+	if err != nil {
+		return nil, err
+	}
+	entries := []Change{}
+	for _, line := range nonEmptyLines(out) {
+		// <mode> <type> <sha>\t<path>
+		meta, path, ok := strings.Cut(line, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 {
+			return nil, fmt.Errorf("unparseable tree record %q", line)
+		}
+		entries = append(entries, Change{Path: path, Mode: fields[0]})
+	}
+	return entries, nil
 }
 
 // ListPaths lists every tracked path at a commit, for the initial full index.

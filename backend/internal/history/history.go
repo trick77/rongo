@@ -208,7 +208,9 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 		if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
 			return nil, err
 		}
-		c.CommittedAt, _ = time.Parse(time.RFC3339, at)
+		if c.CommittedAt, err = time.Parse(time.RFC3339, at); err != nil {
+			return nil, fmt.Errorf("commit %s: committed_at %q: %w", c.SHA, at, err)
+		}
 		if paths != "" {
 			c.Paths = strings.Split(paths, "\n")
 		}
@@ -246,7 +248,9 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 		if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
 			return nil, err
 		}
-		c.CommittedAt, _ = time.Parse(time.RFC3339, at)
+		if c.CommittedAt, err = time.Parse(time.RFC3339, at); err != nil {
+			return nil, fmt.Errorf("commit %s: committed_at %q: %w", c.SHA, at, err)
+		}
 		if paths != "" {
 			c.Paths = strings.Split(paths, "\n")
 		}
@@ -284,7 +288,9 @@ func (s *Store) Count(ctx context.Context, repo string) (n int, newest time.Time
 		return 0, time.Time{}, err
 	}
 	if at.Valid {
-		newest, _ = time.Parse(time.RFC3339, at.String)
+		if newest, err = time.Parse(time.RFC3339, at.String); err != nil {
+			return 0, time.Time{}, fmt.Errorf("newest commit of %s: committed_at %q: %w", repo, at.String, err)
+		}
 	}
 	return n, newest, nil
 }

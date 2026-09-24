@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -154,6 +155,22 @@ func (s *Service) UserByToken(token string) (User, bool) {
 	}
 	u.IsAdmin = adminInt == 1
 	return u, true
+}
+
+// DeleteExpiredSessions removes every session past its expiry. Nothing else
+// ever does: a session is deleted by its own token on logout and otherwise
+// only stops resolving, so the table grew by every login for good. Reports
+// how many rows went.
+func (s *Service) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, now.UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
+	}
+	return n, nil
 }
 
 // DeleteSession revokes one session.

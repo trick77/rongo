@@ -18,6 +18,7 @@ import (
 // GitClient is the part of gitrepo.Client the pipeline uses.
 type GitClient interface {
 	ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]string, error)
+	ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]gitrepo.Change, error)
 	ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]gitrepo.Change, error)
 	ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error)
 }
@@ -113,7 +114,11 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		if ctx.Err() != nil {
 			return Counts{}, ctx.Err()
 		}
-		if tg.deleted {
+		// Not a file is treated like a deletion: a symlink that replaced a
+		// file takes its rows away, and one that was never indexed costs a
+		// no-op delete. The mode is unknown ("") only where a caller handed
+		// over bare paths; those are read like any file.
+		if tg.deleted || (tg.mode != "" && !gitrepo.Indexable(tg.mode)) {
 			if err := ix.writer.DeleteFile(ctx, st.Name, tg.path); err != nil {
 				return Counts{}, err
 			}
@@ -223,38 +228,41 @@ func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
 type target struct {
 	path    string
 	deleted bool
+	// mode is the tree entry's mode, "" when unknown (bare paths handed over
+	// by a caller with no diff to read it from).
+	mode string
 }
 
 // targets resolves what to work on. A full run lists the tree; an incremental
-// one re-reads the diff's STATUS, because the poller hands over path names
-// only and --name-only cannot say whether a path was modified or removed.
-// Guessing from a failed read would conflate a broken checkout with deleted
-// code and silently drop files that still exist.
+// one re-reads the diff's STATUS and modes, because the poller hands over path
+// names only and --name-only cannot say whether a path was modified or
+// removed. Guessing from a failed read would conflate a broken checkout with
+// deleted code and silently drop files that still exist.
 func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, sha string, paths []string) ([]target, error) {
 	if paths == nil {
-		all, err := ix.git.ListPaths(ctx, spec, sha)
+		all, err := ix.git.ListEntries(ctx, spec, sha)
 		if err != nil {
 			return nil, err
 		}
 		out := make([]target, 0, len(all))
-		for _, p := range all {
-			out = append(out, target{path: p})
+		for _, e := range all {
+			out = append(out, target{path: e.Path, mode: e.Mode})
 		}
 		return out, nil
 	}
-	deleted := map[string]bool{}
+	changed := map[string]gitrepo.Change{}
 	if st.LastSHA != "" {
 		changes, err := ix.git.ChangedEntries(ctx, spec, st.LastSHA, sha)
 		if err != nil {
 			return nil, err
 		}
 		for _, c := range changes {
-			deleted[c.Path] = c.Deleted
+			changed[c.Path] = c
 		}
 	}
 	out := make([]target, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, target{path: p, deleted: deleted[p]})
+		out = append(out, target{path: p, deleted: changed[p].Deleted, mode: changed[p].Mode})
 	}
 	return out, nil
 }
@@ -264,11 +272,12 @@ func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, s
 func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha, path string) error {
 	body, err := ix.git.ReadFile(ctx, spec, sha, path)
 	if err != nil {
-		// One unreadable path (a submodule pointer, a broken symlink) must not
-		// fail the repository. It is logged rather than recorded, because
-		// nothing about it is known well enough to record.
-		ix.log.Warn("file unreadable at this commit; skipping", "repo", st.Name, "path", path, "err", err)
-		return nil
+		// A submodule pointer or a symlink never gets here: targets drops
+		// them by mode. What is left is a real read failure, and it fails
+		// the run so last_sha does not advance and the next poll retries.
+		// Logged and skipped, the file kept its previous commit's chunks and
+		// sha for good, and nothing ever revisited it.
+		return fmt.Errorf("read %s at %s: %w", path, gitrepo.ShortSHA(sha), err)
 	}
 	lang := LanguageOf(path)
 	// body from here on is the selector's: redacted where the file is
@@ -437,6 +446,10 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 		}
 	}
 	counts, err := ix.totals(ctx, repo)
+	// The swept chunks' vectors go with them: a boot purge is one of the two
+	// moments the cache is pruned at, and a vector of excluded content kept
+	// here would come back as a hit on the next full index of anything.
+	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
 	return len(hits), counts, err
 }
 

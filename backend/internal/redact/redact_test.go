@@ -156,3 +156,53 @@ func TestSecretManifest(t *testing.T) {
 		t.Error("a properties file is not a manifest")
 	}
 }
+
+// TestRedact_moreShapes are the shapes a first audit found leaving the
+// machine: each one an invented value, each one a line the corpus really
+// carries somewhere.
+func TestRedact_moreShapes(t *testing.T) {
+	cases := []struct {
+		name, path, in, want string
+	}{
+		{"kubernetes env pair", "deployment.yaml",
+			"        - name: DB_PASSWORD\n          value: hunter2\n        - name: DB_HOST\n          value: db",
+			"        - name: DB_PASSWORD\n          value: <redacted>\n        - name: DB_HOST\n          value: db"},
+		{"kubernetes env pair with a placeholder stays", "deployment.yaml",
+			"        - name: DB_PASSWORD\n          value: ${DB_PASSWORD}",
+			"        - name: DB_PASSWORD\n          value: ${DB_PASSWORD}"},
+		{"kubernetes env pair from a secret stays", "deployment.yaml",
+			"        - name: DB_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              name: db\n              key: password",
+			"        - name: DB_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              name: db\n              key: password"},
+		{"single-quoted yaml key", "values.yaml", "'password': hunter2", "'password': <redacted>"},
+		{"exported env", ".env", "export API_TOKEN=abc", "export API_TOKEN=<redacted>"},
+		{"minified json", "config.json", `{"db":{"user":"app","password":"hunter2"}}`, `{"db":{"user":"app","password":"<redacted>"}}`},
+		{"yaml flow mapping", "values.yaml", "db: {user: app, password: hunter2}", "db: {user: app, password: <redacted>}"},
+		{"properties with a space separator", "app.properties", "db.password hunter2", "db.password <redacted>"},
+		{"properties space separator, plain value stays", "app.properties", "db.host localhost", "db.host localhost"},
+		{"npmrc auth token", ".npmrc", "//registry.npmjs.org/:_authToken=npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9", "//registry.npmjs.org/:_authToken=<redacted>"},
+		{"npmrc registry line stays", ".npmrc", "registry=https://registry.npmjs.org/", "registry=https://registry.npmjs.org/"},
+		{"tfvars", "prod.tfvars", `db_password = "hunter2"`, `db_password = "<redacted>"`},
+		{"cfg", "app.cfg", "secret_key = abc", "secret_key = <redacted>"},
+		{"maven settings password element", "settings.xml", "      <password>hunter2</password>", "      <password><redacted></password>"},
+		{"spring xml named property", "beans.xml", `  <property name="password" value="hunter2"/>`, `  <property name="password" value="<redacted>"/>`},
+		{"spring xml other property stays", "beans.xml", `  <property name="url" value="jdbc:h2:mem:test"/>`, `  <property name="url" value="jdbc:h2:mem:test"/>`},
+		{"xml attribute", "beans.xml", `<bean id="ds" password="hunter2" user="app"/>`, `<bean id="ds" password="<redacted>" user="app"/>`},
+		{"web.config app setting", "web.config", `    <add key="ApiToken" value="abc" />`, `    <add key="ApiToken" value="<redacted>" />`},
+		{"comment with an inline key stays", "app.conf", "# password=notreally", "# password=notreally"},
+		{"npm token value under any key", "app.properties", "forge.pat=npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9", "forge.pat=<redacted>"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := string(Redact(c.path, []byte(c.in)))
+			if got != c.want {
+				t.Fatalf("Redact(%q)\n got: %q\nwant: %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestSecretManifest_quotedKind(t *testing.T) {
+	if !SecretManifest("secret.yaml", []byte("apiVersion: v1\nkind: \"Secret\"\ndata:\n  x: eQ==\n")) {
+		t.Error("a quoted kind is still a Secret")
+	}
+}

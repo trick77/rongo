@@ -32,12 +32,14 @@ func New(db *sql.DB, opts modules.Opts) *Store {
 	return &Store{db: db, state: indexer.NewStateStore(db), history: history.New(db), opts: opts}
 }
 
-// RepoStatus reports every repository in repo_state, including the ones the
-// YAML declares with `enabled: false` — those keep their index and are simply
-// not polled. A repository REMOVED from repos.yaml is not here: it was purged
-// with its row when the list was last read.
+// RepoStatus reports every active repository in repo_state. One the YAML
+// declares with `enabled: false` is parked: it keeps its index and its row,
+// is not polled, and is not on the page — parking stops new answers and
+// takes the repository out of sight, it never revises what was answered
+// before. A repository REMOVED from repos.yaml is not here either: it was
+// purged with its row when the list was last read.
 func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
-	all, err := s.state.All(ctx)
+	all, err := s.state.Active(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read repository state: %w", err)
 	}
