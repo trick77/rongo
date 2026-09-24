@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { pageColumn } from "./page";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView, { isCommit } from "./SourceView";
 import CommitView from "./CommitView";
@@ -1100,7 +1101,7 @@ export default function Ask({
             aria-hidden="true"
             className="pointer-events-none sticky top-0 z-20 h-5 shrink-0 -mb-5 bg-gradient-to-b from-bg to-transparent lg:h-8 lg:-mb-8 [@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3"
           />
-          <div className="mx-auto w-full max-w-[900px] flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3">
+          <div className={`${pageColumn} w-full flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3`}>
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. That
                 rule is now a shared cap and a shared centring rather than a
@@ -1204,7 +1205,7 @@ export default function Ask({
             onPointerDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
-            className="sticky bottom-0 z-10 mx-auto w-full max-w-[900px] bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2"
+            className={`sticky bottom-0 z-10 ${pageColumn} w-full bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2`}
             >
             {/* The foot of the column, ../loom's way round: the composer is
                 opaque and the fade is a strip immediately above it, so prose

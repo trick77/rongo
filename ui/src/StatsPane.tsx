@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useEscape } from "./dialog";
 import type { Turn, UsageCall } from "./turns";
 import { money } from "./turns";
 
@@ -446,13 +447,7 @@ export function StatsPane({ target, turns, onClose }: { target: StatsTarget; tur
   const [said, setSaid] = useState<string | null>(null);
   const toggle = (t: string) => setSaid(said === t ? null : t);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useEscape(onClose);
 
   const turn = target.kind === "turn" ? turns[target.index] : null;
 

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
@@ -232,10 +231,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the pasted texts are too long", http.StatusBadRequest)
 		return
 	}
-	audience := ask.AudienceBA
-	if req.Audience == string(ask.AudienceDev) {
-		audience = ask.AudienceDev
-	}
+	audience := parseAudience(req.Audience)
 	lang := ask.ParseLanguage(req.Language)
 
 	// The turn's own context, cancellable from outside the request: deleting
@@ -623,39 +619,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// follow-up pills are written in the language the turn is filed under.
 	lang = ask.ParseLanguage(msg.Language)
 
-	// Headers before the first flush: once anything is written the status code
-	// is fixed, so every failure after this point is an SSE error event, not a
-	// 500 the browser could still act on.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	rc := http.NewResponseController(w)
-	// The title goroutine below writes to this stream from outside the
-	// handler's own goroutine, so the writer is taken under a lock and the
-	// stream is shut to further writes the moment the handler returns: a
-	// write to a ResponseWriter whose handler has finished is not merely
-	// ignored, it races the server's own cleanup.
-	var sendMu sync.Mutex
-	sendClosed := false
-	defer func() {
-		sendMu.Lock()
-		sendClosed = true
-		sendMu.Unlock()
-	}()
-	send := func(event string, payload any) {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		if sendClosed {
-			return
-		}
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
-		_ = rc.Flush()
-	}
+	// Shut when the handler returns — after the deferred title wait below,
+	// which is registered later and so runs first.
+	st := openStream(w)
+	defer st.close()
+	send := st.send
 
 	// The language goes out with the thread, because the record may not have
 	// taken the one that was asked for: a thread answers in the language of its
@@ -668,11 +636,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		"language":   string(lang),
 	})
 
-	// The record is written on a context that outlives the request. A reader
-	// who closes the tab mid-answer cancels r.Context(), and writing the
-	// outcome on it would leave a row with neither an answer nor an error —
-	// indistinguishable from a turn still in flight.
+	// The record is written on a context that outlives the request; see turn.
 	record := context.WithoutCancel(ctx)
+	tr := s.beginTurn(ctx, record, msg.ID, meter, steps, st)
 
 	// The title is written alongside the answer and never in front of it. It is
 	// a label; the answer must not wait for it, and a title that never arrives
@@ -698,41 +664,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Whether any of the answer was streamed: a templated answer is not, and
-	// finishTurn then sends its text whole.
-	var streamed bool
-	events := ask.Events{
-		OnStatus: func(step string) { send("status", map[string]any{"step": step, "at": timeline.Record(ctx, step)}) },
-		OnDetail: func(step string, d map[string]any) {
-			timeline.Detail(ctx, step, d)
-			send("detail", map[string]any{"step": step, "detail": d})
-		},
-		OnToken:  func(tok string) { streamed = true; send("token", map[string]any{"text": tok}) },
-		OnNotice: func(text string) { send("notice", map[string]any{"text": text}) },
-		OnMemory: s.onMemory(record, u.Subject, msg.ID, send),
-	}
-
-	// closeRecord stores what the turn paid for and how it was watched, and
-	// tells the browser the first of those, on EVERY exit: answered, asked
-	// back, found nothing, failed. The gates ran either way. Sent before the
-	// event that ends the turn, so the browser has the number whichever way
-	// the turn closed. A turn that paid for nothing (the first call never
-	// reached the upstream) sends nothing, the same as the stored record
-	// shows for it after a reload. The timeline is stored on the same terms
-	// and never sent: the browser has been drawing it live all along.
-	closeRecord := func() {
-		if err := s.deps.Threads.SaveSteps(record, msg.ID, steps.Close()); err != nil {
-			recordFailed(ctx, "record steps failed", err)
-		}
-		calls := meter.Calls()
-		if len(calls) == 0 {
-			return
-		}
-		if err := s.deps.Threads.SaveUsage(record, msg.ID, calls); err != nil {
-			recordFailed(ctx, "record usage failed", err)
-		}
-		send("usage", usage.Price(calls))
-	}
+	events := tr.events()
+	events.OnNotice = func(text string) { send("notice", map[string]any{"text": text}) }
+	events.OnMemory = s.onMemory(record, u.Subject, msg.ID, send)
+	closeRecord := tr.closeRecord
 
 	if resume != nil {
 		// The resumed turn is a turn of its own: it says what its scope was
@@ -755,17 +690,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			turnStopped(ctx, "resumed turn failed", thread.ID, err)
-			why := failureMessage(err)
-			if ferr := s.deps.Threads.Fail(record, msg.ID, why); ferr != nil {
-				recordFailed(ctx, "record turn failure failed", ferr)
-			}
-			closeRecord()
-			// The id goes out with the failure, not only with a done: asking
-			// again is another attempt at THIS question, and the browser can
-			// only say so if it knows which row it is retrying. Without it a
-			// retry writes head 0 and the record claims the question was
-			// typed twice.
-			send("error", map[string]any{"message": why, "message_id": msg.ID})
+			tr.fail(failureMessage(err))
 			return
 		}
 		// Written a second time, over the scope stored before the call: the
@@ -775,12 +700,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
 			recordFailed(ctx, "record scope failed", serr)
 		}
-		if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
-			recordFailed(ctx, "record answer failed", err)
-		}
-		if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
-			recordFailed(ctx, "record sources failed", err)
-		}
+		tr.finish(answer.Text, answer.Citations, answer.Sources)
 		// -1 is the column's own "no candidate": a narrowing resumed from the
 		// panel as a whole, and there is no row on it that the answer came
 		// from. The link to the clarification is what closes it either way.
@@ -791,21 +711,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
 			recordFailed(ctx, "link choice failed", err)
 		}
-		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, streamed, send, closeRecord)
+		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, tr.streamed, send, closeRecord)
 		return
 	}
 
 	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
 		turnStopped(ctx, "turn failed", thread.ID, err)
-		why := failureMessage(err)
-		if ferr := s.deps.Threads.Fail(record, msg.ID, why); ferr != nil {
-			recordFailed(ctx, "record turn failure failed", ferr)
-		}
-		closeRecord()
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
-		send("error", map[string]any{"message": why, "message_id": msg.ID})
+		tr.fail(failureMessage(err))
 		return
 	}
 	// Stored whichever way the turn ended, before the ending is sent: a card
@@ -829,11 +744,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// choices resuming them cannot honour, and the clarification row
 			// is the only thing distinguishing "ended by asking" from "still
 			// in flight" — so the turn must be recorded as failed here.
-			if ferr := s.deps.Threads.Fail(record, msg.ID, turnFailed); ferr != nil {
-				recordFailed(ctx, "record turn failure failed", ferr)
-			}
-			closeRecord()
-			send("error", map[string]any{"message": turnFailed, "message_id": msg.ID})
+			tr.fail(turnFailed)
 			return
 		}
 		closeRecord()
@@ -843,13 +754,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.deps.Threads.Finish(record, msg.ID, answer.Text, answer.Citations); err != nil {
-		recordFailed(ctx, "record answer failed", err)
-	}
-	if err := s.deps.Threads.SaveSources(record, msg.ID, answer.Sources); err != nil {
-		recordFailed(ctx, "record sources failed", err)
-	}
-	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, streamed, send, closeRecord)
+	tr.finish(answer.Text, answer.Citations, answer.Sources)
+	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, tr.streamed, send, closeRecord)
 }
 
 const (
@@ -1079,10 +985,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	audience := ask.AudienceBA
-	if req.Audience == string(ask.AudienceDev) {
-		audience = ask.AudienceDev
-	}
+	audience := parseAudience(req.Audience)
 
 	// A re-explain is a paid turn like any other, and stops the same way when
 	// the thread it re-answers is deleted under it.
@@ -1136,17 +1039,10 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// failure mode the invariants forbid, so a partial basis is treated the
 	// same as a vanished one.
 	if len(sources) == 0 || len(sources) < total {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		rc := http.NewResponseController(w)
-		body, _ := json.Marshal(map[string]any{"message": basisGone})
 		// A vanished basis is its own message, not the generic turnFailed:
 		// the pipeline never ran, and the truth is that the code the answer
 		// was written from is no longer indexed.
-		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
-		_ = rc.Flush()
+		openStream(w).send("error", map[string]any{"message": basisGone})
 		return
 	}
 
@@ -1170,23 +1066,14 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// as /api/ask: the turn is answered in the language it is filed under.
 	lang = ask.ParseLanguage(newMsg.Language)
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	rc := http.NewResponseController(w)
-	send := func(event string, payload any) {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return
-		}
-		_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body)
-		_ = rc.Flush()
-	}
+	st := openStream(w)
+	defer st.close()
+	send := st.send
 
 	// The record is written on a context that outlives the request, the same
 	// as every other write in this package.
 	record := context.WithoutCancel(ctx)
+	tr := s.beginTurn(ctx, record, newMsg.ID, meter, steps, st)
 
 	// The scope of the turn being re-explained carries over with its sources:
 	// same question, same corpus, so the same rules about what was and was not
@@ -1199,15 +1086,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		recordFailed(ctx, "record scope failed", err)
 	}
 
-	var streamed bool
-	events := ask.Events{
-		OnStatus: func(step string) { send("status", map[string]any{"step": step, "at": timeline.Record(ctx, step)}) },
-		OnDetail: func(step string, d map[string]any) {
-			timeline.Detail(ctx, step, d)
-			send("detail", map[string]any{"step": step, "detail": d})
-		},
-		OnToken: func(tok string) { streamed = true; send("token", map[string]any{"text": tok}) },
-	}
+	events := tr.events()
 	var answer ask.Answer
 	if msg.Scope.Intent == ask.IntentRework {
 		// A rework row's question is an instruction ("summarize"), and its
@@ -1218,41 +1097,16 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	} else {
 		answer, err = s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, events)
 	}
-	// The same rule as handleAsk: what the turn paid for is stored and
-	// reported however it ended.
-	closeRecord := func() {
-		if err := s.deps.Threads.SaveSteps(record, newMsg.ID, steps.Close()); err != nil {
-			recordFailed(ctx, "record steps failed", err)
-		}
-		calls := meter.Calls()
-		if len(calls) == 0 {
-			return
-		}
-		if err := s.deps.Threads.SaveUsage(record, newMsg.ID, calls); err != nil {
-			recordFailed(ctx, "record usage failed", err)
-		}
-		send("usage", usage.Price(calls))
-	}
 	if err != nil {
 		turnStopped(ctx, "reexplain failed", msg.ThreadID, err)
-		why := failureMessage(err)
-		if ferr := s.deps.Threads.Fail(record, newMsg.ID, why); ferr != nil {
-			recordFailed(ctx, "record turn failure failed", ferr)
-		}
-		closeRecord()
-		send("error", map[string]any{"message": why, "message_id": newMsg.ID})
+		tr.fail(failureMessage(err))
 		return
-	}
-	if err := s.deps.Threads.Finish(record, newMsg.ID, answer.Text, answer.Citations); err != nil {
-		recordFailed(ctx, "record answer failed", err)
 	}
 	// The same sources, not answer.Sources: a re-explain answers from exactly
 	// what the original turn gathered, so the new turn can itself be
 	// re-explained later from that same, unchanged evidence.
-	if err := s.deps.Threads.SaveSources(record, newMsg.ID, sources); err != nil {
-		recordFailed(ctx, "record sources failed", err)
-	}
-	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, streamed, send, closeRecord)
+	tr.finish(answer.Text, answer.Citations, sources)
+	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, tr.streamed, send, tr.closeRecord)
 }
 
 // reworkAgain re-answers a rework row for the other audience: the same
@@ -1323,283 +1177,4 @@ func (s *Server) thread(ctx context.Context, subject string, threadID int64, req
 		return threads.Thread{}, errNotYours
 	}
 	return threads.Thread{ID: threadID, PublicID: req.ThreadID}, nil
-}
-
-// handleThreads answers one page of the reader's threads: the rail asks for
-// 30, the Threads page for 50 at a time and then the page after, by cursor.
-func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := auth.UserFrom(r.Context())
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	limit, ok := listLimit(w, r)
-	if !ok {
-		return
-	}
-	page, err := s.deps.Threads.ListPage(r.Context(), u.Subject, threads.ListOptions{
-		Limit:  limit,
-		Cursor: r.URL.Query().Get("cursor"),
-		// ?starred=true is the rail's starred section: every starred thread,
-		// however old. Anything else is the plain list.
-		StarredOnly: r.URL.Query().Get("starred") == "true",
-	})
-	if err != nil {
-		slog.Error("list threads failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(page)
-}
-
-// listLimit reads ?limit=: absent means the store's default, and a number
-// that is not one, or is outside 1..MaxListLimit, is a 400 rather than
-// silently another page size — the browser asked for something specific.
-func listLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
-	raw := r.URL.Query().Get("limit")
-	if raw == "" {
-		return 0, true
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 || n > threads.MaxListLimit {
-		http.Error(w, "limit must be between 1 and 1000", http.StatusBadRequest)
-		return 0, false
-	}
-	return n, true
-}
-
-// handleSearchThreads answers the Threads page's search box: every thread of
-// the reader's whose title or messages match, title hits first.
-func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := auth.UserFrom(r.Context())
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
-		return
-	}
-	limit, ok := listLimit(w, r)
-	if !ok {
-		return
-	}
-	hits, err := s.deps.Threads.Search(r.Context(), u.Subject, q, limit)
-	if err != nil {
-		slog.Error("search threads failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		Items []threads.Hit `json:"items"`
-	}{Items: hits})
-}
-
-func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	// Owns before Messages, unlike the routes below, which carry the owner
-	// inside their own statement. Messages answers an empty list for a thread
-	// that is not this reader's, and an empty list is a 200 — so without this
-	// the one route that reads a thread would tell "no such address" and
-	// "exists, but not yours" apart, while every other one answers 404 to both.
-	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
-	if err != nil {
-		slog.Error("check thread owner failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !owns {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
-	if err != nil {
-		slog.Error("read thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	// Priced here, from the current table, never from a stored figure: the
-	// record holds tokens, and the price is configuration that can change.
-	// A turn with no calls on record (older than the table, or nothing paid)
-	// carries no usage rather than an empty one, so the browser shows nothing
-	// instead of a zero.
-	for i := range msgs {
-		if len(msgs[i].Calls) > 0 {
-			report := usage.Price(msgs[i].Calls)
-			msgs[i].Usage = &report
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(msgs)
-}
-
-// handleThreadSummary is one thread's row — its title, for the header of a
-// thread the rail's page does not carry. Not the reader's → 404, like every
-// other read by address.
-func (s *Server) handleThreadSummary(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	t, found, err := s.deps.Threads.Get(r.Context(), u.Subject, id)
-	if err != nil {
-		slog.Error("read thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(t)
-}
-
-// threadRequest is what the rail's own actions send: a rename carries the new
-// title, a delete carries nothing.
-type threadRequest struct {
-	Title string `json:"title"`
-}
-
-// maxTitleRunes is what a thread title may be, matching the length the store
-// cuts its placeholder to.
-const maxTitleRunes = 48
-
-func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	var req threadRequest
-	// Capped like every other body this package reads: a title is a line of
-	// text, and one that is not would be buffered here and then shipped with
-	// the list on every load of the rail.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
-		return
-	}
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		http.Error(w, "title is required", http.StatusBadRequest)
-		return
-	}
-	// The same length the placeholder is cut to, so a typed title cannot
-	// outgrow the one the model writes. Refused rather than truncated: the
-	// rail would otherwise show something nobody asked for.
-	if len([]rune(title)) > maxTitleRunes {
-		http.Error(w, "title is too long", http.StatusBadRequest)
-		return
-	}
-	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
-	if err != nil {
-		slog.Error("rename thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !renamed {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	deleted, err := s.deps.Threads.Delete(r.Context(), u.Subject, id)
-	if err != nil {
-		slog.Error("delete thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !deleted {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	// Everything else the thread left behind, and only once the delete has
-	// reported a row — so a 404 for someone else's thread cannot be used to
-	// cut their answer short or re-pin their conversation.
-	//
-	// The rows are gone by now, through the schema's cascades. What is left is
-	// a turn that may still be streaming into them, which would run its model
-	// calls to completion and be paid for.
-	s.turns.cancel(id)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleStarThread and handleUnstarThread are ../loom's pair: two verbs
-// rather than a PATCH body field, so a rename's "title is required" stays
-// what it is. No body, 204 like rename and delete — the browser knows what
-// it asked for and patches its own row.
-func (s *Server) handleStarThread(w http.ResponseWriter, r *http.Request) {
-	s.handleSetThreadStarred(w, r, true)
-}
-
-func (s *Server) handleUnstarThread(w http.ResponseWriter, r *http.Request) {
-	s.handleSetThreadStarred(w, r, false)
-}
-
-func (s *Server) handleSetThreadStarred(w http.ResponseWriter, r *http.Request, starred bool) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	found, err := s.deps.Threads.SetStarred(r.Context(), u.Subject, id, starred)
-	if err != nil {
-		slog.Error("star thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// threadTarget resolves the reader and the thread id both single-thread
-// actions need, answering the request itself when either is missing. A thread
-// that is not this reader's is never told apart from one that is gone: both
-// end as the 404 the handlers write once the store reports no row.
-func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User, int64, bool) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return auth.User{}, 0, false
-	}
-	u, ok := auth.UserFrom(r.Context())
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return auth.User{}, 0, false
-	}
-	// An address that names no thread is a 404 and not a 400: to the reader
-	// there is no difference between a thread that never existed, one that was
-	// deleted, and one that is someone else's, and the handlers below keep it
-	// that way by pairing the id with an ownership predicate.
-	id, ok, err := s.deps.Threads.Resolve(r.Context(), r.PathValue("id"))
-	if err != nil {
-		slog.Error("resolve thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return auth.User{}, 0, false
-	}
-	if !ok {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return auth.User{}, 0, false
-	}
-	return u, id, true
 }

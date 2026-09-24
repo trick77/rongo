@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
-import ThreadMenu from "./ThreadMenu";
+import { ThreadMenuFor } from "./ThreadMenu";
 import { pageItems, type Thread } from "./Threads";
 import { useInfiniteList, type Page } from "./useInfiniteList";
 import { useMenuDismiss } from "./useMenuDismiss";
@@ -236,25 +236,7 @@ export default function ThreadsPage({
                 </button>
               </div>
               {menuOpen && (
-                <ThreadMenu
-                  starred={t.starred}
-                  onStar={() => {
-                    setOpenMenu(null);
-                    actions.startStar(t);
-                  }}
-                  onShare={() => {
-                    setOpenMenu(null);
-                    actions.startShare(t);
-                  }}
-                  onRename={() => {
-                    setOpenMenu(null);
-                    actions.startRename(t);
-                  }}
-                  onDelete={() => {
-                    setOpenMenu(null);
-                    actions.startDelete(t);
-                  }}
-                />
+                <ThreadMenuFor thread={t} actions={actions} onPick={() => setOpenMenu(null)} />
               )}
             </li>
           );

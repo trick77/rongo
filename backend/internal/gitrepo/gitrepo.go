@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -537,17 +538,11 @@ func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]
 // the working tree keeps every chunk attributable to an exact SHA, which is
 // what makes a citation verifiable later.
 func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
-	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "show", sha+":"+path)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("read %s at %s: %w: %s", path, ShortSHA(sha), err,
-			redact(stderr.String()))
+	out, err := c.runIn(ctx, c.Dir(spec), nil, nil, "show", sha+":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), err)
 	}
-	return stdout.Bytes(), nil
+	return out, nil
 }
 
 // Object reports what "sha:path" names — "blob", "tree", "commit" — and its
@@ -555,20 +550,14 @@ func (c *Client) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 // non-file object asks here first, so the refusal costs nothing: ReadFile
 // buffers the whole object before returning it.
 func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) (kind string, size int64, err error) {
-	dir := c.Dir(spec)
-	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, "cat-file", "--batch-check")...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
-	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader(sha + ":" + path + "\n")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", 0, fmt.Errorf("stat %s at %s: %w: %s", path, ShortSHA(sha), err, redact(stderr.String()))
+	out, err := c.runIn(ctx, c.Dir(spec), strings.NewReader(sha+":"+path+"\n"), nil, "cat-file", "--batch-check")
+	if err != nil {
+		return "", 0, fmt.Errorf("stat %s at %s: %w", path, ShortSHA(sha), err)
 	}
 	// "<oid> <type> <size>" for an object, "<name> missing" otherwise.
-	fields := strings.Fields(stdout.String())
+	fields := strings.Fields(string(out))
 	if len(fields) != 3 {
-		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(stdout.String()))
+		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(string(out)))
 	}
 	n, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil {
@@ -606,8 +595,18 @@ func (c *Client) runRemote(ctx context.Context, dir string, spec repos.Spec, tok
 }
 
 func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
+	out, err := c.runIn(ctx, dir, nil, extra, args...)
+	return string(out), err
+}
+
+// runIn is every git command: the ownership exemption, no prompting, the
+// configured auth in the environment, stdin where a command reads one, and
+// the raw bytes back. ReadFile and Object used to build their own exec and so
+// missed GIT_TERMINAL_PROMPT and the auth environment.
+func (c *Client) runIn(ctx context.Context, dir string, stdin io.Reader, extra []string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
+	cmd.Stdin = stdin
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
@@ -618,10 +617,10 @@ func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ..
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		// redact keeps an injected token out of an error that will be logged.
-		return stdout.String(), fmt.Errorf("git %s: %w: %s", subcommand(args), err,
+		return stdout.Bytes(), fmt.Errorf("git %s: %w: %s", subcommand(args), err,
 			redact(stderr.String()))
 	}
-	return stdout.String(), nil
+	return stdout.Bytes(), nil
 }
 
 // env is what run adds to git's environment for the remote. Nothing when

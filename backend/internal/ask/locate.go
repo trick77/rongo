@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -637,7 +638,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 	// wrong "not in the index".
 	repos := known
 	if args.Repo != "" {
-		if len(known) > 0 && !contains(known, args.Repo) {
+		if len(known) > 0 && !slices.Contains(known, args.Repo) {
 			return call.Name + "(" + args.Repo + ": outside this turn's repositories)",
 				"That repository is outside this turn. Search the ones already in front of you.", "", nil, nil
 		}
@@ -716,7 +717,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		// dropped whole and the tool would report "nothing found" for a name
 		// another repository in scope defines.
 		landings, err = g.symbolLandings(ctx, args.Name, sources, func(s Source) bool {
-			return inStage(s.Repo, s.Path, stage) && (len(repos) == 0 || contains(repos, s.Repo))
+			return inStage(s.Repo, s.Path, stage) && (len(repos) == 0 || slices.Contains(repos, s.Repo))
 		})
 		if err != nil {
 			return "", "", "", nil, err
@@ -838,15 +839,6 @@ func (g *Gatherer) indexed(ctx context.Context, repo string) bool {
 	err := g.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM repo_state WHERE name = ? AND enabled = 1`, repo).Scan(&n)
 	return err == nil && n > 0
-}
-
-func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // capLandings trims landings to at most n, so one broad call cannot spend the

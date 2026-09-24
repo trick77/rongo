@@ -245,33 +245,17 @@ func upsertFile(ctx context.Context, tx *sql.Tx, repo, path, sha, lang string, s
 // symbols, in the order the mirrors demand: gather the ids, delete the vec0 and
 // fts5 rows by rowid, and only then the chunks themselves.
 func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM chunks WHERE file_id = ?`, fileID)
-	if err != nil {
-		return err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
+	// The set form, like purgeContent and DeleteFile: the mirrors by the
+	// file's chunk ids in one statement each, never a read of the ids and
+	// a delete per id.
+	for _, q := range []string{
+		`DELETE FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)`,
+		`DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)`,
+		`DELETE FROM chunks WHERE file_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, fileID); err != nil {
 			return err
 		}
-		ids = append(ids, id)
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_vec WHERE rowid = ?`, id); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE rowid = ?`, id); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks WHERE file_id = ?`, fileID); err != nil {
-		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM symbols WHERE file_id = ?`, fileID); err != nil {
 		return err

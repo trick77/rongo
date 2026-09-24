@@ -1,4 +1,5 @@
 import { Icon, type IconName } from "./Icon";
+import type { Thread } from "./Threads";
 import { useMenuPlacement } from "./menuPlacement";
 
 /**
@@ -32,6 +33,45 @@ function MenuIcon({ name }: { name: IconName }) {
  * offset past the title would run out of its scroller sideways. `className`
  * moves the anchor for the one place that is not a row, the header's chevron.
  */
+/** The four things a menu can start on a thread, as useThreadActions returns
+ * them. */
+export type ThreadActions = {
+  startStar: (t: Thread) => void;
+  startShare: (t: Thread) => void;
+  startRename: (t: Thread) => void;
+  startDelete: (t: Thread) => void;
+};
+
+/** ThreadMenuFor is the menu wired to one thread: every entry closes the
+ * menu, then starts its action on that thread. The rail, the Threads page
+ * and the header each drew these four closures by hand. */
+export function ThreadMenuFor({
+  thread,
+  actions,
+  onPick,
+  className,
+}: {
+  thread: Thread;
+  actions: ThreadActions;
+  onPick: () => void;
+  className?: string;
+}) {
+  const pick = (start: (t: Thread) => void) => () => {
+    onPick();
+    start(thread);
+  };
+  return (
+    <ThreadMenu
+      className={className}
+      starred={thread.starred}
+      onStar={pick(actions.startStar)}
+      onShare={pick(actions.startShare)}
+      onRename={pick(actions.startRename)}
+      onDelete={pick(actions.startDelete)}
+    />
+  );
+}
+
 export default function ThreadMenu({
   starred = false,
   onStar,

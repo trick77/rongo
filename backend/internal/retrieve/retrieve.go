@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -169,7 +170,7 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 	// searched, so a Code that is not one of them switches it off silently —
 	// and a caller that built the two separately would never notice. Says so
 	// once, rather than answering from a lane the operator thinks is running.
-	if q.Code != "" && !containsText(texts, q.Code) {
+	if q.Code != "" && !slices.Contains(texts, q.Code) {
 		slog.Warn("code text is not among the query texts, the code rung is off for this search",
 			"code", q.Code, "texts", len(texts))
 	}
@@ -178,15 +179,6 @@ func (r *Retriever) Search(ctx context.Context, q Query) ([]Hit, error) {
 		return nil, err
 	}
 	return r.searchTexts(ctx, texts, q.Code, q.Prior, repos, q.K, q.Stage)
-}
-
-func containsText(texts []string, want string) bool {
-	for _, t := range texts {
-		if t == want {
-			return true
-		}
-	}
-	return false
 }
 
 // ResolveRepos sorts what a question said about repositories into the names

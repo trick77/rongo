@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { pageColumn } from "../page";
 
 import SourceView, { isCommit, type SourceRef } from "../SourceView";
 import CommitView from "../CommitView";
@@ -186,7 +187,7 @@ export default function SharePage({ token }: { token: string }) {
             at rest. */}
         <div className="relative min-h-0 min-w-0">
           <div className="h-full overflow-auto">
-            <div className="mx-auto max-w-[900px] px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10">
+            <div className={`${pageColumn} px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10`}>
               <ThreadView
                 turns={state.turns}
                 actions={null}

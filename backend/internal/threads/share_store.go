@@ -200,8 +200,8 @@ func scanShare(row interface{ Scan(...any) error }) (Share, error) {
 		return Share{}, err
 	}
 	sh.Path = SharePath + sh.Token
-	sh.SharedAt, _ = time.Parse("2006-01-02 15:04:05", sharedAt)
-	sh.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAt)
+	sh.SharedAt = parseStamp(sharedAt)
+	sh.UpdatedAt = parseStamp(updatedAt)
 	return sh, nil
 }
 

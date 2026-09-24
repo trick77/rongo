@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusOnOpen } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { highlightLines, languageForPath } from "./highlight";
 
@@ -60,13 +61,7 @@ export default function SourceView({
   const anchor = useRef<HTMLDivElement>(null);
   const dismiss = useBackdropDismiss(onClose);
 
-  // Focus moves into the dialog on open and back to where it was on close,
-  // so a keyboard reader does not land at the top of the page afterwards.
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    closeButton.current?.focus();
-    return () => before?.focus?.();
-  }, []);
+  useFocusOnOpen(closeButton);
 
   // Escape closes. Tab stays inside: the dialog is modal, and the close button
   // is its only control, so a Tab that left it would land in the dimmed page

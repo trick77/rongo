@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Icon } from "./Icon";
-import ThreadMenu from "./ThreadMenu";
+import { ThreadMenuFor } from "./ThreadMenu";
 import { railLabel, railRow } from "./rail";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
@@ -342,25 +342,7 @@ export default function Threads({
                       )}
                     </div>
                     {menuOpen && (
-                      <ThreadMenu
-                        starred={t.starred}
-                        onStar={() => {
-                          setOpenMenu(null);
-                          actions.startStar(t);
-                        }}
-                        onShare={() => {
-                          setOpenMenu(null);
-                          actions.startShare(t);
-                        }}
-                        onRename={() => {
-                          setOpenMenu(null);
-                          actions.startRename(t);
-                        }}
-                        onDelete={() => {
-                          setOpenMenu(null);
-                          actions.startDelete(t);
-                        }}
-                      />
+                      <ThreadMenuFor thread={t} actions={actions} onPick={() => setOpenMenu(null)} />
                     )}
                   </li>
                 );

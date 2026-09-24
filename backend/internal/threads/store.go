@@ -810,33 +810,66 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 // be the newest thing in the thread — two cards can stand open, and a fresh
 // turn can be asked past one.
 func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int64, before int) (Message, bool, error) {
-	var m Message
-	var created string
-	var fromClar sql.NullInt64
-	var scope string
-	var followups string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.from_candidate_idx, m.from_clarification_id, m.created_at
+	m, err := scanMessage(s.db.QueryRowContext(ctx, `
+		SELECT `+messageColumns+`
 		FROM messages m JOIN threads t ON t.id = m.thread_id
 		WHERE m.thread_id = ? AND t.user_subject = ? AND m.answer != ''
 		  AND m.ordinal < ?
 		  AND NOT (json_valid(m.scope) AND json_extract(m.scope, '$.intent') IS 'memory')
 		ORDER BY m.ordinal DESC
-		LIMIT 1`, threadID, subject, before).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &m.FromCandidateIdx, &fromClar, &created)
-	if err == sql.ErrNoRows {
+		LIMIT 1`, threadID, subject, before))
+	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read last turn: %w", err)
 	}
+	return m, true, nil
+}
+
+// messageColumns is every column a Message is read from, in the order
+// scanMessage reads them, with the messages table aliased m. Every SELECT
+// that feeds scanMessage names them through this, so a column added here is
+// added everywhere at once.
+const messageColumns = `m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error,
+	m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at`
+
+// scanner is *sql.Row and *sql.Rows.
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+// scanMessage reads messageColumns off one row, plus extra, and derives the
+// fields a Message carries beside its columns. The side tables — citations,
+// the card, the calls — are the caller's.
+func scanMessage(row scanner, extra ...any) (Message, error) {
+	var m Message
+	var created, scope, followups, pasted, steps string
+	var fromClar sql.NullInt64
+	dest := []any{&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error,
+		&scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
+		return Message{}, err
+	}
 	m.FromClarificationID = fromClar.Int64
 	m.Scope = scanScope(scope)
 	m.Followups = scanFollowups(followups)
+	m.PastedTexts = scanPastedTexts(pasted)
+	m.Steps = scanSteps(steps)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.NarrowedTo = narrowedTo(m)
-	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
-	return m, true, nil
+	m.CreatedAt = parseStamp(created)
+	return m, nil
+}
+
+// sqliteStamp is the layout datetime('now') writes.
+const sqliteStamp = "2006-01-02 15:04:05"
+
+// parseStamp reads a stored stamp; an unreadable one is the zero time, as
+// every read here has always treated it.
+func parseStamp(s string) time.Time {
+	t, _ := time.Parse(sqliteStamp, s)
+	return t
 }
 
 // Message returns one turn by id, or false when it does not belong to a
@@ -844,30 +877,16 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 // re-run the answerer from stored sources, without the caller having to load
 // the whole thread to find one message in it.
 func (s *Store) Message(ctx context.Context, subject string, messageID int64) (Message, bool, error) {
-	var m Message
-	var created string
-	var fromClar sql.NullInt64
-	var scope string
-	var followups string
-	var pasted string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at
+	m, err := scanMessage(s.db.QueryRowContext(ctx, `
+		SELECT `+messageColumns+`
 		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).
-		Scan(&m.ID, &m.ThreadID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created)
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, false, nil
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read message: %w", err)
 	}
-	m.FromClarificationID = fromClar.Int64
-	m.Scope = scanScope(scope)
-	m.Followups = scanFollowups(followups)
-	m.PastedTexts = scanPastedTexts(pasted)
-	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
-	m.NarrowedTo = narrowedTo(m)
-	m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
 	cites, err := s.citations(ctx, m.ID)
 	if err != nil {
 		return Message{}, false, err
@@ -911,7 +930,7 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	// belongs to the person who asked, and a mistake here hands someone else's
 	// conversation over.
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error, m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at,
+		SELECT `+messageColumns+`,
 		       COALESCE(mem.id, 0), COALESCE(mem.text, ''),
 		       NOT EXISTS (SELECT 1 FROM message_sources ms WHERE ms.message_id = m.id)
 		FROM messages m JOIN threads t ON t.id = m.thread_id
@@ -925,30 +944,17 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 
 	out := []Message{}
 	for rows.Next() {
-		var m Message
-		var created string
-		var fromClar sql.NullInt64
-		var scope string
-		var followups string
-		var pasted string
-		var steps string
 		var memID int64
 		var memText string
-		if err := rows.Scan(&m.ID, &m.Ordinal, &m.Audience, &m.Language, &m.Question, &m.Answer, &m.Error, &scope, &followups, &pasted, &steps, &m.FromCandidateIdx, &fromClar, &m.HeadMessageID, &created, &memID, &memText, &m.Sourceless); err != nil {
+		var sourceless bool
+		m, err := scanMessage(rows, &memID, &memText, &sourceless)
+		if err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if memID != 0 {
 			m.Memory = &MemoryRef{ID: memID, Text: memText}
 		}
-		m.FromClarificationID = fromClar.Int64
-		m.Scope = scanScope(scope)
-		m.Followups = scanFollowups(followups)
-		m.PastedTexts = scanPastedTexts(pasted)
-		m.Steps = scanSteps(steps)
-		m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
-		m.NarrowedTo = narrowedTo(m)
-		m.ThreadID = threadID
-		m.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		m.Sourceless = sourceless
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
