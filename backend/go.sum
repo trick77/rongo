@@ -10,8 +10,8 @@ github.com/ncruces/julianday v1.0.0 h1:fH0OKwa7NWvniGQtxdJRxAgkBMolni2BjDHaWTxqt
 github.com/ncruces/julianday v1.0.0/go.mod h1:Dusn2KvZrrovOMJuOt0TNXL6tB7U2E8kvza5fFc9G7g=
 github.com/tetratelabs/wazero v1.9.0 h1:IcZ56OuxrtaEz8UYNRHBrUa9bYeX9oVY93KspZZBf/I=
 github.com/tetratelabs/wazero v1.9.0/go.mod h1:TSbcXCfFP0L2FGkRPxHphadXPjo1T6W+CseNNY7EkjM=
-github.com/trick77/llmwire v0.0.37 h1:XFfC9GXtH3ET0LNUIAZkEFYXvFPFyZMxv2+n6m6FZq8=
-github.com/trick77/llmwire v0.0.37/go.mod h1:uX1JBjy3g+FoNR/paMV4GmmY79jY8xgXOYs1OME5HJE=
+github.com/trick77/llmwire v0.0.38 h1:huQVQRWEifW3OegifbIHpedDaI69qSXqQa71jbC8Xmg=
+github.com/trick77/llmwire v0.0.38/go.mod h1:uX1JBjy3g+FoNR/paMV4GmmY79jY8xgXOYs1OME5HJE=
 golang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=
 golang.org/x/crypto v0.57.0/go.mod h1:Fdz0i5U6CoizGwLda9DttjSk6qlZo25zYNtR+ycvuZA=
 golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
