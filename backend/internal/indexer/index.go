@@ -37,7 +37,9 @@ type Embedder interface {
 // VectorCache is the content-hash embedding cache.
 type VectorCache interface {
 	Get(ctx context.Context, hashes []string) (map[string][]float32, error)
-	Put(ctx context.Context, hash string, vec []float32) error
+	// PutAll stores the vectors of one embedding call together: one
+	// transaction, not one autocommit per vector.
+	PutAll(ctx context.Context, hashes []string, vecs [][]float32) error
 }
 
 // Deps are the pipeline's collaborators.
@@ -270,6 +272,15 @@ func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, s
 // indexOne runs one file through the pipeline: read, select, symbols, chunk,
 // cache, embed, write.
 func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha, path string) error {
+	lang := LanguageOf(path)
+	// The verdicts the path alone decides come before the read: an excluded
+	// or vendored file used to be read, redacted and scanned for credentials
+	// before it was skipped. Recorded with no size, since nothing was read.
+	if decision, detail, decided := ix.selector.SelectPath(path); decided {
+		ix.log.Debug("file not indexed", "repo", st.Name, "path", path,
+			"reason", string(decision), "detail", detail)
+		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(decision), 0)
+	}
 	body, err := ix.git.ReadFile(ctx, spec, sha, path)
 	if err != nil {
 		// A submodule pointer or a symlink never gets here: targets drops
@@ -279,7 +290,6 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		// sha for good, and nothing ever revisited it.
 		return fmt.Errorf("read %s at %s: %w", path, gitrepo.ShortSHA(sha), err)
 	}
-	lang := LanguageOf(path)
 	// body from here on is the selector's: redacted where the file is
 	// configuration, so no credential value reaches ctags, a chunk, the
 	// embedding endpoint or the edge table.
@@ -376,9 +386,9 @@ func (ix *Indexer) vectors(ctx context.Context, chunks []Chunk) ([][]float32, er
 		}
 		for i, h := range missHashes {
 			cached[h] = fresh[i]
-			if err := ix.cache.Put(ctx, h, fresh[i]); err != nil {
-				return nil, err
-			}
+		}
+		if err := ix.cache.PutAll(ctx, missHashes, fresh); err != nil {
+			return nil, err
 		}
 	}
 

@@ -15,6 +15,7 @@ package repodeps
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -112,6 +113,43 @@ func SyncWith(ctx context.Context, db *sql.DB, repo string, mods map[string][]by
 		return fmt.Errorf("skipped %d unparsable go.mod file(s): %s", len(skipped), strings.Join(skipped, "; "))
 	}
 	return nil
+}
+
+// AnyDependency reports whether any repository among repos requires what
+// another of them publishes — DependsOn over every ordered pair, in one
+// query. The router asks this of a whole candidate list, where a pair loop
+// was n² sequential reads for one yes/no.
+func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error) {
+	if len(repos) < 2 {
+		return false, nil
+	}
+	args := make([]any, 0, 2*len(repos))
+	for _, r := range repos {
+		args = append(args, r)
+	}
+	for _, r := range repos {
+		args = append(args, r)
+	}
+	in := placeholders(len(repos))
+	var one int
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+	err := db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM repo_deps AS need
+		JOIN repo_deps AS have ON have.direction = 'publishes' AND have.repo <> need.repo
+		WHERE need.direction = 'requires'
+		  AND need.repo IN (`+in+`) AND have.repo IN (`+in+`)
+		  AND (need.coordinate = have.coordinate
+		       OR substr(need.coordinate, 1, length(have.coordinate) + 1) = have.coordinate || '/')
+		LIMIT 1`, args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func placeholders(n int) string {
+	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // DependsOn reports whether a pulls something b publishes.

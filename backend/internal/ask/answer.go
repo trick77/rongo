@@ -761,6 +761,10 @@ type Scope struct {
 	// afresh.
 	pm       projects.Map
 	pmLoaded bool
+	// stages is the declared stage set, read once per turn by stagesOf the
+	// way pm is by projectsOf.
+	stages       stages.Set
+	stagesLoaded bool
 	// Unknown are the named repositories the index does not carry. The search
 	// silently ignores them — it has to, or a mishearing would wipe the whole
 	// result — so this is the only thing that keeps a turn from answering

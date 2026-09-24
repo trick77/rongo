@@ -124,14 +124,14 @@ const (
 func (p *Pipeline) answerRelease(ctx context.Context, question string, audience Audience, lang Language,
 	_ Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
 
-	declared := p.declaredStages(ctx)
+	declared := p.stagesOf(ctx, &scope)
 	pair := releasePair(question, declared)
 	scope.Between = pair
 	scope = p.describeProjects(ctx, scope)
 	if len(pair) != 2 {
 		return Answer{Text: releaseNeedsTwoStages(lang, declared), Scope: scope}, nil
 	}
-	pm, err := p.router.Projects(ctx)
+	pm, err := p.projectsOf(ctx, &scope)
 	if err != nil {
 		return Answer{}, fmt.Errorf("projects: %w", err)
 	}

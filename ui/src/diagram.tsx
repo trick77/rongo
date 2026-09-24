@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import mermaid from "mermaid";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
 import DiagramView from "./DiagramView";
 import { DownloadIcon, ExpandIcon } from "./icons";
@@ -248,10 +247,23 @@ export function themeVariables(): Record<string, string> {
   return vars;
 }
 
-let initialized = false;
-function init(): void {
-  if (initialized) return;
-  initialized = true;
+/** The renderer is loaded on the first fence, not with the shell: it is the
+ * largest dependency by far, and a page that draws no diagram — the share
+ * page, the Repos page, most threads — should not carry it. One import
+ * promise, so two fences arriving together load it once. */
+type Mermaid = typeof import("mermaid").default;
+let loading: Promise<Mermaid> | null = null;
+function renderer(): Promise<Mermaid> {
+  if (!loading) {
+    loading = import("mermaid").then((m) => {
+      init(m.default);
+      return m.default;
+    });
+  }
+  return loading;
+}
+
+function init(mermaid: Mermaid): void {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
@@ -289,7 +301,7 @@ export function draw(src: string): Promise<Drawn> {
   let p = drawn.get(src);
   if (!p) {
     p = (async (): Promise<Drawn> => {
-      init();
+      const mermaid = await renderer();
       try {
         await mermaid.parse(src);
         const { svg } = await mermaid.render(`rongo-diagram-${++seq}`, src);

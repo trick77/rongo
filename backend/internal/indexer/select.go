@@ -374,6 +374,24 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 	return Include, "", body
 }
 
+// SelectPath is the part of SelectBody that needs no body: the operator's
+// exclusions, vendored directories and generated names. Decided before the
+// file is read, so a tree full of node_modules costs no git reads, no
+// redaction and no credential scan for files that were never going in.
+// decided is false when the path alone cannot say.
+func (s *Selector) SelectPath(p string) (d Decision, reason string, decided bool) {
+	if pat, ok := s.Excluded(p); ok {
+		return SkipExcluded, "matches exclusion pattern " + pat, true
+	}
+	if seg := vendoredSegment(p); seg != "" {
+		return SkipVendored, "lives under " + seg + "/", true
+	}
+	if reason := generatedByName(p); reason != "" {
+		return SkipGenerated, reason, true
+	}
+	return Include, "", false
+}
+
 // selectByPath applies every verdict that needs only the path and the size:
 // the operator's list, vendored and build directories, generated names, data
 // formats and the data ceiling. SelectBody runs it once the body-only checks

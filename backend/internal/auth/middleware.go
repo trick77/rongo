@@ -45,7 +45,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 
 		switch s.mode {
 		case "dev":
-			u, err := s.UpsertUser(devSubject, "dev@example.invalid", true)
+			u, err := s.Admit(devSubject, "dev@example.invalid", true)
 			if err != nil {
 				slog.Error("dev auto-login failed", "err", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -62,7 +62,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			u, err := s.UpsertUser("admin-token", "", true)
+			u, err := s.Admit("admin-token", "", true)
 			if err != nil {
 				slog.Error("admin token login failed", "err", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -82,7 +82,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			u, err := s.UpsertUser(subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)), true)
+			u, err := s.Admit(subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)), true)
 			if err != nil {
 				slog.Error("proxy login failed", "err", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)

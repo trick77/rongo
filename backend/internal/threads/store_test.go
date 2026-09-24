@@ -900,3 +900,103 @@ func TestSetStarred_isTheReadersOwnMarkAndNobodyElses(t *testing.T) {
 		t.Error("still starred after SetStarred(false)")
 	}
 }
+
+// TestMessages_readsTheSideTablesOncePerThread: citations, cards and calls
+// come back grouped to the right turn out of the batched reads, empty where
+// a turn has none, and a card's candidates in their own order.
+func TestMessages_readsTheSideTablesOncePerThread(t *testing.T) {
+	s, ctx, th, _ := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, th, "ba", "en", "How?", 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	cites := []ask.Citation{{Marker: 1, Repo: "peeq", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 2, SHA: "abc"},
+		{Marker: 2, Repo: "peeq", Branch: "master", Path: "b.go", StartLine: 3, EndLine: 4, SHA: "abc"}}
+	if err := s.Finish(ctx, first.ID, "So [1][2].", cites); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := s.SaveUsage(ctx, first.ID, []usage.Call{{Step: "understand", Model: "m", Prompt: 1, Completion: 2}, {Step: "answer", Model: "m", Prompt: 3, Completion: 4}}); err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	card, err := s.AddQuestion(ctx, th, "ba", "en", "Which?", 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := s.Clarify(ctx, card.ID, twoCandidateClarification()); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+	third, err := s.AddQuestion(ctx, th, "ba", "en", "And?", 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if err := s.Finish(ctx, third.ID, "Nothing cited.", nil); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	msgs, err := s.Messages(ctx, testSubject, th)
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+
+	if len(msgs) != 3 {
+		t.Fatalf("got %d messages, want 3", len(msgs))
+	}
+	if len(msgs[0].Citations) != 2 || msgs[0].Citations[1].Path != "b.go" {
+		t.Errorf("first turn citations = %+v, want its two in marker order", msgs[0].Citations)
+	}
+	if len(msgs[0].Calls) != 2 || msgs[0].Calls[0].Step != "understand" || msgs[0].Calls[1].Step != "answer" {
+		t.Errorf("first turn calls = %+v, want its two in call order", msgs[0].Calls)
+	}
+	if msgs[0].Clarification != nil {
+		t.Error("the first turn is not a card")
+	}
+	if msgs[1].Clarification == nil || len(msgs[1].Clarification.Candidates) != 2 || msgs[1].Clarification.Candidates[1].Idx != 1 {
+		t.Errorf("second turn card = %+v, want its two candidates in idx order", msgs[1].Clarification)
+	}
+	if msgs[1].Citations == nil || len(msgs[1].Citations) != 0 || msgs[1].Calls == nil || len(msgs[1].Calls) != 0 {
+		t.Errorf("the card turn must carry empty, non-nil citations and calls: %+v %+v", msgs[1].Citations, msgs[1].Calls)
+	}
+	if len(msgs[2].Citations) != 0 || msgs[2].Clarification != nil {
+		t.Errorf("third turn = %+v, want nothing from the other turns' side tables", msgs[2])
+	}
+	// And the single reads say the same.
+	one, err := s.Clarification(ctx, testSubject, card.ID)
+	if err != nil || one == nil || len(one.Candidates) != 2 {
+		t.Errorf("Clarification() = %+v, %v; want the card with both candidates", one, err)
+	}
+	none, err := s.Clarification(ctx, testSubject, first.ID)
+	if err != nil || none != nil {
+		t.Errorf("Clarification() of a plain turn = %+v, %v; want nil", none, err)
+	}
+}
+
+// TestThreadReads_useTheirIndexes: the two lookups that run on every
+// request must be index searches, not table scans — the partial index on
+// public_id applies only with its predicate spelled out, and the
+// "was this card answered" EXISTS needs the index the migration added.
+func TestThreadReads_useTheirIndexes(t *testing.T) {
+	_, _, _, db := newThreadStore(t)
+	for name, q := range map[string]string{
+		"resolve":  `SELECT id FROM threads WHERE public_id = ? AND public_id != ''`,
+		"answered": `SELECT EXISTS (SELECT 1 FROM messages a WHERE a.from_clarification_id = ?)`,
+	} {
+		rows, err := db.Query("EXPLAIN QUERY PLAN "+q, "x")
+		if err != nil {
+			t.Fatalf("%s: explain: %v", name, err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notUsed int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+				t.Fatalf("%s: scan: %v", name, err)
+			}
+			plan = append(plan, detail)
+		}
+		_ = rows.Close()
+		joined := strings.Join(plan, " | ")
+		if !strings.Contains(joined, "INDEX") || strings.Contains(joined, "SCAN threads") || strings.Contains(joined, "SCAN messages") {
+			t.Errorf("%s: plan = %q, want an index search", name, joined)
+		}
+	}
+}

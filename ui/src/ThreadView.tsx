@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Narrow from "./Narrow";
@@ -152,7 +152,10 @@ export default function ThreadView({
     setCopied(null);
   }, [threadKey]);
 
-  const setHot = (marker: number | null) => onHot?.(marker);
+  // Stable, or the memoized Markdown of the source turn — the previous
+  // answer while the next one streams — re-rendered and re-highlighted on
+  // every token.
+  const setHot = useCallback((marker: number | null) => onHot?.(marker), [onHot]);
   const showSource = onOpenSource;
 
   // Markdown is memoized, and a fresh arrow per render would defeat it on

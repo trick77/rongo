@@ -38,39 +38,54 @@ func (s *Store) Sync(ctx context.Context, repo string, commits []gitrepo.Commit)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := insert(ctx, tx, repo, commits); err != nil {
+	// What the table holds for this repository, read once: insert skips
+	// these, dropAbsent drops the ones the list no longer carries. Per commit
+	// that was one COUNT query each, five hundred a run.
+	held, err := heldSHAs(ctx, tx, repo)
+	if err != nil {
 		return err
 	}
-	if err := dropAbsent(ctx, tx, repo, commits); err != nil {
+	if err := insert(ctx, tx, repo, commits, held); err != nil {
+		return err
+	}
+	if err := dropAbsent(ctx, tx, commits, held); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// dropAbsent removes the repository's rows whose sha the list no longer
-// carries, mirror first, like PurgeTx.
-func dropAbsent(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit) error {
-	keep := make(map[string]bool, len(commits))
-	for _, c := range commits {
-		keep[c.SHA] = true
-	}
+// heldSHAs is every commit row of the repository, sha to row id.
+func heldSHAs(ctx context.Context, tx *sql.Tx, repo string) (map[string]int64, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, sha FROM commits WHERE repo = ?`, repo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var gone []int64
+	defer func() { _ = rows.Close() }()
+	held := map[string]int64{}
 	for rows.Next() {
 		var id int64
 		var sha string
 		if err := rows.Scan(&id, &sha); err != nil {
-			_ = rows.Close()
-			return err
+			return nil, err
 		}
+		held[sha] = id
+	}
+	return held, rows.Err()
+}
+
+// dropAbsent removes the repository's rows whose sha the list no longer
+// carries, mirror first, like PurgeTx.
+func dropAbsent(ctx context.Context, tx *sql.Tx, commits []gitrepo.Commit, held map[string]int64) error {
+	keep := make(map[string]bool, len(commits))
+	for _, c := range commits {
+		keep[c.SHA] = true
+	}
+	var gone []int64
+	for sha, id := range held {
 		if !keep[sha] {
 			gone = append(gone, id)
 		}
 	}
-	_ = rows.Close()
 	for _, id := range gone {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM commits_fts WHERE rowid = ?`, id); err != nil {
 			return fmt.Errorf("drop commit %d from commits_fts: %w", id, err)
@@ -82,14 +97,9 @@ func dropAbsent(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.
 	return nil
 }
 
-func insert(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit) error {
+func insert(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit, held map[string]int64) error {
 	for _, c := range commits {
-		var exists int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM commits WHERE repo = ? AND sha = ?`,
-			repo, c.SHA).Scan(&exists); err != nil {
-			return err
-		}
-		if exists > 0 {
+		if _, ok := held[c.SHA]; ok {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339, c.CommittedAt)

@@ -158,3 +158,37 @@ func TestRepoStatus_aParkedRepositoryKeepsItsIndexAndLeavesThePage(t *testing.T)
 		t.Errorf("files = %d, want the index kept while parked", files)
 	}
 }
+
+func TestRepoStatus_clustersOnceUntilTheIndexMoves(t *testing.T) {
+	// The page is read on every turn and the clustering scans every file
+	// and chunk, so the numbers are kept until the index state they were
+	// read at changes.
+	db := statusDB(t)
+	state := indexer.NewStateStore(db)
+	ctx := context.Background()
+	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	s := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100})
+
+	for i := 0; i < 3; i++ {
+		if _, err := s.RepoStatus(ctx); err != nil {
+			t.Fatalf("RepoStatus %d: %v", i, err)
+		}
+	}
+	if s.clusters != 1 {
+		t.Errorf("clustered %d times over three reads of an unchanged index, want 1", s.clusters)
+	}
+
+	// The index moved: the totals changed.
+	if err := state.SetCounts(ctx, "peeq", indexer.Counts{Files: 2, Chunks: 9}); err != nil {
+		t.Fatalf("SetCounts: %v", err)
+	}
+	if _, err := s.RepoStatus(ctx); err != nil {
+		t.Fatalf("RepoStatus: %v", err)
+	}
+	if s.clusters != 2 {
+		t.Errorf("clustered %d times after the index moved, want 2", s.clusters)
+	}
+}

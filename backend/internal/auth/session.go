@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -38,12 +40,51 @@ type Service struct {
 	// passwordHash is bcrypt.
 	adminUser    string
 	passwordHash []byte
+	// admitted is the users the middleware upserted lately, so a request
+	// does not write the users table on its way in: in dev, token and proxy
+	// mode every request used to be an INSERT … ON CONFLICT beside the
+	// indexer's own writes.
+	admitMu  sync.Mutex
+	admitted map[string]admission
+	// upserts counts the writes, for the test that pins the caching.
+	upserts atomic.Int64
 }
+
+// admission is one upserted user and when the write happened.
+type admission struct {
+	user User
+	at   time.Time
+}
+
+// admitTTL is how long an upsert stands for a subject. An email or admin
+// flag that changes at the proxy reaches the row on the next write.
+const admitTTL = 5 * time.Minute
 
 // NewService builds the auth service. adminToken is only consulted in token
 // mode.
 func NewService(db *sql.DB, mode string, adminToken string) *Service {
-	return &Service{db: db, mode: mode, adminToken: adminToken}
+	return &Service{db: db, mode: mode, adminToken: adminToken, admitted: map[string]admission{}}
+}
+
+// Admit is UpsertUser for the request path: the row is written once per
+// admitTTL per subject and remembered in between, so a page of thirty
+// requests is one write, not thirty.
+func (s *Service) Admit(subject, email string, isAdmin bool) (User, error) {
+	now := time.Now()
+	s.admitMu.Lock()
+	if a, ok := s.admitted[subject]; ok && now.Sub(a.at) < admitTTL && a.user.Email == email && a.user.IsAdmin == isAdmin {
+		s.admitMu.Unlock()
+		return a.user, nil
+	}
+	s.admitMu.Unlock()
+	u, err := s.UpsertUser(subject, email, isAdmin)
+	if err != nil {
+		return User{}, err
+	}
+	s.admitMu.Lock()
+	s.admitted[subject] = admission{user: u, at: now}
+	s.admitMu.Unlock()
+	return u, nil
 }
 
 // SetPasswordAccount installs the one account password mode signs in. The
@@ -90,6 +131,7 @@ func (s *Service) LoginPassword(user, password string) (string, time.Time, error
 
 // UpsertUser inserts the subject or returns the existing row.
 func (s *Service) UpsertUser(subject, email string, isAdmin bool) (User, error) {
+	s.upserts.Add(1)
 	admin := 0
 	if isAdmin {
 		admin = 1

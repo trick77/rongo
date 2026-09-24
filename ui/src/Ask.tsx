@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView, { isCommit } from "./SourceView";
 import CommitView from "./CommitView";
@@ -972,6 +972,11 @@ export default function Ask({
   // that still holds whatever was there before is a plain lie. Nothing else is
   // said about it — the text is on screen to select, and a banner would be
   // noise.
+  // Stable, so the overlays' keydown listeners are attached once rather
+  // than on every streamed token.
+  const closeViewer = useCallback(() => setViewing(null), []);
+  const closeSources = useCallback(() => setSourcesOpen(false), []);
+
   const actions = useMemo(
     () => ({
       onRetry: retry,
@@ -1338,16 +1343,16 @@ export default function Ask({
       </div>
 
       {showSources && (
-        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={() => setSourcesOpen(false)} />
+        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={closeSources} />
       )}
 
       {/* A commit citation opens the commit view, whose touched files open
           the source viewer in turn, whole, at their indexed commit. */}
       {viewing &&
         (isCommit(viewing) ? (
-          <CommitView source={viewing} onClose={() => setViewing(null)} onOpenFile={setViewing} />
+          <CommitView source={viewing} onClose={closeViewer} onOpenFile={setViewing} />
         ) : (
-          <SourceView source={viewing} onClose={() => setViewing(null)} />
+          <SourceView source={viewing} onClose={closeViewer} />
         ))}
     </div>
   );

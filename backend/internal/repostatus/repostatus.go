@@ -10,6 +10,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/httpapi"
@@ -23,13 +25,56 @@ type Store struct {
 	state   *indexer.StateStore
 	history *history.Store
 	opts    modules.Opts
+	// derived is what the index said last time, per repository, keyed by the
+	// state it was read at: the clustering is a scan of every file and
+	// chunk, the page is read on every turn, and neither number moves until
+	// the index does.
+	mu      sync.Mutex
+	derived map[string]derived
+	// clusters counts the clusterings run, for the test that pins the cache.
+	clusters int
+}
+
+// derived is the module count and the commit lane's summary, with the
+// index state they were read at.
+type derived struct {
+	sha            string
+	files, chunks  int
+	modules        int
+	commits        int
+	newestCommitAt time.Time
 }
 
 // New builds a Store. opts are the clustering constants; they decide how many
 // modules a repository reports, so the page and the routing layer must be given
 // the same ones.
 func New(db *sql.DB, opts modules.Opts) *Store {
-	return &Store{db: db, state: indexer.NewStateStore(db), history: history.New(db), opts: opts}
+	return &Store{db: db, state: indexer.NewStateStore(db), history: history.New(db), opts: opts, derived: map[string]derived{}}
+}
+
+// derivedOf is the clustering and the commit count for one repository, read
+// again only when the index moved: a new sha, or the totals a sweep changed.
+func (s *Store) derivedOf(ctx context.Context, st indexer.RepoState) (derived, error) {
+	s.mu.Lock()
+	d, ok := s.derived[st.Name]
+	s.mu.Unlock()
+	if ok && d.sha == st.LastSHA && d.files == st.Files && d.chunks == st.Chunks {
+		return d, nil
+	}
+	mods, err := modules.Cluster(ctx, s.db, st.Name, s.opts)
+	if err != nil {
+		return derived{}, fmt.Errorf("cluster %s: %w", st.Name, err)
+	}
+	commits, newest, err := s.history.Count(ctx, st.Name)
+	if err != nil {
+		return derived{}, fmt.Errorf("count commits of %s: %w", st.Name, err)
+	}
+	d = derived{sha: st.LastSHA, files: st.Files, chunks: st.Chunks, modules: len(mods), commits: commits, newestCommitAt: newest}
+	s.mu.Lock()
+	s.derived[st.Name] = d
+	s.clusters++
+	s.mu.Unlock()
+	return d, nil
 }
 
 // RepoStatus reports every active repository in repo_state. One the YAML
@@ -45,17 +90,13 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 	}
 	out := make([]httpapi.RepoStatus, 0, len(all))
 	for _, st := range all {
-		mods, err := modules.Cluster(ctx, s.db, st.Name, s.opts)
+		d, err := s.derivedOf(ctx, st)
 		if err != nil {
-			return nil, fmt.Errorf("cluster %s: %w", st.Name, err)
-		}
-		commits, newest, err := s.history.Count(ctx, st.Name)
-		if err != nil {
-			return nil, fmt.Errorf("count commits of %s: %w", st.Name, err)
+			return nil, err
 		}
 		out = append(out, httpapi.RepoStatus{
-			Commits:        commits,
-			NewestCommitAt: newest,
+			Commits:        d.commits,
+			NewestCommitAt: d.newestCommitAt,
 			Name:           st.Name,
 			Branch:         st.Branch,
 			LastSHA:        st.LastSHA,
@@ -63,7 +104,7 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			LastIndexedAt:  st.LastIndexedAt,
 			Files:          st.Files,
 			Chunks:         st.Chunks,
-			Modules:        len(mods),
+			Modules:        d.modules,
 			Enabled:        st.Enabled,
 			Snapshot:       st.Snapshot(),
 			LastError:      st.LastError,

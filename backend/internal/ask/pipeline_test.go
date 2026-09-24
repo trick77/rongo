@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -20,6 +21,9 @@ import (
 
 // fakeSearch records the query it was handed and returns fixed hits.
 type fakeSearch struct {
+	// mu guards the record: a comparison turn searches its repositories
+	// concurrently.
+	mu   sync.Mutex
 	hits []retrieve.Hit
 	got  retrieve.Query
 	// substrings is what the raw scan finds, keyed on the literal term, and
@@ -37,6 +41,8 @@ type fakeSearch struct {
 }
 
 func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.got = q
 	f.queries = append(f.queries, q)
 	return f.hits, nil
@@ -45,6 +51,8 @@ func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit
 // Substring answers from a table keyed on the literal term, so a test can say
 // what the raw scan sees. Nothing derived: that is the point of the method.
 func (f *fakeSearch) Substring(_ context.Context, term string, _ int, _ []string, _ string, _ retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.substringTerms = append(f.substringTerms, term)
 	return f.substrings[term], nil
 }
@@ -76,7 +84,13 @@ func (f *fakeSearch) ResolveRepos(_ context.Context, want []string, _ string) (k
 // whether search was called at all — Resume and Reexplain must never call it.
 type searchFunc func(retrieve.Query) ([]retrieve.Hit, error)
 
+// searchFuncMu serialises the closures: a comparison turn searches its
+// repositories concurrently, and a test's closure records what it saw.
+var searchFuncMu sync.Mutex
+
 func (f searchFunc) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
+	searchFuncMu.Lock()
+	defer searchFuncMu.Unlock()
 	return f(q)
 }
 

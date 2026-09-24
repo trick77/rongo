@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -320,7 +321,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// it is part of the record, so a resumed turn reads it off the stored
 	// clarification and a re-explained one off the stored row.
 	scope := Scope{Known: known, Unknown: unknown, Outside: outside, AllDenied: allDenied, All: all,
-		Stage: stage, Intent: u.Intent, Census: u.Census}
+		Stage: stage, Intent: u.Intent, Census: u.Census, stages: declared, stagesLoaded: true}
 	// The rung above routing. A question that names a repository the index does
 	// not carry arrives at Route as "named nothing" and cards on the repository
 	// rung; without this line the route log reports a question that named no
@@ -404,6 +405,17 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 
 // projectsOf is the turn's project map, read on first use and kept on the
 // scope, so one turn reads it once however many steps need it.
+// stagesOf is the declared stages for this turn, read once and kept on the
+// scope: every entry point — a fresh turn, a resume, a re-explain, a release
+// — needs them, and each used to read them again.
+func (p *Pipeline) stagesOf(ctx context.Context, scope *Scope) stages.Set {
+	if scope.stagesLoaded {
+		return scope.stages
+	}
+	scope.stages, scope.stagesLoaded = p.declaredStages(ctx), true
+	return scope.stages
+}
+
 func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, error) {
 	if scope.pmLoaded {
 		return scope.pm, nil
@@ -577,7 +589,7 @@ func (p *Pipeline) describeProjects(ctx context.Context, scope Scope) Scope {
 	// source under a stage directory and narrow the crossing when one was
 	// asked. Read here rather than in Run because every entry point — a
 	// resume, a re-explain — comes through here and needs them alike.
-	scope.Stages = p.declaredStages(ctx)
+	scope.Stages = p.stagesOf(ctx, &scope)
 	if len(scope.Known) == 0 {
 		return scope
 	}
@@ -1131,16 +1143,30 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 		// names is already a member, so knownRepos adds nothing.
 		return p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: known, Question: question, Prior: prior, K: comparisonK, Stage: stage})
 	}
+	// One search per repository, all at once: each is a full retrieval with
+	// its own reranker call, and the sides of a comparison do not depend on
+	// one another. Collected in repository order, so the merge below sees
+	// the same input whichever finished first.
+	perRepo := make([][]retrieve.Hit, len(known))
+	errs := make([]error, len(known))
+	var wg sync.WaitGroup
+	for i, repo := range known {
+		wg.Add(1)
+		go func(i int, repo string) {
+			defer wg.Done()
+			// Question is left out on purpose: it names every one of these
+			// repositories, and knownRepos would union them all back in,
+			// undoing the one-repository-at-a-time cut this exists for.
+			perRepo[i], errs[i] = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
+		}(i, repo)
+	}
+	wg.Wait()
 	var all []retrieve.Hit
-	for _, repo := range known {
-		// Question is left out on purpose: it names every one of these
-		// repositories, and knownRepos would union them all back in, undoing
-		// the one-repository-at-a-time cut this exists for.
-		hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
-		if err != nil {
-			return nil, err
+	for i := range known {
+		if errs[i] != nil {
+			return nil, errs[i]
 		}
-		all = append(all, hits...)
+		all = append(all, perRepo[i]...)
 	}
 	// Ordered best first across the repositories, as one search would be: the
 	// router ranks candidates by their best hit and the gatherer walks in
@@ -1209,7 +1235,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	audience Audience, lang Language, scope Scope, t Thread, ev Events) (Answer, error) {
 
 	texts := u.SearchTexts(question)
-	stage := p.declaredStages(ctx).Prefixes(scope.Stage)
+	stage := p.stagesOf(ctx, &scope).Prefixes(scope.Stage)
 	var hits []retrieve.Hit
 	if len(repos) > 0 {
 		// A restriction the index cannot resolve is not a narrow search, it is

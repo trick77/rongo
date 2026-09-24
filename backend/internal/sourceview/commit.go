@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
@@ -48,6 +49,36 @@ func (s *Service) WithCommits(r CommitReader) *Service {
 	return s
 }
 
+// indexedPaths is which of a commit's files the index holds with chunks, in
+// one query rather than one per file.
+func (s *Service) indexedPaths(ctx context.Context, repo string, files []gitrepo.FileChange) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(files) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, 1+len(files))
+	args = append(args, repo)
+	for _, f := range files {
+		args = append(args, f.Path)
+	}
+	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT path FROM files WHERE repo = ? AND skip_reason = '' AND path IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", len(files)), ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("look up the indexed files of %s: %w", repo, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out[p] = true
+	}
+	return out, rows.Err()
+}
+
 // Commit returns the commit sha of repo. The commits row is the permission,
 // the way the files row is for Read: only a commit the lane recorded is
 // served, so the view is the evidence behind a changes answer and not a
@@ -85,13 +116,12 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 		at = t.UTC().Format(time.RFC3339)
 	}
 	out := Commit{Repo: repo, Branch: branch, SHA: d.SHA, CommittedAt: at, Subject: d.Subject, Body: d.Body, Files: []FileChange{}}
+	indexed, err := s.indexedPaths(ctx, repo, d.Files)
+	if err != nil {
+		return Commit{}, err
+	}
 	for _, f := range d.Files {
-		var indexed int
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT count(*) FROM files WHERE repo = ? AND path = ? AND skip_reason = ''`, repo, f.Path).Scan(&indexed); err != nil {
-			return Commit{}, fmt.Errorf("look up %s/%s: %w", repo, f.Path, err)
-		}
-		out.Files = append(out.Files, FileChange{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Indexed: indexed > 0})
+		out.Files = append(out.Files, FileChange{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Indexed: indexed[f.Path]})
 	}
 	return out, nil
 }

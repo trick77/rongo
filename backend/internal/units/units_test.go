@@ -273,3 +273,20 @@ func TestDescribe_rendersPartsAndConnectionsAndNothingForAPlainRepository(t *tes
 		}
 	}
 }
+
+func TestAnyLinked_isLinkedOverEveryPair(t *testing.T) {
+	db := unitsDB(t)
+	ctx := context.Background()
+	us := []Unit{{Key: "apps/claims", Kind: KindNxApp, Name: "claims"}, {Key: "libs/shared", Kind: KindNxLib, Name: "shared"}, {Key: "libs/other", Kind: KindNxLib, Name: "other"}}
+	if err := Sync(ctx, db, "ui", us, []Dep{{From: "apps/claims", To: "libs/shared"}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	ok, err := AnyLinked(ctx, db, "ui", []string{"libs/other", "libs/shared", "apps/claims"})
+	if err != nil || !ok {
+		t.Errorf("AnyLinked over keys holding a linked pair = %v, %v; want true", ok, err)
+	}
+	ok, err = AnyLinked(ctx, db, "ui", []string{"libs/other", "libs/shared"})
+	if err != nil || ok {
+		t.Errorf("AnyLinked over unlinked keys = %v, %v; want false", ok, err)
+	}
+}
