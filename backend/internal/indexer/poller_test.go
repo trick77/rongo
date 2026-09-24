@@ -701,7 +701,11 @@ func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
 		},
 		FirstDelay: time.Hour, Interval: time.Hour,
 	})
-	go p.Run(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.Run(ctx)
+	}()
 
 	p.Nudge()
 
@@ -710,4 +714,8 @@ func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the nudge did not start a cycle")
 	}
+	// The cycle still running would write into a database the cleanup is
+	// about to close; Run returns once the cycle has ended.
+	cancel()
+	<-done
 }

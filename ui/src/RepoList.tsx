@@ -377,7 +377,9 @@ function ReindexModal({
     <ModalShell title={copy.title} onCancel={onCancel}>
       <p className="mt-3 text-sm/6 text-ink-dim">{copy.body}</p>
       {scope.kind === "all" && (
-        <p className="mt-2 text-sm/6 font-medium text-ochre">This incurs embedding costs across the whole corpus.</p>
+        <p className="mt-2 text-sm/6 font-medium text-accent-strong">
+          This incurs embedding costs across the whole corpus.
+        </p>
       )}
       {error && (
         <p role="alert" className="mt-2 text-sm/6 text-accent-strong">
@@ -445,11 +447,14 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
         }
       }
       setReindex(null);
-      setVersion((v) => v + 1);
     } catch {
       setReindexError("The request did not reach the server.");
     } finally {
       setBusy(false);
+      // Reloaded whatever happened: a project's members are requested one
+      // by one, and the ones queued before a refusal are queued on the
+      // record and have to show as such.
+      setVersion((v) => v + 1);
     }
   }
   const modal = reindex && (
@@ -779,13 +784,13 @@ function ProjectPanel({
                           Error
                         </span>
                       )}
-                      {/* Ochre: the poller's move, not the reader's, but a
-                          request standing until the next cycle is a thing
-                          worth a glance. From the record, so a reload shows
+                      {/* Muted, not ochre: ochre is "your move", and a
+                          request standing until the next cycle asks nothing
+                          of the reader. From the record, so a reload shows
                           it too. */}
                       {r.reindex_queued && (
                         <span
-                          className="rounded-full bg-ochre-wash px-2.5 py-0.5 text-xs font-medium text-ochre"
+                          className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
                           title="A full re-index was requested and runs with the next poll cycle."
                         >
                           Re-index queued

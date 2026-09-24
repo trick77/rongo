@@ -388,7 +388,6 @@ func main() {
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
-		Reindex:        poller,
 		Threads:        threads.NewStore(db),
 		Source:         source,
 		Commit:         source,
@@ -462,6 +461,12 @@ func main() {
 		sources []ask.Source, scope ask.Scope, lang ask.Language,
 	) []string {
 		return ask.Followups(ctx, models, question, answer, audience, sources, scope, lang)
+	}
+	// Only a poller that runs takes re-index requests: with indexing off, or
+	// no list loaded, a request would be accepted, queued on the row and
+	// served by nobody, and the page would show it queued for good.
+	if indexing {
+		deps.Reindex = poller
 	}
 	srv := httpapi.NewServer(deps)
 

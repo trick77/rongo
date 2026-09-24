@@ -112,6 +112,22 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 
 	declared := ix.syncStructure(ctx, spec, st, sha)
 
+	if paths == nil {
+		// A full run reads the tree at sha and nothing else, so a file the
+		// index holds from an earlier commit and the tree no longer has
+		// would stay — retrieved, cited at a commit it is not in — for good:
+		// every later diff runs from sha and never names it. On a first
+		// sight there is nothing to retire; on a requested re-index there
+		// may be.
+		keep := make(map[string]bool, len(targets))
+		for _, tg := range targets {
+			keep[tg.path] = true
+		}
+		if err := ix.writer.DeleteFilesNotIn(ctx, st.Name, keep); err != nil {
+			return Counts{}, err
+		}
+	}
+
 	for _, tg := range targets {
 		if ctx.Err() != nil {
 			return Counts{}, ctx.Err()

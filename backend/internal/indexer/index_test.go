@@ -709,3 +709,34 @@ func TestIndexRepo_aSymlinkIsNotAFile(t *testing.T) {
 		t.Errorf("the repointed symlink took %d files rows, want none", n)
 	}
 }
+
+// TestIndexRepo_aFullRunRetiresFilesTheTreeNoLongerHolds: a requested
+// re-index is a full run over a tree the index already knows an older
+// version of, and a file deleted in between must not survive it — every
+// later diff runs from the new commit and would never name it again.
+func TestIndexRepo_aFullRunRetiresFilesTheTreeNoLongerHolds(t *testing.T) {
+	h := newHarness(t, nil)
+	st := h.stateOf(t)
+	first := h.head(t)
+	if _, err := h.ix.IndexRepo(context.Background(), st, first, nil); err != nil {
+		t.Fatalf("full IndexRepo() err = %v", err)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM files WHERE path = 'README.md'`); n != 1 {
+		t.Fatalf("README rows = %d before, want 1", n)
+	}
+	git(t, h.src, "rm", "-q", "README.md")
+	git(t, h.src, "commit", "-qm", "drop the readme")
+	second := h.head(t)
+
+	// A full run at the new commit, as a requested re-index is.
+	if _, err := h.ix.IndexRepo(context.Background(), st, second, nil); err != nil {
+		t.Fatalf("second full IndexRepo() err = %v", err)
+	}
+
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM files WHERE path = 'README.md'`); n != 0 {
+		t.Errorf("README rows = %d after a full run without it, want 0", n)
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'README.md'`); n != 0 {
+		t.Errorf("README chunks = %d after a full run without it, want 0", n)
+	}
+}

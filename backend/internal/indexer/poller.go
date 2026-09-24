@@ -448,7 +448,7 @@ func (p *Poller) honourReindex(st *RepoState) {
 	if st.ReindexRequested == 0 {
 		return
 	}
-	p.log.Info("full re-index requested", "repo", st.Name)
+	p.log.Info("honouring a full re-index request", "repo", st.Name)
 	st.LastSHA = ""
 }
 

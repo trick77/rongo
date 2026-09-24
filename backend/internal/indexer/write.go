@@ -185,6 +185,37 @@ func (w *Writer) RecordSkipped(ctx context.Context, repo, path, sha, lang, reaso
 	return tx.Commit()
 }
 
+// DeleteFilesNotIn removes every file of the repository whose path is not in
+// keep: what a full run over a tree retires. Reports nothing about a
+// repository with no rows.
+func (w *Writer) DeleteFilesNotIn(ctx context.Context, repo string, keep map[string]bool) error {
+	rows, err := w.db.QueryContext(ctx, `SELECT path FROM files WHERE repo = ?`, repo)
+	if err != nil {
+		return fmt.Errorf("list files of %s: %w", repo, err)
+	}
+	var gone []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if !keep[p] {
+			gone = append(gone, p)
+		}
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, p := range gone {
+		if err := w.DeleteFile(ctx, repo, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteFile removes a path from the index entirely. A path that was never
 // indexed is not an error: a diff legitimately names files that were skipped,
 // or added and removed between two polls.
