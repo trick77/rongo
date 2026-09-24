@@ -132,6 +132,9 @@ type Deps struct {
 	// repository status, which its endpoint says with a 503 rather than an
 	// empty list.
 	Repos RepoStatusSource
+	// Reindex takes the Repos page's one action. Nil means the poller is not
+	// running here, and the page offers nothing.
+	Reindex Reindexer
 	// Ask runs the question pipeline; Threads persists the record. Nil means
 	// this deployment cannot answer questions, which its routes say with a 503.
 	Ask     Asker
@@ -213,6 +216,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/auth/logout", s.requireAuth(http.HandlerFunc(s.handleAuthLogout)))
 	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
+	s.mux.Handle("POST /api/repos/reindex", s.requireAuth(http.HandlerFunc(s.handleReindex)))
+	s.mux.Handle("POST /api/repos/{name}/reindex", s.requireAuth(http.HandlerFunc(s.handleReindex)))
 	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
 	s.mux.Handle("GET /api/threads/search", s.requireAuth(http.HandlerFunc(s.handleSearchThreads)))
 	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))

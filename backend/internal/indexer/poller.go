@@ -73,6 +73,10 @@ type Poller struct {
 	history    *history.Store
 	depth      int
 	log        *slog.Logger
+	// wake ends the wait before a cycle: a re-index request should not sit
+	// until the interval elapses. Buffered by one, so a nudge that lands
+	// mid-cycle starts the next one straight after.
+	wake chan struct{}
 }
 
 // NewPoller builds a Poller, filling in the defaults.
@@ -96,7 +100,52 @@ func NewPoller(d PollerDeps) *Poller {
 		state: d.State, git: d.Git, index: d.Index,
 		tokens: d.Tokens, interval: d.Interval, firstDelay: d.FirstDelay,
 		history: d.History, depth: d.HistoryDepth,
-		log: d.Logger,
+		log: d.Logger, wake: make(chan struct{}, 1),
+	}
+}
+
+// Nudge starts the next cycle now rather than at the end of the wait.
+func (p *Poller) Nudge() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+// RequestReindex asks for a full re-index of one active repository and starts
+// a cycle; the request is kept on the row, so it survives a restart. Reports
+// whether the repository is one the poller serves.
+func (p *Poller) RequestReindex(ctx context.Context, name string) (bool, error) {
+	ok, err := p.state.RequestReindex(ctx, name)
+	if err != nil || !ok {
+		return ok, err
+	}
+	p.Nudge()
+	return true, nil
+}
+
+// RequestReindexAll is RequestReindex over every active repository.
+func (p *Poller) RequestReindexAll(ctx context.Context) (int, error) {
+	n, err := p.state.RequestReindexAll(ctx)
+	if err != nil || n == 0 {
+		return n, err
+	}
+	p.Nudge()
+	return n, nil
+}
+
+// wait sleeps for d, or until ctx ends or a nudge arrives. Reports false when
+// the context ended.
+func (p *Poller) wait(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	case <-p.wake:
+		return true
 	}
 }
 
@@ -117,7 +166,7 @@ func (p *Poller) Run(ctx context.Context) {
 	p.log.Info("indexing scheduled",
 		"first_poll_in", delay.Round(time.Second).String(), "interval", p.interval.String())
 	for {
-		if !sched.Sleep(ctx, delay) {
+		if !p.wait(ctx, delay) {
 			return
 		}
 		if err := p.PollOnce(ctx); err != nil {
@@ -172,6 +221,9 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 			// on the same line.
 			attrs := []any{"repo", st.Name, "mode", res.Mode(),
 				"sha", gitrepo.ShortSHA(res.SHA)}
+			if res.Requested {
+				attrs = append(attrs, "requested", true)
+			}
 			if !res.Full {
 				attrs = append(attrs, "changed", res.Changed)
 			}
@@ -210,7 +262,9 @@ type pollResult struct {
 	// Changed is how many paths the diff named. Zero for a full run, which
 	// indexed everything rather than nothing.
 	Changed int
-	SHA     string
+	// Requested is true for a full run an admin asked for.
+	Requested bool
+	SHA       string
 	// Counts is what the repository holds AFTER the run — whole-repo totals
 	// from Indexer.totals, not the size of this run. The log line names them
 	// total_files/total_chunks for that reason: `mode=incremental files=5000`
@@ -326,6 +380,7 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		return pollResult{}, err
 	}
 
+	p.honourReindex(&st)
 	if head == st.LastSHA {
 		// Nothing new, but the poll SUCCEEDED — so a last_error left by an
 		// earlier network failure has to go. Returning early without clearing
@@ -370,8 +425,31 @@ func (p *Poller) indexAndMark(ctx context.Context, st RepoState, sha string, pat
 			return pollResult{}, err
 		}
 	}
-	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts}
-	return res, p.state.MarkIndexed(ctx, st.Name, sha, counts)
+	res := pollResult{Indexed: true, Full: paths == nil, Changed: len(paths), SHA: sha, Counts: counts,
+		Requested: st.ReindexRequested > 0}
+	if err := p.state.MarkIndexed(ctx, st.Name, sha, counts); err != nil {
+		return pollResult{}, err
+	}
+	if st.ReindexRequested > 0 {
+		// The generation this run read, and only that: a request that
+		// arrived while the run was under way stays for the next cycle.
+		if err := p.state.ClearReindex(ctx, st.Name, st.ReindexRequested); err != nil {
+			return pollResult{}, err
+		}
+	}
+	return res, nil
+}
+
+// honourReindex turns a pending request into a full run: with no recorded
+// commit the poll below reads the whole tree, the way a first sight does.
+// Only this copy of the state forgets the sha; the row keeps it until the
+// full run has landed, so a run that fails leaves the index as it was.
+func (p *Poller) honourReindex(st *RepoState) {
+	if st.ReindexRequested == 0 {
+		return
+	}
+	p.log.Info("full re-index requested", "repo", st.Name)
+	st.LastSHA = ""
 }
 
 // recordHistory makes the lane the branch's first-parent history from head,
@@ -421,6 +499,7 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 		st.Branch = gitrepo.SnapshotBranch
 	}
 
+	p.honourReindex(&st)
 	if sha == st.LastSHA {
 		// Unchanged, and the poll SUCCEEDED — clearing a last_error left by an
 		// earlier missing directory is part of that. For a snapshot this is the

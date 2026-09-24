@@ -572,3 +572,142 @@ func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
 		t.Errorf("chunks = %d, want the 2 that were there", n)
 	}
 }
+
+// TestPollOnce_aRequestedReindexRunsInFullAndIsThenCleared: the flag turns
+// an unchanged repository into a full run, once, and the row keeps its sha
+// throughout so a failed run leaves the index as it was.
+func TestPollOnce_aRequestedReindexRunsInFullAndIsThenCleared(t *testing.T) {
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+	// Unchanged: the second cycle indexes nothing.
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("index called %d times over two cycles of an unchanged remote, want 1", len(rec.calls))
+	}
+
+	// When an admin asks for a full re-index
+	if ok, err := p.RequestReindex(ctx, "fixture"); err != nil || !ok {
+		t.Fatalf("RequestReindex = %v, %v", ok, err)
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("third PollOnce() err = %v", err)
+	}
+
+	// Then the cycle indexed everything, once, and the request is served.
+	if len(rec.calls) != 2 || rec.calls[1].Paths != nil {
+		t.Fatalf("calls = %+v, want a second, full run", rec.calls)
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("fourth PollOnce() err = %v", err)
+	}
+	if len(rec.calls) != 2 {
+		t.Errorf("index called %d times, want the request served once", len(rec.calls))
+	}
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[0].ReindexRequested != 0 || all[0].LastSHA == "" {
+		t.Errorf("state = %+v, want the request cleared and the sha kept", all[0])
+	}
+}
+
+// TestPollOnce_aReindexRequestedMidRunSurvivesThatRun: a request that lands
+// while the repository is being indexed is not the request that run served.
+func TestPollOnce_aReindexRequestedMidRunSurvivesThatRun(t *testing.T) {
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if ok, err := s.RequestReindex(ctx, "fixture"); err != nil || !ok {
+		t.Fatal(err)
+	}
+	var p *Poller
+	runs := 0
+	p = newPoller(t, s, func(ctx context.Context, st RepoState, _ string, _ []string) (Counts, error) {
+		runs++
+		if runs == 1 {
+			// The admin clicks again while this run is under way.
+			if _, err := p.RequestReindex(ctx, st.Name); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return Counts{Files: 1, Chunks: 1}, nil
+	})
+
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("PollOnce() err = %v", err)
+	}
+	all, err := s.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[0].ReindexRequested == 0 {
+		t.Fatal("the request that arrived mid-run was cleared by that run")
+	}
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+	if runs != 2 {
+		t.Errorf("ran %d times, want the mid-run request served by the next cycle", runs)
+	}
+}
+
+// TestRun_aNudgeStartsTheCycleNow: the wait before a cycle ends on a request
+// rather than on the interval.
+func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
+	src := fixtureRemote(t)
+	db := newDB(t)
+	s := NewStateStore(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	ran := make(chan struct{}, 1)
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
+	}
+	p := NewPoller(PollerDeps{
+		State: s, Git: gitrepo.New(gitBin, t.TempDir()),
+		Index: func(context.Context, RepoState, string, []string) (Counts, error) {
+			select {
+			case ran <- struct{}{}:
+			default:
+			}
+			return Counts{}, nil
+		},
+		FirstDelay: time.Hour, Interval: time.Hour,
+	})
+	go p.Run(ctx)
+
+	p.Nudge()
+
+	select {
+	case <-ran:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the nudge did not start a cycle")
+	}
+}

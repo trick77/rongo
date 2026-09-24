@@ -110,13 +110,14 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			LastError:      st.LastError,
 			// A row written before projects shipped has no project; it stands
 			// as one of its own, the same fallback projects.Load applies.
-			Project:     projectOr(st.Project, st.Name),
-			Part:        st.Part,
-			Description: st.Description,
-			Image:       st.Image,
-			Uses:        st.Uses,
-			Library:     st.Library,
-			Stages:      st.Stages,
+			Project:       projectOr(st.Project, st.Name),
+			Part:          st.Part,
+			Description:   st.Description,
+			Image:         st.Image,
+			Uses:          st.Uses,
+			Library:       st.Library,
+			Stages:        st.Stages,
+			ReindexQueued: st.ReindexRequested > 0,
 		})
 	}
 	return out, nil

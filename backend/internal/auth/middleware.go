@@ -24,6 +24,12 @@ const (
 	ProxyEmailHeader = "X-Forwarded-Email"
 )
 
+// WithUser is the context a request carries once the middleware admitted
+// u; a test drives a handler with it.
+func WithUser(ctx context.Context, u User) context.Context {
+	return context.WithValue(ctx, userKey, u)
+}
+
 // UserFrom returns the authenticated user attached by Middleware.
 func UserFrom(ctx context.Context) (User, bool) {
 	u, ok := ctx.Value(userKey).(User)

@@ -43,6 +43,9 @@ type RepoState struct {
 	LastIndexedAt time.Time
 	Files         int
 	Chunks        int
+	// ReindexRequested is the pending request generation, zero for none: an
+	// admin asked for a full re-index and the poller has not run it yet.
+	ReindexRequested int
 	// Project, Part, Description and Uses come from repos.yaml, not from the
 	// checkout: they say which product this repository belongs to and what part
 	// it plays in it. Nothing here is derived from code, and none of it is ever
@@ -349,7 +352,8 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT name, clone_url, branch, enabled, last_sha, last_error, last_run_at,
-		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description, library, image
+		       last_indexed_at, file_count, chunk_count, token_env, token_user, token_auth, project, part, description, library, image,
+		       reindex_requested
 		FROM repo_state `+where+` ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -363,7 +367,7 @@ func (s *StateStore) states(ctx context.Context, where string) ([]RepoState, err
 		var lastRun, lastIndexed string
 		if err := rows.Scan(&r.Name, &r.CloneURL, &r.Branch, &enabled, &r.LastSHA,
 			&r.LastError, &lastRun, &lastIndexed, &r.Files, &r.Chunks, &r.TokenEnv, &r.TokenUser, &r.TokenAuth,
-			&r.Project, &r.Part, &r.Description, &library, &r.Image); err != nil {
+			&r.Project, &r.Part, &r.Description, &library, &r.Image, &r.ReindexRequested); err != nil {
 			return nil, err
 		}
 		r.Enabled = enabled == 1
@@ -448,6 +452,42 @@ func (s *StateStore) attachUses(ctx context.Context, states []RepoState) error {
 		states[i].Uses = append(states[i].Uses, uses)
 	}
 	return rows.Err()
+}
+
+// RequestReindex asks for a full re-index of one active repository at the
+// poller's next pass, and reports whether such a repository exists. A parked
+// one is refused like an unknown one: parked means not polled.
+func (s *StateStore) RequestReindex(ctx context.Context, name string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE repo_state SET reindex_requested = reindex_requested + 1 WHERE name = ? AND enabled = 1`, name)
+	if err != nil {
+		return false, fmt.Errorf("request re-index of %s: %w", name, err)
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// RequestReindexAll is RequestReindex over every active repository, and
+// reports how many it asked for.
+func (s *StateStore) RequestReindexAll(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE repo_state SET reindex_requested = reindex_requested + 1 WHERE enabled = 1`)
+	if err != nil {
+		return 0, fmt.Errorf("request re-index of every repository: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// ClearReindex marks the request of generation gen served. A request that
+// arrived after the run read gen bumped the column past it, and stays.
+func (s *StateStore) ClearReindex(ctx context.Context, name string, gen int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE repo_state SET reindex_requested = 0 WHERE name = ? AND reindex_requested = ?`, name, gen)
+	if err != nil {
+		return fmt.Errorf("clear re-index request of %s: %w", name, err)
+	}
+	return nil
 }
 
 // MarkIndexed records a successful run and clears any previous error, so a

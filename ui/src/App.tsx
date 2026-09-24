@@ -823,7 +823,7 @@ export default function App() {
                 </>
               }
             >
-              <RepoList />
+              <RepoList admin={session.me.is_admin} />
             </PageShell>
           )}
           {page === "memory" && (

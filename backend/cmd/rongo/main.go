@@ -388,6 +388,7 @@ func main() {
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
+		Reindex:        poller,
 		Threads:        threads.NewStore(db),
 		Source:         source,
 		Commit:         source,
