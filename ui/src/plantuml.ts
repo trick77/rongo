@@ -54,8 +54,15 @@ type Engine = {
     lines: string[],
     ok: (svg: string) => void,
     fail: (message: string) => void,
+    options?: { maxSvgSize?: number },
   ) => void;
 };
+
+/** The engine refuses a diagram wider or taller than 8192px, a guard for a
+ * browser that cannot hold the canvas. The sheet draws the SVG as markup and
+ * scales it to the viewBox, so the cap only turned a real file (4788x13531)
+ * into an error. 0 switches it off. */
+const renderOptions = { maxSvgSize: 0 };
 
 /** Everything the engine would fetch on its own is refused before it asks.
  * Themes are bundled with the engine; the standard library (C4, AWS, …),
@@ -130,6 +137,7 @@ function renderOne(e: Engine, lines: string[]): Promise<string> {
             clearTimeout(timer);
             reject(new Error(m));
           },
+          renderOptions,
         );
       }),
   );
