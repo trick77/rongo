@@ -11,7 +11,7 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-import RepoList, { byProject, historyLine, reindexCopy, reindexPaths, unconnected, wiringSpec } from "./RepoList";
+import RepoList, { byProject, historyLine, reindexCopy, reindexPaths, reindexScope, unconnected, wiringSpec } from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
 function respondWith(status: number, body: unknown) {
@@ -440,6 +440,53 @@ describe("re-index", () => {
     expect(screen.queryByRole("button", { name: /re-index/i })).toBeNull();
   });
 
+  it("offers it on each panel's header and on no row, library panels included", async () => {
+    respondWith(200, [
+      peeq,
+      { ...peeq, name: "shop-api", project: "shop" },
+      { ...peeq, name: "shop-ui", project: "shop" },
+      { ...peeq, name: "commons", project: "commons", library: true },
+    ]);
+    render(<RepoList admin />);
+
+    await screen.findByRole("heading", { name: "commons" });
+    expect(screen.getAllByRole("button", { name: /re-index/i })).toHaveLength(4);
+    for (const name of ["Re-index all", "Re-index commons", "Re-index peeq", "Re-index shop"]) {
+      expect(screen.getByRole("button", { name })).toBeTruthy();
+    }
+    for (const table of screen.getAllByRole("table")) {
+      expect(within(table).queryByRole("button", { name: /re-index/i })).toBeNull();
+    }
+  });
+
+  it("re-indexes every member of a project from its header", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${url}`);
+        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { ...peeq, name: "shop-api", project: "shop" },
+            { ...peeq, name: "shop-ui", project: "shop" },
+          ],
+        };
+      }),
+    );
+    render(<RepoList admin />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Re-index shop" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/2 repositories \(shop-api, shop-ui\)/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index 2 repositories" }));
+
+    await waitFor(() => expect(calls).toContain("POST /api/repos/shop-ui/reindex"));
+    expect(calls).toContain("POST /api/repos/shop-api/reindex");
+  });
+
   it("asks first, says what it costs, then posts the one repository and reloads", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
@@ -463,9 +510,9 @@ describe("re-index", () => {
     await waitFor(() => expect(calls).toContain("POST /api/repos/peeq/reindex"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Reloaded from the record: the row says the request is queued and the
-    // button is gone until it is served.
+    // header button rests until it is served.
     expect(await screen.findByText("Re-index queued")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Re-index peeq" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Re-index peeq" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("warns louder about the cost of re-indexing everything and posts the corpus request", async () => {
@@ -509,5 +556,14 @@ describe("re-index", () => {
     expect(reindexCopy(scope).body).toContain("2 repositories (shop-api, shop-ui)");
     expect(reindexPaths(scope)).toEqual(["/api/repos/shop-api/reindex", "/api/repos/shop-ui/reindex"]);
     expect(reindexPaths({ kind: "all", count: 3 })).toEqual(["/api/repos/reindex"]);
+  });
+
+  it("asks about a lone member by its own name only when it is the project's", () => {
+    expect(reindexScope({ name: "peeq", repos: [peeq] })).toEqual({ kind: "repo", name: "peeq" });
+    expect(reindexScope({ name: "shop", repos: [{ ...peeq, name: "shop-api" }] })).toEqual({
+      kind: "project",
+      name: "shop",
+      repos: ["shop-api"],
+    });
   });
 });

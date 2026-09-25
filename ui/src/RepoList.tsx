@@ -3,6 +3,7 @@ import { shortSha } from "./turns";
 import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
 import { ModalShell, cancelButton, saveButton } from "./ThreadModals";
+import { Icon } from "./Icon";
 
 /** One row of GET /api/repos. */
 export type Repo = {
@@ -346,6 +347,15 @@ export function reindexCopy(scope: ReindexScope): { title: string; body: string;
   }
 }
 
+/** reindexScope is what a panel's button asks about. A project that is its
+ * one repository under the same name is that repository, so the dialog does
+ * not list it back as "1 repository (peeq)". */
+export function reindexScope(project: Project): ReindexScope {
+  const only = project.repos.length === 1 ? project.repos[0] : undefined;
+  if (only && only.name === project.name) return { kind: "repo", name: only.name };
+  return { kind: "project", name: project.name, repos: project.repos.map((r) => r.name) };
+}
+
 /** reindexPaths is the request the confirmation sends: one POST per
  * repository, or the one that covers the corpus. */
 export function reindexPaths(scope: ReindexScope): string[] {
@@ -400,8 +410,21 @@ function ReindexModal({
   );
 }
 
-const smallButton =
-  "rounded-ui-sm border border-border px-2 py-0.5 text-[11px] font-medium text-ink-dim transition-colors hover:bg-elevated disabled:opacity-50";
+// rongo's secondary button, as the Memory page's Forget: bordered, sans,
+// 13px. The part, branch and state pills around it are borderless, 11-12px
+// and mostly mono; the first cut shared their size and sat in their row, and
+// a reader took it for one more pill.
+const actionButton =
+  "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border bg-panel px-3 font-sans text-[13px] text-ink-dim transition-colors hover:border-elevated-border hover:bg-active disabled:opacity-50 disabled:hover:border-border disabled:hover:bg-panel";
+
+function ReindexLabel({ text }: { text: string }) {
+  return (
+    <>
+      <Icon name="retry" size="14px" />
+      {text}
+    </>
+  );
+}
 
 export default function RepoList({ admin = false }: { admin?: boolean }) {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -571,13 +594,13 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
         </p>
       )}
       {/* The page's one action, for an administrator: a full re-index, of
-          every active repository from here, of one project or one
-          repository from the panels. Each asks first and says what it
-          costs. */}
+          every active repository from here, of one panel (project or
+          library) from its header. Never per row: a project is what a
+          reader chooses between. Each asks first and says what it costs. */}
       {ask && (
         <p className="mb-5 -mt-2 flex items-center gap-3 px-0.5 text-[12.5px] text-faint">
-          <button type="button" className={smallButton} onClick={() => ask({ kind: "all", count: shown.length })}>
-            Re-index all
+          <button type="button" className={actionButton} onClick={() => ask({ kind: "all", count: shown.length })}>
+            <ReindexLabel text="Re-index all" />
           </button>
           <span>Re-reads every repository; embeds only what changed.</span>
         </p>
@@ -655,13 +678,17 @@ function ProjectPanel({
             )}
           </span>
         )}
-        {ask && project.repos.length > 1 && (
+        {ask && (
           <button
             type="button"
-            className={smallButton + " ml-auto"}
-            onClick={() => ask({ kind: "project", name: project.name, repos: project.repos.map((r) => r.name) })}
+            aria-label={`Re-index ${project.name}`}
+            className={actionButton + " ml-auto self-center"}
+            // Rests while every member waits for the poller: asking again
+            // queues nothing new, and the rows say so.
+            disabled={project.repos.every((r) => r.reindex_queued)}
+            onClick={() => ask(reindexScope(project))}
           >
-            Re-index project
+            <ReindexLabel text="Re-index" />
           </button>
         )}
       </header>
@@ -754,16 +781,6 @@ function ProjectPanel({
                         </span>
                       ) : (
                         <span>{r.branch}</span>
-                      )}
-                      {ask && !r.reindex_queued && (
-                        <button
-                          type="button"
-                          className={smallButton}
-                          aria-label={`Re-index ${r.name}`}
-                          onClick={() => ask({ kind: "repo", name: r.name })}
-                        >
-                          Re-index
-                        </button>
                       )}
                     </div>
                     {r.last_error && (
