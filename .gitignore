@@ -73,6 +73,7 @@ playwright-report/
 # ---------- Agent & editor tooling ----------
 # Local Claude Code settings, and the worktrees that live under .claude/.
 .claude/
+.agents/
 .superpowers/
 # Playwright MCP scratch output, written to the repo root during browser-driven
 # UI verification.
