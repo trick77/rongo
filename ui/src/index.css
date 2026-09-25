@@ -501,6 +501,20 @@ body {
   margin: 1px 3px 1px 0;
   color: var(--color-ink-dim);
 }
+/* The locate loop's lookups, one per line under its sentence. */
+.trace-locate-steps {
+  margin: 0;
+  padding-left: 14px;
+  list-style: none;
+}
+.trace-locate-outcome {
+  color: var(--color-ink-dim);
+}
+.trace-file {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-ink-dim);
+}
 .trace-chip-dim {
   color: var(--color-muted);
 }

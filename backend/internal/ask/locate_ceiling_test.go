@@ -149,15 +149,17 @@ func TestPipeline_locateOnATurnNamingNothingStaysInTheProject(t *testing.T) {
 	}
 }
 
-// The trace carries the loop's pointer sentence beside its calls, so a turn
-// read back shows what the answer was pointed at.
+// The trace carries where the answer was pointed, so a turn read back shows
+// it.
 func TestWithLocateDetail_carriesThePointer(t *testing.T) {
+	place := &LocatePlace{Repo: "peeq", Path: "ConverterPetRegistry.java", Line: 162}
 	d := withLocateDetail(map[string]any{}, LocateReport{
 		Rounds: 1, Calls: []string{"grep(setAnzahlhaustiere)"},
-		Found: "ConverterPetRegistry.java:162 sets it.", Concluded: true,
+		Found: "FOUND: ConverterPetRegistry.java:162 sets it.", Concluded: true,
+		Outcome: LocatePointed, Place: place,
 	})
-	if d["locate_found"] != "ConverterPetRegistry.java:162 sets it." {
-		t.Errorf("locate_found = %v, want the pointer sentence", d["locate_found"])
+	if d["locate_place"] != place || d["locate_outcome"] != LocatePointed {
+		t.Errorf("detail = %v, want the place it pointed at", d)
 	}
 	if d["locate_rounds"] != 1 {
 		t.Errorf("locate_rounds = %v, want 1", d["locate_rounds"])

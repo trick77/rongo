@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Chevron } from "./icons";
+import { locateSummary, type LocateFile } from "./locateTrace";
 
 /**
  * The activity trace has more than two states: a turn that ended by asking
@@ -95,6 +96,15 @@ function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
         </span>
       ))}
     </>
+  );
+}
+
+/** A file named by the locate loop: the base name, repository and path on hover. */
+function LocateFileName({ file }: { file: LocateFile }) {
+  return (
+    <span className="trace-file" title={file.title}>
+      {file.name}
+    </span>
   );
 }
 
@@ -277,18 +287,10 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       // turn that ran none.
       const linkSites = asNumber(detail.link_sites) ?? 0;
       const links = asNumber(detail.links) ?? 0;
-      // The locate loop: what it called, what landed, what came back empty or
-      // was refused, why it stopped, and the pointer it handed the answer.
-      // Absent on every turn it did not run.
-      const locateRounds = asNumber(detail.locate_rounds) ?? 0;
-      const locateStop = typeof detail.locate === "string" ? detail.locate : "";
-      const locateFound = typeof detail.locate_found === "string" ? detail.locate_found : "";
-      const locateLanded = asStrings(detail.locate_landed);
-      const locateEmpty = asStrings(detail.locate_empty);
-      const locateRefused = asStrings(detail.locate_refused);
-      const locateCalls = asStrings(detail.locate_calls).filter(
-        (c) => !locateLanded.includes(c) && !locateEmpty.includes(c),
-      );
+      // The locate loop, told as sentences: each lookup and what came of it,
+      // then what its conclusion did to the sources. Absent on every turn it
+      // did not run.
+      const locate = locateSummary(detail);
       return (
         <div className="trace-detail">
           {hits} hits
@@ -326,36 +328,32 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               <span className="trace-k">Crossed</span> {c.from} → {c.to} <span className="trace-k">on the</span> {c.via}
             </span>
           ))}
-          {(locateRounds > 0 || locateStop !== "") && (
-            <>
-              <br />
-              <span className="trace-k">
-                Located in {locateRounds} {locateRounds === 1 ? "round" : "rounds"}
-                {locateStop !== "" && `, ${locateStop}`}
-              </span>
-              {(
-                [
-                  ["landed", locateLanded, false],
-                  ["looked", locateCalls, true],
-                  ["empty", locateEmpty, true],
-                  ["not run", locateRefused, true],
-                ] as const
-              ).map(
-                ([label, values, dim]) =>
-                  values.length > 0 && (
-                    <span key={label}>
-                      {" · "}
-                      <span className="trace-k">{label}</span> <Chips values={[...values]} dim={dim} />
-                    </span>
-                  ),
+          {locate && (
+            <div className="trace-locate">
+              <div>
+                {locate.header}
+                {locate.steps.length > 0 && ":"}
+              </div>
+              {locate.steps.length > 0 && (
+                <ul className="trace-locate-steps">
+                  {locate.steps.map((s, i) => (
+                    <li key={i}>
+                      {s.lead}
+                      {s.file && <LocateFileName file={s.file} />}
+                      {s.tail} <span className="trace-k">— {s.result}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
-              {locateFound !== "" && (
-                <>
-                  <br />
-                  <span className="trace-k">Pointed the answer at</span> {locateFound}
-                </>
+              {locate.stopped && <div>{locate.stopped}</div>}
+              {locate.outcome && (
+                <div className="trace-locate-outcome">
+                  {locate.outcome.lead}
+                  {locate.outcome.file && <LocateFileName file={locate.outcome.file} />}
+                  {locate.outcome.tail}
+                </div>
               )}
-            </>
+            </div>
           )}
         </div>
       );

@@ -794,28 +794,22 @@ func withLocateDetail(d map[string]any, r LocateReport) map[string]any {
 		return d
 	}
 	d["locate_rounds"] = r.Rounds
-	if len(r.Calls) > 0 {
-		d["locate_calls"] = r.Calls
-	}
-	if len(r.Landed) > 0 {
-		d["locate_landed"] = r.Landed
-	}
-	// What found nothing is the half a reader most wants: it is why the next
-	// call was spelled differently.
-	if len(r.Empty) > 0 {
-		d["locate_empty"] = r.Empty
-	}
-	if len(r.Refused) > 0 {
-		d["locate_refused"] = r.Refused
+	// Every call with what came of it, the ones that found nothing included:
+	// that is why the next call was spelled differently.
+	if len(r.Steps) > 0 {
+		d["locate_steps"] = r.Steps
 	}
 	if r.Concluded {
 		d["locate_concluded"] = true
 	}
-	// The pointer the answer prompt carried, so a turn read back shows what
-	// the answer was pointed at. A debug record like the rest of the trace:
-	// never embedded, never handed to a model, never on a shared page.
-	if r.Found != "" {
-		d["locate_found"] = r.Found
+	// What the conclusion did to the sources, never the conclusion itself:
+	// that sentence is the model's, in the question's language, with claims
+	// about code nothing cites. It stays a pointer for the answer prompt.
+	if r.Outcome != "" {
+		d["locate_outcome"] = r.Outcome
+	}
+	if r.Place != nil {
+		d["locate_place"] = r.Place
 	}
 	return d
 }
