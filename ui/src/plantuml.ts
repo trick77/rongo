@@ -110,12 +110,28 @@ function engine(): Promise<Engine> {
  * the next one, so renders queue. */
 let queue: Promise<unknown> = Promise.resolve();
 
+/** A render that calls neither callback would hold the queue, and every
+ * later diagram of the session, for good. Past this it counts as failed;
+ * the measured renders took 10-70ms. */
+export const renderTimeoutMs = 20_000;
+
 function renderOne(e: Engine, lines: string[]): Promise<string> {
   const run = queue.then(
     () =>
-      new Promise<string>((resolve, reject) =>
-        e.renderToString(lines, resolve, (m) => reject(new Error(m))),
-      ),
+      new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("the engine did not finish")), renderTimeoutMs);
+        e.renderToString(
+          lines,
+          (svg) => {
+            clearTimeout(timer);
+            resolve(svg);
+          },
+          (m) => {
+            clearTimeout(timer);
+            reject(new Error(m));
+          },
+        );
+      }),
   );
   queue = run.catch(() => undefined);
   return run;

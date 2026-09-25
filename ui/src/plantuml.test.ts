@@ -7,7 +7,7 @@ const renderToString = vi.fn();
 vi.mock("@plantuml/core", () => ({ renderToString }));
 vi.mock("@plantuml/core/themes.js", () => ({}));
 
-import { clean, diagrams, drawPlantUml, isPlantUml } from "./plantuml";
+import { clean, diagrams, drawPlantUml, isPlantUml, renderTimeoutMs } from "./plantuml";
 
 beforeEach(() => {
   renderToString.mockReset();
@@ -88,6 +88,23 @@ describe("drawPlantUml", () => {
 
     renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
     expect(await drawPlantUml("@startuml\nretry\n@enduml")).toEqual({ svgs: ["<svg></svg>"] });
+  });
+});
+
+describe("a render that never answers", () => {
+  it("fails after the timeout and leaves the queue free for the next file", async () => {
+    vi.useFakeTimers();
+    try {
+      renderToString.mockImplementationOnce(() => {});
+      const stuck = drawPlantUml("@startuml\nhangs\n@enduml");
+      await vi.advanceTimersByTimeAsync(renderTimeoutMs);
+      expect(await stuck).toEqual({ error: "the engine did not finish" });
+
+      renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+      expect(await drawPlantUml("@startuml\nnext\n@enduml")).toEqual({ svgs: ["<svg></svg>"] });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
