@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFocusOnOpen } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { highlightLines, languageForPath } from "./highlight";
+import PlantUmlSheet from "./PlantUmlSheet";
+import { isPlantUml } from "./plantuml";
 
 /** What a source row knows about the file it points at. The commit is
  * optional because citations recorded before it travelled with them have
@@ -58,21 +60,30 @@ export default function SourceView({
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
+  // A PlantUML file opens as the picture it describes: its source says
+  // nothing to an Analyst. The source stays one click away, because the
+  // cited lines are marked there and nowhere in the picture.
+  const drawable = isPlantUml(source.path);
+  const [view, setView] = useState<"diagram" | "source">(drawable ? "diagram" : "source");
   const dismiss = useBackdropDismiss(onClose);
 
   useFocusOnOpen(closeButton);
 
-  // Escape closes. Tab stays inside: the dialog is modal, and the close button
-  // is its only control, so a Tab that left it would land in the dimmed page
-  // behind the overlay.
+  // Escape closes. Tab stays inside: the dialog is modal, and a Tab that left
+  // it would land in the dimmed page behind the overlay. Its controls are the
+  // close button and, on a PlantUML file, the two views; the ends of the ring
+  // wrap to each other, as in DiagramView.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
-      if (e.key === "Tab") {
-        e.preventDefault();
-        closeButton.current?.focus();
-      }
+      if (e.key !== "Tab") return;
+      e.preventDefault();
+      const inside = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button") ?? []);
+      const at = inside.indexOf(document.activeElement as HTMLElement);
+      const next = at < 0 ? 0 : (at + (e.shiftKey ? inside.length - 1 : 1)) % inside.length;
+      (inside[next] ?? closeButton.current)?.focus();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -115,8 +126,9 @@ export default function SourceView({
   // opened on the tails of the lines with the line numbers out of sight.
   // Guarded like the thread's own scroll: jsdom has no scrollIntoView.
   useEffect(() => {
-    if (loaded.state === "ready") anchor.current?.scrollIntoView?.({ block: "start", inline: "start" });
-  }, [loaded.state]);
+    if (loaded.state === "ready" && view === "source")
+      anchor.current?.scrollIntoView?.({ block: "start", inline: "start" });
+  }, [loaded.state, view]);
 
   const slash = source.path.lastIndexOf("/");
   const dir = slash >= 0 ? source.path.slice(0, slash + 1) : "";
@@ -149,6 +161,7 @@ export default function SourceView({
       onPointerUp={dismiss.onPointerUp}
     >
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={`Source ${source.marker}: ${source.path}`}
@@ -176,6 +189,30 @@ export default function SourceView({
               </span>
             )}
           </span>
+          {drawable && (
+            <div
+              role="group"
+              aria-label="View"
+              // ml-auto on a phone, where the pills beside it are hidden; from
+              // sm up the pills carry it.
+              className="ml-auto flex shrink-0 rounded-ui-sm border border-border p-0.5 font-sans text-[12px] sm:ml-0"
+            >
+              {(["diagram", "source"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={
+                    "rounded-[3px] px-2.5 py-1 " +
+                    (view === v ? "bg-active text-ink" : "text-muted hover:text-ink-dim")
+                  }
+                >
+                  {v === "diagram" ? "Diagram" : "Source"}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             ref={closeButton}
             type="button"
@@ -184,7 +221,10 @@ export default function SourceView({
             // ml-auto only where the pills beside it are not rendered — with
             // both carrying it, flexbox splits the free space and the pills
             // drift away from the button.
-            className="ml-auto grid h-11 w-11 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink sm:ml-0 sm:h-8 sm:w-8"
+            className={
+              (drawable ? "" : "ml-auto ") +
+              "grid h-11 w-11 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink sm:ml-0 sm:h-8 sm:w-8"
+            }
           >
             ×
           </button>
@@ -197,13 +237,17 @@ export default function SourceView({
               {loaded.message}
             </p>
           )}
-          {moved && (
+          {loaded.state === "ready" && view === "diagram" && (
+            <PlantUmlSheet text={loaded.lines.join("\n")} onSource={() => setView("source")} />
+          )}
+          {view === "source" && moved && (
             <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
               The file has changed since the answer was written: it has {loaded.lines.length} lines at this
               commit, and the cited range starts at line {source.start_line}.
             </p>
           )}
           {loaded.state === "ready" &&
+            view === "source" &&
             loaded.lines.map((line, i) => {
               const n = i + 1;
               const hit = n >= source.start_line && n <= source.end_line;
