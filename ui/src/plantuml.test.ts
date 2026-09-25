@@ -75,6 +75,12 @@ describe("drawPlantUml", () => {
     expect(fail).toHaveBeenCalledWith("c4.min.js is not bundled with rongo");
   });
 
+  it("draws a diagram of any size: the engine's own cap is off", async () => {
+    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+    await drawPlantUml("@startuml\nBig -> Diagram\n@enduml");
+    expect(renderToString.mock.calls[0][3]).toEqual({ maxSvgSize: 0 });
+  });
+
   it("draws a file once, however often it is opened", async () => {
     renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
     await drawPlantUml("@startuml\nonce\n@enduml");
