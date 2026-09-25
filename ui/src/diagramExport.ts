@@ -86,44 +86,75 @@ export function svgSize(svg: string): { w: number; h: number } | null {
   return null;
 }
 
-/** A canvas past these draws nothing and encodes to nothing, silently: 16384
- * is the side every current browser holds, and the area stays at half of
- * what that side allows. */
-const canvasSide = 16384;
-const canvasArea = 16384 * 8192;
+/** toXml writes a drawing as XML. DOMPurify hands back HTML, which is what
+ * the page draws, but a file is read as XML: a no-break space in a label
+ * came out as &nbsp;, an entity no SVG viewer defines, and neither the file
+ * nor the PNG made from it would open. */
+export function toXml(svg: string): string {
+  const el = new DOMParser().parseFromString(svg, "text/html").querySelector("svg");
+  return el ? new XMLSerializer().serializeToString(el) : svg;
+}
+
+/** A canvas past its browser's limits draws nothing and encodes to nothing,
+ * silently. Desktop browsers hold a 16384 side (the area kept at half of
+ * what that side allows); iOS Safari stops at about 16.7M pixels, whatever
+ * the side. */
+type CanvasLimit = { side: number; area: number };
+const desktopCanvas: CanvasLimit = { side: 16384, area: 16384 * 8192 };
+export const phoneCanvas: CanvasLimit = { side: 4096, area: 4096 * 4096 };
 
 /** pngScale is how much larger than 1:1 the PNG is drawn: twice, for a
  * picture that stays sharp on a dense screen, less where that would not fit
- * a canvas. A diagram too large even at 1:1 is drawn smaller rather than not
- * at all. */
-export function pngScale(w: number, h: number): number {
-  return Math.min(2, canvasSide / w, canvasSide / h, Math.sqrt(canvasArea / (w * h)));
+ * the canvas. A diagram too large even at 1:1 is drawn smaller rather than
+ * not at all. */
+export function pngScale(w: number, h: number, limit: CanvasLimit = desktopCanvas): number {
+  return Math.min(2, limit.side / w, limit.side / h, Math.sqrt(limit.area / (w * h)));
 }
 
 /** toPng paints a drawing on white, the paper it was drawn for, and encodes
  * it. Through a data: URL, not a blob: URL, which some browsers count as
- * foreign content and then refuse to read back off the canvas. */
-export function toPng(svg: string): Promise<Blob> {
+ * foreign content and then refuse to read back off the canvas. The desktop
+ * size is tried first, a phone's second: which one a browser holds is only
+ * known by asking it. */
+export async function toPng(svg: string): Promise<Blob> {
   const size = svgSize(svg);
-  if (size === null) return Promise.reject(new Error("the drawing states no size"));
-  const scale = pngScale(size.w, size.h);
-  const w = Math.max(1, Math.round(size.w * scale));
-  const h = Math.max(1, Math.round(size.h * scale));
+  if (size === null) throw new Error("the drawing states no size");
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("the drawing could not be read"));
+    i.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+  let last: unknown;
+  for (const limit of [desktopCanvas, phoneCanvas]) {
+    const scale = pngScale(size.w, size.h, limit);
+    try {
+      return await paint(img, Math.max(1, Math.round(size.w * scale)), Math.max(1, Math.round(size.h * scale)));
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** paint draws one PNG at one size. Whatever the canvas throws (a refused
+ * size, a tainted read) rejects, so the reader is told rather than left
+ * clicking a button that does nothing. */
+function paint(img: HTMLImageElement, w: number, h: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
+    try {
       const canvas = document.createElement("canvas");
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("the browser gave no canvas"));
+      if (!ctx) throw new Error("the browser gave no canvas");
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("the picture is too large for a PNG"))), "image/png");
-    };
-    img.onerror = () => reject(new Error("the drawing could not be read"));
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    } catch (e) {
+      reject(e);
+    }
   });
 }
 

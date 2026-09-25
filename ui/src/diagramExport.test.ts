@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { toMermaid, mermaidize, toSvgFile, fileName, withGround, svgSize, pngScale, toPng } from "./diagramExport";
+import { toMermaid, mermaidize, toSvgFile, fileName, withGround, svgSize, pngScale, toPng, toXml, phoneCanvas } from "./diagramExport";
 import type { FlowSpec, SequenceSpec } from "./diagram";
 
 const seq: SequenceSpec = {
@@ -243,6 +243,25 @@ describe("pngScale", () => {
     expect(s).toBeGreaterThan(1);
     expect(40000 * pngScale(40000, 100)).toBeLessThanOrEqual(16384);
   });
+
+  it("fits a phone's smaller canvas when asked to", () => {
+    const s = pngScale(2500, 2000, phoneCanvas);
+    expect(2500 * s * 2000 * s).toBeLessThanOrEqual(phoneCanvas.area);
+  });
+});
+
+describe("toXml", () => {
+  it("writes the drawing as XML, which a file must be", () => {
+    // What DOMPurify hands back is HTML: a no-break space comes out as
+    // &nbsp;, an entity no SVG viewer knows.
+    const html = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><text>a&nbsp;b</text><br></svg>';
+    const out = toXml(html);
+    expect(out).not.toContain("&nbsp;");
+    const doc = new DOMParser().parseFromString(out, "image/svg+xml");
+    expect(doc.querySelector("parsererror")).toBeNull();
+    expect(doc.querySelector("text")?.textContent).toBe("a b");
+    expect(out).toContain('viewBox="0 0 4 4"');
+  });
 });
 
 describe("toPng", () => {
@@ -289,5 +308,22 @@ describe("toPng", () => {
     fail = false;
     blob = null;
     await expect(toPng('<svg width="10" height="10"></svg>')).rejects.toThrow();
+  });
+
+  it("fails rather than hangs when the canvas throws", async () => {
+    ctx.drawImage.mockImplementation(() => {
+      throw new Error("SecurityError");
+    });
+    await expect(toPng('<svg width="10" height="10"></svg>')).rejects.toThrow("SecurityError");
+  });
+
+  it("draws again at a phone's size when the large canvas is refused", async () => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext)
+      .mockReturnValueOnce(null)
+      .mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+    expect(await toPng('<svg width="3000" height="3000"></svg>')).toBe(blob);
+    const [, , w, h] = ctx.fillRect.mock.calls[0];
+    expect(w * h).toBeLessThanOrEqual(phoneCanvas.area);
+    expect(w).toBeGreaterThan(3000);
   });
 });

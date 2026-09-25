@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { drawPlantUml, type Drawn } from "./plantuml";
-import { download, toPng, withGround } from "./diagramExport";
+import { download, toPng, toXml, withGround } from "./diagramExport";
 import { DownloadIcon } from "./icons";
 
 /**
@@ -64,7 +64,7 @@ export default function PlantUmlSheet({
  * styled for white paper is how its connectors got lost in dark mode. */
 function Sheet({ svg, label, name }: { svg: string; label: string; name: string }): ReactNode {
   const [failed, setFailed] = useState<string | null>(null);
-  const file = () => withGround(svg, "#FFFFFF");
+  const file = () => withGround(toXml(svg), "#FFFFFF");
 
   function png() {
     setFailed(null);
