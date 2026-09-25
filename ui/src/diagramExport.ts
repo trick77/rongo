@@ -22,7 +22,13 @@ import { fenceRe } from "./markdown";
 export function toSvgFile(drawn: { svg: string }, card: Element | null): string {
   const ground = card ? groundOf(card) : null;
   if (ground === null) return drawn.svg;
-  return drawn.svg.replace(/<svg\b[^>]*>/, (open) => {
+  return withGround(drawn.svg, ground);
+}
+
+/** withGround paints a colour under the whole drawing, as its first child so
+ * it sits behind everything else. */
+export function withGround(svg: string, ground: string): string {
+  return svg.replace(/<svg\b[^>]*>/, (open) => {
     // The ground covers the viewBox, not the user-space origin: the
     // renderer's viewBox starts left of and above 0 (a sequence at y -25,
     // a flowchart at minus its padding), and a rect at 0,0 would leave a
@@ -43,10 +49,12 @@ function groundOf(el: Element): string | null {
   return null;
 }
 
-/** download hands the browser a file. There is no shared helper in the UI to
- * reuse: this is the first thing rongo lets anyone take away. */
-export function download(name: string, svg: string): void {
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+/** download hands the browser a file: an SVG as its text, anything else as
+ * the blob it already is. There is no shared helper in the UI to reuse: this
+ * is the first thing rongo lets anyone take away. */
+export function download(name: string, data: string | Blob): void {
+  const blob = typeof data === "string" ? new Blob([data], { type: "image/svg+xml;charset=utf-8" }) : data;
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
@@ -62,6 +70,61 @@ export function fileName(src: string): string {
   const kind = diagramKind(src).replace(/Diagram(-v2)?$/, "").toLowerCase();
   if (kind === "") return "rongo-diagram.svg";
   return `rongo-${kind === "graph" ? "flowchart" : kind}-diagram.svg`;
+}
+
+// ---- PNG file ----
+
+/** svgSize is the size a drawing asks for: the width and height its root
+ * element states, else its viewBox. */
+export function svgSize(svg: string): { w: number; h: number } | null {
+  const open = /<svg\b[^>]*>/.exec(svg)?.[0] ?? "";
+  const w = parseFloat(/\swidth="([\d.]+)(?:px)?"/.exec(open)?.[1] ?? "");
+  const h = parseFloat(/\sheight="([\d.]+)(?:px)?"/.exec(open)?.[1] ?? "");
+  if (w > 0 && h > 0) return { w, h };
+  const vb = /viewBox="([^"]*)"/.exec(open)?.[1].trim().split(/[\s,]+/).map(Number);
+  if (vb && vb.length === 4 && vb[2] > 0 && vb[3] > 0) return { w: vb[2], h: vb[3] };
+  return null;
+}
+
+/** A canvas past these draws nothing and encodes to nothing, silently: 16384
+ * is the side every current browser holds, and the area stays at half of
+ * what that side allows. */
+const canvasSide = 16384;
+const canvasArea = 16384 * 8192;
+
+/** pngScale is how much larger than 1:1 the PNG is drawn: twice, for a
+ * picture that stays sharp on a dense screen, less where that would not fit
+ * a canvas. A diagram too large even at 1:1 is drawn smaller rather than not
+ * at all. */
+export function pngScale(w: number, h: number): number {
+  return Math.min(2, canvasSide / w, canvasSide / h, Math.sqrt(canvasArea / (w * h)));
+}
+
+/** toPng paints a drawing on white, the paper it was drawn for, and encodes
+ * it. Through a data: URL, not a blob: URL, which some browsers count as
+ * foreign content and then refuse to read back off the canvas. */
+export function toPng(svg: string): Promise<Blob> {
+  const size = svgSize(svg);
+  if (size === null) return Promise.reject(new Error("the drawing states no size"));
+  const scale = pngScale(size.w, size.h);
+  const w = Math.max(1, Math.round(size.w * scale));
+  const h = Math.max(1, Math.round(size.h * scale));
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("the browser gave no canvas"));
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("the picture is too large for a PNG"))), "image/png");
+    };
+    img.onerror = () => reject(new Error("the drawing could not be read"));
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
 }
 
 // ---- mermaid ----

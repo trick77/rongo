@@ -7,6 +7,10 @@ import userEvent from "@testing-library/user-event";
 const renderToString = vi.fn();
 vi.mock("@plantuml/core", () => ({ renderToString }));
 vi.mock("@plantuml/core/themes.js", () => ({}));
+// jsdom has no canvas to encode with: the PNG itself is tested in
+// diagramExport.test.ts.
+const { toPng } = vi.hoisted(() => ({ toPng: vi.fn() }));
+vi.mock("./diagramExport", async (original) => ({ ...(await original<object>()), toPng }));
 
 import SourceView from "./SourceView";
 
@@ -77,7 +81,7 @@ describe("SourceView on a PlantUML file", () => {
     await waitFor(() => expect(document.querySelector('[data-line="2"]')).not.toBeNull());
   });
 
-  it("keeps Tab inside the dialog, around both views and the close button", async () => {
+  it("keeps Tab inside the dialog, around the views, the close button and the downloads", async () => {
     serve("@startuml\nTab -> Ring\n@enduml\n");
     renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
     const user = userEvent.setup();
@@ -87,16 +91,75 @@ describe("SourceView on a PlantUML file", () => {
     const close = screen.getByRole("button", { name: "Close" });
     const diagram = screen.getByRole("button", { name: "Diagram" });
     const src = screen.getByRole("button", { name: "Source" });
+    const svg = screen.getByRole("button", { name: "Diagram: download SVG" });
+    const png = screen.getByRole("button", { name: "Diagram: download PNG" });
 
     expect(document.activeElement).toBe(close);
+    await user.tab();
+    expect(document.activeElement).toBe(svg);
+    await user.tab();
+    expect(document.activeElement).toBe(png);
     await user.tab();
     expect(document.activeElement).toBe(diagram);
     await user.tab();
     expect(document.activeElement).toBe(src);
-    await user.tab();
-    expect(document.activeElement).toBe(close);
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(src);
+    expect(document.activeElement).toBe(diagram);
+  });
+
+  describe("downloads", () => {
+    let saved: { name: string; blob: Blob }[];
+    beforeEach(() => {
+      saved = [];
+      let blob: Blob | null = null;
+      Object.defineProperty(URL, "createObjectURL", {
+        value: (b: Blob) => ((blob = b), "blob:x"),
+        configurable: true,
+      });
+      Object.defineProperty(URL, "revokeObjectURL", { value: () => {}, configurable: true });
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+        saved.push({ name: this.download, blob: blob as unknown as Blob });
+      });
+      toPng.mockReset();
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    it("takes each picture away as an SVG on white, named after the file", async () => {
+      // Text of its own: drawings are kept per text for the session.
+      serve("@startuml\nSave -> A\n@enduml\n@startuml\nC -> D\n@enduml\n");
+      renderToString.mockImplementation((l: string[], ok: (s: string) => void) =>
+        ok(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 20"><text>${l[1]}</text></svg>`),
+      );
+      const user = userEvent.setup();
+
+      render(<SourceView source={source} onClose={() => {}} />);
+      await screen.findByRole("img", { name: "Diagram 1 of 2" });
+      await user.click(screen.getByRole("button", { name: "Diagram 1 of 2: download SVG" }));
+      await user.click(screen.getByRole("button", { name: "Diagram 2 of 2: download SVG" }));
+
+      expect(saved.map((s) => s.name)).toEqual(["Order.svg", "Order-2.svg"]);
+      const text = await saved[1].blob.text();
+      expect(text).toContain('<rect x="0" y="0" width="40" height="20" fill="#FFFFFF"/>');
+      expect(text).toContain("C -&gt; D");
+    });
+
+    it("takes a picture away as a PNG, and says so when it cannot", async () => {
+      serve("@startuml\nSave -> Png\n@enduml\n");
+      renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+      const png = new Blob(["png"], { type: "image/png" });
+      toPng.mockResolvedValueOnce(png).mockRejectedValueOnce(new Error("the picture is too large for a PNG"));
+      const user = userEvent.setup();
+
+      render(<SourceView source={source} onClose={() => {}} />);
+      const button = await screen.findByRole("button", { name: "Diagram: download PNG" });
+      await user.click(button);
+      await waitFor(() => expect(saved).toEqual([{ name: "Order.png", blob: png }]));
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      await user.click(button);
+      expect((await screen.findByRole("alert")).textContent).toContain("too large for a PNG");
+      expect(saved).toHaveLength(1);
+    });
   });
 
   it("offers no views on a file that is not a diagram", async () => {

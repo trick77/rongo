@@ -73,8 +73,8 @@ export default function SourceView({
 
   // Escape closes. Tab stays inside: the dialog is modal, and a Tab that left
   // it would land in the dimmed page behind the overlay. Its controls are the
-  // close button and, on a PlantUML file, the two views; the ends of the ring
-  // wrap to each other, as in DiagramView.
+  // close button and, on a PlantUML file, the two views and each picture's
+  // downloads; the ends of the ring wrap to each other, as in DiagramView.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -238,7 +238,7 @@ export default function SourceView({
             </p>
           )}
           {loaded.state === "ready" && view === "diagram" && (
-            <PlantUmlSheet text={loaded.lines.join("\n")} onSource={() => setView("source")} />
+            <PlantUmlSheet text={loaded.lines.join("\n")} path={source.path} onSource={() => setView("source")} />
           )}
           {view === "source" && moved && (
             <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
