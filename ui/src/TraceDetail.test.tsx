@@ -200,6 +200,13 @@ describe("Trace, what each step found", () => {
     expect(screen.getAllByTitle("schadenmeldung-service · service/src/main/java/ServiceLinkdata.java").length).toBe(2);
   });
 
+  it("says a lookup found only code outside the turn, never nothing", () => {
+    const text =
+      gathered({ locate_rounds: 1, locate_steps: [{ tool: "search", arg: "pets", outside: 2 }] }).container
+        .textContent ?? "";
+    expect(text).toContain('searched by meaning for "pets" — found only code outside this turn\'s projects');
+  });
+
   it("says plainly when the locate loop did not find the place", () => {
     const { container } = gathered({
       locate_rounds: 1,

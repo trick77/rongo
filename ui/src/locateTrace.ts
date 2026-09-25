@@ -37,6 +37,7 @@ type WireStep = {
   matches?: number;
   held?: number;
   added?: number;
+  outside?: number;
   not_run?: string;
   cut?: boolean;
   /** Stored before counts existed: the call landed something, how much is not known. */
@@ -99,6 +100,7 @@ function resultOf(s: WireStep): string {
   if (s.landed) return "added sources";
   if (num(s.matches) > 0) return plural(num(s.matches), "matching line", "matching lines");
   if (num(s.held) > 0) return "already among the sources";
+  if (num(s.outside) > 0) return "found only code outside this turn's projects";
   return "nothing";
 }
 

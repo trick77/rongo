@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,5 +151,62 @@ func TestWithLocateDetail_sendsStepsAndPlaceNeverTheModelsSentence(t *testing.T)
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("detail %s lacks %s", raw, want)
 		}
+	}
+}
+
+func TestLocate_aLookupLandingOnlyOutsideTheTurnSaysSo(t *testing.T) {
+	// take skips a landing outside the ceiling without counting it, so a
+	// search whose every hit lay outside would read "nothing" in the trace
+	// while the model was shown those excerpts.
+	db := gatherDB(t)
+	seedRepo(t, db, "loom")
+	id := seedChunkIn(t, db, "peeq", "HouseholdEntity.java", 0, 1, 10, "anzahlHaustiere",
+		"private Integer anzahlHaustiere;")
+	outside := seedChunkIn(t, db, "loom", "Pets.java", 0, 1, 10, "pets", "class Pets {}")
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 10000}).
+		WithLocateLoop(locateLLM(t, []locateRound{
+			{calls: []llm.ToolCall{call("c1", "search", `{"query":"pets"}`)}},
+			{content: "NOT FOUND: nichts."},
+		}, nil), locateSearcher{search: map[string][]retrieve.Hit{"pets": {hitInFor(t, db, outside)}}}).
+		within([]string{"peeq"})
+
+	_, report, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, id)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	if len(report.Steps) != 1 || report.Steps[0].Outside != 1 || report.Steps[0].Added != 0 {
+		t.Errorf("Steps = %+v, want one search with its one hit counted as outside", report.Steps)
+	}
+}
+
+func TestLocate_callsOverTheLimitFollowTheCallsNotTried(t *testing.T) {
+	// The reserve runs out on the first call of a round that also went over
+	// the call limit: the round's own calls come first, the ones past the
+	// limit last.
+	db := gatherDB(t)
+	id := seedChunk(t, db, "HouseholdEntity.java", 0, 1, 10, "anzahlHaustiere", "private Integer anzahlHaustiere;")
+	big := seedChunk(t, db, "Big.java", 0, 1, 400, "big", strings.Repeat("token ", 4000))
+	calls := make([]llm.ToolCall, 0, locateMaxCalls+1)
+	for i := 0; i <= locateMaxCalls; i++ {
+		calls = append(calls, call(fmt.Sprintf("c%d", i), "search", fmt.Sprintf(`{"query":"q%d"}`, i)))
+	}
+	g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 200}).
+		WithLocateLoop(locateLLM(t, []locateRound{{calls: calls}, {content: "NOT FOUND: nichts."}}, nil),
+			locateSearcher{search: map[string][]retrieve.Hit{"q0": {hitInFor(t, db, big)}}})
+
+	_, report, err := g.Locate(context.Background(), "wo?", []Source{sourceOf(t, db, id)}, nil, false, nil)
+	if err != nil {
+		t.Fatalf("Locate: %v", err)
+	}
+	var reasons []string
+	for _, s := range report.Steps {
+		reasons = append(reasons, s.Arg+":"+s.NotRun)
+	}
+	last := report.Steps[len(report.Steps)-1]
+	if last.Arg != fmt.Sprintf("q%d", locateMaxCalls) || !strings.Contains(last.NotRun, "limit") {
+		t.Errorf("steps = %v, want the call past the limit last", reasons)
+	}
+	if !report.Steps[0].Cut || !strings.Contains(report.Steps[1].NotRun, "budget") {
+		t.Errorf("steps = %v, want the cut call first and the ones after it not tried", reasons)
 	}
 }

@@ -233,6 +233,9 @@ type LocateStep struct {
 	Matches int    `json:"matches,omitempty"`
 	Held    int    `json:"held,omitempty"`
 	Added   int    `json:"added,omitempty"`
+	// Outside is the landings outside the turn's projects, which take skips
+	// without a word: the model saw them, the answer cannot cite them.
+	Outside int    `json:"outside,omitempty"`
 	NotRun  string `json:"not_run,omitempty"`
 	// Cut is the call the reserve ran out on: it admitted what fit.
 	Cut bool `json:"cut,omitempty"`
@@ -479,8 +482,11 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			gathered := make([]bool, len(landings))
 			for i, l := range landings {
 				gathered[i] = a.seen[l.ChunkID]
-				if gathered[i] {
+				switch {
+				case gathered[i]:
 					step.Held++
+				case !a.permits(l):
+					step.Outside++
 				}
 			}
 			for _, l := range landings {
@@ -525,7 +531,6 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				break
 			}
 		}
-		report.Steps = append(report.Steps, overLimit...)
 		// The conclusion is asked on the last round AND when the reserve ran
 		// out, which can happen on any round: the stop path is exactly where
 		// the loop landed the most material, so dropping the pointer there
@@ -556,8 +561,10 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 				report.Refused = append(report.Refused, rest.Name+"(not tried)")
 				report.Steps = append(report.Steps, callStep(rest).refusedAs("", "the token budget for this step was spent"))
 			}
+			report.Steps = append(report.Steps, overLimit...)
 			break
 		}
+		report.Steps = append(report.Steps, overLimit...)
 	}
 	return g.finishLocate(ctx, a, &report, shown, stage), report, nil
 }
