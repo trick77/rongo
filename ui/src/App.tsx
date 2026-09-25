@@ -541,10 +541,7 @@ export default function App() {
           ) : page === "threads" ? (
             <span className="font-serif text-[19px] font-medium text-accent-strong">Threads</span>
           ) : page === "projects" ? (
-            <>
-              <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
-              <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">read-only</span>
-            </>
+            <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
           ) : page === "memory" ? (
             <>
               <span className="font-serif text-[19px] font-medium text-accent-strong">Memory</span>
@@ -817,7 +814,7 @@ export default function App() {
               title="Projects"
               intro={
                 <>
-                  Read-only. A project is one product and the repositories it is built from; the list is
+                  A project is one product and the repositories it is built from; the list is
                   maintained in <code className="font-mono">repos.yaml</code>, and credentials never live
                   in it. A repo that drops out of the file is removed here too, index and checkout with it.
                 </>

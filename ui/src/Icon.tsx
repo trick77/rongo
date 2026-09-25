@@ -30,6 +30,7 @@ const CODEPOINTS = {
   star: 0xe0e7,
   starOff: 0xe0e9,
   chevronRight: 0xe02a,
+  retry: 0xe11d,
 } as const;
 
 export type IconName = keyof typeof CODEPOINTS;
