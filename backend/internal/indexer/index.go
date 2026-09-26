@@ -150,6 +150,9 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 	// The run replaced chunks; their old vectors, and those of a reset that
 	// preceded it, go now.
 	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", st.Name)
+	// The replaced chunks left their vectors' storage behind in chunks_vec.
+	// Compacting here would lock out live turns; the next boot does it.
+	WarnVectorBloat(ctx, ix.db, ix.log, "repo", st.Name)
 	return ix.totals(ctx, st.Name)
 }
 
@@ -476,6 +479,7 @@ func (ix *Indexer) Sweep(ctx context.Context, repo string) (int, Counts, error) 
 	// moments the cache is pruned at, and a vector of excluded content kept
 	// here would come back as a hit on the next full index of anything.
 	PruneEmbedCacheAndLog(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
+	WarnVectorBloat(ctx, ix.db, ix.log, "repo", repo, "reason", "sweep")
 	return len(hits), counts, err
 }
 

@@ -127,3 +127,49 @@ func TestTurnStopped_readsADeleteAsWhatItIs(t *testing.T) {
 		t.Errorf("log = %q, want the delete accounted for", log.String())
 	}
 }
+
+func TestTurnStopped_namesACancelledTurn(t *testing.T) {
+	// A turn whose reader went away mid-search died on an interrupt that
+	// sqlite-vec reports as "SQL logic error: chunks iter error". Logged as a
+	// failure, that reads as a corrupt database; it is a cancellation, and the
+	// line has to say so and say why.
+	var log bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	closed, cancel := context.WithCancelCause(context.Background())
+	cancel(nil)
+
+	turnStopped(closed, "turn failed", 7, errors.New("search: sqlite3: SQL logic error: chunks iter error"),
+		"step", "searching", "took", "13m0s")
+
+	got := log.String()
+	for _, want := range []string{"level=WARN", `msg="turn cancelled"`, "thread=7",
+		`cause="context canceled"`, "chunks iter error", "step=searching", "took=13m0s"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "ERROR") {
+		t.Errorf("log = %q, want no error for a cancelled turn", got)
+	}
+}
+
+func TestTurnStopped_failureNamesItsThread(t *testing.T) {
+	var log bytes.Buffer
+	restore := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	t.Cleanup(func() { slog.SetDefault(restore) })
+
+	turnStopped(context.Background(), "turn failed", 7, errors.New("search: disk I/O error"),
+		"step", "searching", "took", "4s")
+
+	got := log.String()
+	for _, want := range []string{"level=ERROR", `msg="turn failed"`, "thread=7", "disk I/O error",
+		"step=searching", "took=4s"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log = %q, want %q", got, want)
+		}
+	}
+}

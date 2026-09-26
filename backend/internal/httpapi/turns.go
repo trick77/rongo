@@ -100,12 +100,24 @@ func recordFailed(ctx context.Context, msg string, err error) {
 // reader who deletes a thread mid-answer asked for exactly this; it is not an
 // error, and logging it as one would put a red line in the log for every
 // delete that landed on a live turn.
-func turnStopped(ctx context.Context, msg string, threadID int64, err error) {
+//
+// progress is the turn's step and elapsed time (turn.progress): an error
+// names what failed, not that the turn spent thirteen minutes getting there.
+func turnStopped(ctx context.Context, msg string, threadID int64, err error, progress ...any) {
 	if threadWasDeleted(ctx) {
-		slog.Info("turn stopped, thread deleted", "thread", threadID)
+		slog.Info("turn stopped, thread deleted", append([]any{"thread", threadID}, progress...)...)
 		return
 	}
-	slog.Error(msg, "err", err)
+	// A cancelled turn fails on whatever it was waiting on, and that error
+	// hides the cancel: sqlite-vec reports an interrupt as "SQL logic error:
+	// chunks iter error", which reads as a corrupt database. The cause says
+	// what happened; context.Canceled is the reader's connection closing.
+	if ctx.Err() != nil {
+		slog.Warn("turn cancelled", append([]any{"thread", threadID,
+			"cause", context.Cause(ctx).Error(), "err", err}, progress...)...)
+		return
+	}
+	slog.Error(msg, append([]any{"thread", threadID, "err", err}, progress...)...)
 }
 
 // recordMissed is recordFailed for the writes a turn can lose without losing
