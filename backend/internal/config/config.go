@@ -177,6 +177,21 @@ type Config struct {
 	CookieSecure bool
 }
 
+// DefaultLLMTimeout bounds one model call, body included. The answer call is
+// the longest: it streams its whole cap, which is ask's 16384-token answer
+// budget plus the reasoning allowance llmwire adds for the model (1024 by
+// default), 17408 tokens. At SlowestStreamTokensPerSecond that is 870
+// seconds, 14.5 minutes, so 15 minutes lets a slow endpoint finish.
+// ask's TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel checks the sum
+// against every shipped model's actual cap; raising the answer budget or a
+// profile's allowance past it fails there.
+const DefaultLLMTimeout = 15 * time.Minute
+
+// SlowestStreamTokensPerSecond is the output rate the default timeout is
+// sized for: a slow model under load. A deployment slower than this sets
+// BACKEND_LLM_TIMEOUT.
+const SlowestStreamTokensPerSecond = 20
+
 // retiredEnv are variables a deployment may still carry that no longer do
 // anything. Set, they refuse the boot: a setting that looks active and is
 // ignored is the failure rongo refuses everywhere else.
@@ -252,7 +267,7 @@ func Load() (Config, error) {
 	if cfg.LLMGateTemperature, err = envOptionalFloat("BACKEND_LLM_GATE_TEMPERATURE", 0); err != nil {
 		return Config{}, err
 	}
-	if cfg.LLMTimeout, err = envDurationOr("BACKEND_LLM_TIMEOUT", 15*time.Minute); err != nil {
+	if cfg.LLMTimeout, err = envDurationOr("BACKEND_LLM_TIMEOUT", DefaultLLMTimeout); err != nil {
 		return Config{}, err
 	}
 	// SessionSecret is currently unused — sessions are 256-bit random tokens

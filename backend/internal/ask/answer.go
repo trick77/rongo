@@ -72,7 +72,9 @@ func languageName(lang Language) string {
 // 261 sources spend the whole budget thinking and write nothing (thread 2,
 // message 5, 2026-09-03). The value here is a judgment, not a measurement; a
 // length failure logs its completion count, which is the number to calibrate
-// against.
+// against. Answer plus allowance must stream inside config.DefaultLLMTimeout
+// at the slowest planned rate (the arithmetic is there, the check in
+// TestAnswerCap_fitsTheDefaultTimeoutOnEveryModel).
 const answerMaxTokens = 16384
 
 // Citation is one entry of the evidence panel. The branch travels with it

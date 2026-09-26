@@ -583,7 +583,8 @@ func moduleOpts(cfg config.Config) modules.Opts {
 // answer is not a mode anyone wants to be in by accident. Its Timeout bounds
 // one whole call, body included. The answer streams for as long as its
 // budget takes, hidden reasoning counted, and a short default would cut a
-// slow model mid-answer. The idle watchdog, not this one, is what catches a
+// slow model mid-answer; config.DefaultLLMTimeout carries the arithmetic.
+// The idle watchdog, not this one, is what catches a
 // stalled upstream.
 //
 // chat carries what the environment does not: nothing in production, a
