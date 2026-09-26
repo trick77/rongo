@@ -244,7 +244,7 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 			continue
 		}
 		seen[folded] = true
-		if _, ok := repoWithPart(n, part); ok {
+		if _, ok := repoWithPart(n, repos, part); ok {
 			// An indexed repository with its part glued on, already in known.
 			continue
 		}
@@ -270,10 +270,21 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 // an answer written from that very repository.
 //
 // Only the declared part, never any trailing word: a guess the part does not
-// explain still falls through to the rules below and is reported.
-func repoWithPart(guess string, part map[string]string) (string, bool) {
+// explain still falls through to the rules below and is reported. A guess
+// that already IS an indexed name is that repository, never another one's
+// name plus a part: orders-api stays orders-api beside orders.
+//
+// Walked in the index's order, so two readings of one guess resolve the same
+// way every turn.
+func repoWithPart(guess string, repos []string, part map[string]string) (string, bool) {
 	g := strings.ToLower(strings.TrimSpace(guess))
-	for repo, p := range part {
+	for _, repo := range repos {
+		if foldRepo(repo) == foldRepo(g) {
+			return "", false
+		}
+	}
+	for _, repo := range repos {
+		p := part[repo]
 		if p == "" {
 			continue
 		}
@@ -296,7 +307,7 @@ func withGluedParts(known, want, repos []string, part map[string]string) []strin
 	}
 	added := false
 	for _, w := range want {
-		if repo, ok := repoWithPart(w, part); ok && !in[repo] {
+		if repo, ok := repoWithPart(w, repos, part); ok && !in[repo] {
 			in[repo] = true
 			added = true
 		}
@@ -527,10 +538,11 @@ func knownReposIn(want []string, question string, known []string, project map[st
 	// word happens to be.
 	//
 	// Naming a MEMBER still narrows to that member, which is why a project is
-	// read out of the question with the hyphen as part of the name: "wie
-	// funktioniert shop-ui" names shop-ui, not the product shop. Read the
-	// repository way, "Schadenmeldung-service backend" searched all seven
-	// members of the product for a question about one of them.
+	// read from the question with its members' names blanked out: "wie
+	// funktioniert shop-ui" names shop-ui, not the product shop. Unblanked,
+	// "Schadenmeldung-service backend" searched all seven members of the
+	// product for a question about one of them. Only members are blanked, so
+	// the German compound "das Shop-Frontend" still names the product.
 	wanted := map[string]bool{}
 	for _, name := range known {
 		if guessed[name] || mentions(question, name) {
@@ -538,7 +550,7 @@ func knownReposIn(want []string, question string, known []string, project map[st
 		}
 	}
 	for name, members := range project {
-		if guessed[name] || mentionsWhole(question, name) {
+		if guessed[name] || mentions(withoutMembers(question, name, members), name) {
 			for _, m := range members {
 				wanted[m] = true
 			}
@@ -616,16 +628,6 @@ var commonWords = map[string]bool{
 // case-insensitively. A substring is not a mention: "heirlooms" does not name
 // loom, and reading it as one silences the rest of the corpus.
 func mentions(question, repo string) bool {
-	return mentionsBounded(question, repo, wordRune)
-}
-
-// mentionsWhole is mentions with the hyphen read as part of the name, so a
-// project is not mentioned by the member whose name starts with it.
-func mentionsWhole(question, project string) bool {
-	return mentionsBounded(question, project, nameRune)
-}
-
-func mentionsBounded(question, repo string, is func(rune) bool) bool {
 	if len(repo) < minMentionLen {
 		return false
 	}
@@ -640,11 +642,37 @@ func mentionsBounded(question, repo string, is func(rune) bool) bool {
 		}
 		start := i + j
 		end := start + len(name)
-		if !wordBefore(q, start, is) && !wordAfter(q, end, is) {
+		if !wordBefore(q, start, wordRune) && !wordAfter(q, end, wordRune) {
 			return true
 		}
 		i = start + 1
 	}
+}
+
+// withoutMembers is the question, lower-cased, with every whole mention of a
+// member other than the project's namesake replaced by spaces — whole with
+// the hyphen as part of the name, so shop-ui is blanked and shop-uis is not.
+func withoutMembers(question, project string, members []string) string {
+	q := strings.ToLower(question)
+	for _, m := range members {
+		name := strings.ToLower(m)
+		if name == strings.ToLower(project) {
+			continue
+		}
+		for i := 0; ; {
+			j := strings.Index(q[i:], name)
+			if j < 0 {
+				break
+			}
+			start := i + j
+			end := start + len(name)
+			if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
+				q = q[:start] + strings.Repeat(" ", len(name)) + q[end:]
+			}
+			i = start + 1
+		}
+	}
+	return q
 }
 
 // wordBefore and wordAfter decide the boundaries, on RUNES rather than bytes.

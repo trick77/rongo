@@ -441,6 +441,44 @@ func TestResolveReposReadsOnlyTheDeclaredPart(t *testing.T) {
 	}
 }
 
+func TestResolveReposDoesNotGlueAPartOntoAnIndexedName(t *testing.T) {
+	// orders-api is a repository of its own. Reading it as orders plus its
+	// part would add orders and turn a one-repository question into a
+	// comparison nobody asked for.
+	db := testDB(t)
+	addMemberPart(t, db, "orders", "orders", "api")
+	addMemberPart(t, db, "orders-api", "orders-api", "backend")
+	r := New(db, nil)
+
+	known, unknown, err := r.ResolveRepos(context.Background(), []string{"orders-api"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 || len(known) != 1 || known[0] != "orders-api" {
+		t.Errorf("known = %v, unknown = %v, want orders-api alone", known, unknown)
+	}
+}
+
+func TestResolveReposReadsAProjectInAHyphenatedCompound(t *testing.T) {
+	// German writes "das Shop-Frontend". No member is called shop-frontend,
+	// so the word names the product and the turn narrows to it.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	addMember(t, db, "shop-ui", "shop")
+	addMember(t, db, "legacy-crm", "legacy-crm")
+	r := New(db, nil)
+
+	known, _, err := r.ResolveRepos(context.Background(), nil, "wie funktioniert das Shop-Frontend?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 2 || !contains(known, "shop-backend") || !contains(known, "shop-ui") {
+		t.Errorf("known = %v, want the project's repositories", known)
+	}
+}
+
 func TestResolveReposKeepsAHyphenatedMemberInTheQuestionNarrow(t *testing.T) {
 	// "shop-ui" in the reader's words names the member, not the project whose
 	// name is its first half. Reading the hyphen as a boundary searched all
