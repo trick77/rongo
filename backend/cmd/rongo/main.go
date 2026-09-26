@@ -604,6 +604,7 @@ func newModelClients(cfg config.Config, chat llm.Config) (*embed.Client, *llm.Cl
 	chat.Answer = cfg.LLMModel
 	chat.Gate = cfg.LLMGateModel
 	chat.GateTemperature = cfg.LLMGateTemperature
+	chat.AnswerReasoning = cfg.LLMReasoning
 	models, err := llm.NewClient(chat, nil)
 	if err != nil {
 		return nil, nil, err
@@ -612,9 +613,13 @@ func newModelClients(cfg config.Config, chat llm.Config) (*embed.Client, *llm.Cl
 	if cfg.LLMGateTemperature != nil {
 		gateTemp = fmt.Sprint(*cfg.LLMGateTemperature)
 	}
+	answerReasoning := "default"
+	if cfg.LLMReasoning != "" {
+		answerReasoning = cfg.LLMReasoning
+	}
 	slog.Info("model lanes",
 		"answer", models.Deployment(llm.LaneAnswer), "gate", models.Deployment(llm.LaneGate),
-		"gate_temperature", gateTemp, "timeout", cfg.LLMTimeout)
+		"answer_reasoning", answerReasoning, "gate_temperature", gateTemp, "timeout", cfg.LLMTimeout)
 	return embedder, models, nil
 }
 

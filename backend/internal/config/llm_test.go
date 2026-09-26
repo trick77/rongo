@@ -55,18 +55,30 @@ func TestLoad_llmPolicyValues(t *testing.T) {
 	}
 }
 
-// Reasoning is each call's intent, rendered per model by llmwire; the two
-// variables that once set it per deployment are refused rather than ignored,
-// so a .env still carrying one is told it no longer does anything.
-func TestLoad_refusesTheRetiredReasoningVariables(t *testing.T) {
-	for _, name := range []string{"BACKEND_LLM_GATE_REASONING", "BACKEND_LLM_REASONING"} {
-		t.Run(name, func(t *testing.T) {
-			setEnv(t, map[string]string{name: "off"})
-			_, err := Load()
-			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "no longer") {
-				t.Fatalf("Load() err = %v, want one naming %s as retired", err, name)
-			}
-		})
+// Gate reasoning is each call's intent, rendered per model by llmwire; the
+// variable that once set it per deployment is refused rather than ignored, so
+// a .env still carrying it is told it no longer does anything.
+func TestLoad_refusesTheRetiredGateReasoningVariable(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_LLM_GATE_REASONING": "off"})
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_LLM_GATE_REASONING") || !strings.Contains(err.Error(), "no longer") {
+		t.Fatalf("Load() err = %v, want one naming BACKEND_LLM_GATE_REASONING as retired", err)
+	}
+}
+
+// The answer lane's reasoning level is optional: empty is the model's default.
+// Whether the model takes the level is its profile's, checked in llm.NewClient.
+func TestLoad_answerReasoningIsOptional(t *testing.T) {
+	setEnv(t, nil)
+	cfg, err := Load()
+	if err != nil || cfg.LLMReasoning != "" {
+		t.Fatalf("unset: LLMReasoning = %q, err = %v; want empty", cfg.LLMReasoning, err)
+	}
+
+	setEnv(t, map[string]string{"BACKEND_LLM_REASONING": " high "})
+	cfg, err = Load()
+	if err != nil || cfg.LLMReasoning != "high" {
+		t.Fatalf("set: LLMReasoning = %q, err = %v; want high", cfg.LLMReasoning, err)
 	}
 }
 

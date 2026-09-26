@@ -8,7 +8,9 @@
 // upstream of the answer call is measured by, and it is the model-swap test.
 // The lanes run on BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the product's
 // own; BACKEND_EVAL_ANSWER_MODEL and BACKEND_EVAL_GATE_MODEL point them at
-// another model for the harness alone. The judge runs on its own client
+// another model for the harness alone. A candidate answer model does not take
+// BACKEND_LLM_REASONING; it runs at BACKEND_EVAL_ANSWER_REASONING, unset = its
+// own default. The judge runs on its own client
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
@@ -96,14 +98,47 @@ func loadRubrics(t *testing.T) map[string]Rubric {
 // harness-only lane overrides applied.
 func answerLLM(t *testing.T) *llm.Client {
 	t.Helper()
-	cfg := evalLLMConfig(t, 15*time.Minute)
-	if m := os.Getenv("BACKEND_EVAL_ANSWER_MODEL"); m != "" {
+	return mustLLM(t, answerOverrides(evalLLMConfig(t, 15*time.Minute), os.Getenv))
+}
+
+// answerOverrides applies the harness-only lane overrides. A candidate answer
+// model drops the product's BACKEND_LLM_REASONING: that level was chosen for
+// the product's model, and the candidate may not take it or would silently
+// inherit it. The candidate runs at BACKEND_EVAL_ANSWER_REASONING, unset = its
+// own default.
+func answerOverrides(cfg llm.Config, getenv func(string) string) llm.Config {
+	if m := getenv("BACKEND_EVAL_ANSWER_MODEL"); m != "" {
 		cfg.Answer = m
+		cfg.AnswerReasoning = strings.TrimSpace(getenv("BACKEND_EVAL_ANSWER_REASONING"))
 	}
-	if m := os.Getenv("BACKEND_EVAL_GATE_MODEL"); m != "" {
+	if m := getenv("BACKEND_EVAL_GATE_MODEL"); m != "" {
 		cfg.Gate = m
 	}
-	return mustLLM(t, cfg)
+	return cfg
+}
+
+// A candidate answer model never inherits the product's pinned level: it is
+// measured at its own default, or at BACKEND_EVAL_ANSWER_REASONING.
+func TestAnswerOverrides_theCandidateTakesItsOwnReasoning(t *testing.T) {
+	product := llm.Config{Answer: "prod", Gate: "gate", AnswerReasoning: "high"}
+	for name, tc := range map[string]struct {
+		env                   map[string]string
+		answer, gate, reasons string
+	}{
+		"no override":             {nil, "prod", "gate", "high"},
+		"gate override only":      {map[string]string{"BACKEND_EVAL_GATE_MODEL": "g2"}, "prod", "g2", "high"},
+		"candidate, no level":     {map[string]string{"BACKEND_EVAL_ANSWER_MODEL": "cand"}, "cand", "gate", ""},
+		"candidate with a level":  {map[string]string{"BACKEND_EVAL_ANSWER_MODEL": "cand", "BACKEND_EVAL_ANSWER_REASONING": " low "}, "cand", "gate", "low"},
+		"level without candidate": {map[string]string{"BACKEND_EVAL_ANSWER_REASONING": "low"}, "prod", "gate", "high"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := answerOverrides(product, func(k string) string { return tc.env[k] })
+			if got.Answer != tc.answer || got.Gate != tc.gate || got.AnswerReasoning != tc.reasons {
+				t.Errorf("got answer=%q gate=%q reasoning=%q, want %q %q %q",
+					got.Answer, got.Gate, got.AnswerReasoning, tc.answer, tc.gate, tc.reasons)
+			}
+		})
+	}
 }
 
 // judgeLLM is the judge's client: the models the product reads, never the
@@ -118,13 +153,15 @@ func judgeLLM(t *testing.T) *llm.Client {
 // variable and the opencode identity llmwire's, from the model's provider
 // entry. An unset model FAILS the run rather than skipping it: a skipped
 // eval reads as "nothing to see", and rongo has no model to fall back to.
+// BACKEND_LLM_REASONING is read too, so a pinned answer level is measured.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
 	answer, gate := evalModels(t)
 	// The product's default pin (config.Load), so a judged run decides as
 	// the product does.
 	zero := 0.0
-	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate, GateTemperature: &zero}
+	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate, GateTemperature: &zero,
+		AnswerReasoning: strings.TrimSpace(os.Getenv("BACKEND_LLM_REASONING"))}
 }
 
 // evalModels is the configured pair, or a failed run naming what is unset.

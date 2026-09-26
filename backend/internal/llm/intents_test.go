@@ -50,6 +50,59 @@ func TestReasoning_gateIsMinimalAndTheAnswerIsTheModelsDefault(t *testing.T) {
 	}
 }
 
+// A configured answer level is sent on answer calls only; gate calls stay
+// minimal, and a call asked not to think is not overridden by it.
+func TestReasoning_aConfiguredAnswerLevelReachesTheAnswerOnly(t *testing.T) {
+	srv := llmwiretest.NewServer(t)
+	c, err := NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: llmtest.Answer, Gate: llmtest.Gate, AnswerReasoning: "high"}, srv.Server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	say(t, c)
+	if got := srv.Last().Reasoning(); got != "high" {
+		t.Errorf("answer reasoning = %q, want the configured high", got)
+	}
+	say(t, c, ShortGate(), WithoutThinking())
+	if got := srv.Last().Reasoning(); got != llmwiretest.MinimalSent {
+		t.Errorf("gate reasoning = %q, want minimal (%q)", got, llmwiretest.MinimalSent)
+	}
+	say(t, c, ShortGate())
+	if got := srv.Last().Reasoning(); got != "" {
+		t.Errorf("gate call without an intent sent %q, want none: the level is the answer lane's", got)
+	}
+	say(t, c, WithoutThinking())
+	if got := srv.Last().Reasoning(); got != llmwiretest.MinimalSent {
+		t.Errorf("answer-lane call asked not to think sent %q, want minimal", got)
+	}
+}
+
+// A level the answer model's profile does not list refuses the boot, naming the
+// variable and what the model does take; nothing reaches the wire.
+func TestNewClient_refusesAnAnswerLevelTheModelDoesNotTake(t *testing.T) {
+	srv := llmwiretest.NewServer(t)
+	_, err := NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: llmtest.Answer, Gate: llmtest.Gate, AnswerReasoning: "ultra"}, srv.Server.Client())
+	if err == nil {
+		t.Fatal("want a boot error")
+	}
+	for _, want := range []string{"BACKEND_LLM_REASONING", `"ultra"`, llmtest.Answer, "none, low, medium, high"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
+	}
+
+	_, err = NewClient(Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: llmtest.NoTools, Gate: llmtest.Gate, AnswerReasoning: "high"}, srv.Server.Client())
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_LLM_REASONING") || !strings.Contains(err.Error(), "no effort level") {
+		t.Errorf("err = %v, want a refusal saying the model takes no effort level", err)
+	}
+	if len(srv.Requests()) != 0 {
+		t.Error("a refused level must never reach the wire")
+	}
+}
+
 // A call's cap is the answer it may write; the reasoning allowance on top is
 // llmwire's, for the setting actually sent.
 func TestMaxAnswerTokens_capsTheAnswerAndLeavesReasoningToTheProfile(t *testing.T) {

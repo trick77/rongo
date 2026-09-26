@@ -121,12 +121,17 @@ type Config struct {
 	LLMModel     string
 	LLMGateModel string
 	// The call policy: what a pinned gate call sends as temperature (nil =
-	// none), and how long one call may take. Reasoning is not here: each call
-	// states its intent and llmwire renders it for the model. Malformed values
-	// fail the boot: a typo here changes every routing decision, and is not a
-	// tunable that may quietly fall back.
+	// none), and how long one call may take. Gate reasoning is not here: a
+	// gate call states its intent and llmwire renders it for the model.
+	// Malformed values fail the boot: a typo here changes every routing
+	// decision, and is not a tunable that may quietly fall back.
 	LLMGateTemperature *float64
 	LLMTimeout         time.Duration
+	// LLMReasoning pins the answer lane's reasoning effort level; empty sends
+	// none and the model runs at its own default. Checked against the answer
+	// model's profile in llm.NewClient, not here: config stays a stdlib-only
+	// leaf.
+	LLMReasoning string
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
 	// LocateRounds is how many times the locate loop may look again after the
@@ -195,7 +200,7 @@ const SlowestStreamTokensPerSecond = 20
 // retiredEnv are variables a deployment may still carry that no longer do
 // anything. Set, they refuse the boot: a setting that looks active and is
 // ignored is the failure rongo refuses everywhere else.
-var retiredEnv = []string{"BACKEND_LLM_GATE_REASONING", "BACKEND_LLM_REASONING"}
+var retiredEnv = []string{"BACKEND_LLM_GATE_REASONING"}
 
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
@@ -240,6 +245,7 @@ func Load() (Config, error) {
 		Memory:            r.boolOr("BACKEND_MEMORY", true),
 		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
 		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
+		LLMReasoning:      strings.TrimSpace(os.Getenv("BACKEND_LLM_REASONING")),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
@@ -260,7 +266,7 @@ func Load() (Config, error) {
 	}
 	for _, name := range retiredEnv {
 		if strings.TrimSpace(os.Getenv(name)) != "" {
-			return Config{}, fmt.Errorf("%s is no longer read: reasoning follows each call's intent, rendered for the model by llmwire; remove it", name)
+			return Config{}, fmt.Errorf("%s is no longer read: gate reasoning follows each call's intent, rendered for the model by llmwire; remove it", name)
 		}
 	}
 	var err error
