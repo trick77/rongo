@@ -160,6 +160,57 @@ func TestCompactVectorsAndLog_aFailureIsAWarning(t *testing.T) {
 	}
 }
 
+func TestWarnVectorBloat_warnsWithoutTouchingTheTable(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 3000, 100)
+	logs := &capture{}
+
+	WarnVectorBloat(context.Background(), db, slog.New(logs), "repo", "shop")
+
+	r, ok := logs.find("vector index bloated, compacted at next boot")
+	if !ok || r.Level != slog.LevelWarn {
+		t.Fatalf("want a bloat warning, records = %v", logs.records)
+	}
+	attrs := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	for k, v := range map[string]string{"repo": "shop", "rows": "100", "chunks": "3", "chunks_needed": "1"} {
+		if attrs[k] != v {
+			t.Errorf("attr %s = %q, want %q (all: %v)", k, attrs[k], v, attrs)
+		}
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_vec_chunks`); n != 3 {
+		t.Errorf("chunks_vec_chunks = %d, want 3 untouched", n)
+	}
+}
+
+func TestWarnVectorBloat_quietWhenHealthy(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 10, 10)
+	logs := &capture{}
+
+	WarnVectorBloat(context.Background(), db, slog.New(logs))
+
+	if len(logs.records) != 0 {
+		t.Errorf("records = %v, want none", logs.records)
+	}
+}
+
+func TestWarnVectorBloat_aFailedMeasureWarns(t *testing.T) {
+	db := writeDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	logs := &capture{}
+
+	WarnVectorBloat(ctx, db, slog.New(logs))
+
+	if _, ok := logs.find("measuring the vector index failed"); !ok {
+		t.Errorf("records = %v, want the failure", logs.records)
+	}
+}
+
 func TestLogVectorIndexAtBoot_compactsAndVacuumsABloatedTable(t *testing.T) {
 	db := writeDB(t)
 	churnVectors(t, db, 3000, 100)

@@ -31,23 +31,16 @@ type VecCompaction struct {
 // keeps every rowid and every vector byte for byte, so nothing is re-embedded
 // and retrieval's rowid join is unaffected. One transaction: a failure leaves
 // the table as it was.
+//
+// Boot only. The transaction holds the write lock for the whole copy — 9.6 s
+// for 14k vectors on a laptop — which is past the 10 s busy_timeout at
+// production size, so run beside live turns it fails their writes with
+// "database is locked". An index run warns instead (WarnVectorBloat).
 func CompactVectors(ctx context.Context, db *sql.DB) (VecCompaction, error) {
-	var c VecCompaction
-	var size sql.NullInt64
-	if err := db.QueryRowContext(ctx, `
-		SELECT (SELECT COUNT(*) FROM chunks_vec_rowids),
-		       (SELECT COUNT(*) FROM chunks_vec_chunks),
-		       (SELECT length(validity) * 8 FROM chunks_vec_chunks LIMIT 1)`).
-		Scan(&c.Rows, &c.ChunksBefore, &size); err != nil {
-		return c, fmt.Errorf("measure chunks_vec: %w", err)
-	}
-	if !size.Valid || size.Int64 <= 0 {
-		return c, nil
-	}
-	needed := max((c.Rows+size.Int64-1)/size.Int64, 1)
-	if c.ChunksBefore <= 2*needed {
+	c, needed, err := measureVectors(ctx, db)
+	if err != nil || c.ChunksBefore <= 2*needed {
 		c.ChunksAfter = c.ChunksBefore
-		return c, nil
+		return c, err
 	}
 
 	var ddl string
@@ -90,6 +83,37 @@ func CompactVectors(ctx context.Context, db *sql.DB) (VecCompaction, error) {
 	}
 	c.Compacted = true
 	return c, nil
+}
+
+// measureVectors counts chunks_vec's live rows and storage chunks, and the
+// chunks those rows need. An empty table needs none and has none.
+func measureVectors(ctx context.Context, db *sql.DB) (c VecCompaction, needed int64, err error) {
+	var size sql.NullInt64
+	if err := db.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM chunks_vec_rowids),
+		       (SELECT COUNT(*) FROM chunks_vec_chunks),
+		       (SELECT length(validity) * 8 FROM chunks_vec_chunks LIMIT 1)`).
+		Scan(&c.Rows, &c.ChunksBefore, &size); err != nil {
+		return c, 0, fmt.Errorf("measure chunks_vec: %w", err)
+	}
+	if !size.Valid || size.Int64 <= 0 {
+		return c, 0, nil
+	}
+	return c, max((c.Rows+size.Int64-1)/size.Int64, 1), nil
+}
+
+// WarnVectorBloat is what an index run does instead of compacting: it says
+// the table is bloated, and that the next boot compacts it. Quiet when healthy.
+func WarnVectorBloat(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) {
+	c, needed, err := measureVectors(ctx, db)
+	if err != nil {
+		log.Warn("measuring the vector index failed", append(args, "err", err)...)
+		return
+	}
+	if c.ChunksBefore > 2*needed {
+		log.Warn("vector index bloated, compacted at next boot", append(args, "rows", c.Rows,
+			"chunks", c.ChunksBefore, "chunks_needed", needed)...)
+	}
 }
 
 // CompactVectorsAndLog compacts and says so: one line when it rebuilt the
