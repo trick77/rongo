@@ -237,10 +237,17 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 	// cascades chunks away, and chunks_vec and chunks_fts are NOT part of that
 	// cascade. Letting it fire first would orphan them permanently, and an
 	// orphaned vector keeps answering questions about deleted code.
+	//
+	// chunks_fts goes first because it is a write: the id read chunks_vec
+	// needs comes only once the transaction holds the lock.
 	const owned = `SELECT id FROM chunks WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE rowid IN (`+owned+`)`, repo, path); err != nil {
+		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
+	}
+	if err := deleteVecRows(ctx, tx, owned, repo, path); err != nil {
+		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
+	}
 	for _, q := range []string{
-		`DELETE FROM chunks_vec WHERE rowid IN (` + owned + `)`,
-		`DELETE FROM chunks_fts WHERE rowid IN (` + owned + `)`,
 		`DELETE FROM chunks WHERE id IN (` + owned + `)`,
 		`DELETE FROM symbols WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`,
 		`DELETE FROM integration_tokens WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`,
@@ -253,6 +260,41 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
 	}
 	return tx.Commit()
+}
+
+// deleteVecRow deletes one vector. vec0 resolves `rowid = ?` as a point
+// lookup; `rowid IN (…)` outside a KNN query falls back to a fullscan of every
+// vector, so chunks_vec is always cleared one row at a time.
+const deleteVecRow = `DELETE FROM chunks_vec WHERE rowid = ?`
+
+// deleteVecRows deletes the chunks_vec row of every chunk id query selects.
+// The ids are read in full before the first delete. tx must already have
+// written: a transaction that opens with this read holds a WAL snapshot and
+// fails its first write with "database is locked" (see DeleteFile).
+func deleteVecRows(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, deleteVecRow, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // upsertFile inserts or updates the files row and returns its id.
@@ -274,13 +316,13 @@ func upsertFile(ctx context.Context, tx *sql.Tx, repo, path, sha, lang string, s
 
 // clearFileContent removes a file's chunks from all three tables and its
 // symbols, in the order the mirrors demand: gather the ids, delete the vec0 and
-// fts5 rows by rowid, and only then the chunks themselves.
+// fts5 rows by rowid, and only then the chunks themselves. Every caller has
+// already written (upsertFile), so the id read holds no stale snapshot.
 func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
-	// The set form, like purgeContent and DeleteFile: the mirrors by the
-	// file's chunk ids in one statement each, never a read of the ids and
-	// a delete per id.
+	if err := deleteVecRows(ctx, tx, `SELECT id FROM chunks WHERE file_id = ?`, fileID); err != nil {
+		return err
+	}
 	for _, q := range []string{
-		`DELETE FROM chunks_vec WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)`,
 		`DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE file_id = ?)`,
 		`DELETE FROM chunks WHERE file_id = ?`,
 	} {
