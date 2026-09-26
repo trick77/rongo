@@ -40,11 +40,17 @@
 #      LLMWIRE_<PROVIDER>_*    key of each chat model's provider
 #      LLMWIRE_OPENAI_*        endpoint and key that build the index
 #
-#    compose loads .env into the container whole (env_file below), so any
-#    other variable .env.example documents needs no compose edit. The session
-#    secret and both models are mandatory here: `up` stops with the message
-#    next to them. A missing model key stops rongo at boot, naming the
-#    variable.
+#    .env is the ONLY source of the container's configuration: compose loads
+#    it whole (env_file below), so any variable .env.example documents needs
+#    no compose edit. A value exported in your shell and not written in .env
+#    is NOT forwarded — keys and secrets included. The exceptions are the
+#    session secret and both models, which this file checks itself: `up`
+#    stops with the message next to them. A missing .env is not an error of
+#    its own (required: false), so a forgotten one shows up as those checks,
+#    or as rongo refusing to boot naming the missing key.
+#
+#    Needs Docker Compose 2.24 or later: older versions reject the long
+#    env_file form (path/required) below. `docker compose version` says which.
 services:
   rongo:
     build:
@@ -79,7 +85,8 @@ services:
     # chosen), the model ids, the OIDC block, forge tokens named by token_env
     # in repos.yaml, llmwire's gateway variables. Choosing a model on another
     # provider, or adding a private repository, is a .env edit, never a compose
-    # edit. A missing key stops rongo at boot, naming the variable. Password
+    # edit. Shell-exported values are not forwarded; see step 3 above. A
+    # missing key stops rongo at boot, naming the variable. Password
     # mode: the bcrypt hash has three $ in it and compose expands $ in .env,
     # so write each one as $$ there, or the container gets "$2a$10".
     env_file:
