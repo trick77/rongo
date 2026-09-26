@@ -84,6 +84,11 @@ type Config struct {
 	// (WithGateTemperature); nil sends none. Policy, not a model fact: a
 	// decision must not re-roll between runs. config.Load holds the default.
 	GateTemperature *float64
+	// AnswerReasoning is the effort level answer-lane calls send
+	// (BACKEND_LLM_REASONING); empty sends none, and the model runs at its own
+	// default. NewClient refuses a level the answer model's profile does not
+	// list. A call asked not to think (WithoutThinking) still sends minimal.
+	AnswerReasoning string
 	// Registry and Lookup replace llmwire's shipped profiles and the process
 	// environment. Tests only; nil in production.
 	Registry *llmwire.Registry
@@ -345,6 +350,7 @@ type Client struct {
 	// answer and gate are the profile ids of the two lanes; see Config.
 	answer, gate    string
 	gateTemperature *float64
+	answerReasoning string
 	turnMaxTokens   int
 	// demoted records the features warn has already reported, keyed by
 	// feature name; see warn.
@@ -405,10 +411,14 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	if reg == nil {
 		reg = llmwire.Default()
 	}
-	if err := requireLane(reg, "BACKEND_LLM_MODEL", answer, answerNeeds); err != nil {
+	answerProfile, err := requireLane(reg, "BACKEND_LLM_MODEL", answer, answerNeeds)
+	if err != nil {
 		return nil, err
 	}
-	if err := requireLane(reg, "BACKEND_LLM_GATE_MODEL", gate, gateNeeds); err != nil {
+	if err := requireLevel(answerProfile, cfg.AnswerReasoning); err != nil {
+		return nil, err
+	}
+	if _, err := requireLane(reg, "BACKEND_LLM_GATE_MODEL", gate, gateNeeds); err != nil {
 		return nil, err
 	}
 	wire, err := llmwire.FromEnvModels(llmwire.Config{
@@ -430,6 +440,7 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 		answer:          answer,
 		gate:            gate,
 		gateTemperature: cfg.GateTemperature,
+		answerReasoning: cfg.AnswerReasoning,
 		turnMaxTokens:   cfg.TurnMaxTokens,
 	}, nil
 }
@@ -437,17 +448,31 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 // requireLane refuses a lane's model that is unknown, not a chat model, or
 // short of what the lane does, naming the variable and the models that would
 // do. llmwire's error stays wrapped for errors.As.
-func requireLane(reg *llmwire.Registry, variable, model string, needs llmwire.Needs) error {
-	_, err := reg.Require(model, needs)
+func requireLane(reg *llmwire.Registry, variable, model string, needs llmwire.Needs) (*llmwire.Profile, error) {
+	p, err := reg.Require(model, needs)
 	if err == nil {
-		return nil
+		return p, nil
 	}
 	var unknown *llmwire.UnknownModelError
 	if errors.As(err, &unknown) {
-		return fmt.Errorf("llm: %s=%q is not an llmwire model; valid choices are %s: %w",
+		return nil, fmt.Errorf("llm: %s=%q is not an llmwire model; valid choices are %s: %w",
 			variable, model, strings.Join(reg.ChatModels(needs), ", "), err)
 	}
-	return fmt.Errorf("llm: %s: %w", variable, err)
+	return nil, fmt.Errorf("llm: %s: %w", variable, err)
+}
+
+// requireLevel refuses an answer reasoning level the answer model's profile
+// does not list, naming the levels it does. Empty is the model's default and
+// always fits.
+func requireLevel(p *llmwire.Profile, level string) error {
+	if level == "" || p.Reasoning.Accepts(level) {
+		return nil
+	}
+	if len(p.Reasoning.EffortValues) == 0 {
+		return fmt.Errorf("llm: BACKEND_LLM_REASONING=%q: %s takes no effort level; unset it", level, p.ID)
+	}
+	return fmt.Errorf("llm: BACKEND_LLM_REASONING=%q is not accepted by %s (accepted: %s)",
+		level, p.ID, strings.Join(p.Reasoning.EffortValues, ", "))
 }
 
 func resolve(opts []Option) callOptions {
@@ -485,11 +510,17 @@ func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 		req.Temperature = c.gateTemperature
 	}
 	// Gate calls reason as little as the model allows; every other call is
-	// read by a person and runs at the model's own default, deliberately.
-	if o.thinkingOff {
+	// read by a person and runs at the model's own default, or at the level
+	// the deployment pinned for the answer lane.
+	switch {
+	case o.thinkingOff:
 		req.Reasoning = llmwire.ReasoningMinimal()
+	case o.lane == LaneAnswer && c.answerReasoning != "":
+		req.Reasoning = llmwire.ReasoningEffort(c.answerReasoning)
 	}
-	req.BestEffort = req.Temperature != nil || req.Reasoning != nil
+	// A pinned level was checked against the profile at boot, so it keeps
+	// llmwire's strict validation; only the soft knobs may be demoted.
+	req.BestEffort = req.Temperature != nil || o.thinkingOff
 	if o.jsonObject {
 		req.ResponseFormat = llmwire.ResponseFormat{Kind: llmwire.FormatJSONObject}
 	}

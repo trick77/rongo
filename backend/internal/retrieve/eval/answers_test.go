@@ -118,13 +118,15 @@ func judgeLLM(t *testing.T) *llm.Client {
 // variable and the opencode identity llmwire's, from the model's provider
 // entry. An unset model FAILS the run rather than skipping it: a skipped
 // eval reads as "nothing to see", and rongo has no model to fall back to.
+// BACKEND_LLM_REASONING is read too, so a pinned answer level is measured.
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
 	answer, gate := evalModels(t)
 	// The product's default pin (config.Load), so a judged run decides as
 	// the product does.
 	zero := 0.0
-	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate, GateTemperature: &zero}
+	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate, GateTemperature: &zero,
+		AnswerReasoning: strings.TrimSpace(os.Getenv("BACKEND_LLM_REASONING"))}
 }
 
 // evalModels is the configured pair, or a failed run naming what is unset.

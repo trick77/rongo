@@ -61,6 +61,29 @@ func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
 	})
 }
 
+// BACKEND_LLM_REASONING reaches the answer lane, and a level the answer
+// model's profile does not list stops the boot naming the accepted ones.
+func TestNewModelClients_checksTheAnswerReasoningLevel(t *testing.T) {
+	srv := llmwiretest.NewServer(t)
+	chat := llm.Config{Registry: llmtest.Registry(), Lookup: srv.Lookup}
+	ep, err := llmwire.Default().LookupEmbedding(embed.Model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ep.APIKeyEnv(), "x")
+
+	cfg := config.Config{LLMModel: llmtest.Answer, LLMGateModel: llmtest.Answer, LLMReasoning: "high"}
+	if _, _, err := newModelClients(cfg, chat); err != nil {
+		t.Fatalf("an accepted level: %v", err)
+	}
+
+	cfg.LLMReasoning = "ultra"
+	_, _, err = newModelClients(cfg, chat)
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_LLM_REASONING") || !strings.Contains(err.Error(), "none, low, medium, high") {
+		t.Fatalf("err = %v, want a refusal naming BACKEND_LLM_REASONING and the accepted levels", err)
+	}
+}
+
 // The vec0 table is created at embed.Model's width, and a file created at
 // another width is refused rather than written into.
 func TestMigrateForModel_refusesAFileBuiltForAnotherWidth(t *testing.T) {

@@ -27,10 +27,10 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 ## Models
 - **Model change is judged by `TestEvalMeasureAnswers`**, run twice. Retrieval numbers say what the answer was written from, never whether it was right.
 - **No model id in code.** Both lanes from `BACKEND_LLM_MODEL` / `BACKEND_LLM_GATE_MODEL`, mandatory, no fallback; evals read the same two. Lanes told apart by `llm.Lane`, never by model string: both may be one model, or on two providers.
-- **Model swap = config + key.** Every model fact (levels, limits, hosts, prices) is llmwire's profile. Lanes checked at boot with `Registry.Require` (gate: tools, answer: streaming). A reasoning level, host or rate in rongo is a bug.
+- **Model swap = config + key.** Every model fact (levels, limits, hosts, prices) is llmwire's profile. Lanes checked at boot with `Registry.Require` (gate: tools, answer: streaming). A reasoning level, host or rate in rongo's code is a bug.
 - **Current lane models (2026-09-23) chosen on speed** — the slower sibling was unusable. Quality not the criterion; no eval number behind it.
 - **Answer lane where a human reads; gate lane + `ShortGate` everywhere else.** Bar is "output is an id or a label", not "doesn't think". `WithoutThinking`, `ShortGate`, `WithGateTemperature` are separate switches. Don't couple them.
-- **Reasoning is intent, never a level.** `WithoutThinking` = `llmwire.ReasoningMinimal()`: gate outputs only — on some models it is thinking OFF, which measurably costs prose and arithmetic. Answer call runs at the model's default, deliberately.
+- **Reasoning is intent, never a level in code.** `WithoutThinking` = `llmwire.ReasoningMinimal()`: gate outputs only — on some models it is thinking OFF, which measurably costs prose and arithmetic. Answer call runs at the model's default unless the operator pins `BACKEND_LLM_REASONING` (answer lane only, checked against the profile at boot). `BACKEND_LLM_GATE_REASONING` stays retired: gates stay minimal.
 - **Routing judge on the gate lane.** Two measurements went opposite ways (`2026-08-19-candidates.md`, `2026-09-06-routing-rerun.md`). No move back without a corpus and a number.
 - **Pin `WithGateTemperature` on every call returning an id, label or decision.** Unpinned, the judge re-rolls between runs. Answer call stays unpinned; a person reads it.
 - **Pinning narrows the re-roll, never removes it** — two pinned runs still differ by one question. Never conclude from a one-question gap. Run twice.
