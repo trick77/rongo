@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/store"
 )
@@ -222,6 +223,78 @@ func TestLogVectorIndexAtBoot_compactsAndVacuumsABloatedTable(t *testing.T) {
 		if _, ok := logs.find(msg); !ok {
 			t.Errorf("no %q line, records = %v", msg, logs.records)
 		}
+	}
+}
+
+// Both rewrites take minutes on a production table and hold the boot before
+// "listening", so each says it started, not only that it finished.
+func TestLogVectorIndexAtBoot_saysEachRewriteBeforeItRuns(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 3000, 100)
+	logs := &capture{}
+
+	LogVectorIndexAtBoot(context.Background(), db, slog.New(logs))
+
+	var msgs []string
+	for _, r := range logs.records {
+		msgs = append(msgs, r.Message)
+	}
+	want := []string{"compacting the vector index", "copying vectors out", "writing vectors back",
+		"vector index compacted", "vacuuming the database", "database vacuumed"}
+	if !slices.Equal(msgs, want) {
+		t.Fatalf("messages = %q, want %q", msgs, want)
+	}
+	attrs := map[string]string{}
+	logs.records[0].Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	for k, v := range map[string]string{"reason": "boot", "rows": "100", "chunks": "3", "chunks_needed": "1"} {
+		if attrs[k] != v {
+			t.Errorf("attr %s = %q, want %q (all: %v)", k, attrs[k], v, attrs)
+		}
+	}
+	var before int64
+	logs.records[4].Attrs(func(a slog.Attr) bool {
+		if a.Key == "bytes_before" {
+			before = a.Value.Int64()
+		}
+		return true
+	})
+	if before <= 0 {
+		t.Errorf("vacuum start line has no bytes_before: %v", logs.records[4])
+	}
+}
+
+// A copy longer than one heartbeat says where it has got to while it runs.
+func TestCompactVectorsAndLog_heartbeatReportsProgress(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 6000, 1000)
+	defer func(d time.Duration, b int) { compactHeartbeat, compactBatch = d, b }(compactHeartbeat, compactBatch)
+	compactHeartbeat, compactBatch = time.Millisecond, 64
+	logs := &capture{}
+
+	CompactVectorsAndLog(context.Background(), db, slog.New(logs), "reason", "boot")
+
+	r, ok := logs.find("compacting the vector index, still running")
+	if !ok {
+		t.Fatalf("no heartbeat, records = %v", logs.records)
+	}
+	attrs := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	for _, k := range []string{"reason", "step", "done", "total", "elapsed"} {
+		if attrs[k] == "" {
+			t.Errorf("heartbeat lacks %s: %v", k, attrs)
+		}
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks_vec_rowids`); n != 1000 {
+		t.Errorf("rows = %d, want 1000", n)
+	}
+	if got := nearest(t, db, 5999, 1); len(got) != 1 || got[0] != 5999 {
+		t.Errorf("nearest = %v, want [5999]", got)
 	}
 }
 

@@ -625,7 +625,7 @@ func newModelClients(cfg config.Config, chat llm.Config) (*embed.Client, *llm.Cl
 	}
 	slog.Info("model lanes",
 		"answer", models.Deployment(llm.LaneAnswer), "gate", models.Deployment(llm.LaneGate),
-		"answer_reasoning", answerReasoning, "gate_temperature", gateTemp, "timeout", cfg.LLMTimeout)
+		"answer_reasoning", answerReasoning, "gate_temperature", gateTemp, "timeout", cfg.LLMTimeout.String())
 	return embedder, models, nil
 }
 
