@@ -300,6 +300,14 @@ func main() {
 		listLoaded = true
 	}
 
+	// vec0 never frees a deleted vector's storage, and every search reads all
+	// of it (indexer.CompactVectors). Compacted here before anything reads,
+	// and vacuumed only then: the rewrite blocks writers, which at boot is
+	// nobody.
+	if indexer.CompactVectorsAndLog(ctx, db, slog.Default(), "reason", "boot") {
+		indexer.VacuumAndLog(ctx, db, slog.Default())
+	}
+
 	// OUTSIDE the branch above, deliberately: every boot says what it holds,
 	// including the one where the file was missing. That boot is exactly the one
 	// where the question matters most — the database may carry a whole corpus

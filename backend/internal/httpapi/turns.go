@@ -105,7 +105,15 @@ func turnStopped(ctx context.Context, msg string, threadID int64, err error) {
 		slog.Info("turn stopped, thread deleted", "thread", threadID)
 		return
 	}
-	slog.Error(msg, "err", err)
+	// A cancelled turn fails on whatever it was waiting on, and that error
+	// hides the cancel: sqlite-vec reports an interrupt as "SQL logic error:
+	// chunks iter error", which reads as a corrupt database. The cause says
+	// what happened; context.Canceled is the reader's connection closing.
+	if ctx.Err() != nil {
+		slog.Warn("turn cancelled", "thread", threadID, "cause", context.Cause(ctx).Error(), "err", err)
+		return
+	}
+	slog.Error(msg, "thread", threadID, "err", err)
 }
 
 // recordMissed is recordFailed for the writes a turn can lose without losing
