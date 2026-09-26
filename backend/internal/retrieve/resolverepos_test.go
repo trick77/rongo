@@ -368,3 +368,94 @@ func TestResolveReposStillReportsANameThatIsNoSegment(t *testing.T) {
 		t.Errorf("unknown = %v, want the missing repository named", unknown)
 	}
 }
+
+// addMemberPart inserts a project member with its declared part.
+func addMemberPart(t *testing.T, db *sql.DB, name, project, part string) {
+	t.Helper()
+	if _, err := db.Exec(
+		`INSERT INTO repo_state (name, clone_url, branch, project, part) VALUES (?,?,?,?,?)`,
+		name, "file:///"+name, "master", project, part); err != nil {
+		t.Fatalf("insert %s: %v", name, err)
+	}
+}
+
+func TestResolveReposReadsARepoPlusItsPartAsThatRepo(t *testing.T) {
+	// "Wie wird im Schadenmeldung-service backend …": the understanding step
+	// glued the repository and the part it plays into one guess. The reader
+	// named an indexed repository, so the turn narrows to it and says nothing
+	// about a repository the index lacks.
+	db := testDB(t)
+	addMemberPart(t, db, "shop-service", "shop", "backend")
+	addMemberPart(t, db, "shop-ui", "shop", "ui")
+	r := New(db, nil)
+
+	known, unknown, err := r.ResolveRepos(context.Background(),
+		[]string{"shop-service-backend"}, "wie wird im shop-service backend der Check umgangen?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want nothing claimed about an indexed repository", unknown)
+	}
+	if len(known) != 1 || known[0] != "shop-service" {
+		t.Errorf("known = %v, want shop-service alone", known)
+	}
+}
+
+func TestResolveReposNarrowsToARepoNamedOnlyWithItsPart(t *testing.T) {
+	// The glued guess alone, the question carrying nothing: the repository
+	// still comes back, because the reader did name it.
+	db := testDB(t)
+	addMemberPart(t, db, "shop-service", "shop", "backend")
+	addMemberPart(t, db, "shop-ui", "shop", "ui")
+	r := New(db, nil)
+
+	known, unknown, err := r.ResolveRepos(context.Background(), []string{"UI shop-ui"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(unknown) != 0 || len(known) != 1 || known[0] != "shop-ui" {
+		t.Errorf("known = %v, unknown = %v, want shop-ui alone", known, unknown)
+	}
+}
+
+func TestResolveReposReadsOnlyTheDeclaredPart(t *testing.T) {
+	// The part is declared, never guessed: a repository declared as a consumer
+	// does not swallow "backend", and the name stays reported.
+	db := testDB(t)
+	addMemberPart(t, db, "shop-service", "shop", "consumer")
+	r := New(db, nil)
+
+	known, unknown, err := r.ResolveRepos(context.Background(), []string{"shop-service-backend"}, "")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 0 {
+		t.Errorf("known = %v, want nothing narrowed", known)
+	}
+	if len(unknown) != 1 || unknown[0] != "shop-service-backend" {
+		t.Errorf("unknown = %v, want the guess reported", unknown)
+	}
+}
+
+func TestResolveReposKeepsAHyphenatedMemberInTheQuestionNarrow(t *testing.T) {
+	// "shop-ui" in the reader's words names the member, not the project whose
+	// name is its first half. Reading the hyphen as a boundary searched all
+	// seven members of a product for a question about one of them.
+	db := testDB(t)
+	addMember(t, db, "shop-backend", "shop")
+	addMember(t, db, "shop-ui", "shop")
+	r := New(db, nil)
+
+	known, _, err := r.ResolveRepos(context.Background(), nil, "wie funktioniert shop-ui?")
+
+	if err != nil {
+		t.Fatalf("ResolveRepos: %v", err)
+	}
+	if len(known) != 1 || known[0] != "shop-ui" {
+		t.Errorf("known = %v, want shop-ui alone", known)
+	}
+}
