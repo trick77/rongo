@@ -79,9 +79,9 @@ const locateMaxRounds = 3
 // later by another call entirely.
 const locateMaxTokens = 700
 
-// locateMaxCalls is how many tool calls one turn may run. mimo-v2.6-flash
-// answered a first round with 38 calls in one reply and ran into the output
-// cap mid-call: a guess-storm, not a search. The calls past the limit are
+// locateMaxCalls is how many tool calls one turn may run. A measured first
+// round came back with 38 calls in one reply and ran into the output cap
+// mid-call: a guess-storm, not a search. The calls past the limit are
 // not advertised back, so no call is left without its result.
 const locateMaxCalls = 6
 
@@ -382,7 +382,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		report.Rounds = round + 1
 		turn, err := g.locate.CallTools(ctx, msgs, locateTools(),
 			llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
-			llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
+			llm.WithMaxAnswerTokens(locateMaxTokens), llm.WithStep("locate"))
 		if err != nil && ctx.Err() == nil {
 			// A fan-out that ran into the output cap still carries every call
 			// before the one it was cut in: kept, and the round goes on.
@@ -678,7 +678,7 @@ func (g *Gatherer) conclude(ctx context.Context, msgs []llm.ToolMessage) string 
 	msgs = append(msgs, llm.ToolMessage{Role: "user", Content: locateConclude})
 	turn, err := g.locate.CallTools(ctx, msgs, nil,
 		llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
-		llm.WithMaxTokens(locateMaxTokens), llm.WithStep("locate"))
+		llm.WithMaxAnswerTokens(locateMaxTokens), llm.WithStep("locate"))
 	if err != nil {
 		g.logger().Warn("locate conclusion failed; the landings are kept", "err", err)
 		return ""

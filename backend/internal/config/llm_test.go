@@ -17,8 +17,8 @@ func TestLoad_llmPolicyDefaults(t *testing.T) {
 	if cfg.LLMGateTemperature == nil || *cfg.LLMGateTemperature != 0 {
 		t.Errorf("LLMGateTemperature = %v, want 0", cfg.LLMGateTemperature)
 	}
-	if cfg.LLMGateReasoning != "off" || cfg.LLMReasoning != "default" || cfg.LLMTimeout != 15*time.Minute {
-		t.Errorf("policy = %q/%q/%v, want off/default/15m", cfg.LLMGateReasoning, cfg.LLMReasoning, cfg.LLMTimeout)
+	if cfg.LLMTimeout != 15*time.Minute {
+		t.Errorf("LLMTimeout = %v, want 15m", cfg.LLMTimeout)
 	}
 }
 
@@ -39,8 +39,6 @@ func TestLoad_requiresBothModels(t *testing.T) {
 func TestLoad_llmPolicyValues(t *testing.T) {
 	setEnv(t, map[string]string{
 		"BACKEND_LLM_GATE_TEMPERATURE": "default",
-		"BACKEND_LLM_GATE_REASONING":   "low",
-		"BACKEND_LLM_REASONING":        "medium",
 		"BACKEND_LLM_TIMEOUT":          "90s",
 	})
 
@@ -52,8 +50,23 @@ func TestLoad_llmPolicyValues(t *testing.T) {
 	if cfg.LLMGateTemperature != nil {
 		t.Errorf("LLMGateTemperature = %v, want nil for default", *cfg.LLMGateTemperature)
 	}
-	if cfg.LLMGateReasoning != "low" || cfg.LLMReasoning != "medium" || cfg.LLMTimeout != 90*time.Second {
-		t.Errorf("policy = %q/%q/%v", cfg.LLMGateReasoning, cfg.LLMReasoning, cfg.LLMTimeout)
+	if cfg.LLMTimeout != 90*time.Second {
+		t.Errorf("LLMTimeout = %v, want 90s", cfg.LLMTimeout)
+	}
+}
+
+// Reasoning is each call's intent, rendered per model by llmwire; the two
+// variables that once set it per deployment are refused rather than ignored,
+// so a .env still carrying one is told it no longer does anything.
+func TestLoad_refusesTheRetiredReasoningVariables(t *testing.T) {
+	for _, name := range []string{"BACKEND_LLM_GATE_REASONING", "BACKEND_LLM_REASONING"} {
+		t.Run(name, func(t *testing.T) {
+			setEnv(t, map[string]string{name: "off"})
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "no longer") {
+				t.Fatalf("Load() err = %v, want one naming %s as retired", err, name)
+			}
+		})
 	}
 }
 

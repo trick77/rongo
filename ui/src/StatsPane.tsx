@@ -195,13 +195,9 @@ function TurnStats({ turn, said, toggle }: { turn: Turn; said: string | null; to
         {anyMs && <Kpi value={ms(totalMs)} label="added up over the calls" />}
         {u.cached_tokens != null && u.cached_tokens > 0 && <Kpi value={num(u.cached_tokens)} label="served from cache" />}
         {/* Only when there was any: a lane with thinking switched off reports
-            zero, and a row of zeroes would be noise around the figures that
-            move. The count is recorded either way. Until the MiMo V2.6 pair
-            this never rendered at all — both V2.5 ids reported the reasoning
-            lane as zero and counted thinking inside completion_tokens, so the
-            sum was always zero. V2.6 populates the lane, and the answer call
-            runs at the model's default, so the tile now appears on an
-            ordinary turn. */}
+            zero, as does a model that counts thinking inside
+            completion_tokens, and a row of zeroes would be noise around the
+            figures that move. The count is recorded either way. */}
         {thought > 0 && <Kpi value={num(thought)} label="spent thinking" />}
       </div>
 

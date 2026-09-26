@@ -489,15 +489,15 @@ func recall(question string, t Thread) string {
 // Understand turns a question into search material.
 //
 // Runs on the short-gate deployment: the output is a structured blob nobody
-// reads, so the expensive queue would buy nothing. Thinking is disabled as a
-// SEPARATE decision, for a reason of its own — MiMo's reasoning channel can
-// bleed into the content, and here the content has to parse as JSON.
+// reads, so the expensive queue would buy nothing. Reasoning is minimal as a
+// SEPARATE decision, for a reason of its own — a model's reasoning can bleed
+// into the content, and here the content has to parse as JSON.
 func (u *Understander) Understand(ctx context.Context, question string, t Thread, stageNames []string) (Understanding, error) {
 	holder := memory.From(ctx)
 	out, _, err := u.llm.Complete(ctx, []llm.Message{
 		{Role: "system", Content: understandPrompt(holder != nil, t.Question != "") + stageList(stageNames)},
 		{Role: "user", Content: recall(question, t) + memoryList(holder)},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(understandMaxTokens), llm.WithStep("understand"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxAnswerTokens(understandMaxTokens), llm.WithStep("understand"))
 	if err != nil {
 		return Understanding{}, fmt.Errorf("understand the question: %w", err)
 	}

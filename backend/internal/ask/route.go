@@ -487,7 +487,7 @@ type Router struct {
 	// never sees a module nobody else in the product can see.
 	clusterOpts modules.Opts
 	// judgeDeployment selects which lane decides ask-vs-compose. The history
-	// below measured the MiMo pro/flash pair on the two lanes.
+	// below measured a slow and a fast model of one family on the two lanes.
 	//
 	// It runs on the gate lane, which is where the bar puts it — the output
 	// is one word — and it took two measurements to get back here.
@@ -1209,7 +1209,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 		}
 	}
 
-	opts := []llm.Option{llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route")}
+	opts := []llm.Option{llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxAnswerTokens(routeMaxTokens), llm.WithStep("route")}
 	if r.judgeDeployment != nil {
 		opts = append(opts, r.judgeDeployment)
 	}
@@ -1263,7 +1263,7 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 		{Role: "system", Content: choosableSystem},
 		{Role: "user", Content: b.String()},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
-		llm.WithMaxTokens(routeMaxTokens), llm.WithStep("route"))
+		llm.WithMaxAnswerTokens(routeMaxTokens), llm.WithStep("route"))
 	if err != nil {
 		return false, fmt.Errorf("judge whether the role can choose: %w", err)
 	}
@@ -1338,7 +1338,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 			out, _, err := r.llm.Complete(ctx, []llm.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: b.String()},
-			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(nameMaxTokens), llm.WithStep("name"))
+			}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxAnswerTokens(nameMaxTokens), llm.WithStep("name"))
 			if err != nil {
 				return
 			}

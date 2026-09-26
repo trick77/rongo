@@ -149,7 +149,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 		{Role: "system", Content: gapSystem},
 		{Role: "user", Content: gapPrompt(question, sources)},
 	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(),
-		llm.WithMaxTokens(gapMaxTokens), llm.WithStep("gap"))
+		llm.WithMaxAnswerTokens(gapMaxTokens), llm.WithStep("gap"))
 	if err != nil {
 		if ctx.Err() != nil {
 			// The reader left; there is no turn to fill a gap for.

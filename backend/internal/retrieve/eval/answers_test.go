@@ -8,9 +8,7 @@
 // upstream of the answer call is measured by, and it is the model-swap test.
 // The lanes run on BACKEND_LLM_MODEL and BACKEND_LLM_GATE_MODEL, the product's
 // own; BACKEND_EVAL_ANSWER_MODEL and BACKEND_EVAL_GATE_MODEL point them at
-// another model for the harness alone, BACKEND_EVAL_GATE_REASONING and
-// BACKEND_EVAL_REASONING set that model's policy per lane. The judge runs on
-// its own client
+// another model for the harness alone. The judge runs on its own client
 // without those overrides, so a swapped gate model is graded by the same
 // judge as the baseline.
 //
@@ -105,11 +103,6 @@ func answerLLM(t *testing.T) *llm.Client {
 	if m := os.Getenv("BACKEND_EVAL_GATE_MODEL"); m != "" {
 		cfg.Gate = m
 	}
-	// The policy per lane for the swapped model, the values
-	// BACKEND_LLM_GATE_REASONING and BACKEND_LLM_REASONING take in the
-	// product; unset keeps the default policy.
-	cfg.Policy.GateReasoning = os.Getenv("BACKEND_EVAL_GATE_REASONING")
-	cfg.Policy.ProReasoning = os.Getenv("BACKEND_EVAL_REASONING")
 	return mustLLM(t, cfg)
 }
 
@@ -128,7 +121,10 @@ func judgeLLM(t *testing.T) *llm.Client {
 func evalLLMConfig(t *testing.T, timeout time.Duration) llm.Config {
 	t.Helper()
 	answer, gate := evalModels(t)
-	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate}
+	// The product's default pin (config.Load), so a judged run decides as
+	// the product does.
+	zero := 0.0
+	return llm.Config{Timeout: timeout, Answer: answer, Gate: gate, GateTemperature: &zero}
 }
 
 // evalModels is the configured pair, or a failed run naming what is unset.
@@ -207,7 +203,7 @@ func judgeAnswer(ctx context.Context, c *llm.Client, r Rubric, answer string) (v
 	out, _, err := c.Complete(ctx, []llm.Message{
 		{Role: "system", Content: judgeAnswerSystem},
 		{Role: "user", Content: b.String()},
-	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(512), llm.WithStep("judge-answer"))
+	}, llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxAnswerTokens(512), llm.WithStep("judge-answer"))
 	if err != nil {
 		return verdict{}, err
 	}
