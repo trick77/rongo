@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/llm/llmtest"
 )
 
 // writeDeltas streams the tokens and stops there, leaving the stream open. A
@@ -602,11 +603,11 @@ func TestReachedVia_namesHowEachSourceArrived(t *testing.T) {
 	}
 }
 
-// The lanes' models in tests: two different profiles on one host, so a test
-// can tell from the wire which lane a call took.
+// The lanes' models in tests: two synthetic profiles, so a test can tell from
+// the wire which lane a call took.
 const (
-	testAnswerModel = "mimo-v2.6-pro"
-	testGateModel   = "mimo-v2.6-flash"
+	testAnswerModel = llmtest.Answer
+	testGateModel   = llmtest.Gate
 )
 
 // fakeLLM is the model client pointed at a test server. With BaseURL set,
@@ -614,7 +615,9 @@ const (
 // fail is a bug in the constructor.
 func fakeLLM(t testing.TB, srv *httptest.Server) *llm.Client {
 	t.Helper()
-	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, Answer: testAnswerModel, Gate: testGateModel}, srv.Client())
+	zero := 0.0
+	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: testAnswerModel, Gate: testGateModel, GateTemperature: &zero}, srv.Client())
 	if err != nil {
 		t.Fatalf("llm.NewClient: %v", err)
 	}

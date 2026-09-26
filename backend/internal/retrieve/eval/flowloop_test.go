@@ -58,8 +58,8 @@ func flowToolBudget() int {
 }
 
 // flowModels are the arms: the configured answer model, plus
-// BACKEND_EVAL_ANSWER_MODEL when it names another. The first table ran
-// mimo-v2.6-pro and -flash; pro was dropped 2026-09-23 as too slow to use. A
+// BACKEND_EVAL_ANSWER_MODEL when it names another. The first table ran a
+// slow and a fast model of one family (2026-09-10-flow-loop-diagnostic.md). A
 // failure on one model family cannot separate "agentic search does not work
 // for this" from "this model cannot hold a six-call trajectory"; any
 // conclusion drawn from it must say so.

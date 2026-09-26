@@ -120,16 +120,12 @@ type Config struct {
 	// config stays a stdlib-only leaf.
 	LLMModel     string
 	LLMGateModel string
-	// The call policy, measured on MiMo and therefore a setting once the
-	// model is: what a pinned gate call sends as temperature (nil = none),
-	// what a gate call and the answer lane send as reasoning ("off",
-	// "default" or an effort level the model accepts, checked in internal/llm
-	// at boot), and how long one call may take. Malformed values fail the
-	// boot: a typo here changes every routing decision, and is not a tunable
-	// that may quietly fall back.
+	// The call policy: what a pinned gate call sends as temperature (nil =
+	// none), and how long one call may take. Reasoning is not here: each call
+	// states its intent and llmwire renders it for the model. Malformed values
+	// fail the boot: a typo here changes every routing decision, and is not a
+	// tunable that may quietly fall back.
 	LLMGateTemperature *float64
-	LLMGateReasoning   string
-	LLMReasoning       string
 	LLMTimeout         time.Duration
 	// GatherMaxHops and GatherTokenBudget bound the reference walk. Without
 	// them one question walks the corpus.
@@ -181,6 +177,11 @@ type Config struct {
 	CookieSecure bool
 }
 
+// retiredEnv are variables a deployment may still carry that no longer do
+// anything. Set, they refuse the boot: a setting that looks active and is
+// ignored is the failure rongo refuses everywhere else.
+var retiredEnv = []string{"BACKEND_LLM_GATE_REASONING", "BACKEND_LLM_REASONING"}
+
 // Load reads and validates the environment. It returns the first problem it
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
@@ -224,8 +225,6 @@ func Load() (Config, error) {
 		Memory:            r.boolOr("BACKEND_MEMORY", true),
 		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
 		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
-		LLMGateReasoning:  envOr("BACKEND_LLM_GATE_REASONING", "off"),
-		LLMReasoning:      envOr("BACKEND_LLM_REASONING", "default"),
 		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
@@ -243,6 +242,11 @@ func Load() (Config, error) {
 	}
 	if r.err != nil {
 		return Config{}, r.err
+	}
+	for _, name := range retiredEnv {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return Config{}, fmt.Errorf("%s is no longer read: reasoning follows each call's intent, rendered for the model by llmwire; remove it", name)
+		}
 	}
 	var err error
 	if cfg.LLMGateTemperature, err = envOptionalFloat("BACKEND_LLM_GATE_TEMPERATURE", 0); err != nil {
@@ -270,10 +274,10 @@ func Load() (Config, error) {
 	}
 
 	if cfg.LLMModel == "" {
-		return Config{}, fmt.Errorf("BACKEND_LLM_MODEL is required: the llmwire profile id that answers, e.g. mimo-v2.6-flash")
+		return Config{}, fmt.Errorf("BACKEND_LLM_MODEL is required: the llmwire profile id that answers")
 	}
 	if cfg.LLMGateModel == "" {
-		return Config{}, fmt.Errorf("BACKEND_LLM_GATE_MODEL is required: the llmwire profile id for routing, titles and follow-ups, e.g. mimo-v2.6-flash")
+		return Config{}, fmt.Errorf("BACKEND_LLM_GATE_MODEL is required: the llmwire profile id for routing, titles and follow-ups")
 	}
 
 	switch cfg.AuthMode {

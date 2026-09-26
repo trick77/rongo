@@ -77,7 +77,7 @@ var intentCases = []intentCase{{
 // gate, one short-gate call per case. Run it twice: a pinned gate call still
 // re-rolls, and a one-case gap between runs says nothing.
 //
-//	BACKEND_EVAL=1 BACKEND_LLM_MODEL=... BACKEND_LLM_GATE_MODEL=... LLMWIRE_MIMO_API_KEY=... go test ./internal/retrieve/eval/ -run TestEvalUnderstandIntent -v
+//	BACKEND_EVAL=1 BACKEND_LLM_MODEL=... BACKEND_LLM_GATE_MODEL=... LLMWIRE_<PROVIDER>_API_KEY=... go test ./internal/retrieve/eval/ -run TestEvalUnderstandIntent -v
 func TestEvalUnderstandIntent(t *testing.T) {
 	requireEval(t)
 	u := ask.NewUnderstander(evalLLM(t, 2*time.Minute))

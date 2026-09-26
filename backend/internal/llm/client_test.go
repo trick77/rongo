@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/trick77/llmwire"
+	"github.com/trick77/llmwire/llmwiretest"
 
+	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -35,16 +37,16 @@ func TestComplete_recordsTheCallIntoTheContextsMeterUnderItsStep(t *testing.T) {
 	}
 	want := usage.Call{Step: "understand", Model: testGateModel, Prompt: 11, Completion: 7}
 	// The duration is measured here rather than reported by the endpoint,
-	// and the cost is llmwire's from its own table: 11 in at 0.14 and 7 out
-	// at 0.28 USD per million. Each checked on its own and then cleared:
+	// and the cost is llmwire's from the profile: 11 in at llmwiretest's 1
+	// and 7 out at its 2 USD per million. Each checked on its own and then cleared:
 	// what this test is about is the step, the deployment and the upstream's
 	// own numbers.
 	got := calls[0]
 	if got.Ms == nil {
 		t.Error("the call must be timed")
 	}
-	if got.CostNanoUSD == nil || *got.CostNanoUSD != 3_500 {
-		t.Errorf("cost = %v nanodollars, want 3500", got.CostNanoUSD)
+	if got.CostNanoUSD == nil || *got.CostNanoUSD != 25_000 {
+		t.Errorf("cost = %v nanodollars, want 25000", got.CostNanoUSD)
 	}
 	got.Ms, got.CostNanoUSD = nil, nil
 	if got != want {
@@ -70,10 +72,10 @@ func TestStream_recordsTheTrailingUsageFrameIntoTheMeter(t *testing.T) {
 	}
 	want := usage.Call{Step: "answer", Model: testAnswerModel, Prompt: 3, Completion: 4}
 	got := calls[0]
-	// Priced by llmwire as the stream closed: 3 in at 0.435 and 4 out at
-	// 0.87 USD per million.
-	if got.CostNanoUSD == nil || *got.CostNanoUSD != 4_785 {
-		t.Errorf("cost = %v nanodollars, want 4785", got.CostNanoUSD)
+	// Priced by llmwire as the stream closed: 3 in at 1 and 4 out at 2 USD
+	// per million, llmwiretest's synthetic rates.
+	if got.CostNanoUSD == nil || *got.CostNanoUSD != 11_000 {
+		t.Errorf("cost = %v nanodollars, want 11000", got.CostNanoUSD)
 	}
 	got.CostNanoUSD = nil
 	if got.Ms == nil {
@@ -122,11 +124,11 @@ func TestComplete_withoutAMeterRecordsNothingAndStillAnswers(t *testing.T) {
 
 // TestRecord_namesTheDeploymentNotTheLane: with BACKEND_LLM_MODEL set, the
 // meter shows the model that answered, not the lane constant it was routed
-// through. The usage table read mimo-v2.5-pro for a gpt-5.4 deployment.
+// through. The usage table once read one model's name for another's calls.
 func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 	t.Run("complete", func(t *testing.T) {
-		srv, _ := wireRecorder(t)
-		c := mustClient(t, Config{BaseURL: srv.URL, Answer: "gpt-5.4", Gate: "gpt-5.4-mini"}, srv.Client())
+		srv := llmwiretest.NewServer(t)
+		c := mustClient(t, Config{BaseURL: srv.URL, Answer: testAnswerModel, Gate: testGateModel}, srv.Server.Client())
 		m := usage.New()
 		ctx := usage.WithMeter(context.Background(), m)
 
@@ -141,7 +143,7 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 		if len(calls) != 2 {
 			t.Fatalf("recorded %d calls, want 2", len(calls))
 		}
-		if calls[0].Model != "gpt-5.4-mini" || calls[1].Model != "gpt-5.4" {
+		if calls[0].Model != testGateModel || calls[1].Model != testAnswerModel {
 			t.Errorf("models = %q, %q; want the overrides, not the lanes", calls[0].Model, calls[1].Model)
 		}
 	})
@@ -152,7 +154,7 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 			writeSSE(w, []string{"a"}, "", 1)
 		}))
 		t.Cleanup(srv.Close)
-		c := mustClient(t, Config{BaseURL: srv.URL, Answer: "gpt-5.4", Gate: "gpt-5.4-mini"}, srv.Client())
+		c := mustClient(t, Config{BaseURL: srv.URL, Answer: testAnswerModel, Gate: testGateModel}, srv.Client())
 		m := usage.New()
 		ctx := usage.WithMeter(context.Background(), m)
 
@@ -161,14 +163,14 @@ func TestRecord_namesTheDeploymentNotTheLane(t *testing.T) {
 		}
 
 		calls := m.Calls()
-		if len(calls) != 1 || calls[0].Model != "gpt-5.4" {
-			t.Errorf("calls = %+v; want one under gpt-5.4", calls)
+		if len(calls) != 1 || calls[0].Model != testAnswerModel {
+			t.Errorf("calls = %+v; want one under %s", calls, testAnswerModel)
 		}
 	})
 }
 
 func TestComplete_recordsTheCachedAndReasoningSharesAndHowLongItTook(t *testing.T) {
-	// Given an endpoint that reports both details objects, as MiMo does
+	// Given an endpoint that reports both details objects
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],
@@ -336,19 +338,26 @@ func TestComplete_noCeilingOrNoMeterIsNeverRefused(t *testing.T) {
 	}
 }
 
-// captured is one request body as the fake upstream saw it.
+// captured is one request body as the fake upstream saw it. The reasoning
+// knob and the cap are read through llmwiretest, which knows every spelling.
 type captured struct {
-	Model               string    `json:"model"`
-	Messages            []Message `json:"messages"`
-	Stream              bool      `json:"stream"`
-	MaxCompletionTokens int       `json:"max_completion_tokens"`
-	Thinking            *struct {
-		Type string `json:"type"`
-	} `json:"thinking"`
-	Temperature    *float64 `json:"temperature"`
+	Model          string    `json:"model"`
+	Messages       []Message `json:"messages"`
+	Stream         bool      `json:"stream"`
+	Temperature    *float64  `json:"temperature"`
 	ResponseFormat *struct {
 		Type string `json:"type"`
 	} `json:"response_format"`
+	body map[string]any
+}
+
+// reasoning is the knob sent, in llmwiretest's vocabulary; "" for none.
+func (c *captured) reasoning() string { return llmwiretest.Request{Body: c.body}.Reasoning() }
+
+// maxTokens is the output cap sent, 0 for none.
+func (c *captured) maxTokens() int {
+	n, _ := llmwiretest.Request{Body: c.body}.MaxTokens()
+	return n
 }
 
 // fakeUpstream answers one chat completion and records what it was asked.
@@ -366,6 +375,7 @@ func fakeUpstreamEnding(t *testing.T, reply string, finishReason string) (*Clien
 		if err := json.Unmarshal(body, got); err != nil {
 			t.Errorf("upstream got unparseable body: %v", err)
 		}
+		_ = json.Unmarshal(body, &got.body)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"content": reply}, "finish_reason": finishReason}},
@@ -415,8 +425,8 @@ func TestShortGate_changesTheDeploymentButNotThinking(t *testing.T) {
 	if got.Model != testGateModel {
 		t.Errorf("model = %q, want the non-Pro deployment", got.Model)
 	}
-	if got.Thinking != nil {
-		t.Errorf("thinking = %+v, want it untouched — ShortGate must not disable reasoning", got.Thinking)
+	if r := got.reasoning(); r != "" {
+		t.Errorf("reasoning = %q, want it untouched — ShortGate must not change reasoning", r)
 	}
 }
 
@@ -426,8 +436,8 @@ func TestWithoutThinking_suppressesThoughtButKeepsTheDeployment(t *testing.T) {
 
 	ask(t, c, WithoutThinking())
 
-	if got.Thinking == nil || got.Thinking.Type != "disabled" {
-		t.Errorf("thinking = %+v, want disabled", got.Thinking)
+	if r := got.reasoning(); r != llmwiretest.MinimalSent {
+		t.Errorf("reasoning = %q, want minimal", r)
 	}
 	if got.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment — WithoutThinking must not reroute", got.Model)
@@ -441,14 +451,14 @@ func TestComplete_everyCallCarriesACompletionCap(t *testing.T) {
 
 	ask(t, c)
 
-	if got.MaxCompletionTokens <= 0 {
-		t.Errorf("max_completion_tokens = %d, want a default cap", got.MaxCompletionTokens)
+	if got.maxTokens() < defaultMaxAnswerTokens {
+		t.Errorf("cap = %d, want at least the default answer cap", got.maxTokens())
 	}
 
 	c2, got2 := fakeUpstream(t, "x")
-	ask(t, c2, WithMaxTokens(64))
-	if got2.MaxCompletionTokens != 64 {
-		t.Errorf("max_completion_tokens = %d, want the explicit 64", got2.MaxCompletionTokens)
+	ask(t, c2, WithoutThinking(), WithMaxAnswerTokens(64))
+	if got2.maxTokens() != 64+llmwiretest.MinimalOverhead {
+		t.Errorf("cap = %d, want the explicit 64 plus the minimal reasoning allowance", got2.maxTokens())
 	}
 }
 
@@ -489,8 +499,8 @@ func TestWithGateTemperature_isSentAndIsOtherwiseTheEndpointsDefault(t *testing.
 	if got2.Model != testAnswerModel {
 		t.Errorf("model = %q, want the Pro deployment — WithGateTemperature must not reroute", got2.Model)
 	}
-	if got2.Thinking != nil {
-		t.Errorf("thinking = %+v, want it untouched", got2.Thinking)
+	if r := got2.reasoning(); r != "" {
+		t.Errorf("reasoning = %q, want it untouched", r)
 	}
 }
 
@@ -692,12 +702,12 @@ func TestChatError_aTransportErrorNamesTheHostNotTheURL(t *testing.T) {
 	}
 }
 
-// The lanes' models in tests: two different profiles on one host, so a test
-// can tell from the wire which lane a call took. Test fixtures only; rongo
-// itself has no model of its own.
+// The lanes' models in tests: two synthetic profiles, so a test can tell from
+// the wire which lane a call took. Test fixtures only; rongo itself has no
+// model of its own.
 const (
-	testAnswerModel = "mimo-v2.6-pro"
-	testGateModel   = "mimo-v2.6-flash"
+	testAnswerModel = llmtest.Answer
+	testGateModel   = llmtest.Gate
 )
 
 // mustClient is NewClient for a test whose Config names its fake server, so
@@ -711,6 +721,13 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 	if cfg.Gate == "" {
 		cfg.Gate = testGateModel
 	}
+	if cfg.Registry == nil {
+		cfg.Registry = llmtest.Registry()
+	}
+	if cfg.GateTemperature == nil {
+		zero := 0.0
+		cfg.GateTemperature = &zero
+	}
 	c, err := NewClient(cfg, hc)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -721,11 +738,23 @@ func mustClient(t testing.TB, cfg Config, hc *http.Client) *Client {
 // With no BaseURL the constructor asks llmwire for the profile's variables,
 // and a missing key comes back named rather than as a client that dials "".
 func TestNewClient_withoutBaseURLNamesTheMissingVariable(t *testing.T) {
-	t.Setenv("LLMWIRE_MIMO_API_KEY", "")
-	_, err := NewClient(Config{Answer: testAnswerModel, Gate: testGateModel}, nil)
+	srv := llmwiretest.NewServer(t)
+	hostsOnly := func(name string) (string, bool) {
+		if strings.HasSuffix(name, "_BASE_URL") {
+			return srv.URL, true
+		}
+		return "", false
+	}
+	_, err := NewClient(Config{Registry: llmtest.Registry(), Lookup: hostsOnly,
+		Answer: testAnswerModel, Gate: testGateModel}, nil)
+	for _, v := range []string{"LLMWIRE_LLMWIRETEST_API_KEY", "LLMWIRE_RONGOTEST_API_KEY"} {
+		if err == nil || !strings.Contains(err.Error(), v) {
+			t.Errorf("err = %v, want it to name %s", err, v)
+		}
+	}
 	var me *llmwire.MissingEnvError
-	if !errors.As(err, &me) || me.Var != "LLMWIRE_MIMO_API_KEY" {
-		t.Fatalf("got %v", err)
+	if !errors.As(err, &me) {
+		t.Fatalf("got %v, want llmwire's MissingEnvError", err)
 	}
 }
 
@@ -746,7 +775,7 @@ func TestWithJSONObject_asksForAJSONObjectAndIsOtherwiseAbsent(t *testing.T) {
 	if got2.ResponseFormat == nil || got2.ResponseFormat.Type != "json_object" {
 		t.Errorf("response_format = %+v, want json_object", got2.ResponseFormat)
 	}
-	if got2.Model != testAnswerModel || got2.Thinking != nil {
-		t.Errorf("model = %q thinking = %+v, want the call otherwise unchanged", got2.Model, got2.Thinking)
+	if got2.Model != testAnswerModel || got2.reasoning() != "" {
+		t.Errorf("model = %q reasoning = %q, want the call otherwise unchanged", got2.Model, got2.reasoning())
 	}
 }

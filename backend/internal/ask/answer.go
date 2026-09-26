@@ -63,15 +63,16 @@ func languageName(lang Language) string {
 	return languageNames[ParseLanguage(string(lang))]
 }
 
-// answerMaxTokens is generous on purpose. This is the one call where a
-// truncated reply is worse than a long one: it is what a person reads.
+// answerMaxTokens caps the visible answer, generous on purpose. This is the
+// one call where a truncated reply is worse than a long one: it is what a
+// person reads.
 //
-// The budget is shared with the model's reasoning: max_completion_tokens
-// counts the hidden thinking as well as the visible answer. At 4096 a DEV
-// re-explain over 261 sources spent the whole budget thinking and wrote
-// nothing (thread 2, message 5, 2026-09-03). The value here is a judgment,
-// not a measurement; a length failure now logs its completion count, which
-// is the number to calibrate against.
+// The reasoning allowance is llmwire's, added on top for the model and
+// clamped to its output limit. A shared cap once let a DEV re-explain over
+// 261 sources spend the whole budget thinking and write nothing (thread 2,
+// message 5, 2026-09-03). The value here is a judgment, not a measurement; a
+// length failure logs its completion count, which is the number to calibrate
+// against.
 const answerMaxTokens = 16384
 
 // Citation is one entry of the evidence panel. The branch travels with it
@@ -1405,7 +1406,7 @@ func (a *Answerer) stream(ctx context.Context, lang Language, sources []Source,
 	usage, err := a.llm.Stream(ctx, []llm.Message{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
-	}, func(tok string) { emit(rn.feed(tok)) }, llm.WithMaxTokens(answerMaxTokens), llm.WithStep("answer"))
+	}, func(tok string) { emit(rn.feed(tok)) }, llm.WithMaxAnswerTokens(answerMaxTokens), llm.WithStep("answer"))
 	emit(rn.flush())
 	var cut *llm.FinishError
 	if errors.As(err, &cut) && strings.TrimSpace(text.String()) != "" {

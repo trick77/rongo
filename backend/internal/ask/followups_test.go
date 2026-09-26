@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/trick77/llmwire/llmwiretest"
+
 	"github.com/trick77/rongo/internal/llm"
 )
 
@@ -31,17 +33,19 @@ func followupsLLM(t *testing.T, reply string, status int) (*llm.Client, *followu
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Model               string        `json:"model"`
-			Temperature         *float64      `json:"temperature"`
-			MaxCompletionTokens int           `json:"max_completion_tokens"`
-			Messages            []llm.Message `json:"messages"`
+			Model       string        `json:"model"`
+			Temperature *float64      `json:"temperature"`
+			Messages    []llm.Message `json:"messages"`
 		}
 		_ = json.Unmarshal(body, &req)
+		var raw map[string]any
+		_ = json.Unmarshal(body, &raw)
+		wire, _ := llmwiretest.Request{Body: raw}.MaxTokens()
 		up.mu.Lock()
 		up.calls++
 		up.model = req.Model
 		up.temperature = req.Temperature
-		up.maxTokens = req.MaxCompletionTokens
+		up.maxTokens = wire
 		up.prompt = ""
 		for _, m := range req.Messages {
 			up.prompt += m.Content + "\n"
@@ -140,13 +144,14 @@ func TestFollowups_runsOnTheShortGateLaneWithThePinnedTemperature(t *testing.T) 
 	if up.model != testGateModel {
 		t.Errorf("model = %q, want the short-gate deployment", up.model)
 	}
-	// The policy's pin, 0 by default: the value is llm.Policy's, the call
+	// The policy's pin, 0 by default: the value is the client's, the call
 	// only asks for it.
 	if up.temperature == nil || *up.temperature != 0 {
 		t.Errorf("temperature = %v, want the policy's pin of 0", up.temperature)
 	}
-	if up.maxTokens != followupsMaxTokens {
-		t.Errorf("max tokens = %d, want %d", up.maxTokens, followupsMaxTokens)
+	// An answer cap: the gate call's reasoning allowance comes on top.
+	if want := followupsMaxTokens + llmwiretest.MinimalOverhead; up.maxTokens != want {
+		t.Errorf("max tokens = %d, want %d", up.maxTokens, want)
 	}
 }
 

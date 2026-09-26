@@ -28,8 +28,7 @@ type Call struct {
 	// as prompt_tokens_details.cached_tokens. A SUBSET of Prompt, never an
 	// addition: total_tokens equals prompt plus completion whether anything
 	// was cached or not. It matters because a cached token is priced at
-	// cache_read, which the MiMo listing puts fifty to a hundred times below
-	// the input price — a thread's second turn repeats the prefix of its
+	// cache_read, which providers list far below the input price — a thread's second turn repeats the prefix of its
 	// first, and charging that at full price overstates what it cost.
 	//
 	// Reasoning is completion_tokens_details.reasoning_tokens: the part of

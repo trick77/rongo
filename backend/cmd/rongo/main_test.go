@@ -7,33 +7,58 @@ import (
 	"testing"
 
 	"github.com/trick77/llmwire"
+	"github.com/trick77/llmwire/llmwiretest"
+
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/store"
 )
 
 // The hosts are llmwire's profiles' and the keys are llmwire's to read from
 // the environment; what main owns is refusing to boot, with the variable
-// named, when a key is missing.
+// named, when a key is missing. The chat lanes run on synthetic models; the
+// embedder is a constant of the build and reads the real environment.
 func TestNewModelClients_namesTheMissingVariable(t *testing.T) {
-	vars := []string{"LLMWIRE_OPENAI_API_KEY", "LLMWIRE_MIMO_API_KEY"}
-	for _, v := range vars {
-		t.Setenv(v, "x")
+	srv := llmwiretest.NewServer(t)
+	cfg := config.Config{LLMModel: llmtest.Answer, LLMGateModel: llmtest.Answer}
+	chat := llm.Config{Registry: llmtest.Registry(), Lookup: srv.Lookup}
+	ep, err := llmwire.Default().LookupEmbedding(embed.Model)
+	if err != nil {
+		t.Fatal(err)
 	}
-	cfg := config.Config{LLMModel: "mimo-v2.6-flash", LLMGateModel: "mimo-v2.6-flash"}
-	if _, _, err := newModelClients(cfg); err != nil {
+	embedKey := ep.APIKeyEnv()
+
+	t.Setenv(embedKey, "x")
+	if _, _, err := newModelClients(cfg, chat); err != nil {
 		t.Fatalf("both keys set: %v", err)
 	}
-	for _, v := range vars {
-		t.Run(v, func(t *testing.T) {
-			t.Setenv(v, "")
-			_, _, err := newModelClients(cfg)
-			var me *llmwire.MissingEnvError
-			if !errors.As(err, &me) || me.Var != v {
-				t.Fatalf("got %v, want a MissingEnvError naming %s", err, v)
+
+	t.Run(embedKey, func(t *testing.T) {
+		t.Setenv(embedKey, "")
+		_, _, err := newModelClients(cfg, chat)
+		var me *llmwire.MissingEnvError
+		if !errors.As(err, &me) || me.Var != embedKey {
+			t.Fatalf("got %v, want a MissingEnvError naming %s", err, embedKey)
+		}
+	})
+
+	t.Run("chat key", func(t *testing.T) {
+		const key = "LLMWIRE_LLMWIRETEST_API_KEY"
+		noKey := chat
+		noKey.Lookup = func(name string) (string, bool) {
+			if name == key {
+				return "", false
 			}
-		})
-	}
+			return srv.Lookup(name)
+		}
+		_, _, err := newModelClients(cfg, noKey)
+		var me *llmwire.MissingEnvError
+		if !errors.As(err, &me) || me.Var != key {
+			t.Fatalf("got %v, want a MissingEnvError naming %s", err, key)
+		}
+	})
 }
 
 // The vec0 table is created at embed.Model's width, and a file created at

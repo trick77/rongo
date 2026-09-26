@@ -159,7 +159,7 @@ func main() {
 	// Both model clients before the database is touched, so a missing
 	// endpoint variable stops the boot where a config error would: with
 	// nothing migrated, purged or swept.
-	embedder, models, err := newModelClients(cfg)
+	embedder, models, err := newModelClients(cfg, llm.Config{})
 	if err != nil {
 		slog.Error("model endpoint", "err", err)
 		os.Exit(1)
@@ -582,30 +582,28 @@ func moduleOpts(cfg config.Config) modules.Opts {
 // way. The chat client is always wired: a rongo that indexes but cannot
 // answer is not a mode anyone wants to be in by accident. Its Timeout bounds
 // one whole call, body included. The answer streams for as long as its
-// 16384-token budget takes, hidden reasoning counted, and the default of five
-// minutes would cut a slow one mid-answer: at 20 tokens a second the budget
-// needs close to 14 minutes. The idle watchdog, not this one, is what catches
-// a stalled upstream.
-func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
+// budget takes, hidden reasoning counted, and a short default would cut a
+// slow model mid-answer. The idle watchdog, not this one, is what catches a
+// stalled upstream.
+//
+// chat carries what the environment does not: nothing in production, a
+// synthetic registry and a fake's variables in a test.
+func newModelClients(cfg config.Config, chat llm.Config) (*embed.Client, *llm.Client, error) {
 	embedder, err := embed.NewClient(embed.Config{}, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	// The lanes are profile ids; llm.NewClient refuses one the registry does
-	// not know, and a pair that would live on two hosts, before the database
-	// is touched. Logged here whether set or not: which model answers is the
-	// first thing anyone reading a quality complaint wants to know.
-	models, err := llm.NewClient(llm.Config{
-		Timeout:       cfg.LLMTimeout,
-		TurnMaxTokens: cfg.TurnMaxTokens,
-		Answer:        cfg.LLMModel,
-		Gate:          cfg.LLMGateModel,
-		Policy: llm.Policy{
-			GateTemperature: cfg.LLMGateTemperature,
-			GateReasoning:   cfg.LLMGateReasoning,
-			ProReasoning:    cfg.LLMReasoning,
-		},
-	}, nil)
+	// not know or that cannot do its lane's work, naming the models that
+	// could, before the database is touched. Logged here whether set or not:
+	// which model answers is the first thing anyone reading a quality
+	// complaint wants to know.
+	chat.Timeout = cfg.LLMTimeout
+	chat.TurnMaxTokens = cfg.TurnMaxTokens
+	chat.Answer = cfg.LLMModel
+	chat.Gate = cfg.LLMGateModel
+	chat.GateTemperature = cfg.LLMGateTemperature
+	models, err := llm.NewClient(chat, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -615,8 +613,7 @@ func newModelClients(cfg config.Config) (*embed.Client, *llm.Client, error) {
 	}
 	slog.Info("model lanes",
 		"answer", models.Deployment(llm.LaneAnswer), "gate", models.Deployment(llm.LaneGate),
-		"gate_temperature", gateTemp, "gate_reasoning", cfg.LLMGateReasoning, "reasoning", cfg.LLMReasoning,
-		"timeout", cfg.LLMTimeout)
+		"gate_temperature", gateTemp, "timeout", cfg.LLMTimeout)
 	return embedder, models, nil
 }
 

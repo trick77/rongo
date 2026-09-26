@@ -102,7 +102,7 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 // call itself failed.
 func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title string, replied bool) {
 	out, u, err := c.Complete(ctx, msgs,
-		llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxTokens(titleMaxTokens),
+		llm.ShortGate(), llm.WithoutThinking(), llm.WithGateTemperature(), llm.WithMaxAnswerTokens(titleMaxTokens),
 		llm.WithAttemptTimeout(titleAttemptTimeout), llm.WithStep("title"))
 	if err != nil {
 		// A completion cut off by the token cap is still a reply, and the

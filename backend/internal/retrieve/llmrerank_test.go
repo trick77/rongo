@@ -3,18 +3,22 @@ package retrieve
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/trick77/llmwire/llmwiretest"
+
 	"github.com/trick77/rongo/internal/llm"
+	"github.com/trick77/rongo/internal/llm/llmtest"
 )
 
 // rerankSeen is what the fake read off the request: the prompt the model was
-// shown and the reply cap it was sent. The gate profile spells the cap
-// max_completion_tokens (llmwire profiles.yaml, mimo-v2.6-flash).
+// shown and the answer cap it was sent: the cap on the wire less the
+// reasoning allowance a gate call gets on the synthetic model.
 type rerankSeen struct {
 	prompt   string
 	replyCap int
@@ -23,13 +27,16 @@ type rerankSeen struct {
 func rerankLLM(t *testing.T, reply string, saw *rerankSeen) *llm.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Messages            []struct{ Content string } `json:"messages"`
-			MaxCompletionTokens int                        `json:"max_completion_tokens"`
+			Messages []struct{ Content string } `json:"messages"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		_ = json.Unmarshal(body, &req)
 		if saw != nil {
-			saw.replyCap = req.MaxCompletionTokens
+			var raw map[string]any
+			_ = json.Unmarshal(body, &raw)
+			wire, _ := llmwiretest.Request{Body: raw}.MaxTokens()
+			saw.replyCap = wire - llmwiretest.MinimalOverhead
 			if len(req.Messages) > 1 {
 				saw.prompt = req.Messages[1].Content
 			}
@@ -387,7 +394,9 @@ func TestLLMRerank_replyCapGrowsWithTheListAskedFor(t *testing.T) {
 // fail is a bug in the constructor.
 func fakeLLM(t testing.TB, srv *httptest.Server) *llm.Client {
 	t.Helper()
-	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, Answer: "mimo-v2.6-flash", Gate: "mimo-v2.6-flash"}, srv.Client())
+	zero := 0.0
+	c, err := llm.NewClient(llm.Config{BaseURL: srv.URL, Registry: llmtest.Registry(),
+		Answer: llmtest.Gate, Gate: llmtest.Gate, GateTemperature: &zero}, srv.Client())
 	if err != nil {
 		t.Fatalf("llm.NewClient: %v", err)
 	}

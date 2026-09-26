@@ -736,7 +736,7 @@ func TestLocate_aResumedTurnGathersWithoutTheLoopsReserve(t *testing.T) {
 }
 
 func TestLocate_runsAtMostTheCallLimitPerTurn(t *testing.T) {
-	// mimo-v2.6-flash answered one round with 38 calls. Running them all
+	// A measured round came back with 38 calls. Running them all
 	// would spend the reserve on one guess-storm; the rest are refused and
 	// said so in the report.
 	db := gatherDB(t)
