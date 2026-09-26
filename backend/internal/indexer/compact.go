@@ -144,11 +144,13 @@ func compactVectors(ctx context.Context, db *sql.DB, p *compactProgress) (VecCom
 		return c, err
 	}
 	// Both copies go in rowid batches, walked on chunks_vec_rowids (a plain
-	// table, so the range is an index seek), each vector read by rowid.
+	// table, so the range is an index seek), each vector read by rowid = ?.
+	// Never rowid IN (…): outside a KNN query vec0 answers that with a full
+	// scan, so every batch would walk the whole table.
 	p.begin("copying vectors out", c.Rows)
 	if err := copyBatches(ctx, tx, p, exec, `INSERT INTO vec_compact_keep (id, embedding)
-		SELECT rowid, embedding FROM chunks_vec WHERE rowid IN
-		(SELECT rowid FROM chunks_vec_rowids WHERE rowid > ? ORDER BY rowid LIMIT ?)`,
+		SELECT r.rowid, (SELECT v.embedding FROM chunks_vec v WHERE v.rowid = r.rowid)
+		FROM chunks_vec_rowids r WHERE r.rowid > ? ORDER BY r.rowid LIMIT ?`,
 		`SELECT MAX(id) FROM vec_compact_keep`); err != nil {
 		return c, err
 	}
