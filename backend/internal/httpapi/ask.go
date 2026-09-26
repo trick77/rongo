@@ -689,7 +689,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, prior, events)
 		}
 		if err != nil {
-			turnStopped(ctx, "resumed turn failed", thread.ID, err)
+			turnStopped(ctx, "resumed turn failed", thread.ID, err, tr.progress()...)
 			tr.fail(failureMessage(err))
 			return
 		}
@@ -717,7 +717,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
-		turnStopped(ctx, "turn failed", thread.ID, err)
+		turnStopped(ctx, "turn failed", thread.ID, err, tr.progress()...)
 		// A generic message: the error may quote an upstream body, and that is
 		// not something to hand a browser.
 		tr.fail(failureMessage(err))
@@ -1098,7 +1098,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		answer, err = s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, events)
 	}
 	if err != nil {
-		turnStopped(ctx, "reexplain failed", msg.ThreadID, err)
+		turnStopped(ctx, "reexplain failed", msg.ThreadID, err, tr.progress()...)
 		tr.fail(failureMessage(err))
 		return
 	}

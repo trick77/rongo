@@ -304,9 +304,7 @@ func main() {
 	// of it (indexer.CompactVectors). Compacted here before anything reads,
 	// and vacuumed only then: the rewrite blocks writers, which at boot is
 	// nobody.
-	if indexer.CompactVectorsAndLog(ctx, db, slog.Default(), "reason", "boot") {
-		indexer.VacuumAndLog(ctx, db, slog.Default())
-	}
+	indexer.LogVectorIndexAtBoot(ctx, db, slog.Default())
 
 	// OUTSIDE the branch above, deliberately: every boot says what it holds,
 	// including the one where the file was missing. That boot is exactly the one

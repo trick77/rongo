@@ -6,8 +6,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/trick77/rongo/internal/store"
@@ -181,9 +183,33 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 	q := `SELECT * FROM (` + inner + outerTail //nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
 	args = append(args, maxDistance, maxDistance)
 
+	start := time.Now()
+	out, err := s.scanVector(ctx, q, args)
+	took := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		// sqlite-vec reports an interrupt as "SQL logic error: chunks iter
+		// error", which reads as corruption. Name the cancel and how long the
+		// search had run before it.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("vector search interrupted after %s (%w): %w", took, context.Cause(ctx), err)
+		}
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+	if took >= slowVectorSearch {
+		slog.Warn("slow vector search", "repos", repos, "k", k, "hits", len(out), "took", took.String())
+	}
+	return out, nil
+}
+
+// slowVectorSearch is the duration past which a vector search is logged. A
+// healthy one takes milliseconds; one reading a bloated chunks_vec took
+// minutes and showed nothing until the turn died (indexer.CompactVectors).
+var slowVectorSearch = 2 * time.Second
+
+func (s *Store) scanVector(ctx context.Context, q string, args []any) ([]Hit, error) {
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, fmt.Errorf("vector search: %w", err)
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Hit
@@ -191,7 +217,7 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 		var h Hit
 		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
 			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA, &h.Distance); err != nil {
-			return nil, fmt.Errorf("vector search: %w", err)
+			return nil, err
 		}
 		out = append(out, h)
 	}

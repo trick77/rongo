@@ -95,19 +95,33 @@ func CompactVectors(ctx context.Context, db *sql.DB) (VecCompaction, error) {
 // CompactVectorsAndLog compacts and says so: one line when it rebuilt the
 // table, a warning when that failed, nothing when the table was healthy. A
 // failure is never the caller's: the index is complete, bloat only costs time.
-// It reports whether the table was rebuilt.
-func CompactVectorsAndLog(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) bool {
+// It reports what it found; ok is false when the check itself failed.
+func CompactVectorsAndLog(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) (c VecCompaction, ok bool) {
 	start := time.Now()
 	c, err := CompactVectors(ctx, db)
 	if err != nil {
 		log.Warn("compacting the vector index failed", append(args, "err", err)...)
-		return false
+		return c, false
 	}
 	if c.Compacted {
 		log.Info("vector index compacted", append(args, "rows", c.Rows,
 			"chunks_before", c.ChunksBefore, "chunks_after", c.ChunksAfter, "took", took(start))...)
 	}
-	return c.Compacted
+	return c, true
+}
+
+// LogVectorIndexAtBoot compacts when bloated, vacuums after a compaction, and
+// otherwise states the table's shape: rows against storage chunks is the one
+// number that shows vec0 bloat before searches slow down.
+func LogVectorIndexAtBoot(ctx context.Context, db *sql.DB, log *slog.Logger) {
+	c, ok := CompactVectorsAndLog(ctx, db, log, "reason", "boot")
+	switch {
+	case !ok:
+	case c.Compacted:
+		VacuumAndLog(ctx, db, log)
+	default:
+		log.Info("vector index", "rows", c.Rows, "chunks", c.ChunksBefore)
+	}
 }
 
 // VacuumAndLog rewrites the database file so the pages a compaction freed go

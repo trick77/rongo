@@ -141,11 +141,12 @@ func TestTurnStopped_namesACancelledTurn(t *testing.T) {
 	closed, cancel := context.WithCancelCause(context.Background())
 	cancel(nil)
 
-	turnStopped(closed, "turn failed", 7, errors.New("search: sqlite3: SQL logic error: chunks iter error"))
+	turnStopped(closed, "turn failed", 7, errors.New("search: sqlite3: SQL logic error: chunks iter error"),
+		"step", "searching", "took", "13m0s")
 
 	got := log.String()
 	for _, want := range []string{"level=WARN", `msg="turn cancelled"`, "thread=7",
-		`cause="context canceled"`, "chunks iter error"} {
+		`cause="context canceled"`, "chunks iter error", "step=searching", "took=13m0s"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("log = %q, want %q", got, want)
 		}
@@ -161,10 +162,12 @@ func TestTurnStopped_failureNamesItsThread(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
 	t.Cleanup(func() { slog.SetDefault(restore) })
 
-	turnStopped(context.Background(), "turn failed", 7, errors.New("search: disk I/O error"))
+	turnStopped(context.Background(), "turn failed", 7, errors.New("search: disk I/O error"),
+		"step", "searching", "took", "4s")
 
 	got := log.String()
-	for _, want := range []string{"level=ERROR", `msg="turn failed"`, "thread=7", "disk I/O error"} {
+	for _, want := range []string{"level=ERROR", `msg="turn failed"`, "thread=7", "disk I/O error",
+		"step=searching", "took=4s"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("log = %q, want %q", got, want)
 		}

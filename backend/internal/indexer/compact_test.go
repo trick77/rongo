@@ -160,6 +160,57 @@ func TestCompactVectorsAndLog_aFailureIsAWarning(t *testing.T) {
 	}
 }
 
+func TestLogVectorIndexAtBoot_compactsAndVacuumsABloatedTable(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 3000, 100)
+	logs := &capture{}
+
+	LogVectorIndexAtBoot(context.Background(), db, slog.New(logs))
+
+	for _, msg := range []string{"vector index compacted", "database vacuumed"} {
+		if _, ok := logs.find(msg); !ok {
+			t.Errorf("no %q line, records = %v", msg, logs.records)
+		}
+	}
+}
+
+func TestLogVectorIndexAtBoot_statesAHealthyTable(t *testing.T) {
+	db := writeDB(t)
+	churnVectors(t, db, 10, 10)
+	logs := &capture{}
+
+	LogVectorIndexAtBoot(context.Background(), db, slog.New(logs))
+
+	r, ok := logs.find("vector index")
+	if !ok {
+		t.Fatalf("no vector index line, records = %v", logs.records)
+	}
+	attrs := map[string]string{}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.String()
+		return true
+	})
+	if attrs["rows"] != "10" || attrs["chunks"] != "1" {
+		t.Errorf("attrs = %v, want rows=10 chunks=1", attrs)
+	}
+	if _, ok := logs.find("database vacuumed"); ok {
+		t.Error("a healthy table was vacuumed")
+	}
+}
+
+func TestLogVectorIndexAtBoot_aFailedCheckOnlyWarns(t *testing.T) {
+	db := writeDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	logs := &capture{}
+
+	LogVectorIndexAtBoot(ctx, db, slog.New(logs))
+
+	if len(logs.records) != 1 || logs.records[0].Level != slog.LevelWarn {
+		t.Errorf("records = %v, want one warning", logs.records)
+	}
+}
+
 func TestVacuumAndLog_reportsTheFileShrinking(t *testing.T) {
 	db := writeDB(t)
 	churnVectors(t, db, 3000, 100)

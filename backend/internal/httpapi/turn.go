@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/timeline"
@@ -25,10 +27,34 @@ type turn struct {
 	steps    *timeline.Recorder
 	st       *sseStream
 	streamed bool
+
+	started time.Time
+	mu      sync.Mutex
+	step    string
 }
 
 func (s *Server) beginTurn(ctx, record context.Context, msgID int64, meter *usage.Meter, steps *timeline.Recorder, st *sseStream) *turn {
-	return &turn{s: s, ctx: ctx, record: record, msgID: msgID, meter: meter, steps: steps, st: st}
+	return &turn{s: s, ctx: ctx, record: record, msgID: msgID, meter: meter, steps: steps, st: st, started: time.Now()}
+}
+
+// mark notes the step the pipeline reported last.
+func (t *turn) mark(step string) {
+	t.mu.Lock()
+	t.step = step
+	t.mu.Unlock()
+}
+
+// progress is the step the turn was in and how long it had run, as log
+// attributes for the line that reports how it stopped. took as .String():
+// the JSON handler renders a Duration as nanoseconds.
+func (t *turn) progress() []any {
+	t.mu.Lock()
+	step := t.step
+	t.mu.Unlock()
+	if step == "" {
+		step = "starting"
+	}
+	return []any{"step", step, "took", time.Since(t.started).Round(time.Millisecond).String()}
 }
 
 // events is what the pipeline reports through: status and detail onto the
@@ -37,6 +63,7 @@ func (s *Server) beginTurn(ctx, record context.Context, msgID int64, meter *usag
 func (t *turn) events() ask.Events {
 	return ask.Events{
 		OnStatus: func(step string) {
+			t.mark(step)
 			t.st.send("status", map[string]any{"step": step, "at": timeline.Record(t.ctx, step)})
 		},
 		OnDetail: func(step string, d map[string]any) {
