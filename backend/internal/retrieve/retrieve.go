@@ -209,7 +209,7 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 	// Both halves of the addressable namespace, read once for both answers:
 	// a reader may name a repository or the project it belongs to, and
 	// neither is a name the index lacks.
-	repos, project, err := r.reposAndProjects(ctx)
+	repos, project, part, err := r.reposAndProjects(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,6 +217,7 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 	if len(want) == 0 {
 		return known, nil, nil
 	}
+	known = withGluedParts(known, want, repos, part)
 	indexed := repos
 	for p := range project {
 		indexed = append(indexed, p)
@@ -243,6 +244,10 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 			continue
 		}
 		seen[folded] = true
+		if _, ok := repoWithPart(n, repos, part); ok {
+			// An indexed repository with its part glued on, already in known.
+			continue
+		}
 		if nearAnyRepo(folded, indexed) {
 			// A mishearing. Dropped in silence, exactly as before.
 			continue
@@ -255,6 +260,68 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 		unknown = append(unknown, n)
 	}
 	return known, unknown, nil
+}
+
+// repoWithPart reports the repository a guess names when the guess is that
+// repository's name and its DECLARED part glued together, in either order:
+// "Wie wird im Schadenmeldung-service backend …" came back from the
+// understanding step as schadenmeldung-service-backend. Neither a mishearing
+// nor a segment, so it was reported as a repository the index lacks, beside
+// an answer written from that very repository.
+//
+// Only the declared part, never any trailing word: a guess the part does not
+// explain still falls through to the rules below and is reported. A guess
+// that already IS an indexed name is that repository, never another one's
+// name plus a part: orders-api stays orders-api beside orders.
+//
+// Walked in the index's order, so two readings of one guess resolve the same
+// way every turn.
+func repoWithPart(guess string, repos []string, part map[string]string) (string, bool) {
+	g := strings.ToLower(strings.TrimSpace(guess))
+	for _, repo := range repos {
+		if foldRepo(repo) == foldRepo(g) {
+			return "", false
+		}
+	}
+	for _, repo := range repos {
+		p := part[repo]
+		if p == "" {
+			continue
+		}
+		name, p := strings.ToLower(repo), strings.ToLower(p)
+		for _, sep := range []string{"-", "_", " "} {
+			if g == name+sep+p || g == p+sep+name {
+				return repo, true
+			}
+		}
+	}
+	return "", false
+}
+
+// withGluedParts adds to known every repository a guess names with its part
+// glued on, kept in the index's order like the rest of known.
+func withGluedParts(known, want, repos []string, part map[string]string) []string {
+	in := map[string]bool{}
+	for _, n := range known {
+		in[n] = true
+	}
+	added := false
+	for _, w := range want {
+		if repo, ok := repoWithPart(w, repos, part); ok && !in[repo] {
+			in[repo] = true
+			added = true
+		}
+	}
+	if !added {
+		return known
+	}
+	out := make([]string, 0, len(in))
+	for _, n := range repos {
+		if in[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // foldRepo normalises a name for comparison: lower case (the column is a TEXT
@@ -444,7 +511,7 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 	if len(want) == 0 && strings.TrimSpace(question) == "" {
 		return nil, nil
 	}
-	known, project, err := r.reposAndProjects(ctx)
+	known, project, _, err := r.reposAndProjects(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -470,9 +537,12 @@ func knownReposIn(want []string, question string, known []string, project map[st
 	// name already is, because commonWords does not care which of the two a
 	// word happens to be.
 	//
-	// Naming a MEMBER still narrows to that member: the expansion adds to the
-	// restriction, and a question naming only shop-ui never mentions "shop" as
-	// a whole word, so nothing widens it back out.
+	// Naming a MEMBER still narrows to that member, which is why a project is
+	// read from the question with its members' names blanked out: "wie
+	// funktioniert shop-ui" names shop-ui, not the product shop. Unblanked,
+	// "Schadenmeldung-service backend" searched all seven members of the
+	// product for a question about one of them. Only members are blanked, so
+	// the German compound "das Shop-Frontend" still names the product.
 	wanted := map[string]bool{}
 	for _, name := range known {
 		if guessed[name] || mentions(question, name) {
@@ -480,7 +550,7 @@ func knownReposIn(want []string, question string, known []string, project map[st
 		}
 	}
 	for name, members := range project {
-		if guessed[name] || mentions(question, name) {
+		if guessed[name] || mentions(withoutMembers(question, name, members), name) {
 			for _, m := range members {
 				wanted[m] = true
 			}
@@ -509,25 +579,28 @@ func knownReposIn(want []string, question string, known []string, project map[st
 // restriction and the turn says so out loud. Keeping the name would send it
 // into `WHERE f.repo IN (…)`, match nothing, and report "nothing found" about
 // the whole corpus.
-func (r *Retriever) reposAndProjects(ctx context.Context) ([]string, map[string][]string, error) {
+//
+// part is each repository's declared part, read for repoWithPart.
+func (r *Retriever) reposAndProjects(ctx context.Context) (known []string, project map[string][]string, part map[string]string, err error) {
 	pm, err := projects.Load(ctx, r.store.db)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
+		return nil, nil, nil, fmt.Errorf("resolve repository restriction: %w", err)
 	}
 	seen := map[string]bool{}
-	var known []string
-	project := map[string][]string{}
+	project = map[string][]string{}
+	part = map[string]string{}
 	for _, p := range pm.All() {
 		project[p.Name] = pm.Members(p.Name)
 		for _, m := range p.Members {
 			if !seen[m.Name] {
 				seen[m.Name] = true
 				known = append(known, m.Name)
+				part[m.Name] = m.Part
 			}
 		}
 	}
 	sort.Strings(known)
-	return known, project, nil
+	return known, project, part, nil
 }
 
 // minMentionLen is how short a repository name may be and still be read out of
@@ -574,6 +647,32 @@ func mentions(question, repo string) bool {
 		}
 		i = start + 1
 	}
+}
+
+// withoutMembers is the question, lower-cased, with every whole mention of a
+// member other than the project's namesake replaced by spaces — whole with
+// the hyphen as part of the name, so shop-ui is blanked and shop-uis is not.
+func withoutMembers(question, project string, members []string) string {
+	q := strings.ToLower(question)
+	for _, m := range members {
+		name := strings.ToLower(m)
+		if name == strings.ToLower(project) {
+			continue
+		}
+		for i := 0; ; {
+			j := strings.Index(q[i:], name)
+			if j < 0 {
+				break
+			}
+			start := i + j
+			end := start + len(name)
+			if !wordBefore(q, start, nameRune) && !wordAfter(q, end, nameRune) {
+				q = q[:start] + strings.Repeat(" ", len(name)) + q[end:]
+			}
+			i = start + 1
+		}
+	}
+	return q
 }
 
 // wordBefore and wordAfter decide the boundaries, on RUNES rather than bytes.
