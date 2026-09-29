@@ -244,6 +244,47 @@ func TestUnderstandNamesRework(t *testing.T) {
 	}
 }
 
+// TestOnlyAReworkReadsTheBasis: reading the basis reads every file of it
+// from git, so a follow-up carries only what the basis is until the turn
+// turns out to be a rework. A read that fails fails the turn: answering
+// "summarize" afresh would be a different answer dressed as a summary.
+func TestOnlyAReworkReadsTheBasis(t *testing.T) {
+	refs := reworkThread()
+	full := refs.Sources
+	for i := range refs.Sources {
+		refs.Sources[i].Text = ""
+	}
+	reads := 0
+	refs.ReadBasis = func(context.Context) ([]Source, int, error) {
+		reads++
+		return twoSources(), len(full), nil
+	}
+
+	c, prompt := reworkUpstream(t, reworkReply)
+	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reads != 1 || !strings.Contains(*prompt, "func issueGrant() {}") {
+		t.Errorf("reads = %d; the rework must answer from the text it read:\n%s", reads, *prompt)
+	}
+
+	reads = 0
+	p := newTestPipeline(t)
+	p.understander = NewUnderstander(twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "x"))
+	if _, _, err := p.Run(context.Background(), "and where is it checked?", AudienceBA, LanguageEN, refs, Events{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reads != 0 {
+		t.Errorf("an ordinary follow-up read the basis %d times", reads)
+	}
+
+	refs.ReadBasis = func(context.Context) ([]Source, int, error) { return nil, 0, errors.New("git gone") }
+	c, _ = reworkUpstream(t, reworkReply)
+	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err == nil || !strings.Contains(err.Error(), "git gone") {
+		t.Errorf("err = %v, want the failed read", err)
+	}
+}
+
 // TestAReworkSaysWhichCommitsItsBasisWasReadAt: the basis is re-read from
 // git, not from the index as it is now, and the trace says where from.
 func TestAReworkSaysWhichCommitsItsBasisWasReadAt(t *testing.T) {

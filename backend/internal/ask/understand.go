@@ -172,12 +172,38 @@ func (u *Understanding) standingOnly(question string) bool {
 	if u.Memory == "" {
 		return false
 	}
-	marker := strings.ToLower(strings.TrimSpace(u.MemoryMarker))
-	if marker != "" && strings.Contains(strings.ToLower(question), marker) {
+	if saysItLasts(question, u.MemoryMarker) {
 		return false
 	}
 	u.Memory, u.MemoryScope, u.MemoryReplaces = "", "", nil
 	return true
+}
+
+// markerFold is what the check forgives: case, the apostrophe a keyboard
+// curls, an ellipsis typed as one character, and spacing.
+var markerFold = strings.NewReplacer("’", "'", "‘", "'", "`", "'", "…", "...")
+
+// saysItLasts reports whether marker is words of the question, in its
+// order. A marker may be a pattern the prompt showed — "don't ... anymore",
+// "ne ... plus jamais" — whose parts must each stand in the question, one
+// after the other; a marker of nothing but dots is no marker.
+func saysItLasts(question, marker string) bool {
+	norm := func(s string) string {
+		return strings.Join(strings.Fields(markerFold.Replace(strings.ToLower(s))), " ")
+	}
+	q, found := norm(question), false
+	for _, part := range strings.Split(norm(marker), "...") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		i := strings.Index(q, part)
+		if i < 0 {
+			return false
+		}
+		q, found = q[i+len(part):], true
+	}
+	return found
 }
 
 // KeptRule is the rule the product keeps from this understanding of

@@ -11,15 +11,16 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/sourceview"
 )
 
 // Evidence is the checkout as the record reads it back: a file at the commit
 // an answer read it at, and a commit an answer was written from. The source
-// viewer satisfies it, so a rework reads exactly what a citation opens —
-// same permission, same redaction.
+// viewer satisfies it, so a rework reads what a citation opens — same
+// redaction, and a file the index now skips stays refused.
 type Evidence interface {
-	Read(ctx context.Context, repo, path, sha string) (sourceview.File, error)
+	ReadRecorded(ctx context.Context, repo, path, sha string) (sourceview.File, error)
 	RecordedCommit(ctx context.Context, repo, sha string) (sourceview.Commit, error)
 }
 
@@ -30,6 +31,12 @@ func (s *Store) WithEvidence(e Evidence) *Store {
 	s.evidence = e
 	return s
 }
+
+// chunkCeiling is the chunker's own ceiling. A window read back from git
+// larger than a chunk can be was an overlong line the chunker split into
+// siblings; the whole line is not what any one of them held, and it can be
+// hundreds of kilobytes of minified code.
+var chunkCeiling = indexer.DefaultChunkOptions()
 
 // SaveSources records what an answer was actually written from: every source
 // by what it is — repository, path, commit, lines — beside the row it came
@@ -68,25 +75,56 @@ type recorded struct {
 	hop               int
 }
 
-// key is what makes two rows one source. Siblings of one overlong line share
-// a line range and read back as the same text, so they are one; a row with
-// no identity is its own id.
-func (r recorded) key() string {
-	switch {
-	case r.commitID != 0 && r.repo != "":
-		return "commit|" + r.repo + "|" + r.sha
-	case r.commitID != 0:
-		return fmt.Sprintf("commit#%d", r.commitID)
-	case r.repo != "":
-		return fmt.Sprintf("file|%s|%s|%s|%d|%d", r.repo, r.path, r.sha, r.start, r.end)
+// records reads a message's rows, chunks by hop then id, commits after.
+// A message that does not belong to a thread owned by subject has none.
+func (s *Store) records(ctx context.Context, subject string, messageID int64) ([]recorded, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ms.chunk_id, ms.commit_id, ms.repo, ms.path, ms.sha, ms.start_line, ms.end_line, ms.symbol, ms.reason, ms.hop
+		FROM message_sources ms
+		JOIN messages m ON m.id = ms.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE ms.message_id = ? AND t.user_subject = ?
+		ORDER BY ms.commit_id <> 0, ms.hop, ms.chunk_id, ms.commit_id`, messageID, subject)
+	if err != nil {
+		return nil, fmt.Errorf("read sources: %w", err)
 	}
-	return fmt.Sprintf("chunk#%d", r.chunkID)
+	defer func() { _ = rows.Close() }()
+	var out []recorded
+	for rows.Next() {
+		var r recorded
+		if err := rows.Scan(&r.chunkID, &r.commitID, &r.repo, &r.path, &r.sha, &r.start, &r.end, &r.symbol, &r.reason, &r.hop); err != nil {
+			return nil, fmt.Errorf("scan source: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SourceRefs is the record of an answer's basis without its text: what the
+// sources are, read from the database alone. Every follow-up needs this
+// much — whether there is a basis, which repositories it spans — and only a
+// rework needs the text, so the git reads wait for Sources.
+func (s *Store) SourceRefs(ctx context.Context, subject string, messageID int64) ([]ask.Source, error) {
+	recs, err := s.records(ctx, subject, messageID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ask.Source, 0, len(recs))
+	for _, r := range recs {
+		src := ask.Source{ChunkID: r.chunkID, Repo: r.repo, Path: r.path, SHA: r.sha, Symbol: r.symbol,
+			StartLine: r.start, EndLine: r.end, Reason: r.reason, Hop: r.hop}
+		if r.commitID != 0 {
+			src = ask.Source{Kind: ask.SourceCommit, CommitID: r.commitID, Repo: r.repo, SHA: r.sha, Reason: r.reason, Hop: r.hop}
+		}
+		out = append(out, src)
+	}
+	return out, nil
 }
 
 // Sources reads an answer's basis back, chunks ordered by hop, then commits
 // newest first. A source is read from git at the commit it was read at, so a
 // re-index since the answer changes nothing; one git can no longer produce —
-// a purged repository, a replaced snapshot, a file now excluded — is
+// a purged repository, a replaced snapshot, a file the index now skips — is
 // silently omitted. A message that does not belong to a thread owned by
 // subject yields an empty slice, the same shape as "no sources yet", never
 // another user's evidence.
@@ -98,31 +136,8 @@ func (r recorded) key() string {
 // by SOME of its evidence looks identical to a whole one if only the
 // resolved slice is visible.
 func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT ms.chunk_id, ms.commit_id, ms.repo, ms.path, ms.sha, ms.start_line, ms.end_line, ms.symbol, ms.reason, ms.hop
-		FROM message_sources ms
-		JOIN messages m ON m.id = ms.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE ms.message_id = ? AND t.user_subject = ?
-		ORDER BY ms.hop, ms.chunk_id, ms.commit_id`, messageID, subject)
+	recs, err := s.records(ctx, subject, messageID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("read sources: %w", err)
-	}
-	var recs []recorded
-	seen := map[string]bool{}
-	for rows.Next() {
-		var r recorded
-		if err := rows.Scan(&r.chunkID, &r.commitID, &r.repo, &r.path, &r.sha, &r.start, &r.end, &r.symbol, &r.reason, &r.hop); err != nil {
-			_ = rows.Close()
-			return nil, 0, fmt.Errorf("scan source: %w", err)
-		}
-		if k := r.key(); !seen[k] {
-			seen[k] = true
-			recs = append(recs, r)
-		}
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 
@@ -166,29 +181,11 @@ type fileRead struct {
 // chunk it came from while that row still exists — a chunk id is never
 // reused, so a row that still joins holds the text it held.
 func (s *Store) chunkSource(ctx context.Context, r recorded, files map[string]fileRead) (ask.Source, bool, error) {
-	if r.repo != "" && s.evidence != nil {
-		k := r.repo + "|" + r.path + "|" + r.sha
-		f, ok := files[k]
-		if !ok {
-			file, err := s.evidence.Read(ctx, r.repo, r.path, r.sha)
-			f = fileRead{branch: file.Branch, err: err}
-			if err == nil {
-				// Split the way the chunker splits, so a window is the lines
-				// it was cut from.
-				f.lines = strings.Split(strings.TrimSuffix(file.Content, "\n"), "\n")
-			}
-			files[k] = f
-		}
-		if f.err == nil && r.start >= 1 && r.end >= r.start && r.end <= len(f.lines) {
-			return ask.Source{
-				ChunkID: r.chunkID, Repo: r.repo, Branch: f.branch, Path: r.path, SHA: r.sha, Symbol: r.symbol,
-				StartLine: r.start, EndLine: r.end, Text: strings.Join(f.lines[r.start-1:r.end], "\n"),
-				Reason: r.reason, Hop: r.hop,
-			}, true, nil
-		}
-		if f.err != nil {
-			slog.Debug("source not readable from git", "repo", r.repo, "path", r.path, "sha", r.sha, "err", f.err)
-		}
+	if text, branch, ok := s.window(ctx, r, files); ok {
+		return ask.Source{
+			ChunkID: r.chunkID, Repo: r.repo, Branch: branch, Path: r.path, SHA: r.sha, Symbol: r.symbol,
+			StartLine: r.start, EndLine: r.end, Text: text, Reason: r.reason, Hop: r.hop,
+		}, true, nil
 	}
 	src := ask.Source{ChunkID: r.chunkID, Reason: r.reason, Hop: r.hop}
 	err := s.db.QueryRowContext(ctx, `
@@ -204,6 +201,38 @@ func (s *Store) chunkSource(ctx context.Context, r recorded, files map[string]fi
 		return ask.Source{}, false, fmt.Errorf("read source chunk %d: %w", r.chunkID, err)
 	}
 	return src, true, nil
+}
+
+// window is r's lines read from git at its commit, or false: no identity,
+// no checkout, git cannot produce the file, or the window is larger than a
+// chunk can be — an overlong line split into siblings, which only the
+// chunk rows hold part by part.
+func (s *Store) window(ctx context.Context, r recorded, files map[string]fileRead) (string, string, bool) {
+	if r.repo == "" || s.evidence == nil {
+		return "", "", false
+	}
+	k := r.repo + "|" + r.path + "|" + r.sha
+	f, ok := files[k]
+	if !ok {
+		file, err := s.evidence.ReadRecorded(ctx, r.repo, r.path, r.sha)
+		f = fileRead{branch: file.Branch, err: err}
+		if err == nil {
+			// Split the way the chunker splits, so a window is the lines
+			// it was cut from.
+			f.lines = strings.Split(strings.TrimSuffix(file.Content, "\n"), "\n")
+		} else {
+			slog.Debug("source not readable from git", "repo", r.repo, "path", r.path, "sha", r.sha, "err", err)
+		}
+		files[k] = f
+	}
+	if f.err != nil || r.start < 1 || r.end < r.start || r.end > len(f.lines) {
+		return "", "", false
+	}
+	text := strings.Join(f.lines[r.start-1:r.end], "\n")
+	if chunkCeiling.Splits(text) {
+		return "", "", false
+	}
+	return text, f.branch, true
 }
 
 // commitSource resolves a commit source: from the commit lane while it still

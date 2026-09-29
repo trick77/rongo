@@ -81,6 +81,23 @@ func New(db *sql.DB, git FileReader, maxBytes int) *Service {
 // was last indexed at" — citations recorded before the commit travelled with
 // them have none.
 func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error) {
+	return s.read(ctx, repo, path, sha, false)
+}
+
+// ReadRecorded is Read for a thread's own record: a file an answer was
+// written from, at the commit it was read at. A path the index no longer
+// lists — deleted or renamed since — is still served there, because the
+// answer was read from it; a path the index now SKIPS is not, because that
+// verdict (secret, excluded) is exactly what the files row is the permission
+// for. The commit is required: the record always carries one.
+func (s *Service) ReadRecorded(ctx context.Context, repo, path, sha string) (File, error) {
+	if sha == "" {
+		return File{}, fmt.Errorf("%w: a recorded source without its commit", ErrInvalid)
+	}
+	return s.read(ctx, repo, path, sha, true)
+}
+
+func (s *Service) read(ctx context.Context, repo, path, sha string, recorded bool) (File, error) {
 	if err := validatePath(path); err != nil {
 		return File{}, err
 	}
@@ -109,10 +126,12 @@ func (s *Service) Read(ctx context.Context, repo, path, sha string) (File, error
 	var indexedSHA, skipReason string
 	err = s.db.QueryRowContext(ctx,
 		`SELECT sha, skip_reason FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&indexedSHA, &skipReason)
-	if errors.Is(err, sql.ErrNoRows) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows) && !recorded:
 		return File{}, fmt.Errorf("%w: %s/%s is not indexed", ErrNotFound, repo, path)
-	}
-	if err != nil {
+	case errors.Is(err, sql.ErrNoRows):
+		// Gone from the index since the answer; the commit still holds it.
+	case err != nil:
 		return File{}, fmt.Errorf("look up %s/%s: %w", repo, path, err)
 	}
 	if skipReason != "" {

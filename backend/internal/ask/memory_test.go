@@ -274,6 +274,30 @@ func TestKeptRule_isWhatTheProductKeeps(t *testing.T) {
 	}
 }
 
+// TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt: the prompt's own
+// examples are patterns ("don't ... anymore"), a reader types a curly
+// apostrophe, and a model quotes back either. The words must be the
+// question's, in its order; spelling and spacing are not the test.
+func TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt(t *testing.T) {
+	rule := "Do not mention the library lerb-chooser-ui."
+	for _, c := range []struct {
+		question, marker string
+		kept             bool
+	}{
+		{"don’t mention lerb-chooser-ui anymore", "don't ... anymore", true},
+		{"don't mention lerb-chooser-ui anymore", "don’t … anymore", true},
+		{"don't  mention it\nanymore", "don't mention it anymore", true},
+		{"ne le mentionne plus jamais", "ne ... plus jamais", true},
+		{"anymore, don't mention it", "don't ... anymore", false},
+		{"mention lerb-chooser-ui", "...", false},
+	} {
+		got := Understanding{Memory: rule, MemoryMarker: c.marker}.KeptRule(c.question)
+		if (got != "") != c.kept {
+			t.Errorf("%q with marker %q: kept %q, want kept: %v", c.question, c.marker, got, c.kept)
+		}
+	}
+}
+
 // TestPipeline_forgettingNeedsNoMarker: "show flowcharts again" lasts by
 // nature and carries no "from now on"; the gate is on keeping a rule, never
 // on dropping one.

@@ -104,6 +104,33 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 	return fixture{svc: New(db, client, maxBytes).WithCommits(client), db: db, first: first, second: second}
 }
 
+// TestReadRecorded_servesAFileTheIndexNoLongerListsButNeverOneItSkips: an
+// answer read internal/a.go; a later poll deleted it and purged the row.
+// The record still reads it at its commit. A file the index now SKIPS
+// stays refused — that verdict is the permission — and so does a record
+// with no commit.
+func TestReadRecorded_servesAFileTheIndexNoLongerListsButNeverOneItSkips(t *testing.T) {
+	f := newFixture(t, 1<<20)
+	ctx := context.Background()
+	if _, err := f.db.Exec(`DELETE FROM files WHERE path = 'internal/a.go'`); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.svc.ReadRecorded(ctx, "peeq", "internal/a.go", f.first)
+	if err != nil || !strings.Contains(got.Content, "func One") {
+		t.Fatalf("ReadRecorded = %q, %v", got.Content, err)
+	}
+	if _, err := f.svc.Read(ctx, "peeq", "internal/a.go", f.first); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the viewer serves an unlisted path: %v", err)
+	}
+	if _, err := f.svc.ReadRecorded(ctx, "peeq", "config/prod.env", f.first); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a skipped file was served: %v", err)
+	}
+	if _, err := f.svc.ReadRecorded(ctx, "peeq", "internal/a.go", ""); !errors.Is(err, ErrInvalid) {
+		t.Errorf("no commit: %v", err)
+	}
+}
+
 func TestRead_showsTheFileAtTheCitedCommitNotTheBranchHead(t *testing.T) {
 	// Given
 	f := newFixture(t, 1<<20)

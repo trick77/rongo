@@ -54,17 +54,22 @@ func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
 	}
 	postAsk(t, deps, fmt.Sprintf(`{"question":"zeichne ein diagramm des ablaufs","audience":"ba","thread_id":%q}`, list[0].PublicID))
 
-	if a.gotThread.SourcesTotal != 1 || len(a.gotThread.Sources) != 1 {
-		t.Fatalf("basis %d of %d, want whole", len(a.gotThread.Sources), a.gotThread.SourcesTotal)
+	if a.gotThread.ReadBasis == nil {
+		t.Fatal("a follow-up carries no way to read its basis")
 	}
-	if got := a.gotThread.Sources[0].Text; got != "func Bypass() {\n}" {
+	sources, total, err := a.gotThread.ReadBasis(context.Background())
+	if err != nil || total != 1 || len(sources) != 1 {
+		t.Fatalf("basis %d of %d (%v), want whole", len(sources), total, err)
+	}
+	if got := sources[0].Text; got != "func Bypass() {\n}" {
 		t.Errorf("text = %q, want lines 2-3 at the commit the answer read", got)
 	}
 }
 
 // TestAsk_aFollowUpCarriesThePreviousAnswersSources: a rework answers from
-// the previous turn's own basis, so the handler reads it with the previous
-// question and answer, whole or not — the count says which.
+// the previous turn's own basis, so the handler hands over what it is and a
+// way to read it, whole or not — the count says which. The text is read only
+// when asked for: every follow-up needs the refs, only a rework the files.
 func TestAsk_aFollowUpCarriesThePreviousAnswersSources(t *testing.T) {
 	db := askDB(t)
 	chunkID := seedChunk(t, db)
@@ -80,11 +85,18 @@ func TestAsk_aFollowUpCarriesThePreviousAnswersSources(t *testing.T) {
 	}
 	postAsk(t, deps, fmt.Sprintf(`{"question":"summarize","audience":"ba","thread_id":%q}`, list[0].PublicID))
 
-	if len(a.gotThread.Sources) != 1 || a.gotThread.Sources[0].ChunkID != chunkID {
-		t.Errorf("sources = %+v, want the one chunk the index still holds", a.gotThread.Sources)
+	if a.gotThread.SourcesTotal != 2 || len(a.gotThread.Sources) != 2 || a.gotThread.Sources[0].Text != "" {
+		t.Errorf("refs = %+v (%d), want the two the record holds, unread", a.gotThread.Sources, a.gotThread.SourcesTotal)
 	}
-	if a.gotThread.SourcesTotal != 2 {
-		t.Errorf("sources total = %d, want the two the record holds", a.gotThread.SourcesTotal)
+	sources, total, err := a.gotThread.ReadBasis(context.Background())
+	if err != nil {
+		t.Fatalf("read basis: %v", err)
+	}
+	if len(sources) != 1 || sources[0].ChunkID != chunkID {
+		t.Errorf("sources = %+v, want the one chunk the index still holds", sources)
+	}
+	if total != 2 {
+		t.Errorf("sources total = %d, want the two the record holds", total)
 	}
 }
 

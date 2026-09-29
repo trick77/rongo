@@ -548,20 +548,24 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			slog.Error("read last turn failed", "err", err)
 		} else if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
-			// And what that answer was written from, for a rework. Read
-			// here rather than once the understanding has said the turn is
-			// one: the pipeline has no thread store, and one SELECT per
-			// follow-up is the cost. A read that fails fails the request,
-			// unlike the reads above: a turn that goes on without the
-			// basis answers "summarize" afresh, which is worse than no
-			// answer.
-			sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, last.ID)
+			// And what that answer was written from, for a rework: what
+			// the sources are, from one SELECT, and their text only once
+			// the understanding has said the turn IS a rework — reading
+			// every file from git is the cost of a rework, not of every
+			// follow-up. A read that fails fails the request, unlike the
+			// reads above: a turn that goes on without the basis answers
+			// "summarize" afresh, which is worse than no answer.
+			refs, err := s.deps.Threads.SourceRefs(ctx, u.Subject, last.ID)
 			if err != nil {
 				slog.Error("read last turn's sources failed", "err", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
 			}
-			prior.Sources, prior.SourcesTotal = sources, total
+			subject, id := u.Subject, last.ID
+			prior.Sources, prior.SourcesTotal = refs, len(refs)
+			prior.ReadBasis = func(ctx context.Context) ([]ask.Source, int, error) {
+				return s.deps.Threads.Sources(ctx, subject, id)
+			}
 		}
 	}
 

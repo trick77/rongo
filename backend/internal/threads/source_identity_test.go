@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ type fakeEvidence struct {
 	reads   int
 }
 
-func (f *fakeEvidence) Read(_ context.Context, repo, path, sha string) (sourceview.File, error) {
+func (f *fakeEvidence) ReadRecorded(_ context.Context, repo, path, sha string) (sourceview.File, error) {
 	f.reads++
 	body, ok := f.files[repo+"|"+path+"|"+sha]
 	if !ok {
@@ -106,13 +107,17 @@ func TestASourceGitCannotProduceIsMissing(t *testing.T) {
 	}
 }
 
-func TestSplitSiblingsOfOneLineAreOneSource(t *testing.T) {
-	// An overlong line is stored as sibling chunks sharing one line range.
-	// Read back from git they are the same text; counting them twice would
-	// report a basis short by one that is in fact whole.
-	s, ctx, threadID, _ := newThreadStore(t)
-	s.WithEvidence(&fakeEvidence{files: map[string]string{"peeq|min.js|deadbeef": "x=1\n"}})
+func TestASplitLineIsNeverReadBackWhole(t *testing.T) {
+	// An overlong line is stored as sibling chunks sharing one line range,
+	// each holding a part. Read from git the range is the whole line —
+	// hundreds of kilobytes of minified code for one sibling an answer
+	// used. Each sibling reads back as its own chunk while that exists, and
+	// is missing once it does not: never the whole line.
+	s, ctx, threadID, db := newThreadStore(t)
+	long := strings.Repeat("x", 4*chunkCeiling.MaxTokens*3)
+	s.WithEvidence(&fakeEvidence{files: map[string]string{"peeq|min.js|deadbeef": long + "\n"}})
 	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "q", 0)
+	insertChunk(t, db, 1, "peeq", "min.js", "part one")
 	if err := s.SaveSources(ctx, msg.ID, []ask.Source{
 		{ChunkID: 1, Repo: "peeq", Path: "min.js", SHA: "deadbeef", StartLine: 1, EndLine: 1, Reason: "hit"},
 		{ChunkID: 2, Repo: "peeq", Path: "min.js", SHA: "deadbeef", StartLine: 1, EndLine: 1, Reason: "hit"},
@@ -124,8 +129,36 @@ func TestSplitSiblingsOfOneLineAreOneSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sources: %v", err)
 	}
-	if total != 1 || len(got) != 1 || got[0].Text != "x=1" {
-		t.Errorf("total %d, got %+v; want one source", total, got)
+	if total != 2 || len(got) != 1 || got[0].Text != "part one" {
+		t.Errorf("total %d, got %+v; want the sibling whose chunk remains, alone", total, got)
+	}
+}
+
+func TestSourceRefsReadNoGit(t *testing.T) {
+	// Every follow-up reads what the basis IS; only a rework reads its text.
+	s, ctx, threadID, _ := newThreadStore(t)
+	ev := &fakeEvidence{}
+	s.WithEvidence(ev)
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "q", 0)
+	if err := s.SaveSources(ctx, msg.ID, []ask.Source{
+		{ChunkID: 1, Repo: "peeq", Path: "a.go", SHA: "deadbeef", StartLine: 1, EndLine: 2, Reason: "hit"},
+		{Kind: ask.SourceCommit, CommitID: 5, Repo: "peeq", SHA: "aaa1111", Reason: "hit"},
+	}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+
+	got, err := s.SourceRefs(ctx, testSubject, msg.ID)
+	if err != nil {
+		t.Fatalf("refs: %v", err)
+	}
+	if len(got) != 2 || got[0].Repo != "peeq" || got[0].Path != "a.go" || !got[1].IsCommit() || got[1].SHA != "aaa1111" {
+		t.Errorf("refs = %+v", got)
+	}
+	if ev.reads != 0 {
+		t.Errorf("%d git reads for the refs, want none", ev.reads)
+	}
+	if other, _ := s.SourceRefs(ctx, "someone-else", msg.ID); len(other) != 0 {
+		t.Errorf("a foreign subject read %d refs", len(other))
 	}
 }
 

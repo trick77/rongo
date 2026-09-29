@@ -449,6 +449,13 @@ func windows(lines []string, from, to int, opts ChunkOptions) []span {
 // thousands of tokens, and sending it would fail the request — losing the whole
 // FILE, not just that line. Cutting it here keeps every byte in the index and
 // costs only a boundary in the middle of a line nobody reads anyway.
+// Splits reports whether a window of raw source is one the chunker cuts into
+// siblings rather than stores whole: what reads a window back needs to know
+// that no single chunk held it.
+func (o ChunkOptions) Splits(raw string) bool {
+	return len(splitOverlongLine(raw, o.MaxTokens)) > 1
+}
+
 func splitOverlongLine(raw string, maxTokens int) []string {
 	if maxTokens <= 0 || estimateTokens(raw) <= maxTokens {
 		return []string{raw}

@@ -214,6 +214,11 @@ type Thread struct {
 	// which is how a rework tells a whole basis from a partial one.
 	Sources      []Source
 	SourcesTotal int
+	// ReadBasis reads Sources with their text, for the one turn that needs
+	// it: a rework. Until then Sources says what the basis is and no more,
+	// because reading it means reading every file from git. Nil when Sources
+	// already carries the text.
+	ReadBasis func(context.Context) ([]Source, int, error)
 }
 
 // Run answers one question, or ends the turn by asking which of several
@@ -361,6 +366,11 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// the whole of what it reads, and a search on "summarize" has nothing to
 	// add but a second, different answer.
 	if isRework(u, t) {
+		if t.ReadBasis != nil {
+			if t.Sources, t.SourcesTotal, err = t.ReadBasis(ctx); err != nil {
+				return Answer{}, nil, fmt.Errorf("read the previous answer's basis: %w", err)
+			}
+		}
 		answer, err := p.answerRework(ctx, question, audience, lang, t, scope, ev)
 		return answer, nil, err
 	}

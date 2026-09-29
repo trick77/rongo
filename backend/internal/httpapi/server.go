@@ -80,6 +80,9 @@ type Threads interface {
 	// and undo survive a reload.
 	SetMemory(ctx context.Context, messageID, memoryID int64) error
 	Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error)
+	// SourceRefs is what an answer's basis is, without the text: one read of
+	// the database, where Sources reads every file from git.
+	SourceRefs(ctx context.Context, subject string, messageID int64) ([]ask.Source, error)
 	// SaveUsage records the paid calls one turn made, however it ended.
 	SaveUsage(ctx context.Context, messageID int64, calls []usage.Call) error
 	// SaveFollowups records what the finished answer offered to ask next.
