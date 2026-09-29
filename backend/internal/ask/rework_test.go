@@ -236,4 +236,76 @@ func TestUnderstandNamesRework(t *testing.T) {
 	if !strings.Contains(understandSystem, `"rework"`) || !strings.Contains(understandSystem, "It exists only when a previous turn is above") {
 		t.Error("the understanding prompt must define rework and tie it to a previous turn")
 	}
+	// "zeichne ein diagramm des ablaufs" asks for the previous answer drawn,
+	// nothing new of the code. Absent from the examples, one reply called it
+	// a rework and the next a standing rule.
+	if !strings.Contains(understandSystem, `"zeichne ein Diagramm davon"`) {
+		t.Error("a diagram of the previous answer must be named as a rework")
+	}
+}
+
+// TestOnlyAReworkReadsTheBasis: reading the basis reads every file of it
+// from git, so a follow-up carries only what the basis is until the turn
+// turns out to be a rework. A read that fails fails the turn: answering
+// "summarize" afresh would be a different answer dressed as a summary.
+func TestOnlyAReworkReadsTheBasis(t *testing.T) {
+	refs := reworkThread()
+	full := refs.Sources
+	for i := range refs.Sources {
+		refs.Sources[i].Text = ""
+	}
+	reads := 0
+	refs.ReadBasis = func(context.Context) ([]Source, int, error) {
+		reads++
+		return twoSources(), len(full), nil
+	}
+
+	c, prompt := reworkUpstream(t, reworkReply)
+	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reads != 1 || !strings.Contains(*prompt, "func issueGrant() {}") {
+		t.Errorf("reads = %d; the rework must answer from the text it read:\n%s", reads, *prompt)
+	}
+
+	reads = 0
+	p := newTestPipeline(t)
+	p.understander = NewUnderstander(twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "x"))
+	if _, _, err := p.Run(context.Background(), "and where is it checked?", AudienceBA, LanguageEN, refs, Events{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if reads != 0 {
+		t.Errorf("an ordinary follow-up read the basis %d times", reads)
+	}
+
+	refs.ReadBasis = func(context.Context) ([]Source, int, error) { return nil, 0, errors.New("git gone") }
+	c, _ = reworkUpstream(t, reworkReply)
+	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err == nil || !strings.Contains(err.Error(), "git gone") {
+		t.Errorf("err = %v, want the failed read", err)
+	}
+}
+
+// TestAReworkSaysWhichCommitsItsBasisWasReadAt: the basis is re-read from
+// git, not from the index as it is now, and the trace says where from.
+func TestAReworkSaysWhichCommitsItsBasisWasReadAt(t *testing.T) {
+	c, _ := reworkUpstream(t, reworkReply)
+	p := reworkPipeline(t, c)
+	th := reworkThread()
+	th.Sources[0].SHA = "0123456789abcdef"
+	th.Sources[1].SHA = "0123456789abcdef"
+	var writing map[string]any
+
+	if _, _, err := p.Run(context.Background(), "summarize", AudienceBA, LanguageEN, th,
+		Events{OnDetail: func(step string, d map[string]any) {
+			if step == "writing" {
+				writing = d
+			}
+		}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, _ := writing["read_at"].([]string)
+	if len(got) != 1 || got[0] != "peeq 0123456" {
+		t.Errorf("read_at = %v, want the one repository at its short commit", writing["read_at"])
+	}
 }

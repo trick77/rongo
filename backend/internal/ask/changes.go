@@ -61,7 +61,7 @@ const IntentChanges = "changes"
 // changed wants the list, not a question back. Sources are commits, cited
 // like files and stored like them.
 func (p *Pipeline) answerChanges(ctx context.Context, question string, audience Audience, lang Language,
-	u Understanding, scope Scope, followingUp string, ev Events) (Answer, error) {
+	u Understanding, scope Scope, followingUp FollowUp, ev Events) (Answer, error) {
 
 	scope.SinceDays = clampSinceDays(int(u.SinceDays))
 	scope.Topic = strings.TrimSpace(u.Topic)

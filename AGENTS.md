@@ -60,8 +60,9 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 ### Threads
 - **Thread is a record.** Follow-up adds an answer, never rewrites one. Correction is a new question.
 - **One language per thread** — its first question's. Everything a person reads follows it, replays included. The record decides, not the request.
-- **Answer prompt gets the previous QUESTION only**, never the previous answer — prose beside sources it was NOT written from is how a claim acquires a citation it was never read from. One turn back, never the thread.
-- **Rework ("summarize", "as a table") answers from the previous answer and ITS OWN sources, no search.** First turn is never a rework. A basis missing even ONE chunk is refused — never summarised from survivors, never searched afresh; a fresh answer to "summarize" is a different answer dressed as a summary. Not "translate".
+- **Rework ("summarize", "as a table", "zeichne ein Diagramm davon") answers from the previous answer and ITS OWN sources, no search.** First turn is never a rework. A basis missing even ONE source is refused — never summarised from survivors, never searched afresh; a fresh answer to "summarize" is a different answer dressed as a summary. Not "translate".
+- **A turn's basis is recorded by repo, path, commit, lines — re-read from git, never by chunk row.** A poll re-inserts every chunk of a touched file under new ids; keyed on them, a minute-old answer's diagram was refused as "no longer indexed". Missing means git cannot produce it: purged repo, replaced snapshot, file the index now skips — a file deleted or renamed since is still read at its commit. A window bigger than a chunk (split overlong line) is never read back whole. Text read only once the turn is a rework; every follow-up reads refs, not files.
+- **Previous answer reaches the answer prompt as context, never a source** — markers stripped, fenced off, never cited, its claims never restated as fact. "The flow" is the flow it described. Changes and release lanes get the question only.
 - **Recall reaches the model as ONE user message**, never a user/assistant pair — a prose assistant turn makes the model continue the conversation instead of returning JSON.
 - **Thread is a funnel: narrows, never widens.** Pin is a ceiling; "in all repos" under a pin is not honoured. A named repo the pin excludes is reported as outside — silent refusal to widen is the same quiet drop the rule exists to stop.
 - **Empty repo restriction means the whole corpus** — so a pin or chosen repo that no longer exists must FAIL the turn, never search. Has bitten twice.
@@ -69,6 +70,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 
 ### Memory
 - **Standing instruction kept the turn it is said, in English, per reader.** About the READER only — never a claim about code, never language, audience or repo pin, never a one-off.
+- **Kept only on the reader's word, checked in Go** — the gate quotes it (`memory_marker`), a quote the question lacks is dropped (`standingOnly`). The model's judgement alone filed "zeichne ein diagramm des ablaufs" as "Draw a diagram for the answer." and every later answer drew one. Forgetting is not gated. Same text twice is one rule.
 - **The block outranks the prompt**: overrides form, length, diagrams, what to mention. Never citing, inventing, "nothing found", language, audience. Empty memory leaves the prompt byte-identical — that is the eval baseline. Contradiction REPLACES, a rule never expires, one past the cap is refused, never fitted in by dropping one. Never on a shared page.
 
 ### Routing

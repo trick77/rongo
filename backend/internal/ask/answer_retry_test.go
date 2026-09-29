@@ -48,7 +48,7 @@ func breakAfter(t *testing.T, tokens ...string) (*llm.Client, *atomic.Int32) {
 func TestAnswer_aRetriedAnswerReportsTwoAttemptsInItsDetail(t *testing.T) {
 	c, calls := failThenStream(t, "Stored in ", "store.go [1].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestAnswer_aRetriedAnswerReportsTwoAttemptsInItsDetail(t *testing.T) {
 func TestAnswer_aStreamThatBrokeAfterTextFailsTheTurn(t *testing.T) {
 	c, calls := breakAfter(t, "Stored [2] and ", "then")
 
-	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
+	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil)
 
 	if err == nil {
 		t.Fatal("err = nil, want the turn to fail rather than store a fragment")
@@ -86,7 +86,7 @@ func TestAnswer_aStreamThatBrokeAfterTextFailsTheTurn(t *testing.T) {
 func TestAnswer_anOrdinaryTurnSaysNothingAboutAttempts(t *testing.T) {
 	c, _, _ := streamUpstream(t, "Stored in store.go [1].")
 
-	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil)
+	got, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

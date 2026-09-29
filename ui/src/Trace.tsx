@@ -422,6 +422,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const sourceTok = asNumber(detail.prompt_sources);
       const attempts = asNumber(detail.attempts);
       const memories = asNumber(detail.memories);
+      const readAt = asStrings(detail.read_at);
       return (
         <div className="trace-detail">
           {inTok !== null && <>{tokens(inTok)} tokens in</>}
@@ -434,6 +435,15 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
             <>
               {" · "}
               {cited} of {sources} sources cited
+            </>
+          )}
+          {/* A rework or re-explain answers from the record, re-read from
+              git at the commit each repository was read at - not from the
+              index as it stands now. */}
+          {readAt.length > 0 && (
+            <>
+              {" · "}
+              <span className="trace-k">read at</span> <Chips dim values={readAt} />
             </>
           )}
           {/* The second call the answer took. A call is retried at most once

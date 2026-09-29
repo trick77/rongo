@@ -122,7 +122,11 @@ type Understanding struct {
 	// saved rules it contradicts; MemoryRemoves the saved rules the reader
 	// asks to forget. The intent "memory" is a question that is ONLY a
 	// directive, answered without a search.
-	Memory         string `json:"memory"`
+	Memory string `json:"memory"`
+	// MemoryMarker is the reader's own word that the instruction lasts, as
+	// the model quoted it from the question. It is checked, not believed:
+	// see standingOnly.
+	MemoryMarker   string `json:"memory_marker"`
 	MemoryScope    string `json:"memory_scope"`
 	MemoryReplaces IDs    `json:"memory_replaces"`
 	MemoryRemoves  IDs    `json:"memory_removes"`
@@ -153,6 +157,59 @@ func (ids *IDs) UnmarshalJSON(b []byte) error {
 	}
 	*ids = out
 	return nil
+}
+
+// standingOnly drops a rule the question gives no word of the reader's for.
+// A rule lasts because the reader said so — "ab jetzt", "never" — and the
+// model has to quote that word; a quote the question does not hold is the
+// model's judgement, not the reader's. "zeichne ein diagramm des ablaufs"
+// was filed as "Draw a diagram for the answer." with no such word, and every
+// later answer of that reader drew one. Forgetting is not gated: "show
+// flowcharts again" carries no "from now on". Reports whether a rule went.
+func (u *Understanding) standingOnly(question string) bool {
+	if u.Memory == "" {
+		return false
+	}
+	if saysItLasts(question, u.MemoryMarker) {
+		return false
+	}
+	u.Memory, u.MemoryScope, u.MemoryReplaces = "", "", nil
+	return true
+}
+
+// markerFold is what the check forgives: case, the apostrophe a keyboard
+// curls, an ellipsis typed as one character, and spacing.
+var markerFold = strings.NewReplacer("’", "'", "‘", "'", "`", "'", "…", "...")
+
+// saysItLasts reports whether marker is words of the question, in its
+// order. A marker may be a pattern the prompt showed — "don't ... anymore",
+// "ne ... plus jamais" — whose parts must each stand in the question, one
+// after the other; a marker of nothing but dots is no marker.
+func saysItLasts(question, marker string) bool {
+	norm := func(s string) string {
+		return strings.Join(strings.Fields(markerFold.Replace(strings.ToLower(s))), " ")
+	}
+	q, found := norm(question), false
+	for _, part := range strings.Split(norm(marker), "...") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		i := strings.Index(q, part)
+		if i < 0 {
+			return false
+		}
+		q, found = q[i+len(part):], true
+	}
+	return found
+}
+
+// KeptRule is the rule the product keeps from this understanding of
+// question: Memory, unless standingOnly drops it. What the intent eval
+// grades, so it grades what the reader would get.
+func (u Understanding) KeptRule(question string) string {
+	u.standingOnly(question)
+	return u.Memory
 }
 
 // Directive is what the understanding read as a standing instruction, or
@@ -330,7 +387,8 @@ code lately, asking for no notes, is "changes", never "release".
 "rework" is a request to restate the PREVIOUS ANSWER in another form, asking
 nothing new of the code: "summarize", "tl;dr", "shorter", "in one paragraph",
 "as a table", "as bullet points", "simpler", "rephrase", "expand the second
-point", "fasse zusammen", "kürzer", "résume", "riassumi".
+point", "draw that as a diagram", "fasse zusammen", "kürzer",
+"zeichne ein Diagramm davon", "résume", "en diagramme", "riassumi".
 It exists only when a previous turn is above; with none, or when the question
 asks about anything the previous answer does not already say, it is not
 "rework". A rework has terms [], code_terms [] and repos [].%s
@@ -421,7 +479,14 @@ const understandMemoryFields = `
                   instruction about the answer language, the audience or
                   which repositories to search is not a memory: those are
                   settings the reader picks. Never a statement about what the
-                  code does, never a credential.
+                  code does, never a credential. No word of the reader's
+                  saying it lasts means it is for THIS answer: memory "".
+                  "zeichne ein Diagramm des Ablaufs", "draw it as a
+                  diagram", "keine Emojis" are for this answer.
+  memory_marker   the word or words of the question that say the instruction
+                  lasts, copied exactly as the reader wrote them ("nie
+                  wieder", "from now on", "always"), else "". A memory with
+                  no marker is not kept.
   memory_scope    the project or repository the instruction is limited to,
                   written exactly as the reader named it, else "".
   memory_replaces ids of saved instructions (listed below the question when

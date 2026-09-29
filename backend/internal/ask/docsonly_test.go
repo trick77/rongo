@@ -92,7 +92,7 @@ func TestAnswerPromptCarriesTheDocumentationOnlyRule(t *testing.T) {
 	// does say it, and may have said it for a year while the code moved.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
-		docSources(), Scope{}, "", nil)
+		docSources(), Scope{}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestAnswerPromptOmitsTheRuleWhenCodeIsPresent(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	mixed := append(docSources(), twoSources()[0])
 	_, err := NewAnswerer(c).Answer(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
-		mixed, Scope{}, "", nil)
+		mixed, Scope{}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

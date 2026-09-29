@@ -440,6 +440,13 @@ func windows(lines []string, from, to int, opts ChunkOptions) []span {
 	return out
 }
 
+// Splits reports whether a window of raw source is one the chunker cuts into
+// siblings rather than stores whole: what reads a window back needs to know
+// that no single chunk held it.
+func (o ChunkOptions) Splits(raw string) bool {
+	return len(splitOverlongLine(raw, o.MaxTokens)) > 1
+}
+
 // splitOverlongLine cuts a window that is one enormous line into pieces the
 // embedding endpoint will accept. Normal windows come back unchanged.
 //

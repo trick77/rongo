@@ -64,6 +64,42 @@ func TestAdd_writesTheRuleAndListReadsItBack(t *testing.T) {
 	}
 }
 
+// TestAdd_aRuleTheReaderAlreadyHasIsNotAddedTwice: asking again wrote the
+// same rule a second time, and the Memory page listed it twice. The rule
+// the reader already has comes back as what was kept.
+func TestAdd_aRuleTheReaderAlreadyHasIsNotAddedTwice(t *testing.T) {
+	db := testDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	first, err := s.Add(ctx, "jan", Directive{Text: "Draw a diagram for the answer."}, 0)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+
+	again, err := s.Add(ctx, "jan", Directive{Text: "draw a diagram  for the answer."}, 0)
+	if err != nil {
+		t.Fatalf("add again: %v", err)
+	}
+
+	if again.Row.ID != first.Row.ID || again.Row.Text != first.Row.Text {
+		t.Errorf("again = %+v, want the rule already kept (%d)", again.Row, first.Row.ID)
+	}
+	rows, _ := s.List(ctx, "jan")
+	if len(rows) != 1 {
+		t.Errorf("%d rows, want one", len(rows))
+	}
+	// Another reader's copy is their own rule.
+	if other, _ := s.Add(ctx, "other", Directive{Text: "Draw a diagram for the answer."}, 0); other.Row.ID == first.Row.ID {
+		t.Error("another reader was handed jan's row")
+	}
+	// And the holder does not list it twice either.
+	h := NewHolder([]Row{first.Row})
+	h.Apply(again)
+	if len(h.Rows()) != 1 {
+		t.Errorf("holder rows = %+v", h.Rows())
+	}
+}
+
 func TestAdd_replacesAndRemovesOnlyTheReadersOwnRows(t *testing.T) {
 	db := testDB(t)
 	s := NewStore(db)

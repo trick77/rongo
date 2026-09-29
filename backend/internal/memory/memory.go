@@ -225,11 +225,31 @@ func (s *Store) Add(ctx context.Context, subject string, d Directive, sourceMess
 		if sourceMessageID != 0 {
 			source = sourceMessageID
 		}
+		// A rule the reader already has is not written twice: asking again
+		// listed it twice on the Memory page and twice in every prompt. One
+		// statement, so the transaction still opens with a write.
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO memories (user_subject, text, scope, source_message_id) VALUES (?, ?, ?, ?)`,
-			subject, text, scope, source)
+			INSERT INTO memories (user_subject, text, scope, source_message_id)
+			SELECT ?, ?, ?, ?
+			WHERE NOT EXISTS (SELECT 1 FROM memories WHERE user_subject = ? AND lower(text) = lower(?) AND scope = ?)`,
+			subject, text, scope, source, subject, text, scope)
 		if err != nil {
 			return out, fmt.Errorf("add memory: %w", err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return out, err
+		} else if n == 0 {
+			if err := tx.QueryRowContext(ctx, `
+				SELECT id, text FROM memories WHERE user_subject = ? AND lower(text) = lower(?) AND scope = ?`,
+				subject, text, scope).Scan(&out.Row.ID, &out.Row.Text); err != nil {
+				return out, fmt.Errorf("read the rule already kept: %w", err)
+			}
+			out.Row.Scope = scope
+			out.Row.members, out.Row.ScopeLive = resolveScope(pm, scope)
+			if err := tx.Commit(); err != nil {
+				return out, err
+			}
+			return out, nil
 		}
 		// Counted after the write, inside the lock, and rolled back when the
 		// cap is passed: the row never lands, and nothing else changes either.

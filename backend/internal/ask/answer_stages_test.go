@@ -25,7 +25,7 @@ func stagedSources() []Source {
 func TestAnswer_stagedSourcesAreLabelledAndTheRuleSaysReportEveryStage(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	scope := Scope{Known: []string{"acme-service", "acme-infra"}, Stages: declaredStages}
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How often?", AudienceBA, LanguageEN, stagedSources(), scope, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How often?", AudienceBA, LanguageEN, stagedSources(), scope, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	p := *prompt
@@ -51,7 +51,7 @@ func TestAnswer_anAskedStageRulesOutTheOthers(t *testing.T) {
 	scope := Scope{Known: []string{"acme-service", "acme-infra"}, Stages: declaredStages, Stage: "prod"}
 	sources := stagedSources()
 	sources = append(sources[:2], sources[3])
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How often in production?", AudienceBA, LanguageEN, sources, scope, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How often in production?", AudienceBA, LanguageEN, sources, scope, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	p := *prompt
@@ -66,7 +66,7 @@ func TestAnswer_anAskedStageRulesOutTheOthers(t *testing.T) {
 func TestAnswer_noStagedSourceMeansNoStageRule(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	scope := Scope{Known: []string{"peeq"}, Stages: declaredStages}
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), scope, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), scope, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Contains(*prompt, "deployed configuration") || strings.Contains(*prompt, "(stage ") {
@@ -76,7 +76,7 @@ func TestAnswer_noStagedSourceMeansNoStageRule(t *testing.T) {
 
 func TestAnswer_redactedMarkerIsExplainedToTheModel(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if !strings.Contains(*prompt, "<redacted>") {

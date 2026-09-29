@@ -738,7 +738,7 @@ func TestTheAnswerPromptForbidsInventingTheRestOfTheCorpus(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	sc := Scope{Known: []string{"rongo"}, AllDenied: true}
 	if _, err := NewAnswerer(c).Answer(context.Background(), "vergleiche das mit allen Repositories",
-		AudienceBA, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		AudienceBA, LanguageEN, twoSources(), sc, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if !strings.Contains(*prompt, "Only rongo is in front of you") {
@@ -758,7 +758,7 @@ func TestTheAnswerPromptForbidsClaimsAboutARepositoryTheThreadLeftOut(t *testing
 	c, prompt, _ := streamUpstream(t, "x")
 	sc := Scope{Known: []string{"rongo"}, Outside: []string{"loom"}}
 	if _, err := NewAnswerer(c).Answer(context.Background(), "und wie macht das loom?",
-		AudienceBA, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		AudienceBA, LanguageEN, twoSources(), sc, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if !strings.Contains(*prompt, "this thread does not cover: loom") {
@@ -778,7 +778,7 @@ func TestTheLoopsNotFoundNeverOverridesASourceThatAnswers(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	sc := Scope{Located: "Not found in the index."}
 	if _, err := NewAnswerer(c).Answer(context.Background(), "wo wird das gesetzt?",
-		AudienceDev, LanguageEN, twoSources(), sc, "", nil); err != nil {
+		AudienceDev, LanguageEN, twoSources(), sc, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Contains(*prompt, "say so plainly rather than answering") {
@@ -806,7 +806,7 @@ func TestTheLoopsOpeningFollowsTheAudience(t *testing.T) {
 		cl, prompt, _ := streamUpstream(t, "x")
 		sc := Scope{Located: "FOUND: ConverterPetRegistry.java:150 setAnzahlhaustiere"}
 		if _, err := NewAnswerer(cl).Answer(context.Background(), "wo?",
-			c.audience, LanguageEN, twoSources(), sc, "", nil); err != nil {
+			c.audience, LanguageEN, twoSources(), sc, FollowUp{}, nil); err != nil {
 			t.Fatalf("Answer: %v", err)
 		}
 		if !strings.Contains(*prompt, c.want) {
@@ -818,20 +818,29 @@ func TestTheLoopsOpeningFollowsTheAudience(t *testing.T) {
 	}
 }
 
-// TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer holds the line
-// this whole feature has to stay behind. The previous QUESTION is what a
-// pronoun points at, so it goes in. The previous ANSWER is prose the model
-// wrote itself, and handing it back alongside real sources is how a claim ends
-// up carrying a citation it was never read from.
-func TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer(t *testing.T) {
+// TestTheAnswerPromptCarriesThePreviousQuestionAndItsAnswerAsContext: "the
+// flow" in a follow-up is the flow the previous answer described, so the
+// answer goes in beside the question. It goes in as context, never as a
+// source: without its markers, fenced off from the numbered list, under a
+// rule that it is not cited and its claims are not restated as fact.
+func TestTheAnswerPromptCarriesThePreviousQuestionAndItsAnswerAsContext(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Kannst du das in einem Diagramm aufzeigen?",
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Und wo wird der Bypass geprüft?",
 		AudienceBA, LanguageEN, twoSources(), Scope{},
-		"Wie unterscheidet sich rongo von reinem RAG?", nil); err != nil {
+		FollowUp{Question: "Wie funktioniert der Bypass?", Answer: "Der Hinweis wird bei der Registrierung gelesen [1][2]."}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
-	if !strings.Contains(*prompt, "Wie unterscheidet sich rongo von reinem RAG?") {
+	if !strings.Contains(*prompt, "Wie funktioniert der Bypass?") {
 		t.Errorf("the previous question never reached the prompt:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "Der Hinweis wird bei der Registrierung gelesen .") {
+		t.Errorf("the previous answer, markers stripped, never reached the prompt:\n%s", *prompt)
+	}
+	if strings.Contains(*prompt, "gelesen [1]") {
+		t.Errorf("the previous answer kept its markers, which point at another turn's list:\n%s", *prompt)
+	}
+	if !strings.Contains(*prompt, "never a source") {
+		t.Errorf("nothing says the previous answer is not citable:\n%s", *prompt)
 	}
 	if !strings.Contains(*prompt, "Do not restate what") {
 		t.Errorf("nothing stops the turn from writing the same answer again:\n%s", *prompt)
@@ -843,7 +852,7 @@ func TestTheAnswerPromptCarriesThePreviousQuestionAndNotItsAnswer(t *testing.T) 
 func TestTheAnswerPromptOfAFirstTurnSaysNothingAboutAFollowUp(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	if _, err := NewAnswerer(c).Answer(context.Background(), "How is pricing resolved?",
-		AudienceBA, LanguageEN, twoSources(), Scope{}, "", nil); err != nil {
+		AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Contains(*prompt, "This is a follow-up") {
@@ -889,6 +898,27 @@ func TestReexplainAnswersFromStoredSourcesWithoutSearchingOrGathering(t *testing
 	}
 	if answer.Text == "" {
 		t.Error("want an answer")
+	}
+}
+
+// TestReexplainSaysWhichCommitItsBasisWasReadAt: like a rework, the basis
+// is the record re-read from git, and the writing step says where from.
+func TestReexplainSaysWhichCommitItsBasisWasReadAt(t *testing.T) {
+	p := newTestPipeline(t)
+	var writing map[string]any
+
+	if _, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
+		[]Source{{ChunkID: 1, Repo: "peeq", Path: "a.go", SHA: "abcdef0123", Text: "package a", StartLine: 1, EndLine: 1}}, Scope{},
+		Events{OnDetail: func(step string, d map[string]any) {
+			if step == "writing" {
+				writing = d
+			}
+		}}); err != nil {
+		t.Fatalf("reexplain: %v", err)
+	}
+
+	if got, _ := writing["read_at"].([]string); len(got) != 1 || got[0] != "peeq abcdef0" {
+		t.Errorf("read_at = %v", writing["read_at"])
 	}
 }
 

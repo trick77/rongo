@@ -39,7 +39,7 @@ func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	// built to prevent.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		twoSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
+		twoSources(), Scope{Known: []string{"peeq", "rongo"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestOneProjectIsNotAComparisonOfItsOwnRepositories(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
 		bothReposSources(),
-		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}}, "", nil)
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestAProjectBesideALooseRepositoryIsStillAComparison(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How does shop differ from rongo?", AudienceBA, LanguageEN,
 		bothReposSources(),
-		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Loose: []string{"rongo"}}, "", nil)
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Loose: []string{"rongo"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestTwoProjectsStillCompare_AndByProjectName(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do shop and legacy-crm differ?", AudienceBA, LanguageEN,
 		bothReposSources(),
-		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop", "legacy-crm"}}, "", nil)
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop", "legacy-crm"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestNoProjectsMeansTodaysComparison(t *testing.T) {
 	// it did before projects existed. This is the eval's guarantee in one test.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestTheStructureBlockReachesThePromptAndIsMarkedConfiguration(t *testing.T)
 	}})
 	_, err := NewAnswerer(c).Answer(context.Background(), "How does checkout work?", AudienceBA, LanguageEN,
 		bothReposSources(),
-		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Structure: block}, "", nil)
+		Scope{Known: []string{"peeq", "rongo"}, Projects: []string{"shop"}, Structure: block}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestAnswerPromptCarriesTheComparisonAndTheMissingRepository(t *testing.T) {
 	// loom's side out of its training.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN,
-		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, "", nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Unknown: []string{"loom"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestAnswerPromptStaysUnchangedForAnOrdinaryTurn(t *testing.T) {
 	// prompt must be what it was before any of this existed.
 	c, prompt, _ := streamUpstream(t, "x")
 	_, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN,
-		twoSources(), Scope{Known: []string{"peeq"}}, "", nil)
+		twoSources(), Scope{Known: []string{"peeq"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

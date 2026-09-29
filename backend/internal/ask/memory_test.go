@@ -16,7 +16,7 @@ import (
 )
 
 const flowchartDirective = `{"intent":"memory","terms":[],"code_terms":[],"repos":[],
-  "memory":"Never draw flowchart diagrams.","memory_scope":"","memory_replaces":["3"],"memory_removes":[]}`
+  "memory":"Never draw flowchart diagrams.","memory_marker":"nie wieder","memory_scope":"","memory_replaces":["3"],"memory_removes":[]}`
 
 func withMemory(rows ...memory.Row) context.Context {
 	return memory.With(context.Background(), memory.NewHolder(rows))
@@ -158,7 +158,7 @@ func TestPipeline_aDirectiveAloneIsRememberedAndAnsweredWithoutAModel(t *testing
 func TestPipeline_aDirectiveBesideAQuestionIsAppliedToThatSameAnswer(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
-	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams."}`
+	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams.","memory_marker":"never"}`
 	c, streams, system := memoryUpstream(t, reply, "So [1].")
 	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
@@ -205,6 +205,120 @@ func TestPipeline_aMemoryIntentWithNothingToKeepRunsAsAQuestion(t *testing.T) {
 	}
 }
 
+// TestPipeline_aRuleWithoutTheReadersWordForItIsNotKept is the incident:
+// "zeichne ein diagramm des ablaufs" asked for THIS answer drawn, and the
+// understanding filed it as a standing rule anyway. A rule is kept only on
+// the reader's own word that it lasts, quoted from the question — never on
+// the model's judgement alone.
+func TestPipeline_aRuleWithoutTheReadersWordForItIsNotKept(t *testing.T) {
+	for name, reply := range map[string]string{
+		"no marker": `{"intent":"rework","terms":[],"code_terms":[],"repos":[],"memory":"Draw a diagram for the answer."}`,
+		"a marker the question does not hold": `{"intent":"rework","terms":[],"code_terms":[],"repos":[],
+			"memory":"Draw a diagram for the answer.","memory_marker":"ab jetzt"}`,
+		"a rule alone, invented": `{"intent":"memory","terms":[],"code_terms":[],"repos":[],
+			"memory":"Draw a diagram for the answer.","memory_marker":""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, streams, _ := memoryUpstream(t, reply, "So [1].")
+			p := reworkPipeline(t, c)
+			ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
+				t.Fatalf("kept %+v with no word of the reader's saying it lasts", d)
+				return memory.Added{}, nil
+			}}
+
+			answer, _, err := p.Run(withMemory(), "zeichne ein diagramm des ablaufs", AudienceBA, LanguageDE, reworkThread(), ev)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			// What is left is a request for the previous answer drawn.
+			if answer.Scope.Intent != IntentRework || *streams != 1 {
+				t.Errorf("intent = %q, streams = %d; want the previous answer reworked", answer.Scope.Intent, *streams)
+			}
+		})
+	}
+}
+
+// TestPipeline_theReadersWordKeepsTheRuleWhateverItsCase: the marker is
+// checked against the question, case folded; "Ab jetzt" is "ab jetzt".
+func TestPipeline_theReadersWordKeepsTheRuleWhateverItsCase(t *testing.T) {
+	reply := `{"intent":"memory","terms":[],"code_terms":[],"repos":[],
+		"memory":"Draw a diagram in every answer.","memory_marker":"ab jetzt"}`
+	c, _, _ := memoryUpstream(t, reply)
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	var got memory.Directive
+	ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
+		got = d
+		return memory.Added{Row: memory.Row{ID: 1, Text: d.Text, ScopeLive: true}}, nil
+	}}
+
+	if _, _, err := p.Run(withMemory(), "Ab jetzt immer mit Diagramm, bitte.", AudienceBA, LanguageDE, Thread{}, ev); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got.Text != "Draw a diagram in every answer." {
+		t.Errorf("kept %+v", got)
+	}
+}
+
+// TestKeptRule_isWhatTheProductKeeps: the intent eval grades this, so it
+// must be the same check Run applies.
+func TestKeptRule_isWhatTheProductKeeps(t *testing.T) {
+	u := Understanding{Memory: "Draw a diagram in every answer.", MemoryMarker: "Ab Jetzt"}
+	if got := u.KeptRule("ab jetzt immer mit Diagramm"); got != u.Memory {
+		t.Errorf("kept %q, want the rule", got)
+	}
+	if got := u.KeptRule("zeichne ein diagramm des ablaufs"); got != "" {
+		t.Errorf("kept %q from a question without the word", got)
+	}
+	if u.Memory == "" {
+		t.Error("KeptRule changed the understanding it was asked about")
+	}
+}
+
+// TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt: the prompt's own
+// examples are patterns ("don't ... anymore"), a reader types a curly
+// apostrophe, and a model quotes back either. The words must be the
+// question's, in its order; spelling and spacing are not the test.
+func TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt(t *testing.T) {
+	rule := "Do not mention the library lerb-chooser-ui."
+	for _, c := range []struct {
+		question, marker string
+		kept             bool
+	}{
+		{"don’t mention lerb-chooser-ui anymore", "don't ... anymore", true},
+		{"don't mention lerb-chooser-ui anymore", "don’t … anymore", true},
+		{"don't  mention it\nanymore", "don't mention it anymore", true},
+		{"ne le mentionne plus jamais", "ne ... plus jamais", true},
+		{"anymore, don't mention it", "don't ... anymore", false},
+		{"mention lerb-chooser-ui", "...", false},
+	} {
+		got := Understanding{Memory: rule, MemoryMarker: c.marker}.KeptRule(c.question)
+		if (got != "") != c.kept {
+			t.Errorf("%q with marker %q: kept %q, want kept: %v", c.question, c.marker, got, c.kept)
+		}
+	}
+}
+
+// TestPipeline_forgettingNeedsNoMarker: "show flowcharts again" lasts by
+// nature and carries no "from now on"; the gate is on keeping a rule, never
+// on dropping one.
+func TestPipeline_forgettingNeedsNoMarker(t *testing.T) {
+	reply := `{"intent":"memory","terms":[],"code_terms":[],"repos":[],"memory":"","memory_removes":[3]}`
+	c, _, _ := memoryUpstream(t, reply)
+	p := NewPipeline(c, &fakeSearch{}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	var got memory.Directive
+	ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
+		got = d
+		return memory.Added{Removed: []string{"Never draw flowchart diagrams."}}, nil
+	}}
+
+	if _, _, err := p.Run(withMemory(memory.Row{ID: 3, Text: "Never draw flowchart diagrams."}), "Zeig wieder Flowcharts.", AudienceBA, LanguageDE, Thread{}, ev); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got.Removes) != 1 || got.Removes[0] != 3 {
+		t.Errorf("directive = %+v, want the rule forgotten", got)
+	}
+}
+
 func TestPipeline_aFullMemoryRefusesTheRuleAndSaysSo(t *testing.T) {
 	db := gatherDB(t)
 	c, _, _ := memoryUpstream(t, flowchartDirective)
@@ -243,7 +357,7 @@ func TestPipeline_aFullMemoryRefusesTheRuleAndSaysSo(t *testing.T) {
 func TestPipeline_aFailedWriteBesideAQuestionIsATraceLineNotAFailedTurn(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
-	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams."}`
+	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams.","memory_marker":"never"}`
 	c, streams, _ := memoryUpstream(t, reply, "So [1].")
 	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
 		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
@@ -283,7 +397,7 @@ func TestMemoryAnswer_aRuleWithQuotesIsNotEscaped(t *testing.T) {
 func TestAnswer_theReadersRulesCloseThePromptAheadOfTheLanguage(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "So [1].")
 	rows := []memory.Row{{ID: 1, Text: "Never draw flowchart diagrams.", ScopeLive: true}}
-	got, err := NewAnswerer(c).Answer(withMemory(rows...), "How?", AudienceBA, LanguageDE, twoSources(), Scope{}, "", func(string) {})
+	got, err := NewAnswerer(c).Answer(withMemory(rows...), "How?", AudienceBA, LanguageDE, twoSources(), Scope{}, FollowUp{}, func(string) {})
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -301,11 +415,11 @@ func TestAnswer_theReadersRulesCloseThePromptAheadOfTheLanguage(t *testing.T) {
 
 func TestAnswer_withoutRulesThePromptIsWhatItWas(t *testing.T) {
 	c, plain, _ := streamUpstream(t, "So [1].")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", func(string) {}); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, func(string) {}); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	c, empty, _ := streamUpstream(t, "So [1].")
-	if _, err := NewAnswerer(c).Answer(withMemory(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, "", func(string) {}); err != nil {
+	if _, err := NewAnswerer(c).Answer(withMemory(), "How?", AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, func(string) {}); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if *plain != *empty {
@@ -322,7 +436,7 @@ func TestAnswer_aScopedRuleFollowsTheTurnsRepositories(t *testing.T) {
 	// this turn is not about.
 	c, prompt, _ := streamUpstream(t, "So [1].")
 	rows := []memory.Row{{ID: 1, Text: "Skip the tests.", Scope: "shop", ScopeLive: true}}
-	if _, err := NewAnswerer(c).Answer(withMemory(rows...), "How?", AudienceBA, LanguageEN, twoSources(), Scope{Known: []string{"peeq"}}, "", func(string) {}); err != nil {
+	if _, err := NewAnswerer(c).Answer(withMemory(rows...), "How?", AudienceBA, LanguageEN, twoSources(), Scope{Known: []string{"peeq"}}, FollowUp{}, func(string) {}); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Contains(*prompt, "Skip the tests") {

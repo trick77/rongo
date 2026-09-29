@@ -223,7 +223,8 @@ const noCeiling = int64(1<<63 - 1)
 
 // Store is the thread and message store, backed by the messages tables.
 type Store struct {
-	db *sql.DB
+	db       *sql.DB
+	evidence Evidence
 }
 
 // NewStore builds a Store.
@@ -1365,123 +1366,6 @@ func (s *Store) LinkChoice(ctx context.Context, subject string, messageID, clari
 		return fmt.Errorf("link choice: message %d and clarification %d are not in the same thread owned by this subject", messageID, clarificationID)
 	}
 	return nil
-}
-
-// SaveSources records what an answer was actually written from, as chunk ids.
-func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.Source) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	for _, src := range sources {
-		// One id per row: a commit source has no chunk, a chunk no commit.
-		chunkID, commitID := src.ChunkID, int64(0)
-		if src.IsCommit() {
-			chunkID, commitID = 0, src.CommitID
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO message_sources (message_id, chunk_id, commit_id, reason, hop) VALUES (?,?,?,?,?)`,
-			messageID, chunkID, commitID, src.Reason, src.Hop); err != nil {
-			return fmt.Errorf("store source %d/%d: %w", chunkID, commitID, err)
-		}
-	}
-	return tx.Commit()
-}
-
-// Sources resolves an answer's chunk ids back to their text, ordered by hop
-// then chunk id. A chunk a re-index removed no longer joins and is silently
-// omitted from the returned slice. A message that does not belong to a
-// thread owned by subject yields an empty slice, the same shape as "no
-// sources yet", never another user's evidence.
-//
-// Sources also reports total: how many rows message_sources actually holds
-// for this message, scoped by the same ownership check. The caller decides
-// what an incomplete set means (Sources itself does not know), but it can
-// only decide correctly by comparing len(returned) against total — a
-// re-index that removed SOME of the evidence looks identical to one that
-// removed none of it if only the resolved slice is visible.
-func (s *Store) Sources(ctx context.Context, subject string, messageID int64) (sources []ask.Source, total int, err error) {
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM message_sources ms
-		JOIN messages m ON m.id = ms.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE ms.message_id = ? AND t.user_subject = ?`, messageID, subject).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count sources: %w", err)
-	}
-
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT ms.chunk_id, f.repo, r.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text, ms.reason, ms.hop
-		FROM message_sources ms
-		JOIN chunks c ON c.id = ms.chunk_id
-		JOIN files f ON f.id = c.file_id
-		-- Deliberately NOT filtered on r.enabled, unlike every retrieval and
-		-- routing query. This is the RECORD: a turn answered before its
-		-- repository was parked cites it, and a thread is never rewritten. An
-		-- enabled clause here would empty the sources of answers that were
-		-- correct when they were given, which is the opposite of what parking
-		-- means — it stops NEW answers, it does not revise old ones.
-		JOIN repo_state r ON r.name = f.repo
-		JOIN messages m ON m.id = ms.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE ms.message_id = ? AND t.user_subject = ?
-		ORDER BY ms.hop, ms.chunk_id`, messageID, subject)
-	if err != nil {
-		return nil, 0, fmt.Errorf("read sources: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := []ask.Source{}
-	for rows.Next() {
-		var src ask.Source
-		if err := rows.Scan(&src.ChunkID, &src.Repo, &src.Branch, &src.Path, &src.SHA, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text, &src.Reason, &src.Hop); err != nil {
-			return nil, 0, fmt.Errorf("scan source: %w", err)
-		}
-		out = append(out, src)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	commits, err := s.commitSources(ctx, subject, messageID)
-	if err != nil {
-		return nil, 0, err
-	}
-	return append(out, commits...), total, nil
-}
-
-// commitSources is the commit half of Sources: the rows of a changes turn,
-// read back from the commits table in the order the answer numbered them.
-// Same ownership check, same "no enabled filter" rule, and a commit a
-// re-index dropped no longer joins, which the caller reads off total.
-func (s *Store) commitSources(ctx context.Context, subject string, messageID int64) ([]ask.Source, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT ms.commit_id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths, ms.reason, ms.hop
-		FROM message_sources ms
-		JOIN commits c ON c.id = ms.commit_id
-		JOIN repo_state r ON r.name = c.repo
-		JOIN messages m ON m.id = ms.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE ms.message_id = ? AND ms.commit_id <> 0 AND t.user_subject = ?
-		ORDER BY c.committed_at DESC, ms.commit_id`, messageID, subject)
-	if err != nil {
-		return nil, fmt.Errorf("read commit sources: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := []ask.Source{}
-	for rows.Next() {
-		src := ask.Source{Kind: ask.SourceCommit}
-		var at, paths string
-		if err := rows.Scan(&src.CommitID, &src.Repo, &src.Branch, &src.SHA, &at, &src.Subject, &src.Text, &paths, &src.Reason, &src.Hop); err != nil {
-			return nil, fmt.Errorf("scan commit source: %w", err)
-		}
-		src.CommittedAt, _ = time.Parse(time.RFC3339, at)
-		if paths != "" {
-			src.Paths = strings.Split(paths, "\n")
-		}
-		out = append(out, src)
-	}
-	return out, rows.Err()
 }
 
 // narrowedTo is the repositories a turn resumed from the too-broad panel was

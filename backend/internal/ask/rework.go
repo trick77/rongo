@@ -63,7 +63,26 @@ func (p *Pipeline) answerRework(ctx context.Context, instruction string, audienc
 	answer, err := p.answerer.Rework(ctx, instruction, audience, lang, t, scope, ev.tokens())
 	answer.Scope = scope
 	if err == nil {
-		ev.detail("writing", writingDetail(answer, len(t.Sources)))
+		ev.readAt(t.Sources).detail("writing", writingDetail(answer, len(t.Sources)))
 	}
 	return answer, err
+}
+
+// readAt is where a rework's basis was read from: each repository at the
+// commit its files were read at, once. The basis is the record re-read from
+// git, not the index as it stands now, and the trace says so.
+func readAt(sources []Source) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range sources {
+		if s.IsCommit() || s.SHA == "" {
+			continue
+		}
+		k := s.Repo + " " + shortSHA(s.SHA)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	return out
 }

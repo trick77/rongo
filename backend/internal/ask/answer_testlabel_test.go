@@ -18,7 +18,7 @@ func TestAnswer_testSourcesAreLabelledAndTheRuleSaysCiteTheMechanism(t *testing.
 		{ChunkID: 2, Repo: "llmwire", Branch: "master", Path: "registry_test.go", Symbol: "TestNewRegistry_Rejects",
 			StartLine: 426, EndLine: 450, Text: "func TestNewRegistry_Rejects(t *testing.T) {", Reason: "hit"},
 	}
-	if _, err := NewAnswerer(c).Answer(context.Background(), "How are profiles loaded?", AudienceBA, LanguageEN, sources, Scope{Known: []string{"llmwire"}}, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "How are profiles loaded?", AudienceBA, LanguageEN, sources, Scope{Known: []string{"llmwire"}}, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	p := *prompt
