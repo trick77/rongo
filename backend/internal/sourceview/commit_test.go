@@ -40,3 +40,27 @@ func TestCommit_servesARecordedCommitWithItsFiles(t *testing.T) {
 		t.Errorf("no reader: %v", err)
 	}
 }
+
+// TestRecordedCommit_readsACommitTheLaneHasSinceDropped: the lane is a
+// window, and an answer written from a commit that slid out of it is still
+// written from it. The thread's record reads it without the lane's say.
+func TestRecordedCommit_readsACommitTheLaneHasSinceDropped(t *testing.T) {
+	f := newFixture(t, 1<<20)
+
+	got, err := f.svc.RecordedCommit(context.Background(), "peeq", f.second)
+	if err != nil {
+		t.Fatalf("RecordedCommit: %v", err)
+	}
+	if got.SHA != f.second || got.Branch != "main" || len(got.Files) != 1 {
+		t.Errorf("RecordedCommit = %+v", got)
+	}
+	if _, err := f.svc.RecordedCommit(context.Background(), "peeq", "-rf"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("malformed sha: %v", err)
+	}
+	if _, err := f.svc.RecordedCommit(context.Background(), "nope", f.second); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown repo: %v", err)
+	}
+	if _, err := f.svc.WithCommits(nil).RecordedCommit(context.Background(), "peeq", f.second); !errors.Is(err, ErrNotFound) {
+		t.Errorf("no reader: %v", err)
+	}
+}

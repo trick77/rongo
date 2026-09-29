@@ -36,14 +36,15 @@ func (h *Holder) Rows() []Row {
 }
 
 // Apply folds what a directive did into the rows: the deleted go, the new
-// one comes first.
+// one comes first. A rule the reader already had comes back as itself and
+// moves to the front rather than standing twice.
 func (h *Holder) Apply(a Added) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	gone := map[int64]bool{}
+	gone := map[int64]bool{a.Row.ID: true}
 	for _, id := range a.Deleted {
 		gone[id] = true
 	}

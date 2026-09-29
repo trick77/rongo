@@ -135,8 +135,8 @@ type Answer struct {
 
 // PromptParts is the answer prompt by section, in estimated tokens. System is
 // every rule the audience, language and scope assembled — and the thread's
-// previous question with it, because a follow-up is written into the rules
-// (answerFollowUp) rather than into the message the reader typed. Sources is
+// previous question and answer with it, because a follow-up is written into
+// the rules (answerFollowUp) rather than into the message the reader typed. Sources is
 // the code in front of the model, headers and separators included. Question
 // is what was asked, and only that.
 type PromptParts struct {
@@ -370,22 +370,49 @@ alone and that a new thread can answer across the whole corpus, then answer for
 them. Make no claim of any kind about any other repository - not a guess, not a
 comparison, not "presumably".`
 
+// FollowUp is the turn a follow-up continues: the previous question and the
+// answer it got. Zero on a first turn, and then the prompt carries nothing
+// about a follow-up at all.
+type FollowUp struct {
+	Question string
+	Answer   string
+}
+
+// followUpOf is what a follow-up of t carries into the answer prompt.
+func followUpOf(t Thread) FollowUp {
+	return FollowUp{Question: t.Question, Answer: t.Answer}
+}
+
 // answerFollowUp is added when the turn continues a thread that already
 // answered something. Its one format argument is the PREVIOUS QUESTION.
-//
-// The previous answer's text is not here and must not be: the sources are what
-// a claim rests on, and a model handed its own earlier prose alongside sources
-// it was NOT written from ends up restating it and citing the new sources for
-// it. The question is enough for both things this rule is for — telling the
-// model what a pronoun points at, and telling it not to write the same answer
-// again with a picture on top. A rework is the exception, and it has its own
-// block: answerRework.
 const answerFollowUp = `
 
 This is a follow-up to an earlier question in the same thread: %s. Answer the
 NEW question. Where it points at something without naming it ("that", "this",
 "it"), it points at the subject of that earlier question. Do not restate what
 was already explained - the reader has it directly above.`
+
+// answerFollowUpAnswer follows answerFollowUp when the previous turn
+// answered. Its one format argument is that answer, markers stripped.
+//
+// "The flow" in a follow-up is the flow the previous answer described, and
+// the question alone cannot say which that was. The answer is prose the
+// model wrote itself, not something read from code, so it goes in as
+// context and never as a source: handed back beside sources it was NOT
+// written from, a claim of it would otherwise be restated and cited to a
+// source that never said it.
+const answerFollowUpAnswer = `
+
+Your previous answer, which the reader has directly above, was:
+
+<<<
+%s
+>>>
+
+It is context, never a source: it tells you what the new question refers to.
+Never cite it and never restate its claims as fact. Every claim you make rests
+on the numbered sources below. Where they say something it did not, or
+contradict it, the sources win.`
 
 // answerRework replaces answerFollowUp on a turn that asks for the previous
 // answer in another form. Its one format argument is the reader's
@@ -1205,11 +1232,10 @@ const structureIsConfiguration = "\nThis is configuration, not code. It says whi
 // the model. A model handed only a question and a system prompt answers it
 // fluently from its own training, and that answer would be about some other
 // codebase — the single most expensive failure this product can produce.
-// followingUp is the question this thread asked last, empty when there is
-// none. Only the question: see answerFollowUp for why the previous answer's
-// text stays out of here.
+// followingUp is the turn this one continues, zero when there is none; its
+// answer goes in as context, never as a source (answerFollowUpAnswer).
 func (a *Answerer) Answer(ctx context.Context, question string, audience Audience, lang Language,
-	sources []Source, scope Scope, followingUp string, onToken func(string)) (Answer, error) {
+	sources []Source, scope Scope, followingUp FollowUp, onToken func(string)) (Answer, error) {
 
 	if len(sources) == 0 {
 		return Answer{Text: NothingFound(lang, nil)}, nil
@@ -1237,8 +1263,8 @@ func (a *Answerer) Answer(ctx context.Context, question string, audience Audienc
 // Rework writes the previous answer again in the form the instruction asks
 // for, from that answer's own sources. The previous text goes into the user
 // message beside them — the one place in the product where prose of the
-// model's own reaches the answering prompt, and it is safe here because the
-// sources next to it are the ones it was written from.
+// model's own is material to rework rather than context, and it is safe here
+// because the sources next to it are the ones it was written from.
 //
 // No follow-up rule: "do not restate what was already explained" would forbid
 // the one thing this call exists to do, the same as Reexplain.
@@ -1249,7 +1275,7 @@ func (a *Answerer) Rework(ctx context.Context, instruction string, audience Audi
 		return Answer{}, fmt.Errorf("rework: no sources to rework from")
 	}
 	rules := memory.Applying(memory.From(ctx).Rows(), scope.Known)
-	system := systemPrompt(audience, lang, t.Sources, scope, "", fmt.Sprintf(answerRework, instruction), memory.Block(rules, scope.Known))
+	system := systemPrompt(audience, lang, t.Sources, scope, FollowUp{}, fmt.Sprintf(answerRework, instruction), memory.Block(rules, scope.Known))
 	user := renderRework(instruction, t, scope.Stages)
 	// The sources are measured on their own here: the user message also
 	// carries the previous turn, which is neither the question nor the code
@@ -1267,11 +1293,11 @@ func (a *Answerer) Rework(ctx context.Context, instruction string, audience Audi
 }
 
 // systemPrompt assembles the answering rules for one turn. followingUp is
-// the previous question of an ordinary follow-up, rework the rendered rework
+// the previous turn of an ordinary follow-up, rework the rendered rework
 // block; at most one of them is set. memories is the reader's standing
 // instructions as memory.Block rendered them, empty for a reader with none,
 // and then the prompt is byte for byte what it was before memory existed.
-func systemPrompt(audience Audience, lang Language, sources []Source, scope Scope, followingUp, rework, memories string) string {
+func systemPrompt(audience Audience, lang Language, sources []Source, scope Scope, followingUp FollowUp, rework, memories string) string {
 	name := languageName(lang)
 	system := fmt.Sprintf(answerCommon, name)
 	if audience == AudienceDev {
@@ -1350,8 +1376,11 @@ func systemPrompt(audience Audience, lang Language, sources []Source, scope Scop
 	if scope.AllDenied && len(scope.Known) > 0 {
 		system += fmt.Sprintf(answerAllDenied, strings.Join(scope.Known, ", "))
 	}
-	if followingUp != "" {
-		system += fmt.Sprintf(answerFollowUp, followingUp)
+	if followingUp.Question != "" {
+		system += fmt.Sprintf(answerFollowUp, followingUp.Question)
+		if followingUp.Answer != "" {
+			system += fmt.Sprintf(answerFollowUpAnswer, strings.TrimSpace(stripMarkersOutsideFences(followingUp.Answer)))
+		}
 	}
 	system += rework
 	// Computed from the sources rather than read off the scope, so this block

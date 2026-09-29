@@ -236,4 +236,35 @@ func TestUnderstandNamesRework(t *testing.T) {
 	if !strings.Contains(understandSystem, `"rework"`) || !strings.Contains(understandSystem, "It exists only when a previous turn is above") {
 		t.Error("the understanding prompt must define rework and tie it to a previous turn")
 	}
+	// "zeichne ein diagramm des ablaufs" asks for the previous answer drawn,
+	// nothing new of the code. Absent from the examples, one reply called it
+	// a rework and the next a standing rule.
+	if !strings.Contains(understandSystem, `"zeichne ein Diagramm davon"`) {
+		t.Error("a diagram of the previous answer must be named as a rework")
+	}
+}
+
+// TestAReworkSaysWhichCommitsItsBasisWasReadAt: the basis is re-read from
+// git, not from the index as it is now, and the trace says where from.
+func TestAReworkSaysWhichCommitsItsBasisWasReadAt(t *testing.T) {
+	c, _ := reworkUpstream(t, reworkReply)
+	p := reworkPipeline(t, c)
+	th := reworkThread()
+	th.Sources[0].SHA = "0123456789abcdef"
+	th.Sources[1].SHA = "0123456789abcdef"
+	var writing map[string]any
+
+	if _, _, err := p.Run(context.Background(), "summarize", AudienceBA, LanguageEN, th,
+		Events{OnDetail: func(step string, d map[string]any) {
+			if step == "writing" {
+				writing = d
+			}
+		}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, _ := writing["read_at"].([]string)
+	if len(got) != 1 || got[0] != "peeq 0123456" {
+		t.Errorf("read_at = %v, want the one repository at its short commit", writing["read_at"])
+	}
 }

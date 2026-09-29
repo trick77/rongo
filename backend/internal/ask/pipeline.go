@@ -187,20 +187,19 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 //     after the question has been understood, and the reason a follow-up is
 //     never asked which repository was meant.
 //   - Question and Answer are WHAT the turn is about. They reach the
-//     understanding step and nothing else, so that "show me that as a diagram"
-//     resolves to the subject the reader is following up on instead of being
-//     searched for as the word "diagram".
+//     understanding step, so that "show me that as a diagram" resolves to the
+//     subject the reader is following up on instead of being searched for as
+//     the word "diagram", and the answering prompt, so that "the flow" is the
+//     flow the previous answer described.
 //
-// Answer is the previous answer's TEXT, and it is deliberately kept out of the
-// answering prompt of an ordinary follow-up: sources are the truth, and a
-// model handed its own earlier prose beside sources it was NOT written from
-// ends up citing them for it. Only the previous QUESTION goes there, as the
-// thing a pronoun points at.
+// Answer is the previous answer's TEXT. In an ordinary follow-up it reaches
+// the answering prompt as context and never as a source (answerFollowUpAnswer):
+// sources are the truth, and a model handed its own earlier prose as
+// something to cite ends up citing new sources for claims they never made.
 //
-// The one turn that does read the answer is a rework ("summarize", "as a
-// table"): the answer IS what that turn is about, and it is handed over
-// together with Sources, the material it was written from, so every claim in
-// the reworked text still has its source in front of the model.
+// A rework ("summarize", "as a table") is about the answer itself: it is
+// handed over together with Sources, the material it was written from, so
+// every claim in the reworked text still has its source in front of the model.
 type Thread struct {
 	// Pin is the repositories the thread has already narrowed to.
 	Pin []string
@@ -208,10 +207,11 @@ type Thread struct {
 	Question string
 	// Answer is the answer that question got.
 	Answer string
-	// Sources is what Answer was written from, as the record resolves them
-	// now, and SourcesTotal is how many the record holds. A re-index between
-	// the turns drops chunks from Sources and not from SourcesTotal, which
-	// is how a rework tells a whole basis from a partial one.
+	// Sources is what Answer was written from, re-read from git at the
+	// commit each was read at, and SourcesTotal is how many the record
+	// holds. A source git can no longer produce — a purged repository, a
+	// replaced snapshot — is missing from Sources and not from SourcesTotal,
+	// which is how a rework tells a whole basis from a partial one.
 	Sources      []Source
 	SourcesTotal int
 }
@@ -234,6 +234,14 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	u, err := p.understander.Understand(ctx, question, t, declared.Names())
 	if err != nil {
 		return Answer{}, nil, err
+	}
+	// A rule the reader gave no word for is not kept. A turn that was ONLY
+	// that rule asked for something about the answer and nothing of the
+	// code: the previous answer in another form, which is a rework — and
+	// the guard below makes it an ordinary question on a first turn.
+	if u.standingOnly(question) && u.Intent == IntentMemory && u.Directive().Empty() {
+		slog.Info("instruction not kept: no word of the reader's says it lasts", "thread", llm.ThreadID(ctx))
+		u.Intent = IntentRework
 	}
 	// A rework the guard refuses is an ordinary question from here on, in
 	// the record too: the intent rides the scope onto the row, and a
@@ -340,13 +348,13 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// the fused search nor the routing ladder has anything to say about a
 	// date window.
 	if p.isChanges(u) {
-		answer, err := p.answerChanges(ctx, question, audience, lang, u, scope, t.Question, ev)
+		answer, err := p.answerChanges(ctx, question, audience, lang, u, scope, FollowUp{Question: t.Question}, ev)
 		return answer, nil, err
 	}
 	// A release question leaves here for the same reason: its sources are
 	// the commits between two deployed versions.
 	if p.isRelease(u) {
-		answer, err := p.answerRelease(ctx, question, audience, lang, u, scope, t.Question, ev)
+		answer, err := p.answerRelease(ctx, question, audience, lang, u, scope, FollowUp{Question: t.Question}, ev)
 		return answer, nil, err
 	}
 	// A rework leaves here too: the previous answer and its own sources are
@@ -399,7 +407,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// is what the reader asked this turn, and the thread's older question is
 	// search material they did not type here. Naming it would say the turn
 	// went looking for something they asked a turn ago.
-	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
+	answer, err := p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), followUpOf(t), ev)
 	return answer, nil, err
 }
 
@@ -851,7 +859,7 @@ func withCensusDetail(d map[string]any, c Census) map[string]any {
 // terms are the search terms for the "nothing found" answer; a resume has none
 // to report, having searched nothing.
 func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audience Audience, lang Language,
-	hits []retrieve.Hit, scope Scope, terms []string, followingUp string, ev Events) (Answer, error) {
+	hits []retrieve.Hit, scope Scope, terms []string, followingUp FollowUp, ev Events) (Answer, error) {
 
 	scope = p.describeProjects(ctx, scope)
 
@@ -879,7 +887,7 @@ func (p *Pipeline) gatherAndAnswer(ctx context.Context, question string, audienc
 // step's detail attached once the stream has closed: what it cost, and how
 // many of the sources in front of the model it actually cited.
 func (p *Pipeline) answer(ctx context.Context, question string, audience Audience, lang Language,
-	sources []Source, scope Scope, followingUp string, ev Events) (Answer, error) {
+	sources []Source, scope Scope, followingUp FollowUp, ev Events) (Answer, error) {
 	ev.status("answering")
 	answer, err := p.answerer.Answer(ctx, question, audience, lang, sources, scope, followingUp, ev.tokens())
 	answer.Scope = scope
@@ -1191,15 +1199,15 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 // turn that went through a card is still a turn of the thread, and the reader
 // who typed "und wo wird das entschieden?" gets it answered by a clarification
 // and then by an answer: without the thread the answer prompt loses the rule
-// that says what "das" points at. Only t.Question reaches the prompt — see
-// answerFollowUp for why the previous answer's text does not.
+// that says what "das" points at, and the previous answer beside it as
+// context (answerFollowUpAnswer).
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language,
 	hits []retrieve.Hit, scope Scope, t Thread, ev Events) (Answer, error) {
 
 	// Marked as resumed so the locate loop stays out of it: this path replays
 	// the candidate's stored hits and searches for nothing more.
 	scope.Resumed = true
-	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, t.Question, ev)
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, nil, followUpOf(t), ev)
 }
 
 // ResumeRepo continues a turn after the reader chose a REPOSITORY off a
@@ -1280,7 +1288,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 	// documentation-only footing come out of a resumed turn the way they come
 	// out of any other: a copy of it here once left both off exactly the
 	// turns a repository card sent the reader into.
-	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), t.Question, ev)
+	return p.gatherAndAnswer(ctx, question, audience, lang, hits, scope, withoutPrior(texts, u.Prior), followUpOf(t), ev)
 }
 
 // Reexplain answers the same question for the other audience from sources a
@@ -1315,5 +1323,22 @@ func (p *Pipeline) Reexplain(ctx context.Context, question string, audience Audi
 	// again for the other audience, and the first answer is right above it in
 	// the thread. Telling the model not to restate what was already explained
 	// would forbid the one thing this path exists to do.
-	return p.answer(ctx, question, audience, lang, sources, scope, "", ev)
+	return p.answer(ctx, question, audience, lang, sources, scope, FollowUp{}, ev.readAt(sources))
+}
+
+// readAt adds to the writing step where a basis re-read from the record came
+// from, for the two turns that answer from one: rework and re-explain.
+func (e Events) readAt(sources []Source) Events {
+	at := readAt(sources)
+	if e.OnDetail == nil || len(at) == 0 {
+		return e
+	}
+	next := e.OnDetail
+	e.OnDetail = func(step string, d map[string]any) {
+		if step == "writing" {
+			d["read_at"] = at
+		}
+		next(step, d)
+	}
+	return e
 }

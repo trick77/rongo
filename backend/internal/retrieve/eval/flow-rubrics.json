@@ -180,5 +180,31 @@
         "path": "src/main/java/works/weave/socks/cart/controllers/CartsController.java"
       }
     ]
+  },
+  {
+    "question": "draw the flow as a diagram",
+    "lang": "en",
+    "follows": "What happens when a customer places an order?",
+    "must": [
+      "The answer contains a diagram of the flow.",
+      "The diagram has the orders service fetch the customer's data and charge the payment service before it posts the shipment.",
+      "The diagram ends with the shipment going onto a message queue that queue-master reads."
+    ],
+    "must_not": [
+      "The diagram saves or ships the order before payment is authorised.",
+      "The diagram adds a step the previous answer did not describe, such as an e-mail to the customer."
+    ]
+  },
+  {
+    "question": "In that flow, where is the shipping cost added?",
+    "lang": "en",
+    "follows": "What happens when a customer places an order?",
+    "must": [
+      "The orders service adds a fixed, hard-coded shipping amount of 4.99 to the order total."
+    ],
+    "must_not": [
+      "The shipping service computes the shipping cost.",
+      "The shipping cost depends on the address or the weight."
+    ]
   }
 ]

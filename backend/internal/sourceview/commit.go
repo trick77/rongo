@@ -112,6 +112,34 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 	if n == 0 {
 		return Commit{}, fmt.Errorf("%w: %s/%s is not in the commit lane", ErrNotFound, repo, sha)
 	}
+	return s.show(ctx, repo, branch, sha)
+}
+
+// RecordedCommit is Commit for a thread's own record: a commit an answer was
+// written from, read back without the lane's permission. The lane is a
+// window that slides with every push and drops what fell out of it; the
+// answer that cited the commit did not stop being written from it.
+func (s *Service) RecordedCommit(ctx context.Context, repo, sha string) (Commit, error) {
+	if s.commits == nil {
+		return Commit{}, fmt.Errorf("%w: no commit reader", ErrNotFound)
+	}
+	if !shaRe.MatchString(sha) {
+		return Commit{}, fmt.Errorf("%w: commit %q", ErrInvalid, sha)
+	}
+	var branch string
+	err := s.db.QueryRowContext(ctx, `SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Commit{}, fmt.Errorf("%w: unknown repository %q", ErrNotFound, repo)
+	}
+	if err != nil {
+		return Commit{}, fmt.Errorf("look up repository %q: %w", repo, err)
+	}
+	return s.show(ctx, repo, branch, sha)
+}
+
+// show reads sha of repo from the checkout, once whoever asked has decided
+// it may be shown.
+func (s *Service) show(ctx context.Context, repo, branch, sha string) (Commit, error) {
 	d, err := s.commits.Show(ctx, repos.Spec{Name: repo}, sha)
 	if err != nil {
 		return Commit{}, fmt.Errorf("%w: %w", ErrNotFound, err)

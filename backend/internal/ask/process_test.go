@@ -119,7 +119,7 @@ func TestTheProcessListingReachesThePromptAndIsNeverCited(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
 	listing := "Process \"order-intake\" in shop/workflow/order-intake.bpmn:\n- Validate order (serviceTask) -> Charge payment\n"
 	_, err := NewAnswerer(c).Answer(context.Background(), "Walk me through order intake", AudienceBA, LanguageEN,
-		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Processes: listing}, "", nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}, Processes: listing}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestTheProcessListingReachesThePromptAndIsNeverCited(t *testing.T) {
 	// And nothing of it without a listing.
 	c, prompt, _ = streamUpstream(t, "x")
 	_, err = NewAnswerer(c).Answer(context.Background(), "Walk me through order intake", AudienceBA, LanguageEN,
-		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, "", nil)
+		bothReposSources(), Scope{Known: []string{"peeq", "rongo"}}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

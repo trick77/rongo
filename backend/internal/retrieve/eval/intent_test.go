@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/memory"
 )
 
 // intentStages are the declared stage names the classifier is told about,
@@ -30,6 +31,13 @@ type intentCase struct {
 	want     string
 	notLane  bool
 	record   bool
+	// answered is the previous turn's answer, for a follow-up that refers
+	// to it: a rework exists only with one above.
+	answered string
+	// memory runs the case with memory on, and rule says whether the
+	// product keeps a standing rule from it (ask.Understanding.KeptRule).
+	memory bool
+	rule   bool
 }
 
 // intentCases is the gate's routing measured where it is decided, which
@@ -71,7 +79,56 @@ var intentCases = []intentCase{{
 	name:     "what is between two stages, with no notes asked for",
 	question: "what is between prod and intg?",
 	record:   true,
+}, {
+	// The incident: one reply called this a rework AND a standing rule, the
+	// next a rule alone, and every later answer of that reader drew one.
+	name:     "a diagram of the previous answer is a rework and no rule",
+	question: "zeichne ein diagramm des ablaufs",
+	follows:  "wie funktioniert der bypass der partnervalidierung?",
+	answered: bypassAnswer,
+	want:     ask.IntentRework,
+	memory:   true,
+}, {
+	name:     "the same in English",
+	question: "draw that as a diagram",
+	follows:  "how does the partner validation bypass work?",
+	answered: bypassAnswer,
+	want:     ask.IntentRework,
+	memory:   true,
+}, {
+	name:     "the same in French",
+	question: "fais-en un diagramme",
+	follows:  "comment fonctionne le contournement de la validation?",
+	answered: bypassAnswer,
+	want:     ask.IntentRework,
+	memory:   true,
+}, {
+	name:     "a table of the previous answer is a rework and no rule",
+	question: "als Tabelle bitte",
+	follows:  "wie funktioniert der bypass der partnervalidierung?",
+	answered: bypassAnswer,
+	want:     ask.IntentRework,
+	memory:   true,
+}, {
+	name:     "from now on is a rule",
+	question: "ab jetzt immer mit Diagramm",
+	want:     ask.IntentMemory,
+	memory:   true,
+	rule:     true,
+}, {
+	name:     "never again is a rule",
+	question: "never show me flowcharts again",
+	want:     ask.IntentMemory,
+	memory:   true,
+	rule:     true,
 }}
+
+// bypassAnswer is the opening of the incident's first answer, which is all
+// the understanding step is shown of one.
+const bypassAnswer = "Der CRM-Bypass der Partnervalidierung funktioniert so, dass eine Schadenmeldung mit dem " +
+	"Verarbeitungshinweis BYPASS_PARTNERVALIDATION bei der Ereignisregistrierung an Syrius technisch verändert " +
+	"wird: Die Sozialversicherungsnummer wird entfernt und eine vorhandene Personalnummer durch einen künstlichen " +
+	"Wert mit Präfix BYPASS- ersetzt; in einer Produktionsumgebung wird diese Änderung nicht angewendet."
 
 // TestEvalUnderstandIntent measures the classifier's intent on the release
 // gate, one short-gate call per case. Run it twice: a pinned gate call still
@@ -84,14 +141,15 @@ func TestEvalUnderstandIntent(t *testing.T) {
 
 	for _, tc := range intentCases {
 		t.Run(tc.name, func(t *testing.T) {
-			thread := ask.Thread{}
-			if tc.follows != "" {
-				thread.Question = tc.follows
+			thread := ask.Thread{Question: tc.follows, Answer: tc.answered}
+			ctx := context.Background()
+			if tc.memory {
+				ctx = memory.With(ctx, memory.NewHolder(nil))
 			}
 			var got ask.Understanding
 			var last error
 			for attempt := 1; attempt <= expandAttempts; attempt++ {
-				got, last = u.Understand(context.Background(), tc.question, thread, intentStages)
+				got, last = u.Understand(ctx, tc.question, thread, intentStages)
 				if last == nil {
 					break
 				}
@@ -112,6 +170,13 @@ func TestEvalUnderstandIntent(t *testing.T) {
 				}
 			case got.Intent != tc.want:
 				t.Errorf("intent = %q, want %q (stage=%q)", got.Intent, tc.want, got.Stage)
+			}
+			if tc.memory {
+				kept := got.KeptRule(tc.question)
+				t.Logf("memory=%q marker=%q kept=%q", got.Memory, got.MemoryMarker, kept)
+				if (kept != "") != tc.rule {
+					t.Errorf("rule kept = %q, want kept: %v", kept, tc.rule)
+				}
 			}
 		})
 	}

@@ -32,6 +32,18 @@ describe("Trace, the remaining step details", () => {
     expect(container.querySelector(".trace-detail")?.textContent).toContain("3 of 12 sources cited · retried once");
   });
 
+  it("says which commits a basis re-read from the record came from", () => {
+    const { container } = strict(
+      <Trace
+        steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 9000, completion_tokens: 400, cited: 2, sources: 5, read_at: ["peeq 0123456", "loom abcdef0"] } }]}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 100}
+      />,
+    );
+    expect(container.querySelector(".trace-detail")?.textContent).toContain("2 of 5 sources cited · read at peeq 0123456loom abcdef0");
+  });
+
   it("names a pinned thread's scope, a corpus-wide ask, and the repositories left out", () => {
     const { rerender } = strict(
       <Trace

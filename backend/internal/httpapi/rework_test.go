@@ -8,8 +8,59 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/threads"
 )
+
+// checkout is file bytes by "sha:path", as sourceview reads git.
+type checkout map[string]string
+
+func (c checkout) Object(_ context.Context, _ repos.Spec, sha, path string) (string, int64, error) {
+	body, ok := c[sha+":"+path]
+	if !ok {
+		return "", 0, fmt.Errorf("no %s:%s", sha, path)
+	}
+	return "blob", int64(len(body)), nil
+}
+
+func (c checkout) ReadFile(_ context.Context, _ repos.Spec, sha, path string) ([]byte, error) {
+	body, ok := c[sha+":"+path]
+	if !ok {
+		return nil, fmt.Errorf("no %s:%s", sha, path)
+	}
+	return []byte(body), nil
+}
+
+// TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis is the incident: a good
+// answer, a poll a minute later that re-indexed a file it read, and
+// "zeichne ein diagramm des ablaufs" refused because every chunk of that
+// file had a new id. The basis is read at the commit it was read at.
+func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
+	db := askDB(t)
+	chunkID := seedChunk(t, db)
+	src := ask.Source{ChunkID: chunkID, Repo: "peeq", Path: "a.go", SHA: "abc1234", StartLine: 2, EndLine: 3, Reason: "hit"}
+	a := &fakeAsker{tokens: []string{"x"}, sources: []ask.Source{src}}
+	viewer := sourceview.New(db, checkout{"abc1234:a.go": "package a\nfunc Bypass() {\n}\n"}, 1<<20)
+	deps := Deps{Auth: auth.NewService(db, "dev", ""), Ask: a, Threads: threads.NewStore(db).WithEvidence(viewer)}
+	postAsk(t, deps, `{"question":"wie funktioniert der bypass?","audience":"ba"}`)
+	if _, err := db.Exec(`DELETE FROM chunks WHERE id = ?`, chunkID); err != nil {
+		t.Fatalf("re-index: %v", err)
+	}
+
+	list, err := deps.Threads.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	postAsk(t, deps, fmt.Sprintf(`{"question":"zeichne ein diagramm des ablaufs","audience":"ba","thread_id":%q}`, list[0].PublicID))
+
+	if a.gotThread.SourcesTotal != 1 || len(a.gotThread.Sources) != 1 {
+		t.Fatalf("basis %d of %d, want whole", len(a.gotThread.Sources), a.gotThread.SourcesTotal)
+	}
+	if got := a.gotThread.Sources[0].Text; got != "func Bypass() {\n}" {
+		t.Errorf("text = %q, want lines 2-3 at the commit the answer read", got)
+	}
+}
 
 // TestAsk_aFollowUpCarriesThePreviousAnswersSources: a rework answers from
 // the previous turn's own basis, so the handler reads it with the previous

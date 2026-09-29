@@ -80,7 +80,7 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 	// that has just read two thousand tokens of English tends to answer in
 	// it. The closing line is what keeps a German answer German.
 	c, prompt, _ := streamUpstream(t, "x")
-	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, "", nil); err != nil {
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, FollowUp{}, nil); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if strings.Count(*prompt, "German") < 2 {
@@ -96,7 +96,7 @@ func TestAnswer_theLanguageIsSaidLastAsWell(t *testing.T) {
 func TestAnswer_germanIsSpelledTheSwissWay(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "Der Gesch", "aeftsprozess ist gr", "ößer [1].")
 	var seen []string
-	a, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, "", collect(&seen))
+	a, err := NewAnswerer(c).Answer(context.Background(), "Wie?", AudienceBA, LanguageDE, twoSources(), Scope{}, FollowUp{}, collect(&seen))
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestAnswer_germanIsSpelledTheSwissWay(t *testing.T) {
 
 	// An Italian answer is what the model wrote.
 	c, _, _ = streamUpstream(t, "Il Gesch", "aeftsprozess è größer.")
-	a, err = NewAnswerer(c).Answer(context.Background(), "Come?", AudienceBA, LanguageIT, twoSources(), Scope{}, "", nil)
+	a, err = NewAnswerer(c).Answer(context.Background(), "Come?", AudienceBA, LanguageIT, twoSources(), Scope{}, FollowUp{}, nil)
 	if err != nil {
 		t.Fatalf("Answer: %v", err)
 	}

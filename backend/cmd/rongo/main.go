@@ -389,12 +389,14 @@ func main() {
 
 	// The viewer and the answer pipeline read files through the same service:
 	// the viewer shows a citation, the pipeline reads a process model whose
-	// nodes were cited, both at the indexed commit under the same rules.
+	// nodes were cited, both at the indexed commit under the same rules. A
+	// thread reads its answers' sources back through it too, at the commit
+	// each was read at, so a re-index since the answer changes nothing.
 	source := sourceview.New(db, gitClient, cfg.IndexMaxFileBytes).WithCommits(gitClient)
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
-		Threads:        threads.NewStore(db),
+		Threads:        threads.NewStore(db).WithEvidence(source),
 		Source:         source,
 		Commit:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
