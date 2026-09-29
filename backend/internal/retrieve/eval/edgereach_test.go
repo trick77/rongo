@@ -22,7 +22,7 @@ func TestFlowEdgeReach(t *testing.T) {
 	db := evalDB(t, embedDim(t))
 	ctx := context.Background()
 
-	questions := loadFlowQuestions(t)
+	questions := searchedFlowQuestions(t)
 	var totalPairs, totalReached, totalRepoReached, totalComposed int
 
 	for _, q := range questions {
