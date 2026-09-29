@@ -159,8 +159,6 @@ func (ids *IDs) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Directive is what the understanding read as a standing instruction, or
-// nothing.
 // standingOnly drops a rule the question gives no word of the reader's for.
 // A rule lasts because the reader said so — "ab jetzt", "never" — and the
 // model has to quote that word; a quote the question does not hold is the
@@ -214,6 +212,8 @@ func (u Understanding) KeptRule(question string) string {
 	return u.Memory
 }
 
+// Directive is what the understanding read as a standing instruction, or
+// nothing.
 func (u Understanding) Directive() memory.Directive {
 	return memory.Directive{
 		Text:     u.Memory,
