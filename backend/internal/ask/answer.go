@@ -176,6 +176,10 @@ You are given numbered sources. The rules, without exception:
 
 - Every statement rests on a source and carries its marker, such as [1].
 - Invent nothing. What is not in the sources does not exist for you.
+- Silence in the sources is not absence in the system. What they do not show
+  is "not among the sources", never "does not exist", "does not happen" or
+  "is nowhere in the flow": the code that does it may simply not be in front
+  of you.
 - If the mechanism leads into code that is not present, say so: the call and
   the configuration are visible, the inside is not.
 - A comment is a claim, not proof. What the code does not deliver does not

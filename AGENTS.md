@@ -45,6 +45,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - **Never store or embed model text *about* code** — no module, file or symbol summary. Model prose written at index time goes stale like documentation and pulls a vector toward a claim no code honours. Reopen only with a `TestEvalMeasureAnswers` number, then embed-only, never shown. Per-turn judgement storing nothing (routing judge, reranker) is outside the rule.
 - **Never invent.** Chain into non-indexed code → say so: call and configuration visible, internals not.
 - **No hit means no hit** — "nothing found" plus the terms tried, never an answer from context.
+- **Silence in the sources is never absence in the system.** "Not among the sources", never "does not exist". A search that missed `OrdersController:156` had three of four answers state no shipping cost is added anywhere.
 - **Every claim citable**: repo, branch, file, line, indexed commit. Sources open in rongo's viewer at that commit, never a forge link. Cited files never evicted when capping context.
 - **Templated answer reaches the browser once, whole, from `finishTurn`**, never from a lane — a lane streaming nothing leaves an empty answer until reload.
 - **"What changed" comes from the commit lane, never the files** — the file index has no date, so "latest changes" ranked a month-old write-up over 33 commits of two days. Window and named repositories ARE the scope, applied by the pipeline, never the model. **Author stored, never served**: a shared page is public.
