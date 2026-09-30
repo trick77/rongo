@@ -115,6 +115,23 @@ func TestAnswer_streamsAndResolvesTheMarkersItUsed(t *testing.T) {
 	}
 }
 
+// TestAnswer_silenceInTheSourcesIsNotAbsence: asked where the shipping cost
+// is added, with the code that adds it missing from the sources, three of
+// four answers said no shipping cost is added anywhere. What the sources do
+// not show is "not among the sources", never a fact about the system.
+func TestAnswer_silenceInTheSourcesIsNotAbsence(t *testing.T) {
+	c, prompt, _ := streamUpstream(t, "x")
+	if _, err := NewAnswerer(c).Answer(context.Background(), "Where is the shipping cost added?",
+		AudienceBA, LanguageEN, twoSources(), Scope{}, FollowUp{}, nil); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	for _, want := range []string{"Silence in the sources is not absence in the system", `"not among the sources"`, `"does not exist"`} {
+		if !strings.Contains(*prompt, want) {
+			t.Errorf("the prompt lacks %q:\n%s", want, *prompt)
+		}
+	}
+}
+
 func TestAnswer_aMarkerWithNoSourceIsDroppedNotInvented(t *testing.T) {
 	// A model that cites [7] with three sources in front of it has made the
 	// number up. Emitting a citation for it would put a fabricated reference

@@ -136,6 +136,52 @@ func TestSearch_aRepositoryNameGluedToAGermanWordIsNotAMention(t *testing.T) {
 	}
 }
 
+// TestSearch_aNameOtherRepositoriesUseAsAWordIsNotAMention is the eval miss:
+// "In that flow, where is the shipping cost added?" narrowed the turn to a
+// repository called shipping, and the 4.99 in orders was never searched. A
+// fixed list of common words cannot know a corpus's domain words; the index
+// can. A plain name other repositories use as a word is vocabulary, and only
+// the understanding step's guess — which reads the sentence — narrows to it.
+func TestSearch_aNameOtherRepositoriesUseAsAWordIsNotAMention(t *testing.T) {
+	db := testDB(t)
+	addRepo(t, db, "shipping", "master")
+	addRepo(t, db, "orders", "master")
+	addRepo(t, db, "queue-master", "master")
+	addChunk(t, db, "shipping", "a.go", "A", "sender dispatch", nearVec)
+	addChunk(t, db, "orders", "b.go", "B", "float shipping sender dispatch", nearVec)
+	addChunk(t, db, "queue-master", "c.go", "C", "queue-master sender dispatch", nearVec)
+	r := New(db, fixedEmbedder{vec: queryVec})
+	repos := func(question string, guess ...string) map[string]bool {
+		t.Helper()
+		hits, err := r.Search(context.Background(), Query{Text: "sender", Question: question, Repos: guess, K: 5})
+		if err != nil {
+			t.Fatalf("Search() err = %v", err)
+		}
+		seen := map[string]bool{}
+		for _, h := range hits {
+			seen[h.Repo] = true
+		}
+		return seen
+	}
+
+	// No guess: "shipping" is a word orders uses, so nothing is narrowed.
+	if seen := repos("In that flow, where is the shipping cost added?"); !seen["orders"] {
+		t.Errorf("an ordinary word narrowed the search to %v", seen)
+	}
+	// The guess still narrows: the understanding step read the sentence.
+	if seen := repos("how does shipping queue a shipment?", "shipping"); seen["orders"] || !seen["shipping"] {
+		t.Errorf("the guess named shipping, got %v", seen)
+	}
+	// A name-shaped name is a name wherever else it appears.
+	if seen := repos("what does queue-master do with it?"); seen["orders"] || !seen["queue-master"] {
+		t.Errorf("queue-master was named, got %v", seen)
+	}
+	// And orders, whose name no other repository uses, is a mention.
+	if seen := repos("how do orders get saved?"); seen["shipping"] || !seen["orders"] {
+		t.Errorf("orders was named and nobody else says it, got %v", seen)
+	}
+}
+
 // TestSearch_anOrdinaryWordIsNotAMention keeps a repository named after a
 // common word from swallowing every question that contains it. A restriction
 // is invisible from the outside: the turn would report "nothing found" plus
