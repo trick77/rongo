@@ -213,7 +213,7 @@ func (r *Retriever) ResolveRepos(ctx context.Context, want []string, question st
 	if err != nil {
 		return nil, nil, err
 	}
-	known = knownReposIn(want, question, repos, project, r.vocabulary(ctx))
+	known = knownReposIn(want, question, repos, project)
 	if len(want) == 0 {
 		return known, nil, nil
 	}
@@ -515,58 +515,12 @@ func (r *Retriever) knownRepos(ctx context.Context, want []string, question stri
 	if err != nil {
 		return nil, err
 	}
-	return knownReposIn(want, question, known, project, r.vocabulary(ctx)), nil
-}
-
-// vocabulary is the index's answer to "is this name a word other
-// repositories use?": a plain name — letters only — found by the keyword
-// lane in a repository outside own. A name-shaped one (queue-master,
-// peeq2) is a name wherever else it appears, and is never asked about. Only
-// names the question already mentions reach it, so a turn pays one FTS
-// count per name the reader typed, usually none. A failed count is not
-// vocabulary: the mention stands, as it did before the check existed.
-func (r *Retriever) vocabulary(ctx context.Context) func(name string, own []string) bool {
-	return func(name string, own []string) bool {
-		for _, c := range name {
-			if !unicode.IsLetter(c) {
-				return false
-			}
-		}
-		args := []any{`"` + name + `"`}
-		for _, o := range own {
-			args = append(args, o)
-		}
-		var n int
-		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
-		err := r.store.db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM (
-				SELECT 1 FROM chunks_fts
-				JOIN chunks c ON c.id = chunks_fts.rowid
-				JOIN files f ON f.id = c.file_id
-				JOIN repo_state rs ON rs.name = f.repo AND rs.enabled = 1
-				WHERE chunks_fts MATCH ? AND f.repo NOT IN (`+strings.TrimSuffix(strings.Repeat("?,", len(own)), ",")+`)
-				LIMIT 1)`, args...).Scan(&n)
-		if err != nil {
-			slog.Warn("could not tell whether a repository name is ordinary vocabulary", "name", name, "err", err)
-			return false
-		}
-		return n > 0
-	}
+	return knownReposIn(want, question, known, project), nil
 }
 
 // knownReposIn is knownRepos over an already-read namespace, so a caller
 // that needs the namespace for a second answer reads it once.
-//
-// vocabulary reports a name other repositories than own use as a word; such
-// a name is read out of the question only when the guess has it too (nil:
-// none is). A fixed list cannot know a corpus's domain words: "where is the
-// shipping cost added" narrowed a turn to a repository called shipping, and
-// the answer in orders was never searched.
-func knownReposIn(want []string, question string, known []string, project map[string][]string,
-	vocabulary func(name string, own []string) bool) []string {
-	named := func(q, name string, own []string) bool {
-		return mentions(q, name) && (vocabulary == nil || !vocabulary(name, own))
-	}
+func knownReposIn(want []string, question string, known []string, project map[string][]string) []string {
 	if len(want) == 0 && strings.TrimSpace(question) == "" {
 		return nil
 	}
@@ -591,12 +545,12 @@ func knownReposIn(want []string, question string, known []string, project map[st
 	// the German compound "das Shop-Frontend" still names the product.
 	wanted := map[string]bool{}
 	for _, name := range known {
-		if guessed[name] || named(question, name, []string{name}) {
+		if guessed[name] || mentions(question, name) {
 			wanted[name] = true
 		}
 	}
 	for name, members := range project {
-		if guessed[name] || named(withoutMembers(question, name, members), name, members) {
+		if guessed[name] || mentions(withoutMembers(question, name, members), name) {
 			for _, m := range members {
 				wanted[m] = true
 			}
