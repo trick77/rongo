@@ -193,6 +193,12 @@
     "must_not": [
       "The diagram saves or ships the order before payment is authorised.",
       "The diagram adds a step the previous answer did not describe, such as an e-mail to the customer."
+    ],
+    "cite": [
+      {
+        "repo": "orders",
+        "path": "src/main/java/works/weave/socks/orders/controllers/OrdersController.java"
+      }
     ]
   },
   {
