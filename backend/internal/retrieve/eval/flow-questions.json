@@ -251,5 +251,53 @@
    }
   ],
   "note": "Follow-up. \"the old one\" is the guest's session cart from the preceding turn. A turn that lost the subject answers about carts in general and never reaches the delete."
+ },
+ {
+  "question": "draw the flow as a diagram",
+  "kind": "how",
+  "resolution": "composition",
+  "answers_only": true,
+  "candidates": [
+   {
+    "repo": "front-end",
+    "paths": ["api/orders/index.js"],
+    "verified": "index.js:48 app.post(\"/orders\"), :122 forwards to endpoints.ordersUrl + '/orders'"
+   },
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:50 @RequestMapping POST /orders, :61-73 fetches address, customer, card and items, :78-96 payment, :99-102 shipping, :115 customerOrderRepository.save"
+   },
+   {
+    "repo": "payment",
+    "paths": ["transport.go", "service.go"],
+    "verified": "transport.go:29 POST /paymentAuth, service.go:40-58 Authorise"
+   },
+   {
+    "repo": "shipping",
+    "paths": ["src/main/java/works/weave/socks/shipping/controllers/ShippingController.java"],
+    "verified": "ShippingController.java:36 POST /shipping, :40 rabbitTemplate.convertAndSend(\"shipping-task\", shipment)"
+   },
+   {
+    "repo": "queue-master",
+    "paths": ["src/main/java/works/weave/socks/queuemaster/ShippingTaskHandler.java"],
+    "verified": "ShippingTaskHandler.java:13 handleMessage(Shipment)"
+   }
+  ],
+  "note": "Follow-up to the order flow. A diagram of the previous answer is a rework, drawn from that answer's own sources, never a standing rule. Answer-only: it searches nothing of its own."
+ },
+ {
+  "question": "In that flow, where is the shipping cost added?",
+  "kind": "how",
+  "resolution": "unique",
+  "answers_only": true,
+  "candidates": [
+   {
+    "repo": "orders",
+    "paths": ["src/main/java/works/weave/socks/orders/controllers/OrdersController.java"],
+    "verified": "OrdersController.java:156 float shipping = 4.99F, :158 added to the item total in calculateTotal"
+   }
+  ],
+  "note": "Follow-up to the order flow; \"that flow\" is the preceding answer's. Answer-only: its words mean nothing outside the thread. Four runs on 2026-09-29, before and after #261, never reached :156, and three said no shipping cost exists."
  }
 ]

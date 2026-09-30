@@ -80,6 +80,11 @@ type flowQuestion struct {
 	Resolution Resolution      `json:"resolution"`
 	Candidates []flowCandidate `json:"candidates"`
 	Note       string          `json:"note"`
+	// AnswersOnly is a follow-up whose words mean nothing outside its
+	// thread — "draw the flow as a diagram". The answer arm asks it after
+	// the turn it follows; the search arms, which ask every question cold,
+	// leave it out rather than measure a search nobody would run.
+	AnswersOnly bool `json:"answers_only"`
 }
 
 type flowCandidate struct {
@@ -127,6 +132,19 @@ func loadFlowQuestions(t *testing.T) []flowQuestion {
 	return qs
 }
 
+// searchedFlowQuestions is loadFlowQuestions for the arms that ask every
+// question cold, without a thread: the answer-only follow-ups left out.
+func searchedFlowQuestions(t *testing.T) []flowQuestion {
+	t.Helper()
+	var out []flowQuestion
+	for _, q := range loadFlowQuestions(t) {
+		if !q.AnswersOnly {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
 // TestFlowQuestionsAreWellFormed is the cheap gate, and it runs without
 // BACKEND_EVAL: a candidate without a verified string is a claim nobody
 // checked, and the whole point of this corpus is that every part was read.
@@ -149,6 +167,18 @@ func TestFlowQuestionsAreWellFormed(t *testing.T) {
 			if strings.TrimSpace(c.Verified) == "" {
 				t.Errorf("%q: candidate %s carries no verified evidence", q.Text, c.Repo)
 			}
+		}
+	}
+	// An answer-only question is asked only as the second turn of a
+	// thread, so its rubric has to name the turn it follows; without one
+	// it would be asked cold after all, and graded as a first question.
+	rubrics := loadRubrics(t)
+	for _, q := range qs {
+		if !q.AnswersOnly {
+			continue
+		}
+		if r, ok := rubrics[q.Text]; !ok || r.Follows == "" {
+			t.Errorf("%q is answer-only, but its rubric follows no turn", q.Text)
 		}
 	}
 }
@@ -513,7 +543,7 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 		seen:      map[flowPart]bool{},
 	}
 
-	questions := loadFlowQuestions(t)
+	questions := searchedFlowQuestions(t)
 	for _, deployment := range flowModels(t) {
 		t.Run(deployment, func(t *testing.T) {
 			wire := flowWire(t, deployment)

@@ -55,7 +55,7 @@ func TestExpandFlowQuestions(t *testing.T) {
 	}
 
 	var out []expansion
-	for _, q := range loadFlowQuestions(t) {
+	for _, q := range searchedFlowQuestions(t) {
 		if old, ok := previous[q.Text]; ok && expandOnlyMissing() {
 			out = append(out, old)
 			continue
@@ -140,7 +140,7 @@ func TestFlowGathered(t *testing.T) {
 	ctx := context.Background()
 	retriever := evalRetriever(t, db)
 	expansions := loadFlowExpansions(t)
-	questions := loadFlowQuestions(t)
+	questions := searchedFlowQuestions(t)
 	deployed := gatherOpts(t)
 
 	arms := []flowGatherArm{
