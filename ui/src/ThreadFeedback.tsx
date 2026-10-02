@@ -14,7 +14,6 @@ const reasons: [string, string][] = [
   ["too_long", "Too long"],
   ["wrong_repo", "Wrong repository"],
 ];
-const reasonLabel = new Map(reasons);
 
 function asFeedback(v: unknown): Feedback | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
@@ -44,10 +43,9 @@ function firstUncovered(turns: Turn[], upTo: number): number | null {
 // The same face as the buttons beside them (Explain as…, Copy as Markdown,
 // the follow-up chips): ink-dim at 13.5px on the panel, active on hover.
 const thumb =
-  "inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-dim hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
+  "inline-flex h-7 w-6.5 items-center justify-center rounded-full text-ink-dim hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
 const chip =
   "rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active";
-const link = "text-[13.5px] text-ink-dim underline decoration-border underline-offset-3 hover:text-ink";
 
 /**
  * The reader's verdict on the whole thread, drawn among the buttons under the
@@ -66,9 +64,6 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   const [pickingAt, setPickingAt] = useState<number | null>(null);
   const newest = turns.reduce((m, t) => (finished(t) ? Math.max(m, t.messageId ?? 0) : m), 0);
   const picking = pickingAt !== null && pickingAt === newest;
-  const setPicking = (open: boolean) => setPickingAt(open ? newest : null);
-  const [thanks, setThanks] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The thread the state on screen belongs to; a reply for another one is late.
   const shown = useRef(threadId);
   // Set by the reader's first click on this thread. The load's reply can be
@@ -80,7 +75,6 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
     touched.current = false;
     setFb(null);
     setPickingAt(null);
-    setThanks(false);
     (async () => {
       try {
         const res = await fetch(`/api/threads/${threadId}/feedback`);
@@ -93,14 +87,6 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
       }
     })();
   }, [threadId]);
-
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  const thank = () => {
-    setThanks(true);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setThanks(false), 2000);
-  };
 
   // A click shows at once; the server is told afterwards. Writes go one at a
   // time — two in flight can come back in the other order from the one the
@@ -151,19 +137,13 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
     if (fb?.verdict === verdict) {
       setFb(null);
       setPickingAt(null);
-      setThanks(false);
       want.current = null;
     } else {
-      // Pinned to the newest answer, as the server will pin it.
+      // Pinned to the newest answer, as the server will pin it. A thumbs down
+      // offers the reasons; changing a reason is a thumbs up and down again.
       setFb({ verdict, reason: "", upToMessageId: newest });
       want.current = { verdict, reason: "" };
-      if (verdict === -1) {
-        setPickingAt(newest);
-        setThanks(false);
-      } else {
-        setPickingAt(null);
-        thank();
-      }
+      setPickingAt(verdict === -1 ? newest : null);
     }
     void sync();
   };
@@ -171,23 +151,23 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   const pick = (reason: string) => {
     setFb({ verdict: -1, reason, upToMessageId: newest });
     want.current = { verdict: -1, reason };
-    setPicking(false);
-    thank();
+    setPickingAt(null);
     void sync();
   };
 
-  // The pressed thumb already says which way the verdict went; the label adds
-  // the reason when there is one. It stands AFTER the thumbs: its width
-  // changes with what it says, and in front it moved them from under the
-  // cursor between two clicks.
-  let label = "Helpful?";
-  if (thanks) label = "Thanks";
-  else if (fb) label = fb.reason ? (reasonLabel.get(fb.reason) ?? fb.reason) : fb.verdict === 1 ? "Helpful" : "Not helpful";
   const uncovered = fb ? firstUncovered(turns, fb.upToMessageId) : null;
+
+  // "Helpful?" as the question; "Helpful" once answered yes; the reason of a
+  // thumbs down when it carries one.
+  const label =
+    fb?.verdict === 1
+      ? "Helpful"
+      : (fb?.verdict === -1 && reasons.find(([value]) => value === fb.reason)?.[1]) || "Helpful?";
 
   return (
     <>
-      <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-panel py-0.5 pr-3 pl-0.5">
+      <span className="inline-flex items-center rounded-full border border-border bg-panel py-0.5 pr-0.5 pl-3.5">
+        <span className="pr-1 text-[13.5px] text-ink-dim">{label}</span>
         <button
           type="button"
           aria-label="Helpful"
@@ -208,17 +188,8 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
         >
           <ThumbDownIcon />
         </button>
-        <span className="pl-1.5 text-[13.5px] text-ink-dim">{label}</span>
       </span>
       {uncovered !== null && <span className="text-[13.5px] text-muted">rated before turn {uncovered}</span>}
-      {/* A reason saved now is pinned to the newest answer, so "change" is
-          offered only while the verdict already covers it. Past that, the
-          thumbs are the way to rate again. */}
-      {fb?.verdict === -1 && fb.upToMessageId === newest && !picking && (
-        <button type="button" className={link} onClick={() => setPicking(true)}>
-          {fb.reason ? "change reason" : "add a reason"}
-        </button>
-      )}
       {/* No way to dismiss it: the thumbs down is already stored without a
           reason, and a reason is the reader's to add or not. */}
       {picking && (

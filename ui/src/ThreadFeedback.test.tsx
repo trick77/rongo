@@ -61,20 +61,23 @@ describe("ThreadFeedback", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 
-  it("offers the reasons after a thumbs down, stores the pick and lets it change", async () => {
+  it("offers the reasons after a thumbs down and stores the pick; a new reason is up and down again", async () => {
     const calls = server(null);
     const user = userEvent.setup();
     render(row([answered(2)]));
+    const up = await screen.findByRole("button", { name: "Helpful" });
+    const down = screen.getByRole("button", { name: "Not helpful" });
 
-    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    await user.click(down);
     expect(await screen.findByText("What was off?")).toBeTruthy();
-
     await user.click(screen.getByRole("button", { name: "Incomplete" }));
     await waitFor(() => expect(screen.queryByText("What was off?")).toBeNull());
     expect(calls.at(-1)).toEqual({ url: "/api/threads/t1/feedback", method: "PUT", body: { verdict: -1, reason: "incomplete" } });
 
-    await user.click(screen.getByRole("button", { name: "change reason" }));
+    await user.click(up);
+    await user.click(down);
     expect(await screen.findByText("What was off?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /reason/ })).toBeNull();
   });
 
   it("stores a thumbs down without a reason as soon as it is clicked, with nothing to dismiss", async () => {
@@ -94,11 +97,8 @@ describe("ThreadFeedback", () => {
     server({ verdict: -1, reason: "wrong", upToMessageId: 2 });
     render(row([answered(1), answered(2), answered(3)]));
 
-    expect(await screen.findByText("Wrong")).toBeTruthy();
-    expect(screen.getByText("rated before turn 3")).toBeTruthy();
+    expect(await screen.findByText("rated before turn 3")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true");
-    // A reason saved now would cover turn 3 too, which the reader never judged.
-    expect(screen.queryByRole("button", { name: "change reason" })).toBeNull();
   });
 
   it("counts a turn as covered when the verdict came after its answer, whatever was re-explained since", async () => {
@@ -107,7 +107,9 @@ describe("ThreadFeedback", () => {
     server({ verdict: 1, reason: "", upToMessageId: 3 });
     render(row([answered(1), answered(2), answered(3, 1)]));
 
-    expect(await screen.findByText("Helpful")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Helpful" }).getAttribute("aria-pressed")).toBe("true"),
+    );
     expect(screen.queryByText(/rated before/)).toBeNull();
   });
 
@@ -189,17 +191,24 @@ describe("ThreadFeedback", () => {
     await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
   });
 
-  it("keeps the thumbs where they are whatever the label says", async () => {
+  it("reads Helpful? before the thumbs, Helpful once thumbed up, or the reason of a thumbs down", async () => {
     server(null);
     const user = userEvent.setup();
     render(row([answered(2)]));
     const up = await screen.findByRole("button", { name: "Helpful" });
-
-    // The label comes after both thumbs, so its width cannot move them.
-    await user.click(up);
     const pill = up.parentElement as HTMLElement;
-    expect(pill.firstElementChild).toBe(up);
-    expect(pill.lastElementChild?.textContent).toBe("Thanks");
+    const label = () => pill.firstElementChild?.textContent;
+
+    expect(label()).toBe("Helpful?");
+    await user.click(screen.getByRole("button", { name: "Helpful" }));
+    expect(label()).toBe("Helpful");
+    await user.click(screen.getByRole("button", { name: "Helpful" }));
+    expect(label()).toBe("Helpful?");
+    await user.click(screen.getByRole("button", { name: "Not helpful" }));
+    expect(label()).toBe("Helpful?");
+    await user.click(screen.getByRole("button", { name: "Too long" }));
+    expect(label()).toBe("Too long");
+    expect(screen.queryByText("Thanks")).toBeNull();
   });
 
   it("reads the stored verdict back when the server refuses a write", async () => {
