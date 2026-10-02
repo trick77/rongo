@@ -77,17 +77,17 @@ describe("ThreadFeedback", () => {
     expect(await screen.findByText("What was off?")).toBeTruthy();
   });
 
-  it("lets the reasons be skipped, keeping the bare thumbs down", async () => {
+  it("stores a thumbs down without a reason as soon as it is clicked, with nothing to dismiss", async () => {
     const calls = server(null);
     const user = userEvent.setup();
     render(row([answered(2)]));
 
     await user.click(await screen.findByRole("button", { name: "Not helpful" }));
-    await user.click(await screen.findByRole("button", { name: "skip" }));
 
-    expect(screen.queryByText("What was off?")).toBeNull();
-    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "add a reason" })).toBeTruthy();
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ verdict: -1, reason: "" });
+    expect(screen.getByText("What was off?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "skip" })).toBeNull();
   });
 
   it("reads back a stored verdict and names the first turn it does not cover", async () => {

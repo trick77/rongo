@@ -217,6 +217,8 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
           {fb.reason ? "change reason" : "add a reason"}
         </button>
       )}
+      {/* No way to dismiss it: the thumbs down is already stored without a
+          reason, and a reason is the reader's to add or not. */}
       {picking && (
         // order-last + basis-full: a row of its own under the buttons, below
         // the usage pill that ends the row above.
@@ -227,16 +229,6 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
               {text}
             </button>
           ))}
-          <button
-            type="button"
-            className={link}
-            onClick={() => {
-              setPicking(false);
-              thank();
-            }}
-          >
-            skip
-          </button>
         </div>
       )}
     </>
