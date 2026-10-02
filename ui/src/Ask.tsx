@@ -33,14 +33,17 @@ import { applyEvent, endsTurn } from "./turnEvents";
  *
  * The placeholder belongs here rather than beside the textarea because it is
  * the same invitation as the title, in the place the answer is asked for.
+ * Once the thread has a turn it reads `followUp`: the box no longer takes a
+ * first question but the next turn of the same discussion.
  *
  * The role names are NOT translated: they are the labels on the controls
  * next to this text, and a body naming "un Analyste" beside a button
  * reading "Analyst" points at something that is not on the page. */
-const welcome: Record<string, { title: string; body: string; placeholder: string }> = {
+const welcome: Record<string, { title: string; body: string; placeholder: string; followUp: string }> = {
   en: {
     title: "Ask about the code.",
     placeholder: "Ask about the code…",
+    followUp: "Continue the discussion…",
     body:
       "Rongo searches the indexed repositories, asks back when a question fits more than one " +
       "mechanism, and answers with sources for every claim. Pick a role: an Analyst gets the " +
@@ -49,6 +52,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
   de: {
     title: "Frag den Code.",
     placeholder: "Frag den Code …",
+    followUp: "Diskussion weiterführen …",
     body:
       "Rongo durchsucht die indexierten Repositories, fragt nach, wenn eine Frage auf mehr als einen " +
       "Mechanismus passt, und antwortet mit Quellen für jede Aussage. Wähl eine Rolle: Ein Analyst " +
@@ -57,6 +61,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
   fr: {
     title: "Interrogez le code.",
     placeholder: "Interrogez le code …",
+    followUp: "Poursuivez la discussion …",
     body:
       "Rongo parcourt les dépôts indexés, pose une question en retour quand la vôtre correspond à " +
       "plus d'un mécanisme, et répond avec des sources pour chaque affirmation. Choisissez un rôle : " +
@@ -66,6 +71,7 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
   it: {
     title: "Chiedi al codice.",
     placeholder: "Chiedi al codice …",
+    followUp: "Continua la discussione …",
     body:
       "Rongo cerca nei repository indicizzati, chiede chiarimenti quando una domanda corrisponde a " +
       "più di un meccanismo e risponde con fonti per ogni affermazione. Scegli un ruolo: un Analyst " +
@@ -674,6 +680,7 @@ export default function Ask({
   const threadLanguage = turns.find((t) => t.recorded)?.language ?? null;
   // What the next question will actually be answered in.
   const asking = threadLanguage ?? language;
+  const invite = (welcome[asking] ?? welcome.en)[turns.length > 0 ? "followUp" : "placeholder"];
 
   /**
    * A paste past the threshold is a chip, not text. Native insertion is
@@ -1196,7 +1203,7 @@ export default function Ask({
                 ref={box}
                 rows={1}
                 aria-label="Question"
-                placeholder={(welcome[asking] ?? welcome.en).placeholder}
+                placeholder={invite}
                 // 16px on a touch screen, and the same on the language select
                 // below: iOS Safari zooms the page in when a focused field
                 // renders under 16px and never zooms back out, leaving the app

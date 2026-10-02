@@ -427,15 +427,43 @@ func TestAnswer_theAudienceReachesThePrompt(t *testing.T) {
 		}
 	}
 
-	// Deliberately no headings: a short answer wearing three of them looks
-	// over-built, and that is a judgement the model gets wrong more often than
-	// it gets the list wrong. answerLanguage names headings for a different
-	// reason — whatever the answer uses is written in the reader's language —
-	// so what is asserted here is that nothing asks for one to be emitted.
-	for name, p := range map[string]string{"BA": *promptBA, "DEV": *promptDev} {
-		if strings.Contains(p, "###") {
-			t.Errorf("the %s prompt asks for headings; they were left out on purpose", name)
+	// Headings are the Analyst's alone. Without them a BA answer came back as
+	// four or five dense paragraphs with values in parentheses, read as a wall
+	// of text; a part heading and a three-sentence cap break it up the way the
+	// banned code blocks and paths break a developer answer. A developer
+	// answer has code and paths to look at, and three ### on a short one
+	// look over-built. answerLanguage names headings for a different reason -
+	// whatever the answer uses is in the reader's language - so the marker
+	// asserted here is the "###" the BA block asks for.
+	if !strings.Contains(*promptBA, "###") {
+		t.Error("the BA prompt does not ask for a heading per part")
+	}
+	if strings.Contains(*promptDev, "###") {
+		t.Error("the DEV prompt asks for headings; they were left out on purpose")
+	}
+	for _, want := range []string{
+		"A paragraph is at most three sentences",
+		"an answer of one part has none",
+		"The opening sentence stands above the first heading",
+	} {
+		if !strings.Contains(flatBA, want) {
+			t.Errorf("the BA prompt does not say %q", want)
 		}
+		if strings.Contains(flatDev, want) {
+			t.Errorf("the DEV prompt carries the Analyst shape rule %q", want)
+		}
+	}
+	if strings.Contains(flatBA, "three to five paragraphs") {
+		t.Error("the BA prompt still asks for three to five paragraphs")
+	}
+	// A value in parentheses mid-sentence is what read as code. It is still
+	// copied character for character - answerStages and the eval rely on the
+	// literal - but it stands apart from the prose.
+	if strings.Contains(flatBA, "in parentheses after the words") {
+		t.Error("the BA prompt still puts values in parentheses inside the prose")
+	}
+	if !strings.Contains(flatBA, "copied character for character") {
+		t.Error("the BA prompt dropped the exact value")
 	}
 }
 
