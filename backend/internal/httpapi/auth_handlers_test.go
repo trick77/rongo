@@ -215,6 +215,30 @@ func TestAuthLogin_proxyModeHaltsWhenTheProxyNamesNobody(t *testing.T) {
 	}
 }
 
+func TestAuthLogout_revokesEvenWhenTheTabClosedOnTheWayOut(t *testing.T) {
+	// Given a session, and a logout whose client goes away once the request
+	// is past the door
+	svc := devAuth(t)
+	token, _, _, err := svc.CreateSessionFromClaims(context.Background(), auth.Claims{Subject: "sub-1"}, "")
+	if err != nil {
+		t.Fatalf("CreateSessionFromClaims() err = %v", err)
+	}
+	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil).WithContext(gone)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
+
+	// When
+	srv.handleAuthLogout(httptest.NewRecorder(), req)
+
+	// Then the token is worth nothing: the cleared cookie never reached that
+	// browser, so the row is all that signs it out
+	if _, ok := svc.UserByToken(context.Background(), token); ok {
+		t.Error("the session survived a logout whose request was abandoned")
+	}
+}
+
 func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
 	// Given
 	svc := auth.NewService(authDB(t), "proxy", "")

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { pageColumn } from "./page";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView, { isCommit } from "./SourceView";
@@ -983,8 +983,12 @@ export default function Ask({
   const closeViewer = useCallback(() => setViewing(null), []);
   const closeSources = useCallback(() => setSourcesOpen(false), []);
 
+  // Moved on at the commit, not during render: a render React discards must
+  // not leave its handlers behind for the next click.
   const handlers = useRef({ retry, reexplain, askFollowup, chooseCandidate, narrowTo });
-  handlers.current = { retry, reexplain, askFollowup, chooseCandidate, narrowTo };
+  useLayoutEffect(() => {
+    handlers.current = { retry, reexplain, askFollowup, chooseCandidate, narrowTo };
+  });
 
   const actions = useMemo(
     () => ({

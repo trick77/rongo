@@ -704,7 +704,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
 			recordFailed(ctx, "record scope failed", serr)
 		}
-		tr.finish(answer.Text, answer.Citations, answer.Sources)
+		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
+			return
+		}
 		// -1 is the column's own "no candidate": a narrowing resumed from the
 		// panel as a whole, and there is no row on it that the answer came
 		// from. The link to the clarification is what closes it either way.
@@ -758,7 +760,9 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tr.finish(answer.Text, answer.Citations, answer.Sources)
+	if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
+		return
+	}
 	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, tr.streamed, send, closeRecord)
 }
 
@@ -1109,7 +1113,9 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// The same sources, not answer.Sources: a re-explain answers from exactly
 	// what the original turn gathered, so the new turn can itself be
 	// re-explained later from that same, unchanged evidence.
-	tr.finish(answer.Text, answer.Citations, sources)
+	if !tr.finish(answer.Text, answer.Citations, sources) {
+		return
+	}
 	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, tr.streamed, send, tr.closeRecord)
 }
 

@@ -52,6 +52,28 @@ func mustUser(t *testing.T, r *http.Request) (User, bool) {
 	return u, ok
 }
 
+func TestMiddleware_anAbandonedRequestIsNotAFailedLogin(t *testing.T) {
+	// Given dev mode, and a request whose client went away before the user
+	// row was written
+	svc := newService(t)
+	var reached bool
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil).WithContext(gone)
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
+
+	// Then nobody is let through, and nothing is reported as a server error
+	if reached {
+		t.Error("handler reached for a request with no user")
+	}
+	if rec.Code == http.StatusInternalServerError {
+		t.Error("an abandoned request answered 500, want it dropped quietly")
+	}
+}
+
 func TestMiddleware_proxyModeSignsInTheForwardedUser(t *testing.T) {
 	// Given
 	svc := newService(t)

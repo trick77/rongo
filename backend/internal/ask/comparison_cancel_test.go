@@ -29,6 +29,40 @@ func (s *oneSideFails) Search(ctx context.Context, q retrieve.Query) ([]retrieve
 	}
 }
 
+// cancelsOnReturn answers every search and ends the caller's context as the
+// last one returns.
+type cancelsOnReturn struct {
+	*fakeSearch
+	cancel context.CancelFunc
+}
+
+func (s *cancelsOnReturn) Search(ctx context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
+	hits, err := s.fakeSearch.Search(ctx, q)
+	s.cancel()
+	return hits, err
+}
+
+func TestAComparisonKeepsItsHitsWhenOnlyTheCallerGaveUp(t *testing.T) {
+	// Given searches that all succeed, under a context that ends meanwhile
+	db := gatherDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	search := &cancelsOnReturn{
+		fakeSearch: &fakeSearch{hits: []retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go", Score: 1}}, indexed: []string{"peeq", "rongo"}},
+		cancel:     cancel,
+	}
+	c := twoStepUpstream(t, threeReposReply, "x")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	// When
+	got, err := p.searchScoped(ctx, "q", "", []string{"q"}, "", []string{"peeq", "rongo"}, nil, false)
+
+	// Then no search failed, so nothing is reported as failed here: the next
+	// stage reads the context for itself
+	if err != nil || len(got) == 0 {
+		t.Errorf("got %d hits, err %v; want the hits and no error", len(got), err)
+	}
+}
+
 func TestAComparisonStopsItsOtherSearchesWhenOneFails(t *testing.T) {
 	// Given a comparison of three repositories whose last search fails
 	db := gatherDB(t)

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -122,7 +123,9 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 // index page as the response body.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(auth.SessionCookie); err == nil {
-		if err := s.deps.Auth.DeleteSession(r.Context(), c.Value); err != nil {
+		// Not the request's own context: a tab closed on the way out must
+		// still be signed out, or the token outlives the click by a month.
+		if err := s.deps.Auth.DeleteSession(context.WithoutCancel(r.Context()), c.Value); err != nil {
 			// The cookie is cleared either way, but a session left live in the
 			// database is security-relevant enough not to vanish silently.
 			slog.Error("session revoke failed", "err", err)

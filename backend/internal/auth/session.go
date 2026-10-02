@@ -194,7 +194,7 @@ func (s *Service) UserByToken(ctx context.Context, token string) (User, bool) {
 		// Anything else is a broken database, and collapsing it into the same
 		// silent "not authenticated" would hide that from operators. A
 		// request its client abandoned is neither.
-		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, context.Canceled) {
 			slog.Error("session lookup failed", "err", err)
 		}
 		return User{}, false

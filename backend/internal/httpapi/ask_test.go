@@ -1249,6 +1249,49 @@ func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	}
 }
 
+// finishFailingThreads cannot write an answer: the one transaction that
+// carries it, its citations and its sources does not commit.
+type finishFailingThreads struct {
+	*threads.Store
+}
+
+func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source) error {
+	return errors.New("disk full")
+}
+
+func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
+	// Given a pipeline that answers, and a store that cannot write the answer
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	st := threads.NewStore(db)
+	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &finishFailingThreads{Store: st}}
+
+	// When
+	rec := postAsk(t, deps, `{"question":"how is sign-in done?"}`)
+
+	// Then the browser is told the turn failed, never that it is done
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
+		t.Errorf("want an error event and no done:\n%s", body)
+	}
+	// And the row says so: with neither answer nor error it would read as a
+	// turn still in flight, and hold a share ceiling below it
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: list=%+v err=%v", list, err)
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("Messages: msgs=%+v err=%v", msgs, err)
+	}
+	if msgs[0].Error == "" || msgs[0].Answer != "" {
+		t.Errorf("message = %+v, want it recorded as failed with no answer", msgs[0])
+	}
+}
+
 func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 	// Given a stored clarification
 	srv, store := newTestServerWithStore(t, withAskerResuming())

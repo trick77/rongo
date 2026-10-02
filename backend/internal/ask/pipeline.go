@@ -1164,10 +1164,14 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 	// search left running pays for its reranker call to the end. That first
 	// failure is what the turn reports — the others then fail as cancelled,
 	// which is the consequence, not the cause.
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	perRepo := make([][]retrieve.Hit, len(known))
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		once   sync.Once
+		failed error
+	)
 	for i, repo := range known {
 		wg.Add(1)
 		go func(i int, repo string) {
@@ -1177,15 +1181,20 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 			// undoing the one-repository-at-a-time cut this exists for.
 			hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
 			if err != nil {
-				cancel(err)
+				once.Do(func() {
+					failed = err
+					cancel()
+				})
 				return
 			}
 			perRepo[i] = hits
 		}(i, repo)
 	}
 	wg.Wait()
-	if err := context.Cause(ctx); err != nil {
-		return nil, err
+	// Only a search that failed fails the turn: a caller's context ending as
+	// the last search returned leaves the hits standing, as it always did.
+	if failed != nil {
+		return nil, failed
 	}
 	var all []retrieve.Hit
 	for i := range known {

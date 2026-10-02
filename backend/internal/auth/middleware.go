@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -144,6 +145,10 @@ func bearerToken(r *http.Request) (string, bool) {
 func (s *Service) admit(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string) {
 	u, err := s.Admit(r.Context(), subject, email, true)
 	if err != nil {
+		// A request its client abandoned is not a failed login.
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		slog.Error(what+" failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
