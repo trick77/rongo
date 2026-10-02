@@ -84,12 +84,23 @@ func BenchmarkSearchSubstringIn(b *testing.B) {
 		b.Run(fmt.Sprintf("chunks=%d", n), func(b *testing.B) {
 			db := benchDB(b, n)
 			s := NewStore(db)
-			b.ResetTimer()
-			for b.Loop() {
-				if _, err := s.SearchSubstringIn(b.Context(), "anzahlfahrzeuge", 40, nil, nil); err != nil {
-					b.Fatalf("SearchSubstringIn: %v", err)
+			// One term is the locate loop's grep. It stays on the per-term
+			// path: for a single term the batch is the slower of the two, and
+			// this is where that is read.
+			b.Run("per-term", func(b *testing.B) {
+				for b.Loop() {
+					if _, err := s.SearchSubstringIn(b.Context(), "anzahlfahrzeuge", 40, nil, nil); err != nil {
+						b.Fatalf("SearchSubstringIn: %v", err)
+					}
 				}
-			}
+			})
+			b.Run("batched", func(b *testing.B) {
+				for b.Loop() {
+					if _, err := s.SearchSubstringsIn(b.Context(), []string{"anzahlfahrzeuge"}, 40, nil, nil); err != nil {
+						b.Fatalf("SearchSubstringsIn: %v", err)
+					}
+				}
+			})
 		})
 	}
 }
@@ -103,23 +114,27 @@ func BenchmarkSubstringLane(b *testing.B) {
 	question := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
 	terms := BuildSubstringTerms(question, []string{"Policenantrag", "Datenweitergabe"})
 	for _, n := range []int{10000, 25000} {
-		db := benchDB(b, n)
-		s := NewStore(db)
-		b.Run(fmt.Sprintf("chunks=%d/terms=%d/per-term", n, len(terms)), func(b *testing.B) {
-			for b.Loop() {
-				for _, term := range terms {
-					if _, err := referenceSubstring(b.Context(), s, term, 40, nil, nil); err != nil {
-						b.Fatalf("referenceSubstring: %v", err)
+		// The corpus is built inside the size's own run, so a -bench filter
+		// naming one size does not pay for the other.
+		b.Run(fmt.Sprintf("chunks=%d/terms=%d", n, len(terms)), func(b *testing.B) {
+			db := benchDB(b, n)
+			s := NewStore(db)
+			b.Run("per-term", func(b *testing.B) {
+				for b.Loop() {
+					for _, term := range terms {
+						if _, err := s.SearchSubstringIn(b.Context(), term, 40, nil, nil); err != nil {
+							b.Fatalf("SearchSubstringIn: %v", err)
+						}
 					}
 				}
-			}
-		})
-		b.Run(fmt.Sprintf("chunks=%d/terms=%d/batched", n, len(terms)), func(b *testing.B) {
-			for b.Loop() {
-				if _, err := s.SearchSubstringsIn(b.Context(), terms, 40, nil, nil); err != nil {
-					b.Fatalf("SearchSubstringsIn: %v", err)
+			})
+			b.Run("batched", func(b *testing.B) {
+				for b.Loop() {
+					if _, err := s.SearchSubstringsIn(b.Context(), terms, 40, nil, nil); err != nil {
+						b.Fatalf("SearchSubstringsIn: %v", err)
+					}
 				}
-			}
+			})
 		})
 	}
 }

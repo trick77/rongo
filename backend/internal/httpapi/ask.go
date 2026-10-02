@@ -15,7 +15,6 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/llm"
-	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
@@ -240,7 +239,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// top rather than once the thread id is known, because the meter, the
 	// thread id and the question's own INSERT all hang off ctx before that
 	// point and a cancel has to reach them too.
-	ctx, cancelTurn := context.WithCancelCause(projects.PerTurn(r.Context()))
+	ctx, cancelTurn := context.WithCancelCause(r.Context())
 	defer cancelTurn(nil)
 
 	// The request names its thread by address; everything below works in row
@@ -998,7 +997,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	// A re-explain is a paid turn like any other, and stops the same way when
 	// the thread it re-answers is deleted under it.
-	ctx, cancelTurn := context.WithCancelCause(projects.PerTurn(r.Context()))
+	ctx, cancelTurn := context.WithCancelCause(r.Context())
 	defer cancelTurn(nil)
 	msg, found, err := s.deps.Threads.Message(ctx, u.Subject, id)
 	if err != nil {

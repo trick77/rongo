@@ -17,7 +17,6 @@ import (
 	"context"
 	"database/sql"
 	"sort"
-	"sync"
 )
 
 // Repo is one member of a project.
@@ -57,49 +56,11 @@ type Map struct {
 	usedBy   map[string][]string // library -> the products it is a member of, sorted
 }
 
-// turnKey carries one turn's grouping on its context.
-type turnKey struct{}
-
-type turnMap struct {
-	mu     sync.Mutex
-	loaded bool
-	m      Map
-}
-
-// PerTurn marks a context as one turn. Under it Load reads the grouping once
-// and hands the same Map to every later caller: memory, routing, search and
-// the prompt each asked for it, four to six reads of the same two tables per
-// turn, and a repos.yaml edit landing between two of them had the turn
-// routing by one grouping and answering by another.
-func PerTurn(ctx context.Context) context.Context {
-	return context.WithValue(ctx, turnKey{}, &turnMap{})
-}
-
 // Load reads the whole grouping in two queries. There are a handful of
-// repositories and a handful of edges. It is never cached past a turn (see
-// PerTurn): a project renamed in repos.yaml takes effect on the next question,
-// not on the next restart. A read that failed is not kept either.
-//
-// The Map is shared within a turn, so it is read-only to its callers.
+// repositories and a handful of edges, and this is called once per turn the way
+// repodeps.DependsOn is, so it is deliberately not cached: a project renamed in
+// repos.yaml takes effect on the next question, not on the next restart.
 func Load(ctx context.Context, db *sql.DB) (Map, error) {
-	t, _ := ctx.Value(turnKey{}).(*turnMap)
-	if t == nil {
-		return load(ctx, db)
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.loaded {
-		return t.m, nil
-	}
-	m, err := load(ctx, db)
-	if err != nil {
-		return Map{}, err
-	}
-	t.m, t.loaded = m, true
-	return m, nil
-}
-
-func load(ctx context.Context, db *sql.DB) (Map, error) {
 	m := Map{of: map[string]string{}, projects: map[string]Project{}, library: map[string]bool{}, usedBy: map[string][]string{}}
 
 	// enabled = 1: a parked repository is not offered on a clarification card
