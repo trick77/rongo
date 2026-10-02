@@ -4,7 +4,10 @@
 answer `mimo-v2.6-pro`, gate `mimo-v2.6-flash`, both arms against ONE database.
 Headings 0 → 39, paragraphs over three sentences 16 → 2, values in parentheses
 5 → 0. Correctness held on the twelve questions both arms answered (30/33 →
-29/33, one question); diagrams 7 → 6 on the same twelve. Shipped.**
+29/33, one question); diagrams 7 → 6 on the same twelve. Shipped on the
+shape numbers, which no judge re-rolls. Rubric and diagrams are ONE run each
+— both gaps are one question, below what this file can conclude. The next
+BA measurement reads diagrams against both arms here.**
 
 ## Why
 
