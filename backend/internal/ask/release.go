@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/projects"
+	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/stages"
 )
 
@@ -355,9 +356,14 @@ func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, p
 	}
 	sort.Strings(names)
 
-	var lines []ReleaseLine
-	commits := map[string][]history.Commit{}
-	for _, name := range names {
+	// One image is half a dozen git calls in its own repository and touches
+	// nothing another image does, so they resolve side by side and are listed
+	// in name order, as before.
+	type resolved struct {
+		line    ReleaseLine
+		commits []history.Commit
+	}
+	all, err := sched.Ordered(ctx, sched.Readers, names, func(ctx context.Context, name string) (resolved, error) {
 		line := ReleaseLine{Image: name, Repo: repoOf[name], Versions: map[string]string{}}
 		a, b := census[pair[0]][name], census[pair[1]][name]
 		for stage, v := range map[string]stageVersion{pair[0]: a, pair[1]: b} {
@@ -372,12 +378,20 @@ func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, p
 		}
 		cs, err := resolveLine(ctx, rel, h, pair, a, b, &line)
 		if err != nil {
-			return nil, nil, err
+			return resolved{}, err
 		}
-		if len(cs) > 0 {
-			commits[name] = cs
+		return resolved{line: line, commits: cs}, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	var lines []ReleaseLine
+	commits := map[string][]history.Commit{}
+	for i, r := range all {
+		if len(r.commits) > 0 {
+			commits[names[i]] = r.commits
 		}
-		lines = append(lines, line)
+		lines = append(lines, r.line)
 	}
 	return lines, commits, nil
 }

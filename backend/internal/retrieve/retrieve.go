@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/projects"
+	"github.com/trick77/rongo/internal/sched"
 )
 
 // defaultCandidates is how many rows each lane retrieves before fusion. Fusion
@@ -750,16 +751,25 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior
 	if len(vecs) != len(usable) {
 		return nil, fmt.Errorf("embedder returned %d vectors for %d query texts", len(vecs), len(usable))
 	}
+	// The semantic and keyword lanes are queued in the order fusion is handed
+	// them and read side by side: each is an independent read of one file,
+	// and a turn used to wait for a dozen of them in a row. sched.Ordered
+	// returns them in queue order, so the lane list — and with it every fused
+	// score and tie — is the one the plain loops built.
+	type laneRead struct {
+		name   string
+		weight float64
+		// keepEmpty: a semantic lane is a lane even with no hit under the
+		// distance cap; a keyword rung that matched nothing is not one.
+		keepEmpty bool
+		read      func(context.Context) ([]Hit, error)
+	}
+	var reads []laneRead
 	for i, v := range vecs {
-		hits, err := r.store.SearchVectorIn(ctx, v, candidates, r.MaxDistance, repos, stage)
-		if err != nil {
-			return nil, err
-		}
-		lanes = append(lanes, Lane{
-			Name:   fmt.Sprintf("semantic:%d", i),
-			Hits:   hits,
-			Weight: WeightSemantic,
-		})
+		reads = append(reads, laneRead{name: fmt.Sprintf("semantic:%d", i), weight: WeightSemantic, keepEmpty: true,
+			read: func(ctx context.Context) ([]Hit, error) {
+				return r.store.SearchVectorIn(ctx, v, candidates, r.MaxDistance, repos, stage)
+			}})
 	}
 
 	// Every rung that returns rows becomes its own lane, carrying its own
@@ -781,19 +791,23 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior
 			if text == code && weight == WeightKeywordAny && r.CodeWeight > 0 {
 				weight, name = r.CodeWeight, "keyword:code"
 			}
-			hits, err := r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage)
-			if err != nil {
-				return nil, err
-			}
-			if len(hits) == 0 {
-				continue
-			}
-			lanes = append(lanes, Lane{
-				Name:   name,
-				Hits:   hits,
-				Weight: weight,
-			})
+			reads = append(reads, laneRead{name: name, weight: weight,
+				read: func(ctx context.Context) ([]Hit, error) {
+					return r.store.SearchKeywordIn(ctx, tier.Match, candidates, repos, stage)
+				}})
 		}
+	}
+	found, err := sched.Ordered(ctx, sched.Readers, reads, func(ctx context.Context, l laneRead) ([]Hit, error) {
+		return l.read(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for i, l := range reads {
+		if len(found[i]) == 0 && !l.keepEmpty {
+			continue
+		}
+		lanes = append(lanes, Lane{Name: l.name, Hits: found[i], Weight: l.weight})
 	}
 
 	// The substring rung, last because it is the only lane that does not go

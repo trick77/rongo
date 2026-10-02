@@ -19,6 +19,7 @@ import (
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/stages"
 	"github.com/trick77/rongo/internal/units"
 )
@@ -1097,16 +1098,19 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 // know (because indexing never wrote it, or because the cluster query found
 // nothing for the repo at all) falls back to its own directory.
 func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(repo, path string) string, error) {
-	byRepo := map[string]map[string]string{}
+	var repos []string
 	seen := map[string]bool{}
 	for _, h := range hits {
-		if seen[h.Repo] {
-			continue
+		if !seen[h.Repo] {
+			seen[h.Repo] = true
+			repos = append(repos, h.Repo)
 		}
-		seen[h.Repo] = true
-		mods, err := modules.Cluster(ctx, r.db, h.Repo, r.clusterOpts)
+	}
+	// A cluster reads every file of its repository and nothing of another's.
+	clustered, err := sched.Ordered(ctx, sched.Readers, repos, func(ctx context.Context, repo string) (map[string]string, error) {
+		mods, err := modules.Cluster(ctx, r.db, repo, r.clusterOpts)
 		if err != nil {
-			return nil, fmt.Errorf("cluster %s: %w", h.Repo, err)
+			return nil, fmt.Errorf("cluster %s: %w", repo, err)
 		}
 		paths := map[string]string{}
 		for _, m := range mods {
@@ -1114,7 +1118,14 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 				paths[p] = m.Key
 			}
 		}
-		byRepo[h.Repo] = paths
+		return paths, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	byRepo := make(map[string]map[string]string, len(repos))
+	for i, repo := range repos {
+		byRepo[repo] = clustered[i]
 	}
 	return func(repo, path string) string {
 		if key, ok := byRepo[repo][path]; ok {

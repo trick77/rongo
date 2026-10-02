@@ -14,6 +14,7 @@ import (
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/sched"
 )
 
 // Source is one piece of code the answer may be built on, and the reason it is
@@ -239,12 +240,16 @@ symbols:
 		// each source's own list, or a test the first source references is
 		// admitted ahead of the mechanism the second one references and a
 		// tight budget spends itself on the harness.
+		//
+		// Read side by side, joined in frontier order: each lookup is one
+		// heavy query and nothing is admitted until all of them are in, so
+		// the list below is the one a plain loop built.
+		perSource, err := sched.Ordered(ctx, sched.Readers, frontier, g.referenced)
+		if err != nil {
+			return nil, err
+		}
 		var refs []Source
-		for _, from := range frontier {
-			r, err := g.referenced(ctx, from)
-			if err != nil {
-				return nil, err
-			}
+		for _, r := range perSource {
 			refs = append(refs, r...)
 		}
 		var next []Source
