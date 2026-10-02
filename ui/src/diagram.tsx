@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { useResolved } from "./useResolved";
 import { download, fileName, toMermaid, toSvgFile } from "./diagramExport";
 import DiagramView from "./DiagramView";
 import { DownloadIcon, ExpandIcon } from "./icons";
@@ -326,18 +327,7 @@ export function draw(src: string): Promise<Drawn> {
 
 /** useDrawn is the drawing for a source, null while it is on its way. */
 export function useDrawn(src: string): Drawn | null {
-  const [out, setOut] = useState<Drawn | null>(null);
-  useEffect(() => {
-    let live = true;
-    setOut(null);
-    draw(src).then((d) => {
-      if (live) setOut(d);
-    });
-    return () => {
-      live = false;
-    };
-  }, [src]);
-  return out;
+  return useResolved(src, draw);
 }
 
 /** MermaidSvg is the drawing itself, sized by the renderer: the SVG carries

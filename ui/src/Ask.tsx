@@ -19,20 +19,13 @@ import {
   storedRetries,
   storedTurn,
   threadUsage,
-  withStep,
   type Audience,
   type Citation,
   type Message,
   type ThreadTotal,
   type Turn,
-  type Usage,
 } from "./turns";
-
-// The pieces of a turn the rest of the app still reaches for through Ask.
-// Re-exported rather than moved twice: App imports money and threadUsage for
-// the header's running total, and the tests import languages.
-export { languages, money, threadUsage } from "./turns";
-export type { Usage, UsageCall } from "./turns";
+import { applyEvent, endsTurn } from "./turnEvents";
 
 /** What the empty page and the composer say, in the language the select is
  * set to: the two pieces of chrome a reader meets before any answer, so they
@@ -340,7 +333,11 @@ export default function Ask({
     // parked list: every path into stream() appends through appendTurn first,
     // and the list is dropped only once the stream is over.
     if (!parked) return;
-    const next = parked.map((t, i) => (i === parked.length - 1 ? patch(t) : t));
+    const last = parked[parked.length - 1];
+    const patched = patch(last);
+    // An event that says nothing about the turn changes nothing on screen.
+    if (patched === last) return;
+    const next = parked.map((t, i) => (i === parked.length - 1 ? patched : t));
     liveTurns.current = next;
     // Only the thread on screen is repainted. The reader may be reading
     // another conversation entirely, and writing this turn into it is exactly
@@ -618,11 +615,6 @@ export default function Ask({
               setGone(false);
               onThread(payload.thread_id);
             }
-            // The turn is on record now, in the language the record took. That
-            // is not always the one that was asked for — a thread answers in
-            // the language of its first turn — so the turn on screen, and with
-            // it the composer, follow the server rather than the guess.
-            patchLast((t) => ({ ...t, recorded: true, language: payload.language ?? t.language }));
             // The placeholder title is written by Create, so the entry can
             // appear in the list the moment the question is sent.
             onActivity();
@@ -631,80 +623,18 @@ export default function Ask({
             // of the turn. The text itself is not kept here: the rail and the
             // header read the list, so refreshing it is the whole update.
             onActivity();
-          } else if (name === "status") {
-            const now = Date.now();
-            const serverAt = typeof payload.at === "number" ? payload.at : undefined;
-            patchLast((t) => withStep(t, payload.step, now, serverAt));
-          } else if (name === "detail") {
-            // What the step found, attached to the LATEST step of that name:
-            // a step's detail arrives once the step is done, and "searching"
-            // can run twice in a comparison turn.
-            patchLast((t) => {
-              const i = t.steps.map((s) => s.step).lastIndexOf(payload.step);
-              if (i < 0) return t;
-              const steps = t.steps.slice();
-              steps[i] = { ...steps[i], detail: payload.detail ?? undefined };
-              return { ...t, steps };
-            });
-          } else if (name === "notice") patchLast((t) => ({ ...t, notice: payload.text ?? "" }));
-          else if (name === "token") patchLast((t) => ({ ...t, text: t.text + payload.text }));
-          else if (name === "citations") patchLast((t) => ({ ...t, citations: payload ?? [] }));
-          else if (name === "followups") patchLast((t) => ({ ...t, followups: payload ?? [] }));
-          else if (name === "memory")
-            patchLast((t) => ({
-              ...t,
-              memory: {
-                id: payload.id ?? null,
-                text: payload.text ?? "",
-                scope: payload.scope ?? "",
-                replaced: payload.replaced ?? [],
-                removed: payload.removed ?? [],
-                scopeDropped: payload.scope_dropped ?? "",
-              },
-            }));
-          else if (name === "usage") patchLast((t) => ({ ...t, usage: payload as Usage }));
-          else if (name === "clarification") {
-            patchLast((t) => ({
-              ...t,
-              messageId: payload.message_id,
-              clarification: {
-                messageId: payload.message_id,
-                candidates: payload.candidates ?? [],
-                tooBroad: payload.too_broad ?? false,
-              },
-            }));
-          } else if (name === "error") {
-            ok = false;
-            closed = true;
-            // The id comes with the failure too, not only with done: asking
-            // again is another attempt at THIS question, and the request can
-            // only say so if the turn knows which row it is.
-            patchLast((t) => ({
-              ...t,
-              error: payload.message,
-              done: true,
-              endedAt: Date.now(),
-              messageId: payload.message_id ?? t.messageId,
-            }));
-          }
-          else if (name === "done") {
-            closed = true;
-            patchLast((t) => ({
-              ...t,
-              done: true,
-              endedAt: t.endedAt ?? Date.now(),
-              messageId: payload.message_id ?? t.messageId,
-              // A re-explain opens no thread event, and it too is filed in the
-              // thread's language rather than the one it asked for.
-              recorded: true,
-              language: payload.language ?? t.language,
-              sourceless: payload.sourceless === true,
-            }));
+          } else if (name === "done") {
             // The model-written title replaces the placeholder in a background
             // goroutine that has no way to push it here. Without this the
             // sidebar shows the truncated question until the next reload.
             onActivity();
           }
+          if (name === "error") ok = false;
+          if (endsTurn(name)) closed = true;
+          // What the event does to the turn itself is applyEvent's; the three
+          // branches above are what it does to the page around the turn.
+          const now = Date.now();
+          patchLast((t) => applyEvent(t, name, payload, now));
         });
       }
       // The stream ended without saying how. From the reader's side that is
@@ -982,6 +912,18 @@ export default function Ask({
   // than on every streamed token.
   const closeViewer = useCallback(() => setViewing(null), []);
   const closeSources = useCallback(() => setSourcesOpen(false), []);
+  // The pane is one thing with two ways in, so closing it clears both: a
+  // reader who opened a turn from the header's thread pane must not be left
+  // with the thread pane behind it. Through a ref, because the parent's
+  // handler is a fresh arrow and the pane's Escape listener hangs on this.
+  const closeThreadStats = useRef(onCloseThreadStats);
+  useLayoutEffect(() => {
+    closeThreadStats.current = onCloseThreadStats;
+  });
+  const closeStats = useCallback(() => {
+    setTurnStats(null);
+    closeThreadStats.current();
+  }, []);
 
   // Moved on at the commit, not during render: a render React discards must
   // not leave its handlers behind for the next click.
@@ -1179,13 +1121,7 @@ export default function Ask({
               <StatsPane
                 target={turnStats !== null ? { kind: "turn", index: turnStats } : { kind: "thread" }}
                 turns={turns}
-                onClose={() => {
-                  // The pane is one thing with two ways in, so closing it
-                  // clears both: a reader who opened a turn from the header's
-                  // thread pane must not be left with the thread pane behind it.
-                  setTurnStats(null);
-                  onCloseThreadStats();
-                }}
+                onClose={closeStats}
               />
             )}
           </div>

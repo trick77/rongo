@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { useFocusOnOpen } from "./dialog";
+import { useRef } from "react";
+import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { MermaidSvg, diagramTitle } from "./diagram";
 import { download, fileName, toSvgFile } from "./diagramExport";
 import { useBackdropDismiss } from "./dismiss";
@@ -31,34 +31,9 @@ export default function DiagramView({
 
   useFocusOnOpen(closeButton);
 
-  // Escape closes, and Tab stays inside. SourceView has one control and can
-  // simply refocus it; this dialog has several, so the ends of the ring wrap
-  // to each other. Without it, Tab reaches the citation chips in the answer
-  // behind the scrim — they are focusable groups — and Enter there would open
-  // a second z-30 overlay under this one.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const inside = dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
-      if (!inside || inside.length === 0) return;
-      const first = inside[0];
-      const last = inside[inside.length - 1];
-      const on = document.activeElement;
-      if (!e.shiftKey && (on === last || !dialog.current?.contains(on))) {
-        e.preventDefault();
-        first.focus();
-      } else if (e.shiftKey && (on === first || !dialog.current?.contains(on))) {
-        e.preventDefault();
-        last.focus();
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape closes, and Tab stays inside (see useTabTrap for why).
+  useEscape(onClose);
+  useTabTrap(dialog);
 
   function save() {
     download(fileName(src), toSvgFile({ svg }, body.current));

@@ -546,10 +546,6 @@ body {
   color: var(--color-ink-dim);
 }
 
-.pulse {
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
 /* The shape of a thread while it is being fetched. It holds the place of the
    turn that is coming, so the column does not sit empty and does not keep the
    previous conversation standing under a title that has already changed. */
@@ -583,11 +579,6 @@ body {
     transform: rotate(360deg);
   }
 }
-@keyframes pulse {
-  50% {
-    box-shadow: 0 0 0 4px var(--color-accent-dim);
-  }
-}
 @keyframes slide {
   from {
     background-position: -35% 0;
@@ -604,19 +595,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .node-now::before,
   .busybar,
-  .ui-markdown.streaming > :is(p, h2, h3, h4, pre):last-child::after,
-  .ui-markdown.streaming > :is(ul, ol):last-child > li:last-child::after,
-  .pulse,
   .skeleton,
   .stream-seg {
     animation: none;
   }
-}
-
-/* A native <details> has no open state on its summary's children; the
-   chevron inside rotates off the element's own open attribute. */
-details[open] > summary .chev {
-  transform: rotate(90deg);
 }
 
 /* Login fields: Chromium paints its own autofill tint over bg-bg, and Edge

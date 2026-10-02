@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { JSX, ReactNode } from "react";
-import { highlightBlock, languageOf } from "./highlight";
+import { highlightBlock, highlightFinished, languageOf } from "./highlight";
 import Diagram, { diagramSource } from "./diagram";
 
 /**
@@ -396,7 +396,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
           // the syntax colouring and the source viewer are tuned to it.
           className="overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
         >
-          <code>{highlightBlock(body.join("\n"), languageOf(tag))}</code>
+          <code>{(closed ? highlightFinished : highlightBlock)(body.join("\n"), languageOf(tag))}</code>
         </pre>,
       );
       continue;

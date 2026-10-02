@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { pageColumn } from "../page";
 
 import SourceView, { isCommit, type SourceRef } from "../SourceView";
@@ -38,6 +38,8 @@ export default function SharePage({ token }: { token: string }) {
   const [state, setState] = useState<State>({ s: "loading" });
   const [hot, setHot] = useState<number | null>(null);
   const [viewing, setViewing] = useState<SourceRef | null>(null);
+  // Stable, so the viewer's keydown listener is attached once.
+  const closeViewer = useCallback(() => setViewing(null), []);
   // The same rule the answering page follows: untouched, the pane answers to
   // the audience of the turn it would show, and the reader's own click wins
   // from then on. A share is one thread and never changes, so nothing resets
@@ -231,13 +233,13 @@ export default function SharePage({ token }: { token: string }) {
           <CommitView
             source={viewing}
             endpoint={`/api/shares/${encodeURIComponent(token)}/commit`}
-            onClose={() => setViewing(null)}
+            onClose={closeViewer}
           />
         ) : (
           <SourceView
             source={viewing}
             endpoint={`/api/shares/${encodeURIComponent(token)}/source`}
-            onClose={() => setViewing(null)}
+            onClose={closeViewer}
           />
         ))}
     </div>

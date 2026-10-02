@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CommitView from "./CommitView";
 import { type SourceRef } from "./SourceView";
@@ -75,6 +75,40 @@ describe("CommitView", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("not in Rongo's checkout"));
     // With no onOpenFile nothing in the body is a button but the close.
     expect(screen.getAllByRole("button").length).toBe(1);
+  });
+
+  it("keeps Tab inside, so it cannot reach the page behind the scrim", async () => {
+    // Given a commit with a file to open, under a page that has a control of
+    // its own — the citation chips of the answer are such controls
+    serve(200, {
+      repo: "rongo",
+      branch: "master",
+      sha: "7f2a492abcdef",
+      subject: "s",
+      body: "",
+      files: [{ path: "a.go", added: 1, deleted: 0, indexed: true }],
+    });
+    render(
+      <>
+        <button type="button">behind the scrim</button>
+        <CommitView source={source} onClose={() => {}} onOpenFile={() => {}} />
+      </>,
+    );
+    const file = await screen.findByRole("button", { name: "a.go" });
+    const close = screen.getByLabelText("Close");
+    const dialog = screen.getByRole("dialog");
+
+    // When Tab is pressed on the dialog's last control, and Shift+Tab on its first
+    file.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    const afterTab = document.activeElement;
+    close.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+
+    // Then the ring wraps: the dialog is modal
+    expect(afterTab).toBe(close);
+    expect(document.activeElement).toBe(file);
+    expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
   it("closes on Escape", async () => {

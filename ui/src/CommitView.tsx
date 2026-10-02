@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useEscape, useFocusOnOpen } from "./dialog";
+import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { type SourceRef } from "./SourceView";
 
@@ -38,10 +38,14 @@ export default function CommitView({
 }) {
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
   const dismiss = useBackdropDismiss(onClose);
 
   useFocusOnOpen(closeButton);
   useEscape(onClose);
+  // Modal like the other two overlays: it had no trap, and Tab from its last
+  // file went on into the answer behind the scrim.
+  useTabTrap(dialog);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +93,7 @@ export default function CommitView({
       onPointerUp={dismiss.onPointerUp}
     >
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={`Commit ${source.marker}: ${subject}`}
