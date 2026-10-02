@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -21,13 +20,20 @@ import (
 // measured over this repository, 6.4 ms a file against 0.1 ms through the
 // batch.
 //
-// It returns exactly what ReadFile returns for a file. It is for a run that
-// reads many files and then ends: the process holds the checkout's object
-// store open, so a Reader is closed when the run is over and never kept.
+// For a file it returns the bytes ReadFile returns. A path that is not a file
+// at that commit — a directory, a submodule pointer — is refused, where
+// `git show` would print a listing.
+//
+// It is for a run that reads many files and then ends: the process holds the
+// checkout's object store open, so a Reader is closed when the run is over
+// and never kept. The context given to NewReader bounds every read: ending it
+// kills the process, and a read's own context is only checked before the read
+// starts.
 //
 // Safe for concurrent use; reads are answered one at a time.
 type Reader struct {
 	c    *Client
+	ctx  context.Context
 	dir  string
 	name string
 
@@ -35,7 +41,7 @@ type Reader struct {
 	cmd    *exec.Cmd
 	in     io.WriteCloser
 	out    *bufio.Reader
-	stderr bytes.Buffer
+	stderr lockedBuffer
 	closed bool
 	// broken is set once the stream can no longer be trusted to be in step
 	// with the requests: a failed write, a short read, a header that does not
@@ -44,11 +50,35 @@ type Reader struct {
 	broken error
 }
 
+// ErrReaderBroken marks a read that failed because the batch process is gone
+// or its stream is out of step — not because of the file asked for. The
+// reader will not read again; the caller may read the file another way.
+var ErrReaderBroken = errors.New("git batch reader is broken")
+
+// lockedBuffer is git's stderr: written by the goroutine os/exec copies it
+// on, read here when a read fails.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
 // NewReader starts the batch process in spec's checkout. It lives until
 // Close, or until ctx ends.
 func (c *Client) NewReader(ctx context.Context, spec repos.Spec) (*Reader, error) {
 	dir := c.Dir(spec)
-	r := &Reader{c: c, dir: dir, name: spec.Name}
+	r := &Reader{c: c, ctx: ctx, dir: dir, name: spec.Name}
 	// The same command every git call is built from, so the ownership
 	// exemption, the no-prompt rule and the auth environment apply here too.
 	r.cmd = c.command(ctx, dir, nil, "cat-file", "--batch")
@@ -68,17 +98,11 @@ func (c *Client) NewReader(ctx context.Context, spec repos.Spec) (*Reader, error
 	return r, nil
 }
 
-// ReadFile reads one path at one commit, as Client.ReadFile does. spec must
-// be the checkout the reader was opened on.
+// ReadFile reads one path at one commit. spec must be the checkout the reader
+// was opened on.
 func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
 	if r.c.Dir(spec) != r.dir {
 		return nil, fmt.Errorf("read %s at %s: the reader is open on %s, not %s", path, ShortSHA(sha), r.name, spec.Name)
-	}
-	// A newline ends a request on the batch's input. Such a path is read the
-	// slow way rather than split into two requests, which would leave every
-	// later answer one file out of step.
-	if strings.ContainsAny(sha+path, "\n\r") {
-		return r.c.ReadFile(ctx, spec, sha, path)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), err)
@@ -92,6 +116,12 @@ func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 	if r.broken != nil {
 		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), r.broken)
 	}
+	// A newline ends a request on the batch's input. Such a path is read the
+	// slow way rather than split into two requests, which would leave every
+	// later answer one file out of step.
+	if strings.Contains(sha+path, "\n") {
+		return r.c.ReadFile(ctx, spec, sha, path)
+	}
 	body, err := r.read(sha + ":" + path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), err)
@@ -99,14 +129,8 @@ func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 	return body, nil
 }
 
-// errNotAFile is a request git answered in full that names no file. The
-// stream is still in step, so the reader goes on.
-var errNotAFile = errors.New("not a file at that commit")
-
-// read sends one request and reads its answer:
-//
-//	<oid> <type> <size>\n<size bytes>\n     for an object
-//	<request> missing\n                     for anything else
+// read sends one request and reads its answer: the header, then for an
+// object its bytes and one newline.
 func (r *Reader) read(object string) ([]byte, error) {
 	if _, err := io.WriteString(r.in, object+"\n"); err != nil {
 		return nil, r.fail(fmt.Errorf("ask git: %w", err))
@@ -115,27 +139,21 @@ func (r *Reader) read(object string) ([]byte, error) {
 	if err != nil {
 		return nil, r.fail(fmt.Errorf("read git's answer: %w", err))
 	}
-	header = strings.TrimSuffix(header, "\n")
-	// The header's own fields never hold a space; a request might, so the
-	// fields are taken from the end of a miss and from the start of a hit.
-	if strings.HasSuffix(header, " missing") || strings.HasSuffix(header, " ambiguous") {
-		return nil, errNotAFile
+	kind, size, err := parseBatchHeader(strings.TrimSuffix(header, "\n"))
+	if errors.Is(err, errNoObject) {
+		// Answered in full: the stream is in step and the reader goes on.
+		return nil, err
 	}
-	fields := strings.Fields(header)
-	if len(fields) != 3 {
-		return nil, r.fail(fmt.Errorf("unparseable answer %q", header))
-	}
-	size, err := strconv.ParseInt(fields[2], 10, 64)
-	if err != nil || size < 0 {
-		return nil, r.fail(fmt.Errorf("unparseable answer %q", header))
+	if err != nil {
+		return nil, r.fail(err)
 	}
 	// The object and the newline git puts after it are consumed whatever the
 	// type, so a directory asked for by mistake leaves the stream in step.
-	if fields[1] != "blob" {
+	if kind != "blob" {
 		if _, err := io.CopyN(io.Discard, r.out, size+1); err != nil {
-			return nil, r.fail(fmt.Errorf("skip a %s: %w", fields[1], err))
+			return nil, r.fail(fmt.Errorf("skip a %s: %w", kind, err))
 		}
-		return nil, fmt.Errorf("%w: it is a %s", errNotAFile, fields[1])
+		return nil, fmt.Errorf("not a file at that commit: it is a %s", kind)
 	}
 	body := make([]byte, size)
 	if _, err := io.ReadFull(r.out, body); err != nil {
@@ -147,13 +165,21 @@ func (r *Reader) read(object string) ([]byte, error) {
 	return body, nil
 }
 
-// fail marks the stream unusable and reports why, with what git said.
+// fail marks the stream unusable and reports why. A run that was cancelled
+// says so: the process was killed under the read, and "EOF" would file an
+// ordinary shutdown as a repository that cannot be read.
 func (r *Reader) fail(err error) error {
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		r.broken = fmt.Errorf("%w: %w", ErrReaderBroken, ctxErr)
+		return r.broken
+	}
+	// What git said, as far as it has arrived: its stderr is complete only
+	// once the process has been waited for.
 	if msg := strings.TrimSpace(redact(r.stderr.String())); msg != "" {
 		err = fmt.Errorf("%w: %s", err, msg)
 	}
-	r.broken = err
-	return err
+	r.broken = fmt.Errorf("%w: %w", ErrReaderBroken, err)
+	return r.broken
 }
 
 // Close ends the process. Closing twice is not an error.
@@ -166,9 +192,15 @@ func (r *Reader) Close() error {
 	r.closed = true
 	// Closing stdin is how cat-file is told there is nothing more to read.
 	_ = r.in.Close()
-	// A process the context killed, or one that died on a broken checkout,
-	// reports a failure here; the reads already said what went wrong, and a
-	// run that read everything it needed has nothing to add.
+	// A stream that broke mid-answer may have git blocked writing the rest of
+	// an object nobody will read; it never sees the end of its input, and
+	// waiting for it would hang the run's last step for good.
+	if r.broken != nil && r.cmd.Process != nil {
+		_ = r.cmd.Process.Kill()
+	}
+	// A process that was killed, or died on a broken checkout, reports a
+	// failure here; the reads already said what went wrong, and a run that
+	// read everything it needed has nothing to add.
 	_ = r.cmd.Wait()
 	return nil
 }

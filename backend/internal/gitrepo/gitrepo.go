@@ -560,16 +560,34 @@ func (c *Client) Object(ctx context.Context, spec repos.Spec, sha, path string) 
 	if err != nil {
 		return "", 0, fmt.Errorf("stat %s at %s: %w", path, ShortSHA(sha), err)
 	}
-	// "<oid> <type> <size>" for an object, "<name> missing" otherwise.
-	fields := strings.Fields(string(out))
-	if len(fields) != 3 {
-		return "", 0, fmt.Errorf("stat %s at %s: %s", path, ShortSHA(sha), strings.TrimSpace(string(out)))
-	}
-	n, err := strconv.ParseInt(fields[2], 10, 64)
+	kind, n, err := parseBatchHeader(strings.TrimSpace(string(out)))
 	if err != nil {
-		return "", 0, fmt.Errorf("stat %s at %s: size %q: %w", path, ShortSHA(sha), fields[2], err)
+		return "", 0, fmt.Errorf("stat %s at %s: %w", path, ShortSHA(sha), err)
 	}
-	return fields[1], n, nil
+	return kind, n, nil
+}
+
+// errNoObject is git saying the request names nothing it can read.
+var errNoObject = errors.New("no such object")
+
+// parseBatchHeader reads the line cat-file answers a request with, in
+// --batch and --batch-check alike: "<oid> <type> <size>" for an object,
+// "<request> missing" (or "ambiguous") for anything else. A request may
+// itself hold spaces, so a miss is told by its last word and an object by
+// having exactly three fields.
+func parseBatchHeader(line string) (kind string, size int64, err error) {
+	if strings.HasSuffix(line, " missing") || strings.HasSuffix(line, " ambiguous") {
+		return "", 0, fmt.Errorf("%w: %s", errNoObject, line)
+	}
+	fields := strings.Fields(line)
+	if len(fields) != 3 {
+		return "", 0, fmt.Errorf("unparseable answer %q", line)
+	}
+	size, err = strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || size < 0 {
+		return "", 0, fmt.Errorf("unparseable size in %q", line)
+	}
+	return fields[1], size, nil
 }
 
 // safeDirectory prefixes args with the ownership exemption for dir.
@@ -607,7 +625,8 @@ func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ..
 
 // command builds every git process, the ones that run to the end and the one
 // a Reader keeps open: the ownership exemption, no prompting, the configured
-// auth in the environment.
+// auth in the environment. ReadFile and Object used to build their own exec
+// and so missed GIT_TERMINAL_PROMPT and the auth environment.
 func (c *Client) command(ctx context.Context, dir string, extra []string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
@@ -620,8 +639,7 @@ func (c *Client) command(ctx context.Context, dir string, extra []string, args .
 }
 
 // runIn is every git command that runs to the end: what command sets up,
-// stdin where a command reads one, and the raw bytes back. ReadFile and Object used to build their own exec and so
-// missed GIT_TERMINAL_PROMPT and the auth environment.
+// stdin where a command reads one, and the raw bytes back.
 func (c *Client) runIn(ctx context.Context, dir string, stdin io.Reader, extra []string, args ...string) ([]byte, error) {
 	cmd := c.command(ctx, dir, extra, args...)
 	cmd.Stdin = stdin

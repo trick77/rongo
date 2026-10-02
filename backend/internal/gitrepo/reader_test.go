@@ -3,10 +3,12 @@ package gitrepo
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/repos"
 )
@@ -173,6 +175,95 @@ func TestReader_aCancelledRunStopsReading(t *testing.T) {
 
 	if _, err := r.ReadFile(ctx, spec, sha, "a.txt"); err == nil {
 		t.Error("a read succeeded after the run was cancelled")
+	}
+}
+
+func TestReader_aCancelledRunIsReportedAsCancelled(t *testing.T) {
+	// Given a reader whose run is cancelled while a read is on its way: the
+	// read's own context is still live, the process is killed under it
+	c, spec, sha := clonedFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	r, err := c.NewReader(ctx, spec)
+	if err != nil {
+		t.Fatalf("NewReader() err = %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	cancel()
+	_ = r.cmd.Wait()
+
+	// When
+	_, err = r.ReadFile(context.Background(), spec, sha, "a.txt")
+
+	// Then it is a cancellation, not "EOF": a shutdown is not a repository
+	// that cannot be read
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrReaderBroken) {
+		t.Errorf("err = %v, want the cancellation, marked as a lost reader", err)
+	}
+}
+
+func TestReader_aProcessThatDiedIsALostReaderAndCloseReturns(t *testing.T) {
+	// Given a reader whose git is killed under it
+	c, spec, sha := clonedFixture(t)
+	ctx := context.Background()
+	r, err := c.NewReader(ctx, spec)
+	if err != nil {
+		t.Fatalf("NewReader() err = %v", err)
+	}
+	if err := r.cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+
+	// When
+	_, first := r.ReadFile(ctx, spec, sha, "a.txt")
+	_, second := r.ReadFile(ctx, spec, sha, "dir/b.txt")
+	// A path the batch cannot carry does not get past a lost reader either.
+	_, newline := r.ReadFile(ctx, spec, sha, "a\n.txt")
+
+	// Then every read says the reader is gone, so the caller can read another
+	// way, and closing does not wait on a process that will never answer
+	for i, err := range []error{first, second, newline} {
+		if !errors.Is(err, ErrReaderBroken) {
+			t.Errorf("read %d: err = %v, want a lost reader", i+1, err)
+		}
+	}
+	done := make(chan struct{})
+	go func() { _ = r.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() did not return")
+	}
+}
+
+func TestParseBatchHeader(t *testing.T) {
+	for _, tc := range []struct {
+		line, kind string
+		size       int64
+		miss, bad  bool
+	}{
+		{line: "7da6958e blob 42", kind: "blob", size: 42},
+		{line: "7da6958e tree 0", kind: "tree"},
+		{line: "abc:with space.go missing", miss: true},
+		{line: "abc ambiguous", miss: true},
+		{line: "fatal: something else entirely", bad: true},
+		{line: "7da6958e blob minus", bad: true},
+		{line: "7da6958e blob -3", bad: true},
+	} {
+		kind, size, err := parseBatchHeader(tc.line)
+		switch {
+		case tc.miss:
+			if !errors.Is(err, errNoObject) {
+				t.Errorf("%q: err = %v, want a miss", tc.line, err)
+			}
+		case tc.bad:
+			if err == nil || errors.Is(err, errNoObject) {
+				t.Errorf("%q: err = %v, want it refused as unparseable", tc.line, err)
+			}
+		default:
+			if err != nil || kind != tc.kind || size != tc.size {
+				t.Errorf("%q: got %s %d, err %v", tc.line, kind, size, err)
+			}
+		}
 	}
 }
 

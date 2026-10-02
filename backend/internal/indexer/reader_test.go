@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -52,6 +53,67 @@ func TestIndexRepo_readsAWholeRunThroughOneGitProcess(t *testing.T) {
 	if git.readers.Load() != 1 || git.singles.Load() != 0 {
 		t.Errorf("opened %d readers and read %d files a process at a time, want 1 and 0",
 			git.readers.Load(), git.singles.Load())
+	}
+}
+
+func TestARunOutlivesItsBatchReader(t *testing.T) {
+	// Given a batch reader that dies on its third read, as a git that was
+	// killed under the run does
+	ix := New(Deps{})
+	var batched, singles []string
+	batch := func(_ context.Context, _ repos.Spec, _, path string) ([]byte, error) {
+		batched = append(batched, path)
+		if len(batched) >= 3 {
+			return nil, fmt.Errorf("read %s: %w: EOF", path, gitrepo.ErrReaderBroken)
+		}
+		if path == "gone.go" {
+			return nil, errors.New("no such object")
+		}
+		return []byte("batch:" + path), nil
+	}
+	single := func(_ context.Context, _ repos.Spec, _, path string) ([]byte, error) {
+		singles = append(singles, path)
+		return []byte("single:" + path), nil
+	}
+	read := ix.untilLost(batch, single)
+	ctx := context.Background()
+
+	// When the run reads on
+	first, _ := read(ctx, repos.Spec{}, "sha", "a.go")
+	_, missErr := read(ctx, repos.Spec{}, "sha", "gone.go")
+	third, err3 := read(ctx, repos.Spec{}, "sha", "c.go")
+	fourth, err4 := read(ctx, repos.Spec{}, "sha", "d.go")
+
+	// Then a file that is merely missing stays an error of that file, and
+	// from the read that found the reader gone every file is read the slow
+	// way — that one included, and the dead reader is not asked again
+	if string(first) != "batch:a.go" || missErr == nil {
+		t.Errorf("before the loss: read %q, miss err %v", first, missErr)
+	}
+	if err3 != nil || err4 != nil || string(third) != "single:c.go" || string(fourth) != "single:d.go" {
+		t.Errorf("after the loss: %q (%v), %q (%v)", third, err3, fourth, err4)
+	}
+	if len(batched) != 3 || fmt.Sprint(singles) != "[c.go d.go]" {
+		t.Errorf("batch asked %v, single asked %v", batched, singles)
+	}
+}
+
+func TestACancelledRunDoesNotFallBackToSlowReads(t *testing.T) {
+	// Given a reader that broke because the run was cancelled
+	ix := New(Deps{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	batch := func(context.Context, repos.Spec, string, string) ([]byte, error) {
+		return nil, fmt.Errorf("%w: %w", gitrepo.ErrReaderBroken, context.Canceled)
+	}
+	single := func(context.Context, repos.Spec, string, string) ([]byte, error) {
+		t.Error("a cancelled run went on reading")
+		return nil, nil
+	}
+
+	// When / Then the cancellation is what comes back
+	if _, err := ix.untilLost(batch, single)(ctx, repos.Spec{}, "sha", "a.go"); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want the cancellation", err)
 	}
 }
 

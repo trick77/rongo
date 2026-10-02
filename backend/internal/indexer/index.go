@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path"
@@ -171,11 +172,15 @@ type batchGit interface {
 // reader is how this run reads files, and what to call when the run is over.
 // One git process for the whole run where the git offers it: a process per
 // file was a third of what a file costs outside embedding. Where it does not,
-// or the process will not start, the run reads a file at a time as it always
-// did — slower, never different.
+// the process will not start, or it dies under the run, the run reads a file
+// at a time as it always did: one process lost must not fail every file after
+// it, and the next poll with them.
+//
+// The returned read is for the run's own goroutine.
 func (ix *Indexer) reader(ctx context.Context, spec repos.Spec) (readFile, func()) {
 	bg, ok := ix.git.(batchGit)
 	if !ok {
+		ix.log.Debug("git offers no batch reader; reading a file at a time", "repo", spec.Name)
 		return ix.git.ReadFile, func() {}
 	}
 	r, err := bg.NewReader(ctx, spec)
@@ -183,7 +188,26 @@ func (ix *Indexer) reader(ctx context.Context, spec repos.Spec) (readFile, func(
 		ix.log.Warn("batch reader not started; reading a file at a time", "repo", spec.Name, "err", err)
 		return ix.git.ReadFile, func() {}
 	}
-	return r.ReadFile, func() { _ = r.Close() }
+	return ix.untilLost(r.ReadFile, ix.git.ReadFile), func() { _ = r.Close() }
+}
+
+// untilLost reads through batch until it reports the reader gone, and a file
+// at a time from then on, the file that found it out included.
+func (ix *Indexer) untilLost(batch, single readFile) readFile {
+	lost := false
+	return func(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
+		if !lost {
+			body, err := batch(ctx, spec, sha, path)
+			// Only a reader that is gone, and never a run that was
+			// cancelled: that one ends here.
+			if !errors.Is(err, gitrepo.ErrReaderBroken) || ctx.Err() != nil {
+				return body, err
+			}
+			lost = true
+			ix.log.Warn("batch reader lost; reading a file at a time", "repo", spec.Name, "err", err)
+		}
+		return single(ctx, spec, sha, path)
+	}
 }
 
 // structure is what the manifests said, carried from before the file pass to
