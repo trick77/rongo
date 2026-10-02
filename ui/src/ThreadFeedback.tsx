@@ -66,9 +66,13 @@ export default function ThreadFeedback({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The thread the state on screen belongs to; a reply for another one is late.
   const shown = useRef(threadId);
+  // Set by the reader's first click on this thread. The load's reply can be
+  // older than that click's write, and must not undo what the reader just did.
+  const touched = useRef(false);
 
   useEffect(() => {
     shown.current = threadId;
+    touched.current = false;
     setFb(null);
     setPicking(false);
     setThanks(false);
@@ -78,7 +82,7 @@ export default function ThreadFeedback({
         const res = await fetch(`/api/threads/${threadId}/feedback`);
         if (!res.ok || shown.current !== threadId) return;
         const got = asFeedback(await res.json());
-        if (shown.current === threadId) setFb(got);
+        if (shown.current === threadId && !touched.current) setFb(got);
       } catch {
         // No verdict on screen is what a failed read leaves: the thumbs still
         // work, and the next click writes the truth.
@@ -124,6 +128,7 @@ export default function ThreadFeedback({
   };
 
   const vote = async (verdict: 1 | -1) => {
+    touched.current = true;
     if (fb?.verdict === verdict) return clear();
     if (!(await put(verdict, ""))) return;
     if (verdict === -1) setPicking(true);

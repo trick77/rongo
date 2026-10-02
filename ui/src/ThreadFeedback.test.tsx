@@ -125,6 +125,33 @@ describe("ThreadFeedback", () => {
     expect(screen.queryByText(/rated before/)).toBeNull();
   });
 
+  it("keeps a click made before the stored verdict arrived", async () => {
+    // The load answers "none" only after the reader already voted: the read
+    // ran first on the server, its reply is older than the click.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, opts?: RequestInit) => {
+        if ((opts?.method ?? "GET") === "GET") {
+          await gate;
+          return { ok: true, status: 200, json: async () => null };
+        }
+        return { ok: true, status: 200, json: async () => ({ verdict: 1, reason: "", upToMessageId: 2 }) };
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ThreadFeedback threadId="t1" turns={[answered(2)]} running={false} caveat={caveat} />);
+
+    const up = screen.getByRole("button", { name: "Helpful" });
+    await user.click(up);
+    await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(up.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("treats a reply that is not a verdict as none", async () => {
     server([]);
     render(<ThreadFeedback threadId="t1" turns={[answered(2)]} running={false} caveat={caveat} />);
