@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/trick77/rongo/internal/store"
 	"golang.org/x/mod/modfile"
 )
 
@@ -130,7 +131,7 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 	for _, r := range repos {
 		args = append(args, r)
 	}
-	in := placeholders(len(repos))
+	in := store.Placeholders(len(repos))
 	var one int
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 	err := db.QueryRowContext(ctx, `
@@ -146,10 +147,6 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
 // DependsOn reports whether a pulls something b publishes.

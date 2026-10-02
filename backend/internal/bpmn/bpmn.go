@@ -17,6 +17,7 @@ package bpmn
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -125,13 +126,13 @@ func Parse(body []byte) (*Model, error) {
 				m.Processes = append(m.Processes, p)
 				f.proc, scope = p, p
 			case t.Name.Local == "error":
-				m.Errors[id] = firstOf(name, attr(t, "errorCode"), id)
+				m.Errors[id] = cmp.Or(name, attr(t, "errorCode"), id)
 			case t.Name.Local == "signal":
-				m.Signals[id] = firstOf(name, id)
+				m.Signals[id] = cmp.Or(name, id)
 			case t.Name.Local == "escalation":
-				m.Escalations[id] = firstOf(name, attr(t, "escalationCode"), id)
+				m.Escalations[id] = cmp.Or(name, attr(t, "escalationCode"), id)
 			case t.Name.Local == "message":
-				messages[id] = firstOf(name, id)
+				messages[id] = cmp.Or(name, id)
 			case t.Name.Local == "sequenceFlow" && scope != nil:
 				fl := &Flow{ID: id, Source: attr(t, "sourceRef"), Target: attr(t, "targetRef"), Name: name}
 				scope.Flows = append(scope.Flows, fl)
@@ -139,7 +140,7 @@ func Parse(body []byte) (*Model, error) {
 			case nodeKinds[t.Name.Local] && scope != nil:
 				n := &Node{ID: id, Kind: t.Name.Local, Name: name, Called: attr(t, "calledElement"),
 					Default: attr(t, "default"), AttachedTo: attr(t, "attachedToRef"), Line: lineOf(dec.InputOffset()),
-					Delegate: firstOf(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))}
+					Delegate: cmp.Or(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))}
 				scope.Nodes = append(scope.Nodes, n)
 				f.node = n
 				if containerKinds[t.Name.Local] {
@@ -149,15 +150,15 @@ func Parse(body []byte) (*Model, error) {
 				}
 			case t.Name.Local == "errorEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Error = firstOf(attr(t, "errorRef"), "error")
+					n.Error = cmp.Or(attr(t, "errorRef"), "error")
 				}
 			case t.Name.Local == "signalEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Signal = firstOf(attr(t, "signalRef"), "signal")
+					n.Signal = cmp.Or(attr(t, "signalRef"), "signal")
 				}
 			case t.Name.Local == "escalationEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Escalation = firstOf(attr(t, "escalationRef"), "escalation")
+					n.Escalation = cmp.Or(attr(t, "escalationRef"), "escalation")
 				}
 			case t.Name.Local == "messageEventDefinition":
 				if n := enclosingNode(stack); n != nil {
@@ -168,7 +169,7 @@ func Parse(body []byte) (*Model, error) {
 					// A message throw event carries its delegate on the
 					// definition, not on the event.
 					if n.Delegate == "" {
-						n.Delegate = firstOf(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))
+						n.Delegate = cmp.Or(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))
 					}
 				}
 			case t.Name.Local == "terminateEventDefinition":
@@ -210,10 +211,10 @@ func Parse(body []byte) (*Model, error) {
 	resolve := func(_ *Process) {}
 	resolve = func(p *Process) {
 		for _, n := range p.Nodes {
-			n.Error = firstOf(m.Errors[n.Error], n.Error)
-			n.Signal = firstOf(m.Signals[n.Signal], n.Signal)
-			n.Escalation = firstOf(m.Escalations[n.Escalation], n.Escalation)
-			n.Message = firstOf(messages[n.Message], n.Message)
+			n.Error = cmp.Or(m.Errors[n.Error], n.Error)
+			n.Signal = cmp.Or(m.Signals[n.Signal], n.Signal)
+			n.Escalation = cmp.Or(m.Escalations[n.Escalation], n.Escalation)
+			n.Message = cmp.Or(messages[n.Message], n.Message)
 		}
 		for _, sub := range p.Subs {
 			resolve(sub)
@@ -276,15 +277,6 @@ func attr(el xml.StartElement, name string) string {
 	for _, a := range el.Attr {
 		if a.Name.Local == name {
 			return strings.Join(strings.Fields(a.Value), " ")
-		}
-	}
-	return ""
-}
-
-func firstOf(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
 		}
 	}
 	return ""

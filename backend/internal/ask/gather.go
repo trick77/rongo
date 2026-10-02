@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
+	"github.com/trick77/rongo/internal/store"
 )
 
 // Source is one piece of code the answer may be built on, and the reason it is
@@ -864,29 +867,17 @@ ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 // identifiers pulls the word-shaped tokens out of source text. Deliberately
 // crude — it feeds a lookup against a table of known symbol names, so a wrong
 // guess finds nothing rather than fetching the wrong file.
+//
+// What counts as a token is edges.Identifiers', shared with the edge walk.
 func identifiers(s string) []string {
-	fields := strings.FieldsFunc(s, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
-	})
-	uniq := map[string]bool{}
-	for _, f := range fields {
-		if len(f) > 2 {
-			uniq[f] = true
-		}
-	}
-	out := make([]string, 0, len(uniq))
-	for f := range uniq {
-		out = append(out, f)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(edges.Identifiers(s)))
 }
 
 func placeholders(n int) string {
 	if n == 0 {
 		return "NULL"
 	}
-	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
+	return store.Placeholders(n)
 }
 
 // estimateTokens is the same ~4-characters-per-token heuristic the chunker

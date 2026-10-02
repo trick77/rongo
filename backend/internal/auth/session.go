@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -266,13 +267,5 @@ func (s *Service) CreateSessionFromClaims(ctx context.Context, claims Claims, ad
 // isAdmin reports whether the claims carry the admin group. An empty group name
 // means the check is off; see CreateSessionFromClaims.
 func isAdmin(groups []string, adminGroup string) bool {
-	if adminGroup == "" {
-		return true
-	}
-	for _, g := range groups {
-		if g == adminGroup {
-			return true
-		}
-	}
-	return false
+	return adminGroup == "" || slices.Contains(groups, adminGroup)
 }

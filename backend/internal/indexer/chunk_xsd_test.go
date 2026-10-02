@@ -26,7 +26,7 @@ func TestChunkFile_xsdAnchorsOnTopLevelTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunks := ChunkFile("shop", "main", "src/main/resources/wsdl/order.xsd", body, syms, DefaultChunkOptions())
+	chunks := ChunkFile("shop", "src/main/resources/wsdl/order.xsd", body, syms, DefaultChunkOptions())
 
 	var bySymbol []string
 	for _, c := range chunks {
@@ -58,7 +58,7 @@ func TestChunkFile_schemaKindsAnchorOnlyInASchema(t *testing.T) {
 		{Name: "Order", Kind: "message", Line: 3, End: 5},
 		{Name: "Orders", Kind: "service", Line: 7, End: 9},
 	}
-	chunks := ChunkFile("shop", "main", "api/order.proto", body, syms, DefaultChunkOptions())
+	chunks := ChunkFile("shop", "api/order.proto", body, syms, DefaultChunkOptions())
 	for _, c := range chunks {
 		if c.Symbol != "" {
 			t.Errorf("a proto file anchored on %q", c.Symbol)

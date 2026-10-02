@@ -27,7 +27,7 @@ func TestChunkFile_bpmnAnchorsOnFlowNodesAndDropsTheDiagram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunks := ChunkFile("shop", "main", "src/main/resources/order-intake.bpmn", body, syms, DefaultChunkOptions())
+	chunks := ChunkFile("shop", "src/main/resources/order-intake.bpmn", body, syms, DefaultChunkOptions())
 
 	var bySymbol []string
 	for _, c := range chunks {

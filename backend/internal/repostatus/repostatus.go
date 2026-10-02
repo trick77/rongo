@@ -7,6 +7,7 @@
 package repostatus
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -110,7 +111,7 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 			LastError:      st.LastError,
 			// A row written before projects shipped has no project; it stands
 			// as one of its own, the same fallback projects.Load applies.
-			Project:       projectOr(st.Project, st.Name),
+			Project:       cmp.Or(st.Project, st.Name),
 			Part:          st.Part,
 			Description:   st.Description,
 			Image:         st.Image,
@@ -121,14 +122,4 @@ func (s *Store) RepoStatus(ctx context.Context) ([]httpapi.RepoStatus, error) {
 		})
 	}
 	return out, nil
-}
-
-// projectOr falls back to the repository's own name for a row written before
-// projects existed. Grouping those under "" would put every such repository in
-// one nameless product on the page.
-func projectOr(project, name string) string {
-	if project == "" {
-		return name
-	}
-	return project
 }

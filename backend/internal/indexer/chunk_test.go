@@ -96,7 +96,7 @@ func TestChunkFile_cutsAtSymbolBoundaries(t *testing.T) {
 	opts := DefaultChunkOptions()
 
 	// When
-	chunks := ChunkFile("shop-backend", "master", "src/shop/cart/AbandonedCartJob.java",
+	chunks := ChunkFile("shop-backend", "src/shop/cart/AbandonedCartJob.java",
 		[]byte(javaSource), javaSymbols(), opts)
 
 	// Then: the three methods are the anchors. The class is not — it CONTAINS
@@ -128,7 +128,7 @@ func TestChunkFile_stripCommentsKeepsTheSourceButNotTheClaim(t *testing.T) {
 	// says. That is precisely what makes it dangerous — it steers the vector
 	// towards a claim no line of code has to honour, and it goes stale silently.
 	const claim = "abandoned carts"
-	on := chunkFor(t, ChunkFile("shop", "master", "src/A.java",
+	on := chunkFor(t, ChunkFile("shop", "src/A.java",
 		[]byte(javaSource), javaSymbols(), DefaultChunkOptions()), "run")
 	if !strings.Contains(on.Text, claim) {
 		t.Fatalf("fixture is useless: the embedded text does not contain %q with comments on", claim)
@@ -137,7 +137,7 @@ func TestChunkFile_stripCommentsKeepsTheSourceButNotTheClaim(t *testing.T) {
 	// When
 	opts := DefaultChunkOptions()
 	opts.StripComments = true
-	off := chunkFor(t, ChunkFile("shop", "master", "src/A.java",
+	off := chunkFor(t, ChunkFile("shop", "src/A.java",
 		[]byte(javaSource), javaSymbols(), opts), "run")
 
 	// Then: gone from what is searched...
@@ -221,7 +221,7 @@ func TestChunkFile_aWindowThatIsOnlyCommentsProducesNoChunk(t *testing.T) {
 	opts := DefaultChunkOptions()
 	opts.StripComments = true
 
-	chunks := ChunkFile("shop", "master", "src/LICENSE.go", []byte(header), nil, opts)
+	chunks := ChunkFile("shop", "src/LICENSE.go", []byte(header), nil, opts)
 
 	for _, c := range chunks {
 		if strings.TrimSpace(c.SearchText) == "" {
@@ -255,7 +255,7 @@ func TestChunkFile_defaultKeepsComments(t *testing.T) {
 func TestChunkFile_coversEveryLineExactlyOnce(t *testing.T) {
 	// Given: symbol regions must partition the file. A gap loses code silently
 	// — the answer layer would report "not found" for something that is indexed.
-	chunks := ChunkFile("shop-backend", "master", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	chunks := ChunkFile("shop-backend", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
 
 	// Then
 	total := strings.Count(javaSource, "\n")
@@ -288,7 +288,7 @@ func TestChunkFile_splitsOversizedSymbolWithOverlap(t *testing.T) {
 	}
 
 	// When
-	chunks := ChunkFile("r", "master", "Big.java", []byte(b.String()), syms, DefaultChunkOptions())
+	chunks := ChunkFile("r", "Big.java", []byte(b.String()), syms, DefaultChunkOptions())
 
 	// Then
 	var huge []Chunk
@@ -323,7 +323,7 @@ func TestChunkFile_noSymbolsFallsBackToLineWindows(t *testing.T) {
 	body := b.String()
 
 	// When
-	chunks := ChunkFile("docs", "master", "notes/handbuch.zzz", []byte(body), nil, DefaultChunkOptions())
+	chunks := ChunkFile("docs", "notes/handbuch.zzz", []byte(body), nil, DefaultChunkOptions())
 
 	// Then
 	if len(chunks) < 2 {
@@ -345,7 +345,7 @@ func TestChunkFile_noSymbolsFallsBackToLineWindows(t *testing.T) {
 
 func TestChunkFile_enrichedTextDiffersFromRawText(t *testing.T) {
 	// Given / When
-	chunks := ChunkFile("shop-backend", "master", "src/shop/cart/AbandonedCartJob.java",
+	chunks := ChunkFile("shop-backend", "src/shop/cart/AbandonedCartJob.java",
 		[]byte(javaSource), javaSymbols(), DefaultChunkOptions())
 	run := chunkFor(t, chunks, "run")
 
@@ -374,7 +374,7 @@ func TestChunkFile_enrichedTextDiffersFromRawText(t *testing.T) {
 
 func TestChunkFile_hashCoversCanonicalFieldsNotTheRenderedText(t *testing.T) {
 	// Given / When
-	chunks := ChunkFile("shop-backend", "master", "src/shop/cart/AbandonedCartJob.java",
+	chunks := ChunkFile("shop-backend", "src/shop/cart/AbandonedCartJob.java",
 		[]byte(javaSource), javaSymbols(), DefaultChunkOptions())
 	run := chunkFor(t, chunks, "run")
 
@@ -397,8 +397,8 @@ func TestChunkFile_hashChangesWithThePath(t *testing.T) {
 	// Given: the same body at two paths. The breadcrumb is part of what gets
 	// embedded, so the two must NOT share a cache entry — a hit would pair one
 	// chunk with a vector built from the other file's context.
-	a := ChunkFile("shop-backend", "master", "src/a/AbandonedCartJob.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
-	b := ChunkFile("shop-backend", "master", "src/b/AbandonedCartJob.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	a := ChunkFile("shop-backend", "src/a/AbandonedCartJob.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	b := ChunkFile("shop-backend", "src/b/AbandonedCartJob.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
 
 	// Then
 	if chunkFor(t, a, "run").ContentHash == chunkFor(t, b, "run").ContentHash {
@@ -409,8 +409,8 @@ func TestChunkFile_hashChangesWithThePath(t *testing.T) {
 func TestChunkFile_hashIgnoresTheBranch(t *testing.T) {
 	// Given: the same code on two branches embeds identically, so it must share
 	// its cache entry. Branch belongs to the citation, never to the hash.
-	a := ChunkFile("shop-backend", "master", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
-	b := ChunkFile("shop-backend", "release-2024.3", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	a := ChunkFile("shop-backend", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	b := ChunkFile("shop-backend", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
 
 	// Then
 	if chunkFor(t, a, "run").ContentHash != chunkFor(t, b, "run").ContentHash {
@@ -427,8 +427,8 @@ func TestChunkFile_docCommentEditChangesTheHash(t *testing.T) {
 		"/** Sends the teaser mail for an abandoned cart. */", 1)
 
 	// When
-	a := ChunkFile("r", "master", "A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
-	b := ChunkFile("r", "master", "A.java", []byte(edited), javaSymbols(), DefaultChunkOptions())
+	a := ChunkFile("r", "A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
+	b := ChunkFile("r", "A.java", []byte(edited), javaSymbols(), DefaultChunkOptions())
 
 	// Then
 	if chunkFor(t, a, "run").ContentHash == chunkFor(t, b, "run").ContentHash {
@@ -443,7 +443,7 @@ func TestChunkFile_cutsASinglePathologicalLine(t *testing.T) {
 	body := "var x = " + strings.Repeat("abcdefghij", 5000) + ";\n"
 
 	// When
-	chunks := ChunkFile("ui", "master", "dist/bundle.js", []byte(body), nil, DefaultChunkOptions())
+	chunks := ChunkFile("ui", "dist/bundle.js", []byte(body), nil, DefaultChunkOptions())
 
 	// Then: every byte is still indexed, in pieces the endpoint will accept.
 	if len(chunks) < 2 {
@@ -463,7 +463,7 @@ func TestChunkFile_cutsASinglePathologicalLine(t *testing.T) {
 
 func TestChunkFile_emptyBodyProducesNoChunks(t *testing.T) {
 	// Given / When
-	chunks := ChunkFile("r", "master", "empty.go", []byte("\n\n  \n"), nil, DefaultChunkOptions())
+	chunks := ChunkFile("r", "empty.go", []byte("\n\n  \n"), nil, DefaultChunkOptions())
 
 	// Then
 	if len(chunks) != 0 {

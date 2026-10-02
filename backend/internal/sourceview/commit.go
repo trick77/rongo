@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store"
 )
 
 // Commit is one commit as the commit view shows it: the message, the date,
@@ -66,7 +66,7 @@ func (s *Service) indexedPaths(ctx context.Context, repo string, files []gitrepo
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT path FROM files WHERE repo = ? AND skip_reason = '' AND path IN (`+
-				strings.TrimSuffix(strings.Repeat("?,", len(part)), ",")+`)`, args...)
+				store.Placeholders(len(part))+`)`, args...)
 		if err != nil {
 			return nil, fmt.Errorf("look up the indexed files of %s: %w", repo, err)
 		}

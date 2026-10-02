@@ -698,14 +698,7 @@ and say so plainly instead of guessing.`
 // got wrong is not an error: it is a call that found nothing, and the model is
 // told why.
 func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources []Source, known []string, stage retrieve.StagePrefixes, shown shownFiles) (step LocateStep, refused, display string, landings []Source, err error) {
-	var args struct {
-		Query   string `json:"query"`
-		Pattern string `json:"pattern"`
-		Name    string `json:"name"`
-		Repo    string `json:"repo"`
-		Path    string `json:"path"`
-		Line    int    `json:"line"`
-	}
+	var args locateArgs
 	if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
 		return LocateStep{Tool: call.Name}.refusedAs(call.Name+"(unparseable)", "the call was malformed"), locateUnparseable, "", nil, nil //nolint:nilerr // malformed arguments are the model's mistake, told back to it, never a failed turn
 	}
@@ -835,17 +828,20 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		"There is no tool by that name. The tools are search, grep, symbol and read.", "", nil, nil
 }
 
+// locateArgs is every argument a locate tool takes; each tool reads its own.
+type locateArgs struct {
+	Query   string `json:"query"`
+	Pattern string `json:"pattern"`
+	Name    string `json:"name"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+}
+
 // callStep is the step a call asks for, before it runs. Arguments that do not
 // parse leave the tool name alone.
 func callStep(call llm.ToolCall) LocateStep {
-	var args struct {
-		Query   string `json:"query"`
-		Pattern string `json:"pattern"`
-		Name    string `json:"name"`
-		Repo    string `json:"repo"`
-		Path    string `json:"path"`
-		Line    int    `json:"line"`
-	}
+	var args locateArgs
 	step := LocateStep{Tool: call.Name}
 	if json.Unmarshal([]byte(call.Arguments), &args) != nil {
 		return step
@@ -960,10 +956,7 @@ func (g *Gatherer) indexed(ctx context.Context, repo string) bool {
 // capLandings trims landings to at most n, so one broad call cannot spend the
 // reserve.
 func capLandings(ss []Source, n int) []Source {
-	if len(ss) > n {
-		return ss[:n]
-	}
-	return ss
+	return ss[:min(n, len(ss))]
 }
 
 // locateResult is what a search, symbol or read call reports back to the
