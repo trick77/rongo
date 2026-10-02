@@ -25,15 +25,17 @@ function asFeedback(v: unknown): Feedback | null {
 
 const finished = (t: Turn) => t.done && t.text !== "" && !t.error && t.messageId !== null;
 
-/** Which turn the verdict was given at, and how many finished turns came
- * after it. Turns as the view counts them: a re-explain or a retry is part of
- * the question it answers, not a newer one. */
-function coverage(turns: Turn[], upTo: number): { at: number; newer: number } | null {
-  const groups = groupByQuestion(turns);
-  const at = groups.findIndex((g) => g.some((i) => turns[i].messageId === upTo));
-  if (at < 0) return null;
-  const newer = groups.slice(at + 1).filter((g) => g.some((i) => finished(turns[i]))).length;
-  return { at: at + 1, newer };
+/** The first turn holding an answer written after the verdict, or null when
+ * the verdict covers everything on screen. By message id, not by position:
+ * a re-explain of an older turn is newer than the turns below it, so the
+ * newest answer the verdict covered can sit in turn 1 while turn 2 was on
+ * screen too. Turns as the view counts them — a re-explain or a retry belongs
+ * to the question it answers. */
+function firstUncovered(turns: Turn[], upTo: number): number | null {
+  const at = groupByQuestion(turns).findIndex((g) =>
+    g.some((i) => finished(turns[i]) && (turns[i].messageId ?? 0) > upTo),
+  );
+  return at < 0 ? null : at + 1;
 }
 
 const thumb =
@@ -91,6 +93,13 @@ export default function ThreadFeedback({
   }, [threadId]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
+
+  // A reason picked after the next answer lands would pin the verdict to an
+  // answer the reader never judged, so a running turn closes the picker. The
+  // bare thumbs down stays, covering what it covered.
+  useEffect(() => {
+    if (running) setPicking(false);
+  }, [running]);
 
   const thank = () => {
     setThanks(true);
@@ -182,8 +191,8 @@ export default function ThreadFeedback({
   let said = "Was this thread helpful?";
   if (fb) {
     const parts = [fb.reason ? (reasonLabel.get(fb.reason) ?? fb.reason) : fb.verdict === 1 ? "Helpful" : "Not helpful"];
-    const cov = coverage(turns, fb.upToMessageId);
-    if (cov && cov.newer > 0) parts.push(`rated before turn ${cov.at + 1}`);
+    const turn = firstUncovered(turns, fb.upToMessageId);
+    if (turn !== null) parts.push(`rated before turn ${turn}`);
     said = parts.join(" · ");
   }
 

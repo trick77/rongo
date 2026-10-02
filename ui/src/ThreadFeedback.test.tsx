@@ -125,6 +125,34 @@ describe("ThreadFeedback", () => {
     expect(screen.queryByText(/rated before/)).toBeNull();
   });
 
+  it("counts a turn as covered when the verdict came after its answer, whatever was re-explained since", async () => {
+    // Q1 (1), Q2 (2), then Q1 re-explained (3), then rated: the newest answer
+    // is the re-explain, and Q2 was on screen when the reader judged.
+    server({ verdict: 1, reason: "", upToMessageId: 3 });
+    const turns = [answered(1), answered(2), answered(3, 1)];
+    render(<ThreadFeedback threadId="t1" turns={turns} running={false} caveat={caveat} />);
+
+    expect(await screen.findByText("Helpful")).toBeTruthy();
+    expect(screen.queryByText(/rated before/)).toBeNull();
+  });
+
+  it("drops an open reason picker when the next turn starts", async () => {
+    server(null);
+    const user = userEvent.setup();
+    const first = [answered(2)];
+    const { rerender } = render(<ThreadFeedback threadId="t1" turns={first} running={false} caveat={caveat} />);
+    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    expect(await screen.findByText("What was off?")).toBeTruthy();
+
+    // A reason picked after the next answer would pin the verdict to an
+    // answer the reader never judged.
+    rerender(<ThreadFeedback threadId="t1" turns={first} running caveat={caveat} />);
+    rerender(<ThreadFeedback threadId="t1" turns={[...first, answered(4)]} running={false} caveat={caveat} />);
+
+    expect(screen.queryByText("What was off?")).toBeNull();
+    expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("keeps a click made before the stored verdict arrived", async () => {
     // The load answers "none" only after the reader already voted: the read
     // ran first on the server, its reply is older than the click.
