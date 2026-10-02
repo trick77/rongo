@@ -157,9 +157,12 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
 
   const uncovered = fb ? firstUncovered(turns, fb.upToMessageId) : null;
 
-  // "Helpful?" unless a thumbs down carries a reason: then the reason. The
-  // pressed thumb says which way the verdict went; only a reason adds to it.
-  const label = (fb?.verdict === -1 && reasons.find(([value]) => value === fb.reason)?.[1]) || "Helpful?";
+  // "Helpful?" as the question; "Helpful" once answered yes; the reason of a
+  // thumbs down when it carries one.
+  const label =
+    fb?.verdict === 1
+      ? "Helpful"
+      : (fb?.verdict === -1 && reasons.find(([value]) => value === fb.reason)?.[1]) || "Helpful?";
 
   return (
     <>

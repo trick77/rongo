@@ -191,7 +191,7 @@ describe("ThreadFeedback", () => {
     await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
   });
 
-  it("reads Helpful? before the thumbs, or the reason of a thumbs down", async () => {
+  it("reads Helpful? before the thumbs, Helpful once thumbed up, or the reason of a thumbs down", async () => {
     server(null);
     const user = userEvent.setup();
     render(row([answered(2)]));
@@ -199,11 +199,13 @@ describe("ThreadFeedback", () => {
     const pill = up.parentElement as HTMLElement;
     const label = () => pill.firstElementChild?.textContent;
 
-    for (const name of ["Helpful", "Not helpful", "Helpful"]) {
-      await user.click(screen.getByRole("button", { name }));
-      expect(label()).toBe("Helpful?");
-    }
+    expect(label()).toBe("Helpful?");
+    await user.click(screen.getByRole("button", { name: "Helpful" }));
+    expect(label()).toBe("Helpful");
+    await user.click(screen.getByRole("button", { name: "Helpful" }));
+    expect(label()).toBe("Helpful?");
     await user.click(screen.getByRole("button", { name: "Not helpful" }));
+    expect(label()).toBe("Helpful?");
     await user.click(screen.getByRole("button", { name: "Too long" }));
     expect(label()).toBe("Too long");
     expect(screen.queryByText("Thanks")).toBeNull();
