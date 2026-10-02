@@ -78,9 +78,9 @@ func addChunk(t *testing.T, db *sql.DB, repo, path, symbol, raw string, vec []fl
 	var ordinal int
 	db.QueryRow(`SELECT COALESCE(MAX(ordinal)+1, 0) FROM chunks WHERE file_id = ?`, fileID).Scan(&ordinal)
 	res, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		fileID, ordinal, 10+ordinal, 20+ordinal, symbol, "enriched "+raw, raw, 5, path+raw)
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?,?,?,?,?,?,?)`,
+		fileID, ordinal, 10+ordinal, 20+ordinal, symbol, raw, path+raw)
 	if err != nil {
 		t.Fatalf("insert chunk: %v", err)
 	}
@@ -111,9 +111,9 @@ func addChunkAt(t *testing.T, db *sql.DB, repo, path string, ordinal, start, end
 		t.Fatalf("lookup file: %v", err)
 	}
 	res, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
-		VALUES (?,?,?,?,?,?,?,?,?)`,
-		fileID, ordinal, start, end, symbol, "enriched "+raw, raw, 5, fmt.Sprintf("%s%s%d", path, raw, ordinal))
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?,?,?,?,?,?,?)`,
+		fileID, ordinal, start, end, symbol, raw, fmt.Sprintf("%s%s%d", path, raw, ordinal))
 	if err != nil {
 		t.Fatalf("insert chunk: %v", err)
 	}

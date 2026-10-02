@@ -45,8 +45,8 @@ func seedFileWithTokens(t *testing.T, db *sql.DB, repo, path, text string, syms 
 		t.Fatalf("file id: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, text, raw_text, content_hash)
-		VALUES (?, 0, 1, 50, ?, ?, ?)`, fileID, text, text, repo+"/"+path); err != nil {
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, raw_text, content_hash)
+		VALUES (?, 0, 1, 50, ?, ?)`, fileID, text, repo+"/"+path); err != nil {
 		t.Fatalf("seed chunk %s/%s: %v", repo, path, err)
 	}
 	for _, s := range syms {

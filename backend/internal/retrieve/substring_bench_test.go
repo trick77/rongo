@@ -50,9 +50,9 @@ func benchDB(b *testing.B, n int) *sql.DB {
 		}
 		fileID, _ := res.LastInsertId()
 		res, err = tx.Exec(`
-			INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
-			VALUES (?,0,1,9,?,?,?,?,?)`,
-			fileID, "sym", "enriched "+raw, raw, 5, fmt.Sprintf("h%06d", i))
+			INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+			VALUES (?,0,1,9,?,?,?)`,
+			fileID, "sym", raw, fmt.Sprintf("h%06d", i))
 		if err != nil {
 			b.Fatalf("insert chunk: %v", err)
 		}

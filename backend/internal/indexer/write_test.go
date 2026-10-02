@@ -42,9 +42,9 @@ func vec(marker float32) []float32 {
 func sampleChunks() []Chunk {
 	return []Chunk{
 		{Ordinal: 0, StartLine: 1, EndLine: 4, Symbol: "run", Text: "enriched one",
-			RawText: "public void run() {}", SearchText: "public void run() {}", TokenCount: 5, ContentHash: "h1"},
+			RawText: "public void run() {}", SearchText: "public void run() {}", ContentHash: "h1"},
 		{Ordinal: 1, StartLine: 5, EndLine: 9, Symbol: "seen", Text: "enriched two",
-			RawText: "public int seen() { return 0; }", SearchText: "public int seen() { return 0; }", TokenCount: 6, ContentHash: "h2"},
+			RawText: "public int seen() { return 0; }", SearchText: "public int seen() { return 0; }", ContentHash: "h2"},
 	}
 }
 

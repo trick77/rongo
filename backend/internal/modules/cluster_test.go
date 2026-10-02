@@ -45,8 +45,8 @@ func seedFile(t *testing.T, db *sql.DB, repo, path string, chunks int, skip stri
 	}
 	for i := 0; i < chunks; i++ {
 		if _, err := db.Exec(
-			`INSERT INTO chunks (file_id, ordinal, start_line, end_line, text, raw_text, content_hash)
-			 VALUES (?, ?, 1, 2, 'enriched', 'raw', ?)`,
+			`INSERT INTO chunks (file_id, ordinal, start_line, end_line, raw_text, content_hash)
+			 VALUES (?, ?, 1, 2, 'raw', ?)`,
 			id, i, path+":"+string(rune('a'+i)),
 		); err != nil {
 			t.Fatalf("seed chunk %s#%d: %v", path, i, err)

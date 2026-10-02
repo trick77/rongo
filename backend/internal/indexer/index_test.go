@@ -349,7 +349,7 @@ func TestIndexRepo_aConfigurationFileIsIndexedRedacted(t *testing.T) {
 		t.Fatalf("skip_reason = %q, want the file indexed", reason)
 	}
 	for _, q := range []string{
-		`SELECT COUNT(*) FROM chunks WHERE text LIKE '%fixture-cipher%' OR raw_text LIKE '%fixture-cipher%'`,
+		`SELECT COUNT(*) FROM chunks WHERE raw_text LIKE '%fixture-cipher%'`,
 		`SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH '"fixture-cipher"'`,
 	} {
 		if n := countOf(t, h.db, q); n != 0 {

@@ -29,7 +29,6 @@ type Chunk struct {
 	// comments were stripped, in which case RawText still holds the untouched
 	// source: a citation must quote the real file, never a doctored one.
 	SearchText  string
-	TokenCount  int
 	ContentHash string
 }
 
@@ -185,7 +184,6 @@ func ChunkFile(repo, _, path string, body []byte, syms []symbols.Symbol, opts Ch
 					Text:        text,
 					RawText:     part,
 					SearchText:  searchPart,
-					TokenCount:  estimateTokens(text),
 					ContentHash: contentHash(repo, path, chain, searchPart),
 				})
 			}

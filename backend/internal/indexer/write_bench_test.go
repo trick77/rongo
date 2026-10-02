@@ -34,7 +34,7 @@ func BenchmarkReplaceFile(b *testing.B) {
 	vecs := make([][]float32, perFile)
 	for i := range chunks {
 		chunks[i] = Chunk{Ordinal: i, StartLine: i*30 + 1, EndLine: i*30 + 30, Symbol: "handler",
-			Text: "path: a.go\n" + body, RawText: body, SearchText: body, TokenCount: 400, ContentHash: fmt.Sprintf("h%d", i)}
+			Text: "path: a.go\n" + body, RawText: body, SearchText: body, ContentHash: fmt.Sprintf("h%d", i)}
 		vecs[i] = make([]float32, benchDim)
 	}
 	syms := make([]symbols.Symbol, 40)

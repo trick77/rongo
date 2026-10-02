@@ -45,9 +45,9 @@ func seedChunk(t *testing.T, db *sql.DB, path string, ordinal, start, end int, s
 		t.Fatalf("look up file: %v", err)
 	}
 	res, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		fileID, ordinal, start, end, symbol, "enriched "+body, body, path+string(rune('a'+ordinal)))
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		fileID, ordinal, start, end, symbol, body, path+string(rune('a'+ordinal)))
 	if err != nil {
 		t.Fatalf("seed chunk: %v", err)
 	}
@@ -148,9 +148,9 @@ func seedChunkIn(t *testing.T, db *sql.DB, repo, path string, ordinal, start, en
 		t.Fatalf("look up file: %v", err)
 	}
 	res, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		fileID, ordinal, start, end, symbol, "enriched "+body, body, repo+path+string(rune('a'+ordinal)))
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		fileID, ordinal, start, end, symbol, body, repo+path+string(rune('a'+ordinal)))
 	if err != nil {
 		t.Fatalf("seed chunk: %v", err)
 	}
@@ -400,8 +400,8 @@ func TestGather_crossesARepoBoundaryOnTheSamePath(t *testing.T) {
 	}
 	fileID, _ := res.LastInsertId()
 	if _, err := db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, 0, 1, 10, 'ParseYAML', 'e', 'func ParseYAML() {}', 'h-commons')`, fileID); err != nil {
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, 0, 1, 10, 'ParseYAML', 'func ParseYAML() {}', 'h-commons')`, fileID); err != nil {
 		t.Fatalf("seed other repo chunk: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO symbols (file_id, name, kind, line) VALUES (?, 'ParseYAML', 'func', 1)`, fileID); err != nil {
