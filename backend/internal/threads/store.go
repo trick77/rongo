@@ -17,7 +17,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -685,7 +685,7 @@ func (s *Store) callsFor(ctx context.Context, ids []int64) (map[int64][]usage.Ca
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd
-			 FROM message_usage WHERE message_id IN (`+store.Placeholders(len(part))+`) ORDER BY message_id, id`, idArgs(part)...)
+			 FROM message_usage WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, id`, idArgs(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read usage: %w", err)
 		}
@@ -1063,7 +1063,7 @@ func (s *Store) citationsFor(ctx context.Context, ids []int64) (map[int64][]ask.
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, marker, repo, branch, path, start_line, end_line, sha, kind, subject, committed_at FROM citations
-			 WHERE message_id IN (`+store.Placeholders(len(part))+`) ORDER BY message_id, marker`, idArgs(part)...)
+			 WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, marker`, idArgs(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read citations: %w", err)
 		}
@@ -1259,7 +1259,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 			FROM clarifications c
 			JOIN messages m ON m.id = c.message_id
 			JOIN threads t ON t.id = m.thread_id
-			WHERE c.message_id IN (`+store.Placeholders(len(part))+`) AND (t.user_subject = ? OR ? = ?)`,
+			WHERE c.message_id IN (`+sqlutil.Placeholders(len(part))+`) AND (t.user_subject = ? OR ? = ?)`,
 			append(idArgs(part), subject, subject, anySubject)...)
 		if err != nil {
 			return nil, fmt.Errorf("read clarification: %w", err)
@@ -1296,7 +1296,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT clarification_id, idx, repo, branch, module_key, title, summary, members
-			FROM clarification_candidates WHERE clarification_id IN (`+store.Placeholders(len(part))+`) ORDER BY clarification_id, idx`, idArgs(part)...)
+			FROM clarification_candidates WHERE clarification_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY clarification_id, idx`, idArgs(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read candidates: %w", err)
 		}

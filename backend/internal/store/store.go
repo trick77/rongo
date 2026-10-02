@@ -72,10 +72,3 @@ func VecLiteral(v []float32) string {
 	b.WriteByte(']')
 	return b.String()
 }
-
-// Placeholders is n bind parameters for an IN list: "?,?,?". Empty for
-// none, which is not valid SQL inside IN (); a caller that can have none says
-// what an empty list means itself.
-func Placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
-}

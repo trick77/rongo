@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // Sync replaces one repository's units and unit_deps in one transaction, for
@@ -166,7 +166,7 @@ func AnyLinked(ctx context.Context, db *sql.DB, repo string, keys []string) (boo
 	if len(keys) < 2 {
 		return false, nil
 	}
-	in := store.Placeholders(len(keys))
+	in := sqlutil.Placeholders(len(keys))
 	args := make([]any, 0, 1+2*len(keys))
 	args = append(args, repo)
 	for i := 0; i < 2; i++ {

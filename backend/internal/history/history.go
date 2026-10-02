@@ -13,7 +13,7 @@ import (
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // Store reads and writes the commits table and its FTS mirror.
@@ -192,7 +192,7 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	b.WriteString(` WHERE r.enabled = 1 AND c.committed_at >= ?`)
 	args = append(args, q.Since.UTC().Format(time.RFC3339))
 	if len(q.Repos) > 0 {
-		b.WriteString(` AND c.repo IN (` + store.Placeholders(len(q.Repos)) + `)`)
+		b.WriteString(` AND c.repo IN (` + sqlutil.Placeholders(len(q.Repos)) + `)`)
 		for _, r := range q.Repos {
 			args = append(args, r)
 		}
@@ -247,7 +247,7 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
 		FROM commits c JOIN repo_state r ON r.name = c.repo
-		WHERE c.repo = ? AND c.sha IN (`+store.Placeholders(len(shas))+`)`, args...)
+		WHERE c.repo = ? AND c.sha IN (`+sqlutil.Placeholders(len(shas))+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("commits by sha: %w", err)
 	}

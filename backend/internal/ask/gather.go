@@ -16,7 +16,7 @@ import (
 	"github.com/trick77/rongo/internal/edges"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // Source is one piece of code the answer may be built on, and the reason it is
@@ -796,7 +796,7 @@ WITH selective AS (
     FROM symbols s
     JOIN files sf ON sf.id = s.file_id
     JOIN repo_state sr ON sr.name = sf.repo AND sr.enabled = 1
-    WHERE s.name IN (` + placeholders(len(names)) + `)
+    WHERE s.name IN (` + sqlutil.Placeholders(len(names)) + `)
     GROUP BY s.name
     HAVING definers <= ?
 ),
@@ -871,13 +871,6 @@ ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 // What counts as a token is edges.Identifiers', shared with the edge walk.
 func identifiers(s string) []string {
 	return slices.Sorted(maps.Keys(edges.Identifiers(s)))
-}
-
-func placeholders(n int) string {
-	if n == 0 {
-		return "NULL"
-	}
-	return store.Placeholders(n)
 }
 
 // estimateTokens is the same ~4-characters-per-token heuristic the chunker

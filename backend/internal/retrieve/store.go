@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/trick77/rongo/internal/sqlutil"
 	"github.com/trick77/rongo/internal/store"
 )
 
@@ -125,7 +126,7 @@ func (p StagePrefixes) clause(alias string) (string, []any) {
 	}
 	sort.Strings(repos)
 	var args []any
-	q := " AND (" + alias + ".repo NOT IN (" + store.Placeholders(len(repos)) + ")"
+	q := " AND (" + alias + ".repo NOT IN (" + sqlutil.Placeholders(len(repos)) + ")"
 	args = append(args, toAny(repos)...)
 	for _, r := range repos {
 		// length() in SQL, not len() in Go: substr counts characters and
@@ -161,7 +162,7 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 		" JOIN repo_state r2 ON r2.name = f2.repo" +
 		" WHERE r2.enabled = 1"
 	if len(repos) > 0 {
-		inner += " AND f2.repo IN (" + store.Placeholders(len(repos)) + ")"
+		inner += " AND f2.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
 	// The stage restriction rides in the same subquery, for the same reason.
@@ -253,7 +254,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 		WHERE x.raw_text MATCH ?`
 	args := []any{match}
 	if len(repos) > 0 {
-		q += " AND f.repo IN (" + store.Placeholders(len(repos)) + ")"
+		q += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
 	stageQ, stageArgs := stage.clause("f")
@@ -369,7 +370,7 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	where := "\n\t\tWHERE " + match
 	args := append([]any{}, matchArgs...)
 	if len(repos) > 0 {
-		where += " AND f.repo IN (" + store.Placeholders(len(repos)) + ")"
+		where += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
 		args = append(args, toAny(repos)...)
 	}
 	stageQ, stageArgs := stage.clause("f")
@@ -394,7 +395,7 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	scopeWhere := ""
 	scopeArgs := []any{}
 	if len(repos) > 0 {
-		scopeWhere += " WHERE f.repo IN (" + store.Placeholders(len(repos)) + ")"
+		scopeWhere += " WHERE f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
 		scopeArgs = append(scopeArgs, toAny(repos)...)
 	}
 	stageOnly, stageOnlyArgs := stage.clause("f")
@@ -548,7 +549,7 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	scope := ""
 	var scopeArgs []any
 	if len(repos) > 0 {
-		scope += " AND f.repo IN (" + store.Placeholders(len(repos)) + ")"
+		scope += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
 		scopeArgs = append(scopeArgs, toAny(repos)...)
 	}
 	stageQ, stageArgs := stage.clause("f")
@@ -704,7 +705,7 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 			FROM chunks c
 			JOIN files f ON f.id = c.file_id
 			JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
-			WHERE c.id IN (` + store.Placeholders(len(batch)) + `)`
+			WHERE c.id IN (` + sqlutil.Placeholders(len(batch)) + `)`
 		if err := readHits(ctx, tx, q, batch, byID); err != nil {
 			return nil, err
 		}

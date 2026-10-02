@@ -406,18 +406,6 @@ func TestChunkFile_hashChangesWithThePath(t *testing.T) {
 	}
 }
 
-func TestChunkFile_hashIgnoresTheBranch(t *testing.T) {
-	// Given: the same code on two branches embeds identically, so it must share
-	// its cache entry. Branch belongs to the citation, never to the hash.
-	a := ChunkFile("shop-backend", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
-	b := ChunkFile("shop-backend", "src/A.java", []byte(javaSource), javaSymbols(), DefaultChunkOptions())
-
-	// Then
-	if chunkFor(t, a, "run").ContentHash != chunkFor(t, b, "run").ContentHash {
-		t.Error("the branch changed the hash, so a branch entry would re-embed the whole repository")
-	}
-}
-
 func TestChunkFile_docCommentEditChangesTheHash(t *testing.T) {
 	// Given: only the doc comment differs. It is inside RawText, so this is a
 	// genuine content change and must miss the cache — otherwise the stored

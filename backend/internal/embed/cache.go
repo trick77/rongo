@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // getBatch is how many hashes go into one IN (…) lookup. A full repository
@@ -48,7 +48,7 @@ func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32,
 		}
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 		q := `SELECT content_hash, embedding FROM embed_cache WHERE model = ? AND content_hash IN (` +
-			store.Placeholders(len(batch)) + `)`
+			sqlutil.Placeholders(len(batch)) + `)`
 		rows, err := c.db.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("embed cache get: %w", err)

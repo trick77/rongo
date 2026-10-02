@@ -117,10 +117,11 @@ var commentPrefixes = []string{"//", "/*", "*", "#", "--", ";", "%", "'''", `"""
 // ChunkFile splits body into chunks, anchored on symbols where ctags found any
 // and on line windows where it did not.
 //
-// branch is NOT part of the breadcrumb or the content hash, on purpose: the
-// same code on two branches embeds identically and must share its cache entry,
-// otherwise adding a second branch entry re-embeds a whole repository. The
-// branch belongs to the citation, which the write path stores alongside.
+// It is not given the branch, on purpose: the branch must stay out of the
+// breadcrumb and the content hash, because the same code on two branches embeds
+// identically and must share its cache entry — otherwise adding a second
+// branch entry re-embeds a whole repository. The branch belongs to the
+// citation, which the write path stores alongside.
 func ChunkFile(repo, path string, body []byte, syms []symbols.Symbol, opts ChunkOptions) []Chunk {
 	if opts.TargetTokens <= 0 {
 		opts = DefaultChunkOptions()

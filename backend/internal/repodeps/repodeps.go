@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/sqlutil"
 	"golang.org/x/mod/modfile"
 )
 
@@ -131,7 +131,7 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 	for _, r := range repos {
 		args = append(args, r)
 	}
-	in := store.Placeholders(len(repos))
+	in := sqlutil.Placeholders(len(repos))
 	var one int
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 	err := db.QueryRowContext(ctx, `
