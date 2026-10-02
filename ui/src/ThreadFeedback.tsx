@@ -23,7 +23,10 @@ function asFeedback(v: unknown): Feedback | null {
   return { verdict: f.verdict, reason: typeof f.reason === "string" ? f.reason : "", upToMessageId: f.upToMessageId };
 }
 
-const finished = (t: Turn) => t.done && t.text !== "" && !t.error && t.messageId !== null;
+/** A turn the server counts as a finished answer, the one thing a verdict can
+ * cover: written, not failed, not a card asking back. */
+export const finished = (t: Turn) =>
+  t.done && t.text !== "" && !t.error && !t.clarification && t.messageId !== null;
 
 /** The first turn holding an answer written after the verdict, or null when
  * the verdict covers everything on screen. By message id, not by position:
@@ -39,29 +42,19 @@ function firstUncovered(turns: Turn[], upTo: number): number | null {
 }
 
 const thumb =
-  "inline-flex h-6.5 w-6.5 items-center justify-center rounded-full text-faint hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
+  "inline-flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
 const chip =
-  "rounded-full border border-border bg-panel px-2.5 py-0.5 text-xs text-muted hover:border-elevated-border hover:text-ink";
-const link = "text-muted underline decoration-border underline-offset-3 hover:text-ink";
+  "rounded-full border border-border bg-panel px-3 py-1 text-[12.5px] text-muted hover:border-elevated-border hover:text-ink";
+const link = "text-[12.5px] text-muted underline decoration-border underline-offset-3 hover:text-ink";
 
 /**
- * The line under the composer: the caveat, and once the thread holds a
- * finished answer and nothing is running, the reader's verdict on the whole
- * thread beside it. A thumbs down offers what was off in the same line, so
- * the composer's foot never grows a row. Owner only: the share page draws no
- * composer and the public share API serves no verdict.
+ * The reader's verdict on the whole thread, drawn among the buttons under the
+ * newest answer — where the reader stops reading. ThreadView puts it on that
+ * one answer only, never while a turn runs, never on a shared page. Its pieces
+ * are flex items of that button row: the reasons after a thumbs down take a
+ * row of their own beneath it.
  */
-export default function ThreadFeedback({
-  threadId,
-  turns,
-  running,
-  caveat,
-}: {
-  threadId: string | null;
-  turns: Turn[];
-  running: boolean;
-  caveat: string;
-}) {
+export default function ThreadFeedback({ threadId, turns }: { threadId: string; turns: Turn[] }) {
   const [fb, setFb] = useState<Feedback | null>(null);
   // The picker belongs to the newest answer on screen when it was opened, and
   // shows only while that is still the newest. A reason picked after the next
@@ -86,7 +79,6 @@ export default function ThreadFeedback({
     setFb(null);
     setPickingAt(null);
     setThanks(false);
-    if (threadId === null) return;
     (async () => {
       try {
         const res = await fetch(`/api/threads/${threadId}/feedback`);
@@ -174,56 +166,17 @@ export default function ThreadFeedback({
       }
     });
 
-  const eligible = threadId !== null && !running && turns.some(finished);
-  // min-h holds the line at the thumbs' height in every state, so the composer
-  // above it does not jump when the thumbs appear or the reasons replace them.
-  const wrap =
-    "mt-3 flex min-h-6.5 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-faint [@media(max-height:500px)]:hidden";
-
-  if (!eligible) return <p className={wrap}>{caveat}</p>;
-
-  if (picking) {
-    return (
-      <div className={wrap}>
-        <span>What was off?</span>
-        {reasons.map(([value, label]) => (
-          <button key={value} type="button" className={chip} onClick={() => void pick(value)}>
-            {label}
-          </button>
-        ))}
-        <button
-          type="button"
-          className={link}
-          onClick={() => {
-            setPicking(false);
-            thank();
-          }}
-        >
-          skip
-        </button>
-      </div>
-    );
-  }
-
-  // Short on purpose: the line shares its width with the caveat and must not
-  // wrap. The pressed thumb already says which way the verdict went, so the
-  // words only add what it cannot — the reason, and that later turns came.
-  let said = "Was this thread helpful?";
-  if (fb) {
-    const parts = [fb.reason ? (reasonLabel.get(fb.reason) ?? fb.reason) : fb.verdict === 1 ? "Helpful" : "Not helpful"];
-    const turn = firstUncovered(turns, fb.upToMessageId);
-    if (turn !== null) parts.push(`rated before turn ${turn}`);
-    said = parts.join(" · ");
-  }
+  // The pressed thumb already says which way the verdict went; the label adds
+  // the reason when there is one.
+  let label = "Helpful?";
+  if (thanks) label = "Thanks";
+  else if (fb) label = fb.reason ? (reasonLabel.get(fb.reason) ?? fb.reason) : fb.verdict === 1 ? "Helpful" : "Not helpful";
+  const uncovered = fb ? firstUncovered(turns, fb.upToMessageId) : null;
 
   return (
-    <div className={wrap}>
-      <span>{caveat}</span>
-      <span aria-hidden="true" className="text-border">
-        ·
-      </span>
-      {!fb && <span>{said}</span>}
-      <span className="inline-flex items-center">
+    <>
+      <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-panel py-0.5 pr-0.5 pl-3">
+        <span className="pr-1.5 text-[12.5px] text-faint">{label}</span>
         <button
           type="button"
           aria-label="Helpful"
@@ -245,19 +198,37 @@ export default function ThreadFeedback({
           <ThumbDownIcon />
         </button>
       </span>
-      {fb && <span className="text-muted">{said}</span>}
+      {uncovered !== null && <span className="text-[12.5px] text-faint">rated before turn {uncovered}</span>}
       {/* A reason saved now is pinned to the newest answer, so "change" is
           offered only while the verdict already covers it. Past that, the
           thumbs are the way to rate again. */}
-      {fb?.verdict === -1 && fb.upToMessageId === newest && (
-        <>
-          <span className="text-muted">·</span>
-          <button type="button" className={link} onClick={() => setPicking(true)}>
-            change
-          </button>
-        </>
+      {fb?.verdict === -1 && fb.upToMessageId === newest && !picking && (
+        <button type="button" className={link} onClick={() => setPicking(true)}>
+          {fb.reason ? "change reason" : "add a reason"}
+        </button>
       )}
-      {thanks && <span className="text-muted">Thanks</span>}
-    </div>
+      {picking && (
+        // order-last + basis-full: a row of its own under the buttons, below
+        // the usage pill that ends the row above.
+        <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-1.5 text-[12.5px] text-faint">
+          <span className="mr-1">What was off?</span>
+          {reasons.map(([value, text]) => (
+            <button key={value} type="button" className={chip} onClick={() => void pick(value)}>
+              {text}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={link}
+            onClick={() => {
+              setPicking(false);
+              thank();
+            }}
+          >
+            skip
+          </button>
+        </div>
+      )}
+    </>
   );
 }
