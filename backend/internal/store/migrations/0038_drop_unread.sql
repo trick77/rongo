@@ -6,6 +6,10 @@
 -- itself was stored beside raw_text, about doubling what a chunk's row holds,
 -- and no query selected it. token_count likewise.
 --
+-- NO ROLLING BACK PAST THIS: a build from before it still inserts into both
+-- columns, so on a migrated database every index write of that build fails
+-- while its answers go on serving an index that no longer moves.
+--
 -- One way: the enriched text comes back only by indexing again. Nothing that
 -- is stored depends on it — a re-index recomputes it, hashes it, and finds
 -- the vector in the cache.

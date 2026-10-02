@@ -307,8 +307,8 @@ func TestChunkFile_splitsOversizedSymbolWithOverlap(t *testing.T) {
 		}
 	}
 	for _, c := range huge {
-		if c.TokenCount > DefaultChunkOptions().MaxTokens {
-			t.Errorf("chunk of %d tokens exceeds the %d ceiling", c.TokenCount, DefaultChunkOptions().MaxTokens)
+		if n := estimateTokens(c.Text); n > DefaultChunkOptions().MaxTokens {
+			t.Errorf("chunk of %d tokens exceeds the %d ceiling", n, DefaultChunkOptions().MaxTokens)
 		}
 	}
 }
@@ -451,8 +451,8 @@ func TestChunkFile_cutsASinglePathologicalLine(t *testing.T) {
 	}
 	var rejoined strings.Builder
 	for _, c := range chunks {
-		if c.TokenCount > 2*DefaultChunkOptions().MaxTokens {
-			t.Errorf("chunk of %d tokens is still unbounded", c.TokenCount)
+		if n := estimateTokens(c.Text); n > 2*DefaultChunkOptions().MaxTokens {
+			t.Errorf("chunk of %d tokens is still unbounded", n)
 		}
 		rejoined.WriteString(c.RawText)
 	}

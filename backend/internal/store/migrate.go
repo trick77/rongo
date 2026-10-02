@@ -34,6 +34,14 @@ const embedDimPlaceholder = "{{EMBED_DIM}}"
 // rebuilt. Every database predating that squash is unusable and must be
 // recreated. The rule above holds from there on.
 func Migrate(db *sql.DB, embedDim int) error {
+	return migrateBefore(db, embedDim, "")
+}
+
+// migrateBefore is Migrate stopping short of the migration named stop, or
+// running them all when stop is empty. The one loop serves both, so a test
+// that needs a database as it stood before a migration builds it the way
+// production did.
+func migrateBefore(db *sql.DB, embedDim int, stop string) error {
 	if embedDim <= 0 {
 		return fmt.Errorf("migrate: embed dimension must be positive, got %d", embedDim)
 	}
@@ -57,6 +65,9 @@ func Migrate(db *sql.DB, embedDim int) error {
 	sort.Strings(names)
 
 	for _, name := range names {
+		if stop != "" && name >= stop {
+			break
+		}
 		var dummy int
 		err := db.QueryRow(`SELECT 1 FROM schema_migrations WHERE version = ?`, name).Scan(&dummy)
 		if err == nil {
