@@ -53,9 +53,13 @@ export async function revokeShare(threadID: string): Promise<boolean> {
   return res.ok || res.status === 404;
 }
 
+/**
+ * Throws when the server refuses the list. An empty list is a claim — nothing
+ * is shared — and a failed read is not that claim.
+ */
 export async function listShares(): Promise<Share[]> {
   const res = await fetch("/api/shares");
-  if (!res.ok) return [];
+  if (!res.ok) throw new Error(`shares: ${res.status}`);
   const list = await res.json();
   return Array.isArray(list) ? list : [];
 }

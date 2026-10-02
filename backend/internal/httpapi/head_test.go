@@ -19,7 +19,7 @@ func headDeps(t *testing.T, a Asker) (Deps, *threads.Store) {
 	t.Helper()
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, "dev@x.invalid", false); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@x.invalid", false); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	st := threads.NewStore(db)

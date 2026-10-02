@@ -166,6 +166,18 @@ describe("Trace", () => {
     expect(status.getAttribute("aria-live")).toBe("polite");
   });
 
+  it("keeps the running step's ticking clock out of the announcement", () => {
+    // The clock of the step in progress changes every second. Inside a live
+    // region that is a new announcement every second, over the step names
+    // that are the thing worth hearing.
+    const { container } = strict(<Trace steps={steps} state="running" startedAt={t0} />);
+
+    const clocks = [...container.querySelectorAll("li time")];
+    expect(clocks.at(-1)?.getAttribute("aria-hidden")).toBe("true");
+    // A finished step's time no longer moves, and stays readable.
+    expect(clocks[0].getAttribute("aria-hidden")).toBeNull();
+  });
+
   it("announces nothing for a turn read back out of the record", () => {
     // A record is not something happening. A thread of ten stored turns would
     // otherwise be ten live regions announcing themselves as the page loads.

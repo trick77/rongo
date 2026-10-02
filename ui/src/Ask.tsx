@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { pageColumn } from "./page";
 import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
 import SourceView, { isCommit } from "./SourceView";
@@ -6,7 +6,7 @@ import CommitView from "./CommitView";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
-import { MAX_QUESTION_BYTES, byteLength, fold, shouldCollapse, stagePaste, type PastedText } from "./pastes";
+import { MAX_QUESTION_BYTES, byteLength, fold, pasteKey, shouldCollapse, stagePaste, type PastedText } from "./pastes";
 import {
   askBody,
   asMarkdown,
@@ -965,8 +965,13 @@ export default function Ask({
 
   // The six things a reader can do to a turn. ThreadView draws the turns and
   // knows nothing about the stream; this is the whole of what it can set off.
-  // A memo, because a fresh object per render would remount every turn on
-  // every streamed token.
+  // One object for the life of the page, so no turn re-renders because of it.
+  //
+  // Each entry calls through to the handler of the newest render. Handing the
+  // handlers themselves down pinned whatever `busy` they closed over: the done
+  // event repaints with the turn still running, the end of the stream then
+  // clears busy without touching the turns, and a memo keyed on the turns kept
+  // the handlers that still refused — enabled buttons that did nothing.
   //
   // Both copies report whether the clipboard took it: in an insecure context,
   // or with the permission refused, a button saying "Copied" over a clipboard
@@ -978,10 +983,17 @@ export default function Ask({
   const closeViewer = useCallback(() => setViewing(null), []);
   const closeSources = useCallback(() => setSourcesOpen(false), []);
 
+  // Moved on at the commit, not during render: a render React discards must
+  // not leave its handlers behind for the next click.
+  const handlers = useRef({ retry, reexplain, askFollowup, chooseCandidate, narrowTo });
+  useLayoutEffect(() => {
+    handlers.current = { retry, reexplain, askFollowup, chooseCandidate, narrowTo };
+  });
+
   const actions = useMemo(
     () => ({
-      onRetry: retry,
-      onReexplain: reexplain,
+      onRetry: (i: number) => handlers.current.retry(i),
+      onReexplain: (i: number) => handlers.current.reexplain(i),
       onCopy: async (i: number) => {
         try {
           await navigator.clipboard.writeText(asMarkdown(live.current[i]));
@@ -1003,13 +1015,12 @@ export default function Ask({
           return false;
         }
       },
-      onFollowup: askFollowup,
-      onChoose: chooseCandidate,
-      onNarrow: narrowTo,
+      onFollowup: (i: number, question: string) => handlers.current.askFollowup(i, question),
+      onChoose: (i: number, idx: number) => handlers.current.chooseCandidate(i, idx),
+      onNarrow: (i: number, repos: string[]) => handlers.current.narrowTo(i, repos),
       onOpenStats: (i: number) => setTurnStats(i),
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [turns],
+    [],
   );
 
   // Untouched, the pane follows the turn it would be showing: open for a
@@ -1229,7 +1240,7 @@ export default function Ask({
               {pastes.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-1 pt-1.5">
                   {pastes.map((p, i) => (
-                    <PasteChip key={i} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
+                    <PasteChip key={pasteKey(p)} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
                   ))}
                 </div>
               )}

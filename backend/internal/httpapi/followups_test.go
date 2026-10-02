@@ -71,7 +71,7 @@ func newSuggestingServer(t *testing.T, sp *suggesterSpy, opts ...func(*fakeAsker
 	t.Helper()
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed dev user: %v", err)
 	}
 	f := &fakeAsker{}

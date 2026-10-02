@@ -24,7 +24,7 @@ func threadActions(t *testing.T) (*Server, *threads.Store) {
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
 	for _, subject := range []string{testSubject, otherSubject} {
-		if _, err := svc.UpsertUser(subject, subject+"@example.invalid", true); err != nil {
+		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
 			t.Fatalf("seed user %q: %v", subject, err)
 		}
 	}

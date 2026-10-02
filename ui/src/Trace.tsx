@@ -560,7 +560,12 @@ export default function Trace({
                 <li key={i}>
                   <span className={"node " + (running ? "node-now" : "")} aria-hidden="true" />
                   <span className={"leading-7 " + (running ? "font-medium text-ink" : "")}>{stepLabel(s.step)}</span>
-                  <time className="font-mono text-[11.5px] leading-7 tabular-nums text-faint">
+                  {/* The running step's clock ticks; in a live region every
+                      tick would be announced. */}
+                  <time
+                    aria-hidden={running ? true : undefined}
+                    className="font-mono text-[11.5px] leading-7 tabular-nums text-faint"
+                  >
                     {seconds(until - s.at)}
                   </time>
                   {s.detail && <Detail step={s.step} detail={s.detail} />}

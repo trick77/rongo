@@ -110,14 +110,19 @@ func (t *turn) fail(why string) {
 }
 
 // finish records the answer with its citations and the sources it was
-// written from.
-func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) {
-	if err := t.s.deps.Threads.Finish(t.record, t.msgID, text, cites); err != nil {
+// written from, together: an answer whose sources did not land would read
+// back as one whose basis is no longer indexed.
+//
+// False when nothing landed, and the turn is then recorded as failed: the row
+// would otherwise hold neither an answer nor an error, which is what a turn
+// still in flight looks like, while the browser was told it was done.
+func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) bool {
+	if err := t.s.deps.Threads.FinishWithSources(t.record, t.msgID, text, cites, sources); err != nil {
 		recordFailed(t.ctx, "record answer failed", err)
+		t.fail(turnFailed)
+		return false
 	}
-	if err := t.s.deps.Threads.SaveSources(t.record, t.msgID, sources); err != nil {
-		recordFailed(t.ctx, "record sources failed", err)
-	}
+	return true
 }
 
 // parseAudience reads the wire value; anything but the Developer's is the

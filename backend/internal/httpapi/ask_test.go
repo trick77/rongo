@@ -282,10 +282,10 @@ func newTestServerWithDB(t *testing.T, opts ...func(*fakeAsker)) (*Server, *thre
 	svc := auth.NewService(db, "dev", "")
 	// Both users have to exist before a thread references them: threads have
 	// a foreign key on the owning subject.
-	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed dev user: %v", err)
 	}
-	if _, err := svc.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}
 	f := &fakeAsker{}
@@ -664,7 +664,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 	svc := auth.NewService(db, "dev", "")
 	// The dev user is made on the first request; this thread has to exist
 	// before one, so its owner does too.
-	if _, err := svc.UpsertUser("dev-user", "dev@x.invalid", false); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), "dev-user", "dev@x.invalid", false); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	st := threads.NewStore(db)
@@ -890,7 +890,7 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 	deps, st := askDeps(t, &fakeAsker{tokens: []string{"x"}})
 	// The other user has to exist: threads reference users, and a thread with
 	// no owner would make this test pass for the wrong reason.
-	if _, err := deps.Auth.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
+	if _, err := deps.Auth.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}
 	other, err := st.Create(context.Background(), "someone-else", "Someone else's question?")
@@ -1216,7 +1216,7 @@ func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	// the clarification
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	st := threads.NewStore(db)
@@ -1246,6 +1246,49 @@ func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	}
 	if msgs[0].Error == "" {
 		t.Errorf("message = %+v, want it recorded as failed", msgs[0])
+	}
+}
+
+// finishFailingThreads cannot write an answer: the one transaction that
+// carries it, its citations and its sources does not commit.
+type finishFailingThreads struct {
+	*threads.Store
+}
+
+func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source) error {
+	return errors.New("disk full")
+}
+
+func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
+	// Given a pipeline that answers, and a store that cannot write the answer
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	st := threads.NewStore(db)
+	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &finishFailingThreads{Store: st}}
+
+	// When
+	rec := postAsk(t, deps, `{"question":"how is sign-in done?"}`)
+
+	// Then the browser is told the turn failed, never that it is done
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
+		t.Errorf("want an error event and no done:\n%s", body)
+	}
+	// And the row says so: with neither answer nor error it would read as a
+	// turn still in flight, and hold a share ceiling below it
+	list, err := st.List(context.Background(), testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: list=%+v err=%v", list, err)
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, list[0].ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("Messages: msgs=%+v err=%v", msgs, err)
+	}
+	if msgs[0].Error == "" || msgs[0].Answer != "" {
+		t.Errorf("message = %+v, want it recorded as failed with no answer", msgs[0])
 	}
 }
 

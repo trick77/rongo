@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,6 +50,28 @@ func mustUser(t *testing.T, r *http.Request) (User, bool) {
 	t.Helper()
 	u, ok := UserFrom(r.Context())
 	return u, ok
+}
+
+func TestMiddleware_anAbandonedRequestIsNotAFailedLogin(t *testing.T) {
+	// Given dev mode, and a request whose client went away before the user
+	// row was written
+	svc := newService(t)
+	var reached bool
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// When
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil).WithContext(gone)
+	rec := httptest.NewRecorder()
+	svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
+
+	// Then nobody is let through, and nothing is reported as a server error
+	if reached {
+		t.Error("handler reached for a request with no user")
+	}
+	if rec.Code == http.StatusInternalServerError {
+		t.Error("an abandoned request answered 500, want it dropped quietly")
+	}
 }
 
 func TestMiddleware_proxyModeSignsInTheForwardedUser(t *testing.T) {
@@ -190,8 +213,8 @@ func TestMiddleware_acceptsSessionCookie(t *testing.T) {
 	svc := newService(t)
 	svc.mode = "token"
 	svc.adminToken = "s3cret-token"
-	user, _ := svc.UpsertUser("someone", "someone@example.invalid", false)
-	token, _ := svc.CreateSession(user.ID, time.Hour)
+	user, _ := svc.UpsertUser(context.Background(), "someone", "someone@example.invalid", false)
+	token, _ := svc.CreateSession(context.Background(), user.ID, time.Hour)
 	var reached bool
 
 	// When
@@ -228,7 +251,7 @@ func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
 	}
 	// A changed identity is written again: the proxy's say wins over the
 	// memory of it.
-	if _, err := svc.Admit(devSubject, "other@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), devSubject, "other@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 	if n := svc.upserts.Load(); n != 2 {
@@ -238,7 +261,7 @@ func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
 
 func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
 	svc := newService(t)
-	if _, err := svc.Admit("old", "old@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), "old", "old@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 	svc.admitMu.Lock()
@@ -247,7 +270,7 @@ func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
 	svc.admitted["old"] = a
 	svc.admitMu.Unlock()
 
-	if _, err := svc.Admit("new", "new@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), "new", "new@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 

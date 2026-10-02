@@ -1159,9 +1159,19 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 	// its own reranker call, and the sides of a comparison do not depend on
 	// one another. Collected in repository order, so the merge below sees
 	// the same input whichever finished first.
+	//
+	// The first failure cancels the rest: the turn is lost either way, and a
+	// search left running pays for its reranker call to the end. That first
+	// failure is what the turn reports — the others then fail as cancelled,
+	// which is the consequence, not the cause.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	perRepo := make([][]retrieve.Hit, len(known))
-	errs := make([]error, len(known))
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		once   sync.Once
+		failed error
+	)
 	for i, repo := range known {
 		wg.Add(1)
 		go func(i int, repo string) {
@@ -1169,15 +1179,25 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 			// Question is left out on purpose: it names every one of these
 			// repositories, and knownRepos would union them all back in,
 			// undoing the one-repository-at-a-time cut this exists for.
-			perRepo[i], errs[i] = p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
+			hits, err := p.search.Search(ctx, retrieve.Query{Texts: texts, Code: code, Repos: []string{repo}, Prior: prior, K: searchK, Stage: stage})
+			if err != nil {
+				once.Do(func() {
+					failed = err
+					cancel()
+				})
+				return
+			}
+			perRepo[i] = hits
 		}(i, repo)
 	}
 	wg.Wait()
+	// Only a search that failed fails the turn: a caller's context ending as
+	// the last search returned leaves the hits standing, as it always did.
+	if failed != nil {
+		return nil, failed
+	}
 	var all []retrieve.Hit
 	for i := range known {
-		if errs[i] != nil {
-			return nil, errs[i]
-		}
 		all = append(all, perRepo[i]...)
 	}
 	// Ordered best first across the repositories, as one search would be: the

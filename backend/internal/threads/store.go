@@ -456,6 +456,33 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := finishTx(ctx, tx, messageID, answer, citations); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// FinishWithSources is Finish plus the sources the answer was written from,
+// all or nothing. Written apart, a sources write that failed left an answer
+// whose basis read as "no longer indexed" — a claim about the index, when the
+// fact was a write that never landed.
+func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := finishTx(ctx, tx, messageID, answer, citations); err != nil {
+		return err
+	}
+	if err := saveSourcesTx(ctx, tx, messageID, sources); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func finishTx(ctx context.Context, tx *sql.Tx, messageID int64, answer string, citations []ask.Citation) error {
 	if _, err := tx.ExecContext(ctx, `UPDATE messages SET answer = ? WHERE id = ?`, answer, messageID); err != nil {
 		return fmt.Errorf("store answer: %w", err)
 	}
@@ -468,7 +495,7 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 			return fmt.Errorf("store citation %d: %w", c.Marker, err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SetScope records what the turn's question said about repositories, once the

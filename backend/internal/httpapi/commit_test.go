@@ -77,7 +77,7 @@ func TestCommit_servesTheCitedCommit_andSaysWhyNot(t *testing.T) {
 func TestPublicShareCommit_opensACitedCommitAndNothingElse(t *testing.T) {
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, testSubject+"@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 	st := threads.NewStore(db)

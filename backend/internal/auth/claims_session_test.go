@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ func TestCreateSessionFromClaims_mintsResolvableSession(t *testing.T) {
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com", Groups: []string{"Rongo"}}
 
 	// When
-	token, expiresAt, user, err := svc.CreateSessionFromClaims(claims, "Rongo")
+	token, expiresAt, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "Rongo")
 
 	// Then
 	if err != nil {
@@ -24,7 +25,7 @@ func TestCreateSessionFromClaims_mintsResolvableSession(t *testing.T) {
 	if !user.IsAdmin {
 		t.Error("IsAdmin = false, want true for a member of the admin group")
 	}
-	if got, ok := svc.UserByToken(token); !ok || got.ID != user.ID {
+	if got, ok := svc.UserByToken(context.Background(), token); !ok || got.ID != user.ID {
 		t.Errorf("UserByToken() = (%+v, %v), want the user just created", got, ok)
 	}
 	if until := time.Until(expiresAt); until <= 0 || until > SessionTTL {
@@ -38,13 +39,13 @@ func TestCreateSessionFromClaims_reusesUserForSameSubject(t *testing.T) {
 	// Given
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com"}
-	_, _, first, err := svc.CreateSessionFromClaims(claims, "")
+	_, _, first, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
 	if err != nil {
 		t.Fatalf("first CreateSessionFromClaims() err = %v", err)
 	}
 
 	// When
-	_, _, second, err := svc.CreateSessionFromClaims(claims, "")
+	_, _, second, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
 
 	// Then
 	if err != nil {
@@ -61,7 +62,7 @@ func TestCreateSessionFromClaims_deniesAdminWithoutTheGroup(t *testing.T) {
 	claims := Claims{Subject: "sub-2", Groups: []string{"Loom", "Tools"}}
 
 	// When
-	_, _, user, err := svc.CreateSessionFromClaims(claims, "Rongo")
+	_, _, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "Rongo")
 
 	// Then
 	if err != nil {
@@ -81,7 +82,7 @@ func TestCreateSessionFromClaims_emptyAdminGroupGrantsAdmin(t *testing.T) {
 	claims := Claims{Subject: "sub-3"}
 
 	// When
-	_, _, user, err := svc.CreateSessionFromClaims(claims, "")
+	_, _, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
 
 	// Then
 	if err != nil {
@@ -97,7 +98,7 @@ func TestCreateSessionFromClaims_rejectsClaimsWithoutSubject(t *testing.T) {
 	svc := newService(t)
 
 	// When
-	_, _, _, err := svc.CreateSessionFromClaims(Claims{Email: "jan@example.com"}, "")
+	_, _, _, err := svc.CreateSessionFromClaims(context.Background(), Claims{Email: "jan@example.com"}, "")
 
 	// Then
 	if err == nil {

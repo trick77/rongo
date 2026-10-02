@@ -32,6 +32,20 @@ describe("SharedLinks", () => {
     expect(await screen.findByText(/No thread is shared/)).toBeTruthy();
   });
 
+  it("says the list could not be read when the server refuses it, not that nothing is shared", async () => {
+    // Given a listing the server answers with an error
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    const onCount = vi.fn();
+
+    // When
+    render(<SharedLinks onOpenThread={() => {}} onCount={onCount} />);
+
+    // Then no claim about what is shared, and no count either
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+    expect(screen.queryByText(/No thread is shared/)).toBeNull();
+    expect(onCount).not.toHaveBeenCalledWith(0);
+  });
+
   it("lists a live link with the turns it covers", async () => {
     listing([live]);
     render(<SharedLinks onOpenThread={() => {}} />);

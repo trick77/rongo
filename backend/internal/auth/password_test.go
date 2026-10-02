@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -24,12 +25,12 @@ func passwordService(t *testing.T) *Service {
 func TestLoginPassword_mintsAnAdminSession(t *testing.T) {
 	svc := passwordService(t)
 
-	token, _, err := svc.LoginPassword("admin", "hunter2")
+	token, _, err := svc.LoginPassword(context.Background(), "admin", "hunter2")
 
 	if err != nil {
 		t.Fatalf("LoginPassword() err = %v", err)
 	}
-	u, ok := svc.UserByToken(token)
+	u, ok := svc.UserByToken(context.Background(), token)
 	if !ok {
 		t.Fatal("the minted token does not resolve")
 	}
@@ -48,7 +49,7 @@ func TestLoginPassword_rejectsEitherHalfWrong(t *testing.T) {
 		"empty":          {"", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := svc.LoginPassword(in[0], in[1])
+			_, _, err := svc.LoginPassword(context.Background(), in[0], in[1])
 			if !errors.Is(err, ErrBadCredentials) {
 				t.Fatalf("err = %v, want ErrBadCredentials", err)
 			}
@@ -62,7 +63,7 @@ func TestLoginPassword_refusesInOtherModes(t *testing.T) {
 	svc := newService(t)
 	svc.SetPasswordAccount("admin", "$2a$04$irrelevant")
 
-	if _, _, err := svc.LoginPassword("admin", "anything"); !errors.Is(err, ErrBadCredentials) {
+	if _, _, err := svc.LoginPassword(context.Background(), "admin", "anything"); !errors.Is(err, ErrBadCredentials) {
 		t.Fatalf("err = %v, want ErrBadCredentials", err)
 	}
 }
