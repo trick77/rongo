@@ -107,10 +107,10 @@ export function highlightBlock(code: string, lang: string | null): ReactNode[] {
 // What highlightFinished has coloured, newest last. An answer is parsed again
 // from its first character for every token that arrives, and each parse ran
 // the grammar over every code block the answer already held — blocks whose
-// text can no longer change. Bounded, and dropped oldest first: it is a
-// convenience for the answer on screen, not a store.
+// text can no longer change. Bounded: it is a
+// convenience for the answers on screen, not a store. Least recently used out.
 const finished = new Map<string, ReactNode[]>();
-const FINISHED_MAX = 64;
+const FINISHED_MAX = 256;
 
 /**
  * highlightBlock for a block that is complete: a fence that has been closed.
@@ -122,7 +122,13 @@ export function highlightFinished(code: string, lang: string | null): ReactNode[
   if (!lang) return [code];
   const key = lang + "\u0000" + code;
   const hit = finished.get(key);
-  if (hit) return hit;
+  if (hit) {
+    // Moved to the newest end: what is on screen is asked for on every
+    // parse and must outlive blocks that were only seen once.
+    finished.delete(key);
+    finished.set(key, hit);
+    return hit;
+  }
   const nodes = highlightBlock(code, lang);
   if (finished.size >= FINISHED_MAX) {
     const oldest = finished.keys().next();

@@ -111,6 +111,23 @@ describe("CommitView", () => {
     expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
+  it("keeps its scrolling body in the Tab ring when it has no file to open", async () => {
+    // A shared page: every file is plain text, so Close is the only button.
+    // A long message must still scroll by keyboard, which needs the body to
+    // be a stop of its own rather than something the trap wraps past.
+    serve(200, { repo: "rongo", branch: "master", sha: "7f2a492abcdef", subject: "s", body: "long", files: [] });
+    render(<CommitView source={source} onClose={() => {}} endpoint="/api/shares/tok/commit" />);
+    await screen.findByText("long");
+    const body = screen.getByRole("dialog").querySelector<HTMLElement>('[tabindex="0"]');
+    expect(body).not.toBeNull();
+
+    // From the body, the last stop, Tab wraps to Close.
+    body?.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByLabelText("Close"));
+  });
+
   it("closes on Escape", async () => {
     serve(200, { files: [] });
     const onClose = vi.fn();

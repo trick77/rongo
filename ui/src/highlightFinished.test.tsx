@@ -29,7 +29,7 @@ describe("highlightFinished", () => {
   it("forgets the oldest block rather than growing without end", () => {
     const first = highlightFinished("first := 0", "go");
 
-    for (let i = 0; i < 80; i++) highlightFinished(`v${i} := ${i}`, "go");
+    for (let i = 0; i < 300; i++) highlightFinished(`v${i} := ${i}`, "go");
 
     expect(highlightFinished("first := 0", "go")).not.toBe(first);
   });

@@ -120,7 +120,8 @@ export default function CommitView({
           </button>
         </header>
 
-        <div className="min-h-0 overflow-auto px-5 py-4 text-[13.5px] leading-[1.55]">
+        {/* In the Tab ring, so a long message or file list scrolls by keyboard. */}
+        <div tabIndex={0} className="min-h-0 overflow-auto px-5 py-4 text-[13.5px] leading-[1.55]">
           {loaded.state === "loading" && <p className="text-muted">Reading the commit…</p>}
           {loaded.state === "error" && (
             <p role="alert" className="text-muted">

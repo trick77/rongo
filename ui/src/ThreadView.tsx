@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import Question from "./Question";
 import PasteChip from "./PasteChip";
 import { strip } from "./pastes";
@@ -86,6 +86,107 @@ export type ThreadViewProps = {
   threadKey?: number | string | null;
 };
 
+/**
+ * The head of one question: who asked, the words, the pastes folded under
+ * them, and when. Memoized for the reason TurnAttempt is — it is the other
+ * half of what a streamed token used to redraw for every question in the
+ * thread, peeling the pastes off each question again as it went.
+ */
+const TurnHeader = memo(function TurnHeader({
+  question,
+  pastes,
+  audience,
+  language,
+  askedAt,
+  number,
+  head,
+  canCopy,
+  copied,
+  onCopy,
+}: {
+  /** The question's own fields, not the turn that carried it: that turn is
+   * replaced on every token while its answer streams, and its question is
+   * not. */
+  question: string;
+  pastes: Turn["pastes"];
+  audience: Turn["audience"];
+  language: string;
+  askedAt: Turn["askedAt"];
+  /** Counted in questions, from one. */
+  number: number;
+  /** The index of that turn, which is what copying addresses it by. */
+  head: number;
+  canCopy: boolean;
+  copied: boolean;
+  onCopy: (i: number) => void;
+}) {
+  // The typed words, with the pastes peeled off the tail to be drawn as
+  // chips. A block that is not where the fold put it stays in the prose and
+  // gets no chip.
+  const { typed, matched } = strip(question, pastes);
+  return (
+    <>
+    <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
+      {roleName(audience)}
+    </div>
+    {/* The accent is the eyebrow's alone now: the question is what
+        was typed, at whatever length it was typed, and it reads as
+        the reader's words rather than as a headline.
+
+        Once, because it was asked once. Everything below is what
+        came of it — a card, a failure, the answer, the same answer
+        for the other audience — and each of those is a row in the
+        record carrying a copy of these words. Printing the copies
+        would say the reader typed the question again, which they
+        did not. */}
+    {typed && <Question text={typed} />}
+    {/* Each paste folded to a line under the words, the way it
+        stood in the composer. Folded: the reader knows what
+        they pasted, and the answer is what they came for. */}
+    {matched.some(Boolean) && (
+      <div className="mt-2 flex max-w-[68ch] flex-wrap gap-1.5 border-l-2 border-elevated pl-4">
+        {pastes.map((p, i) =>
+          matched[i] ? <PasteChip key={i} text={p.text} lines={p.lines} /> : null,
+        )}
+      </div>
+    )}
+    <div className="mt-2.5 flex items-center gap-1.5">
+      {askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(askedAt)}</time>}
+      {/* Counted in questions, not in rows: a turn asked twice
+          because the first attempt broke is still the first turn. */}
+      <span className={pill + " bg-active text-muted"}>Turn {number}</span>
+      {language !== "en" && (
+        <span className={pill + " bg-active text-muted"}>
+          {languages.find((l) => l.code === language)?.name ?? language}
+        </span>
+      )}
+      {/* The question's own copy, next to the words it copies.
+          The answer's footer copies the whole turn as Markdown,
+          which is the wrong thing to paste into a ticket or the
+          composer of another thread; and selecting the prose by
+          hand fights a question folded at three lines.
+
+          Always drawn, never revealed on hover: a phone has no
+          hover, the same reason the diagram toolbar gives. Not on
+          a shared page, where the footer's copy is gone too — one
+          copy control without the other would read as an
+          oversight rather than as a decision. */}
+      {canCopy && (
+        <button
+          type="button"
+          onClick={() => onCopy(head)}
+          aria-label={copied ? "Question copied" : "Copy the question"}
+          title={copied ? "Question copied" : "Copy the question"}
+          className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </button>
+      )}
+    </div>
+    </>
+  );
+});
+
 /** The newest turn that cited anything: the one the pane shows, and the only
  * one whose markers can be pointed back to. */
 export function sourceTurnOf(turns: Turn[]): number {
@@ -144,9 +245,9 @@ export default function ThreadView({
 
   // What the caller passed on its newest render, for the steady functions
   // below to call through to. The callers' own handlers are fresh arrows.
-  const latest = useRef({ actions, onOpenSource, onToggleSources });
+  const latest = useRef({ actions, onOpenSource, onToggleSources, onHot });
   useLayoutEffect(() => {
-    latest.current = { actions, onOpenSource, onToggleSources };
+    latest.current = { actions, onOpenSource, onToggleSources, onHot };
   });
   const toggleSources = useCallback((i: number) => latest.current.onToggleSources?.(i), []);
 
@@ -173,11 +274,7 @@ export default function ThreadView({
   // Stable, or the memoized Markdown of the source turn — the previous
   // answer while the next one streams — re-rendered and re-highlighted on
   // every token.
-  const hot = useRef(onHot);
-  useLayoutEffect(() => {
-    hot.current = onHot;
-  });
-  const setHot = useCallback((marker: number | null) => hot.current?.(marker), []);
+  const setHot = useCallback((marker: number | null) => latest.current.onHot?.(marker), []);
 
   // Markdown is memoized, and a fresh arrow per render would defeat it on
   // every turn at once. One handler per turn index is kept instead, and it
@@ -224,13 +321,14 @@ export default function ThreadView({
     copyTimer.current = setTimeout(() => setCopied(null), 1500);
   }, []);
 
-  async function copyQuestion(turnIndex: number) {
+  const copyQuestion = useCallback(async (turnIndex: number) => {
+    const actions = latest.current.actions;
     if (!actions) return;
     if (!(await actions.onCopyQuestion(turnIndex))) return;
     setCopiedQuestion(turnIndex);
     if (copyQuestionTimer.current) clearTimeout(copyQuestionTimer.current);
     copyQuestionTimer.current = setTimeout(() => setCopiedQuestion(null), 1500);
-  }
+  }, []);
 
   // One article per question. The list itself stays flat — every action here
   // addresses a turn by its position in it — and only the rendering groups.
@@ -251,72 +349,23 @@ export default function ThreadView({
     <>
             {groups.map((group, g) => {
               const asked = turns[group[0]];
-              // The typed words, with the pastes peeled off the tail to be
-              // drawn as chips. A block that is not where the fold put it
-              // stays in the prose and gets no chip.
-              const { typed, matched } = strip(asked.question, asked.pastes);
               return (
               <article
                 key={group[0]}
                 className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
               >
-                <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
-                  {roleName(asked.audience)}
-                </div>
-                {/* The accent is the eyebrow's alone now: the question is what
-                    was typed, at whatever length it was typed, and it reads as
-                    the reader's words rather than as a headline.
-
-                    Once, because it was asked once. Everything below is what
-                    came of it — a card, a failure, the answer, the same answer
-                    for the other audience — and each of those is a row in the
-                    record carrying a copy of these words. Printing the copies
-                    would say the reader typed the question again, which they
-                    did not. */}
-                {typed && <Question text={typed} />}
-                {/* Each paste folded to a line under the words, the way it
-                    stood in the composer. Folded: the reader knows what
-                    they pasted, and the answer is what they came for. */}
-                {matched.some(Boolean) && (
-                  <div className="mt-2 flex max-w-[68ch] flex-wrap gap-1.5 border-l-2 border-elevated pl-4">
-                    {asked.pastes.map((p, i) =>
-                      matched[i] ? <PasteChip key={i} text={p.text} lines={p.lines} /> : null,
-                    )}
-                  </div>
-                )}
-                <div className="mt-2.5 flex items-center gap-1.5">
-                  {asked.askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(asked.askedAt)}</time>}
-                  {/* Counted in questions, not in rows: a turn asked twice
-                      because the first attempt broke is still the first turn. */}
-                  <span className={pill + " bg-active text-muted"}>Turn {g + 1}</span>
-                  {asked.language !== "en" && (
-                    <span className={pill + " bg-active text-muted"}>
-                      {languages.find((l) => l.code === asked.language)?.name ?? asked.language}
-                    </span>
-                  )}
-                  {/* The question's own copy, next to the words it copies.
-                      The answer's footer copies the whole turn as Markdown,
-                      which is the wrong thing to paste into a ticket or the
-                      composer of another thread; and selecting the prose by
-                      hand fights a question folded at three lines.
-
-                      Always drawn, never revealed on hover: a phone has no
-                      hover, the same reason the diagram toolbar gives. Not on
-                      a shared page, where the footer's copy is gone too — one
-                      copy control without the other would read as an
-                      oversight rather than as a decision. */}
-                  {actions && (
-                    <button
-                      type="button"
-                      onClick={() => copyQuestion(group[0])}
-                      aria-label={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
-                      title={copiedQuestion === group[0] ? "Question copied" : "Copy the question"}
-                      className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
-                    >
-                      {copiedQuestion === group[0] ? <CheckIcon /> : <CopyIcon />}
-                    </button>
-                  )}
-                </div>
+                <TurnHeader
+                  question={asked.question}
+                  pastes={asked.pastes}
+                  audience={asked.audience}
+                  language={asked.language}
+                  askedAt={asked.askedAt}
+                  number={g + 1}
+                  head={group[0]}
+                  canCopy={!!actions}
+                  copied={copiedQuestion === group[0]}
+                  onCopy={copyQuestion}
+                />
 
                 {/* One entry per attempt. A turn answered on the first try has
                     exactly one and looks as it always did: no rail, no label,

@@ -11,6 +11,15 @@ vi.mock("./Trace", () => ({
   },
 }));
 
+// The same for a question's header, by its words.
+const questionRenders = new Map<string, number>();
+vi.mock("./Question", () => ({
+  default: ({ text }: { text: string }) => {
+    questionRenders.set(text, (questionRenders.get(text) ?? 0) + 1);
+    return null;
+  },
+}));
+
 import ThreadView, { type ThreadActions } from "./ThreadView";
 import { freshTurn, type Turn } from "./turns";
 
@@ -42,7 +51,10 @@ function finished(question: string, startedAt: number): Turn {
   };
 }
 
-beforeEach(() => traceRenders.clear());
+beforeEach(() => {
+  traceRenders.clear();
+  questionRenders.clear();
+});
 
 describe("ThreadView, while an answer streams", () => {
   it("re-renders the turn being written and none of the finished ones", () => {
@@ -81,6 +93,8 @@ describe("ThreadView, while an answer streams", () => {
     expect((traceRenders.get(3000) ?? 0) - (before.get(3000) ?? 0)).toBe(20);
     expect((traceRenders.get(1000) ?? 0) - (before.get(1000) ?? 0)).toBe(0);
     expect((traceRenders.get(2000) ?? 0) - (before.get(2000) ?? 0)).toBe(0);
+    // Nor was any question's header: three questions, each drawn once.
+    expect([...questionRenders.values()]).toEqual([1, 1, 1]);
   });
 
   it("redraws a finished turn when it is that turn that changed", () => {
