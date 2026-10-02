@@ -275,7 +275,12 @@ export default function ThreadView({
     return -1;
   }, [owner, threadKey, turns]);
   const feedback = useMemo(
-    () => (rated >= 0 && typeof threadKey === "string" ? <ThreadFeedback threadId={threadKey} turns={turns} /> : null),
+    // Keyed by the thread: a fresh instance per thread, so a write still out
+    // for the last one can never be applied to this one.
+    () =>
+      rated >= 0 && typeof threadKey === "string" ? (
+        <ThreadFeedback key={threadKey} threadId={threadKey} turns={turns} />
+      ) : null,
     [rated, threadKey, turns],
   );
 

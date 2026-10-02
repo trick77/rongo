@@ -41,11 +41,13 @@ function firstUncovered(turns: Turn[], upTo: number): number | null {
   return at < 0 ? null : at + 1;
 }
 
+// The same face as the buttons beside them (Explain as…, Copy as Markdown,
+// the follow-up chips): ink-dim at 13.5px on the panel, active on hover.
 const thumb =
-  "inline-flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
+  "inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-dim hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
 const chip =
-  "rounded-full border border-border bg-panel px-3 py-1 text-[12.5px] text-muted hover:border-elevated-border hover:text-ink";
-const link = "text-[12.5px] text-muted underline decoration-border underline-offset-3 hover:text-ink";
+  "rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active";
+const link = "text-[13.5px] text-ink-dim underline decoration-border underline-offset-3 hover:text-ink";
 
 /**
  * The reader's verdict on the whole thread, drawn among the buttons under the
@@ -100,74 +102,84 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
     timer.current = setTimeout(() => setThanks(false), 2000);
   };
 
-  const put = async (verdict: 1 | -1, reason: string): Promise<boolean> => {
-    const id = threadId;
+  // A click shows at once; the server is told afterwards. Writes go one at a
+  // time — two in flight can come back in the other order from the one the
+  // server stored them in — and while one is out, further clicks only move
+  // `want`, so the next write sends the reader's latest choice and the ones
+  // in between are never sent. undefined: nothing waiting; null: clear.
+  const want = useRef<{ verdict: 1 | -1; reason: string } | null | undefined>(undefined);
+  const inflight = useRef(false);
+
+  const reload = async () => {
     try {
-      const res = await fetch(`/api/threads/${id}/feedback`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdict, reason }),
-      });
-      if (!res.ok || shown.current !== id) return false;
-      setFb(asFeedback(await res.json()));
-      return true;
+      const res = await fetch(`/api/threads/${threadId}/feedback`);
+      if (res.ok && shown.current === threadId) setFb(asFeedback(await res.json()));
     } catch {
-      return false;
+      // Nothing better to show than what is on screen.
     }
   };
 
-  const clear = async () => {
-    const id = threadId;
+  const sync = async () => {
+    if (inflight.current) return;
+    inflight.current = true;
     try {
-      const res = await fetch(`/api/threads/${id}/feedback`, { method: "DELETE" });
-      if (res.ok && shown.current === id) {
-        setFb(null);
-        setPicking(false);
+      while (want.current !== undefined) {
+        const target = want.current;
+        want.current = undefined;
+        const res = await fetch(
+          `/api/threads/${threadId}/feedback`,
+          target === null
+            ? { method: "DELETE" }
+            : { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target) },
+        );
+        if (!res.ok) throw new Error(`feedback ${res.status}`);
+        // The server's own figures, unless the reader has moved on since.
+        if (want.current === undefined && target !== null) setFb(asFeedback(await res.json()));
       }
     } catch {
-      // Left as it was: the pressed thumb still says what the server holds.
-    }
-  };
-
-  // One write at a time. Two in flight can come back in the other order from
-  // the one the server stored them in, and the screen would then show the
-  // verdict the server dropped. A ref, not state: a double click lands before
-  // any re-render could disable the buttons.
-  const saving = useRef(false);
-  const once = async (write: () => Promise<void>) => {
-    if (saving.current) return;
-    saving.current = true;
-    try {
-      await write();
+      // A write the server refused leaves the screen claiming what it does
+      // not hold: drop what was waiting and read the truth back.
+      want.current = undefined;
+      await reload();
     } finally {
-      saving.current = false;
+      inflight.current = false;
     }
   };
 
-  const vote = (verdict: 1 | -1) =>
-    once(async () => {
-      touched.current = true;
-      if (fb?.verdict === verdict) return clear();
-      // Taken at the click, not after the save: the answer the reader judged.
-      const judged = newest;
-      if (!(await put(verdict, ""))) return;
-      if (verdict === -1) setPickingAt(judged);
-      else {
+  const vote = (verdict: 1 | -1) => {
+    touched.current = true;
+    if (fb?.verdict === verdict) {
+      setFb(null);
+      setPickingAt(null);
+      setThanks(false);
+      want.current = null;
+    } else {
+      // Pinned to the newest answer, as the server will pin it.
+      setFb({ verdict, reason: "", upToMessageId: newest });
+      want.current = { verdict, reason: "" };
+      if (verdict === -1) {
+        setPickingAt(newest);
+        setThanks(false);
+      } else {
         setPickingAt(null);
         thank();
       }
-    });
+    }
+    void sync();
+  };
 
-  const pick = (reason: string) =>
-    once(async () => {
-      if (await put(-1, reason)) {
-        setPicking(false);
-        thank();
-      }
-    });
+  const pick = (reason: string) => {
+    setFb({ verdict: -1, reason, upToMessageId: newest });
+    want.current = { verdict: -1, reason };
+    setPicking(false);
+    thank();
+    void sync();
+  };
 
   // The pressed thumb already says which way the verdict went; the label adds
-  // the reason when there is one.
+  // the reason when there is one. It stands AFTER the thumbs: its width
+  // changes with what it says, and in front it moved them from under the
+  // cursor between two clicks.
   let label = "Helpful?";
   if (thanks) label = "Thanks";
   else if (fb) label = fb.reason ? (reasonLabel.get(fb.reason) ?? fb.reason) : fb.verdict === 1 ? "Helpful" : "Not helpful";
@@ -175,8 +187,7 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
 
   return (
     <>
-      <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-panel py-0.5 pr-0.5 pl-3">
-        <span className="pr-1.5 text-[12.5px] text-faint">{label}</span>
+      <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-panel py-0.5 pr-3 pl-0.5">
         <button
           type="button"
           aria-label="Helpful"
@@ -197,8 +208,9 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
         >
           <ThumbDownIcon />
         </button>
+        <span className="pl-1.5 text-[13.5px] text-ink-dim">{label}</span>
       </span>
-      {uncovered !== null && <span className="text-[12.5px] text-faint">rated before turn {uncovered}</span>}
+      {uncovered !== null && <span className="text-[13.5px] text-muted">rated before turn {uncovered}</span>}
       {/* A reason saved now is pinned to the newest answer, so "change" is
           offered only while the verdict already covers it. Past that, the
           thumbs are the way to rate again. */}
@@ -207,26 +219,18 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
           {fb.reason ? "change reason" : "add a reason"}
         </button>
       )}
+      {/* No way to dismiss it: the thumbs down is already stored without a
+          reason, and a reason is the reader's to add or not. */}
       {picking && (
         // order-last + basis-full: a row of its own under the buttons, below
         // the usage pill that ends the row above.
-        <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-1.5 text-[12.5px] text-faint">
+        <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-2 text-[13.5px] text-ink-dim">
           <span className="mr-1">What was off?</span>
           {reasons.map(([value, text]) => (
             <button key={value} type="button" className={chip} onClick={() => void pick(value)}>
               {text}
             </button>
           ))}
-          <button
-            type="button"
-            className={link}
-            onClick={() => {
-              setPicking(false);
-              thank();
-            }}
-          >
-            skip
-          </button>
         </div>
       )}
     </>

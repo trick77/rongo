@@ -77,17 +77,17 @@ describe("ThreadFeedback", () => {
     expect(await screen.findByText("What was off?")).toBeTruthy();
   });
 
-  it("lets the reasons be skipped, keeping the bare thumbs down", async () => {
+  it("stores a thumbs down without a reason as soon as it is clicked, with nothing to dismiss", async () => {
     const calls = server(null);
     const user = userEvent.setup();
     render(row([answered(2)]));
 
     await user.click(await screen.findByRole("button", { name: "Not helpful" }));
-    await user.click(await screen.findByRole("button", { name: "skip" }));
 
-    expect(screen.queryByText("What was off?")).toBeNull();
-    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "add a reason" })).toBeTruthy();
+    await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1));
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ verdict: -1, reason: "" });
+    expect(screen.getByText("What was off?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "skip" })).toBeNull();
   });
 
   it("reads back a stored verdict and names the first turn it does not cover", async () => {
@@ -151,30 +151,72 @@ describe("ThreadFeedback", () => {
     expect(screen.queryByText("What was off?")).toBeNull();
   });
 
-  it("takes no second verdict while the first is still being saved", async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    const puts: unknown[] = [];
+  it("shows every click at once and saves the reader's last choice, one write at a time", async () => {
+    // A slow server: clicks made while a save is out must neither be lost nor
+    // race it. They show at once; the write after it carries the last one.
+    const releases: (() => void)[] = [];
+    const writes: unknown[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, opts?: RequestInit) => {
-        if (opts?.method === "PUT") {
-          puts.push(JSON.parse(String(opts.body)));
-          await gate;
-          return { ok: true, status: 200, json: async () => ({ verdict: -1, reason: "", upToMessageId: 2 }) };
-        }
-        return { ok: true, status: 200, json: async () => null };
+        const method = opts?.method ?? "GET";
+        if (method === "GET") return { ok: true, status: 200, json: async () => null };
+        const body = opts?.body ? JSON.parse(String(opts.body)) : null;
+        writes.push(method === "DELETE" ? "DELETE" : body);
+        await new Promise<void>((r) => releases.push(r));
+        return { ok: true, status: 200, json: async () => ({ ...body, upToMessageId: 2 }) };
       }),
     );
     const user = userEvent.setup();
     render(row([answered(2)]));
+    const up = await screen.findByRole("button", { name: "Helpful" });
+    const down = screen.getByRole("button", { name: "Not helpful" });
 
-    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
-    await user.click(screen.getByRole("button", { name: "Helpful" }));
-    release();
+    await user.click(down);
+    await user.click(up);
+    await user.click(down);
+    await user.click(up);
 
-    await screen.findByText("What was off?");
-    expect(puts).toEqual([{ verdict: -1, reason: "" }]);
+    // On screen at once, though only the first write has gone out.
+    expect(up.getAttribute("aria-pressed")).toBe("true");
+    expect(writes).toEqual([{ verdict: -1, reason: "" }]);
+
+    releases[0]();
+    await waitFor(() => expect(writes).toHaveLength(2));
+    releases[1]();
+
+    expect(writes[1]).toEqual({ verdict: 1, reason: "" });
+    await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
+  });
+
+  it("keeps the thumbs where they are whatever the label says", async () => {
+    server(null);
+    const user = userEvent.setup();
+    render(row([answered(2)]));
+    const up = await screen.findByRole("button", { name: "Helpful" });
+
+    // The label comes after both thumbs, so its width cannot move them.
+    await user.click(up);
+    const pill = up.parentElement as HTMLElement;
+    expect(pill.firstElementChild).toBe(up);
+    expect(pill.lastElementChild?.textContent).toBe("Thanks");
+  });
+
+  it("reads the stored verdict back when the server refuses a write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, opts?: RequestInit) => {
+        if ((opts?.method ?? "GET") === "GET") return { ok: true, status: 200, json: async () => null };
+        return { ok: false, status: 500, json: async () => null };
+      }),
+    );
+    const user = userEvent.setup();
+    render(row([answered(2)]));
+    const up = await screen.findByRole("button", { name: "Helpful" });
+
+    await user.click(up);
+
+    await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("false"));
   });
 
   it("keeps a click made before the stored verdict arrived", async () => {
