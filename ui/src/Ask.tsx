@@ -6,6 +6,7 @@ import CommitView from "./CommitView";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
+import ThreadFeedback from "./ThreadFeedback";
 import { MAX_QUESTION_BYTES, byteLength, fold, pasteKey, shouldCollapse, stagePaste, type PastedText } from "./pastes";
 import {
   askBody,
@@ -1282,10 +1283,15 @@ export default function Ask({
                 that can go. The version says which build answered, and it is
                 omitted rather than shown as "dev" when the binary was not
                 stamped — see App's Me. */}
-            <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
-              Rongo can make mistakes. Please double-check responses.
-              {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
-            </p>
+            <ThreadFeedback
+              threadId={openThread}
+              turns={turns}
+              running={turns.some((t) => !t.done)}
+              caveat={
+                "Rongo can make mistakes. Please double-check responses." +
+                (version !== "" && version !== "dev" ? ` You're talking to Rongo v${version}.` : "")
+              }
+            />
           </form>
         </div>
       </div>
