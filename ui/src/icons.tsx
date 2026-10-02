@@ -128,3 +128,36 @@ export function CheckIcon() {
     </svg>
   );
 }
+
+/**
+ * Thumbs for the thread's verdict, drawn as outlines. Pressed, the button
+ * behind them lights up, not the glyph: the colour of a pressed thumb is the
+ * neutral ink every other pressed control uses, never ochre or green.
+ */
+export function ThumbUpIcon() {
+  return (
+    <svg className="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M5 7v7H2.5V7zM5 7l2.6-4.6c.9 0 1.6.8 1.4 1.7L8.6 6.5h3.9c.9 0 1.6.9 1.4 1.8l-1 4.4c-.2.8-.8 1.3-1.6 1.3H5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+export function ThumbDownIcon() {
+  return (
+    <svg className="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M5 9V2H2.5v7zM5 9l2.6 4.6c.9 0 1.6-.8 1.4-1.7L8.6 9.5h3.9c.9 0 1.6-.9 1.4-1.8l-1-4.4C12.7 2.5 12.1 2 11.3 2H5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

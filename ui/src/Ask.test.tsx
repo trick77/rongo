@@ -737,8 +737,13 @@ describe("Ask, a stored thread", () => {
     await screen.findByText(/Shipping runs/);
 
     rerender(<Ask threadId="42" onThread={() => {}} />);
+    // The verdict under the composer reads its own route; only the thread
+    // itself would replace the half-written answer.
     await waitFor(() =>
-      expect(mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/")).length).toBe(0),
+      expect(
+        mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/") && !String(c[0]).endsWith("/feedback"))
+          .length,
+      ).toBe(0),
     );
     expect(screen.getByText(/Shipping runs/)).toBeTruthy();
   });

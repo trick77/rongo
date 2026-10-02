@@ -33,6 +33,11 @@ type Threads interface {
 	Rename(ctx context.Context, subject string, id int64, title string) (bool, error)
 	Delete(ctx context.Context, subject string, id int64) (bool, error)
 	SetStarred(ctx context.Context, subject string, id int64, starred bool) (bool, error)
+	// SetFeedback, ClearFeedback and Feedback are the reader's verdict on a
+	// thread. Owner inside the statement, like SetStarred.
+	SetFeedback(ctx context.Context, subject string, id int64, verdict int, reason string) (bool, error)
+	ClearFeedback(ctx context.Context, subject string, id int64) (bool, error)
+	Feedback(ctx context.Context, subject string, id int64) (threads.Feedback, bool, error)
 	AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (threads.Message, error)
 	// FinishWithSources writes the answer, its citations and the sources it
 	// was written from in one transaction.
@@ -230,6 +235,9 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteThread)))
 	s.mux.Handle("POST /api/threads/{id}/star", s.requireAuth(http.HandlerFunc(s.handleStarThread)))
 	s.mux.Handle("POST /api/threads/{id}/unstar", s.requireAuth(http.HandlerFunc(s.handleUnstarThread)))
+	s.mux.Handle("GET /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handleGetFeedback)))
+	s.mux.Handle("PUT /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handlePutFeedback)))
+	s.mux.Handle("DELETE /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handleDeleteFeedback)))
 	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
 	s.mux.Handle("GET /api/commit", s.requireAuth(http.HandlerFunc(s.handleCommit)))
 	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
