@@ -483,6 +483,23 @@ describe("Ask, a stored thread", () => {
   // back from a reload with an empty thread.
   const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 
+  // Once a thread has a turn the composer no longer asks the first question:
+  // what it takes now is the next turn of the same discussion, in the
+  // thread's language, which the record decides.
+  it("invites the next turn once the thread has one", async () => {
+    routedFetch([storedTurn]);
+    strict(<Ask threadId="7" />);
+    await screen.findByText(/Through a grant/);
+    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe("Continue the discussion…");
+  });
+
+  it("invites the next turn in the thread's language", async () => {
+    routedFetch([{ ...storedTurn, language: "de" }]);
+    strict(<Ask threadId="7" />);
+    await screen.findByText(/Through a grant/);
+    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe("Diskussion weiterführen …");
+  });
+
   it("restores an old turn including its sources from the record", async () => {
     routedFetch([storedTurn]);
     strict(<Ask threadId="7" />);

@@ -261,8 +261,18 @@ exactly as they are.`
 // wanted (the hold plus the hourly job, as one range). answerStages is
 // appended after this block and keeps its "copied character for character"
 // rule on purpose - the literal is the anti-hallucination check - so this
-// paragraph keeps the literal too and only moves it: once, after the words,
-// out of the lead.
+// paragraph keeps the literal too and only moves it: once, out of the lead,
+// and out of the prose altogether, as a list item closing its part. In
+// parentheses mid-sentence the values were what made an Analyst answer read
+// as code.
+//
+// The heading and the three-sentence cap exist because "three to five
+// paragraphs" with every code block and path banned left the model nothing
+// but dense prose: answers came back as four or five blocks of six to eight
+// sentences, a wall of text next to a comparable product whose answer of the
+// same length read easily under two part headings. A developer answer has
+// code blocks and paths to break it up; this one has the headings instead.
+// One-part answers get none, the over-built look answerShape warns about.
 //
 // The flowchart sentence exists because this block shaped the answer as
 // prose-and-stop, and the diagram rule appended at the end of the prompt
@@ -290,8 +300,12 @@ carries the one of these the question asked for; the others follow in the
 paragraphs. Where the sources show it, say whether the behaviour is fixed in
 the code, set by configuration, or a manual step, because that decides whether
 a change is a configuration ticket or a development story; where the sources
-do not show it, say nothing about it. Explain the mechanism in three to five
-paragraphs in the language of the business domain. Where the mechanism is a
+do not show it, say nothing about it. Explain the mechanism in the language of
+the business domain. A paragraph is at most three sentences. When the answer
+has two or more parts - what triggers it, what then happens, where it is set -
+each part opens with a short "###" heading in the reader's words; an answer of
+one part has none. The opening sentence stands above the first heading. Where
+the mechanism is a
 process the reader follows step by step - a case that moves through states,
 an approval, a hand-off with a decision on the way - the answer also carries
 a flowchart of it; where it is an exchange between systems, roles or people,
@@ -303,8 +317,10 @@ Identifiers, property keys, cron expressions and code defaults are not the
 language of the business domain. Say what a value means for the reader: a
 schedule in words ("hourly, on the hour"), a delay as its duration, a switch as
 what it turns on. The exact value still appears, copied character for
-character, once, in parentheses after the words that explain it - never on its
-own, never in the opening sentence. When two settings combine, state the
+character, once, but never inside a sentence of prose: it closes the part it
+belongs to as a short list item pairing the words with the value ("hourly, on
+the hour: ` + "`0 0 * * * *`" + `") - never on its own, never in the opening
+sentence. When two settings combine, state the
 outcome the reader experiences as one figure or range, not the settings
 separately.`
 
@@ -598,7 +614,7 @@ the control flow so that it can be followed in the code.`
 // is its own constant rather than a paragraph in each of them.
 //
 // It exists because neither audience block said anything about shape. They
-// ask for three to five paragraphs and for the control flow to be followable,
+// asked for three to five paragraphs and for the control flow to be followable,
 // and the model does the safe thing with that: undifferentiated prose, with
 // the sentence that actually answers the question somewhere in the middle of
 // the first one. The renderer has carried headings, lists and bold since it
@@ -619,10 +635,12 @@ the control flow so that it can be followed in the code.`
 // nothing left to draw. The line is drawn where the diagram rule draws it: a
 // branch or a second party.
 //
-// No headings: they were mocked up and deliberately left out. A short answer
-// wearing three ### headings looks over-built, and that judgement is one the
-// model gets wrong more often than it gets the list wrong. If dev answers
-// still read long with this in, headings are the next thing to try.
+// No headings here: a short answer wearing three ### headings looks
+// over-built, and that judgement is one the model gets wrong more often than
+// it gets the list wrong. answerBA asks for them on its own terms - a heading
+// per part, only with two or more parts - because an Analyst answer has no
+// code to break it up. If dev answers still read long, the same is the next
+// thing to try there.
 const answerShape = `
 
 Open with ONE sentence that answers the question, then explain. A reader who

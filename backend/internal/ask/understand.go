@@ -505,8 +505,8 @@ that carries an instruction AND asks something keeps the intent of what it
 asks, with the instruction in memory.`
 
 // answerRecall is how much of the previous answer the understanding step is
-// shown. A BA answer is the core mechanism in three to five paragraphs, so the
-// opening carries the subject; the rest is edge cases, and this call is a gate
+// shown. A BA answer is the core mechanism in short paragraphs under the
+// opening sentence, so the opening carries the subject; the rest is edge cases, and this call is a gate
 // that emits four JSON fields, not a reader.
 const answerRecall = 1200
 
