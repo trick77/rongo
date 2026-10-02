@@ -20,7 +20,7 @@ import (
 
 // --- fixture repository -------------------------------------------------
 
-func git(t *testing.T, dir string, args ...string) {
+func git(t testing.TB, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -32,7 +32,7 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func write(t *testing.T, dir, name, body string) {
+func write(t testing.TB, dir, name, body string) {
 	t.Helper()
 	full := filepath.Join(dir, name)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -57,7 +57,7 @@ public class AbandonedCartJob {
 
 // fixtureCorpus builds a local repository holding one indexable file, one
 // vendored file and one plain text file, and returns its path.
-func fixtureCorpus(t *testing.T) string {
+func fixtureCorpus(t testing.TB) string {
 	t.Helper()
 	return fixtureCorpusFiles(t, map[string]string{
 		"src/shop/cart/AbandonedCartJob.java": cartJava,
@@ -68,7 +68,7 @@ func fixtureCorpus(t *testing.T) string {
 
 // fixtureCorpusFiles builds a local repository from an arbitrary path->body
 // map and returns its path.
-func fixtureCorpusFiles(t *testing.T, files map[string]string) string {
+func fixtureCorpusFiles(t testing.TB, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main")
@@ -141,7 +141,7 @@ type harness struct {
 	gitc     *gitrepo.Client
 }
 
-func newHarness(t *testing.T, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
+func newHarness(t testing.TB, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
 	t.Helper()
 	return newHarnessFiles(t, nil, symbolExtractor)
 }
@@ -149,7 +149,7 @@ func newHarness(t *testing.T, symbolExtractor func(SymbolExtractor) SymbolExtrac
 // newHarnessFiles is newHarness with the fixture's file set overridable, for
 // tests that need a tree shape fixtureCorpus does not provide (e.g. a
 // go.mod). A nil files map falls back to fixtureCorpus's default tree.
-func newHarnessFiles(t *testing.T, files map[string]string, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
+func newHarnessFiles(t testing.TB, files map[string]string, symbolExtractor func(SymbolExtractor) SymbolExtractor) *harness {
 	t.Helper()
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
@@ -207,7 +207,7 @@ func newTestCache(db *sql.DB) VectorCache {
 	return embed.NewCache(db, "test-model", writeDim)
 }
 
-func (h *harness) stateOf(t *testing.T) RepoState {
+func (h *harness) stateOf(t testing.TB) RepoState {
 	t.Helper()
 	all, err := h.state.All(context.Background())
 	if err != nil {
@@ -222,7 +222,7 @@ func (h *harness) stateOf(t *testing.T) RepoState {
 	return RepoState{}
 }
 
-func (h *harness) head(t *testing.T) string {
+func (h *harness) head(t testing.TB) string {
 	t.Helper()
 	if err := h.gitc.Fetch(context.Background(), h.spec, ""); err != nil {
 		t.Fatalf("Fetch: %v", err)
