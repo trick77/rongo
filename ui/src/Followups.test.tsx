@@ -2,7 +2,8 @@ import { StrictMode } from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import Ask, { languages } from "./Ask";
+import Ask from "./Ask";
+import { languages } from "./turns";
 
 // The language list is a listbox, not a native select: the pill opens it and
 // the row is clicked, as the reader does it.

@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { drawPlantUml, type Drawn } from "./plantuml";
+import { useState, type ReactNode } from "react";
+import { drawPlantUml } from "./plantuml";
+import { useResolved } from "./useResolved";
 import { download, toPng, toXml, withGround } from "./diagramExport";
 import { DownloadIcon } from "./icons";
 
@@ -19,17 +20,7 @@ export default function PlantUmlSheet({
   path: string;
   onSource: () => void;
 }): ReactNode {
-  const [out, setOut] = useState<Drawn | null>(null);
-  useEffect(() => {
-    let live = true;
-    setOut(null);
-    drawPlantUml(text).then((d) => {
-      if (live) setOut(d);
-    });
-    return () => {
-      live = false;
-    };
-  }, [text]);
+  const out = useResolved(text, drawPlantUml);
 
   if (out === null) return <p className="px-5 py-3 font-sans text-muted">Drawing the diagram…</p>;
   if ("error" in out) {

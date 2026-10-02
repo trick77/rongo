@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFocusOnOpen } from "./dialog";
+import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { highlightLines, languageForPath } from "./highlight";
 import PlantUmlSheet from "./PlantUmlSheet";
@@ -74,20 +74,9 @@ export default function SourceView({
   // Escape closes. Tab stays inside: the dialog is modal, and a Tab that left
   // it would land in the dimmed page behind the overlay. Its controls are the
   // close button and, on a PlantUML file, the two views and each picture's
-  // downloads; the ends of the ring wrap to each other, as in DiagramView.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      if (e.key !== "Tab") return;
-      e.preventDefault();
-      const inside = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button") ?? []);
-      const at = inside.indexOf(document.activeElement as HTMLElement);
-      const next = at < 0 ? 0 : (at + (e.shiftKey ? inside.length - 1 : 1)) % inside.length;
-      (inside[next] ?? closeButton.current)?.focus();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // downloads. The same two hooks as DiagramView and CommitView.
+  useEscape(onClose);
+  useTabTrap(dialog);
 
   useEffect(() => {
     let cancelled = false;
