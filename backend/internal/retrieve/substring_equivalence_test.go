@@ -68,7 +68,7 @@ func TestSearchSubstringsIn_returnsPerTermWhatTheTwoScanRungDid(t *testing.T) {
 
 			// Then each term's list is the one it got asked alone, two scans
 			for i, term := range terms {
-				want, err := referenceSubstring(s, ctx, term, n, sc.repos, sc.stage)
+				want, err := referenceSubstring(ctx, s, term, n, sc.repos, sc.stage)
 				if err != nil {
 					t.Fatalf("%s n=%d %q: reference: %v", sc.name, n, term, err)
 				}

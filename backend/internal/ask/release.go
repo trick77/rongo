@@ -233,11 +233,7 @@ type stageVersion struct {
 // entries of one class naming different versions are ambiguous, and the
 // base overlay is never read (repos.yaml declares which directories are
 // stages, and a base may hold a placeholder).
-func imageCensus(ctx context.Context, g *Gatherer, repo, prefix string) (map[string]stageVersion, error) {
-	rows, err := edges.InRepo(ctx, g.db, repo, edges.KindImage)
-	if err != nil {
-		return nil, fmt.Errorf("read the images of %s: %w", repo, err)
-	}
+func imageCensus(rows []edges.Neighbour, prefix string) map[string]stageVersion {
 	type seen struct{ kustomize, inline map[string]bool }
 	by := map[string]*seen{}
 	for _, n := range rows {
@@ -279,7 +275,7 @@ func imageCensus(ctx context.Context, g *Gatherer, repo, prefix string) (map[str
 			out[name] = stageVersion{tag: vs[0][1:]}
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (v stageVersion) empty() bool {
@@ -332,13 +328,15 @@ func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, p
 			prefixes[st.Name] = st.Prefix
 		}
 	}
+	// Read once: both stages are cut from the same rows, by prefix.
+	rows, err := edges.InRepo(ctx, g.db, infra, edges.KindImage)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read the images of %s: %w", infra, err)
+	}
 	census := map[string]map[string]stageVersion{}
 	images := map[string]bool{}
 	for _, stage := range pair {
-		c, err := imageCensus(ctx, g, infra, prefixes[stage])
-		if err != nil {
-			return nil, nil, err
-		}
+		c := imageCensus(rows, prefixes[stage])
 		census[stage] = c
 		for name := range c {
 			images[name] = true

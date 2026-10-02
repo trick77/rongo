@@ -330,12 +330,12 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 // one list per term, in the order given, each exactly what the single-term
 // call returns.
 //
-// One scan for all of them. Asked term by term the lane read raw_text twice
-// per term — the hub-guard count, then the fetch — which was 24 scans and
-// 431 ms a turn at 25k chunks (docs/measurements/2026-09-21-substring-rung.md).
-// Here the scan reports, per matching chunk, which terms it holds; the count,
-// the guard and the cut are done over those rows in Go, and only the chunks
-// that survive the cut are read in full.
+// Two scans for all of them. Asked term by term the lane read raw_text twice
+// per term — the hub-guard count, then the fetch — which was 24 scans a turn
+// (docs/measurements/2026-09-21-substring-rung.md). Here one scan counts
+// every term, a second reports which chunks hold the terms the guard let
+// through, and only the chunks that survive the cut are read in full
+// (docs/measurements/2026-10-02-substring-batched.md).
 func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, repos []string, stage StagePrefixes) ([][]Hit, error) {
 	out := make([][]Hit, len(terms))
 	if n <= 0 {
@@ -368,28 +368,39 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	// generated folded column (a migration and a full re-index) or a Unicode
 	// lower() registered on every connection. Both are larger than this rung,
 	// and neither is decided without a number.
-	var matches []string
-	var matchArgs []any
-	var asked []int // index into terms of each match expression
+	type needle struct {
+		term  int // index into terms
+		match string
+		args  []any
+	}
+	var asked []needle
 	for i, term := range terms {
 		term = strings.TrimSpace(strings.ToLower(term))
 		if term == "" {
 			continue
 		}
-		asked = append(asked, i)
 		if hasNonASCII(term) {
 			// Rune-safe: the first character may itself be the multibyte one.
 			rs := []rune(term)
 			titled := string(unicode.ToUpper(rs[0])) + string(rs[1:])
-			matches = append(matches, "(instr(c.raw_text, ?) > 0 OR instr(c.raw_text, ?) > 0)")
-			matchArgs = append(matchArgs, term, titled)
+			asked = append(asked, needle{i, "(instr(s.raw, ?) > 0 OR instr(s.raw, ?) > 0)", []any{term, titled}})
 		} else {
-			matches = append(matches, "instr(lower(c.raw_text), ?) > 0")
-			matchArgs = append(matchArgs, term)
+			asked = append(asked, needle{i, "instr(s.folded, ?) > 0", []any{term}})
 		}
 	}
 	if len(asked) == 0 {
 		return out, nil
+	}
+	// The match expressions of some needles, comma- or OR-joined, with their
+	// arguments in the same order.
+	exprs := func(ns []needle, sep string) (string, []any) {
+		parts := make([]string, len(ns))
+		var args []any
+		for i, n := range ns {
+			parts[i] = n.match
+			args = append(args, n.args...)
+		}
+		return strings.Join(parts, sep), args
 	}
 
 	// The scope every count and every row is taken in. Numerator and
@@ -415,20 +426,61 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	scope += stageQ
 	scopeArgs = append(scopeArgs, stageArgs...)
 
-	// The denominator does not depend on the term, so it is counted once.
-	var total int
+	// The fold is the cost, not the scan: lower() copies the chunk, and written
+	// into each term's own expression it runs once per term per chunk — one
+	// scan built that way measured within a tenth of the 24 it replaced. The
+	// inner SELECT computes it once per chunk; LIMIT -1 is what stops SQLite
+	// flattening the subquery and putting lower() back into every term.
 	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*)`+scoped+scope, scopeArgs...).Scan(&total); err != nil {
+	folded := `
+		FROM (SELECT c.id AS id, f.repo AS repo, f.path AS path, c.start_line AS start_line,
+			c.ordinal AS ordinal, c.raw_text AS raw, lower(c.raw_text) AS folded` + scoped + scope + `
+			LIMIT -1) s`
+
+	// First scan: how many chunks each term is in, and how many there are.
+	// The hub guard is decided before a row is fetched — a term in a third of
+	// the corpus would otherwise send a third of the corpus through here just
+	// to be thrown away.
+	counts, countArgs := exprs(asked, "), 0), coalesce(sum(")
+	total := 0
+	matched := make([]int, len(asked))
+	dest := []any{&total}
+	for i := range matched {
+		dest = append(dest, &matched[i])
+	}
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	countQ := `SELECT count(*), coalesce(sum(` + counts + `), 0)` + folded
+	if err := s.db.QueryRowContext(ctx, countQ, append(countArgs, scopeArgs...)...).Scan(dest...); err != nil {
 		return nil, fmt.Errorf("substring search: %w", err)
 	}
+	var kept []needle
+	for i, n := range asked {
+		if matched[i] == 0 {
+			continue
+		}
+		// The hub guard: a term in more than substringHubShare of the corpus
+		// is not evidence.
+		if total >= substringHubFloor && float64(matched[i])/float64(total) > substringHubShare {
+			continue
+		}
+		kept = append(kept, n)
+	}
+	if len(kept) == 0 {
+		return out, nil
+	}
 
+	// Second scan: which chunks hold which of the terms that are left. Taking
+	// every match is safe because the guard has bounded each term's set.
+	//
 	// Address order, as the single-term fetch had it: it keeps two runs over
 	// one database identical, and the stable kind sort below falls back to it.
+	cols, colArgs := exprs(kept, ", ")
+	any1, anyArgs := exprs(kept, " OR ")
 	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-	scanQ := `SELECT c.id, f.path, ` + strings.Join(matches, ", ") + scoped + scope +
-		" AND (" + strings.Join(matches, " OR ") + ")" +
-		"\n\t\tORDER BY f.repo, f.path, c.start_line, c.ordinal"
-	args := append(append(append([]any{}, matchArgs...), scopeArgs...), matchArgs...)
+	scanQ := `SELECT s.id, s.path, ` + cols + folded + `
+		WHERE ` + any1 + `
+		ORDER BY s.repo, s.path, s.start_line, s.ordinal`
+	args := append(append(colArgs, scopeArgs...), anyArgs...)
 	rows, err := s.db.QueryContext(ctx, scanQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("substring search: %w", err)
@@ -437,9 +489,9 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 		id   int64
 		kind int
 	}
-	perTerm := make([][]match, len(asked))
-	holds := make([]bool, len(asked))
-	dest := make([]any, 2+len(asked))
+	perTerm := make([][]match, len(kept))
+	holds := make([]bool, len(kept))
+	dest = make([]any, 2+len(kept))
 	var id int64
 	var path string
 	dest[0], dest[1] = &id, &path
@@ -468,12 +520,6 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 	var want []any
 	wanted := map[int64]bool{}
 	for i, found := range perTerm {
-		// The hub guard: a term in more than substringHubShare of the corpus
-		// is not evidence.
-		if total >= substringHubFloor && float64(len(found))/float64(total) > substringHubShare {
-			perTerm[i] = nil
-			continue
-		}
 		// No cut before the sort: address order alone ranks a repository's
 		// LAYOUT rather than its relevance, and cutting by it decides the
 		// answer by directory name. In the corpus that motivated the rung the
@@ -521,7 +567,7 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 			// A chunk re-indexed between the scan and the read is gone under
 			// that id; it is left out rather than returned empty.
 			if h, ok := byID[m.id]; ok {
-				out[asked[i]] = append(out[asked[i]], h)
+				out[kept[i].term] = append(out[kept[i].term], h)
 			}
 		}
 	}

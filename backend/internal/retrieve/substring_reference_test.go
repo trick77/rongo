@@ -12,7 +12,7 @@ import (
 // (docs/measurements/2026-09-21-substring-rung.md): one count and one fetch
 // per term, two scans each. Kept as the definition of what the rung returns,
 // so the one-scan version is held to it hit for hit.
-func referenceSubstring(s *Store, ctx context.Context, term string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
+func referenceSubstring(ctx context.Context, s *Store, term string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
 	term = strings.TrimSpace(strings.ToLower(term))
 	if term == "" {
 		return nil, nil

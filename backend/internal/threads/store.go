@@ -915,11 +915,8 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 	if err != nil {
 		return Message{}, false, fmt.Errorf("read message: %w", err)
 	}
-	cites, err := s.citations(ctx, m.ID)
-	if err != nil {
-		return Message{}, false, err
-	}
-	m.Citations = cites
+	// Without its citations: every caller wants the turn to answer again
+	// from, and none reads what it cited. Messages carries them.
 	return m, true, nil
 }
 
@@ -1050,14 +1047,6 @@ func idArgs(ids []int64) []any {
 		args[i] = id
 	}
 	return args
-}
-
-func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation, error) {
-	by, err := s.citationsFor(ctx, []int64{messageID})
-	if err != nil {
-		return nil, err
-	}
-	return orEmpty(by[messageID]), nil
 }
 
 // citationsFor reads the citations of every message in ids, keyed by message.

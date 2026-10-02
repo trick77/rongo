@@ -95,22 +95,29 @@ func BenchmarkSearchSubstringIn(b *testing.B) {
 }
 
 // BenchmarkSubstringLane is the number that actually matters: one TURN, not one
-// term. The lane issues a query per generated term, and each does two scans (the
-// count guard and the fetch), so a per-term figure understates the per-turn cost
-// by the number of terms.
+// term. A per-term figure understates the per-turn cost by the number of terms.
+//
+// per-term is the rung as first written — a count and a fetch per term — kept
+// so the batched figure is read against it on the same machine.
 func BenchmarkSubstringLane(b *testing.B) {
 	question := "Im Policenantrag Backend, wie wird die Anzahl Fahrzeuge an Kernsystem weitergegeben"
 	terms := BuildSubstringTerms(question, []string{"Policenantrag", "Datenweitergabe"})
 	for _, n := range []int{10000, 25000} {
-		b.Run(fmt.Sprintf("chunks=%d/terms=%d", n, len(terms)), func(b *testing.B) {
-			db := benchDB(b, n)
-			s := NewStore(db)
-			b.ResetTimer()
+		db := benchDB(b, n)
+		s := NewStore(db)
+		b.Run(fmt.Sprintf("chunks=%d/terms=%d/per-term", n, len(terms)), func(b *testing.B) {
 			for b.Loop() {
 				for _, term := range terms {
-					if _, err := s.SearchSubstringIn(b.Context(), term, 40, nil, nil); err != nil {
-						b.Fatalf("SearchSubstringIn: %v", err)
+					if _, err := referenceSubstring(b.Context(), s, term, 40, nil, nil); err != nil {
+						b.Fatalf("referenceSubstring: %v", err)
 					}
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("chunks=%d/terms=%d/batched", n, len(terms)), func(b *testing.B) {
+			for b.Loop() {
+				if _, err := s.SearchSubstringsIn(b.Context(), terms, 40, nil, nil); err != nil {
+					b.Fatalf("SearchSubstringsIn: %v", err)
 				}
 			}
 		})
