@@ -206,7 +206,7 @@ func main() {
 	// that predates the column has none. Fatal rather than best-effort — a
 	// thread with an empty public_id is a row the rail can render and nothing
 	// can open.
-	if err := threads.NewStore(db).BackfillPublicIDs(ctx); err != nil {
+	if err := threadStore.BackfillPublicIDs(ctx); err != nil {
 		slog.Error("give existing threads an address", "err", err)
 		os.Exit(1)
 	}
@@ -396,7 +396,7 @@ func main() {
 	deps := httpapi.Deps{
 		Auth:           authSvc,
 		Repos:          repostatus.New(db, moduleOpts(cfg)),
-		Threads:        threads.NewStore(db).WithEvidence(source),
+		Threads:        threadStore.WithEvidence(source),
 		Source:         source,
 		Commit:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,

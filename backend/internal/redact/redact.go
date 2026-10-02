@@ -310,8 +310,12 @@ func leadingSpace(line string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
+// keySeparators is built once: isSecretKey runs for every key line of every
+// configuration file indexed.
+var keySeparators = strings.NewReplacer("-", "", "_", "")
+
 func isSecretKey(key string) bool {
-	folded := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(key))
+	folded := strings.ToLower(keySeparators.Replace(key))
 	for _, w := range secretKeyWords {
 		if strings.Contains(folded, w) {
 			return true

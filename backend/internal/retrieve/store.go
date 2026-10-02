@@ -472,6 +472,275 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	return out, nil
 }
 
+// SearchSubstringsIn is SearchSubstringIn for every term of a turn at once:
+// one list per term, in the order given, each exactly what the single-term
+// call returns.
+//
+// Two scans for all of them. Asked term by term the lane read raw_text twice
+// per term — the hub-guard count, then the fetch — which was 24 scans a turn
+// (docs/measurements/2026-09-21-substring-rung.md). Here one scan counts
+// every term, a second reports which chunks hold the terms the guard let
+// through, and only the chunks that survive the cut are read in full
+// (docs/measurements/2026-10-02-substring-batched.md).
+//
+// For ONE term the single-term call is the faster of the two and stays as it
+// was; TestSearchSubstringsIn_returnsPerTermWhatThePerTermRungDid holds the
+// two to the same result.
+func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, repos []string, stage StagePrefixes) ([][]Hit, error) {
+	out := make([][]Hit, len(terms))
+	if n <= 0 {
+		n = 10
+	}
+
+	// The same two match expressions as SearchSubstringIn — what the rung
+	// reaches and what it does not is written there — over the subquery's
+	// columns instead of the table's.
+	type needle struct {
+		term  int // index into terms
+		match string
+		args  []any
+	}
+	var asked []needle
+	folds := false // whether any needle reads the folded text
+	for i, term := range terms {
+		term = strings.TrimSpace(strings.ToLower(term))
+		if term == "" {
+			continue
+		}
+		if hasNonASCII(term) {
+			// Rune-safe: the first character may itself be the multibyte one.
+			rs := []rune(term)
+			titled := string(unicode.ToUpper(rs[0])) + string(rs[1:])
+			asked = append(asked, needle{i, "(instr(s.raw, ?) > 0 OR instr(s.raw, ?) > 0)", []any{term, titled}})
+		} else {
+			asked = append(asked, needle{i, "instr(s.folded, ?) > 0", []any{term}})
+			folds = true
+		}
+	}
+	if len(asked) == 0 {
+		return out, nil
+	}
+	// The match expressions of some needles, comma- or OR-joined, with their
+	// arguments in the same order.
+	exprs := func(ns []needle, sep string) (string, []any) {
+		parts := make([]string, len(ns))
+		var args []any
+		for i, n := range ns {
+			parts[i] = n.match
+			args = append(args, n.args...)
+		}
+		return strings.Join(parts, sep), args
+	}
+
+	// The scope every count and every row is taken in. Numerator and
+	// denominator of the hub guard carry the SAME filters. Counting the
+	// matches against every chunk in the database would compute the share
+	// against a population the turn cannot see: a term in 100% of the one repo
+	// in scope is 0.8% of a corpus with a large parked repository in it, and
+	// the guard would wave it through. One big parked or out-of-scope
+	// repository would otherwise disarm the guard for every live one — the
+	// same mistake the vec lane's `rowid IN (…)` rule exists to stop.
+	const scoped = `
+		FROM chunks c
+		JOIN files f ON f.id = c.file_id
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+		WHERE 1=1`
+	scope := ""
+	var scopeArgs []any
+	if len(repos) > 0 {
+		scope += " AND f.repo IN (" + placeholders(len(repos)) + ")"
+		scopeArgs = append(scopeArgs, toAny(repos)...)
+	}
+	stageQ, stageArgs := stage.clause("f")
+	scope += stageQ
+	scopeArgs = append(scopeArgs, stageArgs...)
+
+	// The fold is the cost, not the scan: lower() copies the chunk, and written
+	// into each term's own expression it runs once per term per chunk — one
+	// scan built that way measured within a tenth of the 24 it replaced. The
+	// inner SELECT computes it once per chunk; LIMIT -1 is what stops SQLite
+	// flattening the subquery and putting lower() back into every term.
+	//
+	// Only when a needle reads it: a search of non-ASCII terms alone matches
+	// the raw text, and must not pay for a fold nobody looks at.
+	foldCol := ""
+	if folds {
+		foldCol = ", lower(c.raw_text) AS folded"
+	}
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	folded := `
+		FROM (SELECT c.id AS id, f.repo AS repo, f.path AS path, c.start_line AS start_line,
+			c.ordinal AS ordinal, c.raw_text AS raw` + foldCol + scoped + scope + `
+			LIMIT -1) s`
+
+	// One read transaction for the counts, the matches and the rows: under WAL
+	// that is one snapshot. Read in separate statements, a poll re-indexing a
+	// file in between gave its chunks new ids, and every hit of that file fell
+	// out of the lane after the cut had already been made.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// First scan: how many chunks each term is in, and how many there are.
+	// The hub guard is decided before a row is fetched — a term in a third of
+	// the corpus would otherwise send a third of the corpus through here just
+	// to be thrown away.
+	counts, countArgs := exprs(asked, "), 0), coalesce(sum(")
+	total := 0
+	matched := make([]int, len(asked))
+	dest := []any{&total}
+	for i := range matched {
+		dest = append(dest, &matched[i])
+	}
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	countQ := `SELECT count(*), coalesce(sum(` + counts + `), 0)` + folded
+	if err := tx.QueryRowContext(ctx, countQ, append(countArgs, scopeArgs...)...).Scan(dest...); err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	var kept []needle
+	for i, n := range asked {
+		if matched[i] == 0 {
+			continue
+		}
+		// The hub guard: a term in more than substringHubShare of the corpus
+		// is not evidence.
+		if total >= substringHubFloor && float64(matched[i])/float64(total) > substringHubShare {
+			continue
+		}
+		kept = append(kept, n)
+	}
+	if len(kept) == 0 {
+		return out, nil
+	}
+
+	// Second scan: which chunks hold which of the terms that are left. Taking
+	// every match is safe because the guard has bounded each term's set.
+	//
+	// Address order, as the single-term fetch had it: it keeps two runs over
+	// one database identical, and the stable kind sort below falls back to it.
+	cols, colArgs := exprs(kept, ", ")
+	any1, anyArgs := exprs(kept, " OR ")
+	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+	scanQ := `SELECT s.id, s.path, ` + cols + folded + `
+		WHERE ` + any1 + `
+		ORDER BY s.repo, s.path, s.start_line, s.ordinal`
+	args := append(append(colArgs, scopeArgs...), anyArgs...)
+	rows, err := tx.QueryContext(ctx, scanQ, args...)
+	if err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	type match struct {
+		id   int64
+		kind int
+	}
+	perTerm := make([][]match, len(kept))
+	holds := make([]bool, len(kept))
+	dest = make([]any, 2+len(kept))
+	var id int64
+	var path string
+	dest[0], dest[1] = &id, &path
+	for i := range holds {
+		dest[2+i] = &holds[i]
+	}
+	for rows.Next() {
+		if err := rows.Scan(dest...); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("substring search: %w", err)
+		}
+		m := match{id: id, kind: substringKindRank(path)}
+		for i, has := range holds {
+			if has {
+				perTerm[i] = append(perTerm[i], m)
+			}
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
+	}
+
+	var want []any
+	wanted := map[int64]bool{}
+	for i, found := range perTerm {
+		// No cut before the sort: address order alone ranks a repository's
+		// LAYOUT rather than its relevance, and cutting by it decides the
+		// answer by directory name. In the corpus that motivated the rung the
+		// converter sat at position 35 of 40, behind .puml entity diagrams and
+		// persistence fixtures that merely name the field.
+		//
+		// Code, then tests, then documentation; address within each. A test
+		// proves the mechanism and a diagram names the field, but neither IS
+		// the mechanism, and this lane has no bm25 to tell them apart on
+		// content. Stable over rows already in address order, so the result is
+		// deterministic across runs over one database — what makes a one-part
+		// move in a measurement real rather than row order.
+		sort.SliceStable(found, func(a, b int) bool { return found[a].kind < found[b].kind })
+		if len(found) > n {
+			found = found[:n]
+		}
+		perTerm[i] = found
+		for _, m := range found {
+			if !wanted[m.id] {
+				wanted[m.id] = true
+				want = append(want, m.id)
+			}
+		}
+	}
+	if len(want) == 0 {
+		return out, nil
+	}
+
+	// Only what survived the cut is read in full, from the snapshot the ids
+	// were read in.
+	byID := make(map[int64]Hit, len(want))
+	for start := 0; start < len(want); start += substringFetchBatch {
+		batch := want[start:min(start+substringFetchBatch, len(want))]
+		//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+		q := `SELECT ` + hitColumns + `
+			FROM chunks c
+			JOIN files f ON f.id = c.file_id
+			JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+			WHERE c.id IN (` + placeholders(len(batch)) + `)`
+		if err := readHits(ctx, tx, q, batch, byID); err != nil {
+			return nil, err
+		}
+	}
+	for i, found := range perTerm {
+		for _, m := range found {
+			out[kept[i].term] = append(out[kept[i].term], byID[m.id])
+		}
+	}
+	return out, nil
+}
+
+// substringFetchBatch keeps the id list of one read well under SQLite's bound
+// on host parameters, whatever the term count and the cut multiply to.
+const substringFetchBatch = 500
+
+func readHits(ctx context.Context, tx *sql.Tx, q string, args []any, into map[int64]Hit) error {
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("substring search: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var h Hit
+		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
+			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+			return fmt.Errorf("substring search: %w", err)
+		}
+		into[h.ChunkID] = h
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("substring search: %w", err)
+	}
+	return nil
+}
+
 // substringKindRank orders a path by what it IS: code first, then tests, then
 // documentation. It decides only this lane's own cut; the fused score is still
 // TestDecay's and DocDecay's to set.

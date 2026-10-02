@@ -838,13 +838,9 @@ func (r *Retriever) searchTexts(ctx context.Context, texts []string, code, prior
 		// staying under the hub share, so "anzahlgeraete" and its single
 		// chunk, the mapping the rung exists to recover, were cut before
 		// fusion ever saw them. A wide term must cost itself, not the lane.
-		perTerm := make([][]Hit, len(terms))
-		for i, term := range terms {
-			found, err := r.store.SearchSubstringIn(ctx, term, candidates, repos, stage)
-			if err != nil {
-				return nil, err
-			}
-			perTerm[i] = found
+		perTerm, err := r.store.SearchSubstringsIn(ctx, terms, candidates, repos, stage)
+		if err != nil {
+			return nil, err
 		}
 		var hits []Hit
 		seen := map[int64]bool{}
