@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Narrow from "./Narrow";
@@ -49,6 +49,9 @@ export type TurnAttemptProps = {
   copied: boolean;
   onCopy: (i: number) => void;
   onToggleFailure: (i: number) => void;
+  /** The thread's verdict, among this answer's buttons. ThreadView hands it
+   * to the newest answer only, and holds the element steady across renders. */
+  feedback?: ReactNode;
 };
 
 function TurnAttempt({
@@ -68,6 +71,7 @@ function TurnAttempt({
   copied,
   onCopy,
   onToggleFailure,
+  feedback = null,
 }: TurnAttemptProps) {
   return (
     <div>
@@ -263,7 +267,7 @@ function TurnAttempt({
                     indexed" about sources that never were. Copy stays. */}
                 {actions && turn.done && (turn.usage || (turn.messageId && !turn.error && !turn.clarification)) && (
                   <div className="mt-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {turn.messageId && !turn.error && !turn.clarification && (
                         <>
                           {!turn.sourceless && (
@@ -283,6 +287,7 @@ function TurnAttempt({
                           >
                             {copied ? "Copied" : "Copy as Markdown"}
                           </button>
+                          {feedback}
                         </>
                       )}
                       {turn.usage && (

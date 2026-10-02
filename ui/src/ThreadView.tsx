@@ -3,6 +3,7 @@ import Question from "./Question";
 import PasteChip from "./PasteChip";
 import { strip } from "./pastes";
 import TurnAttempt from "./TurnAttempt";
+import ThreadFeedback, { finished } from "./ThreadFeedback";
 import { CheckIcon, CopyIcon } from "./icons";
 import {
   clock,
@@ -258,6 +259,26 @@ export default function ThreadView({
     setCopiedQuestion(null);
   }, [threadKey]);
 
+  // The thread's verdict sits among the buttons of the newest finished answer,
+  // where the reader stops reading. The owner's view only — a shared page has
+  // no actions — and never while a turn runs: the answer it would sit under is
+  // about to stop being the newest. Held in a memo so the one turn carrying it
+  // is not drawn again for every keystroke in the composer.
+  const owner = actions !== null;
+  // In the order the page draws them: a re-explain of an older question is
+  // drawn under that question, so the newest row is not the answer at the
+  // bottom of the page.
+  const rated = useMemo(() => {
+    if (!owner || typeof threadKey !== "string" || turns.some((t) => !t.done)) return -1;
+    const drawn = groupByQuestion(turns).flat();
+    for (let k = drawn.length - 1; k >= 0; k--) if (finished(turns[drawn[k]])) return drawn[k];
+    return -1;
+  }, [owner, threadKey, turns]);
+  const feedback = useMemo(
+    () => (rated >= 0 && typeof threadKey === "string" ? <ThreadFeedback threadId={threadKey} turns={turns} /> : null),
+    [rated, threadKey, turns],
+  );
+
   // The "Copied" feedback times out through these, cleared on unmount so a
   // reader who leaves within the moment does not have state set on a view
   // that is gone.
@@ -407,6 +428,7 @@ export default function ThreadView({
                       copied={copied === i}
                       onCopy={copy}
                       onToggleFailure={toggleFailure}
+                      feedback={i === rated ? feedback : null}
                     />
                   );
                 })}
