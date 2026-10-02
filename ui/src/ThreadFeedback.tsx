@@ -246,7 +246,10 @@ export default function ThreadFeedback({
         </button>
       </span>
       {fb && <span className="text-muted">{said}</span>}
-      {fb?.verdict === -1 && (
+      {/* A reason saved now is pinned to the newest answer, so "change" is
+          offered only while the verdict already covers it. Past that, the
+          thumbs are the way to rate again. */}
+      {fb?.verdict === -1 && fb.upToMessageId === newest && (
         <>
           <span className="text-muted">·</span>
           <button type="button" className={link} onClick={() => setPicking(true)}>

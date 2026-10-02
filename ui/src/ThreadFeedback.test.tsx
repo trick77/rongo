@@ -211,6 +211,14 @@ describe("ThreadFeedback", () => {
     expect(puts).toEqual([{ verdict: -1, reason: "" }]);
   });
 
+  it("offers no reason change once newer answers came, since a change would cover them too", async () => {
+    server({ verdict: -1, reason: "wrong", upToMessageId: 1 });
+    render(<ThreadFeedback threadId="t1" turns={[answered(1), answered(2)]} running={false} caveat={caveat} />);
+
+    expect(await screen.findByText("Wrong · rated before turn 2")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "change" })).toBeNull();
+  });
+
   it("keeps a click made before the stored verdict arrived", async () => {
     // The load answers "none" only after the reader already voted: the read
     // ran first on the server, its reply is older than the click.
