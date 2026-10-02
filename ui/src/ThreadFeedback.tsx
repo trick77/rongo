@@ -63,7 +63,15 @@ export default function ThreadFeedback({
   caveat: string;
 }) {
   const [fb, setFb] = useState<Feedback | null>(null);
-  const [picking, setPicking] = useState(false);
+  // The picker belongs to the newest answer on screen when it was opened, and
+  // shows only while that is still the newest. A reason picked after the next
+  // answer landed would re-pin the verdict to an answer the reader never
+  // judged — whatever order the save, the running turn and the answer arrive
+  // in, a newer answer closes it.
+  const [pickingAt, setPickingAt] = useState<number | null>(null);
+  const newest = turns.reduce((m, t) => (finished(t) ? Math.max(m, t.messageId ?? 0) : m), 0);
+  const picking = pickingAt !== null && pickingAt === newest;
+  const setPicking = (open: boolean) => setPickingAt(open ? newest : null);
   const [thanks, setThanks] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The thread the state on screen belongs to; a reply for another one is late.
@@ -76,7 +84,7 @@ export default function ThreadFeedback({
     shown.current = threadId;
     touched.current = false;
     setFb(null);
-    setPicking(false);
+    setPickingAt(null);
     setThanks(false);
     if (threadId === null) return;
     (async () => {
@@ -93,13 +101,6 @@ export default function ThreadFeedback({
   }, [threadId]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
-
-  // A reason picked after the next answer lands would pin the verdict to an
-  // answer the reader never judged, so a running turn closes the picker. The
-  // bare thumbs down stays, covering what it covered.
-  useEffect(() => {
-    if (running) setPicking(false);
-  }, [running]);
 
   const thank = () => {
     setThanks(true);
@@ -139,10 +140,12 @@ export default function ThreadFeedback({
   const vote = async (verdict: 1 | -1) => {
     touched.current = true;
     if (fb?.verdict === verdict) return clear();
+    // Taken at the click, not after the save: the answer the reader judged.
+    const judged = newest;
     if (!(await put(verdict, ""))) return;
-    if (verdict === -1) setPicking(true);
+    if (verdict === -1) setPickingAt(judged);
     else {
-      setPicking(false);
+      setPickingAt(null);
       thank();
     }
   };

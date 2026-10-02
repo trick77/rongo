@@ -153,6 +153,36 @@ describe("ThreadFeedback", () => {
     expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("never opens the picker for a thumbs down whose save returns after the next answer", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, opts?: RequestInit) => {
+        if (opts?.method === "PUT") {
+          await gate;
+          return { ok: true, status: 200, json: async () => ({ verdict: -1, reason: "", upToMessageId: 2 }) };
+        }
+        return { ok: true, status: 200, json: async () => null };
+      }),
+    );
+    const user = userEvent.setup();
+    const first = [answered(2)];
+    const { rerender } = render(<ThreadFeedback threadId="t1" turns={first} running={false} caveat={caveat} />);
+    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+
+    // The next question is asked and answered while the save is in flight.
+    rerender(<ThreadFeedback threadId="t1" turns={first} running caveat={caveat} />);
+    const later = [...first, answered(4)];
+    rerender(<ThreadFeedback threadId="t1" turns={later} running={false} caveat={caveat} />);
+    release();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true"),
+    );
+
+    expect(screen.queryByText("What was off?")).toBeNull();
+  });
+
   it("keeps a click made before the stored verdict arrived", async () => {
     // The load answers "none" only after the reader already voted: the read
     // ran first on the server, its reply is older than the click.
