@@ -100,9 +100,9 @@ func (w *Writer) ReplaceFile(ctx context.Context, repo, path, sha, lang string, 
 	}
 	for i, c := range chunks {
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, token_count, content_hash)
-			VALUES (?,?,?,?,?,?,?,?,?)`,
-			fileID, c.Ordinal, c.StartLine, c.EndLine, c.Symbol, c.Text, c.RawText, c.TokenCount, c.ContentHash)
+			INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+			VALUES (?,?,?,?,?,?,?)`,
+			fileID, c.Ordinal, c.StartLine, c.EndLine, c.Symbol, c.RawText, c.ContentHash)
 		if err != nil {
 			return fmt.Errorf("index %s/%s chunk %d: %w", repo, path, c.Ordinal, err)
 		}

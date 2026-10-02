@@ -26,8 +26,8 @@ func TestSourceIdentityBackfill_completesRowsThatStillJoinAndLeavesTheRest(t *te
 	for _, q := range []string{
 		`INSERT INTO repo_state (name, clone_url, branch) VALUES ('peeq', 'x', 'master')`,
 		`INSERT INTO files (id, repo, path, sha) VALUES (1, 'peeq', 'a.go', 'deadbeef')`,
-		`INSERT INTO chunks (id, file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		 VALUES (7, 1, 0, 3, 9, 'A', 't', 't', 'h')`,
+		`INSERT INTO chunks (id, file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		 VALUES (7, 1, 0, 3, 9, 'A', 't', 'h')`,
 		`INSERT INTO commits (id, repo, sha, committed_at, author, subject, body, paths)
 		 VALUES (5, 'peeq', 'aaa1111', '2026-09-17T10:00:00Z', 'x', 's', 'b', '')`,
 	} {

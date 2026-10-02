@@ -487,8 +487,8 @@ func seedChunkAt(t *testing.T, db *sql.DB, path string) int64 {
 		t.Fatalf("seed file: %v", err)
 	}
 	res, err = db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, 0, 1, 5, '', 'package b', 'package b', 'hash2')`, fileID)
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, 0, 1, 5, '', 'package b', 'hash2')`, fileID)
 	if err != nil {
 		t.Fatalf("seed chunk: %v", err)
 	}
@@ -513,8 +513,8 @@ func seedChunk(t *testing.T, db *sql.DB) int64 {
 		t.Fatalf("seed file: %v", err)
 	}
 	res, err = db.Exec(`
-		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, 0, 1, 5, '', 'package a', 'package a', 'hash1')`, fileID)
+		INSERT INTO chunks (file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, 0, 1, 5, '', 'package a', 'hash1')`, fileID)
 	if err != nil {
 		t.Fatalf("seed chunk: %v", err)
 	}

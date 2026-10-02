@@ -60,9 +60,9 @@ func insertChunk(t *testing.T, db *sql.DB, id int64, repo, path, text string) {
 		t.Fatalf("seed file id: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO chunks (id, file_id, ordinal, start_line, end_line, symbol, text, raw_text, content_hash)
-		VALUES (?, ?, 0, 1, 3, '', ?, ?, ?)`,
-		id, fileID, text, text, text); err != nil {
+		INSERT INTO chunks (id, file_id, ordinal, start_line, end_line, symbol, raw_text, content_hash)
+		VALUES (?, ?, 0, 1, 3, '', ?, ?)`,
+		id, fileID, text, text); err != nil {
 		t.Fatalf("seed chunk: %v", err)
 	}
 }

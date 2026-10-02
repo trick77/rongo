@@ -222,7 +222,7 @@ func TestImportDeps_readsAliasImportsOutOfTheIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		id, _ := res.LastInsertId()
-		if _, err := db.Exec(`INSERT INTO chunks (file_id, ordinal, start_line, end_line, text, raw_text, content_hash) VALUES (?, 0, 1, 5, ?, ?, ?)`, id, text, text, p); err != nil {
+		if _, err := db.Exec(`INSERT INTO chunks (file_id, ordinal, start_line, end_line, raw_text, content_hash) VALUES (?, 0, 1, 5, ?, ?)`, id, text, p); err != nil {
 			t.Fatal(err)
 		}
 	}
