@@ -137,25 +137,42 @@ export default function ThreadFeedback({
     }
   };
 
-  const vote = async (verdict: 1 | -1) => {
-    touched.current = true;
-    if (fb?.verdict === verdict) return clear();
-    // Taken at the click, not after the save: the answer the reader judged.
-    const judged = newest;
-    if (!(await put(verdict, ""))) return;
-    if (verdict === -1) setPickingAt(judged);
-    else {
-      setPickingAt(null);
-      thank();
+  // One write at a time. Two in flight can come back in the other order from
+  // the one the server stored them in, and the screen would then show the
+  // verdict the server dropped. A ref, not state: a double click lands before
+  // any re-render could disable the buttons.
+  const saving = useRef(false);
+  const once = async (write: () => Promise<void>) => {
+    if (saving.current) return;
+    saving.current = true;
+    try {
+      await write();
+    } finally {
+      saving.current = false;
     }
   };
 
-  const pick = async (reason: string) => {
-    if (await put(-1, reason)) {
-      setPicking(false);
-      thank();
-    }
-  };
+  const vote = (verdict: 1 | -1) =>
+    once(async () => {
+      touched.current = true;
+      if (fb?.verdict === verdict) return clear();
+      // Taken at the click, not after the save: the answer the reader judged.
+      const judged = newest;
+      if (!(await put(verdict, ""))) return;
+      if (verdict === -1) setPickingAt(judged);
+      else {
+        setPickingAt(null);
+        thank();
+      }
+    });
+
+  const pick = (reason: string) =>
+    once(async () => {
+      if (await put(-1, reason)) {
+        setPicking(false);
+        thank();
+      }
+    });
 
   const eligible = threadId !== null && !running && turns.some(finished);
   // min-h holds the line at the thumbs' height in every state, so the composer

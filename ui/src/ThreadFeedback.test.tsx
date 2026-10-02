@@ -183,6 +183,34 @@ describe("ThreadFeedback", () => {
     expect(screen.queryByText("What was off?")).toBeNull();
   });
 
+  it("takes no second verdict while the first is still being saved", async () => {
+    // Two saves in flight can come back in the other order from the one the
+    // server stored them in, and the screen would show the verdict it lost.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const puts: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, opts?: RequestInit) => {
+        if (opts?.method === "PUT") {
+          puts.push(JSON.parse(String(opts.body)));
+          await gate;
+          return { ok: true, status: 200, json: async () => ({ verdict: -1, reason: "", upToMessageId: 2 }) };
+        }
+        return { ok: true, status: 200, json: async () => null };
+      }),
+    );
+    const user = userEvent.setup();
+    render(<ThreadFeedback threadId="t1" turns={[answered(2)]} running={false} caveat={caveat} />);
+
+    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    await user.click(screen.getByRole("button", { name: "Helpful" }));
+    release();
+
+    await screen.findByText("What was off?");
+    expect(puts).toEqual([{ verdict: -1, reason: "" }]);
+  });
+
   it("keeps a click made before the stored verdict arrived", async () => {
     // The load answers "none" only after the reader already voted: the read
     // ran first on the server, its reply is older than the click.
