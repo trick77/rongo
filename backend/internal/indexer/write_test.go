@@ -97,7 +97,7 @@ func TestReplaceFile_keywordLaneIndexesSearchTextNotTheComment(t *testing.T) {
 	}
 }
 
-func countOf(t *testing.T, db *sql.DB, q string, args ...any) int {
+func countOf(t testing.TB, db *sql.DB, q string, args ...any) int {
 	t.Helper()
 	var n int
 	if err := db.QueryRow(q, args...).Scan(&n); err != nil {

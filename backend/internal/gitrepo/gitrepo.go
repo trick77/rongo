@@ -443,8 +443,14 @@ func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toS
 	// byte ("f\303\244hig.go"), and the quoted form is not a path — a later
 	// `git show <sha>:<path>` fails on it, so every umlaut file would drop out
 	// of the index as merely "unreadable". A German corpus is full of them.
+	//
+	// --no-renames, like ChangedEntries: with rename detection on — git's
+	// default — a renamed file is reported under its NEW name only. The old
+	// path was then never handed to the indexer, kept its rows, and went on
+	// being retrieved and cited at a path the branch no longer has; no later
+	// diff names it again.
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--name-only", fromSHA+".."+toSHA)
+		"diff", "--name-only", "--no-renames", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
@@ -599,19 +605,26 @@ func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ..
 	return string(out), err
 }
 
-// runIn is every git command: the ownership exemption, no prompting, the
-// configured auth in the environment, stdin where a command reads one, and
-// the raw bytes back. ReadFile and Object used to build their own exec and so
-// missed GIT_TERMINAL_PROMPT and the auth environment.
-func (c *Client) runIn(ctx context.Context, dir string, stdin io.Reader, extra []string, args ...string) ([]byte, error) {
+// command builds every git process, the ones that run to the end and the one
+// a Reader keeps open: the ownership exemption, no prompting, the configured
+// auth in the environment.
+func (c *Client) command(ctx context.Context, dir string, extra []string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, c.git, safeDirectory(dir, args...)...) //nolint:gosec // argv with no shell, and git resolves sha:path inside the object tree rather than the filesystem, so a path cannot escape the checkout
 	cmd.Dir = dir
-	cmd.Stdin = stdin
 	// Never let git prompt: a hung credential prompt would stall the poller
 	// forever with no output to diagnose it.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.Env = append(cmd.Env, c.auth.env()...)
 	cmd.Env = append(cmd.Env, extra...)
+	return cmd
+}
+
+// runIn is every git command that runs to the end: what command sets up,
+// stdin where a command reads one, and the raw bytes back. ReadFile and Object used to build their own exec and so
+// missed GIT_TERMINAL_PROMPT and the auth environment.
+func (c *Client) runIn(ctx context.Context, dir string, stdin io.Reader, extra []string, args ...string) ([]byte, error) {
+	cmd := c.command(ctx, dir, extra, args...)
+	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

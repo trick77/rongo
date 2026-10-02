@@ -110,7 +110,10 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 		return Counts{}, err
 	}
 
-	declared := ix.syncStructure(ctx, spec, st, sha)
+	read, done := ix.reader(ctx, spec)
+	defer done()
+
+	declared := ix.syncStructure(ctx, spec, st, sha, read)
 
 	if paths == nil {
 		// A full run reads the tree at sha and nothing else, so a file the
@@ -142,7 +145,7 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 			}
 			continue
 		}
-		if err := ix.indexOne(ctx, spec, st, sha, tg.path); err != nil {
+		if err := ix.indexOne(ctx, spec, st, sha, tg.path, read); err != nil {
 			return Counts{}, err
 		}
 	}
@@ -154,6 +157,33 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 	// Compacting here would lock out live turns; the next boot does it.
 	WarnVectorBloat(ctx, ix.db, ix.log, "repo", st.Name)
 	return ix.totals(ctx, st.Name)
+}
+
+// readFile reads one path at one commit.
+type readFile func(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error)
+
+// batchGit is a git that can keep one process open for all of a run's reads.
+// gitrepo.Client is one; a test's fake need not be.
+type batchGit interface {
+	NewReader(ctx context.Context, spec repos.Spec) (*gitrepo.Reader, error)
+}
+
+// reader is how this run reads files, and what to call when the run is over.
+// One git process for the whole run where the git offers it: a process per
+// file was a third of what a file costs outside embedding. Where it does not,
+// or the process will not start, the run reads a file at a time as it always
+// did — slower, never different.
+func (ix *Indexer) reader(ctx context.Context, spec repos.Spec) (readFile, func()) {
+	bg, ok := ix.git.(batchGit)
+	if !ok {
+		return ix.git.ReadFile, func() {}
+	}
+	r, err := bg.NewReader(ctx, spec)
+	if err != nil {
+		ix.log.Warn("batch reader not started; reading a file at a time", "repo", spec.Name, "err", err)
+		return ix.git.ReadFile, func() {}
+	}
+	return r.ReadFile, func() { _ = r.Close() }
 }
 
 // structure is what the manifests said, carried from before the file pass to
@@ -176,7 +206,7 @@ type structure struct {
 // degrades a clarification decision or a sentence of the answer. Failing the
 // index run over it would take the whole repository out of search for a
 // manifest problem.
-func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoState, sha string) structure {
+func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoState, sha string, readAt readFile) structure {
 	paths, err := ix.git.ListPaths(ctx, spec, sha)
 	if err != nil {
 		ix.log.Warn("list paths for repo_deps failed", "repo", st.Name, "err", err)
@@ -186,7 +216,7 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 	// not this repository's: the file selector skips those paths, and so
 	// does the structure scan.
 	paths = ownPaths(paths)
-	read := func(p string) ([]byte, error) { return ix.git.ReadFile(ctx, spec, sha, p) }
+	read := func(p string) ([]byte, error) { return readAt(ctx, spec, sha, p) }
 	mods := map[string][]byte{}
 	for _, p := range paths {
 		if path.Base(p) != "go.mod" {
@@ -290,7 +320,7 @@ func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, s
 
 // indexOne runs one file through the pipeline: read, select, symbols, chunk,
 // cache, embed, write.
-func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha, path string) error {
+func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha, path string, read readFile) error {
 	lang := LanguageOf(path)
 	// The verdicts the path alone decides come before the read: an excluded
 	// or vendored file used to be read, redacted and scanned for credentials
@@ -300,7 +330,7 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 			"reason", string(decision), "detail", detail)
 		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(decision), 0)
 	}
-	body, err := ix.git.ReadFile(ctx, spec, sha, path)
+	body, err := read(ctx, spec, sha, path)
 	if err != nil {
 		// A submodule pointer or a symlink never gets here: targets drops
 		// them by mode. What is left is a real read failure, and it fails
