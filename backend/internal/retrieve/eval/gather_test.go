@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -182,6 +183,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: gather %q: %v", arm.name, q.Text, err)
 			}
+			dumpGathered(t, arm.name, q.Text, hits, sources)
 			hops := make([]int, 0, len(q.Candidates))
 			ranks := make([]int, 0, len(q.Candidates))
 			paths := make([]string, 0, len(q.Candidates))
@@ -205,6 +207,39 @@ func TestEvalMeasureGathered(t *testing.T) {
 
 	reportWalkGains(t, results["expanded + walk"])
 	reportCompositionParts(t, results["expanded + walk"])
+}
+
+// dumpGathered appends one line per question and arm to the file named by
+// BACKEND_EVAL_GATHER_DUMP: every search hit with its score, every gathered
+// source with its hop and reason, in order. The report above says whether the
+// expected chunk was reached; this says what the whole list was, which is what
+// "one database gathers the identical list" has to be read against when a
+// change claims to move nothing. Two dumps of one database are compared with
+// diff.
+func dumpGathered(t *testing.T, arm, question string, hits []retrieve.Hit, sources []ask.Source) {
+	t.Helper()
+	path := os.Getenv("BACKEND_EVAL_GATHER_DUMP")
+	if path == "" {
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\t%s\thits:", arm, question)
+	for _, h := range hits {
+		fmt.Fprintf(&b, " %d=%.9f", h.ChunkID, h.Score)
+	}
+	b.WriteString("\tsources:")
+	for _, s := range sources {
+		fmt.Fprintf(&b, " %d@%d[%s]", s.ChunkID, s.Hop, s.Reason)
+	}
+	b.WriteString("\n")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // a path the person running the measurement chose
+	if err != nil {
+		t.Fatalf("open gather dump: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(b.String()); err != nil {
+		t.Fatalf("write gather dump: %v", err)
+	}
 }
 
 // reportCompositionParts answers the one question the aggregate cannot: when a
