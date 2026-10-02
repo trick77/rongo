@@ -319,10 +319,25 @@ const substringHubFloor = 500
 // reranker's after it: getting the chunk INTO the fused list is all this lane
 // claims to do.
 func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
-	term = strings.TrimSpace(strings.ToLower(term))
-	if term == "" {
-		return nil, nil
+	found, err := s.SearchSubstringsIn(ctx, []string{term}, n, repos, stage)
+	if err != nil {
+		return nil, err
 	}
+	return found[0], nil
+}
+
+// SearchSubstringsIn is SearchSubstringIn for every term of a turn at once:
+// one list per term, in the order given, each exactly what the single-term
+// call returns.
+//
+// One scan for all of them. Asked term by term the lane read raw_text twice
+// per term — the hub-guard count, then the fetch — which was 24 scans and
+// 431 ms a turn at 25k chunks (docs/measurements/2026-09-21-substring-rung.md).
+// Here the scan reports, per matching chunk, which terms it holds; the count,
+// the guard and the cut are done over those rows in Go, and only the chunks
+// that survive the cut are read in full.
+func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, repos []string, stage StagePrefixes) ([][]Hit, error) {
+	out := make([][]Hit, len(terms))
 	if n <= 0 {
 		n = 10
 	}
@@ -353,123 +368,188 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	// generated folded column (a migration and a full re-index) or a Unicode
 	// lower() registered on every connection. Both are larger than this rung,
 	// and neither is decided without a number.
-	var match string
+	var matches []string
 	var matchArgs []any
-	if hasNonASCII(term) {
-		// Rune-safe: the first character may itself be the multibyte one.
-		rs := []rune(term)
-		titled := string(unicode.ToUpper(rs[0])) + string(rs[1:])
-		match = "(instr(c.raw_text, ?) > 0 OR instr(c.raw_text, ?) > 0)"
-		matchArgs = []any{term, titled}
-	} else {
-		match = "instr(lower(c.raw_text), ?) > 0"
-		matchArgs = []any{term}
+	var asked []int // index into terms of each match expression
+	for i, term := range terms {
+		term = strings.TrimSpace(strings.ToLower(term))
+		if term == "" {
+			continue
+		}
+		asked = append(asked, i)
+		if hasNonASCII(term) {
+			// Rune-safe: the first character may itself be the multibyte one.
+			rs := []rune(term)
+			titled := string(unicode.ToUpper(rs[0])) + string(rs[1:])
+			matches = append(matches, "(instr(c.raw_text, ?) > 0 OR instr(c.raw_text, ?) > 0)")
+			matchArgs = append(matchArgs, term, titled)
+		} else {
+			matches = append(matches, "instr(lower(c.raw_text), ?) > 0")
+			matchArgs = append(matchArgs, term)
+		}
+	}
+	if len(asked) == 0 {
+		return out, nil
 	}
 
-	where := "\n\t\tWHERE " + match
-	args := append([]any{}, matchArgs...)
-	if len(repos) > 0 {
-		where += " AND f.repo IN (" + placeholders(len(repos)) + ")"
-		args = append(args, toAny(repos)...)
-	}
-	stageQ, stageArgs := stage.clause("f")
-	where += stageQ
-	args = append(args, stageArgs...)
-
-	// The hub guard, before the rows are fetched: a term in more than
-	// substringHubShare of the corpus is not evidence, and counting is cheaper
-	// than materialising its hits.
-	//
-	// Numerator and denominator carry the SAME filters. Counting the matches
-	// against every chunk in the database would compute the share against a
-	// population the turn cannot see: a term in 100% of the one repo in scope
-	// is 0.8% of a corpus with a large parked repository in it, and the guard
-	// would wave it through. One big parked or out-of-scope repository would
-	// otherwise disarm the guard for every live one — the same mistake the
-	// vec lane's `rowid IN (…)` rule exists to stop.
-	scoped := `
+	// The scope every count and every row is taken in. Numerator and
+	// denominator of the hub guard carry the SAME filters. Counting the
+	// matches against every chunk in the database would compute the share
+	// against a population the turn cannot see: a term in 100% of the one repo
+	// in scope is 0.8% of a corpus with a large parked repository in it, and
+	// the guard would wave it through. One big parked or out-of-scope
+	// repository would otherwise disarm the guard for every live one — the
+	// same mistake the vec lane's `rowid IN (…)` rule exists to stop.
+	const scoped = `
 		FROM chunks c
 		JOIN files f ON f.id = c.file_id
-		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1`
-	scopeWhere := ""
-	scopeArgs := []any{}
+		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
+		WHERE 1=1`
+	scope := ""
+	var scopeArgs []any
 	if len(repos) > 0 {
-		scopeWhere += " WHERE f.repo IN (" + placeholders(len(repos)) + ")"
+		scope += " AND f.repo IN (" + placeholders(len(repos)) + ")"
 		scopeArgs = append(scopeArgs, toAny(repos)...)
 	}
-	stageOnly, stageOnlyArgs := stage.clause("f")
-	if stageOnly != "" {
-		if scopeWhere == "" {
-			// stage.clause emits a leading " AND"; it needs a WHERE to hang on.
-			scopeWhere = " WHERE 1=1"
-		}
-		scopeWhere += stageOnly
-		scopeArgs = append(scopeArgs, stageOnlyArgs...)
-	}
+	stageQ, stageArgs := stage.clause("f")
+	scope += stageQ
+	scopeArgs = append(scopeArgs, stageArgs...)
 
+	// The denominator does not depend on the term, so it is counted once.
+	var total int
 	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-	countQ := `SELECT (SELECT count(*)` + scoped + where + `), (SELECT count(*)` + scoped + scopeWhere + `)`
-	var matched, total int
-	countArgs := append(append([]any{}, args...), scopeArgs...)
-	if err := s.db.QueryRowContext(ctx, countQ, countArgs...).Scan(&matched, &total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*)`+scoped+scope, scopeArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("substring search: %w", err)
 	}
-	if matched == 0 {
-		return nil, nil
-	}
-	if total >= substringHubFloor && float64(matched)/float64(total) > substringHubShare {
-		return nil, nil
-	}
 
-	// No LIMIT here, and the sort is in Go: address order alone ranks a
-	// repository's LAYOUT rather than its relevance, and cutting by it in SQL
-	// decides the answer by directory name. In the corpus that motivated the
-	// rung the converter sat at position 35 of 40, behind .puml entity
-	// diagrams and persistence fixtures that merely name the field.
-	//
-	// Taking every match first is safe because the hub guard above has already
-	// bounded the set: a term reaching more than substringHubShare of the
-	// corpus never gets here.
-	//
+	// Address order, as the single-term fetch had it: it keeps two runs over
+	// one database identical, and the stable kind sort below falls back to it.
 	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
-	q := `SELECT ` + hitColumns + `
-		FROM chunks c
-		JOIN files f ON f.id = c.file_id
-		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1` + where +
+	scanQ := `SELECT c.id, f.path, ` + strings.Join(matches, ", ") + scoped + scope +
+		" AND (" + strings.Join(matches, " OR ") + ")" +
 		"\n\t\tORDER BY f.repo, f.path, c.start_line, c.ordinal"
-
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	args := append(append(append([]any{}, matchArgs...), scopeArgs...), matchArgs...)
+	rows, err := s.db.QueryContext(ctx, scanQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("substring search: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	var out []Hit
+	type match struct {
+		id   int64
+		kind int
+	}
+	perTerm := make([][]match, len(asked))
+	holds := make([]bool, len(asked))
+	dest := make([]any, 2+len(asked))
+	var id int64
+	var path string
+	dest[0], dest[1] = &id, &path
+	for i := range holds {
+		dest[2+i] = &holds[i]
+	}
 	for rows.Next() {
-		var h Hit
-		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+		if err := rows.Scan(dest...); err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("substring search: %w", err)
 		}
-		out = append(out, h)
+		m := match{id: id, kind: substringKindRank(path)}
+		for i, has := range holds {
+			if has {
+				perTerm[i] = append(perTerm[i], m)
+			}
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("substring search: %w", err)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("substring search: %w", err)
 	}
 
-	// Code, then tests, then documentation; address within each. A test proves
-	// the mechanism and a diagram names the field, but neither IS the
-	// mechanism, and this lane has no bm25 to tell them apart on content.
-	//
-	// SortStableFunc, and the SQL already ordered by address, so the result is
-	// deterministic across runs over one database — what makes a one-part move
-	// in a measurement real rather than row order.
-	sort.SliceStable(out, func(i, j int) bool {
-		return substringKindRank(out[i].Path) < substringKindRank(out[j].Path)
-	})
-	if len(out) > n {
-		out = out[:n]
+	var want []any
+	wanted := map[int64]bool{}
+	for i, found := range perTerm {
+		// The hub guard: a term in more than substringHubShare of the corpus
+		// is not evidence.
+		if total >= substringHubFloor && float64(len(found))/float64(total) > substringHubShare {
+			perTerm[i] = nil
+			continue
+		}
+		// No cut before the sort: address order alone ranks a repository's
+		// LAYOUT rather than its relevance, and cutting by it decides the
+		// answer by directory name. In the corpus that motivated the rung the
+		// converter sat at position 35 of 40, behind .puml entity diagrams and
+		// persistence fixtures that merely name the field.
+		//
+		// Code, then tests, then documentation; address within each. A test
+		// proves the mechanism and a diagram names the field, but neither IS
+		// the mechanism, and this lane has no bm25 to tell them apart on
+		// content. Stable over rows already in address order, so the result is
+		// deterministic across runs over one database — what makes a one-part
+		// move in a measurement real rather than row order.
+		sort.SliceStable(found, func(a, b int) bool { return found[a].kind < found[b].kind })
+		if len(found) > n {
+			found = found[:n]
+		}
+		perTerm[i] = found
+		for _, m := range found {
+			if !wanted[m.id] {
+				wanted[m.id] = true
+				want = append(want, m.id)
+			}
+		}
+	}
+	if len(want) == 0 {
+		return out, nil
+	}
+
+	// Only what survived the cut is read in full.
+	byID := make(map[int64]Hit, len(want))
+	for start := 0; start < len(want); start += substringFetchBatch {
+		batch := want[start:min(start+substringFetchBatch, len(want))]
+		//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
+		q := `SELECT ` + hitColumns + `
+			FROM chunks c
+			JOIN files f ON f.id = c.file_id
+			JOIN repo_state r ON r.name = f.repo
+			WHERE c.id IN (` + placeholders(len(batch)) + `)`
+		if err := s.readHits(ctx, q, batch, byID); err != nil {
+			return nil, err
+		}
+	}
+	for i, found := range perTerm {
+		for _, m := range found {
+			// A chunk re-indexed between the scan and the read is gone under
+			// that id; it is left out rather than returned empty.
+			if h, ok := byID[m.id]; ok {
+				out[asked[i]] = append(out[asked[i]], h)
+			}
+		}
 	}
 	return out, nil
+}
+
+// substringFetchBatch keeps the id list of one read well under SQLite's bound
+// on host parameters, whatever the term count and the cut multiply to.
+const substringFetchBatch = 500
+
+func (s *Store) readHits(ctx context.Context, q string, args []any, into map[int64]Hit) error {
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("substring search: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var h Hit
+		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
+			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+			return fmt.Errorf("substring search: %w", err)
+		}
+		into[h.ChunkID] = h
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("substring search: %w", err)
+	}
+	return nil
 }
 
 // substringKindRank orders a path by what it IS: code first, then tests, then
