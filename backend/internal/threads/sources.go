@@ -48,6 +48,13 @@ func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := saveSourcesTx(ctx, tx, messageID, sources); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveSourcesTx(ctx context.Context, tx *sql.Tx, messageID int64, sources []ask.Source) error {
 	for _, src := range sources {
 		// One id per row: a commit source has no chunk, a chunk no commit.
 		chunkID, commitID := src.ChunkID, int64(0)
@@ -63,7 +70,7 @@ func (s *Store) SaveSources(ctx context.Context, messageID int64, sources []ask.
 			return fmt.Errorf("store source %d/%d: %w", chunkID, commitID, err)
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // recorded is one message_sources row as stored.

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -190,8 +191,8 @@ func TestMiddleware_acceptsSessionCookie(t *testing.T) {
 	svc := newService(t)
 	svc.mode = "token"
 	svc.adminToken = "s3cret-token"
-	user, _ := svc.UpsertUser("someone", "someone@example.invalid", false)
-	token, _ := svc.CreateSession(user.ID, time.Hour)
+	user, _ := svc.UpsertUser(context.Background(), "someone", "someone@example.invalid", false)
+	token, _ := svc.CreateSession(context.Background(), user.ID, time.Hour)
 	var reached bool
 
 	// When
@@ -228,7 +229,7 @@ func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
 	}
 	// A changed identity is written again: the proxy's say wins over the
 	// memory of it.
-	if _, err := svc.Admit(devSubject, "other@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), devSubject, "other@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 	if n := svc.upserts.Load(); n != 2 {
@@ -238,7 +239,7 @@ func TestMiddleware_admitsWithoutWritingOnEveryRequest(t *testing.T) {
 
 func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
 	svc := newService(t)
-	if _, err := svc.Admit("old", "old@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), "old", "old@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 	svc.admitMu.Lock()
@@ -247,7 +248,7 @@ func TestAdmit_forgetsSubjectsNotSeenLately(t *testing.T) {
 	svc.admitted["old"] = a
 	svc.admitMu.Unlock()
 
-	if _, err := svc.Admit("new", "new@example.invalid", true); err != nil {
+	if _, err := svc.Admit(context.Background(), "new", "new@example.invalid", true); err != nil {
 		t.Fatal(err)
 	}
 

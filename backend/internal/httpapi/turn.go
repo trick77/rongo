@@ -110,13 +110,11 @@ func (t *turn) fail(why string) {
 }
 
 // finish records the answer with its citations and the sources it was
-// written from.
+// written from, together: an answer whose sources did not land would read
+// back as one whose basis is no longer indexed.
 func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) {
-	if err := t.s.deps.Threads.Finish(t.record, t.msgID, text, cites); err != nil {
+	if err := t.s.deps.Threads.FinishWithSources(t.record, t.msgID, text, cites, sources); err != nil {
 		recordFailed(t.ctx, "record answer failed", err)
-	}
-	if err := t.s.deps.Threads.SaveSources(t.record, t.msgID, sources); err != nil {
-		recordFailed(t.ctx, "record sources failed", err)
 	}
 }
 

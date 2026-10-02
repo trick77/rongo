@@ -68,7 +68,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	token, expiresAt, err := s.deps.Auth.LoginPassword(in.Username, in.Password)
+	token, expiresAt, err := s.deps.Auth.LoginPassword(r.Context(), in.Username, in.Password)
 	if errors.Is(err, auth.ErrBadCredentials) {
 		// The one place a failed guess is recorded; bcrypt keeps it slow, the
 		// log keeps it visible.
@@ -106,7 +106,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/?auth_error=oidc_callback_failed", http.StatusFound)
 		return
 	}
-	token, expiresAt, _, err := s.deps.Auth.CreateSessionFromClaims(claims, s.deps.OIDCAdminGroup)
+	token, expiresAt, _, err := s.deps.Auth.CreateSessionFromClaims(r.Context(), claims, s.deps.OIDCAdminGroup)
 	if err != nil {
 		slog.Error("session create failed", "err", err)
 		http.Redirect(w, r, "/?auth_error=session_failed", http.StatusFound)
@@ -122,7 +122,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 // index page as the response body.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(auth.SessionCookie); err == nil {
-		if err := s.deps.Auth.DeleteSession(c.Value); err != nil {
+		if err := s.deps.Auth.DeleteSession(r.Context(), c.Value); err != nil {
 			// The cookie is cleared either way, but a session left live in the
 			// database is security-relevant enough not to vanish silently.
 			slog.Error("session revoke failed", "err", err)

@@ -27,7 +27,7 @@ func shareServer(t *testing.T) (*Server, *threads.Store, *fakeSource) {
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
 	for _, subject := range []string{testSubject, otherSubject} {
-		if _, err := svc.UpsertUser(subject, subject+"@example.invalid", true); err != nil {
+		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
 			t.Fatalf("seed user %q: %v", subject, err)
 		}
 	}
@@ -518,7 +518,7 @@ func brokenShares(t *testing.T) (*Server, threads.Thread) {
 	t.Helper()
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, "", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "", true); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	st := threads.NewStore(db)

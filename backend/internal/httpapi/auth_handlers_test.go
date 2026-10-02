@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -112,7 +113,7 @@ func TestAuthCallback_clearsTransientCookiesOnFailure(t *testing.T) {
 func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
 	// Given
 	svc := devAuth(t)
-	token, _, _, err := svc.CreateSessionFromClaims(auth.Claims{Subject: "sub-1"}, "")
+	token, _, _, err := svc.CreateSessionFromClaims(context.Background(), auth.Claims{Subject: "sub-1"}, "")
 	if err != nil {
 		t.Fatalf("CreateSessionFromClaims() err = %v", err)
 	}
@@ -139,7 +140,7 @@ func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
 	if c := cookie(t, rec, auth.SessionCookie); c.Value != "" || c.MaxAge >= 0 {
 		t.Errorf("session cookie = %+v, want it cleared", c)
 	}
-	if _, ok := svc.UserByToken(token); ok {
+	if _, ok := svc.UserByToken(context.Background(), token); ok {
 		t.Error("the session still resolves after logout")
 	}
 }

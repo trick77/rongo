@@ -43,7 +43,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A valid session cookie wins in every mode.
 		if c, err := r.Cookie(SessionCookie); err == nil {
-			if u, ok := s.UserByToken(c.Value); ok {
+			if u, ok := s.UserByToken(r.Context(), c.Value); ok {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
 				return
 			}
@@ -142,7 +142,7 @@ func bearerToken(r *http.Request) (string, bool) {
 // admit lets the request through as the admin subject, writing the user
 // once per interval (see Admit). what names the mode for the log line.
 func (s *Service) admit(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string) {
-	u, err := s.Admit(subject, email, true)
+	u, err := s.Admit(r.Context(), subject, email, true)
 	if err != nil {
 		slog.Error(what+" failed", "err", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

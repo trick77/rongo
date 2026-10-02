@@ -51,6 +51,24 @@ export function stagePaste(text: string): PastedText {
   return { text: t, lines: countLines(t) };
 }
 
+const keys = new WeakMap<PastedText, number>();
+let nextKey = 0;
+
+/**
+ * A key that stays with one staged paste for as long as it is staged. Its
+ * position does not: taking a chip back moves every later one up, and a chip
+ * keyed by position handed its unfolded state to its neighbour. Kept beside
+ * the paste rather than on it, because the paste is sent as it is.
+ */
+export function pasteKey(p: PastedText): number {
+  let k = keys.get(p);
+  if (k === undefined) {
+    k = nextKey++;
+    keys.set(p, k);
+  }
+  return k;
+}
+
 const SEP = "\n\n";
 
 /** The question as sent: what was typed, then each paste, a blank line between. */

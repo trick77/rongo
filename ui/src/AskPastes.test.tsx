@@ -101,6 +101,22 @@ describe("Ask, pasting", () => {
     expect(screen.queryByRole("button", { name: /Pasted text/ })).toBeNull();
   });
 
+  it("keeps a chip's fold its own when the one before it is taken back", async () => {
+    // Given two staged pastes, the first unfolded
+    queuedFetch([]);
+    strict(<Ask />);
+    paste(trace);
+    paste("x".repeat(PASTE_CHAR_THRESHOLD + 1));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` }));
+
+    // When the unfolded one is removed
+    await user.click(screen.getAllByRole("button", { name: "Remove pasted text" })[0]);
+
+    // Then the one left is still folded: it was never opened
+    expect(screen.getByRole("button", { name: "Pasted text · 1 line" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("sends a paste-only question folded, and says which part was pasted", async () => {
     const mock = queuedFetch([[ev("thread", { thread_id: "1", message_id: 5 }), ev("done", { message_id: 5 })]]);
     strict(<Ask />);

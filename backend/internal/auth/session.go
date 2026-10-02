@@ -69,7 +69,7 @@ func NewService(db *sql.DB, mode string, adminToken string) *Service {
 // Admit is UpsertUser for the request path: the row is written once per
 // admitTTL per subject and remembered in between, so a page of thirty
 // requests is one write, not thirty.
-func (s *Service) Admit(subject, email string, isAdmin bool) (User, error) {
+func (s *Service) Admit(ctx context.Context, subject, email string, isAdmin bool) (User, error) {
 	now := time.Now()
 	s.admitMu.Lock()
 	if a, ok := s.admitted[subject]; ok && now.Sub(a.at) < admitTTL && a.user.Email == email && a.user.IsAdmin == isAdmin {
@@ -77,7 +77,7 @@ func (s *Service) Admit(subject, email string, isAdmin bool) (User, error) {
 		return a.user, nil
 	}
 	s.admitMu.Unlock()
-	u, err := s.UpsertUser(subject, email, isAdmin)
+	u, err := s.UpsertUser(ctx, subject, email, isAdmin)
 	if err != nil {
 		return User{}, err
 	}
@@ -116,7 +116,7 @@ var ErrBadCredentials = errors.New("bad credentials")
 // LoginPassword checks the form credentials and mints a session. The bcrypt
 // compare runs even when the username is wrong, so the response time does
 // not tell an attacker which half they got right.
-func (s *Service) LoginPassword(user, password string) (string, time.Time, error) {
+func (s *Service) LoginPassword(ctx context.Context, user, password string) (string, time.Time, error) {
 	if s.mode != "password" || len(s.passwordHash) == 0 {
 		return "", time.Time{}, ErrBadCredentials
 	}
@@ -125,11 +125,11 @@ func (s *Service) LoginPassword(user, password string) (string, time.Time, error
 	if !userOK || pwErr != nil {
 		return "", time.Time{}, ErrBadCredentials
 	}
-	u, err := s.UpsertUser(passwordSubject, "", true)
+	u, err := s.UpsertUser(ctx, passwordSubject, "", true)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	token, err := s.CreateSession(u.ID, SessionTTL)
+	token, err := s.CreateSession(ctx, u.ID, SessionTTL)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -137,13 +137,13 @@ func (s *Service) LoginPassword(user, password string) (string, time.Time, error
 }
 
 // UpsertUser inserts the subject or returns the existing row.
-func (s *Service) UpsertUser(subject, email string, isAdmin bool) (User, error) {
+func (s *Service) UpsertUser(ctx context.Context, subject, email string, isAdmin bool) (User, error) {
 	s.upserts.Add(1)
 	admin := 0
 	if isAdmin {
 		admin = 1
 	}
-	if _, err := s.db.Exec(
+	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO users (subject, email, is_admin) VALUES (?, ?, ?)
 		 ON CONFLICT(subject) DO UPDATE SET email = excluded.email, is_admin = excluded.is_admin`,
 		subject, email, admin,
@@ -152,7 +152,7 @@ func (s *Service) UpsertUser(subject, email string, isAdmin bool) (User, error) 
 	}
 	var u User
 	var adminInt int
-	if err := s.db.QueryRow(
+	if err := s.db.QueryRowContext(ctx,
 		`SELECT id, subject, email, is_admin FROM users WHERE subject = ?`, subject,
 	).Scan(&u.ID, &u.Subject, &u.Email, &adminInt); err != nil {
 		return User{}, fmt.Errorf("read user: %w", err)
@@ -163,13 +163,13 @@ func (s *Service) UpsertUser(subject, email string, isAdmin bool) (User, error) 
 
 // CreateSession mints a random token, stores only its SHA-256, and returns the
 // raw token to hand to the client exactly once.
-func (s *Service) CreateSession(userID int64, ttl time.Duration) (string, error) {
+func (s *Service) CreateSession(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("generate session token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
-	if _, err := s.db.Exec(
+	if _, err := s.db.ExecContext(ctx,
 		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)`,
 		hashToken(token), userID, time.Now().Add(ttl).UTC().Format(time.RFC3339),
 	); err != nil {
@@ -179,11 +179,11 @@ func (s *Service) CreateSession(userID int64, ttl time.Duration) (string, error)
 }
 
 // UserByToken resolves a raw token to its user, rejecting expired sessions.
-func (s *Service) UserByToken(token string) (User, bool) {
+func (s *Service) UserByToken(ctx context.Context, token string) (User, bool) {
 	var u User
 	var adminInt int
 	var expiresAt string
-	err := s.db.QueryRow(
+	err := s.db.QueryRowContext(ctx,
 		`SELECT u.id, u.subject, u.email, u.is_admin, s.expires_at
 		 FROM sessions s JOIN users u ON u.id = s.user_id
 		 WHERE s.token_hash = ?`,
@@ -192,8 +192,9 @@ func (s *Service) UserByToken(token string) (User, bool) {
 	if err != nil {
 		// A bad or unknown cookie is sql.ErrNoRows — expected, not logged.
 		// Anything else is a broken database, and collapsing it into the same
-		// silent "not authenticated" would hide that from operators.
-		if !errors.Is(err, sql.ErrNoRows) {
+		// silent "not authenticated" would hide that from operators. A
+		// request its client abandoned is neither.
+		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
 			slog.Error("session lookup failed", "err", err)
 		}
 		return User{}, false
@@ -223,8 +224,8 @@ func (s *Service) DeleteExpiredSessions(ctx context.Context, now time.Time) (int
 }
 
 // DeleteSession revokes one session.
-func (s *Service) DeleteSession(token string) error {
-	_, err := s.db.Exec(`DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
+func (s *Service) DeleteSession(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
 	return err
 }
 
@@ -247,15 +248,15 @@ const SessionTTL = 30 * 24 * time.Hour
 // default and the honest one while the authorization decision still lives
 // entirely in Authelia's authorization_policy — a group name invented here
 // would look like a second gate without being one.
-func (s *Service) CreateSessionFromClaims(claims Claims, adminGroup string) (string, time.Time, User, error) {
+func (s *Service) CreateSessionFromClaims(ctx context.Context, claims Claims, adminGroup string) (string, time.Time, User, error) {
 	if claims.Subject == "" {
 		return "", time.Time{}, User{}, errors.New("oidc claims carry no subject")
 	}
-	u, err := s.UpsertUser(claims.Subject, claims.Email, isAdmin(claims.Groups, adminGroup))
+	u, err := s.UpsertUser(ctx, claims.Subject, claims.Email, isAdmin(claims.Groups, adminGroup))
 	if err != nil {
 		return "", time.Time{}, User{}, err
 	}
-	token, err := s.CreateSession(u.ID, SessionTTL)
+	token, err := s.CreateSession(ctx, u.ID, SessionTTL)
 	if err != nil {
 		return "", time.Time{}, User{}, err
 	}

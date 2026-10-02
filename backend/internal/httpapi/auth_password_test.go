@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -100,7 +101,7 @@ func TestAuthLogin_passwordModeRedirectsToTheForm(t *testing.T) {
 // No provider, so no "sign out there as well": the marker says so.
 func TestAuthLogout_passwordModeSaysLocal(t *testing.T) {
 	svc := passwordAuth(t)
-	token, _, err := svc.LoginPassword("admin", "hunter2")
+	token, _, err := svc.LoginPassword(context.Background(), "admin", "hunter2")
 	if err != nil {
 		t.Fatalf("LoginPassword() err = %v", err)
 	}

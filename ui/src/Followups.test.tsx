@@ -133,6 +133,44 @@ describe("follow-up suggestions", () => {
     expect(screen.getByText("How are citations stored?")).toBeTruthy();
   });
 
+  it("still asks when the stream closed a moment after the answer was done", async () => {
+    // On a real connection the done event and the end of the stream arrive in
+    // separate network tasks: the page paints the finished answer while the
+    // turn still counts as running, and only then learns it is over. A pill
+    // clicked after that must ask — it is drawn enabled.
+    const encoder = new TextEncoder();
+    const frames = [answered(["What happens on a re-index?"]), answered([], "It is rebuilt.")];
+    let call = 0;
+    const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
+      if (String(url).startsWith("/api/threads/")) {
+        return { ok: true, status: 200, json: async () => [] };
+      }
+      const set = frames[Math.min(call++, frames.length - 1)];
+      let i = 0;
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            async read() {
+              if (i < set.length) return { done: false, value: encoder.encode(set[i++]) };
+              await new Promise((r) => setTimeout(r, 30));
+              return { done: true, value: undefined };
+            },
+          }),
+        },
+      };
+    });
+    vi.stubGlobal("fetch", mock);
+
+    const user = await ask("How are citations stored?");
+    const pill = await screen.findByRole("button", { name: "What happens on a re-index?" });
+    await waitFor(() => expect((pill as HTMLButtonElement).disabled).toBe(false));
+    await user.click(pill);
+
+    await waitFor(() => expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2));
+  });
+
   it("moves the pills to the newest answer instead of stacking them up", async () => {
     streamPerCall([
       answered(["What happens on a re-index?"]),

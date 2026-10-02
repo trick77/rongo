@@ -282,10 +282,10 @@ func newTestServerWithDB(t *testing.T, opts ...func(*fakeAsker)) (*Server, *thre
 	svc := auth.NewService(db, "dev", "")
 	// Both users have to exist before a thread references them: threads have
 	// a foreign key on the owning subject.
-	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed dev user: %v", err)
 	}
-	if _, err := svc.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}
 	f := &fakeAsker{}
@@ -664,7 +664,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 	svc := auth.NewService(db, "dev", "")
 	// The dev user is made on the first request; this thread has to exist
 	// before one, so its owner does too.
-	if _, err := svc.UpsertUser("dev-user", "dev@x.invalid", false); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), "dev-user", "dev@x.invalid", false); err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	st := threads.NewStore(db)
@@ -890,7 +890,7 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 	deps, st := askDeps(t, &fakeAsker{tokens: []string{"x"}})
 	// The other user has to exist: threads reference users, and a thread with
 	// no owner would make this test pass for the wrong reason.
-	if _, err := deps.Auth.UpsertUser("someone-else", "other@x.invalid", false); err != nil {
+	if _, err := deps.Auth.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}
 	other, err := st.Create(context.Background(), "someone-else", "Someone else's question?")
@@ -1216,7 +1216,7 @@ func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	// the clarification
 	db := askDB(t)
 	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(testSubject, "dev@example.invalid", true); err != nil {
+	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	st := threads.NewStore(db)

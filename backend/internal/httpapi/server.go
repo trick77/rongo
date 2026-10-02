@@ -34,7 +34,9 @@ type Threads interface {
 	Delete(ctx context.Context, subject string, id int64) (bool, error)
 	SetStarred(ctx context.Context, subject string, id int64, starred bool) (bool, error)
 	AddQuestion(ctx context.Context, threadID int64, audience, language, question string, headID int64) (threads.Message, error)
-	Finish(ctx context.Context, messageID int64, answer string, citations []ask.Citation) error
+	// FinishWithSources writes the answer, its citations and the sources it
+	// was written from in one transaction.
+	FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source) error
 	Fail(ctx context.Context, messageID int64, msg string) error
 	// ListPage, Get and Search are the Threads page's reads: the rail and the
 	// page read the list a page at a time, the header asks for one thread the
@@ -72,7 +74,6 @@ type Threads interface {
 	Clarification(ctx context.Context, subject string, messageID int64) (*threads.Clarification, error)
 	CandidateHits(ctx context.Context, subject string, clarificationID int64, idx int) (ask.Understanding, []retrieve.Hit, error)
 	LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error
-	SaveSources(ctx context.Context, messageID int64, sources []ask.Source) error
 	// SetScope records what the turn's question said about repositories, so a
 	// reload can render the notice and a resumed turn can rebuild the rules.
 	SetScope(ctx context.Context, messageID int64, scope ask.Scope) error
