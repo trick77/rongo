@@ -41,11 +41,13 @@ function firstUncovered(turns: Turn[], upTo: number): number | null {
   return at < 0 ? null : at + 1;
 }
 
+// The same face as the buttons beside them (Explain as…, Copy as Markdown,
+// the follow-up chips): ink-dim at 13.5px on the panel, active on hover.
 const thumb =
-  "inline-flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
+  "inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-dim hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
 const chip =
-  "rounded-full border border-border bg-panel px-3 py-1 text-[12.5px] text-muted hover:border-elevated-border hover:text-ink";
-const link = "text-[12.5px] text-muted underline decoration-border underline-offset-3 hover:text-ink";
+  "rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active";
+const link = "text-[13.5px] text-ink-dim underline decoration-border underline-offset-3 hover:text-ink";
 
 /**
  * The reader's verdict on the whole thread, drawn among the buttons under the
@@ -206,9 +208,9 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
         >
           <ThumbDownIcon />
         </button>
-        <span className="pl-1.5 text-[12.5px] text-faint">{label}</span>
+        <span className="pl-1.5 text-[13.5px] text-ink-dim">{label}</span>
       </span>
-      {uncovered !== null && <span className="text-[12.5px] text-faint">rated before turn {uncovered}</span>}
+      {uncovered !== null && <span className="text-[13.5px] text-muted">rated before turn {uncovered}</span>}
       {/* A reason saved now is pinned to the newest answer, so "change" is
           offered only while the verdict already covers it. Past that, the
           thumbs are the way to rate again. */}
@@ -222,7 +224,7 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
       {picking && (
         // order-last + basis-full: a row of its own under the buttons, below
         // the usage pill that ends the row above.
-        <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-1.5 text-[12.5px] text-faint">
+        <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-2 text-[13.5px] text-ink-dim">
           <span className="mr-1">What was off?</span>
           {reasons.map(([value, text]) => (
             <button key={value} type="button" className={chip} onClick={() => void pick(value)}>
