@@ -85,8 +85,8 @@ func Scan(repo string, paths []string, read Read) (units []Unit, deps []Dep, ski
 	for _, p := range paths {
 		has[p] = true
 	}
-	units, deps, skipped = scanNx(repo, paths, has, read)
-	u, d, s := scanMaven(repo, paths, has, read)
+	units, deps, skipped = scanNx(repo, paths, read)
+	u, d, s := scanMaven(repo, paths, read)
 	units, deps, skipped = append(units, u...), append(deps, d...), append(skipped, s...)
 	u, d, s = scanGradle(repo, paths, has, read)
 	units, deps, skipped = append(units, u...), append(deps, d...), append(skipped, s...)
@@ -127,7 +127,7 @@ type nxProject struct {
 	ImplicitDependencies []string `json:"implicitDependencies"`
 }
 
-func scanNx(repo string, paths []string, _ map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
+func scanNx(repo string, paths []string, read Read) (units []Unit, deps []Dep, skipped []string) {
 	byName := map[string]string{}
 	for _, p := range paths {
 		if path.Base(p) != "project.json" || ignoredDir(p) || path.Dir(p) == "." {
@@ -285,7 +285,7 @@ func pomDependencies(body []byte) (pomProject, error) {
 	return proj, err
 }
 
-func scanMaven(repo string, paths []string, _ map[string]bool, read Read) (units []Unit, deps []Dep, skipped []string) {
+func scanMaven(repo string, paths []string, read Read) (units []Unit, deps []Dep, skipped []string) {
 	type pom struct {
 		key, artifact, group string
 		requires             []string // groupId:artifactId

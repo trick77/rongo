@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -135,6 +136,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 	expansions := loadExpansions(t)
 	codes := loadExpansionCodes(t)
 	opts := gatherOpts(t)
+	dump := gatherDump(t)
 
 	arms := []gatherArm{
 		{name: "raw, 0 hops", expanded: false, hops: 0},
@@ -182,6 +184,7 @@ func TestEvalMeasureGathered(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s: gather %q: %v", arm.name, q.Text, err)
 			}
+			dump(arm.name, q.Text, hits, sources)
 			hops := make([]int, 0, len(q.Candidates))
 			ranks := make([]int, 0, len(q.Candidates))
 			paths := make([]string, 0, len(q.Candidates))
@@ -205,6 +208,49 @@ func TestEvalMeasureGathered(t *testing.T) {
 
 	reportWalkGains(t, results["expanded + walk"])
 	reportCompositionParts(t, results["expanded + walk"])
+}
+
+// gatherDump writes one line per question and arm to the file named by
+// BACKEND_EVAL_GATHER_DUMP: every search hit with its score, every gathered
+// source with its hop and reason, in order. The report above says whether the
+// expected chunk was reached; this says what the whole list was, which is what
+// "one database gathers the identical list" has to be read against when a
+// change claims to move nothing. Two dumps are compared with diff.
+//
+// A chunk is written as where it is — repository, path, lines — never as its
+// row id: a poll re-inserts every chunk of a touched file under new ids, and
+// two dumps either side of one would differ on every line while the lists
+// they describe were the same.
+//
+// The file is opened, emptied, once per run of the test, so a second run
+// (-count=2, or the run after) never appends to the first.
+func gatherDump(t *testing.T) func(arm, question string, hits []retrieve.Hit, sources []ask.Source) {
+	t.Helper()
+	path := os.Getenv("BACKEND_EVAL_GATHER_DUMP")
+	if path == "" {
+		return func(string, string, []retrieve.Hit, []ask.Source) {}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) //nolint:gosec // a path the person running the measurement chose
+	if err != nil {
+		t.Fatalf("open gather dump: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return func(arm, question string, hits []retrieve.Hit, sources []ask.Source) {
+		var b strings.Builder
+		// %q, so a tab or a newline in a question cannot break the line apart.
+		fmt.Fprintf(&b, "%s\t%q\thits:", arm, question)
+		for _, h := range hits {
+			fmt.Fprintf(&b, " %s/%s:%d-%d=%.9f", h.Repo, h.Path, h.StartLine, h.EndLine, h.Score)
+		}
+		b.WriteString("\tsources:")
+		for _, s := range sources {
+			fmt.Fprintf(&b, " %s/%s:%d-%d@%d[%s]", s.Repo, s.Path, s.StartLine, s.EndLine, s.Hop, s.Reason)
+		}
+		b.WriteString("\n")
+		if _, err := f.WriteString(b.String()); err != nil {
+			t.Fatalf("write gather dump: %v", err)
+		}
+	}
 }
 
 // reportCompositionParts answers the one question the aggregate cannot: when a

@@ -330,10 +330,7 @@ func projectCandidates(cs []Candidate, pm projects.Map) []Candidate {
 // repoCandidates so the manifest-dependency check runs over every repository
 // and only the question put to the reader is shortened.
 func capRepoCandidates(cs []Candidate) []Candidate {
-	if len(cs) > maxRepoCandidates {
-		return cs[:maxRepoCandidates]
-	}
-	return cs
+	return cs[:min(maxRepoCandidates, len(cs))]
 }
 
 // withAllRepos appends the card's last entry: the reader saying they meant
@@ -1181,8 +1178,9 @@ func (r *Router) anyDependency(ctx context.Context, cs []Candidate) (bool, error
 	return false, nil
 }
 
-// judgeDecision is the shape of the judge's reply.
-type judgeDecision struct {
+// gateDecision is the shape of a routing gate's reply: the judge's and the
+// role gate's alike, one word under "decision".
+type gateDecision struct {
 	Decision string `json:"decision"`
 }
 
@@ -1227,7 +1225,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	// asked are the same "ask" to everything downstream, and only the text tells
 	// them apart.
 	ask, decoded := true, true
-	var got judgeDecision
+	var got gateDecision
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		decoded = false
@@ -1237,11 +1235,6 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	slog.Info("route judge", "thread", llm.ThreadID(ctx), "reply", excerptOf(out, 120),
 		"decoded", decoded, "ask", ask)
 	return ask, nil
-}
-
-// choosableDecision is the shape of the role gate's reply.
-type choosableDecision struct {
-	Decision string `json:"decision"`
 }
 
 // choosable asks whether the card just named is one the Analyst can answer. It
@@ -1272,7 +1265,7 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 	// unreadable reply and a gate that deliberately refused both arrive
 	// downstream as "cannot".
 	choose, decoded := false, true
-	var got choosableDecision
+	var got gateDecision
 	body, _ := llmwire.JSONObject(out)
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		decoded = false
@@ -1368,10 +1361,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 
 // firstN returns at most n hits.
 func firstN(hits []retrieve.Hit, n int) []retrieve.Hit {
-	if len(hits) <= n {
-		return hits
-	}
-	return hits[:n]
+	return hits[:min(n, len(hits))]
 }
 
 // excerptOf trims raw chunk text to a short excerpt, so a judge or naming

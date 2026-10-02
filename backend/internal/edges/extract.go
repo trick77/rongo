@@ -24,6 +24,7 @@
 package edges
 
 import (
+	"cmp"
 	"path"
 	"regexp"
 	"strings"
@@ -353,7 +354,7 @@ func Extract(filePath string, body []byte) []Token {
 		}
 		classLevel := routing && strings.Contains(line, "RequestMapping") && classFollows(lines, i)
 		for _, m := range stringLiteral.FindAllStringSubmatch(line, -1) {
-			lit := firstNonEmpty(m[1], m[2], m[3])
+			lit := cmp.Or(m[1], m[2], m[3])
 			if lit == "" {
 				continue
 			}
@@ -586,15 +587,6 @@ func isDestinationShape(s string) bool {
 		}
 	}
 	return hasLetter
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // propertyKeys is the configuration side of a property edge: every key of a

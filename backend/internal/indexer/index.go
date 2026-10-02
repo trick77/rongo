@@ -396,7 +396,7 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 		syms = nil
 	}
 
-	chunks := ChunkFile(st.Name, st.Branch, path, body, syms, ix.chunk)
+	chunks := ChunkFile(st.Name, path, body, syms, ix.chunk)
 	if len(chunks) == 0 {
 		// An empty or blank file. It is recorded with a REASON rather than with
 		// an empty one: a file row carrying no skip reason and no chunks would

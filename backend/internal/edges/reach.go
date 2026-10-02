@@ -160,7 +160,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 	if err != nil {
 		return nil, err
 	}
-	mentioned := identifierSet(text)
+	mentioned := Identifiers(text)
 
 	// Every symbol this repository defines, with the file defining it, dropping
 	// names too common across the ESTATE to say anything.
@@ -224,7 +224,7 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 			if hit[p] {
 				continue
 			}
-			for name := range identifierSet(body) {
+			for name := range Identifiers(body) {
 				if mine[name] {
 					hit[p] = true
 					break
@@ -253,11 +253,11 @@ func inRepoNeighbours(ctx context.Context, db *sql.DB, repo, path string) ([]fil
 	return out, nil
 }
 
-// identifierSet tokenizes source the way internal/ask does: on anything that is
-// not a letter, a digit or an underscore, keeping names longer than two
-// characters. Kept identical on purpose — two walks disagreeing about what an
-// identifier is would make a gathered set depend on which one found it.
-func identifierSet(s string) map[string]bool {
+// Identifiers tokenizes source on anything that is not a letter, a digit or an
+// underscore, keeping names longer than two characters. The one definition of
+// an identifier for this walk and internal/ask's: two walks disagreeing about
+// what one is would make a gathered set depend on which of them found it.
+func Identifiers(s string) map[string]bool {
 	out := map[string]bool{}
 	for _, f := range strings.FieldsFunc(s, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'

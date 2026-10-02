@@ -47,7 +47,6 @@ type ToolCall struct {
 type ToolTurn struct {
 	Content string
 	Calls   []ToolCall
-	Usage   Usage
 }
 
 // Done reports whether the model stopped asking for tools. A caller loops
@@ -117,7 +116,7 @@ func (c *Client) CallTools(ctx context.Context, msgs []ToolMessage, tools []Tool
 	u := usageFrom(resp.Usage)
 	record(ctx, o, c.deployment(o.lane), u, time.Since(started))
 
-	turn := ToolTurn{Content: resp.Content, Usage: u}
+	turn := ToolTurn{Content: resp.Content}
 	for _, call := range resp.ToolCalls {
 		turn.Calls = append(turn.Calls, ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments})
 	}
