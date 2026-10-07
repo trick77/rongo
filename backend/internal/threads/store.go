@@ -821,11 +821,15 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 		if err := rows.Scan(&blob); err != nil {
 			return nil, fmt.Errorf("read thread scope: %w", err)
 		}
-		// scanScope yields the zero scope for unreadable JSON, which reads
-		// here as "this turn narrowed nothing" — the pin is lost, never the
-		// turn, exactly as an unreadable scope costs the pills and not the
-		// message.
-		if sc := scanScope(blob); len(sc.Known) > 0 {
+		// Not scanScope: its zero scope for unreadable JSON would read here
+		// as "this turn narrowed nothing", and a thread that lost its pin
+		// answers the follow-up from the whole corpus. The pin is the turn's
+		// ceiling, so an unreadable one fails the turn.
+		var sc ask.Scope
+		if err := json.Unmarshal([]byte(blob), &sc); err != nil {
+			return nil, fmt.Errorf("read thread scope of a turn: %w", err)
+		}
+		if len(sc.Known) > 0 {
 			return sc.Known, nil
 		}
 	}
