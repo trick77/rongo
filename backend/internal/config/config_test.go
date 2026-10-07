@@ -241,6 +241,18 @@ func TestLoad_indexExclude(t *testing.T) {
 	}
 }
 
+// A list of nothing but separators is neither the default nor "none": read
+// as nil it excluded nothing while looking configured.
+func TestLoad_indexExcludeOfOnlySeparatorsRefusesToStart(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_INDEX_EXCLUDE": " , "})
+
+	_, err := Load()
+
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_INDEX_EXCLUDE") || !strings.Contains(err.Error(), "none") {
+		t.Fatalf("Load() err = %v, want a refusal naming BACKEND_INDEX_EXCLUDE and the way to say none", err)
+	}
+}
+
 func TestLoad_requiresSessionSecret(t *testing.T) {
 	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": ""})
 

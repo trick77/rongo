@@ -231,7 +231,7 @@ func Load() (Config, error) {
 		HistoryDepth:     r.intOr("BACKEND_HISTORY_DEPTH", 500),
 		IndexEnabled:     r.boolOr("BACKEND_INDEX_ENABLED", true),
 		IndexComments:    r.boolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:     envListOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		IndexExclude:     r.listOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
 		GitSSHKey:        strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
 		GitSSHKnownHosts: strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
 		GitCAFile:        strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
@@ -419,10 +419,11 @@ func cookieSource(mode AuthMode) string {
 	return "signs in without a session cookie"
 }
 
-// envListOr reads a comma-separated list. Unset or blank means the default,
+// listOr reads a comma-separated list. Unset or blank means the default,
 // like every other setting; the literal "none" is how an operator switches
-// the list off, since an empty value cannot say "nothing" here.
-func envListOr(key string, fallback []string) []string {
+// the list off, since an empty value cannot say "nothing" here. A value of
+// separators alone is neither, and is refused.
+func (r *envReader) listOr(key string, fallback []string) []string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return fallback
@@ -435,6 +436,10 @@ func envListOr(key string, fallback []string) []string {
 		if item = strings.TrimSpace(item); item != "" {
 			out = append(out, item)
 		}
+	}
+	if len(out) == 0 {
+		r.fail(fmt.Errorf("%s=%q has only empty items; unset it for the default, or write none", key, v))
+		return fallback
 	}
 	return out
 }
