@@ -69,10 +69,15 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	addr := remoteHost(r)
+	if !s.logins.wait(r.Context(), addr) {
+		return
+	}
 	token, expiresAt, err := s.deps.Auth.LoginPassword(r.Context(), in.Username, in.Password)
 	if errors.Is(err, auth.ErrBadCredentials) {
 		// The one place a failed guess is recorded; bcrypt keeps it slow, the
-		// log keeps it visible.
+		// throttle slower once it repeats, the log keeps it visible.
+		s.logins.failed(addr)
 		slog.Warn("password login rejected", "remote", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -82,6 +87,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	s.logins.succeeded(addr)
 	auth.SetSessionCookie(w, token, s.deps.CookieSecure, time.Until(expiresAt))
 	w.WriteHeader(http.StatusNoContent)
 }
