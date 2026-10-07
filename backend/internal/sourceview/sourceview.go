@@ -38,6 +38,10 @@ var (
 	// not on disk. Which one it was is in the wrapped message for the log,
 	// not for the caller: all of them mean "rongo cannot show this file".
 	ErrNotFound = errors.New("source not found")
+	// ErrNotIndexed is the ErrNotFound of a path the index does not list —
+	// never one it lists as skipped. A caller holding a citation of exactly
+	// that file can retry with ReadRecorded.
+	ErrNotIndexed = fmt.Errorf("%w: not indexed", ErrNotFound)
 	// ErrInvalid is a request rongo will not even try: an empty path, a path
 	// that climbs out of the tree, or a commit that is not a commit.
 	ErrInvalid = errors.New("invalid source request")
@@ -128,7 +132,7 @@ func (s *Service) read(ctx context.Context, repo, path, sha string, recorded boo
 		`SELECT sha, skip_reason FROM files WHERE repo = ? AND path = ?`, repo, path).Scan(&indexedSHA, &skipReason)
 	switch {
 	case errors.Is(err, sql.ErrNoRows) && !recorded:
-		return File{}, fmt.Errorf("%w: %s/%s is not indexed", ErrNotFound, repo, path)
+		return File{}, fmt.Errorf("%w: %s/%s", ErrNotIndexed, repo, path)
 	case errors.Is(err, sql.ErrNoRows):
 		// Gone from the index since the answer; the commit still holds it.
 	case err != nil:

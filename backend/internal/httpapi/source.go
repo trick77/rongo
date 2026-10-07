@@ -24,42 +24,56 @@ type SourceReader interface {
 // citation points at, read at the cited commit. It is what makes a source in
 // the evidence panel something a reader can open rather than only read about.
 //
-// The route takes any triple, so it reads as the record only for one the
-// reader's own threads cite. Anything else needs a files row: without that
+// The route takes any triple, so a file the index no longer lists is read
+// from the record only when the reader's own threads cite it. Without that
 // rule a signed-in reader could open a secret manifest at a commit from
 // before the index ran.
 func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	repo, path, sha := q.Get("repo"), q.Get("path"), q.Get("sha")
-	recorded := false
-	if u, ok := auth.UserFrom(r.Context()); ok && sha != "" && s.deps.Source != nil && s.deps.Threads != nil {
-		cited, err := s.deps.Threads.CitedBy(r.Context(), u.Subject, repo, path, sha)
-		if err != nil {
-			slog.Error("read owner citation failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
-			return
+	var cited citedFunc
+	if u, ok := auth.UserFrom(r.Context()); ok && s.deps.Threads != nil {
+		cited = func(ctx context.Context) (bool, error) {
+			return s.deps.Threads.CitedBy(ctx, u.Subject, repo, path, sha)
 		}
-		recorded = cited
 	}
-	s.serveSource(w, r, repo, path, sha, recorded)
+	s.serveSource(w, r, repo, path, sha, cited)
 }
+
+// citedFunc reports whether a turn the caller may see cites the triple being
+// served. Nil means nothing does.
+type citedFunc func(ctx context.Context) (bool, error)
+
+// alwaysCited is the share route's: SharedCitation authorised the triple
+// before it got here.
+func alwaysCited(context.Context) (bool, error) { return true, nil }
 
 // serveSource reads one file and writes it, or writes the reason it cannot.
 // Both the signed-in route above and the share-scoped one in share.go end
 // here, so a reader following a citation gets the same file and the same
-// message whichever door they came through. recorded means a turn the caller
-// may see cites exactly this triple, so a path gone from the index since is
-// still read at that commit.
-func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path, sha string, recorded bool) {
+// message whichever door they came through.
+//
+// A file the index no longer lists — renamed or deleted since the answer — is
+// read from the record at its commit when cited says a visible turn cites
+// it. The record is asked only on that miss: the owner's question is a join
+// over every citation, and nearly every click is a file still indexed.
+func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path, sha string, cited citedFunc) {
 	if s.deps.Source == nil {
 		http.Error(w, "source view unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	read := s.deps.Source.Read
-	if recorded {
-		read = s.deps.Source.ReadRecorded
+	f, err := s.deps.Source.Read(r.Context(), repo, path, sha)
+	if errors.Is(err, sourceview.ErrNotIndexed) && sha != "" && cited != nil {
+		ok, cerr := cited(r.Context())
+		if cerr != nil {
+			slog.Error("read citation failed", "err", cerr)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		if ok {
+			f, err = s.deps.Source.ReadRecorded(r.Context(), repo, path, sha)
+		}
 	}
-	f, err := read(r.Context(), repo, path, sha)
 	switch {
 	case err == nil:
 	case errors.Is(err, sourceview.ErrInvalid):

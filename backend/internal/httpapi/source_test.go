@@ -22,17 +22,15 @@ type fakeSource struct {
 	file                  sourceview.File
 	err                   error
 	gotRepo, gotPath, sha string
-	// recorded says the last read went through ReadRecorded.
-	recorded bool
 }
 
 func (f *fakeSource) Read(_ context.Context, repo, path, sha string) (sourceview.File, error) {
-	f.gotRepo, f.gotPath, f.sha, f.recorded = repo, path, sha, false
+	f.gotRepo, f.gotPath, f.sha = repo, path, sha
 	return f.file, f.err
 }
 
 func (f *fakeSource) ReadRecorded(_ context.Context, repo, path, sha string) (sourceview.File, error) {
-	f.gotRepo, f.gotPath, f.sha, f.recorded = repo, path, sha, true
+	f.gotRepo, f.gotPath, f.sha = repo, path, sha
 	return f.file, f.err
 }
 
@@ -222,10 +220,27 @@ func TestSourceUncitedPathWithoutRowIs404(t *testing.T) {
 	}
 }
 
+// The record is a join over every citation, so it is asked only when the index
+// no longer lists the file: an indexed file opens without it, even when the
+// record could not answer.
+func TestSource_anIndexedFileNeverAsksTheRecord(t *testing.T) {
+	srv, _, db, _ := recordServer(t)
+	if _, err := db.Exec(`ALTER TABLE citations RENAME TO citations_gone`); err != nil {
+		t.Fatalf("break citations: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/source?"+
+		url.Values{"repo": {"rongo"}, "path": {"a.go"}, "sha": {recordedSHA}}.Encode(), nil))
+
+	wantContent(t, rec, "package a\n")
+}
+
 // A record that cannot say whether the reader cited a file is a 500, never a
 // guess either way.
 func TestSource_aBrokenRecordIsAnError(t *testing.T) {
 	srv, _, db, _ := recordServer(t)
+	dropFromIndex(t, db, "a.go")
 	if _, err := db.Exec(`ALTER TABLE citations RENAME TO citations_gone`); err != nil {
 		t.Fatalf("break citations: %v", err)
 	}
