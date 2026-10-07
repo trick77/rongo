@@ -3,6 +3,7 @@ package gitrepo
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -54,6 +55,48 @@ func TestEntries_carryTheBlobSize(t *testing.T) {
 		if s, ok := sizes["sub"]; !ok || s != 0 {
 			t.Errorf("%s: sub size = %d (listed %v), want 0", name, s, ok)
 		}
+	}
+}
+
+// TestChangedEntries_sizesByTheFullObjectID: diff --raw abbreviates object
+// ids, and an abbreviation handed to cat-file is a revision — a ref of that
+// name wins over the blob, and an ambiguous one fails the run. Tags named
+// like every likely abbreviation of the blob must not change its size.
+func TestChangedEntries_sizesByTheFullObjectID(t *testing.T) {
+	src := fixtureRepo(t)
+	c := newClient(t)
+	ctx := context.Background()
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatalf("EnsureCloned() err = %v", err)
+	}
+	first, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+	writeAndCommit(t, src, "big.txt", strings.Repeat("x", 5000), "big")
+	out, err := exec.Command("git", "-C", src, "rev-parse", "HEAD:big.txt").Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	oid := strings.TrimSpace(string(out))
+	for n := 4; n <= 16; n++ {
+		gitRun(t, src, "tag", oid[:n], first)
+	}
+	if err := c.Fetch(ctx, spec, ""); err != nil {
+		t.Fatalf("Fetch() err = %v", err)
+	}
+	second, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatalf("HeadSHA() err = %v", err)
+	}
+
+	changed, err := c.ChangedEntries(ctx, spec, first, second)
+	if err != nil {
+		t.Fatalf("ChangedEntries() err = %v", err)
+	}
+	if len(changed) != 1 || changed[0].Size != 5000 {
+		t.Errorf("ChangedEntries() = %+v, want big.txt at 5000 bytes", changed)
 	}
 }
 

@@ -505,13 +505,15 @@ func Indexable(mode string) bool {
 // three-field record to parse for the same outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--raw", "--no-renames", fromSHA+".."+toSHA)
+		"diff", "--raw", "--no-renames", "--no-abbrev", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
 	changes := []Change{}
 	// The blobs to size, by object id: --raw carries no size, and asking
-	// by id needs no path quoting.
+	// by id needs no path quoting. The FULL id (--no-abbrev): an
+	// abbreviation is a revision to cat-file, where a ref of that name wins
+	// over the blob and an ambiguous one fails the run.
 	var blobs []int
 	var oids strings.Builder
 	for _, line := range nonEmptyLines(out) {
