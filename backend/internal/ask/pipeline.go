@@ -38,6 +38,10 @@ type Searcher interface {
 	// loop's grep tool: it tells the model that nothing found means the
 	// spelling was wrong, so the scan has to be of the text it asked for.
 	Substring(ctx context.Context, term string, n int, repos []string, question string, stage retrieve.StagePrefixes) ([]retrieve.Hit, error)
+	// Parked is the names among names held with `enabled: false`. ResolveRepos
+	// drops a parked repository the way it drops a purged one; a turn failing
+	// on one has to say which, because parked is not gone.
+	Parked(ctx context.Context, names []string) ([]string, error)
 }
 
 // Routes decides whether a turn can be answered from the gathered hits or
@@ -311,10 +315,10 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 			return Answer{}, nil, fmt.Errorf("resolve the thread's repositories: %w", err)
 		}
 		// One repository gone is as fatal as all of them: searching the
-		// survivors answers from two while the record says three.
+		// survivors answers from two while the record says three. Parked
+		// fails the same way and says so — its index stays, it is not gone.
 		if gone := missingRepos(pin, live); len(gone) > 0 {
-			return Answer{}, nil, fmt.Errorf("this thread is about %s, which the index no longer carries",
-				strings.Join(gone, ", "))
+			return Answer{}, nil, p.unresolved(ctx, gone, "this thread is about %s, which the index no longer carries")
 		}
 		pin = live
 		// Narrowing, not replacing. A thread pinned to two repositories by a
@@ -593,6 +597,27 @@ func intersect(named, pin []string) []string {
 		}
 	}
 	return out
+}
+
+// unresolved is the error for a turn whose repositories did not all resolve:
+// goneFormat for the ones the index no longer carries, and its own sentence
+// for a parked one, which keeps its index and citations and is not gone. The
+// turn fails either way — a thread does not widen, and the survivors are not
+// what the record says was searched.
+func (p *Pipeline) unresolved(ctx context.Context, missing []string, goneFormat string) error {
+	parked, err := p.search.Parked(ctx, missing)
+	if err != nil {
+		return fmt.Errorf("look up parked repositories: %w", err)
+	}
+	if len(parked) == 0 {
+		return fmt.Errorf(goneFormat, strings.Join(missing, ", "))
+	}
+	msg := fmt.Sprintf("%s is parked (enabled: false) and answers nothing until it is enabled again",
+		strings.Join(parked, ", "))
+	if gone := missingRepos(missing, parked); len(gone) > 0 {
+		msg += "; " + fmt.Sprintf(goneFormat, strings.Join(gone, ", "))
+	}
+	return errors.New(msg)
 }
 
 // missingRepos is the names of want the index did not resolve, each once, in
@@ -1317,8 +1342,7 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 			// check exists to stop, one repository at a time. Compared as
 			// sets: two products sharing a library name it twice, and the
 			// resolver folds the repeat.
-			return Answer{}, fmt.Errorf("the chosen repositories %s are no longer in the index",
-				strings.Join(gone, ", "))
+			return Answer{}, p.unresolved(ctx, gone, "the chosen repositories %s are no longer in the index")
 		}
 		ev.status("searching")
 		// searchScoped: more than one chosen repository is a comparison, one

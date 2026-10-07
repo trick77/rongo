@@ -38,6 +38,22 @@ type fakeSearch struct {
 	// scope wants: the guess passes through unchanged, as it did before
 	// ResolveRepos existed.
 	indexed []string
+	// parked is what this fake index holds with `enabled: false`: not in
+	// indexed, and not gone either.
+	parked []string
+}
+
+// Parked answers from parked, in the order asked.
+func (f *fakeSearch) Parked(_ context.Context, names []string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		for _, p := range f.parked {
+			if n == p {
+				out = append(out, n)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
@@ -103,6 +119,12 @@ func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known
 // Substring scans nothing: the locate loop is off in these tests, and a
 // pipeline with no loop must behave exactly as it did before the loop existed.
 func (f searchFunc) Substring(_ context.Context, _ string, _ int, _ []string, _ string, _ retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+	return nil, nil
+}
+
+// Parked knows no parked repository: a name these tests resolve to nothing
+// is one the index no longer carries.
+func (f searchFunc) Parked(context.Context, []string) ([]string, error) {
 	return nil, nil
 }
 
@@ -918,6 +940,45 @@ func TestRun_aPinMissingOneRepositoryFailsTheTurn(t *testing.T) {
 	}
 	if len(search.queries) != 0 {
 		t.Errorf("searched %d times, want no search on a pin the index cannot honour", len(search.queries))
+	}
+}
+
+// TestRun_aPinWithAParkedMemberSaysItIsParked: parked is not purged — its
+// index and its citations stay — so "no longer carries" would be false. The
+// turn still fails: a thread does not widen, and answering from the
+// survivors is the substitution the pin check exists to stop.
+func TestRun_aPinWithAParkedMemberSaysItIsParked(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"rongo"}, parked: []string{"peeq"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	_, _, err := p.Run(context.Background(), "und das?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
+
+	if err == nil {
+		t.Fatal("want the turn to fail on a parked member of the pin")
+	}
+	if !strings.Contains(err.Error(), "peeq") || !strings.Contains(err.Error(), "parked") ||
+		strings.Contains(err.Error(), "no longer") {
+		t.Errorf("err = %v, want it to say peeq is parked, not gone", err)
+	}
+	if len(search.queries) != 0 {
+		t.Errorf("searched %d times, want no search", len(search.queries))
+	}
+}
+
+// TestResumeRepo_aParkedChoiceSaysItIsParked: the same distinction for a
+// repository parked between the card and the click.
+func TestResumeRepo_aParkedChoiceSaysItIsParked(t *testing.T) {
+	search := &fakeSearch{indexed: []string{"loom"}, parked: []string{"peeq"}}
+	p := newTestPipeline(t, func(f *pipelineFakes) { f.search = search })
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"peeq", "loom"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"peeq", "loom"}}, Thread{}, Events{})
+
+	if err == nil || !strings.Contains(err.Error(), "peeq") || !strings.Contains(err.Error(), "parked") {
+		t.Errorf("err = %v, want it to say peeq is parked", err)
 	}
 }
 
