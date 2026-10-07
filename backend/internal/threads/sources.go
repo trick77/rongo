@@ -228,7 +228,9 @@ func (s *Store) window(ctx context.Context, r recorded, files map[string]fileRea
 			// it was cut from.
 			f.lines = strings.Split(strings.TrimSuffix(file.Content, "\n"), "\n")
 		} else {
-			slog.Debug("source not readable from git", "repo", r.repo, "path", r.path, "sha", r.sha, "err", err)
+			// Warn, not Debug: the basis is meant to be re-read from git, and
+			// chunkSource falling back to the chunk row must not pass unseen.
+			slog.Warn("source not readable from git, falling back to the chunk rows", "repo", r.repo, "path", r.path, "sha", r.sha, "err", err)
 		}
 		files[k] = f
 	}
