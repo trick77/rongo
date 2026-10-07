@@ -341,3 +341,26 @@ func (s *Store) sharedCitation(ctx context.Context, token, repo, path, sha, kind
 	}
 	return true, nil
 }
+
+// CitedBy reports whether a thread this subject owns has a turn citing that
+// exact file at that exact commit. It is SharedCitation for the owner: what
+// lets the signed-in viewer open a cited file the index has since dropped,
+// without opening every path at every commit to whoever is signed in.
+func (s *Store) CitedBy(ctx context.Context, subject, repo, path, sha string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM citations c
+		JOIN messages m ON m.id = c.message_id
+		JOIN threads t ON t.id = m.thread_id
+		WHERE t.user_subject = ?
+		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ''
+		LIMIT 1`, subject, repo, path, sha).Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read owner citation: %w", err)
+	}
+	return true, nil
+}

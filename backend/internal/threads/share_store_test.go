@@ -605,3 +605,36 @@ func TestFailOrphaned_marksTurnsNoProcessIsWriting(t *testing.T) {
 		t.Errorf("second run failed %d rows, %v; want 0", again, err)
 	}
 }
+
+// CitedBy is the owner's twin of SharedCitation: a thread of theirs has a
+// turn citing that exact file at that exact commit.
+func TestCitedBy_answersOnlyForTheOwnersOwnCitations(t *testing.T) {
+	s, ctx, th, db := newThreadStore(t)
+	answeredTurn(t, s, th, "How?", "So [1].",
+		ask.Citation{Marker: 1, Repo: "rongo", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 2, SHA: "abc"})
+
+	for name, tc := range map[string]struct {
+		subject, path, sha string
+		want               bool
+	}{
+		"the owner's citation":    {testSubject, "a.go", "abc", true},
+		"another file":            {testSubject, "secrets.go", "abc", false},
+		"the file at another sha": {testSubject, "a.go", "def", false},
+		"somebody else":           {"bruno", "a.go", "abc", false},
+	} {
+		got, err := s.CitedBy(ctx, tc.subject, "rongo", tc.path, tc.sha)
+		if err != nil {
+			t.Fatalf("%s: cited by: %v", name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: CitedBy = %v, want %v", name, got, tc.want)
+		}
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := s.CitedBy(ctx, testSubject, "rongo", "a.go", "abc"); err == nil {
+		t.Error("CitedBy returned no error against a closed database")
+	}
+}

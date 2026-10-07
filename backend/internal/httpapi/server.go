@@ -4,7 +4,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -116,6 +119,9 @@ type Threads interface {
 	SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error)
 	// SharedCommit is SharedCitation for a commit citation.
 	SharedCommit(ctx context.Context, token, repo, sha string) (bool, error)
+	// CitedBy is SharedCitation for the owner: a thread this subject owns
+	// cites that file at that commit.
+	CitedBy(ctx context.Context, subject, repo, path, sha string) (bool, error)
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,
@@ -273,13 +279,66 @@ func (s *Server) routes() {
 }
 
 // requireAuth is the single gate every authenticated route goes through.
+//
+// A request that changes something and comes from another site is refused
+// before auth runs. Dev and proxy mode admit a request that carries no cookie,
+// so SameSite protects only password and OIDC; without this a cross-site form
+// could post to a bodiless action (reindex, star, share, logout) in the
+// operator's own browser.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	if s.deps.Auth == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
 		})
 	}
-	return s.deps.Auth.Middleware(next)
+	authed := s.deps.Auth.Middleware(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if crossSite(r) {
+			http.Error(w, "cross-site request refused", http.StatusForbidden)
+			return
+		}
+		authed.ServeHTTP(w, r)
+	})
+}
+
+// crossSite reports whether a request that is not a read came from another
+// origin. Fetch metadata decides when the browser sent it: only same-origin
+// and none (typed, bookmarked) pass — same-site is a sibling subdomain, which
+// SameSite would let through and is still not rongo. Only an older browser
+// without it falls back to Origin, which is compared with both the host the
+// request reached and the one the proxy says it was sent to — behind a proxy
+// r.Host can be the loopback listener. A request with neither header is no
+// browser's and passes: a token-mode script sends none.
+func crossSite(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
+		return site != "same-origin" && site != "none"
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		// "null" is an opaque origin: a sandboxed frame, a data: URL.
+		return true
+	}
+	if strings.EqualFold(u.Host, r.Host) {
+		return false
+	}
+	fwd, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
+	fwd = strings.TrimSpace(fwd)
+	if fwd != "" && strings.EqualFold(u.Host, fwd) {
+		return false
+	}
+	// A proxy that rewrites Host and forwards no X-Forwarded-Host lands here
+	// for every write from such a browser; without the hosts the operator
+	// sees only 403s.
+	slog.Warn("cross-site request refused", "origin_host", u.Host, "host", r.Host, "forwarded_host", fwd)
+	return true
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
