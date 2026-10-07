@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,9 +26,24 @@ type fakeReleaser struct {
 	offBranch map[string]bool     // repo/sha -> lies on a side branch
 	head      map[string]RepoHead
 	depth     int
+	// fail makes one call on one repository fail: "Head/shop-backend".
+	// onFail runs first, so a test can cancel the turn from inside git.
+	fail   map[string]error
+	onFail func()
+}
+
+func (f *fakeReleaser) failing(call, repo string) error {
+	err, ok := f.fail[call+"/"+repo]
+	if ok && f.onFail != nil {
+		f.onFail()
+	}
+	return err
 }
 
 func (f *fakeReleaser) ResolveTag(_ context.Context, repo, tag string) (string, error) {
+	if err := f.failing("ResolveTag", repo); err != nil {
+		return "", err
+	}
 	if sha, ok := f.tags[repo+"/"+tag]; ok {
 		return sha, nil
 	}
@@ -47,6 +63,9 @@ func (f *fakeReleaser) index(repo, sha string) int {
 }
 
 func (f *fakeReleaser) IsAncestor(_ context.Context, repo, ancestor, descendant string) (bool, error) {
+	if err := f.failing("IsAncestor", repo); err != nil {
+		return false, err
+	}
 	if f.offBranch[repo+"/"+ancestor] || f.offBranch[repo+"/"+descendant] {
 		return ancestor == descendant, nil
 	}
@@ -55,6 +74,9 @@ func (f *fakeReleaser) IsAncestor(_ context.Context, repo, ancestor, descendant 
 }
 
 func (f *fakeReleaser) Range(_ context.Context, repo, from, to string, limit int) ([]string, error) {
+	if err := f.failing("Range", repo); err != nil {
+		return nil, err
+	}
 	a, d := f.index(repo, from), f.index(repo, to)
 	var out []string
 	for i := d; i > a && len(out) < limit; i-- {
@@ -64,6 +86,9 @@ func (f *fakeReleaser) Range(_ context.Context, repo, from, to string, limit int
 }
 
 func (f *fakeReleaser) Head(_ context.Context, repo string) (RepoHead, error) {
+	if err := f.failing("Head", repo); err != nil {
+		return RepoHead{}, err
+	}
 	if h, ok := f.head[repo]; ok {
 		return h, nil
 	}
@@ -336,6 +361,56 @@ func TestReleaseLines_theRefusalMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A checkout git cannot read is one component's problem: that component
+// gets a line saying so, the others resolve as ever, and the turn stands.
+// Only a turn that was cancelled fails, because nobody is waiting for it.
+func TestReleaseLines_aComponentWhoseCheckoutErrorsIsOneLine(t *testing.T) {
+	for _, call := range []string{"Head", "ResolveTag", "IsAncestor", "Range"} {
+		t.Run(call, func(t *testing.T) {
+			db := gatherDB(t)
+			rel, h, declared, pm := releaseCorpus(t, db)
+			rel.fail = map[string]error{call + "/shop-backend": errors.New("fatal: bad object c3")}
+			g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
+
+			lines, commits, err := releaseLines(context.Background(), g, rel, h, pm, "shop-infra", declared, []string{"prod", "test"})
+			if err != nil {
+				t.Fatalf("releaseLines: %v, want the turn to stand", err)
+			}
+
+			by := map[string]ReleaseLine{}
+			for _, l := range lines {
+				by[l.Image] = l
+			}
+			be := by["registry.example.invalid/acme/shop-backend"]
+			// Nothing half-measured survives into the record: a direction or
+			// a count set before the failing call is no fact about the range.
+			if be.Note != NoteUnreadable || be.Ahead != "" || be.Commits != 0 || be.Detail != "" {
+				t.Errorf("backend = %+v, want only the unreadable note", be)
+			}
+			if ui := by["registry.example.invalid/acme/shop-ui"]; ui.Note != NoteUnchanged {
+				t.Errorf("ui = %+v, want it resolved as ever", ui)
+			}
+			if len(commits) != 0 {
+				t.Errorf("commits = %v, want none", commits)
+			}
+		})
+	}
+
+	t.Run("a cancelled turn still fails", func(t *testing.T) {
+		db := gatherDB(t)
+		rel, h, declared, pm := releaseCorpus(t, db)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		rel.fail = map[string]error{"Head/shop-backend": context.Canceled}
+		rel.onFail = cancel
+		g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
+
+		if _, _, err := releaseLines(ctx, g, rel, h, pm, "shop-infra", declared, []string{"prod", "test"}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want the cancellation", err)
+		}
+	})
 }
 
 func TestReleaseLines_digestMissingAndAmbiguousVersions(t *testing.T) {

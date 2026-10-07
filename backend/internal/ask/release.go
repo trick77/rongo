@@ -89,6 +89,7 @@ const (
 	NoteDiverged    = "diverged"
 	NoteBeyondDepth = "beyond-depth"
 	NoteUnrecorded  = "unrecorded"
+	NoteUnreadable  = "unreadable"
 )
 
 // ReleaseLine is one image of the infrastructure repository as the turn
@@ -319,6 +320,7 @@ func isKustomization(p string) bool {
 //	ancestry                     which stage is ahead, or diverged
 //	range past the depth         beyond-depth
 //	a sha the lane never recorded unrecorded
+//	git cannot read the checkout unreadable
 func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, pm projects.Map,
 	infra string, declared stages.Set, pair []string) ([]ReleaseLine, map[string][]history.Commit, error) {
 
@@ -372,7 +374,16 @@ func releaseLines(ctx context.Context, g *Gatherer, rel Releaser, h Histories, p
 		}
 		cs, err := resolveLine(ctx, rel, h, pair, a, b, &line)
 		if err != nil {
-			return nil, nil, err
+			// A cancelled turn has nobody waiting for it. Anything else is
+			// one component's checkout, and the rest of the release still
+			// stands: the line says it could not be read, and whatever the
+			// walk measured before the failure is dropped with the range.
+			if ctx.Err() != nil {
+				return nil, nil, err
+			}
+			slog.Warn("release: checkout not readable", "repo", line.Repo, "image", name, "err", err)
+			line.Note, line.Ahead, line.Commits, line.Detail = NoteUnreadable, "", 0, ""
+			cs = nil
 		}
 		if len(cs) > 0 {
 			commits[name] = cs
@@ -647,6 +658,8 @@ func noteEnglish(l ReleaseLine) string {
 		return fmt.Sprintf("%d commits apart, older than the recorded history of %s, so not summarised", l.Commits, l.Detail)
 	case NoteUnrecorded:
 		return fmt.Sprintf("%d commits apart, %s of them not in the recorded history, so not summarised", l.Commits, l.Detail)
+	case NoteUnreadable:
+		return "the repository's checkout could not be read, so nothing to compare"
 	}
 	return l.Note
 }
@@ -738,6 +751,9 @@ var releaseNotes = map[string]map[Language]string{
 	NoteUnrecorded: {
 		LanguageEN: "%s: %s commits between the versions are not in the recorded history.", LanguageDE: "%s: %s Commits zwischen den Versionen sind nicht in der aufgezeichneten Historie.",
 		LanguageFR: "%s : %s commits entre les versions ne sont pas dans l'historique enregistré.", LanguageIT: "%s: %s commit tra le versioni non sono nella cronologia registrata."},
+	NoteUnreadable: {
+		LanguageEN: "%s: the checkout could not be read.", LanguageDE: "%s: der Checkout konnte nicht gelesen werden.",
+		LanguageFR: "%s : le checkout n'a pas pu être lu.", LanguageIT: "%s: impossibile leggere il checkout."},
 }
 
 // NoRelease is the answer when no component has a range: the sentence,
