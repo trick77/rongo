@@ -173,6 +173,10 @@ type Config struct {
 	// truthful default while the only real gate is Authelia's
 	// authorization_policy.
 	OIDCAdminGroup string
+	// ProxyAdminGroup is OIDCAdminGroup for proxy mode, read from the
+	// proxy's X-Forwarded-Groups header. Empty means every forwarded user
+	// is an admin; set outside proxy mode it is refused.
+	ProxyAdminGroup string
 	// CookieSecure marks the session and nonce cookies Secure. In oidc mode
 	// it is derived from OIDCRedirectURL: behind a TLS-terminating proxy the
 	// process only ever sees plain HTTP, and the redirect URL is the one
@@ -264,6 +268,7 @@ func Load() (Config, error) {
 		OIDCClientSecret: strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_SECRET")),
 		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
 		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
+		ProxyAdminGroup:  strings.TrimSpace(os.Getenv("BACKEND_PROXY_ADMIN_GROUP")),
 	}
 	if r.err != nil {
 		return Config{}, r.err
@@ -376,6 +381,10 @@ func Load() (Config, error) {
 	// setting refuses.
 	if strings.TrimSpace(os.Getenv("BACKEND_COOKIE_SECURE")) != "" && cfg.AuthMode != AuthModePassword {
 		return Config{}, fmt.Errorf("BACKEND_COOKIE_SECURE is read in password mode only; BACKEND_AUTH_MODE=%s %s, remove it", cfg.AuthMode, cookieSource(cfg.AuthMode))
+	}
+
+	if cfg.ProxyAdminGroup != "" && cfg.AuthMode != AuthModeProxy {
+		return Config{}, fmt.Errorf("BACKEND_PROXY_ADMIN_GROUP is read in proxy mode only, got BACKEND_AUTH_MODE=%s; remove it", cfg.AuthMode)
 	}
 
 	if cfg.AuthMode == AuthModeOIDC {

@@ -60,6 +60,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_OIDC_CLIENT_SECRET",
 	"BACKEND_OIDC_REDIRECT_URL",
 	"BACKEND_OIDC_ADMIN_GROUP",
+	"BACKEND_PROXY_ADMIN_GROUP",
 }
 
 // mandatoryEnv is what .env.example leaves uncommented: the values nothing
@@ -747,6 +748,35 @@ func TestLoad_cookieSecureIsRefusedOutsidePasswordMode(t *testing.T) {
 
 			if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") || !strings.Contains(err.Error(), name) {
 				t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE and mode %s", err, name)
+			}
+		})
+	}
+}
+
+// The proxy's admin group decides admin in proxy mode alone. Set anywhere
+// else it would look like it gates the re-index and gate nothing.
+func TestLoad_proxyAdminGroup(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_AUTH_MODE": "proxy", "BACKEND_PROXY_ADMIN_GROUP": " rongo-admins "})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.ProxyAdminGroup != "rongo-admins" {
+		t.Errorf("ProxyAdminGroup = %q, want it trimmed", cfg.ProxyAdminGroup)
+	}
+
+	for name, env := range map[string]map[string]string{
+		"oidc": oidcEnv(nil),
+		"dev":  {},
+	} {
+		t.Run("refused in "+name, func(t *testing.T) {
+			env["BACKEND_PROXY_ADMIN_GROUP"] = "rongo-admins"
+			setEnv(t, env)
+
+			_, err := Load()
+
+			if err == nil || !strings.Contains(err.Error(), "BACKEND_PROXY_ADMIN_GROUP") {
+				t.Errorf("Load() err = %v, want a refusal naming BACKEND_PROXY_ADMIN_GROUP", err)
 			}
 		})
 	}

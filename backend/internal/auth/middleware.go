@@ -19,10 +19,12 @@ var userKey contextKey
 const devSubject = "dev-user"
 
 // The headers proxy mode reads. They are what oauth-proxy and its relatives
-// set with pass-user-headers on.
+// set with pass-user-headers on; the groups, comma-separated, are read only
+// when an admin group is configured.
 const (
-	ProxyUserHeader  = "X-Forwarded-User"
-	ProxyEmailHeader = "X-Forwarded-Email"
+	ProxyUserHeader   = "X-Forwarded-User"
+	ProxyEmailHeader  = "X-Forwarded-Email"
+	ProxyGroupsHeader = "X-Forwarded-Groups"
 )
 
 // WithUser is the context a request carries once the middleware admitted
@@ -77,7 +79,8 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			s.admit(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)))
+			s.admitAs(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)),
+				isAdmin(proxyGroups(r), s.proxyAdminGroup))
 			return
 
 		case "password":
@@ -140,10 +143,27 @@ func bearerToken(r *http.Request) (string, bool) {
 	return h[len(prefix):], true
 }
 
+// proxyGroups is the groups the proxy forwarded, comma-separated in one
+// header, trimmed.
+func proxyGroups(r *http.Request) []string {
+	var out []string
+	for _, g := range strings.Split(r.Header.Get(ProxyGroupsHeader), ",") {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 // admit lets the request through as the admin subject, writing the user
 // once per interval (see Admit). what names the mode for the log line.
 func (s *Service) admit(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string) {
-	u, err := s.Admit(r.Context(), subject, email, true)
+	s.admitAs(w, r, next, what, subject, email, true)
+}
+
+// admitAs is admit with the admin flag decided by the caller.
+func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Handler, what, subject, email string, admin bool) {
+	u, err := s.Admit(r.Context(), subject, email, admin)
 	if err != nil {
 		// A request its client abandoned is not a failed login.
 		if errors.Is(err, context.Canceled) {

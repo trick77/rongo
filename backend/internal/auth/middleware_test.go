@@ -107,6 +107,55 @@ func TestMiddleware_proxyModeSignsInTheForwardedUser(t *testing.T) {
 	}
 }
 
+// proxyAdmin is whether proxy mode admits a caller sending groups as admin.
+func proxyAdmin(t *testing.T, svc *Service, groups string) bool {
+	t.Helper()
+	var got User
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = mustUser(t, r)
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set(ProxyUserHeader, "jdoe")
+	if groups != "" {
+		req.Header.Set(ProxyGroupsHeader, groups)
+	}
+	rec := httptest.NewRecorder()
+	svc.Middleware(handler).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want the caller let in either way", rec.Code)
+	}
+	return got.IsAdmin
+}
+
+// With an admin group set, the proxy's group header decides: a member may
+// re-index, everyone else the proxy let in may only ask.
+func TestProxyModeNonMemberIsNotAdmin(t *testing.T) {
+	svc := newService(t)
+	svc.mode = "proxy"
+	svc.SetProxyAdminGroup("rongo-admins")
+
+	if proxyAdmin(t, svc, "") {
+		t.Error("a caller with no groups is admin")
+	}
+	if proxyAdmin(t, svc, "devs, readers") {
+		t.Error("a non-member is admin")
+	}
+	if !proxyAdmin(t, svc, "devs, rongo-admins ,readers") {
+		t.Error("a member is not admin")
+	}
+}
+
+// No group configured is no check: whom the proxy lets in is its decision.
+func TestProxyModeEmptyGroupEveryoneIsAdmin(t *testing.T) {
+	svc := newService(t)
+	svc.mode = "proxy"
+
+	if !proxyAdmin(t, svc, "") || !proxyAdmin(t, svc, "devs") {
+		t.Error("a forwarded user is not admin without an admin group")
+	}
+}
+
 func TestMiddleware_proxyModeRejectsAMissingHeader(t *testing.T) {
 	// Given: a request that reached the process without the proxy's header,
 	// which is what a skip-auth path on the proxy forwards.

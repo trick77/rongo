@@ -41,6 +41,9 @@ type Service struct {
 	// passwordHash is bcrypt.
 	adminUser    string
 	passwordHash []byte
+	// proxyAdminGroup is the group whose members proxy mode admits as
+	// admins; empty admits every forwarded user as one.
+	proxyAdminGroup string
 	// admitted is the users the middleware upserted lately, so a request
 	// does not write the users table on its way in: in dev, token and proxy
 	// mode every request used to be an INSERT … ON CONFLICT beside the
@@ -100,6 +103,12 @@ func (s *Service) Admit(ctx context.Context, subject, email string, isAdmin bool
 func (s *Service) SetPasswordAccount(user, hash string) {
 	s.adminUser = user
 	s.passwordHash = []byte(hash)
+}
+
+// SetProxyAdminGroup installs the group proxy mode reads from the proxy's
+// group header to decide admin. Empty is no check.
+func (s *Service) SetProxyAdminGroup(group string) {
+	s.proxyAdminGroup = group
 }
 
 // Mode reports the configured auth mode.
