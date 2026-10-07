@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/version"
@@ -77,6 +80,7 @@ func TestMe_carriesTheBuildVersion(t *testing.T) {
 func TestCrossSitePostIsRefused(t *testing.T) {
 	for name, headers := range map[string]map[string]string{
 		"fetch metadata says cross-site":         {"Sec-Fetch-Site": "cross-site"},
+		"a sibling subdomain":                    {"Sec-Fetch-Site": "same-site"},
 		"origin names another host":              {"Origin": "https://evil.example"},
 		"opaque origin":                          {"Origin": "null"},
 		"cross-site wins over a matching origin": {"Sec-Fetch-Site": "cross-site", "Origin": "http://example.com"},
@@ -92,6 +96,29 @@ func TestCrossSitePostIsRefused(t *testing.T) {
 				t.Fatalf("status = %d, want 403", rec.Code)
 			}
 		})
+	}
+}
+
+// Behind a proxy that rewrites Host and forwards no X-Forwarded-Host, every
+// write from an older browser is refused on Origin. The log says which hosts
+// disagreed, or the operator sees only 403s.
+func TestCrossSiteOriginMismatchIsLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.Header.Set("Origin", "https://rongo.example")
+	rec := httptest.NewRecorder()
+	NewServer(Deps{Auth: devAuth(t)}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, "rongo.example") || !strings.Contains(line, "example.com") {
+		t.Errorf("refusal not logged with both hosts: %s", line)
 	}
 }
 

@@ -4,6 +4,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -301,7 +302,9 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 }
 
 // crossSite reports whether a request that is not a read came from another
-// site. Fetch metadata decides when the browser sent it; only an older browser
+// origin. Fetch metadata decides when the browser sent it: only same-origin
+// and none (typed, bookmarked) pass — same-site is a sibling subdomain, which
+// SameSite would let through and is still not rongo. Only an older browser
 // without it falls back to Origin, which is compared with both the host the
 // request reached and the one the proxy says it was sent to — behind a proxy
 // r.Host can be the loopback listener. A request with neither header is no
@@ -312,7 +315,7 @@ func crossSite(r *http.Request) bool {
 		return false
 	}
 	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
-		return site == "cross-site"
+		return site != "same-origin" && site != "none"
 	}
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -328,7 +331,14 @@ func crossSite(r *http.Request) bool {
 	}
 	fwd, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
 	fwd = strings.TrimSpace(fwd)
-	return fwd == "" || !strings.EqualFold(u.Host, fwd)
+	if fwd != "" && strings.EqualFold(u.Host, fwd) {
+		return false
+	}
+	// A proxy that rewrites Host and forwards no X-Forwarded-Host lands here
+	// for every write from such a browser; without the hosts the operator
+	// sees only 403s.
+	slog.Warn("cross-site request refused", "origin_host", u.Host, "host", r.Host, "forwarded_host", fwd)
+	return true
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
