@@ -305,9 +305,11 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		if err != nil {
 			return Answer{}, nil, fmt.Errorf("resolve the thread's repositories: %w", err)
 		}
-		if len(live) == 0 {
+		// One repository gone is as fatal as all of them: searching the
+		// survivors answers from two while the record says three.
+		if gone := missingRepos(pin, live); len(gone) > 0 {
 			return Answer{}, nil, fmt.Errorf("this thread is about %s, which the index no longer carries",
-				strings.Join(pin, ", "))
+				strings.Join(gone, ", "))
 		}
 		pin = live
 		// Narrowing, not replacing. A thread pinned to two repositories by a
@@ -583,6 +585,24 @@ func intersect(named, pin []string) []string {
 	for _, n := range named {
 		if in[n] {
 			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// missingRepos is the names of want the index did not resolve, each once, in
+// the order want holds them. A set comparison, not a count: a library folded
+// into two products is one repository named twice, never one missing.
+func missingRepos(want, resolved []string) []string {
+	have := make(map[string]bool, len(resolved))
+	for _, r := range resolved {
+		have[r] = true
+	}
+	var out []string
+	for _, w := range want {
+		if !have[w] {
+			have[w] = true
+			out = append(out, w)
 		}
 	}
 	return out
@@ -1283,15 +1303,17 @@ func (p *Pipeline) ResumeRepo(ctx context.Context, question string, u Understand
 		if err != nil {
 			return Answer{}, fmt.Errorf("resolve the chosen repositories: %w", err)
 		}
-		if len(known) != len(repos) {
+		if gone := missingRepos(repos, known); len(gone) > 0 {
 			// Not just "all of them gone": a subset is worse, because the turn
 			// would run and look right. The scope, the notice and the prompt
 			// rules were all written from the full list a few lines up in the
 			// handler, so searching the survivors answers from two
 			// repositories while the record says three — the substitution this
-			// check exists to stop, one repository at a time.
+			// check exists to stop, one repository at a time. Compared as
+			// sets: two products sharing a library name it twice, and the
+			// resolver folds the repeat.
 			return Answer{}, fmt.Errorf("the chosen repositories %s are no longer in the index",
-				strings.Join(repos, ", "))
+				strings.Join(gone, ", "))
 		}
 		ev.status("searching")
 		// searchScoped: more than one chosen repository is a comparison, one
