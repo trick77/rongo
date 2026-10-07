@@ -69,15 +69,18 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	addr := remoteHost(r)
-	if !s.logins.wait(r.Context(), addr) {
+	key := loginKey(remoteHost(r), in.Username)
+	if !s.logins.wait(r.Context(), key) {
+		// The caller left, or the server is shutting down. Never a bare
+		// return: no status is a 200, which the SPA reads as signed in.
+		http.Error(w, "login not checked", http.StatusServiceUnavailable)
 		return
 	}
 	token, expiresAt, err := s.deps.Auth.LoginPassword(r.Context(), in.Username, in.Password)
 	if errors.Is(err, auth.ErrBadCredentials) {
 		// The one place a failed guess is recorded; bcrypt keeps it slow, the
-		// throttle slower once it repeats, the log keeps it visible.
-		s.logins.failed(addr)
+		// throttle, which counted the attempt as it started, slower once it
+		// repeats; the log keeps it visible.
 		slog.Warn("password login rejected", "remote", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -87,7 +90,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.logins.succeeded(addr)
+	s.logins.succeeded(key)
 	auth.SetSessionCookie(w, token, s.deps.CookieSecure, time.Until(expiresAt))
 	w.WriteHeader(http.StatusNoContent)
 }

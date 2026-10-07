@@ -3,10 +3,12 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,7 +182,82 @@ func TestPasswordLoginSlowsAfterFailures(t *testing.T) {
 		postPassword(srv, wrong)
 	}
 	srv.logins.sleep = func(context.Context, time.Duration) bool { return false }
-	if rec := postPassword(srv, `{"username":"admin","password":"hunter2"}`); rec.Code == http.StatusNoContent {
-		t.Error("an abandoned wait still logged in")
+	// An explicit status: a handler returning without one answers 200, which
+	// the SPA reads as signed in.
+	if rec := postPassword(srv, `{"username":"admin","password":"hunter2"}`); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("an abandoned wait answered %d, want 503", rec.Code)
+	}
+}
+
+// Parallel guesses must not all read the same count and sleep together:
+// each attempt is counted when it starts, so the tenth concurrent one waits
+// as long as the tenth sequential one.
+func TestLoginThrottle_countsAnAttemptWhenItStarts(t *testing.T) {
+	th := newLoginThrottle()
+	var mu sync.Mutex
+	var slept []time.Duration
+	th.sleep = func(_ context.Context, d time.Duration) bool {
+		mu.Lock()
+		slept = append(slept, d)
+		mu.Unlock()
+		return true
+	}
+	key := loginKey("192.0.2.1", "admin")
+	var wg sync.WaitGroup
+	for range loginFreeFailures + 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			th.wait(context.Background(), key)
+		}()
+	}
+	wg.Wait()
+	slices.Sort(slept)
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	if !slices.Equal(slept, want) {
+		t.Errorf("slept %v, want %v", slept, want)
+	}
+
+	// Another account name from the same address has its own count.
+	slept = nil
+	th.wait(context.Background(), loginKey("192.0.2.1", "root"))
+	if len(slept) != 0 {
+		t.Errorf("another username slept %v, want nothing", slept)
+	}
+}
+
+// The map is capped: past it new keys share one overflow count, so a flood
+// of addresses or names neither grows memory nor escapes the brake.
+func TestLoginThrottle_isCapped(t *testing.T) {
+	th := newLoginThrottle()
+	th.max = 3
+	var slept []time.Duration
+	th.sleep = func(_ context.Context, d time.Duration) bool {
+		slept = append(slept, d)
+		return true
+	}
+	for i := range 3 + loginFreeFailures + 1 {
+		th.wait(context.Background(), loginKey("192.0.2.1", fmt.Sprint("user", i)))
+	}
+	th.mu.Lock()
+	n := len(th.seen)
+	th.mu.Unlock()
+	if n > 4 {
+		t.Errorf("tracked %d keys, want at most the cap plus the overflow", n)
+	}
+	if !slices.Equal(slept, []time.Duration{time.Second}) {
+		t.Errorf("slept %v, want the overflow count to brake", slept)
+	}
+
+	// The sweep, when it comes round, drops what expired.
+	clock := time.Now().Add(loginFailureTTL)
+	th.now = func() time.Time { return clock }
+	th.sweepEvery = 1
+	th.wait(context.Background(), loginKey("192.0.2.9", "admin"))
+	th.mu.Lock()
+	n = len(th.seen)
+	th.mu.Unlock()
+	if n != 1 {
+		t.Errorf("tracked %d keys after the sweep, want only the fresh one", n)
 	}
 }
