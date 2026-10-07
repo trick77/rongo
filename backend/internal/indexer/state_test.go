@@ -258,11 +258,15 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	}
 
 	// When: the list no longer mentions peeq.
-	purged, err := s.SyncSpecs(ctx, []repos.Spec{
+	synced, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "shop", CloneURL: "/tmp/shop", Branch: "master", Enabled: true},
 	})
 	if err != nil {
 		t.Fatalf("second SyncSpecs() err = %v", err)
+	}
+	purged := synced.Purged
+	if len(synced.Reset) != 0 {
+		t.Errorf("reset = %v, want none — shop's clone_url did not change", synced.Reset)
 	}
 
 	// Then: it is reported as purged, so the caller can remove its checkout ...
@@ -996,10 +1000,16 @@ func TestSyncSpecs_cloneURLChangeResetsTheIndexWithoutACheckout(t *testing.T) {
 	}
 
 	// When: the entry is corrected to another remote under the same name.
-	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+	synced, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "file:///new", Branch: "master", Enabled: true},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("second SyncSpecs() err = %v", err)
+	}
+
+	// Then: the reset is reported, so the boot can say so ...
+	if len(synced.Reset) != 1 || synced.Reset[0] != "peeq" || len(synced.Purged) != 0 {
+		t.Errorf("synced = %+v, want peeq reset and nothing purged", synced)
 	}
 
 	// Then: nothing built from the old remote answers under the new name, and

@@ -98,10 +98,13 @@ func NewStateStore(db *sql.DB) *StateStore {
 // the explicit purge the comments promised was never implemented. The cost of
 // the reversal is that a mistyped name: re-indexes and re-embeds instead of
 // resuming, since PruneEmbedCache drops the purged repository's vectors too.
-func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purged, error) {
+//
+// An entry whose clone_url changed keeps its row and loses its index, and is
+// reported in Synced.Reset.
+func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) (Synced, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return Synced{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -111,19 +114,20 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 	}
 	known, err := namesTx(ctx, tx)
 	if err != nil {
-		return nil, err
+		return Synced{}, err
 	}
 	var purged []Purged
+	var reset []string
 	stored := make(map[string]string, len(known))
 	for _, k := range known {
-		if listed[k.Name] {
-			stored[k.Name] = k.cloneURL
+		if listed[k.name] {
+			stored[k.name] = k.cloneURL
 			continue
 		}
-		if err := purgeRepoTx(ctx, tx, k.Name); err != nil {
-			return nil, err
+		if err := purgeRepoTx(ctx, tx, k.name); err != nil {
+			return Synced{}, err
 		}
-		purged = append(purged, k.Purged)
+		purged = append(purged, Purged{Name: k.name, Snapshot: k.cloneURL == ""})
 	}
 
 	for _, spec := range specs {
@@ -134,8 +138,9 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 		// last_sha failed "bad object", and the old code went on answering.
 		if url, ok := stored[spec.Name]; ok && url != spec.CloneURL {
 			if err := resetTx(ctx, tx, spec.Name); err != nil {
-				return nil, err
+				return Synced{}, err
 			}
+			reset = append(reset, spec.Name)
 		}
 		enabled := 0
 		if spec.Enabled {
@@ -190,31 +195,39 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 			spec.Name, spec.CloneURL, spec.Branch, enabled, spec.TokenEnv, spec.TokenUser, spec.TokenAuth,
 			spec.Project, spec.Part, spec.Description, library, spec.Image,
 		); err != nil {
-			return nil, fmt.Errorf("upsert %s: %w", spec.Name, err)
+			return Synced{}, fmt.Errorf("upsert %s: %w", spec.Name, err)
 		}
 
 		// Replace rather than insert, for repodeps.Sync's reason: a repository
 		// that drops an edge must stop declaring it, or the Projects page goes
 		// on drawing an arrow that no longer exists.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM repo_uses WHERE repo = ?`, spec.Name); err != nil {
-			return nil, fmt.Errorf("clear repo_uses for %s: %w", spec.Name, err)
+			return Synced{}, fmt.Errorf("clear repo_uses for %s: %w", spec.Name, err)
 		}
 		for _, u := range spec.Uses {
 			if _, err := tx.ExecContext(ctx,
 				`INSERT OR IGNORE INTO repo_uses (repo, uses) VALUES (?, ?)`, spec.Name, u); err != nil {
-				return nil, fmt.Errorf("insert repo_uses for %s: %w", spec.Name, err)
+				return Synced{}, fmt.Errorf("insert repo_uses for %s: %w", spec.Name, err)
 			}
 		}
 		// Stages are structure too: replaced per repository from the file,
 		// and a stage edit leaves last_sha and the checkout alone.
 		if err := stages.Sync(ctx, tx, spec.Name, spec.Stages); err != nil {
-			return nil, err
+			return Synced{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return Synced{}, err
 	}
-	return purged, nil
+	return Synced{Purged: purged, Reset: reset}, nil
+}
+
+// Synced is what SyncSpecs did beyond recording the list: the repositories it
+// purged, and the ones whose index it reset because their clone_url changed.
+// Both happen inside the transaction; the caller logs them.
+type Synced struct {
+	Purged []Purged
+	Reset  []string
 }
 
 // EmptyStages names the declared stages of a repository that no indexed path
@@ -305,15 +318,16 @@ func namesTx(ctx context.Context, tx *sql.Tx) ([]knownRepo, error) {
 		if err := rows.Scan(&name, &cloneURL); err != nil {
 			return nil, err
 		}
-		out = append(out, knownRepo{Purged: Purged{Name: name, Snapshot: cloneURL == ""}, cloneURL: cloneURL})
+		out = append(out, knownRepo{name: name, cloneURL: cloneURL})
 	}
 	return out, rows.Err()
 }
 
-// knownRepo is one repo_state row as SyncSpecs reconciles it: what a purge
-// reports, and the clone_url a listed entry is compared against.
+// knownRepo is one repo_state row as SyncSpecs reconciles it. The clone_url
+// is both what a listed entry is compared against and, empty, the snapshot
+// flag a purge reports.
 type knownRepo struct {
-	Purged
+	name     string
 	cloneURL string
 }
 

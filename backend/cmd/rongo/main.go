@@ -269,10 +269,16 @@ func main() {
 		slog.Error("repository list is invalid; refusing to start rather than run on a stale one",
 			"path", cfg.ReposFile, "err", err)
 		os.Exit(1)
-	} else if purged, err := state.SyncSpecs(ctx, specs); err != nil {
+	} else if synced, err := state.SyncSpecs(ctx, specs); err != nil {
 		slog.Error("recording the repository list failed", "err", err)
 		os.Exit(1)
 	} else {
+		// The checkout is left to the poller: its origin check re-clones one
+		// that points at the old remote.
+		for _, name := range synced.Reset {
+			slog.Info("clone_url changed; index reset", "repo", name)
+		}
+		purged := synced.Purged
 		for _, p := range purged {
 			slog.Info("repository left the list; index purged", "repo", p.Name)
 			// A snapshot's directory is an archive the operator extracted by
