@@ -255,5 +255,8 @@ func (s *Server) handlePublicShareSource(w http.ResponseWriter, r *http.Request)
 		notFound(w)
 		return
 	}
-	s.serveSource(w, r, repo, path, sha)
+	// The link cites this triple, so a path dropped from the index since is
+	// read at its commit. A citation older than the commit travelling with it
+	// has no sha and reads the file where it was last indexed.
+	s.serveSource(w, r, repo, path, sha, sha != "")
 }

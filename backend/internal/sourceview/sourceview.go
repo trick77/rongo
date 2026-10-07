@@ -138,6 +138,8 @@ func (s *Service) read(ctx context.Context, repo, path, sha string, recorded boo
 		return File{}, fmt.Errorf("%w: %s/%s was not indexed (%s)", ErrNotFound, repo, path, skipReason)
 	}
 	if sha == "" {
+		// Read only: ReadRecorded refuses an empty commit, so a recorded read
+		// never falls back to today's indexed one.
 		sha = indexedSHA
 	}
 

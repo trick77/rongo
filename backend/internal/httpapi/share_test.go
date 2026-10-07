@@ -415,6 +415,9 @@ func TestPublicShareSource_opensACitedFileAndNothingElse(t *testing.T) {
 	if src.gotPath != "a.go" || src.sha != "abc" {
 		t.Errorf("read %q at %q, want the cited file at the cited commit", src.gotPath, src.sha)
 	}
+	if !src.recorded {
+		t.Error("a cited file was read as an arbitrary path, not from the record")
+	}
 
 	// And nothing else in the corpus is reachable through the link.
 	if rec := getPublic(srv, q("rongo", "internal/config/config.go", "abc")); rec.Code != http.StatusNotFound {
