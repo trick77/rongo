@@ -541,10 +541,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			unreadable(ctx, w, "resolve head ordinal failed", err)
 			return
 		}
-		// "All repositories" travels with it: the reader gave that answer
-		// for this question, and dropping it cards the question again.
+		// "All repositories" travels with a true retry only: the reader gave
+		// that answer for this question, and dropping it cards the question
+		// again — but a different question under the same head never had it.
 		if scope := retryHead.Scope; scope.All || len(scope.Known) > 0 {
-			prior.Pin, prior.All = scope.Known, scope.All
+			prior.Pin = scope.Known
+			prior.All = scope.All && req.Question == retryHead.Question
 		} else if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
 			unreadable(ctx, w, "read thread scope failed", err)
 			return
