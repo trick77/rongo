@@ -240,9 +240,21 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 // and the entry never recovers. A clone can too, when its directory was
 // removed and the entry re-cloned from another remote. The caller asks first
 // and re-indexes in full instead.
-func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) bool {
-	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
-	return err == nil
+//
+// Only git's own "no such object" is absence: a plain `cat-file -e` exits 1
+// for it and 128 for anything fatal (a ^{commit} suffix would make a miss
+// fatal too). Any other failure is returned, because the caller drops the
+// whole index on absence, and a failed process is not a missing commit.
+func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) (bool, error) {
+	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha)
+	switch {
+	case err == nil:
+		return true, nil
+	case exitCode(err) == 1:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // OriginURL reports which remote a checkout was actually made from.

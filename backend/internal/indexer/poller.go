@@ -356,18 +356,6 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 	if err := p.git.EnsureCloned(ctx, spec, token); err != nil {
 		return pollResult{}, err
 	}
-	// The origin check above sees only a checkout that is still there. A
-	// recorded commit the checkout does not hold means the index was built
-	// from somewhere else: every diff from it would fail "bad object" while
-	// the old chunks went on answering. pollSnapshot's rule, for a clone.
-	if st.LastSHA != "" && !p.git.HasCommit(ctx, spec, st.LastSHA) {
-		p.log.Info("indexed commit is not in the checkout; re-indexing in full",
-			"repo", st.Name, "indexed_sha", st.LastSHA)
-		if err := p.state.ResetRepo(ctx, st.Name); err != nil {
-			return pollResult{}, err
-		}
-		st.LastSHA = ""
-	}
 
 	// An omitted branch is resolved from the remote and written back, so the
 	// Repos page shows what is actually being indexed. Never assume master.
@@ -405,6 +393,16 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		// it left a healthy repository showing a permanent error until someone
 		// happened to push to it.
 		return pollResult{SHA: head}, p.state.MarkChecked(ctx, st.Name)
+	}
+
+	// The origin check above sees only a checkout that is still there. A
+	// recorded commit the checkout does not hold means the index was built
+	// from somewhere else: every diff from it would fail "bad object" while
+	// the old chunks went on answering. pollSnapshot's rule, for a clone.
+	if st.LastSHA != "" {
+		if err := p.resetIfLost(ctx, spec, &st, "indexed commit is not in the checkout"); err != nil {
+			return pollResult{}, err
+		}
 	}
 
 	var paths []string
@@ -525,33 +523,47 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 		return pollResult{SHA: sha}, p.state.MarkChecked(ctx, st.Name)
 	}
 
-	var paths []string
+	// The drop was deleted and re-extracted, so `git init` built a new object
+	// store and the recorded commit is not in it. Diffing against it would
+	// fail with "bad object" on this and every later cycle, leaving the entry
+	// in a permanent error while the files sit there perfectly readable. Drop
+	// the index and read the new tree whole.
 	if st.LastSHA != "" {
-		if p.git.HasCommit(ctx, spec, st.LastSHA) {
-			changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, sha)
-			if err != nil {
-				return pollResult{}, err
-			}
-			paths = changed
-			p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
-				"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(sha),
-				"paths", len(changed))
-		} else {
-			// The drop was deleted and re-extracted, so `git init` built a new
-			// object store and the recorded commit is not in it. Diffing against
-			// it would fail with "bad object" on this and every later cycle,
-			// leaving the entry in a permanent error while the files sit there
-			// perfectly readable. Drop the index and read the new tree whole.
-			p.log.Info("snapshot was replaced; re-indexing in full",
-				"repo", st.Name, "indexed_sha", st.LastSHA)
-			if err := p.state.ResetRepo(ctx, st.Name); err != nil {
-				return pollResult{}, err
-			}
-			st.LastSHA = ""
+		if err := p.resetIfLost(ctx, spec, &st, "snapshot was replaced"); err != nil {
+			return pollResult{}, err
 		}
 	}
 
+	var paths []string
+	if st.LastSHA != "" {
+		changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, sha)
+		if err != nil {
+			return pollResult{}, err
+		}
+		paths = changed
+		p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
+			"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(sha),
+			"paths", len(changed))
+	}
+
 	return p.indexAndMark(ctx, st, sha, paths, nil)
+}
+
+// resetIfLost drops the index and forgets st.LastSHA when the checkout does
+// not hold that commit, so the run reads the tree whole. A git that FAILED to
+// answer is returned instead: dropping a healthy index over one failed
+// process would re-read the whole repository for nothing.
+func (p *Poller) resetIfLost(ctx context.Context, spec repos.Spec, st *RepoState, why string) error {
+	has, err := p.git.HasCommit(ctx, spec, st.LastSHA)
+	if err != nil || has {
+		return err
+	}
+	p.log.Info(why+"; re-indexing in full", "repo", st.Name, "indexed_sha", st.LastSHA)
+	if err := p.state.ResetRepo(ctx, st.Name); err != nil {
+		return err
+	}
+	st.LastSHA = ""
+	return nil
 }
 
 // warnEmptyStages puts a declared stage that no indexed path lies under on

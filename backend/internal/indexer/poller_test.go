@@ -573,6 +573,50 @@ func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
 	}
 }
 
+func TestPollOnce_aGitThatCannotAnswerKeepsTheIndex(t *testing.T) {
+	// Given: an indexed repository and a last_sha git cannot even look up —
+	// it fails fatally rather than reporting the object missing, as a
+	// broken process or object store does.
+	src := fixtureRemote(t)
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	rec := &recordingIndex{}
+	p := newPoller(t, s, rec.fn)
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("first PollOnce() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, "fixture", "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	if err := s.MarkIndexed(ctx, "fixture", "not-a-commit", Counts{Files: 1, Chunks: 2}); err != nil {
+		t.Fatalf("MarkIndexed() err = %v", err)
+	}
+
+	// When
+	if err := p.PollOnce(ctx); err != nil {
+		t.Fatalf("second PollOnce() err = %v", err)
+	}
+
+	// Then: the failure is on the Repos page and nothing was thrown away.
+	st := stateOf(t, s, "fixture")
+	if st.LastError == "" || st.LastSHA != "not-a-commit" {
+		t.Errorf("state = error %q, sha %q; want the failure recorded and the sha kept", st.LastError, st.LastSHA)
+	}
+	if len(rec.calls) != 1 {
+		t.Errorf("index called %d times, want 1", len(rec.calls))
+	}
+	if n := countOf(t, db, `SELECT COUNT(*) FROM chunks`); n != 2 {
+		t.Errorf("chunks = %d, want the 2 that were there", n)
+	}
+}
+
 func TestPollOnce_anIndexedCommitTheCheckoutLacksIndexesInFull(t *testing.T) {
 	// Given: a recorded last_sha the checkout does not hold — the row outlived
 	// the remote it was indexed from, by whatever route. Diffing from it fails

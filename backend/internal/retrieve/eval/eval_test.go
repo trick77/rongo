@@ -350,7 +350,11 @@ func snapshotHead(ctx context.Context, gitc *gitrepo.Client, state *indexer.Stat
 	if st.LastSHA == "" {
 		return sha, nil, false, nil
 	}
-	if gitc.HasCommit(ctx, spec, st.LastSHA) {
+	has, err := gitc.HasCommit(ctx, spec, st.LastSHA)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if has {
 		paths, err = gitc.ChangedPaths(ctx, spec, st.LastSHA, sha)
 		return sha, paths, false, err
 	}
