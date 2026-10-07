@@ -980,6 +980,13 @@ func TestResumeRepo_aParkedChoiceSaysItIsParked(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "peeq") || !strings.Contains(err.Error(), "parked") {
 		t.Errorf("err = %v, want it to say peeq is parked", err)
 	}
+
+	// One parked and one purged: each is named for what it is.
+	_, err = p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"peeq", "ledger"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"peeq", "ledger"}}, Thread{}, Events{})
+	if err == nil || !strings.Contains(err.Error(), "peeq is parked") || !strings.Contains(err.Error(), "ledger are no longer") {
+		t.Errorf("err = %v, want peeq parked and ledger gone", err)
+	}
 }
 
 // TestRun_aThreadCarryingAllAnswersAcrossTheCorpus: a retry of a turn the
