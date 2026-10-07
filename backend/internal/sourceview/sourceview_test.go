@@ -120,11 +120,11 @@ func TestReadRecorded_servesAFileTheIndexNoLongerListsButNeverOneItSkips(t *test
 	if err != nil || !strings.Contains(got.Content, "func One") {
 		t.Fatalf("ReadRecorded = %q, %v", got.Content, err)
 	}
-	if _, err := f.svc.Read(ctx, "peeq", "internal/a.go", f.first); !errors.Is(err, ErrNotFound) {
-		t.Errorf("the viewer serves an unlisted path: %v", err)
+	if _, err := f.svc.Read(ctx, "peeq", "internal/a.go", f.first); !errors.Is(err, ErrNotFound) || !errors.Is(err, ErrNotIndexed) {
+		t.Errorf("the viewer serves an unlisted path, or does not say it is unlisted: %v", err)
 	}
-	if _, err := f.svc.ReadRecorded(ctx, "peeq", "config/prod.env", f.first); !errors.Is(err, ErrNotFound) {
-		t.Errorf("a skipped file was served: %v", err)
+	if _, err := f.svc.ReadRecorded(ctx, "peeq", "config/prod.env", f.first); !errors.Is(err, ErrNotFound) || errors.Is(err, ErrNotIndexed) {
+		t.Errorf("a skipped file was served, or reads as merely unlisted: %v", err)
 	}
 	if _, err := f.svc.ReadRecorded(ctx, "peeq", "internal/a.go", ""); !errors.Is(err, ErrInvalid) {
 		t.Errorf("no commit: %v", err)

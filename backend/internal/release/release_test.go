@@ -146,3 +146,23 @@ func TestRange_listsNewestFirstAndIsAncestorAgrees(t *testing.T) {
 		t.Errorf("Depth = %d", g.Depth())
 	}
 }
+
+// git's own failures carry ask's sentinel, so the release turn can tell a
+// component whose git state it cannot determine from a database fault,
+// which still fails the turn.
+func TestGitFailuresCarryAsksSentinel(t *testing.T) {
+	g, shas := fixture(t)
+	ctx := context.Background()
+	if _, err := g.ResolveTag(ctx, "ghost", "1.0.0"); !errors.Is(err, ask.ErrGitState) {
+		t.Errorf("ResolveTag(ghost) err = %v, want ErrGitState", err)
+	}
+	if _, err := g.IsAncestor(ctx, "ghost", shas["c1"], shas["c2"]); !errors.Is(err, ask.ErrGitState) {
+		t.Errorf("IsAncestor(ghost) err = %v, want ErrGitState", err)
+	}
+	if _, err := g.Range(ctx, "ghost", shas["c1"], shas["c2"], 10); !errors.Is(err, ask.ErrGitState) {
+		t.Errorf("Range(ghost) err = %v, want ErrGitState", err)
+	}
+	if _, err := g.Head(ctx, "nope"); err == nil || errors.Is(err, ask.ErrGitState) {
+		t.Errorf("Head(nope) err = %v, want a database error without ErrGitState", err)
+	}
+}

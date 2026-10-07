@@ -4,6 +4,8 @@ import { pathForRoute, routeFromPath } from "./routing";
 
 /** The shape the server mints: 16 random bytes as 22 URL-safe characters. */
 const address = "v76BBy2b1nMYOFl2Lnm9JQ";
+/** A share token is minted the same way. */
+const shareToken = "kd8Qw1rZx3Yv9pLmN0aB_c";
 
 describe("routeFromPath", () => {
   it("reads a thread out of its address", () => {
@@ -21,7 +23,7 @@ describe("routeFromPath", () => {
     expect(routeFromPath("/projects")).toEqual({ view: "projects" });
     expect(routeFromPath("/shared")).toEqual({ view: "shared" });
     expect(routeFromPath("/memory")).toEqual({ view: "memory" });
-    expect(routeFromPath("/share/kd8Qw1rZ")).toEqual({ view: "share", token: "kd8Qw1rZ" });
+    expect(routeFromPath(`/share/${shareToken}`)).toEqual({ view: "share", token: shareToken });
   });
 
   it("falls back to the unasked question", () => {
@@ -38,7 +40,7 @@ describe("routeFromPath", () => {
     for (const path of [
       "/", "/new", "/thread/", "/thread/abc", "/thread/19",
       `/thread/${address}x`, `/thread/${address.slice(1)}`,
-      "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/", "/nope",
+      "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/", "/share/kd8Qw1rZ", `/share/${shareToken}x`, "/nope",
     ]) {
       expect(routeFromPath(path)).toEqual({ view: "new" });
     }
@@ -52,7 +54,7 @@ describe("routeFromPath", () => {
       { view: "projects" },
       { view: "shared" },
       { view: "memory" },
-      { view: "share", token: "kd8Qw1rZ" },
+      { view: "share", token: shareToken },
     ] as const) {
       expect(routeFromPath(pathForRoute(route))).toEqual(route);
     }

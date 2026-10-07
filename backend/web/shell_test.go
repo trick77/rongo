@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -113,6 +115,9 @@ func TestOrigin_prefersWhatTheProxySays(t *testing.T) {
 	}
 }
 
+// liveToken is a share token of the shape threads.newToken mints.
+const liveToken = "kd8Qw1rZx3Yv9pLmN0aB_c"
+
 // builtFS stands in for a tree someone has run `make fe-build` over. The real
 // dist/ is gitignored and only exists after that build, so CI's Go job never
 // has one — a test that read the embedded copy would skip there and assert
@@ -133,11 +138,11 @@ func builtFS() fs.FS {
 // as a file, so check it end to end through the handler.
 func TestHandler_putsTheShareTitleInTheCard(t *testing.T) {
 	// Given: a lookup that knows one token and nothing else.
-	h := handler(builtFS(), func(_ context.Context, token string) (string, bool) {
-		if token == "kd8Qw1rZ" {
-			return "Why can an order be cancelled twice?", true
+	h := handler(builtFS(), func(_ context.Context, token string) (string, bool, error) {
+		if token == liveToken {
+			return "Why can an order be cancelled twice?", true, nil
 		}
-		return "", false
+		return "", false, nil
 	})
 
 	tests := []struct {
@@ -149,19 +154,9 @@ func TestHandler_putsTheShareTitleInTheCard(t *testing.T) {
 	}{
 		{
 			name:      "a live link unfurls as its own question",
-			path:      "/share/kd8Qw1rZ",
+			path:      "/share/" + liveToken,
 			wantTitle: "Why can an order be cancelled twice?",
 			wantDesc:  shareDesc,
-			noindex:   true,
-		},
-		{
-			// A revoked or invented token gets the site card WHOLE — title and
-			// description together. Keeping the share description under the
-			// bare site title would describe a thread that is not there.
-			name:      "a token that is not live falls back to the site card",
-			path:      "/share/nope",
-			wantTitle: siteTitle,
-			wantDesc:  siteDesc,
 			noindex:   true,
 		},
 		{
@@ -260,5 +255,107 @@ func TestHandler_hasNoFavicon(t *testing.T) {
 				t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
 			}
 		})
+	}
+}
+
+// A revoked or invented token is a real 404, the same answer the public API
+// gives for it, and still kept out of a search index. A 200 shell would tell
+// a crawler and a monitor the link works. The body is still the app, so the
+// reader sees its own "no longer available" page rather than bare text, and
+// nothing in front caches it: re-sharing a revoked thread returns the SAME
+// token, and a cached 404 would outlive that.
+func TestShellDeadShareLinkIs404(t *testing.T) {
+	dead := func(context.Context, string) (string, bool, error) { return "", false, nil }
+
+	t.Run("built", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler(builtFS(), dead).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if rec.Header().Get("X-Robots-Tag") == "" {
+			t.Error("a dead share link is indexable")
+		}
+		if !strings.Contains(rec.Body.String(), `og:title" content="`+siteTitle+`"`) {
+			t.Errorf("a dead share link was not served the shell with the site card: %q", rec.Body.String())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("Cache-Control = %q, want no-store", got)
+		}
+		if rec.Header().Get("Vary") == "" {
+			t.Error("no Vary on a shell built from the request")
+		}
+		if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(rec.Body.Len()) {
+			t.Errorf("Content-Length = %q, body is %d bytes", got, rec.Body.Len())
+		}
+	})
+
+	t.Run("placeholder", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler(fstest.MapFS{}, dead).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if rec.Header().Get("X-Robots-Tag") == "" {
+			t.Error("a dead share link is indexable")
+		}
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Error("a dead share link may be cached")
+		}
+	})
+}
+
+// Only what the store mints is a share link; anything else never reaches the
+// record. The placeholder build answers the same set, and marks a share link
+// noindex like the shell does.
+func TestShellShareRouteNeedsTokenShape(t *testing.T) {
+	asked := 0
+	lookup := func(context.Context, string) (string, bool, error) {
+		asked++
+		return "A title", true, nil
+	}
+	for name, fsys := range map[string]fs.FS{"built": builtFS(), "placeholder": fstest.MapFS{}} {
+		h := handler(fsys, lookup)
+		for _, path := range []string{"/share/nope", "/share/" + liveToken + "x", "/share/kd8Qw1rZx3Yv9pLmN0aB.c", "/share/" + liveToken + "/x"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s %s: status = %d, want 404", name, path, rec.Code)
+			}
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: a token of the right shape: status = %d, want 200", name, rec.Code)
+		}
+		if rec.Header().Get("X-Robots-Tag") == "" {
+			t.Errorf("%s: a share link is indexable", name)
+		}
+	}
+	if asked != 2 {
+		t.Errorf("the record was asked %d times, want twice (one well-formed token per build)", asked)
+	}
+}
+
+// A record that cannot answer is not a revocation: the shell is served with
+// the site card, and the SPA asks the API itself.
+func TestShellShareTitleErrorStillServesShell(t *testing.T) {
+	h := handler(builtFS(), func(context.Context, string) (string, bool, error) {
+		return "", false, errors.New("database is locked")
+	})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `og:title" content="`+siteTitle+`"`) {
+		t.Error("an outage did not fall back to the site card")
+	}
+	if rec.Header().Get("X-Robots-Tag") == "" {
+		t.Error("a share link is indexable")
 	}
 }

@@ -6,6 +6,29 @@ import (
 	"testing"
 )
 
+// TestParked_namesOnlyTheParkedOnes: a resolver drops a parked repository the
+// same way it drops a purged one, and a thread pinned to either fails — but
+// parked is not gone, and the turn has to say which.
+func TestParked_namesOnlyTheParkedOnes(t *testing.T) {
+	db := testDB(t)
+	addRepo(t, db, "peeq", "master")
+	addRepo(t, db, "loom", "main")
+	park(t, db, "peeq")
+	r := New(db, nil)
+
+	got, err := r.Parked(context.Background(), []string{"loom", "peeq", "purged"})
+
+	if err != nil {
+		t.Fatalf("Parked: %v", err)
+	}
+	if len(got) != 1 || got[0] != "peeq" {
+		t.Errorf("Parked() = %v, want [peeq]", got)
+	}
+	if got, err := r.Parked(context.Background(), nil); err != nil || got != nil {
+		t.Errorf("Parked(nil) = %v, %v, want nothing", got, err)
+	}
+}
+
 // park sets enabled = 0 the way SyncSpecs does for `enabled: false`.
 func park(t *testing.T, db *sql.DB, name string) {
 	t.Helper()

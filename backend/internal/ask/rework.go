@@ -57,7 +57,11 @@ func (p *Pipeline) answerRework(ctx context.Context, instruction string, audienc
 	// one stood.
 	scope = p.describeProjects(ctx, scope)
 	scope.Processes = p.describeProcesses(ctx, t.Sources)
-	scope.DocsOnly = DocsOnly(t.Sources)
+	// Said live, the way a fresh turn says it: the record alone would tell
+	// the reader only after a reload.
+	if scope.DocsOnly = DocsOnly(t.Sources); scope.DocsOnly {
+		ev.notice(ScopeNotice(lang, scope))
+	}
 
 	ev.status("answering")
 	answer, err := p.answerer.Rework(ctx, instruction, audience, lang, t, scope, ev.tokens())

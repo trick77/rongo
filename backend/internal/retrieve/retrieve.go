@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/projects"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // defaultCandidates is how many rows each lane retrieves before fusion. Fusion
@@ -564,6 +565,45 @@ func knownReposIn(want []string, question string, known []string, project map[st
 		}
 	}
 	return out
+}
+
+// Parked is the names among names held with `enabled: false`, in the order
+// asked. ResolveRepos drops a parked repository exactly as it drops one that
+// was purged; a caller failing on the drop asks this to say which it was,
+// because parked keeps its index and citations and is not gone.
+func (r *Retriever) Parked(ctx context.Context, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(names))
+	for i, n := range names {
+		args[i] = n
+	}
+	//nolint:gosec // only a ?-placeholder list is interpolated; every name is a bound parameter
+	rows, err := r.store.db.QueryContext(ctx,
+		`SELECT name FROM repo_state WHERE enabled = 0 AND name IN (`+sqlutil.Placeholders(len(names))+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read parked repositories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	parked := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("read parked repositories: %w", err)
+		}
+		parked[n] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read parked repositories: %w", err)
+	}
+	var out []string
+	for _, n := range names {
+		if parked[n] {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
 // reposAndProjects reads the repository names and the projects they group into.

@@ -467,7 +467,12 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // all or nothing. Written apart, a sources write that failed left an answer
 // whose basis read as "no longer indexed" — a claim about the index, when the
 // fact was a write that never landed.
-func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source) error {
+//
+// choice is the card a resumed turn answers, nil for every other turn. Its
+// link is the same write: apart, a link that did not land — or a process that
+// died between the two — left an answered row the card knew nothing about,
+// and the next click wrote a second answer under it.
+func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source, choice *Choice) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -480,7 +485,21 @@ func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer s
 	if err := saveSourcesTx(ctx, tx, messageID, sources); err != nil {
 		return err
 	}
+	if choice != nil {
+		if err := linkChoice(ctx, tx, choice.Subject, messageID, choice.ClarificationID, choice.Idx); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// Choice is the card entry a resumed turn answers: the clarification and the
+// candidate index, -1 for a narrowing resumed from the panel as a whole.
+// Subject is the owner the link is checked against.
+type Choice struct {
+	Subject         string
+	ClarificationID int64
+	Idx             int
 }
 
 func finishTx(ctx context.Context, tx *sql.Tx, messageID int64, answer string, citations []ask.Citation) error {
@@ -802,11 +821,15 @@ func (s *Store) ThreadScope(ctx context.Context, subject string, threadID int64)
 		if err := rows.Scan(&blob); err != nil {
 			return nil, fmt.Errorf("read thread scope: %w", err)
 		}
-		// scanScope yields the zero scope for unreadable JSON, which reads
-		// here as "this turn narrowed nothing" — the pin is lost, never the
-		// turn, exactly as an unreadable scope costs the pills and not the
-		// message.
-		if sc := scanScope(blob); len(sc.Known) > 0 {
+		// Not scanScope: its zero scope for unreadable JSON would read here
+		// as "this turn narrowed nothing", and a thread that lost its pin
+		// answers the follow-up from the whole corpus. The pin is the turn's
+		// ceiling, so an unreadable one fails the turn.
+		var sc ask.Scope
+		if err := json.Unmarshal([]byte(blob), &sc); err != nil {
+			return nil, fmt.Errorf("read thread scope of a turn: %w", err)
+		}
+		if len(sc.Known) > 0 {
 			return sc.Known, nil
 		}
 	}
@@ -1366,8 +1389,20 @@ func (s *Store) CandidateHits(ctx context.Context, subject string, clarification
 // attribute an answer to a card it never came from, which corrupts the record
 // this whole task exists to keep honest. A mismatch — cross-thread,
 // cross-user, or either id simply wrong — updates zero rows and errors.
+//
+// A resumed turn links through FinishWithSources, in the answer's own
+// transaction; this is the same write on its own.
 func (s *Store) LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error {
-	res, err := s.db.ExecContext(ctx, `
+	return linkChoice(ctx, s.db, subject, messageID, clarificationID, idx)
+}
+
+// execer is *sql.DB and *sql.Tx.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func linkChoice(ctx context.Context, db execer, subject string, messageID, clarificationID int64, idx int) error {
+	res, err := db.ExecContext(ctx, `
 		UPDATE messages SET from_clarification_id = ?, from_candidate_idx = ?
 		WHERE id = ?
 		  AND thread_id = (

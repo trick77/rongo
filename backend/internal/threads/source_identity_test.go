@@ -1,9 +1,11 @@
 package threads
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +106,38 @@ func TestASourceGitCannotProduceIsMissing(t *testing.T) {
 	}
 	if total != 2 || len(got) != 1 || got[0].Path != "a.go" {
 		t.Errorf("total %d, got %+v; want 2 and only a.go", total, got)
+	}
+}
+
+// A repository purged from the list is an expected miss and every reopen of
+// its threads would say so again: quiet. Git failing on a repository still
+// listed is not expected, and is said at Warn.
+func TestAnUnreadableSourceWarnsOnlyForARepositoryStillListed(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	s, ctx, threadID, db := newThreadStore(t)
+	s.WithEvidence(&fakeEvidence{})
+	msg, _ := s.AddQuestion(ctx, threadID, "ba", "en", "q", 0)
+	insertChunk(t, db, 1, "peeq", "a.go", "package a")
+	if err := s.SaveSources(ctx, msg.ID, []ask.Source{
+		{ChunkID: 1, Repo: "peeq", Path: "a.go", SHA: "deadbeef", StartLine: 1, EndLine: 1, Reason: "hit"},
+		{ChunkID: 2, Repo: "gone", Path: "b.go", SHA: "cafe", StartLine: 1, EndLine: 2, Reason: "hit"},
+	}); err != nil {
+		t.Fatalf("save sources: %v", err)
+	}
+
+	if _, _, err := s.Sources(ctx, testSubject, msg.ID); err != nil {
+		t.Fatalf("sources: %v", err)
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, "repo=peeq") {
+		t.Errorf("no warning for the listed repository:\n%s", out)
+	}
+	if strings.Contains(out, "repo=gone") {
+		t.Errorf("warned for a purged repository:\n%s", out)
 	}
 }
 

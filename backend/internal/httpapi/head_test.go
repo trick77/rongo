@@ -297,7 +297,48 @@ func TestAsk_aRetryOfAResumedRowKeepsTheRowsOwnScope(t *testing.T) {
 					t.Errorf("pin = %v, want %v", a.gotThread.Pin, tc.want)
 				}
 			}
+			// The permission travels with the scope: dropped, the retry
+			// cards the question the reader already answered.
+			if a.gotThread.All != tc.scope.All {
+				t.Errorf("all = %v, want %v", a.gotThread.All, tc.scope.All)
+			}
 		})
+	}
+}
+
+// "All repositories" was the reader's answer to ONE question. A request
+// naming that row as its head but asking something else is not a retry of
+// it, and does not inherit the permission.
+func TestAsk_aNewQuestionUnderAnAllHeadIsNotGivenAll(t *testing.T) {
+	a := &fakeAsker{tokens: []string{"x"}}
+	deps, st := askDeps(t, a)
+	ctx := context.Background()
+	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
+	list, err := deps.Threads.List(ctx, testSubject)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list threads: %v (%d)", err, len(list))
+	}
+	failed, err := st.AddQuestion(ctx, list[0].ID, "ba", "en", "Und wie schnell?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.SetScope(ctx, failed.ID, ask.Scope{All: true}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	if err := st.Fail(ctx, failed.ID, "kaputt"); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+
+	a.gotThread = ask.Thread{}
+	rec := postAsk(t, deps, fmt.Sprintf(
+		`{"thread_id":%q,"question":"Und wo wird gecacht?","audience":"ba","head_message_id":%d}`,
+		list[0].PublicID, failed.ID))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	if a.gotThread.All {
+		t.Error("a different question under the head must not inherit all repositories")
 	}
 }
 

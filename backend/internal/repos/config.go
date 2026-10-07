@@ -604,6 +604,12 @@ func validateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("name is required")
 	}
+	// Refused rather than trimmed: uses targets are trimmed, so a padded
+	// name is one they cannot reach, and trimming it here would quietly
+	// re-identify a repository already indexed under the padded name.
+	if name != strings.TrimSpace(name) {
+		return fmt.Errorf("name %q has leading or trailing whitespace", name)
+	}
 	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") || name == "." {
 		return fmt.Errorf(
 			"name %q must be a single path segment without separators or parent references", name)

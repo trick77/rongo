@@ -38,6 +38,22 @@ type fakeSearch struct {
 	// scope wants: the guess passes through unchanged, as it did before
 	// ResolveRepos existed.
 	indexed []string
+	// parked is what this fake index holds with `enabled: false`: not in
+	// indexed, and not gone either.
+	parked []string
+}
+
+// Parked answers from parked, in the order asked.
+func (f *fakeSearch) Parked(_ context.Context, names []string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		for _, p := range f.parked {
+			if n == p {
+				out = append(out, n)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSearch) Search(_ context.Context, q retrieve.Query) ([]retrieve.Hit, error) {
@@ -103,6 +119,12 @@ func (f searchFunc) ResolveRepos(_ context.Context, _ []string, _ string) (known
 // Substring scans nothing: the locate loop is off in these tests, and a
 // pipeline with no loop must behave exactly as it did before the loop existed.
 func (f searchFunc) Substring(_ context.Context, _ string, _ int, _ []string, _ string, _ retrieve.StagePrefixes) ([]retrieve.Hit, error) {
+	return nil, nil
+}
+
+// Parked knows no parked repository: a name these tests resolve to nothing
+// is one the index no longer carries.
+func (f searchFunc) Parked(context.Context, []string) ([]string, error) {
 	return nil, nil
 }
 
@@ -515,6 +537,43 @@ func TestResumeRepoWithNoRepositorySearchesTheWholeCorpus(t *testing.T) {
 	}
 }
 
+// dedupSearch resolves the way the real retriever does: every name once.
+type dedupSearch struct{ indexedSearch }
+
+func (s dedupSearch) ResolveRepos(ctx context.Context, want []string, q string) (known, unknown []string, err error) {
+	all, unknown, err := s.indexedSearch.ResolveRepos(ctx, want, q)
+	seen := map[string]bool{}
+	for _, n := range all {
+		if !seen[n] {
+			seen[n] = true
+			known = append(known, n)
+		}
+	}
+	return known, unknown, err
+}
+
+// TestResumeRepo_aRepeatedRepositoryIsNotAMissingOne: two products sharing a
+// library reach ResumeRepo as one list naming the library twice, and the
+// resolver folds the repeat. One repository named twice is not one missing.
+func TestResumeRepo_aRepeatedRepositoryIsNotAMissingOne(t *testing.T) {
+	searched := false
+	p := newTestPipeline(t, func(f *pipelineFakes) {
+		f.search = dedupSearch{indexedSearch{searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
+			searched = true
+			return nil, nil
+		}, indexed: []string{"shop-ui", "lib"}}}
+	})
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"shop-ui", "lib", "lib"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"shop-ui", "lib"}}, Thread{}, Events{})
+	if err != nil {
+		t.Fatalf("resume repo: %v", err)
+	}
+	if !searched {
+		t.Error("want the chosen repositories searched")
+	}
+}
+
 // TestResumeRepoSaysNothingFoundRatherThanAnswering: a repository can be
 // chosen and turn out to hold nothing for this question. "No hit means no
 // hit" — never an answer assembled from what the card happened to show.
@@ -857,6 +916,96 @@ func TestTheAnswerPromptOfAFirstTurnSaysNothingAboutAFollowUp(t *testing.T) {
 	}
 	if strings.Contains(*prompt, "This is a follow-up") {
 		t.Errorf("a first turn must not be told it is following something up:\n%s", *prompt)
+	}
+}
+
+// TestRun_aPinMissingOneRepositoryFailsTheTurn: a pin that lost ONE of its
+// repositories is not a narrower pin. The survivors would be searched while
+// the scope, the notice and the record all named the full list — the same
+// substitution ResumeRepo refuses, so the turn fails the same way.
+func TestRun_aPinMissingOneRepositoryFailsTheTurn(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	_, _, err := p.Run(context.Background(), "und das?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
+
+	if err == nil {
+		t.Fatal("want the turn to fail when a pinned repository left the index")
+	}
+	if !strings.Contains(err.Error(), "peeq") || strings.Contains(err.Error(), "rongo") {
+		t.Errorf("err = %v, want it to name the missing repository alone", err)
+	}
+	if len(search.queries) != 0 {
+		t.Errorf("searched %d times, want no search on a pin the index cannot honour", len(search.queries))
+	}
+}
+
+// TestRun_aPinWithAParkedMemberSaysItIsParked: parked is not purged — its
+// index and its citations stay — so "no longer carries" would be false. The
+// turn still fails: a thread does not widen, and answering from the
+// survivors is the substitution the pin check exists to stop.
+func TestRun_aPinWithAParkedMemberSaysItIsParked(t *testing.T) {
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"rongo"}, parked: []string{"peeq"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+
+	_, _, err := p.Run(context.Background(), "und das?", AudienceBA, LanguageEN,
+		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
+
+	if err == nil {
+		t.Fatal("want the turn to fail on a parked member of the pin")
+	}
+	if !strings.Contains(err.Error(), "peeq") || !strings.Contains(err.Error(), "parked") ||
+		strings.Contains(err.Error(), "no longer") {
+		t.Errorf("err = %v, want it to say peeq is parked, not gone", err)
+	}
+	if len(search.queries) != 0 {
+		t.Errorf("searched %d times, want no search", len(search.queries))
+	}
+}
+
+// TestResumeRepo_aParkedChoiceSaysItIsParked: the same distinction for a
+// repository parked between the card and the click.
+func TestResumeRepo_aParkedChoiceSaysItIsParked(t *testing.T) {
+	search := &fakeSearch{indexed: []string{"loom"}, parked: []string{"peeq"}}
+	p := newTestPipeline(t, func(f *pipelineFakes) { f.search = search })
+
+	_, err := p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"peeq", "loom"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"peeq", "loom"}}, Thread{}, Events{})
+
+	if err == nil || !strings.Contains(err.Error(), "peeq") || !strings.Contains(err.Error(), "parked") {
+		t.Errorf("err = %v, want it to say peeq is parked", err)
+	}
+
+	// One parked and one purged: each is named for what it is.
+	_, err = p.ResumeRepo(context.Background(), "frage", Understanding{}, []string{"peeq", "ledger"},
+		AudienceBA, LanguageEN, Scope{Known: []string{"peeq", "ledger"}}, Thread{}, Events{})
+	if err == nil || !strings.Contains(err.Error(), "peeq is parked") || !strings.Contains(err.Error(), "ledger are no longer") {
+		t.Errorf("err = %v, want peeq parked and ledger gone", err)
+	}
+}
+
+// TestRun_aThreadCarryingAllAnswersAcrossTheCorpus: a retry of a turn the
+// reader answered by choosing "all repositories" is the same question under
+// the same permission, so the repository card must not come back.
+func TestRun_aThreadCarryingAllAnswersAcrossTheCorpus(t *testing.T) {
+	fr := &fakeRouter{}
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+
+	got, _, err := p.Run(context.Background(), "how are token costs calculated?", AudienceBA, LanguageEN,
+		Thread{All: true}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !fr.all || !got.Scope.All {
+		t.Errorf("router all = %v, scope = %+v, want the reader's earlier choice honoured", fr.all, got.Scope)
 	}
 }
 

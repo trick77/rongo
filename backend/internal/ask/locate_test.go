@@ -139,6 +139,10 @@ func (s locateSearcher) ResolveRepos(_ context.Context, want []string, _ string)
 	return want, nil, nil
 }
 
+func (s locateSearcher) Parked(context.Context, []string) ([]string, error) {
+	return nil, nil
+}
+
 func call(id, name, args string) llm.ToolCall {
 	return llm.ToolCall{ID: id, Name: name, Arguments: args}
 }
