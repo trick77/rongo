@@ -105,7 +105,7 @@ func TestSyncSpecs_reportsWhetherAPurgedRepoWasASnapshot(t *testing.T) {
 	}
 
 	// When: both leave the list
-	purged, err := s.SyncSpecs(ctx, []repos.Spec{
+	synced, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "keeper", CloneURL: "/tmp/keeper", Enabled: true, Project: "keeper"},
 	})
 
@@ -113,6 +113,7 @@ func TestSyncSpecs_reportsWhetherAPurgedRepoWasASnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
+	purged := synced.Purged
 	if len(purged) != 2 {
 		t.Fatalf("purged = %v, want two entries", purged)
 	}

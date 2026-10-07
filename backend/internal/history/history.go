@@ -7,6 +7,7 @@ package history
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -39,17 +40,22 @@ func (s *Store) Sync(ctx context.Context, repo string, commits []gitrepo.Commit)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// What the table holds for this repository, read once: insert skips
-	// these, dropAbsent drops the ones the list no longer carries. Per commit
-	// that was one COUNT query each, five hundred a run.
+	// The transaction WRITES first. In WAL mode a transaction that opens with
+	// a read holds a snapshot, and its first write after another connection
+	// has committed fails at once with "database is locked" — the busy
+	// timeout never runs for a stale snapshot. The HTTP side writes all the
+	// time, so the drop goes first and the read follows it.
+	if err := dropAbsent(ctx, tx, repo, commits); err != nil {
+		return err
+	}
+	// What the table still holds for this repository, read once: insert
+	// skips these. Per commit that was one COUNT query each, five hundred a
+	// run.
 	held, err := heldSHAs(ctx, tx, repo)
 	if err != nil {
 		return err
 	}
 	if err := insert(ctx, tx, repo, commits, held); err != nil {
-		return err
-	}
-	if err := dropAbsent(ctx, tx, commits, held); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -75,25 +81,20 @@ func heldSHAs(ctx context.Context, tx *sql.Tx, repo string) (map[string]int64, e
 }
 
 // dropAbsent removes the repository's rows whose sha the list no longer
-// carries, mirror first, like PurgeTx.
-func dropAbsent(ctx context.Context, tx *sql.Tx, commits []gitrepo.Commit, held map[string]int64) error {
-	keep := make(map[string]bool, len(commits))
-	for _, c := range commits {
-		keep[c.SHA] = true
+// carries, mirror first, like PurgeTx. Two statements and no read ahead of
+// them, so it can open Sync's transaction.
+func dropAbsent(ctx context.Context, tx *sql.Tx, repo string, commits []gitrepo.Commit) error {
+	shas := make([]string, len(commits))
+	for i, c := range commits {
+		shas[i] = c.SHA
 	}
-	var gone []int64
-	for sha, id := range held {
-		if !keep[sha] {
-			gone = append(gone, id)
-		}
+	keep, _ := json.Marshal(shas) // a []string always marshals
+	const absent = `SELECT id FROM commits WHERE repo = ?1 AND sha NOT IN (SELECT value FROM json_each(?2))`
+	if _, err := tx.ExecContext(ctx, `DELETE FROM commits_fts WHERE rowid IN (`+absent+`)`, repo, string(keep)); err != nil {
+		return fmt.Errorf("drop commits of %s from commits_fts: %w", repo, err)
 	}
-	for _, id := range gone {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM commits_fts WHERE rowid = ?`, id); err != nil {
-			return fmt.Errorf("drop commit %d from commits_fts: %w", id, err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM commits WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("drop commit %d: %w", id, err)
-		}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM commits WHERE id IN (`+absent+`)`, repo, string(keep)); err != nil {
+		return fmt.Errorf("drop commits of %s: %w", repo, err)
 	}
 	return nil
 }

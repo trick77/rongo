@@ -233,15 +233,28 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 
 // HasCommit reports whether a sha is in the checkout's object store.
 //
-// A remote repository never needs this: a fetch only adds objects, so a
-// recorded last_sha is always still there. A snapshot can lose one — deleting
-// the drop and extracting a newer archive gives it a fresh `git init` and an
-// empty object store, after which diffing against the recorded commit fails
-// with "bad object" on every cycle and the entry never recovers. The caller
-// asks first and re-indexes in full instead.
-func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) bool {
-	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
-	return err == nil
+// A fetch only adds objects, so a checkout that indexed last_sha still holds
+// it. A snapshot can lose one — deleting the drop and extracting a newer
+// archive gives it a fresh `git init` and an empty object store, after which
+// diffing against the recorded commit fails with "bad object" on every cycle
+// and the entry never recovers. A clone can too, when its directory was
+// removed and the entry re-cloned from another remote. The caller asks first
+// and re-indexes in full instead.
+//
+// Only git's own "no such object" is absence: a plain `cat-file -e` exits 1
+// for it and 128 for anything fatal (a ^{commit} suffix would make a miss
+// fatal too). Any other failure is returned, because the caller drops the
+// whole index on absence, and a failed process is not a missing commit.
+func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) (bool, error) {
+	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha)
+	switch {
+	case err == nil:
+		return true, nil
+	case exitCode(err) == 1:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // OriginURL reports which remote a checkout was actually made from.
@@ -468,6 +481,10 @@ type Change struct {
 	// a file BEFORE it is read. `git show` of a symlink returns the link
 	// target as if it were the file's text.
 	Mode string
+	// Size is the blob's size in bytes at the newer commit, 0 when deleted or
+	// not a file: what lets the indexer refuse a file over its ceiling
+	// without reading it. A 2 GB artifact read whole took the poller down.
+	Size int64
 }
 
 // Indexable reports whether a tree entry of this mode is a file to read:
@@ -488,11 +505,17 @@ func Indexable(mode string) bool {
 // three-field record to parse for the same outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--raw", "--no-renames", fromSHA+".."+toSHA)
+		"diff", "--raw", "--no-renames", "--no-abbrev", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
 	changes := []Change{}
+	// The blobs to size, by object id: --raw carries no size, and asking
+	// by id needs no path quoting. The FULL id (--no-abbrev): an
+	// abbreviation is a revision to cat-file, where a ref of that name wins
+	// over the blob and an ambiguous one fails the run.
+	var blobs []int
+	var oids strings.Builder
 	for _, line := range nonEmptyLines(out) {
 		// :<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>
 		meta, path, ok := strings.Cut(line, "\t")
@@ -504,28 +527,52 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 		if !ch.Deleted {
 			ch.Mode = fields[1]
 		}
+		if Indexable(ch.Mode) {
+			blobs = append(blobs, len(changes))
+			oids.WriteString(fields[3] + "\n")
+		}
 		changes = append(changes, ch)
+	}
+	if len(blobs) == 0 {
+		return changes, nil
+	}
+	sized, err := c.runIn(ctx, c.Dir(spec), strings.NewReader(oids.String()), nil, "cat-file", "--batch-check")
+	if err != nil {
+		return nil, err
+	}
+	lines := nonEmptyLines(string(sized))
+	if len(lines) != len(blobs) {
+		return nil, fmt.Errorf("sized %d of %d changed blobs", len(lines), len(blobs))
+	}
+	for i, line := range lines {
+		_, size, err := parseBatchHeader(line)
+		if err != nil {
+			return nil, err
+		}
+		changes[blobs[i]].Size = size
 	}
 	return changes, nil
 }
 
-// ListEntries lists every tracked entry at a commit with its mode, for the
-// initial full index. ListPaths is the same listing without the modes.
+// ListEntries lists every tracked entry at a commit with its mode and size,
+// for the initial full index. ListPaths is the same listing without either.
 func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"ls-tree", "-r", sha)
+		"ls-tree", "-r", "-l", sha)
 	if err != nil {
 		return nil, err
 	}
 	entries := []Change{}
 	for _, line := range nonEmptyLines(out) {
-		// <mode> <type> <sha>\t<path>
+		// <mode> <type> <sha> <size>\t<path>; the size is "-" for a
+		// submodule pointer, which names a commit and has none.
 		meta, path, ok := strings.Cut(line, "\t")
 		fields := strings.Fields(meta)
-		if !ok || len(fields) != 3 {
+		if !ok || len(fields) != 4 {
 			return nil, fmt.Errorf("unparseable tree record %q", line)
 		}
-		entries = append(entries, Change{Path: path, Mode: fields[0]})
+		size, _ := strconv.ParseInt(fields[3], 10, 64)
+		entries = append(entries, Change{Path: path, Mode: fields[0], Size: size})
 	}
 	return entries, nil
 }

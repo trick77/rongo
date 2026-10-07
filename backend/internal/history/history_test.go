@@ -182,3 +182,17 @@ func TestInsert_refusesAnUnparseableDate(t *testing.T) {
 		t.Error("a bad date was stored")
 	}
 }
+
+func TestSync_reportsAFailedDrop(t *testing.T) {
+	for _, table := range []string{"commits_fts", "commits"} {
+		t.Run(table, func(t *testing.T) {
+			db := testDB(t)
+			if _, err := db.Exec(`DROP TABLE ` + table); err != nil {
+				t.Fatalf("sabotage: %v", err)
+			}
+			if err := New(db).Sync(context.Background(), "shop", nil); err == nil {
+				t.Error("Sync() err = nil, want the failed drop")
+			}
+		})
+	}
+}

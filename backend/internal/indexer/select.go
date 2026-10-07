@@ -338,7 +338,7 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 	// too_large anyway, and labelling a binary that happened to match a pattern
 	// "secret" when "binary" is the true reason.
 	if len(body) > s.opts.MaxBytes {
-		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated", body
+		return SkipTooLarge, tooLargeDetail, body
 	}
 	if isBinary(body) {
 		return SkipBinary, "contains NUL bytes", body
@@ -372,6 +372,35 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 		return SkipGenerated, "carries a generated-code marker", body
 	}
 	return Include, "", body
+}
+
+const tooLargeDetail = "larger than the configured ceiling; skipped whole rather than truncated"
+
+// MaxBytes is the ceiling above which a file is skipped whole, for the
+// pipeline to apply before the read when git has said how big a blob is.
+func (s *Selector) MaxBytes() int64 { return int64(s.opts.MaxBytes) }
+
+// SelectSize is the part of SelectBody that needs the size but not the bytes:
+// the file ceiling, the data formats and the data and schema ceilings,
+// decided on the size git listed so a refused blob is never read. size is 0
+// when unknown, which decides nothing by size. decided is false when the
+// bytes are needed.
+//
+// A configuration file is redacted BEFORE SelectBody applies the data
+// ceiling, and the redacted body can fall under it, so for one only the file
+// ceiling and the path decide here: deciding its data ceiling on the raw
+// size would stop indexing a file that is indexed today.
+func (s *Selector) SelectSize(p string, size int64) (d Decision, reason string, decided bool) {
+	if size > int64(s.opts.MaxBytes) {
+		return SkipTooLarge, tooLargeDetail, true
+	}
+	if redact.IsConfigPath(p) {
+		size = 0
+	}
+	if d, reason := s.selectByPath(p, int(size)); d != Include {
+		return d, reason, true
+	}
+	return Include, "", false
 }
 
 // SelectPath is the part of SelectBody that needs no body: the operator's

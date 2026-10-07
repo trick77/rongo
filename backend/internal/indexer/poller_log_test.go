@@ -7,10 +7,61 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
 )
+
+// TestRun_aShutdownMidCycleIsNotAFailure: a cancelled run is the process
+// ending, not a broken repository. It logged "poll cycle failed" at Error and
+// tried to record the failure with the dead context, which failed too.
+func TestRun_aShutdownMidCycleIsNotAFailure(t *testing.T) {
+	// Given a repository whose index run sees the shutdown arrive, and one
+	// after it the cycle never reaches
+	db := newDB(t)
+	s := NewStateStore(db)
+	if _, err := s.SyncSpecs(context.Background(), []repos.Spec{
+		snapshotSpec("acme-core"), snapshotSpec("acme-web"),
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := t.TempDir()
+	cap := &capture{}
+	p := NewPoller(PollerDeps{
+		State: s,
+		Git:   gitrepo.New(gitBin, root),
+		Index: func(ctx context.Context, _ RepoState, _ string, _ []string) (Counts, error) {
+			cancel()
+			return Counts{}, ctx.Err()
+		},
+		Interval:   time.Hour,
+		FirstDelay: time.Millisecond,
+		Logger:     slog.New(cap),
+	})
+	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+
+	// When
+	p.Run(ctx)
+
+	// Then nothing reads as a failure, in the log or on the Repos page
+	cap.mu.Lock()
+	for _, r := range cap.records {
+		if r.Level >= slog.LevelWarn {
+			t.Errorf("logged %s %q at shutdown", r.Level, r.Message)
+		}
+	}
+	cap.mu.Unlock()
+	if st := stateOf(t, s, "acme-core"); st.LastError != "" {
+		t.Errorf("LastError = %q, want none", st.LastError)
+	}
+}
 
 // capture collects log records so a test can assert on what a run SAID, not
 // only on what it wrote to the database. A silent healthy run is the defect
