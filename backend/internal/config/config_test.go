@@ -781,3 +781,37 @@ func TestLoad_proxyAdminGroup(t *testing.T) {
 		})
 	}
 }
+
+// A mode-bound setting set under a mode that never reads it looks active
+// and changes nothing: BACKEND_OIDC_ADMIN_GROUP under proxy mode gated no
+// re-index. Every one is refused, by name and mode.
+func TestLoad_aModeBoundSettingIsRefusedInAModeThatNeverReadsIt(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		mode map[string]string
+	}{
+		{"BACKEND_OIDC_ADMIN_GROUP", map[string]string{"BACKEND_AUTH_MODE": "proxy"}},
+		{"BACKEND_OIDC_ISSUER", map[string]string{}},
+		{"BACKEND_OIDC_CLIENT_ID", map[string]string{"BACKEND_AUTH_MODE": "token", "BACKEND_ADMIN_TOKEN": "t0ken"}},
+		{"BACKEND_OIDC_CLIENT_SECRET", map[string]string{}},
+		{"BACKEND_OIDC_REDIRECT_URL", map[string]string{}},
+		{"BACKEND_ADMIN_TOKEN", oidcEnv(nil)},
+		{"BACKEND_ADMIN_USER", map[string]string{"BACKEND_AUTH_MODE": "proxy"}},
+		{"BACKEND_ADMIN_PASSWORD_HASH", map[string]string{}},
+		{"BACKEND_PROXY_ADMIN_GROUP", oidcEnv(nil)},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			env := map[string]string{tc.key: "x"}
+			for k, v := range tc.mode {
+				env[k] = v
+			}
+			setEnv(t, env)
+
+			_, err := Load()
+
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), "BACKEND_AUTH_MODE=") {
+				t.Errorf("Load() err = %v, want a refusal naming %s and the mode", err, tc.key)
+			}
+		})
+	}
+}

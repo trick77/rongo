@@ -376,15 +376,18 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password, oidc or proxy)", cfg.AuthMode)
 	}
 
-	// Only password mode reads the flag. Anywhere else a value set here
-	// looks active and changes nothing, which is the failure every other
-	// setting refuses.
-	if strings.TrimSpace(os.Getenv("BACKEND_COOKIE_SECURE")) != "" && cfg.AuthMode != AuthModePassword {
-		return Config{}, fmt.Errorf("BACKEND_COOKIE_SECURE is read in password mode only; BACKEND_AUTH_MODE=%s %s, remove it", cfg.AuthMode, cookieSource(cfg.AuthMode))
-	}
-
-	if cfg.ProxyAdminGroup != "" && cfg.AuthMode != AuthModeProxy {
-		return Config{}, fmt.Errorf("BACKEND_PROXY_ADMIN_GROUP is read in proxy mode only, got BACKEND_AUTH_MODE=%s; remove it", cfg.AuthMode)
+	// A mode-bound setting set under a mode that never reads it looks
+	// active and changes nothing, which is the failure every other setting
+	// refuses: BACKEND_OIDC_ADMIN_GROUP under proxy mode gated nothing.
+	for _, b := range modeBound {
+		if strings.TrimSpace(os.Getenv(b.name)) == "" || b.mode == cfg.AuthMode {
+			continue
+		}
+		hint := ""
+		if b.hint != nil {
+			hint = "; " + b.hint(cfg.AuthMode)
+		}
+		return Config{}, fmt.Errorf("%s is read in %s mode only, got BACKEND_AUTH_MODE=%s%s; remove it", b.name, b.mode, cfg.AuthMode, hint)
 	}
 
 	if cfg.AuthMode == AuthModeOIDC {
@@ -419,13 +422,32 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// modeBound is every setting exactly one auth mode reads.
+var modeBound = []struct {
+	name string
+	mode AuthMode
+	// hint, when set, says what the refusing mode does instead.
+	hint func(AuthMode) string
+}{
+	{name: "BACKEND_ADMIN_TOKEN", mode: AuthModeToken},
+	{name: "BACKEND_ADMIN_USER", mode: AuthModePassword},
+	{name: "BACKEND_ADMIN_PASSWORD_HASH", mode: AuthModePassword},
+	{name: "BACKEND_COOKIE_SECURE", mode: AuthModePassword, hint: cookieSource},
+	{name: "BACKEND_OIDC_ISSUER", mode: AuthModeOIDC},
+	{name: "BACKEND_OIDC_CLIENT_ID", mode: AuthModeOIDC},
+	{name: "BACKEND_OIDC_CLIENT_SECRET", mode: AuthModeOIDC},
+	{name: "BACKEND_OIDC_REDIRECT_URL", mode: AuthModeOIDC},
+	{name: "BACKEND_OIDC_ADMIN_GROUP", mode: AuthModeOIDC},
+	{name: "BACKEND_PROXY_ADMIN_GROUP", mode: AuthModeProxy},
+}
+
 // cookieSource says where a mode other than password takes the session
 // cookie's Secure flag from, for the refusal of BACKEND_COOKIE_SECURE.
 func cookieSource(mode AuthMode) string {
 	if mode == AuthModeOIDC {
-		return "derives it from BACKEND_OIDC_REDIRECT_URL"
+		return "it derives the flag from BACKEND_OIDC_REDIRECT_URL"
 	}
-	return "signs in without a session cookie"
+	return "it signs in without a session cookie"
 }
 
 // listOr reads a comma-separated list. Unset or blank means the default,
