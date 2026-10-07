@@ -20,7 +20,8 @@ const devSubject = "dev-user"
 
 // The headers proxy mode reads. They are what oauth-proxy and its relatives
 // set with pass-user-headers on; the groups, comma-separated, are read only
-// when an admin group is configured.
+// when an admin group is configured. oauth2-proxy sends them; OpenShift's
+// oauth-proxy does not.
 const (
 	ProxyUserHeader   = "X-Forwarded-User"
 	ProxyEmailHeader  = "X-Forwarded-Email"
@@ -80,7 +81,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			s.admitAs(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)),
-				isAdmin(proxyGroups(r), s.proxyAdminGroup))
+				s.proxyAdmin(r))
 			return
 
 		case "password":
@@ -141,6 +142,25 @@ func bearerToken(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return h[len(prefix):], true
+}
+
+// proxyAdmin decides admin for a proxied caller. No group configured is no
+// check, and the header is not read. With one, a request carrying no groups
+// header at all makes nobody admin — OpenShift's oauth-proxy never sends
+// one — so that is said once at Warn rather than left to look like a
+// permissions bug.
+func (s *Service) proxyAdmin(r *http.Request) bool {
+	if s.proxyAdminGroup == "" {
+		return true
+	}
+	if len(r.Header.Values(ProxyGroupsHeader)) == 0 {
+		s.noGroupsOnce.Do(func() {
+			slog.Warn("proxy sent no "+ProxyGroupsHeader+" header; with BACKEND_PROXY_ADMIN_GROUP set nobody is admin",
+				"group", s.proxyAdminGroup)
+		})
+		return false
+	}
+	return isAdmin(proxyGroups(r), s.proxyAdminGroup)
 }
 
 // proxyGroups is the groups the proxy forwarded, comma-separated in one

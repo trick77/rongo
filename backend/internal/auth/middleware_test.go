@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,6 +146,25 @@ func TestProxyModeNonMemberIsNotAdmin(t *testing.T) {
 	}
 	if !proxyAdmin(t, svc, "devs, rongo-admins ,readers") {
 		t.Error("a member is not admin")
+	}
+}
+
+// OpenShift's oauth-proxy sends no groups header at all, and then a set
+// group makes nobody admin. That is said once, at Warn, never silently.
+func TestProxyModeWarnsOnceWhenTheGroupsHeaderIsMissing(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	svc := newService(t)
+	svc.mode = "proxy"
+	svc.SetProxyAdminGroup("rongo-admins")
+
+	proxyAdmin(t, svc, "")
+	proxyAdmin(t, svc, "")
+
+	if n := strings.Count(logs.String(), ProxyGroupsHeader); n != 1 {
+		t.Errorf("warned %d times naming %s, want once:\n%s", n, ProxyGroupsHeader, logs.String())
 	}
 }
 

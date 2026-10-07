@@ -44,6 +44,8 @@ type Service struct {
 	// proxyAdminGroup is the group whose members proxy mode admits as
 	// admins; empty admits every forwarded user as one.
 	proxyAdminGroup string
+	// noGroupsOnce keeps the missing-groups-header warning to one line.
+	noGroupsOnce sync.Once
 	// admitted is the users the middleware upserted lately, so a request
 	// does not write the users table on its way in: in dev, token and proxy
 	// mode every request used to be an INSERT … ON CONFLICT beside the
