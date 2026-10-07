@@ -60,6 +60,7 @@ var allBackendEnvVars = []string{
 	"BACKEND_OIDC_CLIENT_SECRET",
 	"BACKEND_OIDC_REDIRECT_URL",
 	"BACKEND_OIDC_ADMIN_GROUP",
+	"BACKEND_PROXY_ADMIN_GROUP",
 }
 
 // mandatoryEnv is what .env.example leaves uncommented: the values nothing
@@ -238,6 +239,18 @@ func TestLoad_indexExclude(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A list of nothing but separators is neither the default nor "none": read
+// as nil it excluded nothing while looking configured.
+func TestLoad_indexExcludeOfOnlySeparatorsRefusesToStart(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_INDEX_EXCLUDE": " , "})
+
+	_, err := Load()
+
+	if err == nil || !strings.Contains(err.Error(), "BACKEND_INDEX_EXCLUDE") || !strings.Contains(err.Error(), "none") {
+		t.Fatalf("Load() err = %v, want a refusal naming BACKEND_INDEX_EXCLUDE and the way to say none", err)
 	}
 }
 
@@ -671,26 +684,134 @@ func TestLoad_aMalformedSettingRefusesToStart(t *testing.T) {
 	}
 }
 
-// TestLoad_aMalformedCookieSecureRefusesToStart: the cookie flag is read
-// inside the password and oidc branches, after the general check, and so
-// needs a check of its own — silently true, a plain-HTTP dev box would mint
-// a Secure cookie the browser drops and every login would 401 on the next
-// request.
-func TestLoad_aMalformedCookieSecureRefusesToStart(t *testing.T) {
+// oidcEnv is a complete oidc setup, for tests about something beside it.
+func oidcEnv(extra map[string]string) map[string]string {
+	env := map[string]string{
+		"BACKEND_AUTH_MODE":          "oidc",
+		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
+		"BACKEND_OIDC_CLIENT_ID":     "rongo",
+		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
+		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
+}
+
+// TestLoad_cookieSecureMalformedIsRefusedInEveryMode: silently true, a
+// plain-HTTP dev box would mint a Secure cookie the browser drops and every
+// login would 401 on the next request; under oidc a typo used to boot
+// because the flag was only read in password mode.
+func TestLoad_cookieSecureMalformedIsRefusedInEveryMode(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
 	}
-	setEnv(t, map[string]string{
-		"BACKEND_AUTH_MODE":           "password",
-		"BACKEND_ADMIN_USER":          "jan",
-		"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
-		"BACKEND_COOKIE_SECURE":       "flase",
-	})
+	for name, env := range map[string]map[string]string{
+		"password": {
+			"BACKEND_AUTH_MODE":           "password",
+			"BACKEND_ADMIN_USER":          "jan",
+			"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
+		},
+		"oidc": oidcEnv(nil),
+		"dev":  {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env["BACKEND_COOKIE_SECURE"] = "flase"
+			setEnv(t, env)
 
-	_, err = Load()
+			_, err := Load()
 
-	if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") {
-		t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE", err)
+			if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") || !strings.Contains(err.Error(), "flase") {
+				t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE=flase", err)
+			}
+		})
+	}
+}
+
+// TestLoad_cookieSecureIsRefusedOutsidePasswordMode: only password mode
+// reads the flag. Under oidc it is derived from the redirect URL, so
+// BACKEND_COOKIE_SECURE=false looked active and was ignored.
+func TestLoad_cookieSecureIsRefusedOutsidePasswordMode(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"oidc":  oidcEnv(nil),
+		"dev":   {},
+		"token": {"BACKEND_AUTH_MODE": "token", "BACKEND_ADMIN_TOKEN": "t0ken"},
+		"proxy": {"BACKEND_AUTH_MODE": "proxy"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env["BACKEND_COOKIE_SECURE"] = "false"
+			setEnv(t, env)
+
+			_, err := Load()
+
+			if err == nil || !strings.Contains(err.Error(), "BACKEND_COOKIE_SECURE") || !strings.Contains(err.Error(), name) {
+				t.Errorf("Load() err = %v, want a refusal naming BACKEND_COOKIE_SECURE and mode %s", err, name)
+			}
+		})
+	}
+}
+
+// The proxy's admin group decides admin in proxy mode alone. Set anywhere
+// else it would look like it gates the re-index and gate nothing.
+func TestLoad_proxyAdminGroup(t *testing.T) {
+	setEnv(t, map[string]string{"BACKEND_AUTH_MODE": "proxy", "BACKEND_PROXY_ADMIN_GROUP": " rongo-admins "})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() err = %v", err)
+	}
+	if cfg.ProxyAdminGroup != "rongo-admins" {
+		t.Errorf("ProxyAdminGroup = %q, want it trimmed", cfg.ProxyAdminGroup)
+	}
+
+	for name, env := range map[string]map[string]string{
+		"oidc": oidcEnv(nil),
+		"dev":  {},
+	} {
+		t.Run("refused in "+name, func(t *testing.T) {
+			env["BACKEND_PROXY_ADMIN_GROUP"] = "rongo-admins"
+			setEnv(t, env)
+
+			_, err := Load()
+
+			if err == nil || !strings.Contains(err.Error(), "BACKEND_PROXY_ADMIN_GROUP") {
+				t.Errorf("Load() err = %v, want a refusal naming BACKEND_PROXY_ADMIN_GROUP", err)
+			}
+		})
+	}
+}
+
+// A mode-bound setting set under a mode that never reads it looks active
+// and changes nothing: BACKEND_OIDC_ADMIN_GROUP under proxy mode gated no
+// re-index. Every one is refused, by name and mode.
+func TestLoad_aModeBoundSettingIsRefusedInAModeThatNeverReadsIt(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		mode map[string]string
+	}{
+		{"BACKEND_OIDC_ADMIN_GROUP", map[string]string{"BACKEND_AUTH_MODE": "proxy"}},
+		{"BACKEND_OIDC_ISSUER", map[string]string{}},
+		{"BACKEND_OIDC_CLIENT_ID", map[string]string{"BACKEND_AUTH_MODE": "token", "BACKEND_ADMIN_TOKEN": "t0ken"}},
+		{"BACKEND_OIDC_CLIENT_SECRET", map[string]string{}},
+		{"BACKEND_OIDC_REDIRECT_URL", map[string]string{}},
+		{"BACKEND_ADMIN_TOKEN", oidcEnv(nil)},
+		{"BACKEND_ADMIN_USER", map[string]string{"BACKEND_AUTH_MODE": "proxy"}},
+		{"BACKEND_ADMIN_PASSWORD_HASH", map[string]string{}},
+		{"BACKEND_PROXY_ADMIN_GROUP", oidcEnv(nil)},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			env := map[string]string{tc.key: "x"}
+			for k, v := range tc.mode {
+				env[k] = v
+			}
+			setEnv(t, env)
+
+			_, err := Load()
+
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), "BACKEND_AUTH_MODE=") {
+				t.Errorf("Load() err = %v, want a refusal naming %s and the mode", err, tc.key)
+			}
+		})
 	}
 }

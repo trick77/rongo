@@ -224,6 +224,7 @@ func main() {
 	if cfg.AuthMode == config.AuthModePassword {
 		authSvc.SetPasswordAccount(cfg.AdminUser, cfg.AdminPasswordHash)
 	}
+	authSvc.SetProxyAdminGroup(cfg.ProxyAdminGroup)
 
 	// Built before the list is synced: a repository that left the list is purged
 	// from the database, and its checkout has to go with it.

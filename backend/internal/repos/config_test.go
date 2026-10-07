@@ -574,6 +574,37 @@ projects:
 	}
 }
 
+// A padded name is refused, never trimmed: uses are trimmed, so a padded
+// name was one they could not reach, and trimming it silently would
+// re-identify a deployed repository (purge, re-clone) without a word.
+func TestLoad_refusesAPaddedRepositoryName(t *testing.T) {
+	for name, body := range map[string]string{
+		"library": `
+libraries:
+  - name: " shop-lib "
+    clone_url: https://forge.example.invalid/acme/shop-lib.git
+projects:
+  - name: shop
+    repositories:
+      - name: shop-orders
+        clone_url: https://forge.example.invalid/acme/shop-orders.git
+`,
+		"member": `
+projects:
+  - name: shop
+    repositories:
+      - name: "shop-billing "
+        clone_url: https://forge.example.invalid/acme/shop-billing.git
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeYAML(t, body)); err == nil || !strings.Contains(err.Error(), "whitespace") {
+				t.Errorf("Load() err = %v, want the padded name refused", err)
+			}
+		})
+	}
+}
+
 func TestLoad_rejectsTwoBranchesOfOneRepositoryInAProject(t *testing.T) {
 	// Given: a project holding two branches of one repository would search the
 	// same file at two commits and answer as one product. AGENTS.md already

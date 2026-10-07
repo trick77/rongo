@@ -70,9 +70,10 @@ const (
 // related passages start and well clear of unrelated text at cosine 0.0-0.15
 // (L2 1.31-1.41). The value is peeq's, measured against ~600-token transcript
 // chunks under text-embedding-3-small; rongo's chunks are enriched code and the
-// model is still being chosen, so it is a CONFIGURED value here
-// (BACKEND_SEARCH_MAX_DISTANCE) and the evaluation harness reports how many
-// hits it barred per question. A recall failure that is really this constant
+// model is still being chosen, so it is only the default of
+// Retriever.MaxDistance. The server has no setting for it; the evaluation
+// harness overrides it from BACKEND_SEARCH_MAX_DISTANCE, read there alone,
+// and reports how many hits it barred per question. A recall failure that is really this constant
 // must be visible as such, or the model comparison measures the constant.
 const DefaultMaxDistance = 1.25
 

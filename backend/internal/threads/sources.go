@@ -210,6 +210,14 @@ func (s *Store) chunkSource(ctx context.Context, r recorded, files map[string]fi
 	return src, true, nil
 }
 
+// listed reports whether repo is still in repo_state, parked or not. A
+// failed lookup counts as listed, so the doubt is logged loudly.
+func (s *Store) listed(ctx context.Context, repo string) bool {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM repo_state WHERE name = ?`, repo).Scan(&one)
+	return !errors.Is(err, sql.ErrNoRows)
+}
+
 // window is r's lines read from git at its commit, or false: no identity,
 // no checkout, git cannot produce the file, or the window is larger than a
 // chunk can be — an overlong line split into siblings, which only the
@@ -228,7 +236,15 @@ func (s *Store) window(ctx context.Context, r recorded, files map[string]fileRea
 			// it was cut from.
 			f.lines = strings.Split(strings.TrimSuffix(file.Content, "\n"), "\n")
 		} else {
-			slog.Debug("source not readable from git", "repo", r.repo, "path", r.path, "sha", r.sha, "err", err)
+			// A repository purged from the list is an expected miss, and
+			// every reopen of its threads would repeat it: Debug. Git
+			// failing on one still listed is not, and chunkSource falling
+			// back to the chunk row must not pass unseen: Warn.
+			level := slog.LevelWarn
+			if !s.listed(ctx, r.repo) {
+				level = slog.LevelDebug
+			}
+			slog.Log(ctx, level, "source not readable from git, falling back to the chunk rows", "repo", r.repo, "path", r.path, "sha", r.sha, "err", err)
 		}
 		files[k] = f
 	}
