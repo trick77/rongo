@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,8 +117,15 @@ func (t *turn) fail(why string) {
 //
 // False when nothing landed, and the turn is then recorded as failed: the row
 // would otherwise hold neither an answer nor an error, which is what a turn
-// still in flight looks like, while the browser was told it was done.
+// still in flight looks like, while the browser was told it was done. An
+// empty answer is the same row by another road — the share ceiling stops
+// below it and FailOrphaned rewrites it at the next boot — so it fails too.
 func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) bool {
+	if strings.TrimSpace(text) == "" {
+		recordFailed(t.ctx, "empty answer", errors.New("the answer is empty"))
+		t.fail(turnFailed)
+		return false
+	}
 	if err := t.s.deps.Threads.FinishWithSources(t.record, t.msgID, text, cites, sources); err != nil {
 		recordFailed(t.ctx, "record answer failed", err)
 		t.fail(turnFailed)
