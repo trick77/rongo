@@ -2,7 +2,7 @@ package httpapi
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -122,7 +122,9 @@ func (t *turn) fail(why string) {
 // below it and FailOrphaned rewrites it at the next boot — so it fails too.
 func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) bool {
 	if strings.TrimSpace(text) == "" {
-		recordFailed(t.ctx, "empty answer", errors.New("the answer is empty"))
+		if !threadWasDeleted(t.ctx) {
+			slog.Error("empty answer", "message", t.msgID)
+		}
 		t.fail(turnFailed)
 		return false
 	}
