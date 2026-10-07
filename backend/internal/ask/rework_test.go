@@ -185,6 +185,31 @@ func TestRunTreatsAReworkOfAnAnswerWithoutABasisAsAnOrdinaryQuestion(t *testing.
 	}
 }
 
+// TestReworkOfADocsOnlyBasisSaysSoLive: a rework stands on documentation
+// alone when its basis did, and the reader is told while it is written, the
+// way a fresh turn tells them — not only after a reload reads the scope.
+func TestReworkOfADocsOnlyBasisSaysSoLive(t *testing.T) {
+	c, _ := reworkUpstream(t, reworkReply)
+	p := reworkPipeline(t, c)
+	th := reworkThread()
+	th.Sources = []Source{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "README.md",
+		StartLine: 1, EndLine: 10, Text: "# Grants", Reason: "hit"}}
+	th.SourcesTotal = 1
+	var notices []string
+
+	got, err := p.Rework(context.Background(), "summarize", AudienceBA, LanguageEN, th, Scope{},
+		Events{OnNotice: func(text string) { notices = append(notices, text) }})
+	if err != nil {
+		t.Fatalf("Rework: %v", err)
+	}
+	if !got.Scope.DocsOnly {
+		t.Fatalf("scope = %+v, want documentation only", got.Scope)
+	}
+	if len(notices) != 1 || notices[0] != ScopeNotice(LanguageEN, got.Scope) {
+		t.Errorf("notices = %q, want the documentation-only notice once", notices)
+	}
+}
+
 // TestReworkIsTheSameLaneRunTakes: the handler's re-explain of a rework row
 // enters through Rework and has to land in the same prompt.
 func TestReworkIsTheSameLaneRunTakes(t *testing.T) {
