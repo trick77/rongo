@@ -253,8 +253,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// this reader's: the two must not be told apart.
 	reqThreadID, found, err := s.deps.Threads.Resolve(ctx, req.ThreadID)
 	if err != nil {
-		slog.Error("resolve thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalError(ctx, w, "resolve thread failed", err)
 		return
 	}
 	if req.ThreadID != "" && !found {
@@ -291,13 +290,19 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if req.ClarificationMessageID != 0 {
 		c, err := s.deps.Threads.Clarification(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
-			slog.Error("resolve clarification failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalError(ctx, w, "resolve clarification failed", err)
 			return
 		}
 		if c == nil {
 			// Refused, not explained: whether the id exists at all is not
 			// something to confirm to someone who does not own it.
+			http.Error(w, "no such clarification", http.StatusForbidden)
+			return
+		}
+		if reqThreadID != 0 && reqThreadID != c.ThreadID {
+			// The card names its thread. A thread_id that disagrees is
+			// refused rather than quietly preferring one of them, the way a
+			// retry's head is — and before the claim, so the card stays open.
 			http.Error(w, "no such clarification", http.StatusForbidden)
 			return
 		}
@@ -378,11 +383,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// The panel stores no hits to replay and offers no module: every
 			// entry is a project, and the resumed turn searches the picked
 			// ones at full depth — every repository of each.
+			// A library is a member of every product using it, so two picked
+			// products can name it twice: kept once, in the order first seen.
 			resumeRepoChoice = true
+			seen := map[string]bool{}
 			for _, cand := range c.Candidates {
 				for _, picked := range narrowed {
-					if cand.Repo == picked {
-						resumeRepos = append(resumeRepos, candidateRepos(cand)...)
+					if cand.Repo != picked {
+						continue
+					}
+					for _, r := range candidateRepos(cand) {
+						if !seen[r] {
+							seen[r] = true
+							resumeRepos = append(resumeRepos, r)
+						}
 					}
 				}
 			}
@@ -395,8 +409,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if !resumeRepoChoice {
 			_, hits, err = s.deps.Threads.CandidateHits(ctx, u.Subject, c.ID, req.Choice)
 			if err != nil {
-				slog.Error("resolve candidate hits failed", "err", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				internalError(ctx, w, "resolve candidate hits failed", err)
 				return
 			}
 		}
@@ -406,8 +419,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// writes loom's side out of its own training.
 		m, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.ClarificationMessageID)
 		if err != nil {
-			slog.Error("resolve clarification scope failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalError(ctx, w, "resolve clarification scope failed", err)
 			return
 		}
 		if ok {
@@ -445,8 +457,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if resume == nil && req.HeadMessageID != 0 {
 		head, ok, err := s.deps.Threads.Message(ctx, u.Subject, req.HeadMessageID)
 		if err != nil {
-			slog.Error("resolve head message failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalError(ctx, w, "resolve head message failed", err)
 			return
 		}
 		// Refused, not explained — the same rule the clarification check
@@ -461,12 +472,22 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		headID = head.Head()
 	}
 
+	// The reader's standing instructions, read once here: the understanding
+	// step lists them, the answer is written under them, and a rule given in
+	// this very question joins them mid-turn. Read before a thread can be
+	// created, so a refusal leaves no empty one behind.
+	ctx, err = s.memoryHolder(ctx, u.Subject)
+	if err != nil {
+		internalError(ctx, w, "read memories failed", err)
+		return
+	}
+
 	// prior is what earlier turns of this thread left behind: what they
 	// narrowed to, and the last question they answered. Read before the stream
-	// opens, from the same subject the ownership check used. A thread that
-	// cannot be read is treated as a first turn rather than failing this one:
-	// an un-narrowed answer is worse than a narrowed one and better than no
-	// answer, and the reader is told the scope either way.
+	// opens, from the same subject the ownership check used. A read that fails
+	// fails the request: a pinned thread read as unpinned answers from the
+	// whole corpus, and a "summarize" with no previous turn is searched afresh
+	// — both a confident answer to a question nobody asked.
 	var prior ask.Thread
 	var thread threads.Thread
 	// followUpIn is the thread whose last answered turn this one follows, 0
@@ -491,7 +512,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		thread = threads.Thread{ID: resume.ThreadID}
 		followUpIn = resume.ThreadID
 		if resumeMsg != nil {
-			followUpBefore = s.headOrdinal(ctx, u.Subject, *resumeMsg)
+			if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *resumeMsg); err != nil {
+				internalError(ctx, w, "resolve head ordinal failed", err)
+				return
+			}
 		}
 		prior.Pin = resumeScope.Known
 	case retryHead != nil:
@@ -508,11 +532,19 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// pointed at.
 		thread = threads.Thread{ID: retryHead.ThreadID}
 		followUpIn = retryHead.ThreadID
-		followUpBefore = s.headOrdinal(ctx, u.Subject, *retryHead)
+		if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *retryHead); err != nil {
+			internalError(ctx, w, "resolve head ordinal failed", err)
+			return
+		}
+		// "All repositories" travels with a true retry only: the reader gave
+		// that answer for this question, and dropping it cards the question
+		// again — but a different question under the same head never had it.
 		if scope := retryHead.Scope; scope.All || len(scope.Known) > 0 {
 			prior.Pin = scope.Known
-		} else {
-			prior.Pin = s.threadPin(ctx, u.Subject, retryHead.ThreadID)
+			prior.All = scope.All && req.Question == retryHead.Question
+		} else if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
+			internalError(ctx, w, "read thread scope failed", err)
+			return
 		}
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
@@ -524,8 +556,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// A locked database is not a permissions problem, and its text is
 			// not for the browser — the same rule the error event below
 			// follows.
-			slog.Error("resolve thread failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalError(ctx, w, "resolve thread failed", err)
 			return
 		}
 		thread = t
@@ -534,31 +565,36 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// the read from above.
 			followUpIn = reqThreadID
 			followUpBefore = math.MaxInt
-			prior.Pin = s.threadPin(ctx, u.Subject, reqThreadID)
+			if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
+				internalError(ctx, w, "read thread scope failed", err)
+				return
+			}
 		}
 	}
 
 	// The last ANSWERED turn below that bound is what a follow-up points at,
 	// because "kannst du das in einem Diagramm aufzeigen?" names no mechanism
-	// — the reader named it a turn ago. A read that fails is logged and
-	// treated as no previous turn, the way an unreadable thread is.
+	// — the reader named it a turn ago. A read that fails fails the request,
+	// the way an unreadable pin does: "summarize" with no previous turn is a
+	// fresh search dressed as a summary.
 	if followUpIn != 0 {
 		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		if err != nil {
-			slog.Error("read last turn failed", "err", err)
-		} else if ok {
+			internalError(ctx, w, "read last turn failed", err)
+			return
+		}
+		if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
 			// And what that answer was written from, for a rework: what
 			// the sources are, from one SELECT, and their text only once
 			// the understanding has said the turn IS a rework — reading
 			// every file from git is the cost of a rework, not of every
-			// follow-up. A read that fails fails the request, unlike the
+			// follow-up. A read that fails fails the request, like the
 			// reads above: a turn that goes on without the basis answers
 			// "summarize" afresh, which is worse than no answer.
 			refs, err := s.deps.Threads.SourceRefs(ctx, u.Subject, last.ID)
 			if err != nil {
-				slog.Error("read last turn's sources failed", "err", err)
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				internalError(ctx, w, "read last turn's sources failed", err)
 				return
 			}
 			subject, id := u.Subject, last.ID
@@ -580,8 +616,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if thread.PublicID == "" {
 		publicID, err := s.deps.Threads.PublicIDFor(ctx, thread.ID)
 		if err != nil {
-			slog.Error("read thread address failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalError(ctx, w, "read thread address failed", err)
 			return
 		}
 		thread.PublicID = publicID
@@ -597,19 +632,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// reader watched is still there when they come back to the thread.
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
-	// And the reader's standing instructions, read once here: the
-	// understanding step lists them, the answer is written under them, and a
-	// rule given in this very question joins them mid-turn.
-	ctx = s.memoryHolder(ctx, u.Subject)
-
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
 	defer s.turns.add(thread.ID, cancelTurn)()
 
 	msg, err := s.deps.Threads.AddQuestion(ctx, thread.ID, string(audience), string(lang), req.Question, headID)
 	if err != nil {
-		slog.Error("record question failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalError(ctx, w, "record question failed", err)
 		return
 	}
 	// Render-only, so a failure costs the chip and never the turn: the paste
@@ -642,7 +671,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	// The record is written on a context that outlives the request; see turn.
 	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, msg.ID, meter, steps, st)
+	tr := s.beginTurn(ctx, record, thread.ID, msg.ID, meter, steps, st)
 
 	// The title is written alongside the answer and never in front of it. It is
 	// a label; the answer must not wait for it, and a title that never arrives
@@ -704,18 +733,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
 			recordFailed(ctx, "record scope failed", serr)
 		}
-		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
-			return
-		}
 		// -1 is the column's own "no candidate": a narrowing resumed from the
 		// panel as a whole, and there is no row on it that the answer came
-		// from. The link to the clarification is what closes it either way.
+		// from. The link to the clarification is what closes it either way,
+		// and it lands with the answer or not at all: an answer the card did
+		// not know about left it open, and the next click wrote a second one.
 		choiceIdx := req.Choice
 		if len(req.Repos) > 0 {
 			choiceIdx = -1
 		}
-		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
-			recordFailed(ctx, "link choice failed", err)
+		tr.choice = &threads.Choice{Subject: u.Subject, ClarificationID: resume.ID, Idx: choiceIdx}
+		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
+			return
 		}
 		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, tr.streamed, send, closeRecord)
 		return
@@ -1001,8 +1030,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	defer cancelTurn(nil)
 	msg, found, err := s.deps.Threads.Message(ctx, u.Subject, id)
 	if err != nil {
-		slog.Error("resolve message failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalError(ctx, w, "resolve message failed", err)
 		return
 	}
 	if !found {
@@ -1021,7 +1049,11 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	ctx = timeline.With(ctx, steps)
 	// The reader's standing instructions apply to a re-explain as they do
 	// to any answer: same reader, same rules.
-	ctx = s.memoryHolder(ctx, u.Subject)
+	ctx, err = s.memoryHolder(ctx, u.Subject)
+	if err != nil {
+		internalError(ctx, w, "read memories failed", err)
+		return
+	}
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)
@@ -1029,8 +1061,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	sources, total, err := s.deps.Threads.Sources(ctx, u.Subject, id)
 	if err != nil {
-		slog.Error("resolve sources failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalError(ctx, w, "resolve sources failed", err)
 		return
 	}
 
@@ -1062,8 +1093,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// default -1: this row did not resume a clarification.
 	newMsg, err := s.deps.Threads.AddQuestion(ctx, msg.ThreadID, string(audience), string(lang), msg.Question, msg.Head())
 	if err != nil {
-		slog.Error("record re-explain question failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalError(ctx, w, "record re-explain question failed", err)
 		return
 	}
 	// The row copies the question, so it copies the fold too.
@@ -1081,7 +1111,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// The record is written on a context that outlives the request, the same
 	// as every other write in this package.
 	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, newMsg.ID, meter, steps, st)
+	tr := s.beginTurn(ctx, record, msg.ThreadID, newMsg.ID, meter, steps, st)
 
 	// The scope of the turn being re-explained carries over with its sources:
 	// same question, same corpus, so the same rules about what was and was not
@@ -1126,7 +1156,11 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reworkAgain(ctx context.Context, subject string, msg threads.Message, audience ask.Audience,
 	lang ask.Language, sources []ask.Source, total int, ev ask.Events) (ask.Answer, error) {
 
-	last, ok, err := s.deps.Threads.LastTurnBefore(ctx, subject, msg.ThreadID, s.headOrdinal(ctx, subject, msg))
+	before, err := s.headOrdinal(ctx, subject, msg)
+	if err != nil {
+		return ask.Answer{}, fmt.Errorf("read the reworked turn's head: %w", err)
+	}
+	last, ok, err := s.deps.Threads.LastTurnBefore(ctx, subject, msg.ThreadID, before)
 	if err != nil {
 		return ask.Answer{}, fmt.Errorf("read the reworked turn: %w", err)
 	}
@@ -1143,33 +1177,39 @@ func (s *Server) reworkAgain(ctx context.Context, subject string, msg threads.Me
 // to, and its own ordinal would make the new turn follow a question that is
 // still being answered.
 //
-// A head that cannot be read yields 0, which is no antecedent at all. That is
-// the safe end of the mistake: a turn answered without the previous question
-// is a turn that has to be asked more fully, where one answered under the
-// WRONG previous question is a turn that quietly followed something else.
-func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) int {
+// A head row that is gone yields 0, which is no antecedent at all. That is the
+// safe end of the mistake: a turn answered without the previous question is a
+// turn that has to be asked more fully, where one answered under the WRONG
+// previous question is a turn that quietly followed something else. A read
+// that FAILED is not a row that is gone, and is returned: guessing "none"
+// there turns a busy database into a rework searched afresh.
+func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) (int, error) {
 	head := m.Head()
 	if head == 0 || head == m.ID {
-		return m.Ordinal
+		return m.Ordinal, nil
 	}
 	ordinal, ok, err := s.deps.Threads.MessageOrdinal(ctx, subject, head)
-	if err != nil || !ok {
-		slog.Error("resolve head ordinal failed", "err", err, "head", head)
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("resolve head ordinal: %w", err)
 	}
-	return ordinal
+	if !ok {
+		slog.Warn("head row gone, following nothing", "head", head)
+		return 0, nil
+	}
+	return ordinal, nil
 }
 
-// threadPin is what earlier turns of this thread narrowed to. A read that
-// fails is an un-narrowed turn, which is worse than a narrowed one and better
-// than no answer.
-func (s *Server) threadPin(ctx context.Context, subject string, threadID int64) []string {
-	pin, err := s.deps.Threads.ThreadScope(ctx, subject, threadID)
-	if err != nil {
-		slog.Error("read thread scope failed", "err", err)
-		return nil
+// internalError answers 500 for a read or write the turn cannot go on
+// without, before the stream opens. A reader who closed the tab cancelled the
+// call, which is not a database fault and is not logged as one. The error's
+// text never reaches the browser.
+func internalError(ctx context.Context, w http.ResponseWriter, msg string, err error) {
+	if ctx.Err() != nil {
+		slog.Warn(msg, "cause", context.Cause(ctx).Error(), "err", err)
+	} else {
+		slog.Error(msg, "err", err)
 	}
-	return pin
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

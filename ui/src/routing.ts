@@ -25,6 +25,9 @@ export type Route =
 export const sharePrefix = "/share/";
 const threadPrefix = "/thread/";
 
+/** What threads.newToken mints: 16 random bytes as 22 URL-safe characters. */
+const minted = /^[A-Za-z0-9_-]{22}$/;
+
 // decoded is the percent-decoded rest of a path, or null where it is not
 // valid percent-encoding at all ("/thread/%E0"). decodeURIComponent throws
 // on that, and it runs at module load: unguarded, one bad link rendered
@@ -50,11 +53,13 @@ export function routeFromPath(path: string): Route {
     // addressed by row number for one release; those URLs are not redirected,
     // because a redirect would keep the counter reachable for good.
     const raw = decoded(path.slice(threadPrefix.length));
-    if (raw !== null && /^[A-Za-z0-9_-]{22}$/.test(raw)) return { view: "thread", id: raw };
+    if (raw !== null && minted.test(raw)) return { view: "thread", id: raw };
   }
   if (path.startsWith(sharePrefix)) {
+    // A share token is minted the same way, and the server answers 404 for
+    // any other shape before this runs (backend/web/embed.go isRoute).
     const token = decoded(path.slice(sharePrefix.length));
-    if (token !== null && token !== "") return { view: "share", token };
+    if (token !== null && minted.test(token)) return { view: "share", token };
   }
   if (path === "/threads") return { view: "threads" };
   if (path === "/projects") return { view: "projects" };

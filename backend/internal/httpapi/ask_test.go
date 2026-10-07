@@ -1255,8 +1255,75 @@ type finishFailingThreads struct {
 	*threads.Store
 }
 
-func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source) error {
+func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source, *threads.Choice) error {
 	return errors.New("disk full")
+}
+
+// finishGate fails the finish while fail is set, and records the card link
+// each finish was handed.
+type finishGate struct {
+	*threads.Store
+	fail    bool
+	choices []*threads.Choice
+}
+
+func (g *finishGate) FinishWithSources(ctx context.Context, id int64, answer string, cites []ask.Citation, sources []ask.Source, choice *threads.Choice) error {
+	g.choices = append(g.choices, choice)
+	if g.fail {
+		return errors.New("database is locked")
+	}
+	return g.Store.FinishWithSources(ctx, id, answer, cites, sources, choice)
+}
+
+// TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable: the link is what
+// closes a card, and it lands in the answer's own write. A finish that does
+// not commit leaves neither an answer nor a link — the card open for a retry —
+// and one that commits has closed it, so no click can put a second answer
+// under one card.
+func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	gate := &finishGate{Store: st, fail: true}
+	srv.deps.Threads = gate
+	msgID, clarID := seedClarification(t, st)
+	req := fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID)
+
+	body := doSSE(t, srv, "/api/ask", req)
+
+	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
+		t.Fatalf("want the turn failed, got:\n%s", body)
+	}
+	if len(gate.choices) != 1 || gate.choices[0] == nil ||
+		gate.choices[0].ClarificationID != clarID || gate.choices[0].Idx != 1 || gate.choices[0].Subject != testSubject {
+		t.Fatalf("choices = %+v, want the card link handed to the finish", gate.choices)
+	}
+	if c, _ := st.Clarification(context.Background(), testSubject, msgID); c == nil || c.Answered {
+		t.Fatalf("card = %+v, want it open after a finish that did not land", c)
+	}
+
+	gate.fail = false
+	body = doSSE(t, srv, "/api/ask", req)
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the retry did not answer:\n%s", body)
+	}
+	if c, _ := st.Clarification(context.Background(), testSubject, msgID); c == nil || !c.Answered {
+		t.Fatalf("card = %+v, want it closed by the answer", c)
+	}
+	if code := doStatus(t, srv, "/api/ask", req); code != http.StatusConflict {
+		t.Errorf("third choice status = %d, want 409 — the card is answered", code)
+	}
+}
+
+// TestAsk_anOrdinaryTurnFinishesWithNoCardLink: only a resume closes a card.
+func TestAsk_anOrdinaryTurnFinishesWithNoCardLink(t *testing.T) {
+	srv, st := newTestServerWithStore(t, func(f *fakeAsker) { f.tokens = []string{"x"} })
+	gate := &finishGate{Store: st}
+	srv.deps.Threads = gate
+
+	doSSE(t, srv, "/api/ask", `{"question":"how is sign-in done?"}`)
+
+	if len(gate.choices) != 1 || gate.choices[0] != nil {
+		t.Errorf("choices = %+v, want one finish with no link", gate.choices)
+	}
 }
 
 func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
@@ -1289,6 +1356,35 @@ func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) 
 	}
 	if msgs[0].Error == "" || msgs[0].Answer != "" {
 		t.Errorf("message = %+v, want it recorded as failed with no answer", msgs[0])
+	}
+}
+
+// TestAsk_aResumeNamingAnotherThreadIsRefused: the card names its thread, and
+// a thread_id that disagrees is refused rather than quietly preferring one of
+// them — the rule a retry already follows. Refused before the claim, so the
+// card is still answerable.
+func TestAsk_aResumeNamingAnotherThreadIsRefused(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	msgID, _ := seedClarification(t, st)
+	other, err := st.Create(context.Background(), testSubject, "something else")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	code := doStatus(t, srv, "/api/ask", fmt.Sprintf(
+		`{"thread_id":%q,"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, other.PublicID, msgID))
+
+	if code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", code)
+	}
+	if asker.gotAud != "" {
+		t.Error("a refused resume must not reach the pipeline")
+	}
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("the card must still be answerable:\n%s", body)
 	}
 }
 
@@ -1790,6 +1886,49 @@ func TestAsk_theTooBroadPanelSaysSoOnTheWire(t *testing.T) {
 	}
 	if !strings.Contains(body, `"too_broad":true`) {
 		t.Errorf("the clarification event must say the panel is not a card:\n%s", body)
+	}
+}
+
+// TestAsk_narrowingToTwoProjectsSharingALibrarySearchesItOnce: a library is a
+// member of every product using it, so two picked products name it twice. The
+// repeat reached ResumeRepo, the resolver folded it, the counts disagreed and
+// the turn failed as "no longer in the index" — on every retry.
+func TestAsk_narrowingToTwoProjectsSharingALibrarySearchesItOnce(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	ctx := context.Background()
+	th, err := st.Create(ctx, testSubject, "how is retry done?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := st.AddQuestion(ctx, th.ID, "ba", "en", "how is retry done?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := st.Clarify(ctx, msg.ID, ask.Clarification{
+		TooBroad:      true,
+		Understanding: ask.Understanding{CodeTerms: []string{"retry"}},
+		Candidates: []ask.Candidate{
+			{Repo: "shop", Members: []string{"shop-backend", "shop-ui", "commons"}},
+			{Repo: "claims", Members: []string{"claims-service", "commons"}},
+			{Repo: "peeq", Branch: "master"},
+		},
+	}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,"repos":["shop","claims"]}`, msg.ID))
+
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the resumed turn did not finish:\n%s", body)
+	}
+	want := []string{"shop-backend", "shop-ui", "commons", "claims-service"}
+	if fmt.Sprint(asker.resumedRepos) != fmt.Sprint(want) {
+		t.Errorf("resumed over %v, want %v — the shared library once", asker.resumedRepos, want)
+	}
+	if fmt.Sprint(asker.gotScope.Known) != fmt.Sprint(want) {
+		t.Errorf("scope.Known = %v, want %v", asker.gotScope.Known, want)
 	}
 }
 
