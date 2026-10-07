@@ -211,6 +211,33 @@ func TestThreadScopeIgnoresAnAllRepositoriesTurn(t *testing.T) {
 	}
 }
 
+// TestThreadScopeOfACorruptScopeIsAnError: an unreadable scope blob is not a
+// turn that narrowed nothing. Read as one, the thread lost its pin and the
+// follow-up searched the whole corpus.
+func TestThreadScopeOfACorruptScopeIsAnError(t *testing.T) {
+	s, ctx, threadID, db := newThreadStore(t)
+	first, err := s.AddQuestion(ctx, threadID, "ba", "en", "How does rongo cite sources?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := s.SetScope(ctx, first.ID, ask.Scope{Known: []string{"rongo"}}); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	second, err := s.AddQuestion(ctx, threadID, "ba", "en", "Und das?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE messages SET scope = '{"known":["peeq"' WHERE id = ?`, second.ID); err != nil {
+		t.Fatalf("corrupt scope: %v", err)
+	}
+
+	got, err := s.ThreadScope(ctx, testSubject, threadID)
+
+	if err == nil {
+		t.Errorf("thread scope = %v, want an error for the unreadable scope", got)
+	}
+}
+
 // TestThreadScopeOfAFreshThreadIsEmpty: the first turn of a thread has nothing
 // to inherit, and the ladder runs whole.
 func TestThreadScopeOfAFreshThreadIsEmpty(t *testing.T) {
