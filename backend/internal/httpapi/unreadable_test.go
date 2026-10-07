@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,6 +179,27 @@ func TestAsk_aReworkWhoseAntecedentCannotBeReadFails(t *testing.T) {
 			t.Error("a rework whose antecedent could not be read must not run")
 		}
 	})
+}
+
+// TestInternalError_aClosedTabIsNotADatabaseFault: the read failed because the
+// reader left, and the log says so at Warn rather than paging anyone.
+func TestInternalError_aClosedTabIsNotADatabaseFault(t *testing.T) {
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rec := httptest.NewRecorder()
+
+	internalError(ctx, rec, "read thread scope failed", errLocked)
+
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), errLocked.Error()) {
+		t.Errorf("status = %d body = %q, want a bare 500", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(buf.String(), "level=WARN") || strings.Contains(buf.String(), "level=ERROR") {
+		t.Errorf("log = %q, want it at Warn", buf.String())
+	}
 }
 
 // failingMemories cannot read the reader's rules.
