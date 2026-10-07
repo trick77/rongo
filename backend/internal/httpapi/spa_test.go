@@ -46,7 +46,7 @@ func TestSPA_fallsBackForClientRoutes(t *testing.T) {
 	// addresses are real.
 	srv := NewServer(Deps{})
 
-	for _, path := range []string{"/new", "/threads", "/projects", "/shared", "/memory", "/thread/v76BBy2b1nMYOFl2Lnm9JQ", "/share/kd8Qw1rZ"} {
+	for _, path := range []string{"/new", "/threads", "/projects", "/shared", "/memory", "/thread/v76BBy2b1nMYOFl2Lnm9JQ", "/share/kd8Qw1rZx3Yv9pLmN0aB_c"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -69,7 +69,7 @@ func TestSPA_aPathTheAppHasNoPageForIsNotFound(t *testing.T) {
 
 	for _, path := range []string{
 		"/threads/42", "/nope", "/thread/", "/thread/19", "/thread/abc",
-		"/thread/v76BBy2b1nMYOFl2Lnm9JQx", "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/",
+		"/thread/v76BBy2b1nMYOFl2Lnm9JQx", "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/", "/share/kd8Qw1rZ",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -48,8 +49,10 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, http.ErrNotSupported
 }
 
-// logging emits one access line per request. It logs r.URL.Path and never the
-// query string or full URL: query strings carry tokens and, later, OIDC codes.
+// logging emits one access line per request. It logs the path and never the
+// query string or full URL: query strings carry tokens and OIDC codes. The
+// path is masked too, because a share link's token is a path segment and is
+// the link's whole authorisation; see maskPath.
 //
 // A healthy /healthz is not logged. The container probes it every few
 // seconds, and a log that is mostly probes hides the requests a reader is
@@ -67,7 +70,7 @@ func logging(next http.Handler) http.Handler {
 		}
 		attrs := []any{
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", maskPath(r.URL.Path),
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
 		}
@@ -87,10 +90,32 @@ func recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if v := recover(); v != nil {
-				slog.Error("panic recovered", "err", v, "path", r.URL.Path)
+				slog.Error("panic recovered", "err", v, "path", maskPath(r.URL.Path))
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// sharePrefixes are the routes whose next path segment is a share token:
+// the public API and the page a link opens.
+var sharePrefixes = []string{"/api/shares/", "/share/"}
+
+// maskPath replaces a share token in path with the literal "{token}", keeping
+// what follows it, so a log line still says which route was hit without
+// handing whoever reads the log every link that was opened.
+func maskPath(path string) string {
+	for _, prefix := range sharePrefixes {
+		rest, ok := strings.CutPrefix(path, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		suffix := ""
+		if i := strings.IndexByte(rest, '/'); i >= 0 {
+			suffix = rest[i:]
+		}
+		return prefix + "{token}" + suffix
+	}
+	return path
 }

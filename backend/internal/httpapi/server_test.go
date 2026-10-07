@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/version"
@@ -69,5 +72,81 @@ func TestMe_carriesTheBuildVersion(t *testing.T) {
 	}
 	if body.Email == "" {
 		t.Error("email is empty; the session fields must survive the addition")
+	}
+}
+
+// Dev and proxy mode admit a request with no cookie at all, so SameSite does
+// not stop a cross-site form from posting to a bodiless action. The gate does.
+func TestCrossSitePostIsRefused(t *testing.T) {
+	for name, headers := range map[string]map[string]string{
+		"fetch metadata says cross-site":         {"Sec-Fetch-Site": "cross-site"},
+		"a sibling subdomain":                    {"Sec-Fetch-Site": "same-site"},
+		"origin names another host":              {"Origin": "https://evil.example"},
+		"opaque origin":                          {"Origin": "null"},
+		"cross-site wins over a matching origin": {"Sec-Fetch-Site": "cross-site", "Origin": "http://example.com"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+			for k, v := range headers {
+				req.Header.Set(k, v)
+			}
+			rec := httptest.NewRecorder()
+			NewServer(Deps{Auth: devAuth(t)}).ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403", rec.Code)
+			}
+		})
+	}
+}
+
+// Behind a proxy that rewrites Host and forwards no X-Forwarded-Host, every
+// write from an older browser is refused on Origin. The log says which hosts
+// disagreed, or the operator sees only 403s.
+func TestCrossSiteOriginMismatchIsLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.Header.Set("Origin", "https://rongo.example")
+	rec := httptest.NewRecorder()
+	NewServer(Deps{Auth: devAuth(t)}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, "rongo.example") || !strings.Contains(line, "example.com") {
+		t.Errorf("refusal not logged with both hosts: %s", line)
+	}
+}
+
+func TestSameOriginPostPasses(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method  string
+		headers map[string]string
+	}{
+		"the SPA's own fetch":              {http.MethodPost, map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://example.com"}},
+		"a same-origin origin alone":       {http.MethodPost, map[string]string{"Origin": "http://example.com"}},
+		"origin of the proxy's host":       {http.MethodPost, map[string]string{"Origin": "https://rongo.example", "X-Forwarded-Host": "rongo.example"}},
+		"a script with no browser headers": {http.MethodPost, nil},
+		"a cross-site GET":                 {http.MethodGet, map[string]string{"Sec-Fetch-Site": "cross-site"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := "/api/auth/logout"
+			if tc.method == http.MethodGet {
+				path = "/api/me"
+			}
+			req := httptest.NewRequest(tc.method, path, nil)
+			for k, v := range tc.headers {
+				req.Header.Set(k, v)
+			}
+			rec := httptest.NewRecorder()
+			NewServer(Deps{Auth: devAuth(t)}).ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
