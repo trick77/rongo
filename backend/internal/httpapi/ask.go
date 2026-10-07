@@ -470,12 +470,22 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		headID = head.Head()
 	}
 
+	// The reader's standing instructions, read once here: the understanding
+	// step lists them, the answer is written under them, and a rule given in
+	// this very question joins them mid-turn. Read before a thread can be
+	// created, so a refusal leaves no empty one behind.
+	ctx, err = s.memoryHolder(ctx, u.Subject)
+	if err != nil {
+		unreadable(ctx, w, "read memories failed", err)
+		return
+	}
+
 	// prior is what earlier turns of this thread left behind: what they
 	// narrowed to, and the last question they answered. Read before the stream
-	// opens, from the same subject the ownership check used. A thread that
-	// cannot be read is treated as a first turn rather than failing this one:
-	// an un-narrowed answer is worse than a narrowed one and better than no
-	// answer, and the reader is told the scope either way.
+	// opens, from the same subject the ownership check used. A read that fails
+	// fails the request: a pinned thread read as unpinned answers from the
+	// whole corpus, and a "summarize" with no previous turn is searched afresh
+	// — both a confident answer to a question nobody asked.
 	var prior ask.Thread
 	var thread threads.Thread
 	// followUpIn is the thread whose last answered turn this one follows, 0
@@ -500,7 +510,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		thread = threads.Thread{ID: resume.ThreadID}
 		followUpIn = resume.ThreadID
 		if resumeMsg != nil {
-			followUpBefore = s.headOrdinal(ctx, u.Subject, *resumeMsg)
+			if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *resumeMsg); err != nil {
+				unreadable(ctx, w, "resolve head ordinal failed", err)
+				return
+			}
 		}
 		prior.Pin = resumeScope.Known
 	case retryHead != nil:
@@ -517,11 +530,15 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// pointed at.
 		thread = threads.Thread{ID: retryHead.ThreadID}
 		followUpIn = retryHead.ThreadID
-		followUpBefore = s.headOrdinal(ctx, u.Subject, *retryHead)
+		if followUpBefore, err = s.headOrdinal(ctx, u.Subject, *retryHead); err != nil {
+			unreadable(ctx, w, "resolve head ordinal failed", err)
+			return
+		}
 		if scope := retryHead.Scope; scope.All || len(scope.Known) > 0 {
 			prior.Pin = scope.Known
-		} else {
-			prior.Pin = s.threadPin(ctx, u.Subject, retryHead.ThreadID)
+		} else if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
+			unreadable(ctx, w, "read thread scope failed", err)
+			return
 		}
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
@@ -543,25 +560,31 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// the read from above.
 			followUpIn = reqThreadID
 			followUpBefore = math.MaxInt
-			prior.Pin = s.threadPin(ctx, u.Subject, reqThreadID)
+			if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, reqThreadID); err != nil {
+				unreadable(ctx, w, "read thread scope failed", err)
+				return
+			}
 		}
 	}
 
 	// The last ANSWERED turn below that bound is what a follow-up points at,
 	// because "kannst du das in einem Diagramm aufzeigen?" names no mechanism
-	// — the reader named it a turn ago. A read that fails is logged and
-	// treated as no previous turn, the way an unreadable thread is.
+	// — the reader named it a turn ago. A read that fails fails the request,
+	// the way an unreadable pin does: "summarize" with no previous turn is a
+	// fresh search dressed as a summary.
 	if followUpIn != 0 {
 		last, ok, err := s.deps.Threads.LastTurnBefore(ctx, u.Subject, followUpIn, followUpBefore)
 		if err != nil {
-			slog.Error("read last turn failed", "err", err)
-		} else if ok {
+			unreadable(ctx, w, "read last turn failed", err)
+			return
+		}
+		if ok {
 			prior.Question, prior.Answer = last.Question, last.Answer
 			// And what that answer was written from, for a rework: what
 			// the sources are, from one SELECT, and their text only once
 			// the understanding has said the turn IS a rework — reading
 			// every file from git is the cost of a rework, not of every
-			// follow-up. A read that fails fails the request, unlike the
+			// follow-up. A read that fails fails the request, like the
 			// reads above: a turn that goes on without the basis answers
 			// "summarize" afresh, which is worse than no answer.
 			refs, err := s.deps.Threads.SourceRefs(ctx, u.Subject, last.ID)
@@ -606,11 +629,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	// reader watched is still there when they come back to the thread.
 	steps := timeline.New()
 	ctx = timeline.With(ctx, steps)
-	// And the reader's standing instructions, read once here: the
-	// understanding step lists them, the answer is written under them, and a
-	// rule given in this very question joins them mid-turn.
-	ctx = s.memoryHolder(ctx, u.Subject)
-
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
 	defer s.turns.add(thread.ID, cancelTurn)()
@@ -1030,7 +1048,11 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	ctx = timeline.With(ctx, steps)
 	// The reader's standing instructions apply to a re-explain as they do
 	// to any answer: same reader, same rules.
-	ctx = s.memoryHolder(ctx, u.Subject)
+	ctx, err = s.memoryHolder(ctx, u.Subject)
+	if err != nil {
+		unreadable(ctx, w, "read memories failed", err)
+		return
+	}
 	lang := ask.ParseLanguage(msg.Language)
 	if req.Language != "" {
 		lang = ask.ParseLanguage(req.Language)
@@ -1135,7 +1157,11 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reworkAgain(ctx context.Context, subject string, msg threads.Message, audience ask.Audience,
 	lang ask.Language, sources []ask.Source, total int, ev ask.Events) (ask.Answer, error) {
 
-	last, ok, err := s.deps.Threads.LastTurnBefore(ctx, subject, msg.ThreadID, s.headOrdinal(ctx, subject, msg))
+	before, err := s.headOrdinal(ctx, subject, msg)
+	if err != nil {
+		return ask.Answer{}, fmt.Errorf("read the reworked turn's head: %w", err)
+	}
+	last, ok, err := s.deps.Threads.LastTurnBefore(ctx, subject, msg.ThreadID, before)
 	if err != nil {
 		return ask.Answer{}, fmt.Errorf("read the reworked turn: %w", err)
 	}
@@ -1152,33 +1178,38 @@ func (s *Server) reworkAgain(ctx context.Context, subject string, msg threads.Me
 // to, and its own ordinal would make the new turn follow a question that is
 // still being answered.
 //
-// A head that cannot be read yields 0, which is no antecedent at all. That is
-// the safe end of the mistake: a turn answered without the previous question
-// is a turn that has to be asked more fully, where one answered under the
-// WRONG previous question is a turn that quietly followed something else.
-func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) int {
+// A head row that is gone yields 0, which is no antecedent at all. That is the
+// safe end of the mistake: a turn answered without the previous question is a
+// turn that has to be asked more fully, where one answered under the WRONG
+// previous question is a turn that quietly followed something else. A read
+// that FAILED is not a row that is gone, and is returned: guessing "none"
+// there turns a busy database into a rework searched afresh.
+func (s *Server) headOrdinal(ctx context.Context, subject string, m threads.Message) (int, error) {
 	head := m.Head()
 	if head == 0 || head == m.ID {
-		return m.Ordinal
+		return m.Ordinal, nil
 	}
 	ordinal, ok, err := s.deps.Threads.MessageOrdinal(ctx, subject, head)
-	if err != nil || !ok {
-		slog.Error("resolve head ordinal failed", "err", err, "head", head)
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("resolve head ordinal: %w", err)
 	}
-	return ordinal
+	if !ok {
+		slog.Warn("head row gone, following nothing", "head", head)
+		return 0, nil
+	}
+	return ordinal, nil
 }
 
-// threadPin is what earlier turns of this thread narrowed to. A read that
-// fails is an un-narrowed turn, which is worse than a narrowed one and better
-// than no answer.
-func (s *Server) threadPin(ctx context.Context, subject string, threadID int64) []string {
-	pin, err := s.deps.Threads.ThreadScope(ctx, subject, threadID)
-	if err != nil {
-		slog.Error("read thread scope failed", "err", err)
-		return nil
+// unreadable answers 500 for a read the turn cannot go on without, before the
+// stream opens. A reader who closed the tab cancelled the read, which is not a
+// database fault and is not logged as one.
+func unreadable(ctx context.Context, w http.ResponseWriter, msg string, err error) {
+	if ctx.Err() != nil {
+		slog.Warn(msg, "cause", context.Cause(ctx).Error(), "err", err)
+	} else {
+		slog.Error(msg, "err", err)
 	}
-	return pin
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

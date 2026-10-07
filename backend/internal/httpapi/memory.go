@@ -71,19 +71,19 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 
 // memoryHolder reads the reader's rules for one turn onto the context. A
 // deployment without memory attaches nothing, which is how the pipeline
-// knows not to ask for a directive. A read that fails is logged and the turn
-// runs with no rules rather than not at all: an answer without the reader's
-// preferences is worse than one with them and better than no answer.
-func (s *Server) memoryHolder(ctx context.Context, subject string) context.Context {
+// knows not to ask for a directive. A read that fails is returned, never read
+// as a reader with no rules: the answer would ignore what they told rongo
+// while looking like one written under it, and empty memory is the eval
+// baseline, not a fallback.
+func (s *Server) memoryHolder(ctx context.Context, subject string) (context.Context, error) {
 	if s.deps.Memory == nil {
-		return ctx
+		return ctx, nil
 	}
 	rows, err := s.deps.Memory.List(ctx, subject)
 	if err != nil {
-		slog.Error("read memories failed", "err", err)
-		rows = nil
+		return ctx, err
 	}
-	return memory.With(ctx, memory.NewHolder(rows))
+	return memory.With(ctx, memory.NewHolder(rows)), nil
 }
 
 // wireMemory is the memory event: what the turn saved, what it replaced,
