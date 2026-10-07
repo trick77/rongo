@@ -169,7 +169,8 @@ func (p *Poller) Run(ctx context.Context) {
 		if !p.wait(ctx, delay) {
 			return
 		}
-		if err := p.PollOnce(ctx); err != nil {
+		// A cycle cut short by the shutdown is not a failure.
+		if err := p.PollOnce(ctx); err != nil && ctx.Err() == nil {
 			p.log.Error("poll cycle failed", "err", err)
 		}
 		delay = sched.Jittered(p.interval)
@@ -203,6 +204,11 @@ func (p *Poller) PollOnce(ctx context.Context) error {
 		repoStart := time.Now()
 		res, err := p.pollRepo(ctx, st)
 		switch {
+		case err != nil && ctx.Err() != nil:
+			// The process is ending, not the repository failing: recording
+			// it would put a shutdown on the Repos page, through a context
+			// that can no longer write.
+			return ctx.Err()
 		case err != nil:
 			failed++
 			p.log.Warn("repository poll failed", "repo", st.Name,
