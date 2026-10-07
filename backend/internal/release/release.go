@@ -28,25 +28,38 @@ func New(git *gitrepo.Client, db *sql.DB, depth int) *Git {
 
 func spec(repo string) repos.Spec { return repos.Spec{Name: repo} }
 
+// gitFailed marks a failure of git itself with ask's sentinel, so the
+// release turn makes it one line for the component and not a failed turn.
+func gitFailed(repo string, err error) error {
+	return fmt.Errorf("%s: %w: %w", repo, ask.ErrGitState, err)
+}
+
 // ResolveTag is gitrepo's, with its miss mapped onto ask's sentinel.
 func (g *Git) ResolveTag(ctx context.Context, repo, tag string) (string, error) {
 	sha, err := g.git.ResolveTag(ctx, spec(repo), tag)
 	if errors.Is(err, gitrepo.ErrTagUnknown) {
 		return "", fmt.Errorf("%s: %q: %w", repo, tag, ask.ErrVersionUnknown)
 	}
-	return sha, err
+	if err != nil {
+		return "", gitFailed(repo, err)
+	}
+	return sha, nil
 }
 
 // IsAncestor is gitrepo's.
 func (g *Git) IsAncestor(ctx context.Context, repo, ancestor, descendant string) (bool, error) {
-	return g.git.IsAncestor(ctx, spec(repo), ancestor, descendant)
+	ok, err := g.git.IsAncestor(ctx, spec(repo), ancestor, descendant)
+	if err != nil {
+		return false, gitFailed(repo, err)
+	}
+	return ok, nil
 }
 
 // Range lists the first-parent shas of from..to, newest first.
 func (g *Git) Range(ctx context.Context, repo, from, to string, limit int) ([]string, error) {
 	commits, err := g.git.Log(ctx, spec(repo), from, to, limit)
 	if err != nil {
-		return nil, err
+		return nil, gitFailed(repo, err)
 	}
 	out := make([]string, 0, len(commits))
 	for _, c := range commits {

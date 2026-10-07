@@ -367,18 +367,18 @@ func TestReleaseLines_theRefusalMatrix(t *testing.T) {
 	}
 }
 
-// A checkout git cannot read is one component's problem: that component
-// gets a line saying so, the others resolve as ever, and the turn stands.
-// Only a turn that was cancelled fails, because nobody is waiting for it.
+// A component whose git state cannot be determined is one component's
+// problem: that component gets a line saying so, the others resolve as
+// ever, and the turn stands. Only git's failures get the line: a database
+// error is not a fact about one component, and a cancelled turn has nobody
+// waiting for it, so both still fail the turn.
 func TestReleaseLines_aComponentWhoseCheckoutErrorsIsOneLine(t *testing.T) {
-	for _, call := range []string{"Head", "ResolveTag", "IsAncestor", "Range", "BySHAs"} {
+	gitFailed := fmt.Errorf("shop-backend: %w: git merge-base: exit status 128: fatal: bad object c3", ErrGitState)
+	for _, call := range []string{"Head", "ResolveTag", "IsAncestor", "Range"} {
 		t.Run(call, func(t *testing.T) {
 			db := gatherDB(t)
 			rel, h, declared, pm := releaseCorpus(t, db)
-			rel.fail = map[string]error{call + "/shop-backend": errors.New("fatal: bad object c3")}
-			if call == "BySHAs" {
-				h.fail = errors.New("database is locked")
-			}
+			rel.fail = map[string]error{call + "/shop-backend": gitFailed}
 			g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
 
 			lines, commits, err := releaseLines(context.Background(), g, rel, h, pm, "shop-infra", declared, []string{"prod", "test"})
@@ -393,8 +393,8 @@ func TestReleaseLines_aComponentWhoseCheckoutErrorsIsOneLine(t *testing.T) {
 			be := by["registry.example.invalid/acme/shop-backend"]
 			// Nothing half-measured survives into the record: a direction or
 			// a count set before the failing call is no fact about the range.
-			if be.Note != NoteUnreadable || be.Ahead != "" || be.Commits != 0 || be.Detail != "" {
-				t.Errorf("backend = %+v, want only the unreadable note", be)
+			if be.Note != NoteUndetermined || be.Ahead != "" || be.Commits != 0 || be.Detail != "" {
+				t.Errorf("backend = %+v, want only the undetermined note", be)
 			}
 			if ui := by["registry.example.invalid/acme/shop-ui"]; ui.Note != NoteUnchanged {
 				t.Errorf("ui = %+v, want it resolved as ever", ui)
@@ -405,12 +405,32 @@ func TestReleaseLines_aComponentWhoseCheckoutErrorsIsOneLine(t *testing.T) {
 		})
 	}
 
+	for name, tweak := range map[string]func(rel *fakeReleaser, h *releaseHistory){
+		"head from the database": func(rel *fakeReleaser, _ *releaseHistory) {
+			rel.fail = map[string]error{"Head/shop-backend": fmt.Errorf("head of shop-backend: %w", sql.ErrNoRows)}
+		},
+		"commits from the database": func(_ *fakeReleaser, h *releaseHistory) {
+			h.fail = errors.New("database is locked")
+		},
+	} {
+		t.Run(name+" still fails", func(t *testing.T) {
+			db := gatherDB(t)
+			rel, h, declared, pm := releaseCorpus(t, db)
+			tweak(rel, h)
+			g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
+
+			if _, _, err := releaseLines(context.Background(), g, rel, h, pm, "shop-infra", declared, []string{"prod", "test"}); err == nil {
+				t.Fatal("err = nil, want a database error to fail the turn")
+			}
+		})
+	}
+
 	t.Run("a cancelled turn still fails", func(t *testing.T) {
 		db := gatherDB(t)
 		rel, h, declared, pm := releaseCorpus(t, db)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		rel.fail = map[string]error{"Head/shop-backend": context.Canceled}
+		rel.fail = map[string]error{"Head/shop-backend": fmt.Errorf("%w: %w", ErrGitState, context.Canceled)}
 		rel.onFail = cancel
 		g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
 
