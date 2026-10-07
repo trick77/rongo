@@ -405,6 +405,38 @@ func TestRetriable_refusesARateLimitTheCallerCannotWaitOut(t *testing.T) {
 	}
 }
 
+// A 429 with a Retry-After is the one 4xx retried: a timing fact, not a
+// request the endpoint refused. Up to the cap and no further, and once: a
+// second 429 is the answer.
+func TestRetriable_rateLimitRetriesOnceCapped(t *testing.T) {
+	limited := func(d time.Duration) error {
+		return &llmwire.RateLimitError{
+			APIError:   &llmwire.APIError{StatusCode: 429, Class: llmwire.ErrRateLimited},
+			RetryAfter: d,
+		}
+	}
+	if !retriable(context.Background(), limited(retryAfterCap), 0) {
+		t.Error("a wait at the cap is not retried")
+	}
+	if retriable(context.Background(), limited(retryAfterCap+time.Nanosecond), 0) {
+		t.Error("a wait past the cap is retried")
+	}
+
+	c, calls := attemptsUpstream(t,
+		attempt{status: http.StatusTooManyRequests, retryAfter: "1"},
+		attempt{status: http.StatusTooManyRequests, retryAfter: "1"},
+		attempt{content: []string{"the answer"}, finish: "stop", completion: 7},
+	)
+	stubSleep(t, true)
+	_, u, err := complete(t, c)
+	if !errors.Is(err, llmwire.ErrRateLimited) {
+		t.Fatalf("err = %v, want the second rate limit reported", err)
+	}
+	if n := calls.Load(); n != 2 || u.Attempts != 2 {
+		t.Errorf("requests = %d attempts = %d, want two of each", n, u.Attempts)
+	}
+}
+
 // Every retry pauses: refiring in the same instant hits the upstream that is
 // having a moment with the burst that just bounced.
 func TestRetryWait_neverRefiresInTheSameInstant(t *testing.T) {

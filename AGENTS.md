@@ -36,7 +36,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - **Pinning narrows the re-roll, never removes it** — two pinned runs still differ by one question. Never conclude from a one-question gap. Run twice.
 - **Never rank routing by accuracy.** Most questions want no card, so never-asking scores well and accuracy drifts every threshold toward silence. Price errors apart: needless card = 1, missed ambiguity = W (`2026-09-06-routing-cost-metric.md`).
 - Cap every call with `WithMaxAnswerTokens`, sized for the ANSWER; llmwire adds the reasoning allowance. Never hand-size a cap to cover thinking.
-- **Retry once when nothing was delivered** — never a stream that delivered, a 4xx, a spent budget, a window run out.
+- **Retry once when nothing was delivered** — never a stream that delivered, a 4xx, a spent budget, a window run out. One 4xx exception: a 429 whose Retry-After fits `retryAfterCap` (10 s) and the caller's deadline — a timing fact, not a request fault.
 - Embeddings cached by content hash. Never re-embed unchanged content. Cache holds only what a chunk uses: pruned after every successful index run and every boot purge, logged. A reset re-indexes before the prune, so unchanged content still hits; a purged repository re-embeds on return, accepted: a forgotten repository must not live on as vectors. Eval `query:` rows exempt: pruning them re-embeds questions and drift moves the number.
 
 ## Invariants
