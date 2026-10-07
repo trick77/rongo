@@ -1793,6 +1793,49 @@ func TestAsk_theTooBroadPanelSaysSoOnTheWire(t *testing.T) {
 	}
 }
 
+// TestAsk_narrowingToTwoProjectsSharingALibrarySearchesItOnce: a library is a
+// member of every product using it, so two picked products name it twice. The
+// repeat reached ResumeRepo, the resolver folded it, the counts disagreed and
+// the turn failed as "no longer in the index" — on every retry.
+func TestAsk_narrowingToTwoProjectsSharingALibrarySearchesItOnce(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	ctx := context.Background()
+	th, err := st.Create(ctx, testSubject, "how is retry done?")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	msg, err := st.AddQuestion(ctx, th.ID, "ba", "en", "how is retry done?", 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if _, err := st.Clarify(ctx, msg.ID, ask.Clarification{
+		TooBroad:      true,
+		Understanding: ask.Understanding{CodeTerms: []string{"retry"}},
+		Candidates: []ask.Candidate{
+			{Repo: "shop", Members: []string{"shop-backend", "shop-ui", "commons"}},
+			{Repo: "claims", Members: []string{"claims-service", "commons"}},
+			{Repo: "peeq", Branch: "master"},
+		},
+	}); err != nil {
+		t.Fatalf("clarify: %v", err)
+	}
+
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,"repos":["shop","claims"]}`, msg.ID))
+
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the resumed turn did not finish:\n%s", body)
+	}
+	want := []string{"shop-backend", "shop-ui", "commons", "claims-service"}
+	if fmt.Sprint(asker.resumedRepos) != fmt.Sprint(want) {
+		t.Errorf("resumed over %v, want %v — the shared library once", asker.resumedRepos, want)
+	}
+	if fmt.Sprint(asker.gotScope.Known) != fmt.Sprint(want) {
+		t.Errorf("scope.Known = %v, want %v", asker.gotScope.Known, want)
+	}
+}
+
 func TestAsk_theTooBroadPanelResumesAcrossEveryRepositoryPicked(t *testing.T) {
 	srv, st := newTestServerWithStore(t, withAskerResuming())
 	asker := srv.deps.Ask.(*fakeAsker)

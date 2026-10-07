@@ -378,11 +378,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// The panel stores no hits to replay and offers no module: every
 			// entry is a project, and the resumed turn searches the picked
 			// ones at full depth — every repository of each.
+			// A library is a member of every product using it, so two picked
+			// products can name it twice: kept once, in the order first seen.
 			resumeRepoChoice = true
+			seen := map[string]bool{}
 			for _, cand := range c.Candidates {
 				for _, picked := range narrowed {
-					if cand.Repo == picked {
-						resumeRepos = append(resumeRepos, candidateRepos(cand)...)
+					if cand.Repo != picked {
+						continue
+					}
+					for _, r := range candidateRepos(cand) {
+						if !seen[r] {
+							seen[r] = true
+							resumeRepos = append(resumeRepos, r)
+						}
 					}
 				}
 			}
