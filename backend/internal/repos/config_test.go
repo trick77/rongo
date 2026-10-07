@@ -574,11 +574,12 @@ projects:
 	}
 }
 
-// A name is trimmed like the uses that point at it: stored with its
-// padding, `uses: [shop-billing]` named no repository, and " shop-billing"
-// beside "shop-billing" was two.
-func TestLoad_trimsRepositoryNames(t *testing.T) {
-	path := writeYAML(t, `
+// A padded name is refused, never trimmed: uses are trimmed, so a padded
+// name was one they could not reach, and trimming it silently would
+// re-identify a deployed repository (purge, re-clone) without a word.
+func TestLoad_refusesAPaddedRepositoryName(t *testing.T) {
+	for name, body := range map[string]string{
+		"library": `
 libraries:
   - name: " shop-lib "
     clone_url: https://forge.example.invalid/acme/shop-lib.git
@@ -587,33 +588,20 @@ projects:
     repositories:
       - name: shop-orders
         clone_url: https://forge.example.invalid/acme/shop-orders.git
-        uses: [shop-billing, shop-lib]
-      - name: " shop-billing "
-        clone_url: https://forge.example.invalid/acme/shop-billing.git
-`)
-
-	specs, err := Load(path)
-
-	if err != nil {
-		t.Fatalf("Load() err = %v, want the padded names to resolve", err)
-	}
-	for _, s := range specs {
-		if s.Name != strings.TrimSpace(s.Name) {
-			t.Errorf("name %q stored untrimmed", s.Name)
-		}
-	}
-
-	dup := writeYAML(t, `
+`,
+		"member": `
 projects:
   - name: shop
     repositories:
-      - name: shop-billing
-        clone_url: https://forge.example.invalid/acme/shop-billing.git
       - name: "shop-billing "
-        clone_url: https://forge.example.invalid/acme/shop-billing-2.git
-`)
-	if _, err := Load(dup); err == nil || !strings.Contains(err.Error(), "duplicate repository name") {
-		t.Errorf("Load() err = %v, want the two spellings refused as one name", err)
+        clone_url: https://forge.example.invalid/acme/shop-billing.git
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeYAML(t, body)); err == nil || !strings.Contains(err.Error(), "whitespace") {
+				t.Errorf("Load() err = %v, want the padded name refused", err)
+			}
+		})
 	}
 }
 
