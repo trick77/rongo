@@ -574,6 +574,49 @@ projects:
 	}
 }
 
+// A name is trimmed like the uses that point at it: stored with its
+// padding, `uses: [shop-billing]` named no repository, and " shop-billing"
+// beside "shop-billing" was two.
+func TestLoad_trimsRepositoryNames(t *testing.T) {
+	path := writeYAML(t, `
+libraries:
+  - name: " shop-lib "
+    clone_url: https://forge.example.invalid/acme/shop-lib.git
+projects:
+  - name: shop
+    repositories:
+      - name: shop-orders
+        clone_url: https://forge.example.invalid/acme/shop-orders.git
+        uses: [shop-billing, shop-lib]
+      - name: " shop-billing "
+        clone_url: https://forge.example.invalid/acme/shop-billing.git
+`)
+
+	specs, err := Load(path)
+
+	if err != nil {
+		t.Fatalf("Load() err = %v, want the padded names to resolve", err)
+	}
+	for _, s := range specs {
+		if s.Name != strings.TrimSpace(s.Name) {
+			t.Errorf("name %q stored untrimmed", s.Name)
+		}
+	}
+
+	dup := writeYAML(t, `
+projects:
+  - name: shop
+    repositories:
+      - name: shop-billing
+        clone_url: https://forge.example.invalid/acme/shop-billing.git
+      - name: "shop-billing "
+        clone_url: https://forge.example.invalid/acme/shop-billing-2.git
+`)
+	if _, err := Load(dup); err == nil || !strings.Contains(err.Error(), "duplicate repository name") {
+		t.Errorf("Load() err = %v, want the two spellings refused as one name", err)
+	}
+}
+
 func TestLoad_rejectsTwoBranchesOfOneRepositoryInAProject(t *testing.T) {
 	// Given: a project holding two branches of one repository would search the
 	// same file at two commits and answer as one product. AGENTS.md already

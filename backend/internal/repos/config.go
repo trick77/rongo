@@ -210,6 +210,8 @@ func Load(path string) ([]Spec, error) {
 	// Libraries first: their names occupy both namespaces, so a project block
 	// named after one is refused by the ordinary duplicate-project rule below.
 	for i, r := range f.Libraries {
+		// Trimmed like the uses that point at it, before any rule reads it.
+		r.Name = strings.TrimSpace(r.Name)
 		if err := validateName(r.Name); err != nil {
 			return nil, fmt.Errorf("library %d: %w", i, err)
 		}
@@ -255,6 +257,7 @@ func Load(path string) ([]Spec, error) {
 		}
 
 		for j, r := range p.Repositories {
+			r.Name = strings.TrimSpace(r.Name)
 			if err := validateName(r.Name); err != nil {
 				return nil, fmt.Errorf("project %q, entry %d: %w", name, j, err)
 			}
