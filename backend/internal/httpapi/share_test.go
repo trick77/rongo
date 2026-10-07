@@ -337,23 +337,23 @@ func TestShareTitle_answersOnlyForALiveLink(t *testing.T) {
 	}
 
 	// A live link answers with the thread's own title.
-	if title, ok := srv.shareTitle(ctx, live.Token); !ok || title != live.Title {
-		t.Errorf("shareTitle(live) = %q, %v; want %q, true", title, ok, live.Title)
+	if title, ok, err := srv.shareTitle(ctx, live.Token); err != nil || !ok || title != live.Title {
+		t.Errorf("shareTitle(live) = %q, %v, %v; want %q, true, nil", title, ok, err, live.Title)
 	}
-	// A revoked and an invented token both say nothing, the way the public
-	// API answers 404 for either.
+	// A revoked and an invented token both say "not found", the way the
+	// public API answers 404 for either.
 	for name, token := range map[string]string{
 		"revoked": revoked.Token,
 		"unknown": "AAAAAAAAAAAAAAAAAAAAAA",
 	} {
-		if title, ok := srv.shareTitle(ctx, token); ok {
-			t.Errorf("shareTitle(%s) = %q, true; want no answer", name, title)
+		if title, ok, err := srv.shareTitle(ctx, token); ok || err != nil {
+			t.Errorf("shareTitle(%s) = %q, %v, %v; want not found", name, title, ok, err)
 		}
 	}
 	// And a server with no thread record at all — the state every handler
-	// here has to survive — answers nothing rather than panicking.
-	if _, ok := NewServer(Deps{}).shareTitle(ctx, live.Token); ok {
-		t.Error("a server with no thread store answered a share title")
+	// here has to survive — cannot answer, which is not a revocation.
+	if _, ok, err := NewServer(Deps{}).shareTitle(ctx, live.Token); ok || err == nil {
+		t.Error("a server with no thread store gave a verdict on a share link")
 	}
 }
 
@@ -386,17 +386,13 @@ func TestSharePage_unfurlsAsTheThreadsOwnQuestion(t *testing.T) {
 		t.Error("a shared page is indexable")
 	}
 
-	// And a token that is not live falls back to the site card rather than
-	// saying anything about it — the same 200 and shell any SPA route gets.
+	// And a token that is not live is the same 404 the public API answers.
 	blank := getPublic(srv, "/share/AAAAAAAAAAAAAAAAAAAAAA")
-	if blank.Code != http.StatusOK {
-		t.Fatalf("unknown token: status = %d, want 200", blank.Code)
+	if blank.Code != http.StatusNotFound {
+		t.Fatalf("unknown token: status = %d, want 404", blank.Code)
 	}
 	if strings.Contains(blank.Body.String(), `content="`+sh.Title+`"`) {
 		t.Error("an unknown token was given a real thread's title")
-	}
-	if !strings.Contains(blank.Body.String(), `property="og:title" content="Rongo"`) {
-		t.Error("unknown token did not fall back to the site card")
 	}
 }
 

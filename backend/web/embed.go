@@ -64,27 +64,33 @@ func isRoute(path string) bool {
 		return true
 	}
 	if rest, ok := strings.CutPrefix(path, "/share/"); ok {
-		return rest != ""
+		return isAddress(rest)
 	}
 	if rest, ok := strings.CutPrefix(path, "/thread/"); ok {
-		if len(rest) != threadAddressLen {
-			return false
-		}
-		for _, c := range rest {
-			switch {
-			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
-			default:
-				return false
-			}
-		}
-		return true
+		return isAddress(rest)
 	}
 	return false
 }
 
-// threadAddressLen is 16 random bytes in base64url without padding, which is
-// what threads.newToken mints.
-const threadAddressLen = 22
+// isAddress reports whether s has the shape threads.newToken mints. Thread
+// addresses and share tokens are both minted there.
+func isAddress(s string) bool {
+	if len(s) != addressLen {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// addressLen is 16 random bytes in base64url without padding, which is what
+// threads.newToken mints.
+const addressLen = 22
 
 // Handler serves the built SPA. A path the SPA has a page for falls back to
 // index.html so the client-side router can take over; anything else is a 404.
@@ -101,10 +107,12 @@ const threadAddressLen = 22
 func Handler() http.Handler { return HandlerWithShareTitles(nil) }
 
 // ShareTitle answers the one question the shell asks about a share link: what
-// the shared thread is called. It reports false for a token that is unknown or
-// revoked, exactly as GET /api/shares/{token} already answers 404 for those —
-// so this tells a crawler nothing that endpoint does not.
-type ShareTitle func(ctx context.Context, token string) (string, bool)
+// the shared thread is called. It reports found == false for a token that is
+// unknown or revoked, and the page answers 404, exactly as GET
+// /api/shares/{token} already does for those — so this tells a crawler nothing
+// that endpoint does not. An error is a record that could not answer, never a
+// verdict on the link: the shell is served and the SPA asks the API itself.
+type ShareTitle func(ctx context.Context, token string) (title string, found bool, err error)
 
 // HandlerWithShareTitles is Handler with the link-preview title for /share/
 // wired up. Crawlers do not run JavaScript, so a share link unfurls with
@@ -139,19 +147,25 @@ func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 	// serveShell writes the SPA shell with its link-preview placeholders
 	// filled in. A share link carries the thread's own title and a noindex
 	// header, matching what the public API sends for the same token: unfurl
-	// it, do not put it in a search index.
+	// it, do not put it in a search index. A link that is not live gets the
+	// API's 404, not a 200 shell telling a crawler and a monitor it works.
 	serveShell := func(w http.ResponseWriter, r *http.Request) {
 		var title, desc string
 		if token, ok := strings.CutPrefix(r.URL.Path, "/share/"); ok && token != "" {
+			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 			if shareTitle != nil {
-				if t, found := shareTitle(r.Context(), token); found {
-					// Both together, or neither: a revoked link described as
-					// "a shared thread, frozen where it was shared" under the
-					// bare site title is a card for something that is gone.
+				t, found, err := shareTitle(r.Context(), token)
+				if err == nil && !found {
+					http.NotFound(w, r)
+					return
+				}
+				if found {
+					// Both together, or neither: a link described as "a shared
+					// thread, frozen where it was shared" under the bare site
+					// title is a card for something that may be gone.
 					title, desc = t, shareDesc
 				}
 			}
-			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 		}
 		body := renderShell(shell, r, title, desc)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -178,6 +192,9 @@ func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 			if strings.HasPrefix(r.URL.Path, "/assets/") || !isRoute(r.URL.Path) {
 				http.NotFound(w, r)
 				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/share/") {
+				w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(placeholderHTML)
