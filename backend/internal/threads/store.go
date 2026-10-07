@@ -739,13 +739,27 @@ func counted(n sql.NullInt64) *int {
 }
 
 // Fail records that a turn did not produce an answer. The question stays: a
-// disappearing question leaves the reader wondering what they asked. An
-// answer already written goes: a turn that failed after its answer landed
-// (the card it answers could not be closed) must not stand as the answered
-// turn a follow-up reworks, nor as a second answer under that card.
+// disappearing question leaves the reader wondering what they asked. What
+// FinishWithSources already wrote goes, in the same transaction: a turn that
+// failed after its answer landed (the card it answers could not be closed)
+// must not stand as the answered turn a follow-up reworks, a basis a
+// re-explain answers from, nor a second answer under that card.
 func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE messages SET error = ?, answer = '' WHERE id = ?`, msg, messageID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("store turn failure: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE messages SET error = ?, answer = '' WHERE id = ?`, msg, messageID); err != nil {
+		return fmt.Errorf("store turn failure: %w", err)
+	}
+	for _, table := range []string{"citations", "message_sources"} {
+		//nolint:gosec // table is one of two fixed names; the id is a bound ? parameter
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE message_id = ?`, messageID); err != nil {
+			return fmt.Errorf("store turn failure: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store turn failure: %w", err)
 	}
 	return nil

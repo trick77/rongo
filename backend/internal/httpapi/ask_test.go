@@ -1333,8 +1333,13 @@ func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
 		t.Fatalf("messages: %v", err)
 	}
 	first := msgs[len(msgs)-1]
-	if first.Error == "" || first.Answer != "" {
+	if first.Error == "" || first.Answer != "" || len(first.Citations) != 0 {
 		t.Errorf("resumed row = %+v, want it failed with no answer standing", first)
+	}
+	// Nor a basis: a re-explain of the failed row would answer under the card
+	// from it, the card none the wiser.
+	if _, total, err := st.Sources(context.Background(), testSubject, first.ID); err != nil || total != 0 {
+		t.Errorf("failed row keeps %d sources (%v), want none", total, err)
 	}
 
 	// The card is open again, and a retry that links answers it once.
