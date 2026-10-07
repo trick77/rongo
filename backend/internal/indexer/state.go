@@ -114,17 +114,29 @@ func (s *StateStore) SyncSpecs(ctx context.Context, specs []repos.Spec) ([]Purge
 		return nil, err
 	}
 	var purged []Purged
+	stored := make(map[string]string, len(known))
 	for _, k := range known {
 		if listed[k.Name] {
+			stored[k.Name] = k.cloneURL
 			continue
 		}
 		if err := purgeRepoTx(ctx, tx, k.Name); err != nil {
 			return nil, err
 		}
-		purged = append(purged, k)
+		purged = append(purged, k.Purged)
 	}
 
 	for _, spec := range specs {
+		// A changed clone_url is another repository under the same name, so
+		// the index goes here rather than in the poller: its origin check
+		// compares against a checkout, and with the directory removed there
+		// is none — the new remote was cloned, every diff from the old
+		// last_sha failed "bad object", and the old code went on answering.
+		if url, ok := stored[spec.Name]; ok && url != spec.CloneURL {
+			if err := resetTx(ctx, tx, spec.Name); err != nil {
+				return nil, err
+			}
+		}
 		enabled := 0
 		if spec.Enabled {
 			enabled = 1
@@ -247,6 +259,14 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := resetTx(ctx, tx, name); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// resetTx is ResetRepo inside the caller's transaction.
+func resetTx(ctx context.Context, tx *sql.Tx, name string) error {
 	if err := purgeContent(ctx, tx, name); err != nil {
 		return err
 	}
@@ -256,7 +276,7 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 		WHERE name = ?`, name); err != nil {
 		return fmt.Errorf("reset %s: %w", name, err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Purged is one repository SyncSpecs removed, and whether it was a snapshot.
@@ -273,21 +293,28 @@ type Purged struct {
 
 // namesTx lists every repository the database knows about, inside a transaction,
 // with the clone_url that says whether each is a snapshot.
-func namesTx(ctx context.Context, tx *sql.Tx) ([]Purged, error) {
+func namesTx(ctx context.Context, tx *sql.Tx) ([]knownRepo, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT name, clone_url FROM repo_state ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Purged
+	var out []knownRepo
 	for rows.Next() {
 		var name, cloneURL string
 		if err := rows.Scan(&name, &cloneURL); err != nil {
 			return nil, err
 		}
-		out = append(out, Purged{Name: name, Snapshot: cloneURL == ""})
+		out = append(out, knownRepo{Purged: Purged{Name: name, Snapshot: cloneURL == ""}, cloneURL: cloneURL})
 	}
 	return out, rows.Err()
+}
+
+// knownRepo is one repo_state row as SyncSpecs reconciles it: what a purge
+// reports, and the clone_url a listed entry is compared against.
+type knownRepo struct {
+	Purged
+	cloneURL string
 }
 
 // purgeRepoTx is purgeContent plus the repo_state row itself, which takes
@@ -317,18 +344,28 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	// the cascade fire first would strand both, and an orphaned vector is not
 	// inert: the semantic lane keeps returning it, and rowid == chunks.id then
 	// resolves it against whatever chunk is written next.
-	for _, mirror := range []string{"chunks_vec", "chunks_fts"} {
-		// mirror is one of the two literals above, never caller input.
-		if _, err := tx.ExecContext(ctx,
-			//nolint:gosec // only fixed SQL structure is interpolated (a literal table name); every value is a bound ? parameter
-			`DELETE FROM `+mirror+` WHERE rowid IN (
-			SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?)`,
-			name); err != nil {
-			return fmt.Errorf("purge %s from %s: %w", name, mirror, err)
-		}
+	//
+	// chunks_fts goes first because it is a write, for DeleteFile's reason;
+	// chunks_vec row by row, for deleteVecRow's.
+	const owned = `SELECT c.id FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.repo = ?`
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE rowid IN (`+owned+`)`, name); err != nil {
+		return fmt.Errorf("purge %s from chunks_fts: %w", name, err)
+	}
+	if err := deleteVecRows(ctx, tx, owned, name); err != nil {
+		return fmt.Errorf("purge %s from chunks_vec: %w", name, err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE repo = ?`, name); err != nil {
 		return fmt.Errorf("purge %s: %w", name, err)
+	}
+	// What the manifests declared goes too: units and unit_deps hang off no
+	// foreign key, and repo_deps cascades only when the row goes, which a
+	// reset keeps — the next run rewrites it only for a tree with manifests.
+	for _, table := range []string{"units", "unit_deps", "repo_deps"} {
+		// table is one of the three literals above, never caller input.
+		//nolint:gosec // only fixed SQL structure is interpolated (a literal table name); every value is a bound ? parameter
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE repo = ?`, name); err != nil {
+			return fmt.Errorf("purge %s from %s: %w", name, table, err)
+		}
 	}
 	// The commit lane goes with the files: its mirror is an fts5 table too.
 	return history.PurgeTx(ctx, tx, name)

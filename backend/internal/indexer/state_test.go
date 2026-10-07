@@ -251,6 +251,7 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 			sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 			t.Fatalf("ReplaceFile(%s) err = %v", repo, err)
 		}
+		seedStructure(t, db, repo)
 	}
 	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {
 		t.Fatalf("MarkIndexed() err = %v", err)
@@ -294,6 +295,9 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	if n := countOf(t, db, `SELECT COUNT(*) FROM symbols`); n != 0 {
 		t.Errorf("symbols = %d, want 0", n)
 	}
+	// ... and what its manifests declared: units has no FK to cascade from.
+	assertStructure(t, db, "peeq", 0)
+	assertStructure(t, db, "shop", 1)
 
 	// And: the repository that stayed in the list is untouched.
 	active, err := s.Active(ctx)
@@ -848,6 +852,21 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 		if err := s.ResetRepo(ctx, "peeq"); err == nil {
 			t.Error("ResetRepo() err = nil, want the mirror failure surfaced")
 		}
+		if _, err := s.SyncSpecs(ctx, []repos.Spec{
+			{Name: "peeq", CloneURL: "/tmp/elsewhere", Branch: "master", Enabled: true},
+		}); err == nil {
+			t.Error("SyncSpecs() over a changed clone_url err = nil, want the mirror failure surfaced")
+		}
+	})
+
+	t.Run("the units table is unreachable", func(t *testing.T) {
+		db, s := seedPurgeable(t, "peeq")
+		if _, err := db.Exec(`DROP TABLE units`); err != nil {
+			t.Fatalf("sabotage: %v", err)
+		}
+		if err := s.ResetRepo(ctx, "peeq"); err == nil {
+			t.Error("ResetRepo() err = nil, want the failure surfaced")
+		}
 	})
 
 	t.Run("the row a reset has to keep is gone", func(t *testing.T) {
@@ -879,6 +898,7 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
+	seedStructure(t, db, "peeq")
 	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {
 		t.Fatalf("MarkIndexed() err = %v", err)
 	}
@@ -925,6 +945,82 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 			t.Errorf("%s = %d, want 0", q, n)
 		}
 	}
+	// The row stays, so repo_deps does not cascade, and the next run replaces
+	// it only when the new tree has manifests at all.
+	assertStructure(t, db, "peeq", 0)
+}
+
+// seedStructure gives repo one row in each table its manifests fill.
+func seedStructure(t *testing.T, db *sql.DB, repo string) {
+	t.Helper()
+	for _, q := range []string{
+		`INSERT INTO units (repo, key, kind, name) VALUES (?, 'apps/web', 'nx-app', 'web')`,
+		`INSERT INTO unit_deps (repo, from_key, to_key) VALUES (?, 'apps/web', 'libs/ui')`,
+		`INSERT INTO repo_deps (repo, coordinate, direction) VALUES (?, 'example.com/lib', 'requires')`,
+	} {
+		if _, err := db.Exec(q, repo); err != nil {
+			t.Fatalf("seed %s: %v", repo, err)
+		}
+	}
+}
+
+// assertStructure checks repo holds want rows in each of those tables.
+func assertStructure(t *testing.T, db *sql.DB, repo string, want int) {
+	t.Helper()
+	for _, table := range []string{"units", "unit_deps", "repo_deps"} {
+		if n := countOf(t, db, `SELECT COUNT(*) FROM `+table+` WHERE repo = ?`, repo); n != want {
+			t.Errorf("%s rows for %s = %d, want %d", table, repo, n, want)
+		}
+	}
+}
+
+func TestSyncSpecs_cloneURLChangeResetsTheIndexWithoutACheckout(t *testing.T) {
+	// Given: an indexed repository whose checkout the operator removed. With
+	// no .git the poller's origin check has nothing to compare, so only the
+	// list itself can tell that the entry now names another repository.
+	db := purgeDB(t)
+	s := NewStateStore(db)
+	ctx := context.Background()
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///old", Branch: "master", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SyncSpecs() err = %v", err)
+	}
+	if err := NewWriter(db).ReplaceFile(ctx, "peeq", "src/A.java", "sha", "java", 10,
+		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
+		t.Fatalf("ReplaceFile() err = %v", err)
+	}
+	seedStructure(t, db, "peeq")
+	if err := s.MarkIndexed(ctx, "peeq", "abc123", Counts{Files: 1, Chunks: 2}); err != nil {
+		t.Fatalf("MarkIndexed() err = %v", err)
+	}
+
+	// When: the entry is corrected to another remote under the same name.
+	if _, err := s.SyncSpecs(ctx, []repos.Spec{
+		{Name: "peeq", CloneURL: "file:///new", Branch: "master", Enabled: true},
+	}); err != nil {
+		t.Fatalf("second SyncSpecs() err = %v", err)
+	}
+
+	// Then: nothing built from the old remote answers under the new name, and
+	// the next poll indexes in full rather than diffing against a commit the
+	// new repository does not have.
+	st := stateOf(t, s, "peeq")
+	if st.LastSHA != "" || st.Files != 0 || st.Chunks != 0 || !st.LastIndexedAt.IsZero() {
+		t.Errorf("state = sha %q, %d files, %d chunks, indexed %v; want none",
+			st.LastSHA, st.Files, st.Chunks, st.LastIndexedAt)
+	}
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM files`,
+		`SELECT COUNT(*) FROM chunks`,
+		`SELECT COUNT(*) FROM chunks_vec`,
+		`SELECT COUNT(*) FROM chunks_fts`,
+	} {
+		if n := countOf(t, db, q); n != 0 {
+			t.Errorf("%s = %d, want 0", q, n)
+		}
+	}
+	assertStructure(t, db, "peeq", 0)
 }
 
 func TestRequestReindex_isAGenerationClearedOnlyByTheRunThatReadIt(t *testing.T) {

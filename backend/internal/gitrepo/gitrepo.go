@@ -233,12 +233,13 @@ func (c *Client) snapshotDiffers(ctx context.Context, dir string) (bool, error) 
 
 // HasCommit reports whether a sha is in the checkout's object store.
 //
-// A remote repository never needs this: a fetch only adds objects, so a
-// recorded last_sha is always still there. A snapshot can lose one — deleting
-// the drop and extracting a newer archive gives it a fresh `git init` and an
-// empty object store, after which diffing against the recorded commit fails
-// with "bad object" on every cycle and the entry never recovers. The caller
-// asks first and re-indexes in full instead.
+// A fetch only adds objects, so a checkout that indexed last_sha still holds
+// it. A snapshot can lose one — deleting the drop and extracting a newer
+// archive gives it a fresh `git init` and an empty object store, after which
+// diffing against the recorded commit fails with "bad object" on every cycle
+// and the entry never recovers. A clone can too, when its directory was
+// removed and the entry re-cloned from another remote. The caller asks first
+// and re-indexes in full instead.
 func (c *Client) HasCommit(ctx context.Context, spec repos.Spec, sha string) bool {
 	_, err := c.run(ctx, c.Dir(spec), "cat-file", "-e", sha+"^{commit}")
 	return err == nil

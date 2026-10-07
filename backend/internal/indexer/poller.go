@@ -350,6 +350,18 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 	if err := p.git.EnsureCloned(ctx, spec, token); err != nil {
 		return pollResult{}, err
 	}
+	// The origin check above sees only a checkout that is still there. A
+	// recorded commit the checkout does not hold means the index was built
+	// from somewhere else: every diff from it would fail "bad object" while
+	// the old chunks went on answering. pollSnapshot's rule, for a clone.
+	if st.LastSHA != "" && !p.git.HasCommit(ctx, spec, st.LastSHA) {
+		p.log.Info("indexed commit is not in the checkout; re-indexing in full",
+			"repo", st.Name, "indexed_sha", st.LastSHA)
+		if err := p.state.ResetRepo(ctx, st.Name); err != nil {
+			return pollResult{}, err
+		}
+		st.LastSHA = ""
+	}
 
 	// An omitted branch is resolved from the remote and written back, so the
 	// Repos page shows what is actually being indexed. Never assume master.
