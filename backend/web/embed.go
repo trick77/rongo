@@ -144,29 +144,43 @@ func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 		builtIndexErr = shellErr
 	}
 
-	// serveShell writes the SPA shell with its link-preview placeholders
-	// filled in. A share link carries the thread's own title and a noindex
-	// header, matching what the public API sends for the same token: unfurl
-	// it, do not put it in a search index. A link that is not live gets the
-	// API's 404, not a 200 shell telling a crawler and a monitor it works.
-	serveShell := func(w http.ResponseWriter, r *http.Request) {
-		var title, desc string
-		if token, ok := strings.CutPrefix(r.URL.Path, "/share/"); ok && token != "" {
-			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-			if shareTitle != nil {
-				t, found, err := shareTitle(r.Context(), token)
-				if err == nil && !found {
-					http.NotFound(w, r)
-					return
-				}
-				if found {
-					// Both together, or neither: a link described as "a shared
-					// thread, frozen where it was shared" under the bare site
-					// title is a card for something that may be gone.
-					title, desc = t, shareDesc
-				}
-			}
+	// share looks a share link up for the page about to be served. A share
+	// link carries the thread's own title and a noindex header, matching what
+	// the public API sends for the same token: unfurl it, do not put it in a
+	// search index. A link that is not live is the API's 404, not a 200 telling
+	// a crawler and a monitor it works — the body is still the app, which
+	// renders its own "no longer available" page off that same API 404.
+	share := func(w http.ResponseWriter, r *http.Request) (title, desc string, status int) {
+		status = http.StatusOK
+		token, ok := strings.CutPrefix(r.URL.Path, "/share/")
+		if !ok || token == "" {
+			return "", "", status
 		}
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		// Re-sharing a revoked thread returns the SAME token, so a 404 cached
+		// in front would outlive the link coming back.
+		w.Header().Set("Cache-Control", "no-store")
+		if shareTitle == nil {
+			return "", "", status
+		}
+		t, found, err := shareTitle(r.Context(), token)
+		switch {
+		case found:
+			// Both together, or neither: a link described as "a shared
+			// thread, frozen where it was shared" under the bare site title
+			// is a card for something that may be gone.
+			return t, shareDesc, status
+		case err == nil:
+			return "", "", http.StatusNotFound
+		}
+		// A record that cannot answer is not a revocation.
+		return "", "", status
+	}
+
+	// serveShell writes the SPA shell with its link-preview placeholders
+	// filled in.
+	serveShell := func(w http.ResponseWriter, r *http.Request) {
+		title, desc, status := share(w, r)
 		body := renderShell(shell, r, title, desc)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
@@ -174,6 +188,7 @@ func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 		// path alone would serve one reader's host and title to the next.
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Vary", "X-Forwarded-Host, X-Forwarded-Proto")
+		w.WriteHeader(status)
 		_, _ = w.Write(body)
 	}
 
@@ -193,10 +208,9 @@ func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
 				http.NotFound(w, r)
 				return
 			}
-			if strings.HasPrefix(r.URL.Path, "/share/") {
-				w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-			}
+			_, _, status := share(w, r)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(status)
 			_, _ = w.Write(placeholderHTML)
 			return
 		}

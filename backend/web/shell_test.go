@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -259,24 +260,51 @@ func TestHandler_hasNoFavicon(t *testing.T) {
 
 // A revoked or invented token is a real 404, the same answer the public API
 // gives for it, and still kept out of a search index. A 200 shell would tell
-// a crawler and a monitor the link works.
+// a crawler and a monitor the link works. The body is still the app, so the
+// reader sees its own "no longer available" page rather than bare text, and
+// nothing in front caches it: re-sharing a revoked thread returns the SAME
+// token, and a cached 404 would outlive that.
 func TestShellDeadShareLinkIs404(t *testing.T) {
-	h := handler(builtFS(), func(context.Context, string) (string, bool, error) {
-		return "", false, nil
+	dead := func(context.Context, string) (string, bool, error) { return "", false, nil }
+
+	t.Run("built", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler(builtFS(), dead).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if rec.Header().Get("X-Robots-Tag") == "" {
+			t.Error("a dead share link is indexable")
+		}
+		if !strings.Contains(rec.Body.String(), `og:title" content="`+siteTitle+`"`) {
+			t.Errorf("a dead share link was not served the shell with the site card: %q", rec.Body.String())
+		}
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("Cache-Control = %q, want no-store", got)
+		}
+		if rec.Header().Get("Vary") == "" {
+			t.Error("no Vary on a shell built from the request")
+		}
+		if got := rec.Header().Get("Content-Length"); got != strconv.Itoa(rec.Body.Len()) {
+			t.Errorf("Content-Length = %q, body is %d bytes", got, rec.Body.Len())
+		}
 	})
 
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
+	t.Run("placeholder", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		handler(fstest.MapFS{}, dead).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+liveToken, nil))
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
-	if rec.Header().Get("X-Robots-Tag") == "" {
-		t.Error("a dead share link is indexable")
-	}
-	if strings.Contains(rec.Body.String(), "og:title") {
-		t.Error("a dead share link was served the shell")
-	}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rec.Code)
+		}
+		if rec.Header().Get("X-Robots-Tag") == "" {
+			t.Error("a dead share link is indexable")
+		}
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Error("a dead share link may be cached")
+		}
+	})
 }
 
 // Only what the store mints is a share link; anything else never reaches the
@@ -306,8 +334,8 @@ func TestShellShareRouteNeedsTokenShape(t *testing.T) {
 			t.Errorf("%s: a share link is indexable", name)
 		}
 	}
-	if asked != 1 {
-		t.Errorf("the record was asked %d times, want once (the built shell's one well-formed token)", asked)
+	if asked != 2 {
+		t.Errorf("the record was asked %d times, want twice (one well-formed token per build)", asked)
 	}
 }
 
