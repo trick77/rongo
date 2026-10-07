@@ -146,7 +146,7 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 			}
 			continue
 		}
-		if err := ix.indexOne(ctx, spec, st, sha, tg.path, read); err != nil {
+		if err := ix.indexOne(ctx, spec, st, sha, tg, read); err != nil {
 			return Counts{}, err
 		}
 	}
@@ -160,8 +160,17 @@ func (ix *Indexer) IndexRepo(ctx context.Context, st RepoState, sha string, path
 	return ix.totals(ctx, st.Name)
 }
 
-// readFile reads one path at one commit.
-type readFile func(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error)
+// readFile reads one path at one commit. A blob over limit bytes, when limit
+// is non-zero, may be refused with a *gitrepo.TooLargeError; only the batch
+// reader can refuse before holding it, the slow way reads whole.
+type readFile func(ctx context.Context, spec repos.Spec, sha, path string, limit int64) ([]byte, error)
+
+// unlimited is a GitClient read as a readFile: it cannot refuse unread.
+func unlimited(read func(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error)) readFile {
+	return func(ctx context.Context, spec repos.Spec, sha, path string, _ int64) ([]byte, error) {
+		return read(ctx, spec, sha, path)
+	}
+}
 
 // batchGit is a git that can keep one process open for all of a run's reads.
 // gitrepo.Client is one; a test's fake need not be.
@@ -181,23 +190,23 @@ func (ix *Indexer) reader(ctx context.Context, spec repos.Spec) (readFile, func(
 	bg, ok := ix.git.(batchGit)
 	if !ok {
 		ix.log.Debug("git offers no batch reader; reading a file at a time", "repo", spec.Name)
-		return ix.git.ReadFile, func() {}
+		return unlimited(ix.git.ReadFile), func() {}
 	}
 	r, err := bg.NewReader(ctx, spec)
 	if err != nil {
 		ix.log.Warn("batch reader not started; reading a file at a time", "repo", spec.Name, "err", err)
-		return ix.git.ReadFile, func() {}
+		return unlimited(ix.git.ReadFile), func() {}
 	}
-	return ix.untilLost(r.ReadFile, ix.git.ReadFile), func() { _ = r.Close() }
+	return ix.untilLost(r.ReadFileLimited, unlimited(ix.git.ReadFile)), func() { _ = r.Close() }
 }
 
 // untilLost reads through batch until it reports the reader gone, and a file
 // at a time from then on, the file that found it out included.
 func (ix *Indexer) untilLost(batch, single readFile) readFile {
 	lost := false
-	return func(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
+	return func(ctx context.Context, spec repos.Spec, sha, path string, limit int64) ([]byte, error) {
 		if !lost {
-			body, err := batch(ctx, spec, sha, path)
+			body, err := batch(ctx, spec, sha, path, limit)
 			// Only a reader that is gone, and never a run that was
 			// cancelled: that one ends here.
 			if !errors.Is(err, gitrepo.ErrReaderBroken) || ctx.Err() != nil {
@@ -206,7 +215,7 @@ func (ix *Indexer) untilLost(batch, single readFile) readFile {
 			lost = true
 			ix.log.Warn("batch reader lost; reading a file at a time", "repo", spec.Name, "err", err)
 		}
-		return single(ctx, spec, sha, path)
+		return single(ctx, spec, sha, path, limit)
 	}
 }
 
@@ -240,7 +249,8 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 	// not this repository's: the file selector skips those paths, and so
 	// does the structure scan.
 	paths = ownPaths(paths)
-	read := func(p string) ([]byte, error) { return readAt(ctx, spec, sha, p) }
+	// Unlimited: a manifest is read for structure whatever the file ceiling.
+	read := func(p string) ([]byte, error) { return readAt(ctx, spec, sha, p, 0) }
 	mods := map[string][]byte{}
 	for _, p := range paths {
 		if path.Base(p) != "go.mod" {
@@ -306,6 +316,8 @@ type target struct {
 	// mode is the tree entry's mode, "" when unknown (bare paths handed over
 	// by a caller with no diff to read it from).
 	mode string
+	// size is the blob's size from the listing, 0 when unknown.
+	size int64
 }
 
 // targets resolves what to work on. A full run lists the tree; an incremental
@@ -321,7 +333,7 @@ func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, s
 		}
 		out := make([]target, 0, len(all))
 		for _, e := range all {
-			out = append(out, target{path: e.Path, mode: e.Mode})
+			out = append(out, target{path: e.Path, mode: e.Mode, size: e.Size})
 		}
 		return out, nil
 	}
@@ -337,14 +349,16 @@ func (ix *Indexer) targets(ctx context.Context, spec repos.Spec, st RepoState, s
 	}
 	out := make([]target, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, target{path: p, deleted: changed[p].Deleted, mode: changed[p].Mode})
+		c := changed[p]
+		out = append(out, target{path: p, deleted: c.Deleted, mode: c.Mode, size: c.Size})
 	}
 	return out, nil
 }
 
 // indexOne runs one file through the pipeline: read, select, symbols, chunk,
 // cache, embed, write.
-func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha, path string, read readFile) error {
+func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, sha string, tg target, read readFile) error {
+	path := tg.path
 	lang := LanguageOf(path)
 	// The verdicts the path alone decides come before the read: an excluded
 	// or vendored file used to be read, redacted and scanned for credentials
@@ -354,7 +368,18 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 			"reason", string(decision), "detail", detail)
 		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(decision), 0)
 	}
-	body, err := read(ctx, spec, sha, path)
+	// So does the ceiling, on the size git listed: the body check came after
+	// git had handed over every byte, and one 2 GB artifact took the poller
+	// down. An unknown size is refused by the reader instead, unread.
+	limit := ix.selector.MaxBytes()
+	if tg.size > limit {
+		return ix.recordTooLarge(ctx, st, path, sha, lang, tg.size)
+	}
+	body, err := read(ctx, spec, sha, path, limit)
+	var tooLarge *gitrepo.TooLargeError
+	if errors.As(err, &tooLarge) {
+		return ix.recordTooLarge(ctx, st, path, sha, lang, tooLarge.Size)
+	}
 	if err != nil {
 		// A submodule pointer or a symlink never gets here: targets drops
 		// them by mode. What is left is a real read failure, and it fails
@@ -418,6 +443,14 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 	// a pass of its own.
 	toks := edges.Extract(path, body)
 	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, len(body), chunks, vecs, syms, toks)
+}
+
+// recordTooLarge is SelectBody's too_large verdict for a blob never read,
+// recorded at the size git reported.
+func (ix *Indexer) recordTooLarge(ctx context.Context, st RepoState, path, sha, lang string, size int64) error {
+	ix.log.Debug("file not indexed", "repo", st.Name, "path", path,
+		"reason", string(SkipTooLarge), "detail", tooLargeDetail)
+	return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(SkipTooLarge), int(size))
 }
 
 // vectors resolves one file's chunks to vectors, embedding only the misses.

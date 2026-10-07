@@ -61,7 +61,7 @@ func TestARunOutlivesItsBatchReader(t *testing.T) {
 	// killed under the run does
 	ix := New(Deps{})
 	var batched, singles []string
-	batch := func(_ context.Context, _ repos.Spec, _, path string) ([]byte, error) {
+	batch := func(_ context.Context, _ repos.Spec, _, path string, _ int64) ([]byte, error) {
 		batched = append(batched, path)
 		if len(batched) >= 3 {
 			return nil, fmt.Errorf("read %s: %w: EOF", path, gitrepo.ErrReaderBroken)
@@ -71,7 +71,7 @@ func TestARunOutlivesItsBatchReader(t *testing.T) {
 		}
 		return []byte("batch:" + path), nil
 	}
-	single := func(_ context.Context, _ repos.Spec, _, path string) ([]byte, error) {
+	single := func(_ context.Context, _ repos.Spec, _, path string, _ int64) ([]byte, error) {
 		singles = append(singles, path)
 		return []byte("single:" + path), nil
 	}
@@ -79,10 +79,10 @@ func TestARunOutlivesItsBatchReader(t *testing.T) {
 	ctx := context.Background()
 
 	// When the run reads on
-	first, _ := read(ctx, repos.Spec{}, "sha", "a.go")
-	_, missErr := read(ctx, repos.Spec{}, "sha", "gone.go")
-	third, err3 := read(ctx, repos.Spec{}, "sha", "c.go")
-	fourth, err4 := read(ctx, repos.Spec{}, "sha", "d.go")
+	first, _ := read(ctx, repos.Spec{}, "sha", "a.go", 0)
+	_, missErr := read(ctx, repos.Spec{}, "sha", "gone.go", 0)
+	third, err3 := read(ctx, repos.Spec{}, "sha", "c.go", 0)
+	fourth, err4 := read(ctx, repos.Spec{}, "sha", "d.go", 0)
 
 	// Then a file that is merely missing stays an error of that file, and
 	// from the read that found the reader gone every file is read the slow
@@ -103,16 +103,16 @@ func TestACancelledRunDoesNotFallBackToSlowReads(t *testing.T) {
 	ix := New(Deps{})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	batch := func(context.Context, repos.Spec, string, string) ([]byte, error) {
+	batch := func(context.Context, repos.Spec, string, string, int64) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %w", gitrepo.ErrReaderBroken, context.Canceled)
 	}
-	single := func(context.Context, repos.Spec, string, string) ([]byte, error) {
+	single := func(context.Context, repos.Spec, string, string, int64) ([]byte, error) {
 		t.Error("a cancelled run went on reading")
 		return nil, nil
 	}
 
 	// When / Then the cancellation is what comes back
-	if _, err := ix.untilLost(batch, single)(ctx, repos.Spec{}, "sha", "a.go"); !errors.Is(err, context.Canceled) {
+	if _, err := ix.untilLost(batch, single)(ctx, repos.Spec{}, "sha", "a.go", 0); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want the cancellation", err)
 	}
 }

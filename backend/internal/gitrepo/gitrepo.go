@@ -469,6 +469,10 @@ type Change struct {
 	// a file BEFORE it is read. `git show` of a symlink returns the link
 	// target as if it were the file's text.
 	Mode string
+	// Size is the blob's size in bytes at the newer commit, 0 when deleted or
+	// not a file: what lets the indexer refuse a file over its ceiling
+	// without reading it. A 2 GB artifact read whole took the poller down.
+	Size int64
 }
 
 // Indexable reports whether a tree entry of this mode is a file to read:
@@ -494,6 +498,10 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 		return nil, err
 	}
 	changes := []Change{}
+	// The blobs to size, by object id: --raw carries no size, and asking
+	// by id needs no path quoting.
+	var blobs []int
+	var oids strings.Builder
 	for _, line := range nonEmptyLines(out) {
 		// :<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>
 		meta, path, ok := strings.Cut(line, "\t")
@@ -505,28 +513,52 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 		if !ch.Deleted {
 			ch.Mode = fields[1]
 		}
+		if Indexable(ch.Mode) {
+			blobs = append(blobs, len(changes))
+			oids.WriteString(fields[3] + "\n")
+		}
 		changes = append(changes, ch)
+	}
+	if len(blobs) == 0 {
+		return changes, nil
+	}
+	sized, err := c.runIn(ctx, c.Dir(spec), strings.NewReader(oids.String()), nil, "cat-file", "--batch-check")
+	if err != nil {
+		return nil, err
+	}
+	lines := nonEmptyLines(string(sized))
+	if len(lines) != len(blobs) {
+		return nil, fmt.Errorf("sized %d of %d changed blobs", len(lines), len(blobs))
+	}
+	for i, line := range lines {
+		_, size, err := parseBatchHeader(line)
+		if err != nil {
+			return nil, err
+		}
+		changes[blobs[i]].Size = size
 	}
 	return changes, nil
 }
 
-// ListEntries lists every tracked entry at a commit with its mode, for the
-// initial full index. ListPaths is the same listing without the modes.
+// ListEntries lists every tracked entry at a commit with its mode and size,
+// for the initial full index. ListPaths is the same listing without either.
 func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"ls-tree", "-r", sha)
+		"ls-tree", "-r", "-l", sha)
 	if err != nil {
 		return nil, err
 	}
 	entries := []Change{}
 	for _, line := range nonEmptyLines(out) {
-		// <mode> <type> <sha>\t<path>
+		// <mode> <type> <sha> <size>\t<path>; the size is "-" for a
+		// submodule pointer, which names a commit and has none.
 		meta, path, ok := strings.Cut(line, "\t")
 		fields := strings.Fields(meta)
-		if !ok || len(fields) != 3 {
+		if !ok || len(fields) != 4 {
 			return nil, fmt.Errorf("unparseable tree record %q", line)
 		}
-		entries = append(entries, Change{Path: path, Mode: fields[0]})
+		size, _ := strconv.ParseInt(fields[3], 10, 64)
+		entries = append(entries, Change{Path: path, Mode: fields[0], Size: size})
 	}
 	return entries, nil
 }

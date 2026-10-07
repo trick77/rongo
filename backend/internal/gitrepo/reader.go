@@ -98,9 +98,26 @@ func (c *Client) NewReader(ctx context.Context, spec repos.Spec) (*Reader, error
 	return r, nil
 }
 
+// TooLargeError is a blob a limited read refused: skipped on the stream,
+// never held.
+type TooLargeError struct {
+	Size int64
+}
+
+func (e *TooLargeError) Error() string {
+	return fmt.Sprintf("a blob of %d bytes is over the read limit", e.Size)
+}
+
 // ReadFile reads one path at one commit. spec must be the checkout the reader
 // was opened on.
 func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string) ([]byte, error) {
+	return r.ReadFileLimited(ctx, spec, sha, path, 0)
+}
+
+// ReadFileLimited is ReadFile refusing a blob over limit bytes with a
+// *TooLargeError before allocating it. Zero means no limit. A path holding a
+// newline is read the slow way and unlimited.
+func (r *Reader) ReadFileLimited(ctx context.Context, spec repos.Spec, sha, path string, limit int64) ([]byte, error) {
 	if r.c.Dir(spec) != r.dir {
 		return nil, fmt.Errorf("read %s at %s: the reader is open on %s, not %s", path, ShortSHA(sha), r.name, spec.Name)
 	}
@@ -122,7 +139,7 @@ func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 	if strings.Contains(sha+path, "\n") {
 		return r.c.ReadFile(ctx, spec, sha, path)
 	}
-	body, err := r.read(sha + ":" + path)
+	body, err := r.read(sha+":"+path, limit)
 	if err != nil {
 		return nil, fmt.Errorf("read %s at %s: %w", path, ShortSHA(sha), err)
 	}
@@ -130,8 +147,9 @@ func (r *Reader) ReadFile(ctx context.Context, spec repos.Spec, sha, path string
 }
 
 // read sends one request and reads its answer: the header, then for an
-// object its bytes and one newline.
-func (r *Reader) read(object string) ([]byte, error) {
+// object its bytes and one newline. A blob over limit (when non-zero) is
+// consumed unread, like a non-blob.
+func (r *Reader) read(object string, limit int64) ([]byte, error) {
 	if _, err := io.WriteString(r.in, object+"\n"); err != nil {
 		return nil, r.fail(fmt.Errorf("ask git: %w", err))
 	}
@@ -154,6 +172,12 @@ func (r *Reader) read(object string) ([]byte, error) {
 			return nil, r.fail(fmt.Errorf("skip a %s: %w", kind, err))
 		}
 		return nil, fmt.Errorf("not a file at that commit: it is a %s", kind)
+	}
+	if limit > 0 && size > limit {
+		if _, err := io.CopyN(io.Discard, r.out, size+1); err != nil {
+			return nil, r.fail(fmt.Errorf("skip %d bytes: %w", size, err))
+		}
+		return nil, &TooLargeError{Size: size}
 	}
 	body := make([]byte, size)
 	if _, err := io.ReadFull(r.out, body); err != nil {

@@ -338,7 +338,7 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 	// too_large anyway, and labelling a binary that happened to match a pattern
 	// "secret" when "binary" is the true reason.
 	if len(body) > s.opts.MaxBytes {
-		return SkipTooLarge, "larger than the configured ceiling; skipped whole rather than truncated", body
+		return SkipTooLarge, tooLargeDetail, body
 	}
 	if isBinary(body) {
 		return SkipBinary, "contains NUL bytes", body
@@ -373,6 +373,12 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 	}
 	return Include, "", body
 }
+
+const tooLargeDetail = "larger than the configured ceiling; skipped whole rather than truncated"
+
+// MaxBytes is the ceiling above which a file is skipped whole, for the
+// pipeline to apply before the read when git has said how big a blob is.
+func (s *Selector) MaxBytes() int64 { return int64(s.opts.MaxBytes) }
 
 // SelectPath is the part of SelectBody that needs no body: the operator's
 // exclusions, vendored directories and generated names. Decided before the
