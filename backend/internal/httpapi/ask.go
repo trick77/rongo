@@ -678,7 +678,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	// The record is written on a context that outlives the request; see turn.
 	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, msg.ID, meter, steps, st)
+	tr := s.beginTurn(ctx, record, thread.ID, msg.ID, meter, steps, st)
 
 	// The title is written alongside the answer and never in front of it. It is
 	// a label; the answer must not wait for it, and a title that never arrives
@@ -740,26 +740,18 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
 			recordFailed(ctx, "record scope failed", serr)
 		}
-		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
-			return
-		}
 		// -1 is the column's own "no candidate": a narrowing resumed from the
 		// panel as a whole, and there is no row on it that the answer came
-		// from. The link to the clarification is what closes it either way.
+		// from. The link to the clarification is what closes it either way,
+		// and it lands with the answer or not at all: an answer the card did
+		// not know about left it open, and the next click wrote a second one.
 		choiceIdx := req.Choice
 		if len(req.Repos) > 0 {
 			choiceIdx = -1
 		}
-		// An answer the card does not know about leaves the card open with
-		// the claim released, and the next click writes a second answer under
-		// it. Tried twice, then the turn fails: open for a retry, and never two
-		// answers under one card.
-		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
-			if err = s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
-				recordFailed(ctx, "link choice failed", err)
-				tr.fail(turnFailed)
-				return
-			}
+		tr.choice = &threads.Choice{Subject: u.Subject, ClarificationID: resume.ID, Idx: choiceIdx}
+		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
+			return
 		}
 		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, tr.streamed, send, closeRecord)
 		return
@@ -1129,7 +1121,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// The record is written on a context that outlives the request, the same
 	// as every other write in this package.
 	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, newMsg.ID, meter, steps, st)
+	tr := s.beginTurn(ctx, record, msg.ThreadID, newMsg.ID, meter, steps, st)
 
 	// The scope of the turn being re-explained carries over with its sources:
 	// same question, same corpus, so the same rules about what was and was not

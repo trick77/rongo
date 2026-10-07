@@ -467,7 +467,12 @@ func (s *Store) Finish(ctx context.Context, messageID int64, answer string, cita
 // all or nothing. Written apart, a sources write that failed left an answer
 // whose basis read as "no longer indexed" — a claim about the index, when the
 // fact was a write that never landed.
-func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source) error {
+//
+// choice is the card a resumed turn answers, nil for every other turn. Its
+// link is the same write: apart, a link that did not land — or a process that
+// died between the two — left an answered row the card knew nothing about,
+// and the next click wrote a second answer under it.
+func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer string, citations []ask.Citation, sources []ask.Source, choice *Choice) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -480,7 +485,21 @@ func (s *Store) FinishWithSources(ctx context.Context, messageID int64, answer s
 	if err := saveSourcesTx(ctx, tx, messageID, sources); err != nil {
 		return err
 	}
+	if choice != nil {
+		if err := linkChoice(ctx, tx, choice.Subject, messageID, choice.ClarificationID, choice.Idx); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// Choice is the card entry a resumed turn answers: the clarification and the
+// candidate index, -1 for a narrowing resumed from the panel as a whole.
+// Subject is the owner the link is checked against.
+type Choice struct {
+	Subject         string
+	ClarificationID int64
+	Idx             int
 }
 
 func finishTx(ctx context.Context, tx *sql.Tx, messageID int64, answer string, citations []ask.Citation) error {
@@ -739,27 +758,10 @@ func counted(n sql.NullInt64) *int {
 }
 
 // Fail records that a turn did not produce an answer. The question stays: a
-// disappearing question leaves the reader wondering what they asked. What
-// FinishWithSources already wrote goes, in the same transaction: a turn that
-// failed after its answer landed (the card it answers could not be closed)
-// must not stand as the answered turn a follow-up reworks, a basis a
-// re-explain answers from, nor a second answer under that card.
+// disappearing question leaves the reader wondering what they asked.
 func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET error = ? WHERE id = ?`, msg, messageID)
 	if err != nil {
-		return fmt.Errorf("store turn failure: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET error = ?, answer = '' WHERE id = ?`, msg, messageID); err != nil {
-		return fmt.Errorf("store turn failure: %w", err)
-	}
-	for _, table := range []string{"citations", "message_sources"} {
-		//nolint:gosec // table is one of two fixed names; the id is a bound ? parameter
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE message_id = ?`, messageID); err != nil {
-			return fmt.Errorf("store turn failure: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store turn failure: %w", err)
 	}
 	return nil
@@ -1383,8 +1385,20 @@ func (s *Store) CandidateHits(ctx context.Context, subject string, clarification
 // attribute an answer to a card it never came from, which corrupts the record
 // this whole task exists to keep honest. A mismatch — cross-thread,
 // cross-user, or either id simply wrong — updates zero rows and errors.
+//
+// A resumed turn links through FinishWithSources, in the answer's own
+// transaction; this is the same write on its own.
 func (s *Store) LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error {
-	res, err := s.db.ExecContext(ctx, `
+	return linkChoice(ctx, s.db, subject, messageID, clarificationID, idx)
+}
+
+// execer is *sql.DB and *sql.Tx.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func linkChoice(ctx context.Context, db execer, subject string, messageID, clarificationID int64, idx int) error {
+	res, err := db.ExecContext(ctx, `
 		UPDATE messages SET from_clarification_id = ?, from_candidate_idx = ?
 		WHERE id = ?
 		  AND thread_id = (

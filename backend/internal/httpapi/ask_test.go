@@ -1255,8 +1255,75 @@ type finishFailingThreads struct {
 	*threads.Store
 }
 
-func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source) error {
+func (f *finishFailingThreads) FinishWithSources(context.Context, int64, string, []ask.Citation, []ask.Source, *threads.Choice) error {
 	return errors.New("disk full")
+}
+
+// finishGate fails the finish while fail is set, and records the card link
+// each finish was handed.
+type finishGate struct {
+	*threads.Store
+	fail    bool
+	choices []*threads.Choice
+}
+
+func (g *finishGate) FinishWithSources(ctx context.Context, id int64, answer string, cites []ask.Citation, sources []ask.Source, choice *threads.Choice) error {
+	g.choices = append(g.choices, choice)
+	if g.fail {
+		return errors.New("database is locked")
+	}
+	return g.Store.FinishWithSources(ctx, id, answer, cites, sources, choice)
+}
+
+// TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable: the link is what
+// closes a card, and it lands in the answer's own write. A finish that does
+// not commit leaves neither an answer nor a link — the card open for a retry —
+// and one that commits has closed it, so no click can put a second answer
+// under one card.
+func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	gate := &finishGate{Store: st, fail: true}
+	srv.deps.Threads = gate
+	msgID, clarID := seedClarification(t, st)
+	req := fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID)
+
+	body := doSSE(t, srv, "/api/ask", req)
+
+	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
+		t.Fatalf("want the turn failed, got:\n%s", body)
+	}
+	if len(gate.choices) != 1 || gate.choices[0] == nil ||
+		gate.choices[0].ClarificationID != clarID || gate.choices[0].Idx != 1 || gate.choices[0].Subject != testSubject {
+		t.Fatalf("choices = %+v, want the card link handed to the finish", gate.choices)
+	}
+	if c, _ := st.Clarification(context.Background(), testSubject, msgID); c == nil || c.Answered {
+		t.Fatalf("card = %+v, want it open after a finish that did not land", c)
+	}
+
+	gate.fail = false
+	body = doSSE(t, srv, "/api/ask", req)
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the retry did not answer:\n%s", body)
+	}
+	if c, _ := st.Clarification(context.Background(), testSubject, msgID); c == nil || !c.Answered {
+		t.Fatalf("card = %+v, want it closed by the answer", c)
+	}
+	if code := doStatus(t, srv, "/api/ask", req); code != http.StatusConflict {
+		t.Errorf("third choice status = %d, want 409 — the card is answered", code)
+	}
+}
+
+// TestAsk_anOrdinaryTurnFinishesWithNoCardLink: only a resume closes a card.
+func TestAsk_anOrdinaryTurnFinishesWithNoCardLink(t *testing.T) {
+	srv, st := newTestServerWithStore(t, func(f *fakeAsker) { f.tokens = []string{"x"} })
+	gate := &finishGate{Store: st}
+	srv.deps.Threads = gate
+
+	doSSE(t, srv, "/api/ask", `{"question":"how is sign-in done?"}`)
+
+	if len(gate.choices) != 1 || gate.choices[0] != nil {
+		t.Errorf("choices = %+v, want one finish with no link", gate.choices)
+	}
 }
 
 func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
@@ -1289,80 +1356,6 @@ func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) 
 	}
 	if msgs[0].Error == "" || msgs[0].Answer != "" {
 		t.Errorf("message = %+v, want it recorded as failed with no answer", msgs[0])
-	}
-}
-
-// linkFailingThreads cannot close a card: every LinkChoice fails, and the
-// attempts are counted.
-type linkFailingThreads struct {
-	*threads.Store
-	fail  bool
-	links int
-}
-
-func (l *linkFailingThreads) LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error {
-	l.links++
-	if l.fail {
-		return errors.New("database is locked")
-	}
-	return l.Store.LinkChoice(ctx, subject, messageID, clarificationID, idx)
-}
-
-// TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable: the link is what
-// closes a card. An answer stored without it leaves the card open, the claim
-// is released, and the next click writes a second answer under one card. A
-// link that will not land after a retry fails the turn instead, so the card
-// is open for a retry and the record holds one answer under it, never two.
-func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
-	srv, st := newTestServerWithStore(t, withAskerResuming())
-	failing := &linkFailingThreads{Store: st, fail: true}
-	srv.deps.Threads = failing
-	msgID, _ := seedClarification(t, st)
-	req := fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID)
-
-	body := doSSE(t, srv, "/api/ask", req)
-
-	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
-		t.Fatalf("want the turn failed, got:\n%s", body)
-	}
-	if failing.links != 2 {
-		t.Errorf("link attempts = %d, want one retry", failing.links)
-	}
-	msgs, err := st.Messages(context.Background(), testSubject, threadOf(t, st, msgID))
-	if err != nil {
-		t.Fatalf("messages: %v", err)
-	}
-	first := msgs[len(msgs)-1]
-	if first.Error == "" || first.Answer != "" || len(first.Citations) != 0 {
-		t.Errorf("resumed row = %+v, want it failed with no answer standing", first)
-	}
-	// Nor a basis: a re-explain of the failed row would answer under the card
-	// from it, the card none the wiser.
-	if _, total, err := st.Sources(context.Background(), testSubject, first.ID); err != nil || total != 0 {
-		t.Errorf("failed row keeps %d sources (%v), want none", total, err)
-	}
-
-	// The card is open again, and a retry that links answers it once.
-	failing.fail = false
-	body = doSSE(t, srv, "/api/ask", req)
-	if !strings.Contains(body, "event: done") {
-		t.Fatalf("the retry did not answer:\n%s", body)
-	}
-	msgs, err = st.Messages(context.Background(), testSubject, threadOf(t, st, msgID))
-	if err != nil {
-		t.Fatalf("messages: %v", err)
-	}
-	answered := 0
-	for _, m := range msgs {
-		if m.Answer != "" && m.Error == "" {
-			answered++
-		}
-	}
-	if answered != 1 {
-		t.Errorf("answers under the card = %d, want 1", answered)
-	}
-	if code := doStatus(t, srv, "/api/ask", req); code != http.StatusConflict {
-		t.Errorf("third choice status = %d, want 409 — the card is answered", code)
 	}
 }
 

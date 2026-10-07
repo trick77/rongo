@@ -2,12 +2,13 @@ package httpapi
 
 import (
 	"context"
-	"log/slog"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -24,19 +25,23 @@ type turn struct {
 	// neither an answer nor an error — indistinguishable from a turn still
 	// in flight.
 	record   context.Context
+	threadID int64
 	msgID    int64
 	meter    *usage.Meter
 	steps    *timeline.Recorder
 	st       *sseStream
 	streamed bool
+	// choice is the card a resumed turn answers, nil otherwise: finish writes
+	// its link with the answer, so the two cannot disagree.
+	choice *threads.Choice
 
 	started time.Time
 	mu      sync.Mutex
 	step    string
 }
 
-func (s *Server) beginTurn(ctx, record context.Context, msgID int64, meter *usage.Meter, steps *timeline.Recorder, st *sseStream) *turn {
-	return &turn{s: s, ctx: ctx, record: record, msgID: msgID, meter: meter, steps: steps, st: st, started: time.Now()}
+func (s *Server) beginTurn(ctx, record context.Context, threadID, msgID int64, meter *usage.Meter, steps *timeline.Recorder, st *sseStream) *turn {
+	return &turn{s: s, ctx: ctx, record: record, threadID: threadID, msgID: msgID, meter: meter, steps: steps, st: st, started: time.Now()}
 }
 
 // mark notes the step the pipeline reported last.
@@ -120,21 +125,25 @@ func (t *turn) fail(why string) {
 // still in flight looks like, while the browser was told it was done. An
 // empty answer is the same row by another road — the share ceiling stops
 // below it and FailOrphaned rewrites it at the next boot — so it fails too.
+//
+// A resumed turn's card link lands in the same write, so a failed finish
+// leaves the card open for a retry and a finished one has closed it.
 func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) bool {
 	if strings.TrimSpace(text) == "" {
-		if !threadWasDeleted(t.ctx) {
-			slog.Error("empty answer", "message", t.msgID)
-		}
+		turnStopped(t.ctx, "empty answer", t.threadID, errEmptyAnswer, t.progress()...)
 		t.fail(turnFailed)
 		return false
 	}
-	if err := t.s.deps.Threads.FinishWithSources(t.record, t.msgID, text, cites, sources); err != nil {
+	if err := t.s.deps.Threads.FinishWithSources(t.record, t.msgID, text, cites, sources, t.choice); err != nil {
 		recordFailed(t.ctx, "record answer failed", err)
 		t.fail(turnFailed)
 		return false
 	}
 	return true
 }
+
+// errEmptyAnswer is why a turn whose pipeline returned no text failed.
+var errEmptyAnswer = errors.New("the answer is empty")
 
 // parseAudience reads the wire value; anything but the Developer's is the
 // Analyst's.
