@@ -421,6 +421,9 @@ func TestRetriable_rateLimitRetriesOnceCapped(t *testing.T) {
 	if retriable(context.Background(), limited(retryAfterCap+time.Nanosecond), 0) {
 		t.Error("a wait past the cap is retried")
 	}
+	if !retriable(context.Background(), limited(0), 0) {
+		t.Error("a 429 naming no wait is not retried after the floor")
+	}
 
 	c, calls := attemptsUpstream(t,
 		attempt{status: http.StatusTooManyRequests, retryAfter: "1"},

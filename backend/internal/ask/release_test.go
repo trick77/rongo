@@ -108,9 +108,13 @@ func (f *fakeReleaser) Depth() int {
 type releaseHistory struct {
 	fakeHistory
 	rows map[string]history.Commit
+	fail error
 }
 
 func (h *releaseHistory) BySHAs(_ context.Context, repo string, shas []string) ([]history.Commit, error) {
+	if h.fail != nil {
+		return nil, h.fail
+	}
 	var out []history.Commit
 	for _, s := range shas {
 		if c, ok := h.rows[repo+"/"+s]; ok {
@@ -367,11 +371,14 @@ func TestReleaseLines_theRefusalMatrix(t *testing.T) {
 // gets a line saying so, the others resolve as ever, and the turn stands.
 // Only a turn that was cancelled fails, because nobody is waiting for it.
 func TestReleaseLines_aComponentWhoseCheckoutErrorsIsOneLine(t *testing.T) {
-	for _, call := range []string{"Head", "ResolveTag", "IsAncestor", "Range"} {
+	for _, call := range []string{"Head", "ResolveTag", "IsAncestor", "Range", "BySHAs"} {
 		t.Run(call, func(t *testing.T) {
 			db := gatherDB(t)
 			rel, h, declared, pm := releaseCorpus(t, db)
 			rel.fail = map[string]error{call + "/shop-backend": errors.New("fatal: bad object c3")}
+			if call == "BySHAs" {
+				h.fail = errors.New("database is locked")
+			}
 			g := NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
 
 			lines, commits, err := releaseLines(context.Background(), g, rel, h, pm, "shop-infra", declared, []string{"prod", "test"})
