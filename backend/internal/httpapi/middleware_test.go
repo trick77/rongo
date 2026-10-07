@@ -94,3 +94,57 @@ func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
 		t.Errorf("a failing probe was not logged: %s", buf.String())
 	}
 }
+
+// A share link's token is its whole authorisation, and it travels in the
+// path, so the access log masks it the way it leaves a query string out.
+func TestLoggingMasksShareToken(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
+	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+
+	for _, path := range []string{
+		"/api/shares/" + token,
+		"/api/shares/" + token + "/source",
+		"/share/" + token,
+	} {
+		buf.Reset()
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+		if strings.Contains(buf.String(), token) {
+			t.Errorf("%s: token in the access log: %s", path, buf.String())
+		}
+		if !strings.Contains(buf.String(), "{token}") {
+			t.Errorf("%s: no masked segment in the access log: %s", path, buf.String())
+		}
+	}
+	buf.Reset()
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/shares/"+token+"/source", nil))
+	if !strings.Contains(buf.String(), "path=/api/shares/{token}/source") {
+		t.Errorf("the route after the token was lost: %s", buf.String())
+	}
+	buf.Reset()
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/shares", nil))
+	if !strings.Contains(buf.String(), "path=/api/shares ") {
+		t.Errorf("the owner's list route was changed: %s", buf.String())
+	}
+}
+
+func TestRecoveryMasksShareToken(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
+	handler := recovery(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/share/"+token, nil))
+
+	if strings.Contains(buf.String(), token) {
+		t.Errorf("token in the panic log: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "path=/share/{token}") {
+		t.Errorf("panic log does not say which route: %s", buf.String())
+	}
+}
