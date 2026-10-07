@@ -178,7 +178,8 @@ type Config struct {
 	// process only ever sees plain HTTP, and the redirect URL is the one
 	// setting that has to name the external origin anyway. Password mode has
 	// no such URL, so it reads BACKEND_COOKIE_SECURE, default true, and only
-	// a loopback listener may switch it off.
+	// a loopback listener may switch it off. Set in any other mode, it is
+	// refused: there it would look active and change nothing.
 	CookieSecure bool
 }
 
@@ -206,6 +207,9 @@ var retiredEnv = []string{"BACKEND_LLM_GATE_REASONING"}
 // finds rather than starting a half-configured server.
 func Load() (Config, error) {
 	r := &envReader{}
+	// Read in every mode so a malformed value is refused in every mode, and
+	// kept only where it means something: password mode, below.
+	cookieSecure := r.boolOr("BACKEND_COOKIE_SECURE", true)
 	cfg := Config{
 		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
 		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
@@ -332,12 +336,7 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_ADMIN_PASSWORD_HASH is not a bcrypt hash; generate one with `rongo -hash-password`")
 		}
-		cfg.CookieSecure = r.boolOr("BACKEND_COOKIE_SECURE", true)
-		// Read after the one check above, so its own malformed value is
-		// refused like every other setting's.
-		if r.err != nil {
-			return Config{}, r.err
-		}
+		cfg.CookieSecure = cookieSecure
 		if !cfg.CookieSecure && !isLoopback(cfg.Addr) {
 			return Config{}, fmt.Errorf(
 				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
@@ -372,6 +371,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password, oidc or proxy)", cfg.AuthMode)
 	}
 
+	// Only password mode reads the flag. Anywhere else a value set here
+	// looks active and changes nothing, which is the failure every other
+	// setting refuses.
+	if strings.TrimSpace(os.Getenv("BACKEND_COOKIE_SECURE")) != "" && cfg.AuthMode != AuthModePassword {
+		return Config{}, fmt.Errorf("BACKEND_COOKIE_SECURE is read in password mode only; BACKEND_AUTH_MODE=%s %s, remove it", cfg.AuthMode, cookieSource(cfg.AuthMode))
+	}
+
 	if cfg.AuthMode == AuthModeOIDC {
 		cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
 	}
@@ -402,6 +408,15 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// cookieSource says where a mode other than password takes the session
+// cookie's Secure flag from, for the refusal of BACKEND_COOKIE_SECURE.
+func cookieSource(mode AuthMode) string {
+	if mode == AuthModeOIDC {
+		return "derives it from BACKEND_OIDC_REDIRECT_URL"
+	}
+	return "signs in without a session cookie"
 }
 
 // envListOr reads a comma-separated list. Unset or blank means the default,
