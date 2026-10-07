@@ -18,9 +18,11 @@ import (
 // TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot: in WAL mode
 // a transaction that opens with a read holds a snapshot, and its first write
 // after another connection committed fails at once with "database is locked"
-// — busy_timeout never runs for a stale snapshot. The trace hook lands that
+// — busy_timeout never runs for a stale snapshot. The trace hook tries that
 // commit between the transaction's first statement and its second, the one
-// interleaving the poller meets when the HTTP side writes mid-sync.
+// interleaving the poller meets when the HTTP side writes mid-sync. Opened
+// with a read, the commit lands and Sync's write fails; opened with a write,
+// Sync already holds the lock and it is the other writer that is refused.
 func TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "h.db")
@@ -42,8 +44,7 @@ func TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot(t *testing.T)
 	}
 
 	dsn := "file:" + url.PathEscape(path) + "?_pragma=journal_mode(wal)&_pragma=foreign_keys(on)"
-	// The other writer gives up at once: while Sync holds the write lock it
-	// cannot commit, which is the outcome the fix is for.
+	// The other writer gives up at once rather than wait out Sync's lock.
 	other, err := driver.Open(dsn + "&_pragma=busy_timeout(0)")
 	if err != nil {
 		t.Fatalf("open other: %v", err)
@@ -58,6 +59,7 @@ func TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot(t *testing.T)
 		first     string
 		firstRead bool
 		fired     bool
+		otherErr  error
 	)
 	trace := func(_ sqlite3.TraceEvent, arg1 any, _ any) error {
 		stmt, ok := arg1.(*sqlite3.Stmt)
@@ -71,7 +73,7 @@ func TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot(t *testing.T)
 			return nil
 		}
 		fired = true
-		_, _ = other.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('loom', 'file:///loom', 'main')`)
+		_, otherErr = other.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('loom', 'file:///loom', 'main')`)
 		return nil
 	}
 	db, err := driver.Open(dsn+"&_pragma=busy_timeout(10000)", func(c *sqlite3.Conn) error {
@@ -106,6 +108,9 @@ func TestSync_writesFirstSoAConcurrentCommitCannotStaleTheSnapshot(t *testing.T)
 	}
 	if err != nil {
 		t.Fatalf("Sync() err = %v, want the write lock held from the first statement", err)
+	}
+	if otherErr == nil {
+		t.Error("the other writer committed mid-sync; Sync did not hold the write lock")
 	}
 	if n := countRows(t, seed, `SELECT COUNT(*) FROM commits WHERE repo = 'shop'`); n != 2 {
 		t.Errorf("commits = %d, want 2", n)
