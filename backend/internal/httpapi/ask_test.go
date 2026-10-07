@@ -1292,6 +1292,75 @@ func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) 
 	}
 }
 
+// linkFailingThreads cannot close a card: every LinkChoice fails, and the
+// attempts are counted.
+type linkFailingThreads struct {
+	*threads.Store
+	fail  bool
+	links int
+}
+
+func (l *linkFailingThreads) LinkChoice(ctx context.Context, subject string, messageID, clarificationID int64, idx int) error {
+	l.links++
+	if l.fail {
+		return errors.New("database is locked")
+	}
+	return l.Store.LinkChoice(ctx, subject, messageID, clarificationID, idx)
+}
+
+// TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable: the link is what
+// closes a card. An answer stored without it leaves the card open, the claim
+// is released, and the next click writes a second answer under one card. A
+// link that will not land after a retry fails the turn instead, so the card
+// is open for a retry and the record holds one answer under it, never two.
+func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	failing := &linkFailingThreads{Store: st, fail: true}
+	srv.deps.Threads = failing
+	msgID, _ := seedClarification(t, st)
+	req := fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID)
+
+	body := doSSE(t, srv, "/api/ask", req)
+
+	if !strings.Contains(body, "event: error") || strings.Contains(body, "event: done") {
+		t.Fatalf("want the turn failed, got:\n%s", body)
+	}
+	if failing.links != 2 {
+		t.Errorf("link attempts = %d, want one retry", failing.links)
+	}
+	msgs, err := st.Messages(context.Background(), testSubject, threadOf(t, st, msgID))
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	first := msgs[len(msgs)-1]
+	if first.Error == "" || first.Answer != "" {
+		t.Errorf("resumed row = %+v, want it failed with no answer standing", first)
+	}
+
+	// The card is open again, and a retry that links answers it once.
+	failing.fail = false
+	body = doSSE(t, srv, "/api/ask", req)
+	if !strings.Contains(body, "event: done") {
+		t.Fatalf("the retry did not answer:\n%s", body)
+	}
+	msgs, err = st.Messages(context.Background(), testSubject, threadOf(t, st, msgID))
+	if err != nil {
+		t.Fatalf("messages: %v", err)
+	}
+	answered := 0
+	for _, m := range msgs {
+		if m.Answer != "" && m.Error == "" {
+			answered++
+		}
+	}
+	if answered != 1 {
+		t.Errorf("answers under the card = %d, want 1", answered)
+	}
+	if code := doStatus(t, srv, "/api/ask", req); code != http.StatusConflict {
+		t.Errorf("third choice status = %d, want 409 — the card is answered", code)
+	}
+}
+
 func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 	// Given a stored clarification
 	srv, store := newTestServerWithStore(t, withAskerResuming())

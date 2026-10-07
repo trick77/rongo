@@ -739,9 +739,12 @@ func counted(n sql.NullInt64) *int {
 }
 
 // Fail records that a turn did not produce an answer. The question stays: a
-// disappearing question leaves the reader wondering what they asked.
+// disappearing question leaves the reader wondering what they asked. An
+// answer already written goes: a turn that failed after its answer landed
+// (the card it answers could not be closed) must not stand as the answered
+// turn a follow-up reworks, nor as a second answer under that card.
 func (s *Store) Fail(ctx context.Context, messageID int64, msg string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE messages SET error = ? WHERE id = ?`, msg, messageID)
+	_, err := s.db.ExecContext(ctx, `UPDATE messages SET error = ?, answer = '' WHERE id = ?`, msg, messageID)
 	if err != nil {
 		return fmt.Errorf("store turn failure: %w", err)
 	}

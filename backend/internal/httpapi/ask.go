@@ -741,8 +741,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if len(req.Repos) > 0 {
 			choiceIdx = -1
 		}
+		// An answer the card does not know about leaves the card open with
+		// the claim released, and the next click writes a second answer under
+		// it. Tried twice, then the turn fails: open for a retry, and never two
+		// answers under one card.
 		if err := s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
-			recordFailed(ctx, "link choice failed", err)
+			if err = s.deps.Threads.LinkChoice(record, u.Subject, msg.ID, resume.ID, choiceIdx); err != nil {
+				recordFailed(ctx, "link choice failed", err)
+				tr.fail(turnFailed)
+				return
+			}
 		}
 		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, tr.streamed, send, closeRecord)
 		return
