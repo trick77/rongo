@@ -103,7 +103,7 @@ func TestLoggingMasksShareToken(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	handler := logging(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	for _, path := range []string{
 		"/api/shares/" + token,
