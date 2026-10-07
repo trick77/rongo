@@ -301,6 +301,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no such clarification", http.StatusForbidden)
 			return
 		}
+		if reqThreadID != 0 && reqThreadID != c.ThreadID {
+			// The card names its thread. A thread_id that disagrees is
+			// refused rather than quietly preferring one of them, the way a
+			// retry's head is — and before the claim, so the card stays open.
+			http.Error(w, "no such clarification", http.StatusForbidden)
+			return
+		}
 		narrowing := len(req.Repos) > 0
 		if narrowing && !c.TooBroad {
 			// A card is one question with one answer. Narrowing to a handful
@@ -534,8 +541,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			unreadable(ctx, w, "resolve head ordinal failed", err)
 			return
 		}
+		// "All repositories" travels with it: the reader gave that answer
+		// for this question, and dropping it cards the question again.
 		if scope := retryHead.Scope; scope.All || len(scope.Known) > 0 {
-			prior.Pin = scope.Known
+			prior.Pin, prior.All = scope.Known, scope.All
 		} else if prior.Pin, err = s.deps.Threads.ThreadScope(ctx, u.Subject, retryHead.ThreadID); err != nil {
 			unreadable(ctx, w, "read thread scope failed", err)
 			return

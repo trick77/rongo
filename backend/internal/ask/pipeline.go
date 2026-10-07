@@ -203,6 +203,11 @@ func NewPipeline(c *llm.Client, s Searcher, g *Gatherer, r Routes) *Pipeline {
 type Thread struct {
 	// Pin is the repositories the thread has already narrowed to.
 	Pin []string
+	// All is the reader's own permission to answer across the corpus, given
+	// on a card for THIS question: carried by a retry of the turn it was
+	// given in, so the repository card does not ask again. Never inherited
+	// by a later question.
+	All bool
 	// Question is the last question this thread asked and got an answer to.
 	Question string
 	// Answer is the answer that question got.
@@ -290,7 +295,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 	// established. AllRepos goes with it: "in all repos" is a widening, and a
 	// thread does not widen.
 	outside := outsideThePin(known, pin)
-	all := u.AllRepos
+	all := u.AllRepos || t.All
 	allDenied := false
 	if len(pin) > 0 {
 		// The pin comes off a stored row, and between the turn that wrote it

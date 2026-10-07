@@ -297,6 +297,11 @@ func TestAsk_aRetryOfAResumedRowKeepsTheRowsOwnScope(t *testing.T) {
 					t.Errorf("pin = %v, want %v", a.gotThread.Pin, tc.want)
 				}
 			}
+			// The permission travels with the scope: dropped, the retry
+			// cards the question the reader already answered.
+			if a.gotThread.All != tc.scope.All {
+				t.Errorf("all = %v, want %v", a.gotThread.All, tc.scope.All)
+			}
 		})
 	}
 }

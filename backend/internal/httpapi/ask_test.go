@@ -1361,6 +1361,35 @@ func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
 	}
 }
 
+// TestAsk_aResumeNamingAnotherThreadIsRefused: the card names its thread, and
+// a thread_id that disagrees is refused rather than quietly preferring one of
+// them — the rule a retry already follows. Refused before the claim, so the
+// card is still answerable.
+func TestAsk_aResumeNamingAnotherThreadIsRefused(t *testing.T) {
+	srv, st := newTestServerWithStore(t, withAskerResuming())
+	asker := srv.deps.Ask.(*fakeAsker)
+	msgID, _ := seedClarification(t, st)
+	other, err := st.Create(context.Background(), testSubject, "something else")
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+
+	code := doStatus(t, srv, "/api/ask", fmt.Sprintf(
+		`{"thread_id":%q,"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, other.PublicID, msgID))
+
+	if code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", code)
+	}
+	if asker.gotAud != "" {
+		t.Error("a refused resume must not reach the pipeline")
+	}
+	body := doSSE(t, srv, "/api/ask",
+		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, msgID))
+	if !strings.Contains(body, "event: done") {
+		t.Errorf("the card must still be answerable:\n%s", body)
+	}
+}
+
 func TestAskWithAChoiceResumesWithoutSearching(t *testing.T) {
 	// Given a stored clarification
 	srv, store := newTestServerWithStore(t, withAskerResuming())

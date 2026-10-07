@@ -921,6 +921,26 @@ func TestRun_aPinMissingOneRepositoryFailsTheTurn(t *testing.T) {
 	}
 }
 
+// TestRun_aThreadCarryingAllAnswersAcrossTheCorpus: a retry of a turn the
+// reader answered by choosing "all repositories" is the same question under
+// the same permission, so the repository card must not come back.
+func TestRun_aThreadCarryingAllAnswersAcrossTheCorpus(t *testing.T) {
+	fr := &fakeRouter{}
+	db := gatherDB(t)
+	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
+	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
+	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+
+	got, _, err := p.Run(context.Background(), "how are token costs calculated?", AudienceBA, LanguageEN,
+		Thread{All: true}, Events{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !fr.all || !got.Scope.All {
+		t.Errorf("router all = %v, scope = %+v, want the reader's earlier choice honoured", fr.all, got.Scope)
+	}
+}
+
 // TestRunNarrowsFurtherInsideThePin: the pin is a ceiling, not a floor. A
 // thread pinned to two repositories by a comparison is still a thread, and
 // "and in rongo?" inside it has to reach rongo alone.
