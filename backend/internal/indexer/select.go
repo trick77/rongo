@@ -380,6 +380,29 @@ const tooLargeDetail = "larger than the configured ceiling; skipped whole rather
 // pipeline to apply before the read when git has said how big a blob is.
 func (s *Selector) MaxBytes() int64 { return int64(s.opts.MaxBytes) }
 
+// SelectSize is the part of SelectBody that needs the size but not the bytes:
+// the file ceiling, the data formats and the data and schema ceilings,
+// decided on the size git listed so a refused blob is never read. size is 0
+// when unknown, which decides nothing by size. decided is false when the
+// bytes are needed.
+//
+// A configuration file is redacted BEFORE SelectBody applies the data
+// ceiling, and the redacted body can fall under it, so for one only the file
+// ceiling and the path decide here: deciding its data ceiling on the raw
+// size would stop indexing a file that is indexed today.
+func (s *Selector) SelectSize(p string, size int64) (d Decision, reason string, decided bool) {
+	if size > int64(s.opts.MaxBytes) {
+		return SkipTooLarge, tooLargeDetail, true
+	}
+	if redact.IsConfigPath(p) {
+		size = 0
+	}
+	if d, reason := s.selectByPath(p, int(size)); d != Include {
+		return d, reason, true
+	}
+	return Include, "", false
+}
+
 // SelectPath is the part of SelectBody that needs no body: the operator's
 // exclusions, vendored directories and generated names. Decided before the
 // file is read, so a tree full of node_modules costs no git reads, no

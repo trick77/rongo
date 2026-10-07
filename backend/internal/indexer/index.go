@@ -368,17 +368,16 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 			"reason", string(decision), "detail", detail)
 		return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(decision), 0)
 	}
-	// So does the ceiling, on the size git listed: the body check came after
+	// So do the ceilings, on the size git listed: the body check came after
 	// git had handed over every byte, and one 2 GB artifact took the poller
 	// down. An unknown size is refused by the reader instead, unread.
-	limit := ix.selector.MaxBytes()
-	if tg.size > limit {
-		return ix.recordTooLarge(ctx, st, path, sha, lang, tg.size)
+	if decision, detail, decided := ix.selector.SelectSize(path, tg.size); decided {
+		return ix.recordUnread(ctx, st, path, sha, lang, decision, detail, tg.size)
 	}
-	body, err := read(ctx, spec, sha, path, limit)
+	body, err := read(ctx, spec, sha, path, ix.selector.MaxBytes())
 	var tooLarge *gitrepo.TooLargeError
 	if errors.As(err, &tooLarge) {
-		return ix.recordTooLarge(ctx, st, path, sha, lang, tooLarge.Size)
+		return ix.recordUnread(ctx, st, path, sha, lang, SkipTooLarge, tooLargeDetail, tooLarge.Size)
 	}
 	if err != nil {
 		// A submodule pointer or a symlink never gets here: targets drops
@@ -445,12 +444,12 @@ func (ix *Indexer) indexOne(ctx context.Context, spec repos.Spec, st RepoState, 
 	return ix.writer.ReplaceFile(ctx, st.Name, path, sha, lang, len(body), chunks, vecs, syms, toks)
 }
 
-// recordTooLarge is SelectBody's too_large verdict for a blob never read,
-// recorded at the size git reported.
-func (ix *Indexer) recordTooLarge(ctx context.Context, st RepoState, path, sha, lang string, size int64) error {
+// recordUnread records a verdict reached on a blob never read, at the size
+// git reported.
+func (ix *Indexer) recordUnread(ctx context.Context, st RepoState, path, sha, lang string, d Decision, detail string, size int64) error {
 	ix.log.Debug("file not indexed", "repo", st.Name, "path", path,
-		"reason", string(SkipTooLarge), "detail", tooLargeDetail)
-	return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(SkipTooLarge), int(size))
+		"reason", string(d), "detail", detail)
+	return ix.writer.RecordSkipped(ctx, st.Name, path, sha, lang, string(d), int(size))
 }
 
 // vectors resolves one file's chunks to vectors, embedding only the misses.

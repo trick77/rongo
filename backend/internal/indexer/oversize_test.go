@@ -123,6 +123,47 @@ func TestIndexRepo_aBlobOfUnknownSizeIsRefusedByTheReader(t *testing.T) {
 	assertTooLarge(t, h, "big.go", 5<<20)
 }
 
+// TestIndexOne_decidesTheDataCeilingsUnreadWhereTheSizeIsFinal: a schema over
+// its ceiling and a data format are refused on the listed size, unread. A
+// configuration file is redacted before the data ceiling and the redacted
+// body can fall under it, so its verdict still needs the bytes: here a long
+// credential value takes a json file under the ceiling, and it is indexed.
+func TestIndexOne_decidesTheDataCeilingsUnreadWhereTheSizeIsFinal(t *testing.T) {
+	schema := `<?xml version="1.0"?>` + "\n" + `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">` + "\n" +
+		strings.Repeat(`  <xs:element name="filler" type="xs:string"/>`+"\n", 60) + "</xs:schema>\n"
+	csv := "id,name\n" + strings.Repeat("1,filler\n", 300)
+	secretJSON := `{"name": "shop", "password": "` + strings.Repeat("s", 3000) + `"}` + "\n"
+	h := newHarnessFiles(t, map[string]string{
+		"contracts/order.xsd": schema,
+		"data/rows.csv":       csv,
+		"config/app.json":     secretJSON,
+	}, nil)
+	h.ix.selector = NewSelector(SelectOptions{MaxDataBytes: 1024, MaxSchemaBytes: 1024})
+	git := &byteCountingGit{GitClient: h.gitc, bytes: map[string]int{}}
+	h.ix.git = git
+
+	if _, err := h.ix.IndexRepo(context.Background(), h.stateOf(t), h.head(t), nil); err != nil {
+		t.Fatalf("IndexRepo() err = %v", err)
+	}
+
+	for p, size := range map[string]int{"contracts/order.xsd": len(schema), "data/rows.csv": len(csv)} {
+		var reason string
+		var got int
+		if err := h.db.QueryRow(`SELECT skip_reason, size FROM files WHERE path = ?`, p).Scan(&reason, &got); err != nil {
+			t.Fatalf("no row for %s: %v", p, err)
+		}
+		if reason != string(SkipData) || got != size {
+			t.Errorf("%s = %q at %d bytes, want %q at %d", p, reason, got, SkipData, size)
+		}
+		if n := git.read(p); n != 0 {
+			t.Errorf("read %d bytes of %s, want 0", n, p)
+		}
+	}
+	if n := countOf(t, h.db, `SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'config/app.json'`); n == 0 {
+		t.Error("config/app.json was not indexed; its redacted body is under the ceiling")
+	}
+}
+
 func assertTooLarge(t *testing.T, h *harness, path string, size int) {
 	t.Helper()
 	var reason string
