@@ -4,6 +4,21 @@ import (
 	"testing"
 )
 
+// TestIsPropertiesPath_readsTheExtensionCaseBlind: keys come out of
+// X.PROPERTIES as out of x.properties, and the gather crossing filter asks
+// this same check, or keys of one would cross unfiltered.
+func TestIsPropertiesPath_readsTheExtensionCaseBlind(t *testing.T) {
+	for p, want := range map[string]bool{
+		"src/main/resources/application.properties": true,
+		"conf/LEGACY.PROPERTIES":                    true,
+		"src/Main.java":                             false,
+	} {
+		if got := IsPropertiesPath(p); got != want {
+			t.Errorf("IsPropertiesPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 // values returns the tokens of one kind, so a test can say what it means
 // without walking the slice.
 func values(toks []Token, kind Kind) []string {
