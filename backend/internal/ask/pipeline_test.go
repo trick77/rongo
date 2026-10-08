@@ -382,10 +382,12 @@ func TestRunEndsTheTurnWithAClarification(t *testing.T) {
 
 func TestResumeGathersFromTheGivenHitsAndNeverSearches(t *testing.T) {
 	// Given a searcher that fails the test if it is called
-	p := newTestPipeline(t, withSearcher(func(retrieve.Query) ([]retrieve.Hit, error) {
-		t.Fatal("a resumed turn must not search again: the answer has to come from what the card offered")
-		return nil, nil
-	}))
+	p := newTestPipeline(t, func(f *pipelineFakes) {
+		f.search = indexedSearch{searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
+			t.Fatal("a resumed turn must not search again: the answer has to come from what the card offered")
+			return nil, nil
+		}, indexed: []string{"peeq"}}
+	})
 
 	// When
 	answer, err := p.Resume(context.Background(), "frage", AudienceBA, LanguageEN,
@@ -436,10 +438,10 @@ func TestResumeCarriesTheFollowUpRule(t *testing.T) {
 	// A resumed turn runs no understanding step, so the answer call is the
 	// only one the upstream sees and streamUpstream records it.
 	c, prompt, _ := streamUpstream(t, "Answer [1].")
-	p := NewPipeline(c, searchFunc(func(retrieve.Query) ([]retrieve.Hit, error) {
+	p := NewPipeline(c, indexedSearch{searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
 		t.Fatal("a resumed turn must not search again")
 		return nil, nil
-	}), NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	}, indexed: []string{"peeq"}}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
 
 	if _, err := p.Resume(context.Background(), "und wo wird das entschieden?", AudienceBA, LanguageEN,
 		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{},
@@ -986,6 +988,23 @@ func TestResumeRepo_aParkedChoiceSaysItIsParked(t *testing.T) {
 		AudienceBA, LanguageEN, Scope{Known: []string{"peeq", "ledger"}}, Thread{}, Events{})
 	if err == nil || !strings.Contains(err.Error(), "peeq is parked") || !strings.Contains(err.Error(), "ledger are no longer") {
 		t.Errorf("err = %v, want peeq parked and ledger gone", err)
+	}
+}
+
+// TestResume_aModuleCardOnAParkedRepoSaysItIsParked: a module card replays
+// the hits it stored, so a repository parked or purged since the card was
+// asked would answer again from them — new answers from a repository that
+// answers nothing.
+func TestResume_aModuleCardOnAParkedRepoSaysItIsParked(t *testing.T) {
+	search := &fakeSearch{indexed: []string{"loom"}, parked: []string{"peeq"}}
+	p := newTestPipeline(t, func(f *pipelineFakes) { f.search = search })
+	hits := []retrieve.Hit{{ChunkID: 900001, Repo: "peeq", Path: "internal/a.go", StartLine: 1, EndLine: 3, RawText: "func One() {}", Score: 1}}
+
+	_, err := p.Resume(context.Background(), "frage", AudienceBA, LanguageEN, hits,
+		Scope{Known: []string{"peeq"}}, Thread{}, Events{})
+
+	if err == nil || !strings.Contains(err.Error(), "peeq is parked") {
+		t.Errorf("err = %v, want it to say peeq is parked", err)
 	}
 }
 
