@@ -233,33 +233,6 @@ func (u Understanding) Directive() memory.Directive {
 // reply is dropped on decode.
 const CensusLink = "link"
 
-// Names is a list of names a gate model may also write as one string
-// ("prod, intg") or null: the release turn's one list field, and the one
-// place a small model's formatting would otherwise fail the whole turn as
-// "reply was not JSON". Anything unreadable is empty.
-type Names []string
-
-// UnmarshalJSON reads a list of strings, one comma-separated string, or null.
-func (n *Names) UnmarshalJSON(b []byte) error {
-	var list []string
-	if err := json.Unmarshal(b, &list); err == nil {
-		*n = list
-		return nil
-	}
-	var one string
-	if err := json.Unmarshal(b, &one); err != nil {
-		*n = nil
-		return nil //nolint:nilerr // a malformed name list reads as none: the rest of the understanding is what the turn needs (see the type comment)
-	}
-	*n = nil
-	for _, part := range strings.Split(one, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			*n = append(*n, p)
-		}
-	}
-	return nil
-}
-
 // Days is an integer a gate model may also write as a quoted string ("7") or
 // a float (7.0): the only numeric field of the understanding, and the one
 // place a small model's formatting would otherwise fail the whole turn as
