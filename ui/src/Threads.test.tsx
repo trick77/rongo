@@ -436,6 +436,21 @@ describe("Threads", () => {
       expect(screen.getByRole("button", { name: "Shipping, end to end" })).toBeTruthy();
     });
 
+    // The server refuses a title over 60 runes (ask.MaxTitleRunes) and the
+    // dialog says nothing on a refusal, so the box must not take more.
+    it("caps the typed title at what the server takes", async () => {
+      threadList(two);
+      render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const user = await openMenu("How does shipping work?");
+
+      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+      const box = screen.getByRole("textbox", { name: "Thread title" }) as HTMLInputElement;
+      await user.clear(box);
+      await user.type(box, "a".repeat(70));
+
+      expect(box.value).toHaveLength(60);
+    });
+
     // A row dropped from a delete the server refused would be a lie: the
     // thread is still there on the next reload.
     it("keeps the row and the dialog when the delete fails", async () => {

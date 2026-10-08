@@ -15,6 +15,11 @@ import (
 // given room will write a sentence.
 const titleMaxTokens = 48
 
+// MaxTitleRunes is the longest thread title, written by the model or typed by
+// the reader: a typed one may be as long as any the model writes, or saving
+// the model's own title back is refused.
+const MaxTitleRunes = 60
+
 const (
 	// titleAttempts is how many times a title is asked for before the
 	// placeholder is accepted as the thread's name. It counts REPLIES THAT
@@ -122,7 +127,7 @@ func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title st
 	}
 	// A model that answered with a paragraph did not write a title. Taking the
 	// first line of it would put half a sentence in the sidebar.
-	if strings.Contains(title, "\n") || len([]rune(title)) > 60 {
+	if strings.Contains(title, "\n") || len([]rune(title)) > MaxTitleRunes {
 		return "", true
 	}
 	return title, true

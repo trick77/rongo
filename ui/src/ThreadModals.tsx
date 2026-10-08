@@ -99,6 +99,8 @@ export function RenameThreadModal({
         <input
           ref={input}
           aria-label="Thread title"
+          // ask.MaxTitleRunes: the server refuses a longer one.
+          maxLength={60}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           className="mt-3 h-[38px] w-full rounded-ui-sm border border-border bg-bg px-3 text-ink outline-none focus:border-accent"
