@@ -2,6 +2,9 @@ package gitrepo
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,6 +88,53 @@ func TestLog_aMessageMayHoldTheRecordSeparator(t *testing.T) {
 	}
 	if len(got[0].Paths) != 1 || got[0].Paths[0] != "c.txt" || len(got[1].Paths) != 1 || got[1].Paths[0] != "b.txt" {
 		t.Errorf("paths = %v / %v", got[0].Paths, got[1].Paths)
+	}
+}
+
+// TestLogAndShow_namePathsAsTheIndexDoes: the file listings hand odd paths
+// back verbatim, so the commit lane and the commit view must too, or the
+// view's indexed flag and the changes lane miss exactly those files.
+func TestLogAndShow_namePathsAsTheIndexDoes(t *testing.T) {
+	src := fixtureRepo(t)
+	odd := []string{`say "hi".md`, "trail ", "tab\there.md"}
+	for _, name := range odd {
+		if err := os.WriteFile(filepath.Join(src, name), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun(t, src, "add", "-A")
+	gitRun(t, src, "commit", "-qm", "odd")
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	head, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	log, err := c.Log(ctx, spec, "", head, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	show, err := c.Show(ctx, spec, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var shown []string
+	for _, f := range show.Files {
+		shown = append(shown, f.Path)
+	}
+	for _, want := range odd {
+		if !slices.Contains(log[0].Paths, want) {
+			t.Errorf("Log paths = %q, missing %q", log[0].Paths, want)
+		}
+		if !slices.Contains(shown, want) {
+			t.Errorf("Show paths = %q, missing %q", shown, want)
+		}
 	}
 }
 

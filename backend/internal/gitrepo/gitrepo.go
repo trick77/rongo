@@ -842,14 +842,28 @@ func nulFields(s string) []string {
 	return out
 }
 
+// nonEmptyLines splits s into its lines, verbatim: a path line may end in a
+// space, so nothing is trimmed.
 func nonEmptyLines(s string) []string {
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
+		if line != "" {
 			out = append(out, line)
 		}
 	}
 	return out
+}
+
+// gitPath is a path line as git printed it, unquoted: git C-quotes a path
+// holding a quote, a backslash or a control byte whatever core.quotePath
+// says, in output that has no -z form worth parsing.
+func gitPath(p string) string {
+	if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
+		if s, err := strconv.Unquote(p); err == nil {
+			return s
+		}
+	}
+	return p
 }
 
 // ShortSHA is the seven-character form used in errors and log lines. Exported

@@ -77,13 +77,23 @@ func parseLog(out string) ([]Commit, error) {
 			Author:      f[i+2],
 			Subject:     f[i+3],
 			Body:        stripTrailers(f[i+4]),
-			Paths:       append([]string{}, nonEmptyLines(paths)...),
+			Paths:       gitPaths(nonEmptyLines(paths)),
 		})
 		if !more {
 			return commits, nil
 		}
 		head = next
 	}
+}
+
+// gitPaths unquotes each path line; never nil, so an empty commit stores
+// an empty list.
+func gitPaths(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, gitPath(l))
+	}
+	return out
 }
 
 // trailerRe matches a git trailer line: Signed-off-by, Co-authored-by,
@@ -138,7 +148,7 @@ func (c *Client) Show(ctx context.Context, spec repos.Spec, sha string) (CommitD
 		}
 		added, _ := strconv.Atoi(parts[0])
 		deleted, _ := strconv.Atoi(parts[1])
-		d.Files = append(d.Files, FileChange{Path: parts[2], Added: added, Deleted: deleted})
+		d.Files = append(d.Files, FileChange{Path: gitPath(parts[2]), Added: added, Deleted: deleted})
 	}
 	return d, nil
 }
