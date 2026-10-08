@@ -42,6 +42,9 @@ var (
 	// never one it lists as skipped. A caller holding a citation of exactly
 	// that file can retry with ReadRecorded.
 	ErrNotIndexed = fmt.Errorf("%w: not indexed", ErrNotFound)
+	// ErrNotInLane is the ErrNotFound of a commit the commit lane does not
+	// hold. A caller holding a citation of it can retry with RecordedCommit.
+	ErrNotInLane = fmt.Errorf("%w: not in the commit lane", ErrNotFound)
 	// ErrInvalid is a request rongo will not even try: an empty path, a path
 	// that climbs out of the tree, or a commit that is not a commit.
 	ErrInvalid = errors.New("invalid source request")

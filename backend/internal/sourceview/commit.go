@@ -110,7 +110,7 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 		return Commit{}, fmt.Errorf("look up commit %s/%s: %w", repo, sha, err)
 	}
 	if n == 0 {
-		return Commit{}, fmt.Errorf("%w: %s/%s is not in the commit lane", ErrNotFound, repo, sha)
+		return Commit{}, fmt.Errorf("%w: %s/%s", ErrNotInLane, repo, sha)
 	}
 	return s.show(ctx, repo, branch, sha)
 }
