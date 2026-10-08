@@ -248,9 +248,10 @@ func Redact(p string, body []byte) []byte {
 			out = append(out, lines[i])
 			continue
 		}
-		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) {
-			// A flow mapping or an inline object: the keys are inside the
-			// value, and each is judged where it stands.
+		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[") || strings.Contains(value, ",")) {
+			// A flow mapping, an inline object, or more pairs after a comma
+			// on a hand-wrapped JSON line: the keys are inside the value, and
+			// each is judged where it stands.
 			if inner := inlineKeyed.ReplaceAllString(rest, "${1}${2}${3}${4}${5}"+Marker); inner != rest {
 				out = append(out, m[1]+m[2]+key+m[4]+sep+inner+eol(crlf))
 				changed = true

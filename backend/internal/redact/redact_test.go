@@ -177,6 +177,8 @@ func TestRedact_moreShapes(t *testing.T) {
 		{"exported env", ".env", "export API_TOKEN=abc", "export API_TOKEN=<redacted>"},
 		{"minified json", "config.json", `{"db":{"user":"app","password":"hunter2"}}`, `{"db":{"user":"app","password":"<redacted>"}}`},
 		{"yaml flow mapping", "values.yaml", "db: {user: app, password: hunter2}", "db: {user: app, password: <redacted>}"},
+		{"json pairs sharing a line", "config.json", `  "user": "admin", "password": "hunter2hunter2"`, `  "user": "admin", "password": "<redacted>"`},
+		{"json pairs sharing a line, key first", "config.json", `"db": "main", "apiKey": "abcd1234efgh",`, `"db": "main", "apiKey": "<redacted>",`},
 		{"properties with a space separator", "app.properties", "db.password hunter2", "db.password <redacted>"},
 		{"properties space separator, plain value stays", "app.properties", "db.host localhost", "db.host localhost"},
 		{"npmrc auth token", ".npmrc", "//registry.npmjs.org/:_authToken=npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9", "//registry.npmjs.org/:_authToken=<redacted>"},
