@@ -176,6 +176,12 @@ func (s *Service) read(ctx context.Context, repo, path, sha string, recorded boo
 	// citation points at never held the credential; a viewer reading git
 	// directly must not be the way round that.
 	body = redact.Redact(path, body)
+	// The files row grants the path, not every body it ever held: an older
+	// commit may carry what the selector would skip whole today. Judge the
+	// body read, the same two verdicts the selector gives.
+	if redact.SecretManifest(path, body) || redact.MatchSecret(body) != "" {
+		return File{}, fmt.Errorf("%w: %s/%s at %s carries a credential", ErrNotFound, repo, path, sha)
+	}
 	return File{Repo: repo, Branch: branch, Path: path, SHA: sha, Content: string(body)}, nil
 }
 

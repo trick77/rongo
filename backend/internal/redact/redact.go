@@ -292,6 +292,33 @@ func SecretManifest(p string, body []byte) bool {
 	return false
 }
 
+// secretPatterns are shapes that are credentials wherever they appear. This is
+// a filter, not a scanner: it exists so an accidentally committed credential
+// does not leave the network when the file is embedded. Missing an exotic
+// format is acceptable; letting an obvious one through is not.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                   // AWS access key id
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`), // any PEM private key
+	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}`),         // GitHub tokens
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`),       // GitHub fine-grained PAT
+	regexp.MustCompile(`glpat-[A-Za-z0-9\-_]{20,}`),          // GitLab PAT
+	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9\-]{10,}`),      // Slack tokens
+	regexp.MustCompile(`sk-[A-Za-z0-9]{32,}`),                // OpenAI-style secret key
+	regexp.MustCompile(`(?i)aws_secret_access_key\s*[=:]\s*\S{20,}`),
+}
+
+// MatchSecret returns the first credential pattern the (already redacted)
+// body matches, or "". A match skips the file whole: the indexer never embeds
+// it and the source viewer never serves it, at any commit.
+func MatchSecret(body []byte) string {
+	for _, re := range secretPatterns {
+		if re.Match(body) {
+			return re.String()
+		}
+	}
+	return ""
+}
+
 func isYAML(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
 	case ".yaml", ".yml":
