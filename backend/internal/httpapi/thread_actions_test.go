@@ -166,7 +166,7 @@ func TestRenameThread_refusesATitleLongerThanTheRailCanHold(t *testing.T) {
 	th, _ := st.Create(ctx, testSubject, "How is sign-in done?")
 
 	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID),
-		`{"title":"`+strings.Repeat("a", 49)+`"}`)
+		`{"title":"`+strings.Repeat("ä", ask.MaxTitleRunes+1)+`"}`)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -174,6 +174,25 @@ func TestRenameThread_refusesATitleLongerThanTheRailCanHold(t *testing.T) {
 	list, _ := st.List(ctx, testSubject)
 	if !strings.HasPrefix(list[0].Title, "How is sign-in") {
 		t.Errorf("title = %q, want the placeholder untouched", list[0].Title)
+	}
+}
+
+// TestRenameThread_takesATitleAsLongAsTheModelWrites: the model may title a
+// thread up to ask.MaxTitleRunes. A rename cap below it refused saving that
+// very title back unchanged, and the dialog said nothing.
+func TestRenameThread_takesATitleAsLongAsTheModelWrites(t *testing.T) {
+	ctx := context.Background()
+	srv, st := threadActions(t)
+	th, _ := st.Create(ctx, testSubject, "How is sign-in done?")
+	title := strings.Repeat("ä", ask.MaxTitleRunes)
+
+	rec := act(srv, http.MethodPatch, fmt.Sprintf("/api/threads/%s", th.PublicID), `{"title":"`+title+`"}`)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if list, _ := st.List(ctx, testSubject); list[0].Title != title {
+		t.Errorf("title = %q, want %q", list[0].Title, title)
 	}
 }
 

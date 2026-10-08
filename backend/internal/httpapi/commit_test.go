@@ -19,11 +19,61 @@ type fakeCommit struct {
 	commit       sourceview.Commit
 	err          error
 	gotRepo, sha string
+	// recorded is what RecordedCommit serves: the commit read past the
+	// lane's permission. Nil refuses it.
+	recorded *sourceview.Commit
 }
 
 func (f *fakeCommit) Commit(_ context.Context, repo, sha string) (sourceview.Commit, error) {
 	f.gotRepo, f.sha = repo, sha
 	return f.commit, f.err
+}
+
+func (f *fakeCommit) RecordedCommit(_ context.Context, _, _ string) (sourceview.Commit, error) {
+	if f.recorded == nil {
+		return sourceview.Commit{}, sourceview.ErrNotFound
+	}
+	return *f.recorded, nil
+}
+
+// TestCommit_aCitedCommitTheLaneHasDroppedStillOpens: the lane slides with
+// every push, so a commit a changes answer cited a few weeks ago is no longer
+// in it. A turn citing it is the permission, owner and share link alike; an
+// uncited commit stays refused.
+func TestCommit_aCitedCommitTheLaneHasDroppedStillOpens(t *testing.T) {
+	db := askDB(t)
+	svc := auth.NewService(db, "dev", "")
+	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
+		t.Fatal(err)
+	}
+	st := threads.NewStore(db)
+	old := sourceview.Commit{Repo: "rongo", SHA: "aaa1111", Subject: "Old"}
+	c := &fakeCommit{err: fmt.Errorf("x: %w", sourceview.ErrNotInLane), recorded: &old}
+	srv := NewServer(Deps{Auth: svc, Threads: st, Commit: c})
+	ctx := context.Background()
+	th, _ := st.Create(ctx, testSubject, "What changed?")
+	m, _ := st.AddQuestion(ctx, th.ID, "ba", "en", "What changed?", 0)
+	if err := st.Finish(ctx, m.ID, "This [1].", []ask.Citation{
+		{Marker: 1, Repo: "rongo", Branch: "master", SHA: "aaa1111", Kind: ask.SourceCommit, Subject: "Old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	owner := func(sha string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/commit?"+url.Values{"repo": {"rongo"}, "sha": {sha}}.Encode(), nil))
+		return rec
+	}
+
+	if rec := owner("aaa1111"); rec.Code != http.StatusOK {
+		t.Errorf("owner, cited: status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if rec := owner("bbb2222"); rec.Code != http.StatusNotFound {
+		t.Errorf("owner, uncited: status = %d, want 404", rec.Code)
+	}
+	sh := share(t, srv, th.PublicID)
+	if rec := getPublic(srv, "/api/shares/"+sh.Token+"/commit?repo=rongo&sha=aaa1111"); rec.Code != http.StatusOK {
+		t.Errorf("share, cited: status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
 }
 
 func TestCommit_servesTheCitedCommit_andSaysWhyNot(t *testing.T) {

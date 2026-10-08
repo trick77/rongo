@@ -72,11 +72,14 @@ export function ModalShell({
 export function RenameThreadModal({
   title,
   busy,
+  error,
   onCancel,
   onSubmit,
 }: {
   title: string;
   busy: boolean;
+  /** Why the server refused the last save, if it did. */
+  error?: string;
   onCancel: () => void;
   onSubmit: (title: string) => void;
 }) {
@@ -103,6 +106,11 @@ export function RenameThreadModal({
           onChange={(e) => setValue(e.target.value)}
           className="mt-3 h-[38px] w-full rounded-ui-sm border border-border bg-bg px-3 text-ink outline-none focus:border-accent"
         />
+        {error && (
+          <p role="alert" className="mt-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" className={cancelButton} onClick={onCancel}>
             Cancel

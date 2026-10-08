@@ -347,6 +347,16 @@ func (s *Store) sharedCitation(ctx context.Context, token, repo, path, sha, kind
 // lets the signed-in viewer open a cited file the index has since dropped,
 // without opening every path at every commit to whoever is signed in.
 func (s *Store) CitedBy(ctx context.Context, subject, repo, path, sha string) (bool, error) {
+	return s.citedBy(ctx, subject, repo, path, sha, "")
+}
+
+// CommitCitedBy is CitedBy for a commit citation: what lets the owner open a
+// cited commit the lane has since dropped.
+func (s *Store) CommitCitedBy(ctx context.Context, subject, repo, sha string) (bool, error) {
+	return s.citedBy(ctx, subject, repo, "", sha, ask.SourceCommit)
+}
+
+func (s *Store) citedBy(ctx context.Context, subject, repo, path, sha, kind string) (bool, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT 1
@@ -354,8 +364,8 @@ func (s *Store) CitedBy(ctx context.Context, subject, repo, path, sha string) (b
 		JOIN messages m ON m.id = c.message_id
 		JOIN threads t ON t.id = m.thread_id
 		WHERE t.user_subject = ?
-		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ''
-		LIMIT 1`, subject, repo, path, sha).Scan(&n)
+		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ?
+		LIMIT 1`, subject, repo, path, sha, kind).Scan(&n)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

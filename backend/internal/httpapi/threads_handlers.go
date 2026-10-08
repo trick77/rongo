@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
@@ -162,10 +163,6 @@ type threadRequest struct {
 	Title string `json:"title"`
 }
 
-// maxTitleRunes is what a thread title may be, matching the length the store
-// cuts its placeholder to.
-const maxTitleRunes = 48
-
 func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	u, id, ok := s.threadTarget(w, r)
 	if !ok {
@@ -184,10 +181,10 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "title is required", http.StatusBadRequest)
 		return
 	}
-	// The same length the placeholder is cut to, so a typed title cannot
-	// outgrow the one the model writes. Refused rather than truncated: the
-	// rail would otherwise show something nobody asked for.
-	if len([]rune(title)) > maxTitleRunes {
+	// The model's own cap, so a typed title can be as long as any it writes.
+	// Refused rather than truncated: the rail would otherwise show something
+	// nobody asked for.
+	if len([]rune(title)) > ask.MaxTitleRunes {
 		http.Error(w, "title is too long", http.StatusBadRequest)
 		return
 	}

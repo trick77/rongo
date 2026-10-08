@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/trick77/llmwire"
 
@@ -184,7 +186,8 @@ var markerFold = strings.NewReplacer("’", "'", "‘", "'", "`", "'", "…", ".
 // saysItLasts reports whether marker is words of the question, in its
 // order. A marker may be a pattern the prompt showed — "don't ... anymore",
 // "ne ... plus jamais" — whose parts must each stand in the question, one
-// after the other; a marker of nothing but dots is no marker.
+// after the other; a marker of nothing but dots is no marker. Whole words
+// only: "ab" inside "ablaufs" is not the reader saying anything lasts.
 func saysItLasts(question, marker string) bool {
 	norm := func(s string) string {
 		return strings.Join(strings.Fields(markerFold.Replace(strings.ToLower(s))), " ")
@@ -195,13 +198,42 @@ func saysItLasts(question, marker string) bool {
 		if part == "" {
 			continue
 		}
-		i := strings.Index(q, part)
+		i := wordIndex(q, part)
 		if i < 0 {
 			return false
 		}
 		q, found = q[i+len(part):], true
 	}
 	return found
+}
+
+// wordIndex is strings.Index of part in s at a word boundary: no letter or
+// digit runs on into it on either side. A script written without spaces has
+// no boundary to ask for, so a match next to one of its characters stands.
+func wordIndex(s, part string) int {
+	inWord := func(r rune) bool {
+		return (unicode.IsLetter(r) || unicode.IsDigit(r)) &&
+			!unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar)
+	}
+	first, _ := utf8.DecodeRuneInString(part)
+	last, _ := utf8.DecodeLastRuneInString(part)
+	for from := 0; from < len(s); {
+		i := strings.Index(s[from:], part)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		after, _ := utf8.DecodeRuneInString(s[i+len(part):])
+		runsOnBefore := i > 0 && inWord(before) && inWord(first)
+		runsOnAfter := i+len(part) < len(s) && inWord(after) && inWord(last)
+		if !runsOnBefore && !runsOnAfter {
+			return i
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		from = i + size
+	}
+	return -1
 }
 
 // KeptRule is the rule the product keeps from this understanding of
@@ -226,33 +258,6 @@ func (u Understanding) Directive() memory.Directive {
 // CensusLink is the one census the pipeline has. Any other value in the
 // reply is dropped on decode.
 const CensusLink = "link"
-
-// Names is a list of names a gate model may also write as one string
-// ("prod, intg") or null: the release turn's one list field, and the one
-// place a small model's formatting would otherwise fail the whole turn as
-// "reply was not JSON". Anything unreadable is empty.
-type Names []string
-
-// UnmarshalJSON reads a list of strings, one comma-separated string, or null.
-func (n *Names) UnmarshalJSON(b []byte) error {
-	var list []string
-	if err := json.Unmarshal(b, &list); err == nil {
-		*n = list
-		return nil
-	}
-	var one string
-	if err := json.Unmarshal(b, &one); err != nil {
-		*n = nil
-		return nil //nolint:nilerr // a malformed name list reads as none: the rest of the understanding is what the turn needs (see the type comment)
-	}
-	*n = nil
-	for _, part := range strings.Split(one, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			*n = append(*n, p)
-		}
-	}
-	return nil
-}
 
 // Days is an integer a gate model may also write as a quoted string ("7") or
 // a float (7.0): the only numeric field of the understanding, and the one

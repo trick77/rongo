@@ -262,7 +262,7 @@ func repoCandidates(cs []Candidate) []Candidate {
 // It is a SECOND fold rather than a change to repoCandidates, and the
 // separation is load-bearing. Route hands repoCandidates' output to Related,
 // and anyDependency passes each candidate's Repo straight to
-// repodeps.DependsOn, which joins repo_deps WHERE repo = ?. A project name has
+// repodeps.AnyDependency, which joins repo_deps on the repository name. A project name has
 // no rows in that table, so folding one step earlier would lose every go.mod
 // edge for repositories belonging to a multi-repo project — and no measurement
 // would catch it, because the eval corpus is one project per repository, where
@@ -620,10 +620,9 @@ func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 	return r.anyDependency(ctx, cs)
 }
 
-// Projects reads the declared grouping for this turn. Deliberately not cached,
-// for repodeps.DependsOn's reason: it is a handful of rows read once per turn,
-// and a project renamed in repos.yaml takes effect on the next question rather
-// than the next restart.
+// Projects reads the declared grouping for this turn. Deliberately not cached:
+// it is a handful of rows, and a project renamed in repos.yaml takes effect on
+// the next question rather than the next restart.
 //
 // A Router with no database — the pure-function tests build one — gets the zero
 // Map, which answers every repository with its own name. That is the behaviour
@@ -664,7 +663,7 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 // Choosable asks whether the named candidates are a choice the Analyst can
 // make — the rung that decides whether the READER is equipped to answer what
 // the judge found ambiguous. Route runs it for the Analyst only, over
-// candidates that have already been named. Exported for the eval harness.
+// candidates that have already been named.
 func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	return r.choosable(ctx, question, cs)
 }

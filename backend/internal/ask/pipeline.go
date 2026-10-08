@@ -444,7 +444,7 @@ func (p *Pipeline) stagesOf(ctx context.Context, scope *Scope) stages.Set {
 }
 
 // projectsOf is the turn's project map, read on first use and kept on the
-// scope, so one turn reads it once however many steps need it.
+// scope, so the steps that ask through it read it once a turn.
 func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, error) {
 	if scope.pmLoaded {
 		return scope.pm, nil
@@ -1283,6 +1283,21 @@ func (p *Pipeline) searchScoped(ctx context.Context, question, prior string, tex
 // context (answerFollowUpAnswer).
 func (p *Pipeline) Resume(ctx context.Context, question string, audience Audience, lang Language,
 	hits []retrieve.Hit, scope Scope, t Thread, ev Events) (Answer, error) {
+
+	// The stored hits replay without a search, so nothing else would notice a
+	// repository parked or purged since the card was asked: it would answer
+	// again from them. Refused the way ResumeRepo refuses a chosen one.
+	var hitRepos []string
+	for _, h := range hits {
+		hitRepos = append(hitRepos, h.Repo)
+	}
+	known, _, err := p.search.ResolveRepos(ctx, hitRepos, "")
+	if err != nil {
+		return Answer{}, fmt.Errorf("resolve the card's repositories: %w", err)
+	}
+	if gone := missingRepos(hitRepos, known); len(gone) > 0 {
+		return Answer{}, p.unresolved(ctx, gone, "the card's repositories %s are no longer in the index")
+	}
 
 	// Marked as resumed so the locate loop stays out of it: this path replays
 	// the candidate's stored hits and searches for nothing more.

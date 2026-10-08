@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -700,7 +701,7 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 // callsFor reads the calls of every message in ids, keyed by message.
 func (s *Store) callsFor(ctx context.Context, ids []int64) (map[int64][]usage.Call, error) {
 	out := map[int64][]usage.Call{}
-	for _, part := range inChunks(ids) {
+	for part := range slices.Chunk(ids, inChunk) {
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd
@@ -1047,21 +1048,10 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-// inChunks cuts ids into lists a statement can bind: SQLite's variable limit
-// is far above this, and one thread never comes near it, but a read that
-// grows with the thread should not be the one that finds the limit.
-func inChunks(ids []int64) [][]int64 {
-	const size = 500
-	var out [][]int64
-	for len(ids) > size {
-		out = append(out, ids[:size])
-		ids = ids[size:]
-	}
-	if len(ids) > 0 {
-		out = append(out, ids)
-	}
-	return out
-}
+// inChunk is how many ids one statement binds: SQLite's variable limit is far
+// above this, and one thread never comes near it, but a read that grows with
+// the thread should not be the one that finds the limit.
+const inChunk = 500
 
 func idArgs(ids []int64) []any {
 	args := make([]any, len(ids))
@@ -1082,7 +1072,7 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 // citationsFor reads the citations of every message in ids, keyed by message.
 func (s *Store) citationsFor(ctx context.Context, ids []int64) (map[int64][]ask.Citation, error) {
 	out := map[int64][]ask.Citation{}
-	for _, part := range inChunks(ids) {
+	for part := range slices.Chunk(ids, inChunk) {
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, marker, repo, branch, path, start_line, end_line, sha, kind, subject, committed_at FROM citations
@@ -1271,7 +1261,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 	out := map[int64]*Clarification{}
 	byCard := map[int64]*Clarification{}
 	var cardIDs []int64
-	for _, part := range inChunks(ids) {
+	for part := range slices.Chunk(ids, inChunk) {
 		// Whether the card was answered is asked of the messages, not of a
 		// flag on the card: a clarification is closed by the answer that came
 		// out of it, and that link already exists on the answering turn.
@@ -1315,7 +1305,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 	}
 	// hits is deliberately not selected here: it is large JSON, never sent to
 	// the browser, and only the resumed turn reads it, via CandidateHits.
-	for _, part := range inChunks(cardIDs) {
+	for part := range slices.Chunk(cardIDs, inChunk) {
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT clarification_id, idx, repo, branch, module_key, title, summary, members

@@ -463,13 +463,13 @@ func (c *Client) ChangedPaths(ctx context.Context, spec repos.Spec, fromSHA, toS
 	// being retrieved and cited at a path the branch no longer has; no later
 	// diff names it again.
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--name-only", "--no-renames", fromSHA+".."+toSHA)
+		"diff", "-z", "--name-only", "--no-renames", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
 	}
 	// Never nil: a nil path list means "index everything" to the pipeline, so
 	// an empty diff would trigger a full re-index of the whole repository.
-	return append([]string{}, nonEmptyLines(out)...), nil
+	return append([]string{}, nulFields(out)...), nil
 }
 
 // Change is one path in a diff, and whether the newer commit still has it.
@@ -505,9 +505,16 @@ func Indexable(mode string) bool {
 // three-field record to parse for the same outcome.
 func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, toSHA string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"diff", "--raw", "--no-renames", "--no-abbrev", fromSHA+".."+toSHA)
+		"diff", "-z", "--raw", "--no-renames", "--no-abbrev", fromSHA+".."+toSHA)
 	if err != nil {
 		return nil, err
+	}
+	// -z: each record is its metadata and its path as two NUL-terminated
+	// fields, the path verbatim. Without it git still C-quotes a path holding
+	// a quote, a backslash or a control byte, whatever core.quotePath says.
+	recs := nulFields(out)
+	if len(recs)%2 != 0 {
+		return nil, fmt.Errorf("unparseable diff output: %d fields", len(recs))
 	}
 	changes := []Change{}
 	// The blobs to size, by object id: --raw carries no size, and asking
@@ -516,14 +523,13 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 	// over the blob and an ambiguous one fails the run.
 	var blobs []int
 	var oids strings.Builder
-	for _, line := range nonEmptyLines(out) {
-		// :<src mode> <dst mode> <src sha> <dst sha> <status>\t<path>
-		meta, path, ok := strings.Cut(line, "\t")
-		fields := strings.Fields(strings.TrimPrefix(meta, ":"))
-		if !ok || len(fields) != 5 {
-			return nil, fmt.Errorf("unparseable diff record %q", line)
+	for i := 0; i < len(recs); i += 2 {
+		// :<src mode> <dst mode> <src sha> <dst sha> <status>, then the path
+		fields := strings.Fields(strings.TrimPrefix(recs[i], ":"))
+		if len(fields) != 5 {
+			return nil, fmt.Errorf("unparseable diff record %q", recs[i])
 		}
-		ch := Change{Path: strings.TrimSpace(path), Deleted: strings.HasPrefix(fields[4], "D")}
+		ch := Change{Path: recs[i+1], Deleted: strings.HasPrefix(fields[4], "D")}
 		if !ch.Deleted {
 			ch.Mode = fields[1]
 		}
@@ -558,12 +564,12 @@ func (c *Client) ChangedEntries(ctx context.Context, spec repos.Spec, fromSHA, t
 // for the initial full index. ListPaths is the same listing without either.
 func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) ([]Change, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"ls-tree", "-r", "-l", sha)
+		"ls-tree", "-z", "-r", "-l", sha)
 	if err != nil {
 		return nil, err
 	}
 	entries := []Change{}
-	for _, line := range nonEmptyLines(out) {
+	for _, line := range nulFields(out) {
 		// <mode> <type> <sha> <size>\t<path>; the size is "-" for a
 		// submodule pointer, which names a commit and has none.
 		meta, path, ok := strings.Cut(line, "\t")
@@ -580,11 +586,11 @@ func (c *Client) ListEntries(ctx context.Context, spec repos.Spec, sha string) (
 // ListPaths lists every tracked path at a commit, for the initial full index.
 func (c *Client) ListPaths(ctx context.Context, spec repos.Spec, sha string) ([]string, error) {
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
-		"ls-tree", "-r", "--name-only", sha)
+		"ls-tree", "-z", "-r", "--name-only", sha)
 	if err != nil {
 		return nil, err
 	}
-	return nonEmptyLines(out), nil
+	return nulFields(out), nil
 }
 
 // ReadFile reads one path at one commit. Reading from the commit rather than
@@ -824,14 +830,40 @@ func subcommand(args []string) string {
 	return "git"
 }
 
+// nulFields splits -z output into its fields, verbatim: a path may end in a
+// space, so nothing is trimmed.
+func nulFields(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, "\x00") {
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// nonEmptyLines splits s into its lines, verbatim: a path line may end in a
+// space, so nothing is trimmed.
 func nonEmptyLines(s string) []string {
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
+		if line != "" {
 			out = append(out, line)
 		}
 	}
 	return out
+}
+
+// gitPath is a path line as git printed it, unquoted: git C-quotes a path
+// holding a quote, a backslash or a control byte whatever core.quotePath
+// says, in output that has no -z form worth parsing.
+func gitPath(p string) string {
+	if len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"' {
+		if s, err := strconv.Unquote(p); err == nil {
+			return s
+		}
+	}
+	return p
 }
 
 // ShortSHA is the seven-character form used in errors and log lines. Exported

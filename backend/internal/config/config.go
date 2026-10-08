@@ -178,9 +178,10 @@ type Config struct {
 	// is an admin; set outside proxy mode it is refused.
 	ProxyAdminGroup string
 	// CookieSecure marks the session and nonce cookies Secure. In oidc mode
-	// it is derived from OIDCRedirectURL: behind a TLS-terminating proxy the
-	// process only ever sees plain HTTP, and the redirect URL is the one
-	// setting that has to name the external origin anyway. Password mode has
+	// it is always true, and an http OIDCRedirectURL is refused: behind a
+	// TLS-terminating proxy the process only ever sees plain HTTP, and the
+	// redirect URL is the one setting that has to name the external origin
+	// anyway. Password mode has
 	// no such URL, so it reads BACKEND_COOKIE_SECURE, default true, and only
 	// a loopback listener may switch it off. Set in any other mode, it is
 	// refused: there it would look active and change nothing.
@@ -370,7 +371,7 @@ func Load() (Config, error) {
 		// wrote http://; the login works and the cookies go out readable.
 		if !strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://") {
 			return Config{}, fmt.Errorf(
-				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_OIDC_REDIRECT_URL, got %q; the session cookie's Secure flag is derived from it", cfg.OIDCRedirectURL)
+				"BACKEND_AUTH_MODE=oidc requires an https BACKEND_OIDC_REDIRECT_URL, got %q; the session cookie is always Secure in oidc mode", cfg.OIDCRedirectURL)
 		}
 	default:
 		return Config{}, fmt.Errorf("unknown BACKEND_AUTH_MODE %q (want dev, token, password, oidc or proxy)", cfg.AuthMode)
@@ -391,7 +392,8 @@ func Load() (Config, error) {
 	}
 
 	if cfg.AuthMode == AuthModeOIDC {
-		cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
+		// The redirect URL was refused above unless it is https.
+		cfg.CookieSecure = true
 	}
 
 	// A file named here that is not there fails the boot. ssh would report

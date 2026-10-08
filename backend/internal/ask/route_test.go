@@ -626,8 +626,8 @@ func TestProjectCandidatesFoldOneProductIntoOneButton(t *testing.T) {
 // TestRepoCandidatesStayRepositoryGrainedForTheManifestCheck is the regression
 // test for the one way this change could break routing silently.
 //
-// anyDependency hands a candidate's Repo straight to repodeps.DependsOn, which
-// joins repo_deps WHERE repo = ?. A project name has no rows there, so folding
+// anyDependency hands a candidate's Repo straight to repodeps.AnyDependency,
+// which joins repo_deps on the repository name. A project name has no rows there, so folding
 // inside repoCandidates would lose every go.mod edge for repositories that
 // belong to a multi-repo project — and no measurement would catch it, because
 // the eval corpus is one project per repository, where the two names are the

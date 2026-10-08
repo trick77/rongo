@@ -117,9 +117,14 @@ func SyncWith(ctx context.Context, db *sql.DB, repo string, mods map[string][]by
 }
 
 // AnyDependency reports whether any repository among repos requires what
-// another of them publishes — DependsOn over every ordered pair, in one
-// query. The router asks this of a whole candidate list, where a pair loop
-// was n² sequential reads for one yes/no.
+// another of them publishes, over every ordered pair in one query. The router
+// asks this of a whole candidate list, where a pair loop was n² sequential
+// reads for one yes/no.
+//
+// It is a JOIN, not a lookup: a repository requires far more coordinates than
+// the corpus publishes, and only the pairs that meet are edges. An unindexed
+// dependency is not a routing candidate anyway — the spec forbids crossing
+// into one.
 func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error) {
 	if len(repos) < 2 {
 		return false, nil
@@ -147,32 +152,4 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 		return false, nil
 	}
 	return err == nil, err
-}
-
-// DependsOn reports whether a pulls something b publishes.
-//
-// It is a JOIN, not a lookup: a repository requires far more coordinates than
-// the corpus publishes, and only the pairs that meet are edges. An unindexed
-// dependency is not a routing candidate anyway — the spec forbids crossing into
-// one.
-func DependsOn(ctx context.Context, db *sql.DB, a, b string) (bool, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT need.coordinate, have.coordinate
-		FROM repo_deps AS need
-		JOIN repo_deps AS have ON have.direction = 'publishes' AND have.repo = ?
-		WHERE need.repo = ? AND need.direction = 'requires'`, b, a)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var need, have string
-		if err := rows.Scan(&need, &have); err != nil {
-			return false, err
-		}
-		if need == have || strings.HasPrefix(need, have+"/") {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
 }

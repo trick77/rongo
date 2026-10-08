@@ -368,7 +368,7 @@ symbols:
 	// nothing is capped, so the harness measures what it always measured.
 	configSpent, configLimit := 0, g.opts.TokenBudget/crossingReserve
 	for _, c := range later {
-		configToConfig := g.terms != nil && isConfigPath(c.from.Path) && isConfigPath(c.landing.Path)
+		configToConfig := g.terms != nil && edges.IsPropertiesPath(c.from.Path) && edges.IsPropertiesPath(c.landing.Path)
 		cost := estimateTokens(c.landing.Text)
 		if configToConfig {
 			if a.seen[c.landing.ChunkID] || configSpent+cost > configLimit {
@@ -623,7 +623,7 @@ func (g *Gatherer) crossReason(n edges.Neighbour, from Source) bool {
 	if g.terms == nil || n.Kind != edges.KindProperty {
 		return true
 	}
-	if !isConfigPath(from.Path) || !isConfigPath(n.Path) {
+	if !edges.IsPropertiesPath(from.Path) || !edges.IsPropertiesPath(n.Path) {
 		return true
 	}
 	for _, w := range words(n.Value) {
@@ -632,12 +632,6 @@ func (g *Gatherer) crossReason(n edges.Neighbour, from Source) bool {
 		}
 	}
 	return false
-}
-
-// isConfigPath is a file property keys are SET in: the one kind the edge
-// extractor reads keys from (edges.propertyKeys).
-func isConfigPath(path string) bool {
-	return strings.HasSuffix(path, ".properties")
 }
 
 // withTerms is the gatherer that knows the turn's words (the search texts:

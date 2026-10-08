@@ -32,6 +32,7 @@ export function useThreadActions({
   // Which thread a dialog is asking about. Objects rather than ids only for
   // the title the dialog shows; the list may reload underneath them.
   const [renaming, setRenaming] = useState<Thread | null>(null);
+  const [renameError, setRenameError] = useState<string | undefined>(undefined);
   const [deleting, setDeleting] = useState<Thread | null>(null);
   // The thread whose link is being handed out, and the link it already has.
   // Fetched before the dialog opens, so it never flashes "Share thread" at
@@ -58,13 +59,19 @@ export function useThreadActions({
 
   async function rename(t: Thread, title: string) {
     setPending(true);
+    setRenameError(undefined);
     try {
       const res = await fetch(`/api/threads/${t.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        // A refused title (too long, say) is the reader's to fix, so the
+        // dialog stays and says why.
+        setRenameError((await res.text()).trim() || `The server answered with ${res.status}.`);
+        return;
+      }
       setRenaming(null);
       onRenamed(t.id, title);
     } catch {
@@ -111,7 +118,11 @@ export function useThreadActions({
         <RenameThreadModal
           title={renaming.title}
           busy={pending}
-          onCancel={() => setRenaming(null)}
+          error={renameError}
+          onCancel={() => {
+            setRenaming(null);
+            setRenameError(undefined);
+          }}
           onSubmit={(title) => void rename(renaming, title)}
         />
       )}

@@ -56,6 +56,7 @@ func commit(t *testing.T, dir, name string, body []byte, msg string) string {
 type fixture struct {
 	svc           *Service
 	db            *sql.DB
+	root          string
 	first, second string
 }
 
@@ -101,7 +102,7 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 		}
 	}
 	client := gitrepo.New(gitBin, root)
-	return fixture{svc: New(db, client, maxBytes).WithCommits(client), db: db, first: first, second: second}
+	return fixture{svc: New(db, client, maxBytes).WithCommits(client), db: db, root: root, first: first, second: second}
 }
 
 // TestReadRecorded_servesAFileTheIndexNoLongerListsButNeverOneItSkips: an
@@ -203,6 +204,32 @@ func TestRead_aConfigurationFileIsServedRedacted(t *testing.T) {
 	want := "acme.cron.send-digest=0 0 * ? * * *\ndb.password=<redacted>\nacme.key=${MASTER_KEY}\n"
 	if got.Content != want {
 		t.Fatalf("content = %q, want %q", got.Content, want)
+	}
+}
+
+// TestRead_refusesAnOlderCommitWhoseBodyTheIndexerWouldSkip: the files row
+// grants a path at whatever commit, so a credential committed once and removed
+// since is one old sha away. The body read is judged again the way the
+// selector judges it, never only redacted.
+func TestRead_refusesAnOlderCommitWhoseBodyTheIndexerWouldSkip(t *testing.T) {
+	// Given: internal/aws.go is indexed today; an older commit held a key.
+	f := newFixture(t, 1<<20)
+	dir := filepath.Join(f.root, "peeq")
+	leaky := commit(t, dir, "internal/aws.go", []byte("package a\n\nconst key = \"AKIAABCDEFGHIJKLMNOP\"\n"), "oops")
+	clean := commit(t, dir, "internal/aws.go", []byte("package a\n\nvar key = os.Getenv(\"K\")\n"), "fix")
+	if _, err := f.db.Exec(`INSERT INTO files (repo, path, sha, skip_reason) VALUES ('peeq', 'internal/aws.go', ?, '')`, clean); err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	got, err := f.svc.Read(context.Background(), "peeq", "internal/aws.go", leaky)
+
+	// Then
+	if !errors.Is(err, ErrNotFound) || strings.Contains(got.Content, "AKIA") {
+		t.Fatalf("Read at the leaky commit = %q, %v; want ErrNotFound", got.Content, err)
+	}
+	if got, err := f.svc.Read(context.Background(), "peeq", "internal/aws.go", clean); err != nil || !strings.Contains(got.Content, "Getenv") {
+		t.Fatalf("Read at the clean commit = %q, %v", got.Content, err)
 	}
 }
 

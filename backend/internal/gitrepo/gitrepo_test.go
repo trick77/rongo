@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/repos"
@@ -341,6 +343,84 @@ func TestListPaths_handlesNonAsciiFilenames(t *testing.T) {
 	if _, err := c.ReadFile(ctx, spec, sha, found); err != nil {
 		t.Errorf("ReadFile(%q) err = %v — the listed path is not usable", found, err)
 	}
+}
+
+// TestListings_returnPathsGitQuotesOrPads: core.quotePath=false stops only the
+// octal quoting of non-ASCII bytes. git still C-quotes a path holding a quote,
+// a backslash or a control byte, and a trimmed line loses a trailing space.
+// Either way the listed path is not one ReadFile can open, and one such file
+// failed every indexing run of its repository.
+func TestListings_returnPathsGitQuotesOrPads(t *testing.T) {
+	// Given
+	src := fixtureRepo(t)
+	from := strings.TrimSpace(func() string {
+		out, _ := exec.Command("git", "-C", src, "rev-parse", "HEAD").Output()
+		return string(out)
+	}())
+	odd := []string{`say "hi".md`, `back\slash.md`, "trail ", "tab\there.md"}
+	for _, name := range odd {
+		writeAndCommit(t, src, name, "x\n", "odd")
+	}
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	listed, err := c.ListPaths(ctx, spec, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := c.ListEntries(ctx, spec, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := c.ChangedPaths(ctx, spec, from, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := c.ChangedEntries(ctx, spec, from, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Then: every listing names each odd file as it is, and it reads back.
+	for name, got := range map[string][]string{
+		"ListPaths":      listed,
+		"ListEntries":    pathsOf(entries),
+		"ChangedPaths":   changed,
+		"ChangedEntries": pathsOf(changes),
+	} {
+		for _, want := range odd {
+			if !slices.Contains(got, want) {
+				t.Errorf("%s = %q, missing %q", name, got, want)
+			}
+		}
+	}
+	for _, p := range odd {
+		if _, err := c.ReadFile(ctx, spec, sha, p); err != nil {
+			t.Errorf("ReadFile(%q): %v", p, err)
+		}
+	}
+	for _, e := range changes {
+		if e.Size == 0 {
+			t.Errorf("ChangedEntries lost the size of %q", e.Path)
+		}
+	}
+}
+
+func pathsOf(entries []Change) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Path)
+	}
+	return out
 }
 
 func TestChangedPaths_emptyDiffIsEmptyNotNil(t *testing.T) {

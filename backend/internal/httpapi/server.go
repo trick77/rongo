@@ -122,6 +122,8 @@ type Threads interface {
 	// CitedBy is SharedCitation for the owner: a thread this subject owns
 	// cites that file at that commit.
 	CitedBy(ctx context.Context, subject, repo, path, sha string) (bool, error)
+	// CommitCitedBy is CitedBy for a commit citation.
+	CommitCitedBy(ctx context.Context, subject, repo, sha string) (bool, error)
 }
 
 // Deps holds every collaborator the HTTP layer needs. Phase 1 has only Auth,

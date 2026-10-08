@@ -290,6 +290,17 @@ func TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt(t *testing.T) {
 		{"ne le mentionne plus jamais", "ne ... plus jamais", true},
 		{"anymore, don't mention it", "don't ... anymore", false},
 		{"mention lerb-chooser-ui", "...", false},
+		{"never mention lerb-chooser-ui.", "never", true},
+		{"don't mention lerb-chooser-ui, ever again!", "ever again", true},
+		// A marker is whole words: a fragment inside one is not the reader
+		// saying the rule lasts.
+		{"zeichne ein diagramm des ablaufs", "ab", false},
+		{"how does the knowledge base get its data", "now", false},
+		{"warum ist das feld immerhin leer", "immer", false},
+		// A word in quotes is still the word; a script written without
+		// spaces has no word boundary to ask for.
+		{"'never' mention lerb-chooser-ui", "never", true},
+		{"以后都不要提这个", "以后都", true},
 	} {
 		got := Understanding{Memory: rule, MemoryMarker: c.marker}.KeptRule(c.question)
 		if (got != "") != c.kept {

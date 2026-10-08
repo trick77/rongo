@@ -168,6 +168,13 @@ var placeholderExt = map[string]bool{".java": true}
 // a follow-up with its own rule.
 var propertiesExt = map[string]bool{".properties": true}
 
+// IsPropertiesPath reports whether Extract reads property keys from p: the
+// one check the gather crossing filter shares with it, so the two cannot
+// disagree about which files are configuration.
+func IsPropertiesPath(p string) bool {
+	return propertiesExt[strings.ToLower(path.Ext(p))]
+}
+
 // yamlExt is where the image rule runs, and the only rule yaml gets: a
 // property rule over manifests would emit spec.template.spec.containers
 // from every one of them.
@@ -276,10 +283,10 @@ const linkMaxRunes = 120
 // the edges that exist, and their failure mode is a missing token rather than a
 // wrong one.
 func Extract(filePath string, body []byte) []Token {
-	ext := strings.ToLower(path.Ext(filePath))
-	if propertiesExt[ext] {
+	if IsPropertiesPath(filePath) {
 		return propertyKeys(body)
 	}
+	ext := strings.ToLower(path.Ext(filePath))
 	if yamlExt[ext] {
 		return imageRefs(body)
 	}

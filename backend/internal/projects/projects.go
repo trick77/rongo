@@ -57,9 +57,9 @@ type Map struct {
 }
 
 // Load reads the whole grouping in two queries. There are a handful of
-// repositories and a handful of edges, and this is called once per turn the way
-// repodeps.DependsOn is, so it is deliberately not cached: a project renamed in
-// repos.yaml takes effect on the next question, not on the next restart.
+// repositories and a handful of edges, so it is deliberately not cached, though
+// a turn reads it several times: a project renamed in repos.yaml takes effect
+// on the next question, not on the next restart.
 func Load(ctx context.Context, db *sql.DB) (Map, error) {
 	m := Map{of: map[string]string{}, projects: map[string]Project{}, library: map[string]bool{}, usedBy: map[string][]string{}}
 

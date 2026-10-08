@@ -75,6 +75,10 @@ const secretNames = `\w*(?:password|passwd|passphrase|passwort|secret|token|apik
 // is a pointer, not a value.
 var inlineKeyed = regexp.MustCompile(`(?i)(["']?)(` + secretNames + `)(["']?)(\s*[:=]\s*)(["']?)([^"'\s,;}{$][^"'\s,;}]*)`)
 
+// jsonFirstValue is the quoted string a JSON value opens with, its text in
+// group 1.
+var jsonFirstValue = regexp.MustCompile(`^\s*"((?:[^"\\]|\\.)*)"`)
+
 // xmlNamedValue is a name/value attribute pair whose NAME says secret:
 // Spring's <property name="password" value="…"/>, web.config's <add
 // key="ApiToken" value="…"/>. The key is in one attribute and the value in
@@ -175,6 +179,7 @@ func Redact(p string, body []byte) []byte {
 	}
 	yaml := isYAML(p)
 	properties := strings.ToLower(path.Ext(p)) == ".properties"
+	json := strings.ToLower(path.Ext(p)) == ".json"
 	lines := strings.Split(string(body), "\n")
 	out := make([]string, 0, len(lines))
 	changed := false
@@ -248,6 +253,20 @@ func Redact(p string, body []byte) []byte {
 			out = append(out, lines[i])
 			continue
 		}
+		if !secretKey && json && strings.Contains(value, ",") {
+			// More pairs after a comma on a hand-wrapped JSON line: each key
+			// is judged where it stands, and the line's own first value as
+			// any value is.
+			inner := inlineKeyed.ReplaceAllString(rest, "${1}${2}${3}${4}${5}"+Marker)
+			if fv := jsonFirstValue.FindStringSubmatchIndex(inner); fv != nil && isSecretValue(inner[fv[2]:fv[3]]) {
+				inner = inner[:fv[2]] + Marker + inner[fv[3]:]
+			}
+			if inner != rest {
+				out = append(out, m[1]+m[2]+key+m[4]+sep+inner+eol(crlf))
+				changed = true
+				continue
+			}
+		}
 		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) {
 			// A flow mapping or an inline object: the keys are inside the
 			// value, and each is judged where it stands.
@@ -290,6 +309,33 @@ func SecretManifest(p string, body []byte) bool {
 		}
 	}
 	return false
+}
+
+// secretPatterns are shapes that are credentials wherever they appear. This is
+// a filter, not a scanner: it exists so an accidentally committed credential
+// does not leave the network when the file is embedded. Missing an exotic
+// format is acceptable; letting an obvious one through is not.
+var secretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                   // AWS access key id
+	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`), // any PEM private key
+	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}`),         // GitHub tokens
+	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`),       // GitHub fine-grained PAT
+	regexp.MustCompile(`glpat-[A-Za-z0-9\-_]{20,}`),          // GitLab PAT
+	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9\-]{10,}`),      // Slack tokens
+	regexp.MustCompile(`sk-[A-Za-z0-9]{32,}`),                // OpenAI-style secret key
+	regexp.MustCompile(`(?i)aws_secret_access_key\s*[=:]\s*\S{20,}`),
+}
+
+// MatchSecret returns the first credential pattern the (already redacted)
+// body matches, or "". A match skips the file whole: the indexer never embeds
+// it and the source viewer never serves it, at any commit.
+func MatchSecret(body []byte) string {
+	for _, re := range secretPatterns {
+		if re.Match(body) {
+			return re.String()
+		}
+	}
+	return ""
 }
 
 func isYAML(p string) bool {

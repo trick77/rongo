@@ -301,21 +301,6 @@ var manifestFiles = map[string]bool{
 // sees under .bpmn and which carry diagram geometry past any ceiling.
 var exemptSuffixes = []string{".bpmn20.xml", ".bpmn.xml"}
 
-// secretPatterns are shapes that are credentials wherever they appear. This is
-// a filter, not a scanner: it exists so an accidentally committed credential
-// does not leave the network when the file is embedded. Missing an exotic
-// format is acceptable; letting an obvious one through is not.
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),                   // AWS access key id
-	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`), // any PEM private key
-	regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36,}`),         // GitHub tokens
-	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`),       // GitHub fine-grained PAT
-	regexp.MustCompile(`glpat-[A-Za-z0-9\-_]{20,}`),          // GitLab PAT
-	regexp.MustCompile(`xox[baprs]-[A-Za-z0-9\-]{10,}`),      // Slack tokens
-	regexp.MustCompile(`sk-[A-Za-z0-9]{32,}`),                // OpenAI-style secret key
-	regexp.MustCompile(`(?i)aws_secret_access_key\s*[=:]\s*\S{20,}`),
-}
-
 // Select decides what to do with one file and returns a human-readable reason
 // for anything it skips. The reason is stored on the file row so the answer
 // layer can say "that file exists but was not indexed" — the "never invent"
@@ -356,7 +341,7 @@ func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) 
 	// Secrets next, and ahead of every remaining verdict: those are about
 	// usefulness, this one is about not shipping a credential to a third-party
 	// embedding endpoint, so it wins regardless of where the file lives.
-	if pat := matchSecret(body); pat != "" {
+	if pat := redact.MatchSecret(body); pat != "" {
 		return SkipSecret, "matches a credential pattern (" + pat + ")", body
 	}
 	if d, reason := s.selectByPath(p, len(body)); d != Include {
@@ -447,15 +432,6 @@ func (s *Selector) selectByPath(p string, size int) (Decision, string) {
 		return SkipData, reason
 	}
 	return Include, ""
-}
-
-func matchSecret(body []byte) string {
-	for _, re := range secretPatterns {
-		if re.Match(body) {
-			return re.String()
-		}
-	}
-	return ""
 }
 
 // isBinary uses the NUL byte, the same heuristic git uses. Checking only the

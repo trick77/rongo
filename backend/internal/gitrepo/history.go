@@ -41,9 +41,10 @@ func (c *Client) Log(ctx context.Context, spec repos.Spec, fromSHA, toSHA string
 		rng = fromSHA + ".." + toSHA
 	}
 	// %x1e opens a record, %x00 separates its fields; the paths --name-only
-	// appends follow the last field as lines. Neither byte can occur in a
-	// message git accepted, and core.quotePath=false keeps an umlaut path a
-	// path (see ChangedPaths).
+	// appends follow the last field as lines. git refuses only NUL in a
+	// message, so the fields are split on NUL alone and 0x1e is looked for
+	// only in the path lines, where git quotes a control byte.
+	// core.quotePath=false keeps an umlaut path a path (see ChangedPaths).
 	out, err := c.run(ctx, c.Dir(spec), "-c", "core.quotePath=false",
 		"log", "--first-parent", "--name-only", "-n", strconv.Itoa(limit),
 		"--format=%x1e%H%x00%aI%x00%an%x00%s%x00%b%x00", rng)
@@ -55,24 +56,44 @@ func (c *Client) Log(ctx context.Context, spec repos.Spec, fromSHA, toSHA string
 
 func parseLog(out string) ([]Commit, error) {
 	commits := []Commit{}
-	for _, rec := range strings.Split(out, "\x1e") {
-		if strings.TrimSpace(rec) == "" {
-			continue
+	if strings.TrimSpace(out) == "" {
+		return commits, nil
+	}
+	// Five fields per commit; the sixth piece holds its paths and, after the
+	// last 0x1e, the next commit's sha.
+	f := strings.Split(out, "\x00")
+	head, ok := strings.CutPrefix(f[0], "\x1e")
+	for i := 0; ; i += 5 {
+		if !ok || i+5 >= len(f) {
+			return nil, fmt.Errorf("unparseable log record at field %d", i)
 		}
-		f := strings.Split(rec, "\x00")
-		if len(f) != 6 {
-			return nil, fmt.Errorf("unparseable log record with %d fields", len(f))
+		paths, next, more := f[i+5], "", false
+		if at := strings.LastIndex(paths, "\x1e"); at >= 0 {
+			paths, next, more = paths[:at], paths[at+1:], true
 		}
 		commits = append(commits, Commit{
-			SHA:         f[0],
-			CommittedAt: f[1],
-			Author:      f[2],
-			Subject:     f[3],
-			Body:        stripTrailers(f[4]),
-			Paths:       append([]string{}, nonEmptyLines(f[5])...),
+			SHA:         head,
+			CommittedAt: f[i+1],
+			Author:      f[i+2],
+			Subject:     f[i+3],
+			Body:        stripTrailers(f[i+4]),
+			Paths:       gitPaths(nonEmptyLines(paths)),
 		})
+		if !more {
+			return commits, nil
+		}
+		head = next
 	}
-	return commits, nil
+}
+
+// gitPaths unquotes each path line; never nil, so an empty commit stores
+// an empty list.
+func gitPaths(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, gitPath(l))
+	}
+	return out
 }
 
 // trailerRe matches a git trailer line: Signed-off-by, Co-authored-by,
@@ -127,7 +148,7 @@ func (c *Client) Show(ctx context.Context, spec repos.Spec, sha string) (CommitD
 		}
 		added, _ := strconv.Atoi(parts[0])
 		deleted, _ := strconv.Atoi(parts[1])
-		d.Files = append(d.Files, FileChange{Path: parts[2], Added: added, Deleted: deleted})
+		d.Files = append(d.Files, FileChange{Path: gitPath(parts[2]), Added: added, Deleted: deleted})
 	}
 	return d, nil
 }
