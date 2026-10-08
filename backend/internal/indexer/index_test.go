@@ -610,9 +610,12 @@ func TestIndexRepoRecordsTheDependenciesFromGoMod(t *testing.T) {
 // repository that removed its last go.mod kept depending on what it no longer
 // requires, and the router went on reading the two as one product.
 func TestIndexRepo_aRepositoryThatDropsItsManifestsDropsItsDependencies(t *testing.T) {
+	// A pom with no artifactId is skipped on every run: a manifest that says
+	// nothing, never a reason to keep the rows.
 	h := newHarnessFiles(t, map[string]string{
 		"go.mod":  "module github.com/trick77/peeq\n\nrequire github.com/ncruces/go-sqlite3 v0.23.3\n",
 		"main.go": "package main\n\nfunc main() {}\n",
+		"pom.xml": "<project></project>\n",
 	}, nil)
 	st := h.stateOf(t)
 	first := h.head(t)

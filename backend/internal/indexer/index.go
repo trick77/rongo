@@ -231,8 +231,8 @@ type structure struct {
 	// mods is each go.mod's text by path, for repo_deps.
 	mods    map[string][]byte
 	aliases map[string]string
-	// unread is a manifest that could not be read or was skipped: the
-	// coordinates found are then not the whole of them.
+	// unread is a manifest that could not be read: the coordinates found
+	// are then not the whole of them.
 	unread bool
 }
 
@@ -253,9 +253,17 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 	// does the structure scan.
 	paths = ownPaths(paths)
 	// Unlimited: a manifest is read for structure whatever the file ceiling.
-	read := func(p string) ([]byte, error) { return readAt(ctx, spec, sha, p, 0) }
-	mods := map[string][]byte{}
+	// A failed read is noted apart from a manifest that parses badly: the
+	// one is transient, the other says the same thing every run.
 	unread := false
+	read := func(p string) ([]byte, error) {
+		body, err := readAt(ctx, spec, sha, p, 0)
+		if err != nil {
+			unread = true
+		}
+		return body, err
+	}
+	mods := map[string][]byte{}
 	for _, p := range paths {
 		if path.Base(p) != "go.mod" {
 			continue
@@ -263,7 +271,6 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 		body, err := read(p)
 		if err != nil {
 			ix.log.Warn("read go.mod failed", "repo", st.Name, "path", p, "err", err)
-			unread = true
 			continue
 		}
 		mods[p] = body
@@ -273,7 +280,8 @@ func (ix *Indexer) syncStructure(ctx context.Context, spec repos.Spec, st RepoSt
 	for _, s := range skipped {
 		ix.log.Warn("manifest skipped", "repo", st.Name, "manifest", s)
 	}
-	return structure{scanned: true, units: us, deps: deps, mods: mods, aliases: units.Aliases(paths, read), unread: unread || len(skipped) > 0}
+	aliases := units.Aliases(paths, read)
+	return structure{scanned: true, units: us, deps: deps, mods: mods, aliases: aliases, unread: unread}
 }
 
 // linkUnits writes what the manifests said: the repository's units, every
@@ -298,9 +306,10 @@ func (ix *Indexer) linkUnits(ctx context.Context, st RepoState, s structure) {
 			requires = append(requires, d.Coordinate)
 		}
 	}
-	// A tree with no manifest left clears the rows; one whose manifest could
-	// not be read keeps them rather than wipe them over a transient failure.
-	if len(s.mods) > 0 || len(publishes) > 0 || len(requires) > 0 || !s.unread {
+	// The rows follow the tree, a tree with no manifest left clearing them.
+	// A manifest that could not be read keeps the previous rows whole: a
+	// partial rewrite would drop its coordinates over a transient failure.
+	if !s.unread {
 		if err := repodeps.SyncWith(ctx, ix.db, st.Name, s.mods, publishes, requires); err != nil {
 			ix.log.Warn("sync repo_deps failed", "repo", st.Name, "err", err)
 		}
