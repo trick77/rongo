@@ -154,7 +154,7 @@ func main() {
 		slog.Error("required external tool missing or wrong", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("external tools resolved", "git", tools.Git, "rg", tools.Rg, "ctags", tools.Ctags)
+	slog.Info("external tools resolved", "git", tools.Git, "ctags", tools.Ctags)
 
 	// Both model clients before the database is touched, so a missing
 	// endpoint variable stops the boot where a config error would: with
