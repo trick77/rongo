@@ -1063,7 +1063,7 @@
           "README.md",
           "docs/manual-verification.md"
         ],
-        "verified": "read 2026-09-05: README.md:27 'Needs Go, Node.js, git, rg and universal-ctags'; docs/manual-verification.md:8-15 lists the same prerequisites and the brew install line. The startup check in code names ctags alone, never the full list."
+        "verified": "read 2026-09-05: README.md:63 'Needs Go, Node.js, git and universal-ctags'; docs/manual-verification.md:8-15 lists the same prerequisites and the brew install line. The startup check in code names ctags alone, never the full list."
       }
     ],
     "note": "Doc-led. Two documents in one repository are one candidate: the reader is not choosing between a README and the manual-verification page."

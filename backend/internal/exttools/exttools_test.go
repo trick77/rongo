@@ -75,8 +75,23 @@ func TestResolve_reportsMissingBinary(t *testing.T) {
 	if err == nil {
 		t.Fatal("Resolve() err = nil, want an error naming ctags")
 	}
-	if !strings.Contains(err.Error(), "ctags") {
-		t.Errorf("error = %q, want it to name ctags", err)
+	if !strings.Contains(err.Error(), "ctags not found in PATH") {
+		t.Errorf("error = %q, want it to say ctags is not on PATH", err)
+	}
+}
+
+func TestResolve_reportsMissingGit(t *testing.T) {
+	// Given: ctags present, git absent.
+	dir := t.TempDir()
+	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\njson supports json format output")
+	onlyPath(t, dir)
+
+	// When
+	_, err := Resolve()
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "git not found in PATH") {
+		t.Errorf("error = %v, want it to say git is not on PATH", err)
 	}
 }
 

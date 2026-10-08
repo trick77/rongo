@@ -33,7 +33,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -186,7 +185,7 @@ func TestFlowQuestionsAreWellFormed(t *testing.T) {
 // --- the tools -------------------------------------------------------------
 
 // flowTools is what the model may call. Deliberately the capabilities rongo
-// ALREADY has: the hybrid search it ships, ripgrep,
+// ALREADY has: the hybrid search it ships, its substring lane,
 // the ctags symbols it already stores, and reading a file. Giving the loop a
 // tool the product does not have would measure a product that does not exist.
 func flowToolSpecs() []llmwire.Tool {
@@ -208,7 +207,7 @@ func flowToolSpecs() []llmwire.Tool {
 		},
 		{
 			Name:        "grep",
-			Description: "Literal or regular-expression search over the checked-out source, like ripgrep. Use it to follow an exact string such as a queue name or a route across repositories.",
+			Description: "Literal, case-folded search over the indexed code, also inside longer identifiers. Use it to follow an exact string such as a queue name or a route across repositories.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -253,7 +252,6 @@ type flowEnv struct {
 	retriever *retrieve.Retriever
 	db        *sql.DB
 	repoRoot  string
-	rg        string
 
 	// seen is every repo/path the model was actually SHOWN. The diagnostic
 	// scores against this rather than against the final prose: whether the
@@ -307,29 +305,24 @@ func (e *flowEnv) search(ctx context.Context, query, repo string) string {
 	return b.String()
 }
 
+// grep is the product's substring lane, the text search rongo ships: the
+// diagnostic first ran it on ripgrep, which rongo no longer carries.
 func (e *flowEnv) grep(ctx context.Context, pattern, repo string) string {
-	root := e.repoRoot
+	var repos []string
 	if repo != "" {
-		root = filepath.Join(e.repoRoot, repo)
+		repos = []string{repo}
 	}
-	cmd := exec.CommandContext(ctx, e.rg, "--line-number", "--max-count", "5",
-		"--max-columns", "300", "--no-heading", "--color", "never", pattern, root)
-	out, err := cmd.Output()
-	if err != nil && len(out) == 0 {
+	hits, err := e.retriever.Substring(ctx, pattern, 40, repos, "", nil)
+	if err != nil {
+		return "grep failed: " + err.Error()
+	}
+	if len(hits) == 0 {
 		return "no matches"
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-	if len(lines) > 40 {
-		lines = lines[:40]
-	}
 	var b strings.Builder
-	for _, ln := range lines {
-		rel := strings.TrimPrefix(ln, e.repoRoot+string(filepath.Separator))
-		if r, p, ok := splitRepoPath(rel); ok {
-			e.note(r, p)
-		}
-		b.WriteString(rel)
-		b.WriteString("\n")
+	for _, h := range hits {
+		e.note(h.Repo, h.Path)
+		fmt.Fprintf(&b, "%s/%s:%d-%d\n", h.Repo, h.Path, h.StartLine, h.EndLine)
 	}
 	return b.String()
 }
@@ -387,19 +380,6 @@ func (e *flowEnv) read(repo, path, start, end string) string {
 		fmt.Fprintf(&b, "%d: %s\n", i, lines[i-1])
 	}
 	return clip(b.String(), 8000)
-}
-
-// splitRepoPath turns "orders/src/main/..." into its repository and path.
-func splitRepoPath(rel string) (string, string, bool) {
-	i := strings.IndexByte(rel, filepath.Separator)
-	if i <= 0 {
-		return "", "", false
-	}
-	rest := rel[i+1:]
-	if j := strings.IndexByte(rest, ':'); j >= 0 {
-		rest = rest[:j]
-	}
-	return rel[:i], rest, rest != ""
 }
 
 func clip(s string, n int) string {
@@ -530,16 +510,11 @@ func TestFlowLoopDiagnostic(t *testing.T) {
 	db := evalDB(t, dim)
 	ctx := context.Background()
 
-	rg, err := exec.LookPath("rg")
-	if err != nil {
-		t.Fatalf("ripgrep: %v", err)
-	}
 	env := &flowEnv{
 		t:         t,
 		retriever: retrieve.New(db, evalQueryEmbedder(t, db)),
 		db:        db,
 		repoRoot:  envOr("BACKEND_REPO_ROOT", "/tmp/rongo-flow-repos"),
-		rg:        rg,
 		seen:      map[flowPart]bool{},
 	}
 

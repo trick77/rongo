@@ -43,8 +43,7 @@ does it and shows the code inline.
 ## How it works
 
 One Go binary, one SQLite file (FTS5 for text, sqlite-vec for embeddings), React UI
-embedded in the binary. Symbols come from universal-ctags,
-checkouts from git. Chat goes to the models named by `BACKEND_LLM_MODEL` and
+embedded in the binary. Symbols come from universal-ctags, checkouts from git. Chat goes to the models named by `BACKEND_LLM_MODEL` and
 `BACKEND_LLM_GATE_MODEL` (both required, no default), embeddings to `text-embedding-3-small`;
 hosts, keys and an optional LiteLLM gateway in front are llmwire's variables,
 see `.env.example`.
