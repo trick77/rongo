@@ -153,4 +153,3 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 	}
 	return err == nil, err
 }
-
