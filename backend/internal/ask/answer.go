@@ -808,7 +808,8 @@ type Scope struct {
 	// unless they are exactly one product's members (onlyOneProduct).
 	Known []string
 	// pm is the project map, read once per turn by projectsOf and reused by
-	// the search, the structure block and the gather ceiling. Unexported,
+	// the structure block and the gather ceiling; the search, the resolver
+	// and the router still read their own. Unexported,
 	// so it is never persisted: a resumed or re-explained turn reads it
 	// afresh.
 	pm       projects.Map

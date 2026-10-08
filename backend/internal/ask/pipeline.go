@@ -444,7 +444,7 @@ func (p *Pipeline) stagesOf(ctx context.Context, scope *Scope) stages.Set {
 }
 
 // projectsOf is the turn's project map, read on first use and kept on the
-// scope, so one turn reads it once however many steps need it.
+// scope, so the steps that ask through it read it once a turn.
 func (p *Pipeline) projectsOf(ctx context.Context, scope *Scope) (projects.Map, error) {
 	if scope.pmLoaded {
 		return scope.pm, nil

@@ -391,7 +391,8 @@ func Load() (Config, error) {
 	}
 
 	if cfg.AuthMode == AuthModeOIDC {
-		cfg.CookieSecure = strings.HasPrefix(strings.ToLower(cfg.OIDCRedirectURL), "https://")
+		// The redirect URL was refused above unless it is https.
+		cfg.CookieSecure = true
 	}
 
 	// A file named here that is not there fails the boot. ssh would report

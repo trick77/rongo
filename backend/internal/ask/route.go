@@ -663,7 +663,7 @@ func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bo
 // Choosable asks whether the named candidates are a choice the Analyst can
 // make — the rung that decides whether the READER is equipped to answer what
 // the judge found ambiguous. Route runs it for the Analyst only, over
-// candidates that have already been named. Exported for the eval harness.
+// candidates that have already been named.
 func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	return r.choosable(ctx, question, cs)
 }
