@@ -225,7 +225,9 @@ func wordIndex(s, part string) int {
 		i += from
 		before, _ := utf8.DecodeLastRuneInString(s[:i])
 		after, _ := utf8.DecodeRuneInString(s[i+len(part):])
-		if !(i > 0 && inWord(before) && inWord(first)) && !(i+len(part) < len(s) && inWord(after) && inWord(last)) {
+		runsOnBefore := i > 0 && inWord(before) && inWord(first)
+		runsOnAfter := i+len(part) < len(s) && inWord(after) && inWord(last)
+		if !runsOnBefore && !runsOnAfter {
 			return i
 		}
 		_, size := utf8.DecodeRuneInString(s[i:])
