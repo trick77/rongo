@@ -161,7 +161,10 @@ func Load(ctx context.Context, db *sql.DB, repo string) ([]Unit, []Dep, error) {
 }
 
 // AnyLinked reports whether any two distinct keys among keys are joined by a
-// declared edge in repo, either way: Linked over every pair, in one query.
+// declared edge in repo, either way, in one query — the in-repository form of
+// the manifest edge routing reads across repositories: parts of one build that
+// use each other are one mechanism, and asking which was meant would make the
+// reader pick half an answer.
 func AnyLinked(ctx context.Context, db *sql.DB, repo string, keys []string) (bool, error) {
 	if len(keys) < 2 {
 		return false, nil
@@ -179,20 +182,6 @@ func AnyLinked(ctx context.Context, db *sql.DB, repo string, keys []string) (boo
 	err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM unit_deps
 		WHERE repo = ? AND from_key IN (`+in+`) AND to_key IN (`+in+`) AND from_key <> to_key`, args...).Scan(&n)
-	return n > 0, err
-}
-
-// Linked reports whether two units of one repository are joined by a
-// declared dependency in either direction — the in-repository form of the
-// manifest edge routing reads across repositories: parts of one build that
-// use each other are one mechanism, and asking which was meant would make
-// the reader pick half an answer.
-func Linked(ctx context.Context, db *sql.DB, repo, a, b string) (bool, error) {
-	var n int
-	err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM unit_deps
-		WHERE repo = ? AND ((from_key = ? AND to_key = ?) OR (from_key = ? AND to_key = ?))`,
-		repo, a, b, b, a).Scan(&n)
 	return n > 0, err
 }
 

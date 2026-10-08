@@ -200,11 +200,11 @@ func TestSync_replacesAndLoadsAndLinks(t *testing.T) {
 	if err := Sync(ctx, db, "ui", us, []Dep{{From: "apps/claims", To: "libs/shared"}}); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	linked, err := Linked(ctx, db, "ui", "libs/shared", "apps/claims")
+	linked, err := AnyLinked(ctx, db, "ui", []string{"libs/shared", "apps/claims"})
 	if err != nil || !linked {
-		t.Errorf("Linked = %v, %v; want true in either direction", linked, err)
+		t.Errorf("AnyLinked = %v, %v; want true in either direction", linked, err)
 	}
-	linked, _ = Linked(ctx, db, "ui", "apps/claims", "apps/other")
+	linked, _ = AnyLinked(ctx, db, "ui", []string{"apps/claims", "apps/other"})
 	if linked {
 		t.Errorf("unrelated units read as linked")
 	}

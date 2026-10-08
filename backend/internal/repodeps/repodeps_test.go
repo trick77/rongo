@@ -49,6 +49,31 @@ func mustSync(t *testing.T, db *sql.DB, repo, goMod string) {
 	}
 }
 
+// DependsOn reports whether a pulls something b publishes: AnyDependency for
+// one ordered pair, written as the plain Go loop it is the one-query form of,
+// so the tests hold the SQL's prefix rule against it.
+func DependsOn(ctx context.Context, db *sql.DB, a, b string) (bool, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT need.coordinate, have.coordinate
+		FROM repo_deps AS need
+		JOIN repo_deps AS have ON have.direction = 'publishes' AND have.repo = ?
+		WHERE need.repo = ? AND need.direction = 'requires'`, b, a)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var need, have string
+		if err := rows.Scan(&need, &have); err != nil {
+			return false, err
+		}
+		if need == have || strings.HasPrefix(need, have+"/") {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // assertDepends checks DependsOn(a, b) against want.
 func assertDepends(t *testing.T, db *sql.DB, a, b string, want bool) {
 	t.Helper()
