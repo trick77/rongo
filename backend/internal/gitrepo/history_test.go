@@ -54,6 +54,40 @@ func TestLog_listsCommitsNewestFirstWithPaths(t *testing.T) {
 	}
 }
 
+// TestLog_aMessageMayHoldTheRecordSeparator: git refuses only NUL in a
+// message. A pasted 0x1e split the record it was in, Log failed, and the
+// poll that records history before marking the index failed every cycle.
+func TestLog_aMessageMayHoldTheRecordSeparator(t *testing.T) {
+	// Given
+	src := fixtureRepo(t)
+	writeAndCommit(t, src, "b.txt", "b\n", "pasted \x1e here\n\nbody \x1e too")
+	writeAndCommit(t, src, "c.txt", "c\n", "after")
+	c := newClient(t)
+	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
+	ctx := context.Background()
+	if err := c.EnsureCloned(ctx, spec, ""); err != nil {
+		t.Fatal(err)
+	}
+	head, err := c.HeadSHA(ctx, spec, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// When
+	got, err := c.Log(ctx, spec, "", head, 100)
+
+	// Then
+	if err != nil {
+		t.Fatalf("Log() err = %v", err)
+	}
+	if len(got) != 3 || got[1].Subject != "pasted \x1e here" || got[1].Body != "body \x1e too" {
+		t.Fatalf("Log() = %+v", got)
+	}
+	if len(got[0].Paths) != 1 || got[0].Paths[0] != "c.txt" || len(got[1].Paths) != 1 || got[1].Paths[0] != "b.txt" {
+		t.Errorf("paths = %v / %v", got[0].Paths, got[1].Paths)
+	}
+}
+
 func TestLog_fromToListsOnlyTheNewSide_andLimitCaps(t *testing.T) {
 	// Given
 	src := fixtureRepo(t)
