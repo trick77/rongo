@@ -436,19 +436,22 @@ describe("Threads", () => {
       expect(screen.getByRole("button", { name: "Shipping, end to end" })).toBeTruthy();
     });
 
-    // The server refuses a title over 60 runes (ask.MaxTitleRunes) and the
-    // dialog says nothing on a refusal, so the box must not take more.
-    it("caps the typed title at what the server takes", async () => {
+    // A title the server refuses (too long, say) is the reader's to fix: a
+    // Save that silently did nothing left them guessing.
+    it("keeps the dialog and says why the server refused the title", async () => {
       threadList(two);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
       const user = await openMenu("How does shipping work?");
 
       await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-      const box = screen.getByRole("textbox", { name: "Thread title" }) as HTMLInputElement;
+      const box = screen.getByRole("textbox", { name: "Thread title" });
       await user.clear(box);
       await user.type(box, "a".repeat(70));
+      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 400, text: async () => "title is too long\n" });
+      await user.click(screen.getByRole("button", { name: "Save" }));
 
-      expect(box.value).toHaveLength(60);
+      expect((await screen.findByRole("alert")).textContent).toBe("title is too long");
+      expect(screen.getByRole("textbox", { name: "Thread title" })).toBeTruthy();
     });
 
     // A row dropped from a delete the server refused would be a lie: the
