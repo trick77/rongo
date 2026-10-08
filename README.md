@@ -43,7 +43,7 @@ does it and shows the code inline.
 ## How it works
 
 One Go binary, one SQLite file (FTS5 for text, sqlite-vec for embeddings), React UI
-embedded in the binary. Symbols come from universal-ctags, search from ripgrep,
+embedded in the binary. Symbols come from universal-ctags,
 checkouts from git. Chat goes to the models named by `BACKEND_LLM_MODEL` and
 `BACKEND_LLM_GATE_MODEL` (both required, no default), embeddings to `text-embedding-3-small`;
 hosts, keys and an optional LiteLLM gateway in front are llmwire's variables,
@@ -61,7 +61,7 @@ ones exercised, over https with a token or over ssh with a mounted key.
 This part is for whoever sets it up. Everybody else gets a link and their usual
 company login.
 
-`make dev` runs it locally with hot reload. Needs Go, Node.js, `git`, `rg` and
+`make dev` runs it locally with hot reload. Needs Go, Node.js, `git` and
 universal-ctags (the BSD ctags macOS ships doesn't work and Rongo says so at
 startup).
 

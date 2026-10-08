@@ -18,7 +18,7 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - One SQLite file is the whole datastore. No Postgres, Redis, vector service.
 - stdlib `net/http`. No framework, ORM, router.
 - **No tree-sitter** (cgo). `ctags` covers ~150 languages; else the line window.
-- Runtime image non-distroless: rongo shells out to `git`, `rg`, `ctags`.
+- Runtime image non-distroless: rongo shells out to `git`, `ctags`. No `rg`: the index holds every file worth searching, and its substring lane is the text search.
 - **`ctags` must be universal-ctags** — macOS ships BSD ctags, wrong one yields an empty symbol index rather than an error. Verify at startup, fail loudly.
 - Wire layer is llmwire. Nothing wire-shaped belongs here; a gap is a llmwire PR, a new model goes there first. Prices from its `profiles.yaml`, never derived from tokens.
 - Models are llmwire profile ids, never hosts. Hosts and keys are `LLMWIRE_*`, never read by rongo.

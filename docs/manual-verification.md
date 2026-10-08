@@ -9,7 +9,6 @@ Prerequisites (the dev environment runs without Docker, so these come from your
 machine):
 
 - `git`
-- `rg` (ripgrep)
 - `ctags` — **universal-ctags**, not the BSD ctags macOS ships at
   `/usr/bin/ctags`. Install with `brew install universal-ctags` and make sure it
   precedes `/usr/bin` on `PATH`.

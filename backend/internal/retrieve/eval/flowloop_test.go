@@ -186,7 +186,7 @@ func TestFlowQuestionsAreWellFormed(t *testing.T) {
 // --- the tools -------------------------------------------------------------
 
 // flowTools is what the model may call. Deliberately the capabilities rongo
-// ALREADY has: the hybrid search it ships, ripgrep it already shells out to,
+// ALREADY has: the hybrid search it ships, ripgrep,
 // the ctags symbols it already stores, and reading a file. Giving the loop a
 // tool the product does not have would measure a product that does not exist.
 func flowToolSpecs() []llmwire.Tool {

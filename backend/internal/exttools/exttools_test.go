@@ -27,7 +27,6 @@ func TestResolve_acceptsUniversalCtags(t *testing.T) {
 	// Given
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
-	fakeBin(t, dir, "rg", "ripgrep 15.2.0")
 	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\njson supports json format output")
 	onlyPath(t, dir)
 
@@ -48,7 +47,6 @@ func TestResolve_rejectsBSDCtags(t *testing.T) {
 	// empty symbol index rather than an error, which is far worse.
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
-	fakeBin(t, dir, "rg", "ripgrep 15.2.0")
 	fakeBin(t, dir, "ctags", "usage: ctags [-BFTaduwvx] [-f tagsfile] file ...")
 	onlyPath(t, dir)
 
@@ -65,10 +63,9 @@ func TestResolve_rejectsBSDCtags(t *testing.T) {
 }
 
 func TestResolve_reportsMissingBinary(t *testing.T) {
-	// Given: git and ctags present, rg absent.
+	// Given: git present, ctags absent.
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
-	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0")
 	onlyPath(t, dir)
 
 	// When
@@ -76,10 +73,10 @@ func TestResolve_reportsMissingBinary(t *testing.T) {
 
 	// Then
 	if err == nil {
-		t.Fatal("Resolve() err = nil, want an error naming ripgrep")
+		t.Fatal("Resolve() err = nil, want an error naming ctags")
 	}
-	if !strings.Contains(err.Error(), "rg") {
-		t.Errorf("error = %q, want it to name rg", err)
+	if !strings.Contains(err.Error(), "ctags") {
+		t.Errorf("error = %q, want it to name ctags", err)
 	}
 }
 
@@ -91,7 +88,6 @@ func TestResolve_rejectsAUniversalCtagsBuiltWithoutJSON(t *testing.T) {
 	// exists to prevent.
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
-	fakeBin(t, dir, "rg", "ripgrep 15.2.0")
 	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\nregex can use regular expression based pattern matching")
 	onlyPath(t, dir)
 

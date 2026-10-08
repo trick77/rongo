@@ -17,7 +17,6 @@ import (
 // Paths holds the resolved absolute paths of the external tools.
 type Paths struct {
 	Git   string
-	Rg    string
 	Ctags string
 }
 
@@ -29,9 +28,6 @@ func Resolve() (Paths, error) {
 
 	if p.Git, err = exec.LookPath("git"); err != nil {
 		return Paths{}, fmt.Errorf("git not found in PATH: %w", err)
-	}
-	if p.Rg, err = exec.LookPath("rg"); err != nil {
-		return Paths{}, fmt.Errorf("ripgrep (rg) not found in PATH: %w", err)
 	}
 	if p.Ctags, err = exec.LookPath("ctags"); err != nil {
 		return Paths{}, fmt.Errorf("ctags not found in PATH (install universal-ctags): %w", err)

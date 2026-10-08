@@ -59,12 +59,12 @@ jobs:
         with:
           node-version: "20"
       - run: pip install diff-cover==10.3.0
-      # universal-ctags and ripgrep are not test fixtures: the indexer shells
-      # out to both, and rongo verifies at startup that ctags is the universal
-      # build rather than the BSD one. Without them the tests that walk a real
+      # universal-ctags is not a test fixture: the indexer shells out to
+      # it, and rongo verifies at startup that ctags is the universal
+      # build rather than the BSD one. Without it the tests that walk a real
       # fixture repository fail for the wrong reason.
-      - name: Install ripgrep and universal-ctags
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep universal-ctags
+      - name: Install universal-ctags
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
       - run: cd backend && go build ./...
       - run: cd backend && go vet ./...
       # gofmt is not covered by `go vet`. Run it from the repo root, not
