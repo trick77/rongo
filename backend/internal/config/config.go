@@ -159,7 +159,6 @@ type Config struct {
 	// read from the environment.
 	AdminUser         string
 	AdminPasswordHash string
-	SessionSecret     string // reserved: not read by anything yet — see the check below
 	LogLevel          string
 	// The OIDC block, all required when AuthMode is oidc. The issuer carries no
 	// path and no trailing slash for Authelia (https://auth.trick77.com);
@@ -259,7 +258,6 @@ func Load() (Config, error) {
 		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
 		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
 		AdminPasswordHash: strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
-		SessionSecret:     strings.TrimSpace(os.Getenv("BACKEND_SESSION_SECRET")),
 		LogLevel:          r.oneOf("BACKEND_LOG_LEVEL", "info", "debug", "info", "warn", "error"),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
@@ -285,23 +283,6 @@ func Load() (Config, error) {
 	}
 	if cfg.LLMTimeout, err = envDurationOr("BACKEND_LLM_TIMEOUT", DefaultLLMTimeout); err != nil {
 		return Config{}, err
-	}
-	// SessionSecret is currently unused — sessions are 256-bit random tokens
-	// stored as unsalted SHA-256, no signing involved yet. It is still
-	// required so a later phase that adds cookie signing can assume the
-	// value is real instead of finding every deployment signed with a
-	// placeholder. "change-me" and anything under 16 characters are rejected
-	// for the same reason.
-	if cfg.SessionSecret == "" {
-		return Config{}, fmt.Errorf("BACKEND_SESSION_SECRET is required")
-	}
-	if cfg.SessionSecret == "change-me" {
-		return Config{}, fmt.Errorf(
-			"BACKEND_SESSION_SECRET must not be the placeholder value %q; generate one with `openssl rand -base64 32`", "change-me")
-	}
-	if len(cfg.SessionSecret) < 16 {
-		return Config{}, fmt.Errorf(
-			"BACKEND_SESSION_SECRET must be at least 16 characters; generate one with `openssl rand -base64 32`")
 	}
 
 	if cfg.LLMModel == "" {

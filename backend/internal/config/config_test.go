@@ -9,10 +9,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// validSecret satisfies the length and placeholder checks so tests that don't
-// care about SessionSecret validation itself don't trip over it.
-const validSecret = "s3cret-long-enough"
-
 // allBackendEnvVars lists every BACKEND_* variable Load reads. Tests clear
 // all of them before setting their own, so a developer with e.g. BACKEND_ADDR
 // exported in their shell doesn't fail an unrelated test.
@@ -25,7 +21,6 @@ var allBackendEnvVars = []string{
 	"BACKEND_ADMIN_USER",
 	"BACKEND_ADMIN_PASSWORD_HASH",
 	"BACKEND_COOKIE_SECURE",
-	"BACKEND_SESSION_SECRET",
 	"BACKEND_LOG_LEVEL",
 	"BACKEND_INDEX_ENABLED",
 	"BACKEND_INDEX_MAX_FILE_BYTES",
@@ -67,7 +62,6 @@ var allBackendEnvVars = []string{
 // defaults. setEnv seeds them so a test about something else doesn't have to
 // repeat them; a test about one of them overrides it with "".
 var mandatoryEnv = map[string]string{
-	"BACKEND_SESSION_SECRET": validSecret,
 	"LLMWIRE_OPENAI_API_KEY": "embed-key",
 	"LLMWIRE_MIMO_API_KEY":   "llm-key",
 	"BACKEND_LLM_MODEL":      "mimo-v2.6-flash",
@@ -89,9 +83,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 
 func TestLoad_appliesDefaults(t *testing.T) {
 	// Given
-	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-	})
+	setEnv(t, map[string]string{})
 
 	// When
 	cfg, err := Load()
@@ -133,7 +125,6 @@ func TestLoad_turnMaxTokens(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Given
 			setEnv(t, map[string]string{
-				"BACKEND_SESSION_SECRET":  validSecret,
 				"BACKEND_TURN_MAX_TOKENS": tc.env,
 			})
 
@@ -254,44 +245,9 @@ func TestLoad_indexExcludeOfOnlySeparatorsRefusesToStart(t *testing.T) {
 	}
 }
 
-func TestLoad_requiresSessionSecret(t *testing.T) {
-	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": ""})
-
-	_, err := Load()
-
-	if err == nil {
-		t.Fatal("Load() err = nil, want an error about BACKEND_SESSION_SECRET")
-	}
-}
-
-func TestLoad_rejectsPlaceholderSessionSecret(t *testing.T) {
-	// Given: "change-me" is the value .env.example must never ship as
-	// something the loader accepts — a later phase that signs cookies with it
-	// would sign every deployment with the same public placeholder.
-	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": "change-me"})
-
-	_, err := Load()
-
-	if err == nil {
-		t.Fatal("Load() err = nil, want a refusal of the literal placeholder \"change-me\"")
-	}
-}
-
-func TestLoad_rejectsShortSessionSecret(t *testing.T) {
-	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": "short"})
-
-	_, err := Load()
-
-	if err == nil {
-		t.Fatal("Load() err = nil, want a refusal of a secret under 16 characters")
-	}
-}
-
 func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 	// Given
-	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-	})
+	setEnv(t, map[string]string{})
 
 	// When
 	cfg, err := Load()
@@ -308,8 +264,7 @@ func TestLoad_appliesRouteMarginDefault(t *testing.T) {
 func TestLoad_acceptsAnExplicitRouteMargin(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_ROUTE_MARGIN":   "0.4",
+		"BACKEND_ROUTE_MARGIN": "0.4",
 	})
 
 	// When
@@ -329,9 +284,8 @@ func TestLoad_trimsAdminToken(t *testing.T) {
 	// an env file) must authenticate the same as one without, or every
 	// correct-looking Bearer request gets a silent 401.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "token",
-		"BACKEND_ADMIN_TOKEN":    "s3cret-token\n",
+		"BACKEND_AUTH_MODE":   "token",
+		"BACKEND_ADMIN_TOKEN": "s3cret-token\n",
 	})
 
 	cfg, err := Load()
@@ -344,25 +298,12 @@ func TestLoad_trimsAdminToken(t *testing.T) {
 	}
 }
 
-func TestLoad_rejectsWhitespaceOnlySessionSecret(t *testing.T) {
-	// Given: 16 raw spaces satisfy the length check unless it operates on the
-	// trimmed value.
-	setEnv(t, map[string]string{"BACKEND_SESSION_SECRET": "                "})
-
-	_, err := Load()
-
-	if err == nil {
-		t.Fatal("Load() err = nil, want a refusal of a whitespace-only secret")
-	}
-}
-
 func TestLoad_devModeRefusesNonLoopbackAddr(t *testing.T) {
 	// Given: dev mode auto-logs in an admin. Exposing that on 0.0.0.0 is an
 	// open door, so the config layer refuses it rather than trusting operators.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "dev",
-		"BACKEND_ADDR":           "0.0.0.0:8080",
+		"BACKEND_AUTH_MODE": "dev",
+		"BACKEND_ADDR":      "0.0.0.0:8080",
 	})
 
 	_, err := Load()
@@ -376,9 +317,8 @@ func TestLoad_proxyModeRefusesNonLoopbackAddr(t *testing.T) {
 	// Given: proxy mode believes X-Forwarded-User. On 0.0.0.0 anyone who can
 	// reach the port writes that header themselves.
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "proxy",
-		"BACKEND_ADDR":           "0.0.0.0:8080",
+		"BACKEND_AUTH_MODE": "proxy",
+		"BACKEND_ADDR":      "0.0.0.0:8080",
 	})
 
 	_, err := Load()
@@ -390,9 +330,8 @@ func TestLoad_proxyModeRefusesNonLoopbackAddr(t *testing.T) {
 
 func TestLoad_proxyModeAcceptsLoopback(t *testing.T) {
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "proxy",
-		"BACKEND_ADDR":           "127.0.0.1:8080",
+		"BACKEND_AUTH_MODE": "proxy",
+		"BACKEND_ADDR":      "127.0.0.1:8080",
 	})
 
 	cfg, err := Load()
@@ -407,8 +346,7 @@ func TestLoad_proxyModeAcceptsLoopback(t *testing.T) {
 
 func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "token",
+		"BACKEND_AUTH_MODE": "token",
 	})
 
 	_, err := Load()
@@ -423,7 +361,6 @@ func TestLoad_tokenModeRequiresAdminToken(t *testing.T) {
 // than a missing variable. Each of the four is fatal at boot instead.
 func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 	full := map[string]string{
-		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -468,7 +405,6 @@ func TestLoad_oidcModeRequiresTheWholeBlock(t *testing.T) {
 // slash in the discovery URL, and discovery 404s.
 func TestLoad_trimsTrailingSlashFromIssuer(t *testing.T) {
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET":     validSecret,
 		"BACKEND_AUTH_MODE":          "oidc",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com/",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
@@ -548,8 +484,7 @@ func TestLoad_devModeLeavesCookieSecureOff(t *testing.T) {
 
 func TestLoad_rejectsUnknownAuthMode(t *testing.T) {
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_AUTH_MODE":      "kerberos",
+		"BACKEND_AUTH_MODE": "kerberos",
 	})
 
 	_, err := Load()
@@ -617,9 +552,7 @@ func TestLoad_sshKeyAndKnownHostsComeTogether(t *testing.T) {
 
 func TestLoad_locateLoopIsOnByDefault(t *testing.T) {
 	// Given
-	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-	})
+	setEnv(t, map[string]string{})
 
 	// When
 	cfg, err := Load()
@@ -636,8 +569,7 @@ func TestLoad_locateLoopIsOnByDefault(t *testing.T) {
 func TestLoad_locateLoopCanBeSwitchedOff(t *testing.T) {
 	// Given
 	setEnv(t, map[string]string{
-		"BACKEND_SESSION_SECRET": validSecret,
-		"BACKEND_LOCATE_ROUNDS":  "0",
+		"BACKEND_LOCATE_ROUNDS": "0",
 	})
 
 	// When
