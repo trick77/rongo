@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/trick77/llmwire"
 
@@ -188,26 +189,49 @@ var markerFold = strings.NewReplacer("’", "'", "‘", "'", "`", "'", "…", ".
 // after the other; a marker of nothing but dots is no marker. Whole words
 // only: "ab" inside "ablaufs" is not the reader saying anything lasts.
 func saysItLasts(question, marker string) bool {
-	// Words are letters, digits and apostrophes; anything else separates
-	// them, so "never." and "lerb-chooser-ui," read as their words.
 	norm := func(s string) string {
-		return strings.Join(strings.FieldsFunc(s, func(r rune) bool {
-			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
-		}), " ")
+		return strings.Join(strings.Fields(markerFold.Replace(strings.ToLower(s))), " ")
 	}
-	q, found := " "+norm(markerFold.Replace(strings.ToLower(question)))+" ", false
-	for _, part := range strings.Split(markerFold.Replace(strings.ToLower(marker)), "...") {
-		part = norm(part)
+	q, found := norm(question), false
+	for _, part := range strings.Split(norm(marker), "...") {
+		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		i := strings.Index(q, " "+part+" ")
+		i := wordIndex(q, part)
 		if i < 0 {
 			return false
 		}
-		q, found = q[i+len(part)+1:], true
+		q, found = q[i+len(part):], true
 	}
 	return found
+}
+
+// wordIndex is strings.Index of part in s at a word boundary: no letter or
+// digit runs on into it on either side. A script written without spaces has
+// no boundary to ask for, so a match next to one of its characters stands.
+func wordIndex(s, part string) int {
+	inWord := func(r rune) bool {
+		return (unicode.IsLetter(r) || unicode.IsDigit(r)) &&
+			!unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar)
+	}
+	first, _ := utf8.DecodeRuneInString(part)
+	last, _ := utf8.DecodeLastRuneInString(part)
+	for from := 0; from < len(s); {
+		i := strings.Index(s[from:], part)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		before, _ := utf8.DecodeLastRuneInString(s[:i])
+		after, _ := utf8.DecodeRuneInString(s[i+len(part):])
+		if !(i > 0 && inWord(before) && inWord(first)) && !(i+len(part) < len(s) && inWord(after) && inWord(last)) {
+			return i
+		}
+		_, size := utf8.DecodeRuneInString(s[i:])
+		from = i + size
+	}
+	return -1
 }
 
 // KeptRule is the rule the product keeps from this understanding of

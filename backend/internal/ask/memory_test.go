@@ -297,6 +297,10 @@ func TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt(t *testing.T) {
 		{"zeichne ein diagramm des ablaufs", "ab", false},
 		{"how does the knowledge base get its data", "now", false},
 		{"warum ist das feld immerhin leer", "immer", false},
+		// A word in quotes is still the word; a script written without
+		// spaces has no word boundary to ask for.
+		{"'never' mention lerb-chooser-ui", "never", true},
+		{"以后都不要提这个", "以后都", true},
 	} {
 		got := Understanding{Memory: rule, MemoryMarker: c.marker}.KeptRule(c.question)
 		if (got != "") != c.kept {
