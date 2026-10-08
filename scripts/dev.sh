@@ -3,10 +3,9 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-# Documented in the README as the way to set BACKEND_SESSION_SECRET (and
-# anything else) for `make dev`. Values below still win where this script
-# forces dev-specific settings (addr, auth mode); only unset ones fall
-# through from .env.
+# Documented in the README as the way to set anything for `make dev`.
+# Values below still win where this script forces dev-specific settings
+# (addr, auth mode); only unset ones fall through from .env.
 if [ -f "$ROOT/.env" ]; then
   set -a
   # shellcheck disable=SC1090
@@ -58,7 +57,6 @@ mkdir -p "$REPO_ROOT"
 
 (
   cd "$ROOT/backend"
-  BACKEND_SESSION_SECRET=${BACKEND_SESSION_SECRET:-dev-secret-not-for-prod} \
   BACKEND_AUTH_MODE=dev \
   BACKEND_ADDR=127.0.0.1:8080 \
   BACKEND_DB_PATH="$DB_PATH" \
