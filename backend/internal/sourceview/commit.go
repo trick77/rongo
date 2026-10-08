@@ -2,8 +2,6 @@ package sourceview
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -91,19 +89,8 @@ func (s *Service) indexedPaths(ctx context.Context, repo string, files []gitrepo
 // served, so the view is the evidence behind a changes answer and not a
 // browser over every commit of every checkout.
 func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) {
-	if s.commits == nil {
-		return Commit{}, fmt.Errorf("%w: no commit reader", ErrNotFound)
-	}
 	if !shaRe.MatchString(sha) {
 		return Commit{}, fmt.Errorf("%w: commit %q", ErrInvalid, sha)
-	}
-	var branch string
-	err := s.db.QueryRowContext(ctx, `SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Commit{}, fmt.Errorf("%w: unknown repository %q", ErrNotFound, repo)
-	}
-	if err != nil {
-		return Commit{}, fmt.Errorf("look up repository %q: %w", repo, err)
 	}
 	var n int
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM commits WHERE repo = ? AND sha = ?`, repo, sha).Scan(&n); err != nil {
@@ -112,7 +99,7 @@ func (s *Service) Commit(ctx context.Context, repo, sha string) (Commit, error) 
 	if n == 0 {
 		return Commit{}, fmt.Errorf("%w: %s/%s", ErrNotInLane, repo, sha)
 	}
-	return s.show(ctx, repo, branch, sha)
+	return s.RecordedCommit(ctx, repo, sha)
 }
 
 // RecordedCommit is Commit for a thread's own record: a commit an answer was
@@ -126,13 +113,9 @@ func (s *Service) RecordedCommit(ctx context.Context, repo, sha string) (Commit,
 	if !shaRe.MatchString(sha) {
 		return Commit{}, fmt.Errorf("%w: commit %q", ErrInvalid, sha)
 	}
-	var branch string
-	err := s.db.QueryRowContext(ctx, `SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Commit{}, fmt.Errorf("%w: unknown repository %q", ErrNotFound, repo)
-	}
+	branch, err := s.branch(ctx, repo)
 	if err != nil {
-		return Commit{}, fmt.Errorf("look up repository %q: %w", repo, err)
+		return Commit{}, err
 	}
 	return s.show(ctx, repo, branch, sha)
 }

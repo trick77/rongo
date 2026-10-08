@@ -117,14 +117,9 @@ func (s *Service) read(ctx context.Context, repo, path, sha string, recorded boo
 	// parked must still open at the commit it was read from, or "every claim is
 	// citable" stops holding retroactively. Parking stops new answers; it does
 	// not close the ones already given.
-	var branch string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)
-	if errors.Is(err, sql.ErrNoRows) {
-		return File{}, fmt.Errorf("%w: unknown repository %q", ErrNotFound, repo)
-	}
+	branch, err := s.branch(ctx, repo)
 	if err != nil {
-		return File{}, fmt.Errorf("look up repository %q: %w", repo, err)
+		return File{}, err
 	}
 
 	// The files row is the permission. Only a path the indexer took is
@@ -186,6 +181,20 @@ func (s *Service) read(ctx context.Context, repo, path, sha string, recorded boo
 		return File{}, fmt.Errorf("%w: %s/%s at %s carries a credential", ErrNotFound, repo, path, sha)
 	}
 	return File{Repo: repo, Branch: branch, Path: path, SHA: sha, Content: string(body)}, nil
+}
+
+// branch is repo's configured branch, ErrNotFound for a repository the state
+// does not hold.
+func (s *Service) branch(ctx context.Context, repo string) (string, error) {
+	var branch string
+	err := s.db.QueryRowContext(ctx, `SELECT branch FROM repo_state WHERE name = ?`, repo).Scan(&branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: unknown repository %q", ErrNotFound, repo)
+	}
+	if err != nil {
+		return "", fmt.Errorf("look up repository %q: %w", repo, err)
+	}
+	return branch, nil
 }
 
 // validatePath refuses what git would misread or what would leave the tree.
