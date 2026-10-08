@@ -29,7 +29,7 @@ const (
 )
 
 // WithUser is the context a request carries once the middleware admitted
-// u; a test drives a handler with it.
+// u; a test drives a handler with the same one.
 func WithUser(ctx context.Context, u User) context.Context {
 	return context.WithValue(ctx, userKey, u)
 }
@@ -48,7 +48,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		// A valid session cookie wins in every mode.
 		if c, err := r.Cookie(SessionCookie); err == nil {
 			if u, ok := s.UserByToken(r.Context(), c.Value); ok {
-				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+				next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))
 				return
 			}
 		}
@@ -193,5 +193,5 @@ func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Hand
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
-	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, u)))
+	next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))
 }
