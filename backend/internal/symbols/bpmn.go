@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/trick77/rongo/internal/bpmn"
 )
 
 // ExtractBPMN reads a BPMN 2.0 process model and returns one Symbol per flow
@@ -104,7 +106,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 				closeFlows()
 				out = append(out, Symbol{Name: "diagram", Kind: DiagramKind, Line: line})
 				o.sym = len(out) - 1
-			case bpmnNodeKinds[local]:
+			case bpmn.NodeKind(local):
 				closeFlows()
 				name := attr(t, "name")
 				id := attr(t, "id")
@@ -121,7 +123,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 				out = append(out, Symbol{Name: name, Kind: local,
 					Scope: o.scopeName, ScopeKind: o.scopeKind, Line: line})
 				o.sym = len(out) - 1
-				if bpmnContainerKinds[local] {
+				if bpmn.ContainerKind(local) {
 					o.scopeName, o.scopeKind = name, local
 				}
 			case local == "process":
@@ -134,7 +136,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 			// condition, a listener under its extension elements) or of a
 			// node is not one. Siblings are the children of a process or of
 			// a container, which the stack tells apart.
-			if len(stack) > 0 && (stack[len(stack)-1].local == "process" || bpmnContainerKinds[stack[len(stack)-1].local]) {
+			if len(stack) > 0 && (stack[len(stack)-1].local == "process" || bpmn.ContainerKind(stack[len(stack)-1].local)) {
 				lastEl = local
 			}
 			stack = append(stack, o)
@@ -144,7 +146,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 			}
 			o := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			if o.local == "process" || bpmnContainerKinds[o.local] {
+			if o.local == "process" || bpmn.ContainerKind(o.local) {
 				// A run of flows ends with its scope: the flows after a
 				// sub-process are the process's, not a continuation.
 				closeFlows()
@@ -168,39 +170,18 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 // their own symbol rather than the tail of the node before them.
 const minFlowRun = 3
 
-// bpmnNodeKinds are the flow-node elements that become symbols. Their local
-// names double as the symbol kind, so the breadcrumb reads "serviceTask X".
-var bpmnNodeKinds = map[string]bool{
-	"task": true, "serviceTask": true, "userTask": true, "sendTask": true,
-	"receiveTask": true, "scriptTask": true, "businessRuleTask": true,
-	"manualTask": true, "callActivity": true, "subProcess": true,
-	"adHocSubProcess": true, "transaction": true,
-	"exclusiveGateway": true, "parallelGateway": true, "inclusiveGateway": true,
-	"eventBasedGateway": true, "complexGateway": true,
-	"startEvent": true, "endEvent": true, "intermediateCatchEvent": true,
-	"intermediateThrowEvent": true, "boundaryEvent": true,
-}
-
 // bpmnEventKinds are the nodes that only become symbols when named.
 var bpmnEventKinds = map[string]bool{
 	"startEvent": true, "endEvent": true, "intermediateCatchEvent": true,
 	"intermediateThrowEvent": true, "boundaryEvent": true,
 }
 
-// bpmnContainerKinds are the nodes whose children report them as scope.
-var bpmnContainerKinds = map[string]bool{
-	"subProcess": true, "adHocSubProcess": true, "transaction": true,
-}
-
 // BPMNStructuralKinds are the symbol kinds ExtractBPMN emits that a chunk may
-// anchor on: every node kind, the flow run and the diagram block. The chunker
-// merges them into its ctags set.
+// anchor on: every node kind (bpmn.NodeKind, whose local names double as the
+// symbol kind, so the breadcrumb reads "serviceTask X"), the flow run and the
+// diagram block. The chunker merges them into its ctags set.
 func BPMNStructuralKinds() []string {
-	kinds := make([]string, 0, len(bpmnNodeKinds)+2)
-	for k := range bpmnNodeKinds {
-		kinds = append(kinds, k)
-	}
-	kinds = append(kinds, "sequenceFlows", "diagram")
+	kinds := append(bpmn.NodeKinds(), "sequenceFlows", "diagram")
 	sort.Strings(kinds)
 	return kinds
 }

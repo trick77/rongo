@@ -240,6 +240,23 @@ var nodeKinds = map[string]bool{
 
 var containerKinds = map[string]bool{"subProcess": true, "adHocSubProcess": true, "transaction": true}
 
+// NodeKind reports whether local is a flow-node element. The chunker anchors
+// on the same kinds the graph is made of, so both read this one table.
+func NodeKind(local string) bool { return nodeKinds[local] }
+
+// ContainerKind reports whether local is a node that holds other nodes.
+func ContainerKind(local string) bool { return containerKinds[local] }
+
+// NodeKinds lists every flow-node kind, sorted.
+func NodeKinds() []string {
+	kinds := make([]string, 0, len(nodeKinds))
+	for k := range nodeKinds {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
 func enclosingNode(stack []frame) *Node {
 	for i := len(stack) - 1; i >= 0; i-- {
 		if stack[i].node != nil {
