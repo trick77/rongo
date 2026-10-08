@@ -764,3 +764,18 @@ func TestGather_readsTestFilesAfterTheMechanismAcrossTheWholeHop(t *testing.T) {
 		t.Errorf("sources = %v, want the test file left for lack of room", paths(got))
 	}
 }
+
+// TestIsConfigPath_readsTheExtensionLikeTheExtractor: the edge extractor
+// takes keys from X.PROPERTIES as from x.properties, so the crossing filter
+// has to see both as configuration, or keys of one cross unfiltered.
+func TestIsConfigPath_readsTheExtensionLikeTheExtractor(t *testing.T) {
+	for p, want := range map[string]bool{
+		"src/main/resources/application.properties": true,
+		"conf/LEGACY.PROPERTIES":                    true,
+		"src/Main.java":                             false,
+	} {
+		if got := isConfigPath(p); got != want {
+			t.Errorf("isConfigPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

@@ -635,9 +635,10 @@ func (g *Gatherer) crossReason(n edges.Neighbour, from Source) bool {
 }
 
 // isConfigPath is a file property keys are SET in: the one kind the edge
-// extractor reads keys from (edges.propertyKeys).
+// extractor reads keys from (edges.propertyKeys), whose extension it
+// lowercases.
 func isConfigPath(path string) bool {
-	return strings.HasSuffix(path, ".properties")
+	return strings.HasSuffix(strings.ToLower(path), ".properties")
 }
 
 // withTerms is the gatherer that knows the turn's words (the search texts:
