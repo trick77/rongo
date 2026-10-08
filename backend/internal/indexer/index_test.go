@@ -605,6 +605,33 @@ func TestIndexRepoRecordsTheDependenciesFromGoMod(t *testing.T) {
 	}
 }
 
+// TestIndexRepo_aRepositoryThatDropsItsManifestsDropsItsDependencies: the
+// rows were rewritten only when the tree still held a manifest, so a
+// repository that removed its last go.mod kept depending on what it no longer
+// requires, and the router went on reading the two as one product.
+func TestIndexRepo_aRepositoryThatDropsItsManifestsDropsItsDependencies(t *testing.T) {
+	h := newHarnessFiles(t, map[string]string{
+		"go.mod":  "module github.com/trick77/peeq\n\nrequire github.com/ncruces/go-sqlite3 v0.23.3\n",
+		"main.go": "package main\n\nfunc main() {}\n",
+	}, nil)
+	st := h.stateOf(t)
+	first := h.head(t)
+	if _, err := h.ix.IndexRepo(context.Background(), st, first, nil); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	git(t, h.src, "rm", "-q", "go.mod")
+	git(t, h.src, "commit", "-qm", "no module")
+	st.LastSHA = first
+
+	if _, err := h.ix.IndexRepo(context.Background(), st, h.head(t), []string{"go.mod"}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	if n := countOf(t, h.db, `SELECT count(*) FROM repo_deps WHERE repo = '`+h.spec.Name+`'`); n != 0 {
+		t.Errorf("repo_deps kept %d rows of a manifest the tree no longer has", n)
+	}
+}
+
 func TestIndexRepoSurvivesAnUnparsableGoMod(t *testing.T) {
 	// A broken manifest is a missing edge, never a failed index run: the
 	// corpus is other people's code and one bad file must not stop indexing.

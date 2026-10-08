@@ -373,7 +373,7 @@ func purgeContent(ctx context.Context, tx *sql.Tx, name string) error {
 	}
 	// What the manifests declared goes too: units and unit_deps hang off no
 	// foreign key, and repo_deps cascades only when the row goes, which a
-	// reset keeps — the next run rewrites it only for a tree with manifests.
+	// reset keeps — the next run keeps it when a manifest cannot be read.
 	for _, table := range []string{"units", "unit_deps", "repo_deps"} {
 		// table is one of the three literals above, never caller input.
 		//nolint:gosec // only fixed SQL structure is interpolated (a literal table name); every value is a bound ? parameter
