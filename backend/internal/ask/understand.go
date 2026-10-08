@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/trick77/llmwire"
 
@@ -184,22 +185,27 @@ var markerFold = strings.NewReplacer("’", "'", "‘", "'", "`", "'", "…", ".
 // saysItLasts reports whether marker is words of the question, in its
 // order. A marker may be a pattern the prompt showed — "don't ... anymore",
 // "ne ... plus jamais" — whose parts must each stand in the question, one
-// after the other; a marker of nothing but dots is no marker.
+// after the other; a marker of nothing but dots is no marker. Whole words
+// only: "ab" inside "ablaufs" is not the reader saying anything lasts.
 func saysItLasts(question, marker string) bool {
+	// Words are letters, digits and apostrophes; anything else separates
+	// them, so "never." and "lerb-chooser-ui," read as their words.
 	norm := func(s string) string {
-		return strings.Join(strings.Fields(markerFold.Replace(strings.ToLower(s))), " ")
+		return strings.Join(strings.FieldsFunc(s, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+		}), " ")
 	}
-	q, found := norm(question), false
-	for _, part := range strings.Split(norm(marker), "...") {
-		part = strings.TrimSpace(part)
+	q, found := " "+norm(markerFold.Replace(strings.ToLower(question)))+" ", false
+	for _, part := range strings.Split(markerFold.Replace(strings.ToLower(marker)), "...") {
+		part = norm(part)
 		if part == "" {
 			continue
 		}
-		i := strings.Index(q, part)
+		i := strings.Index(q, " "+part+" ")
 		if i < 0 {
 			return false
 		}
-		q, found = q[i+len(part):], true
+		q, found = q[i+len(part)+1:], true
 	}
 	return found
 }
