@@ -92,8 +92,17 @@ func isAddress(s string) bool {
 // threads.newToken mints.
 const addressLen = 22
 
-// Handler serves the built SPA. A path the SPA has a page for falls back to
-// index.html so the client-side router can take over; anything else is a 404.
+// ShareTitle answers the one question the shell asks about a share link: what
+// the shared thread is called. It reports found == false for a token that is
+// unknown or revoked, and the page answers 404, exactly as GET
+// /api/shares/{token} already does for those — so this tells a crawler nothing
+// that endpoint does not. An error is a record that could not answer, never a
+// verdict on the link: the shell is served and the SPA asks the API itself.
+type ShareTitle func(ctx context.Context, token string) (title string, found bool, err error)
+
+// HandlerWithShareTitles serves the built SPA. A path the SPA has a page for
+// falls back to index.html so the client-side router can take over; anything
+// else is a 404.
 // /api paths are excluded first so a typo in an endpoint stays a 404 instead
 // of silently returning HTML.
 // /assets/ is excluded the same way: those are content-hashed files vite
@@ -104,23 +113,12 @@ const addressLen = 22
 // reload-on-stale-chunk heuristic can act on. If the SPA has never been
 // built, dist/index.html is absent (only .gitkeep is tracked there) and the
 // handler serves the placeholder instead.
-func Handler() http.Handler { return HandlerWithShareTitles(nil) }
-
-// ShareTitle answers the one question the shell asks about a share link: what
-// the shared thread is called. It reports found == false for a token that is
-// unknown or revoked, and the page answers 404, exactly as GET
-// /api/shares/{token} already does for those — so this tells a crawler nothing
-// that endpoint does not. An error is a record that could not answer, never a
-// verdict on the link: the shell is served and the SPA asks the API itself.
-type ShareTitle func(ctx context.Context, token string) (title string, found bool, err error)
-
-// HandlerWithShareTitles is Handler with the link-preview title for /share/
-// wired up. Crawlers do not run JavaScript, so a share link unfurls with
-// whatever the served HTML says; SharePage sets document.title long after
-// Slack has read the page and left.
 //
-// Passing nil serves the site-wide card everywhere, which is what Handler
-// does and what a binary without a thread record has to do anyway.
+// It wires up the link-preview title for /share/. Crawlers do not run
+// JavaScript, so a share link unfurls with whatever the served HTML says;
+// SharePage sets document.title long after Slack has read the page and left.
+// Passing nil serves the site-wide card everywhere, which is what a binary
+// without a thread record has to do anyway.
 func HandlerWithShareTitles(shareTitle ShareTitle) http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
