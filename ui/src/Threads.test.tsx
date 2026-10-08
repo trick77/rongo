@@ -452,6 +452,13 @@ describe("Threads", () => {
 
       expect((await screen.findByRole("alert")).textContent).toBe("title is too long");
       expect(screen.getByRole("textbox", { name: "Thread title" })).toBeTruthy();
+
+      // Cancelled and opened again, the dialog does not carry the old refusal.
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Actions for How does shipping work?" }));
+      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+      expect(screen.queryByRole("alert")).toBeNull();
     });
 
     // A row dropped from a delete the server refused would be a lie: the
