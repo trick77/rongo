@@ -75,6 +75,10 @@ const secretNames = `\w*(?:password|passwd|passphrase|passwort|secret|token|apik
 // is a pointer, not a value.
 var inlineKeyed = regexp.MustCompile(`(?i)(["']?)(` + secretNames + `)(["']?)(\s*[:=]\s*)(["']?)([^"'\s,;}{$][^"'\s,;}]*)`)
 
+// jsonFirstValue is the quoted string a JSON value opens with, its text in
+// group 1.
+var jsonFirstValue = regexp.MustCompile(`^\s*"((?:[^"\\]|\\.)*)"`)
+
 // xmlNamedValue is a name/value attribute pair whose NAME says secret:
 // Spring's <property name="password" value="…"/>, web.config's <add
 // key="ApiToken" value="…"/>. The key is in one attribute and the value in
@@ -175,6 +179,7 @@ func Redact(p string, body []byte) []byte {
 	}
 	yaml := isYAML(p)
 	properties := strings.ToLower(path.Ext(p)) == ".properties"
+	json := strings.ToLower(path.Ext(p)) == ".json"
 	lines := strings.Split(string(body), "\n")
 	out := make([]string, 0, len(lines))
 	changed := false
@@ -248,10 +253,23 @@ func Redact(p string, body []byte) []byte {
 			out = append(out, lines[i])
 			continue
 		}
-		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[") || strings.Contains(value, ",")) {
-			// A flow mapping, an inline object, or more pairs after a comma
-			// on a hand-wrapped JSON line: the keys are inside the value, and
-			// each is judged where it stands.
+		if !secretKey && json && strings.Contains(value, ",") {
+			// More pairs after a comma on a hand-wrapped JSON line: each key
+			// is judged where it stands, and the line's own first value as
+			// any value is.
+			inner := inlineKeyed.ReplaceAllString(rest, "${1}${2}${3}${4}${5}"+Marker)
+			if fv := jsonFirstValue.FindStringSubmatchIndex(inner); fv != nil && isSecretValue(inner[fv[2]:fv[3]]) {
+				inner = inner[:fv[2]] + Marker + inner[fv[3]:]
+			}
+			if inner != rest {
+				out = append(out, m[1]+m[2]+key+m[4]+sep+inner+eol(crlf))
+				changed = true
+				continue
+			}
+		}
+		if !secretKey && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) {
+			// A flow mapping or an inline object: the keys are inside the
+			// value, and each is judged where it stands.
 			if inner := inlineKeyed.ReplaceAllString(rest, "${1}${2}${3}${4}${5}"+Marker); inner != rest {
 				out = append(out, m[1]+m[2]+key+m[4]+sep+inner+eol(crlf))
 				changed = true
