@@ -196,17 +196,17 @@ func (s *Store) chunkSource(ctx context.Context, r recorded, files map[string]fi
 		}, true, nil
 	}
 	src := ask.Source{ChunkID: r.chunkID, Reason: r.reason, Hop: r.hop}
-	err := s.db.QueryRowContext(ctx, `
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `
 		SELECT f.repo, rs.branch, f.path, f.sha, c.symbol, c.start_line, c.end_line, c.raw_text
 		FROM chunks c
 		JOIN files f ON f.id = c.file_id
 		JOIN repo_state rs ON rs.name = f.repo
-		WHERE c.id = ?`, r.chunkID).Scan(&src.Repo, &src.Branch, &src.Path, &src.SHA, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ask.Source{}, false, nil
-	}
+		WHERE c.id = ?`, r.chunkID), &src.Repo, &src.Branch, &src.Path, &src.SHA, &src.Symbol, &src.StartLine, &src.EndLine, &src.Text)
 	if err != nil {
 		return ask.Source{}, false, fmt.Errorf("read source chunk %d: %w", r.chunkID, err)
+	}
+	if !found {
+		return ask.Source{}, false, nil
 	}
 	return src, true, nil
 }

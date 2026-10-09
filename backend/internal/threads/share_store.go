@@ -191,7 +191,7 @@ const shareColumns = `
 	       (SELECT COUNT(*) FROM messages m WHERE m.thread_id = sh.thread_id AND m.id > sh.up_to_message_id)
 	FROM shared_threads sh JOIN threads t ON t.id = sh.thread_id`
 
-func scanShare(row interface{ Scan(...any) error }) (Share, error) {
+func scanShare(row sqlutil.Scanner) (Share, error) {
 	var sh Share
 	var sharedAt, updatedAt string
 	if err := row.Scan(&sh.Token, &sh.ThreadPublicID, &sh.threadID, &sh.Title, &sh.UpToMessageID,

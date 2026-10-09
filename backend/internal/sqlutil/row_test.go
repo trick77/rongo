@@ -73,13 +73,3 @@ func TestParseStamp_readsWhatDatetimeNowWritesAndZeroesTheRest(t *testing.T) {
 		t.Fatalf("Stamp = %q", sqlutil.Stamp)
 	}
 }
-
-func TestOrEmpty_turnsNilIntoAnEmptySliceAndLeavesTheRestAlone(t *testing.T) {
-	if got := sqlutil.OrEmpty[string](nil); got == nil || len(got) != 0 {
-		t.Fatalf("OrEmpty(nil) = %#v", got)
-	}
-	in := []int{1, 2}
-	if got := sqlutil.OrEmpty(in); len(got) != 2 || got[0] != 1 {
-		t.Fatalf("OrEmpty(in) = %v", got)
-	}
-}

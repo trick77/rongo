@@ -50,12 +50,3 @@ func ParseStamp(s string) time.Time {
 	t, _ := time.Parse(Stamp, s)
 	return t
 }
-
-// OrEmpty is s, or an empty slice for nil: a JSON field that must serialise
-// as [] rather than null.
-func OrEmpty[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
-}

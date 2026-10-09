@@ -327,7 +327,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		// follow-up, and the one that named a repository the thread left
 		// behind — falls back to the whole pin, because the alternative is an
 		// empty restriction, which means the whole corpus.
-		if narrowed := intersect(known, pin); len(narrowed) > 0 {
+		if narrowed := keepIn(known, pin); len(narrowed) > 0 {
 			known = narrowed
 		} else {
 			known = pin
@@ -615,12 +615,6 @@ func dropIn(names, set []string) []string {
 		}
 	}
 	return out
-}
-
-// intersect is the names in both, in the order the question named them — the
-// thread narrowing further inside what it already carries.
-func intersect(named, pin []string) []string {
-	return keepIn(named, pin)
 }
 
 // unresolved is the error for a turn whose repositories did not all resolve:

@@ -519,7 +519,7 @@ func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) err
 	// and it bought nothing: scanScope decodes any blob to the zero value,
 	// and ThreadScope reads Known after decoding, so a stored empty scope
 	// says exactly what an empty column says.
-	return s.setJSON(ctx, "scope", messageID, sc)
+	return s.setJSON(ctx, colScope, messageID, sc)
 }
 
 // SetMemory records the standing instruction a turn saved, so the chip under
@@ -539,7 +539,7 @@ func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string)
 	if len(qs) == 0 {
 		return nil
 	}
-	return s.setJSON(ctx, "followups", messageID, qs)
+	return s.setJSON(ctx, colFollowups, messageID, qs)
 }
 
 // SavePastedTexts records which trailing blocks of the question were pasted.
@@ -551,7 +551,7 @@ func (s *Store) SavePastedTexts(ctx context.Context, messageID int64, ps []Paste
 	if len(ps) == 0 {
 		return nil
 	}
-	return s.setJSON(ctx, "pasted_texts", messageID, ps)
+	return s.setJSON(ctx, colPastedTexts, messageID, ps)
 }
 
 // SaveSteps records the activity timeline the reader watched this turn
@@ -563,33 +563,29 @@ func (s *Store) SaveSteps(ctx context.Context, messageID int64, tr timeline.Trac
 	if len(tr.Steps) == 0 {
 		return nil
 	}
-	return s.setJSON(ctx, "steps", messageID, tr)
+	return s.setJSON(ctx, colSteps, messageID, tr)
 }
 
-// jsonColumns is every message column written as JSON, each with the whole
-// statement that sets it. The column name reaches the SQL only through this
-// table, never from a caller's string: a name not listed is refused.
-var jsonColumns = map[string]string{
-	"scope":        `UPDATE messages SET scope = ? WHERE id = ?`,
-	"followups":    `UPDATE messages SET followups = ? WHERE id = ?`,
-	"pasted_texts": `UPDATE messages SET pasted_texts = ? WHERE id = ?`,
-	"steps":        `UPDATE messages SET steps = ? WHERE id = ?`,
-}
+// jsonColumn is one message column written as JSON: the whole statement that
+// sets it and the words an error names it by. The column name reaches the SQL
+// only through these four values, never from a caller's string.
+type jsonColumn struct{ stmt, label string }
 
-// setJSON writes v as the JSON of one message column. The error names the
-// column in words.
-func (s *Store) setJSON(ctx context.Context, col string, messageID int64, v any) error {
-	label := strings.ReplaceAll(col, "_", " ")
-	stmt, ok := jsonColumns[col]
-	if !ok {
-		return fmt.Errorf("store %s: not a json column", label)
-	}
+var (
+	colScope       = jsonColumn{`UPDATE messages SET scope = ? WHERE id = ?`, "scope"}
+	colFollowups   = jsonColumn{`UPDATE messages SET followups = ? WHERE id = ?`, "followups"}
+	colPastedTexts = jsonColumn{`UPDATE messages SET pasted_texts = ? WHERE id = ?`, "pasted texts"}
+	colSteps       = jsonColumn{`UPDATE messages SET steps = ? WHERE id = ?`, "steps"}
+)
+
+// setJSON writes v as the JSON of one message column.
+func (s *Store) setJSON(ctx context.Context, col jsonColumn, messageID int64, v any) error {
 	blob, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("encode %s: %w", label, err)
+		return fmt.Errorf("encode %s: %w", col.label, err)
 	}
-	if _, err := s.db.ExecContext(ctx, stmt, string(blob), messageID); err != nil {
-		return fmt.Errorf("store %s: %w", label, err)
+	if _, err := s.db.ExecContext(ctx, col.stmt, string(blob), messageID); err != nil {
+		return fmt.Errorf("store %s: %w", col.label, err)
 	}
 	return nil
 }
@@ -978,9 +974,9 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	}
 	for i := range out {
 		// Non-nil when empty, so the wire says [] rather than null.
-		out[i].Citations = sqlutil.OrEmpty(cites[out[i].ID])
+		out[i].Citations = orEmpty(cites[out[i].ID])
 		out[i].Clarification = cards[out[i].ID]
-		out[i].Calls = sqlutil.OrEmpty(calls[out[i].ID])
+		out[i].Calls = orEmpty(calls[out[i].ID])
 	}
 	return out, nil
 }
@@ -995,7 +991,7 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 	if err != nil {
 		return nil, err
 	}
-	return sqlutil.OrEmpty(by[messageID]), nil
+	return orEmpty(by[messageID]), nil
 }
 
 // citationsFor reads the citations of every message in ids, keyed by message.
@@ -1319,14 +1315,11 @@ func linkChoice(ctx context.Context, db execer, subject string, messageID, clari
 		      WHERE cl.id = ? AND t.user_subject = ?
 		  )`,
 		clarificationID, idx, messageID, clarificationID, subject)
+	linked, err := sqlutil.Affected(res, err, "link choice")
 	if err != nil {
-		return fmt.Errorf("link choice: %w", err)
+		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("link choice: %w", err)
-	}
-	if n == 0 {
+	if !linked {
 		return fmt.Errorf("link choice: message %d and clarification %d are not in the same thread owned by this subject", messageID, clarificationID)
 	}
 	return nil
@@ -1344,4 +1337,13 @@ func narrowedTo(m Message) []string {
 		return nil
 	}
 	return m.Scope.Known
+}
+
+// orEmpty is s, or an empty slice for nil: a JSON field that must serialise
+// as [] rather than null.
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
