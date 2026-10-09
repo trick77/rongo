@@ -46,7 +46,7 @@ type Hit struct {
 	// lane only. The keyword lane leaves it 0: FTS rank is positional and the
 	// fusion works on rank, not on score.
 	Distance float64
-	// Score and Lanes are filled by FuseWeighted.
+	// Score and Lanes are filled by FuseWeightedDecayed.
 	Score float64
 	Lanes []string
 }
@@ -220,7 +220,7 @@ func (s *Store) scanVector(ctx context.Context, q string, args []any) ([]Hit, er
 	return out, rows.Err()
 }
 
-// SearchKeyword returns up to n chunks whose raw text matches the FTS5
+// SearchKeywordIn returns up to n chunks whose raw text matches the FTS5
 // expression, best (lowest bm25) first. match must already have been built by
 // BuildFTSMatch; an empty match yields no hits without touching the database.
 //
@@ -231,11 +231,9 @@ func (s *Store) scanVector(ctx context.Context, q string, args []any) ([]Hit, er
 // bm25() must name the FTS5 table itself, never the query alias — SQLite
 // resolves it as a hidden column on the virtual table, where aliases are not
 // recognised.
-func (s *Store) SearchKeyword(ctx context.Context, match string, n int, repos []string) ([]Hit, error) {
-	return s.SearchKeywordIn(ctx, match, n, repos, nil)
-}
-
-// SearchKeywordIn is SearchKeyword under a stage restriction as well.
+//
+// stage narrows the search further to the asked stage's directories; nil
+// leaves it at the repository restriction.
 func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos []string, stage StagePrefixes) ([]Hit, error) {
 	if strings.TrimSpace(match) == "" {
 		return nil, nil

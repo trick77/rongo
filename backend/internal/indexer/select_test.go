@@ -337,10 +337,10 @@ func TestSelect_decisionTable(t *testing.T) {
 	s := NewSelector(DefaultSelectOptions())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reason := s.Select(tc.path, []byte(tc.body))
+			got, reason, _ := s.SelectBody(tc.path, []byte(tc.body))
 
 			if got != tc.want {
-				t.Errorf("Select(%q) = %v (%s), want %v", tc.path, got, reason, tc.want)
+				t.Errorf("SelectBody(%q) = %v (%s), want %v", tc.path, got, reason, tc.want)
 			}
 			if got != Include && reason == "" {
 				t.Error("a skipped file must carry a reason, so the answer layer can say why it was not indexed")
@@ -360,15 +360,15 @@ func TestSelect_schemaCeilingIsConfigurable(t *testing.T) {
 	// The schema ceiling is its own knob, and its reason names it, so the
 	// operator raises the right number.
 	s := NewSelector(SelectOptions{MaxSchemaBytes: 128})
-	got, reason := s.Select("wsdl/OrderService.xsd", []byte(xsdOfSize(256)))
+	got, reason, _ := s.SelectBody("wsdl/OrderService.xsd", []byte(xsdOfSize(256)))
 	if got != SkipData {
-		t.Fatalf("Select() = %v, want %v", got, SkipData)
+		t.Fatalf("SelectBody() = %v, want %v", got, SkipData)
 	}
 	if !strings.Contains(reason, "128") || !strings.Contains(reason, "schema ceiling") {
 		t.Errorf("reason = %q, want the schema ceiling and its value in it", reason)
 	}
-	if got, _ := s.Select("wsdl/OrderService.xsd", []byte("<xsd:schema/>")); got != Include {
-		t.Errorf("Select(small) = %v, want include", got)
+	if got, _, _ := s.SelectBody("wsdl/OrderService.xsd", []byte("<xsd:schema/>")); got != Include {
+		t.Errorf("SelectBody(small) = %v, want include", got)
 	}
 }
 
@@ -379,9 +379,9 @@ func TestSelect_nameBeatsSize(t *testing.T) {
 	small := `{"a": "b"}`
 	big := "{" + strings.Repeat(`"cart.title": "Warenkorb",`, 1000) + `"x": "y"}`
 	for _, body := range []string{small, big} {
-		got, reason := s.Select("src/i18n/generated-de-CH.json", []byte(body))
+		got, reason, _ := s.SelectBody("src/i18n/generated-de-CH.json", []byte(body))
 		if got != SkipGenerated {
-			t.Errorf("Select(%d bytes) = %v (%s), want %v", len(body), got, reason, SkipGenerated)
+			t.Errorf("SelectBody(%d bytes) = %v (%s), want %v", len(body), got, reason, SkipGenerated)
 		}
 	}
 }
@@ -390,15 +390,15 @@ func TestSelect_dataCeilingIsConfigurable(t *testing.T) {
 	// The ceiling is a knob, and the logged reason names it, so an operator
 	// who sees "why is my openapi.json missing" learns which number to raise.
 	s := NewSelector(SelectOptions{MaxDataBytes: 64})
-	got, reason := s.Select("api/openapi.json", []byte(strings.Repeat(`{"a":1}`, 20)))
+	got, reason, _ := s.SelectBody("api/openapi.json", []byte(strings.Repeat(`{"a":1}`, 20)))
 	if got != SkipData {
-		t.Fatalf("Select() = %v, want %v", got, SkipData)
+		t.Fatalf("SelectBody() = %v, want %v", got, SkipData)
 	}
 	if !strings.Contains(reason, "64") || !strings.Contains(reason, "json") {
 		t.Errorf("reason = %q, want the format and the ceiling in it", reason)
 	}
-	if got, _ := s.Select("api/openapi.json", []byte(`{"a":1}`)); got != Include {
-		t.Errorf("Select(small) = %v, want include", got)
+	if got, _, _ := s.SelectBody("api/openapi.json", []byte(`{"a":1}`)); got != Include {
+		t.Errorf("SelectBody(small) = %v, want include", got)
 	}
 }
 
@@ -523,10 +523,10 @@ func TestSelect_excludedPaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewSelector(SelectOptions{Exclude: tc.exclude})
 
-			got, reason := s.Select(tc.path, []byte("# heading\n\nbody\n"))
+			got, reason, _ := s.SelectBody(tc.path, []byte("# heading\n\nbody\n"))
 
 			if got != tc.want {
-				t.Errorf("Select(%q) with %v = %v (%s), want %v", tc.path, tc.exclude, got, reason, tc.want)
+				t.Errorf("SelectBody(%q) with %v = %v (%s), want %v", tc.path, tc.exclude, got, reason, tc.want)
 			}
 		})
 	}
@@ -538,11 +538,11 @@ func TestSelect_secretDetectionBeatsExcluded(t *testing.T) {
 	// the network, and it also decides what gets reported.
 	s := NewSelector(SelectOptions{Exclude: []string{"docs/plans/**"}})
 
-	got, reason := s.Select("docs/plans/deploy-notes.md",
+	got, reason, _ := s.SelectBody("docs/plans/deploy-notes.md",
 		[]byte("export KEY=AKIAIOSFODNN7EXAMPLE\n"))
 
 	if got != SkipSecret {
-		t.Errorf("Select() = %v (%s), want SkipSecret — a credential outranks an exclusion", got, reason)
+		t.Errorf("SelectBody() = %v (%s), want SkipSecret — a credential outranks an exclusion", got, reason)
 	}
 }
 
@@ -575,11 +575,11 @@ func TestSelect_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
 	// found anywhere in the corpus is worth surfacing.
 	s := NewSelector(DefaultSelectOptions())
 
-	got, reason := s.Select("node_modules/dep/config.js",
+	got, reason, _ := s.SelectBody("node_modules/dep/config.js",
 		[]byte("const k = 'AKIAIOSFODNN7EXAMPLE'\n"))
 
 	if got != SkipSecret {
-		t.Errorf("Select() = %v (%s), want SkipSecret — a credential outranks a vendored verdict", got, reason)
+		t.Errorf("SelectBody() = %v (%s), want SkipSecret — a credential outranks a vendored verdict", got, reason)
 	}
 }
 
@@ -590,11 +590,11 @@ func TestSelect_secretDetectionRunsBeforeEmbedding(t *testing.T) {
 	// two, so it must reject on CONTENT, not merely on a suspicious filename.
 	s := NewSelector(DefaultSelectOptions())
 
-	got, _ := s.Select("src/perfectly/ordinary/Service.java",
+	got, _, _ := s.SelectBody("src/perfectly/ordinary/Service.java",
 		[]byte("class Service {\n  String t = \"ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\";\n}\n"))
 
 	if got != SkipSecret {
-		t.Errorf("Select() = %v, want SkipSecret for a credential in an ordinary-looking source file", got)
+		t.Errorf("SelectBody() = %v, want SkipSecret for a credential in an ordinary-looking source file", got)
 	}
 }
 

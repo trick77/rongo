@@ -27,8 +27,8 @@ func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 	}
 
 	// When: the decay is switched off.
-	plain := FuseWeighted(lanes, 5)
-	got := FuseWeightedDiverse(lanes, 5, 1.0)
+	plain := FuseWeightedDecayed(lanes, 5, shippedDecays)
+	got := FuseWeightedDecayed(lanes, 5, Decays{Repo: 1.0, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: byte for byte the undiversified ranking. The knob's off position
 	// has to be the behaviour that shipped, or every measurement against it
@@ -56,7 +56,7 @@ func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	}
 
 	// When: three hits are wanted and the decay is on.
-	got := FuseWeightedDiverse(lanes, 3, 0.5)
+	got := FuseWeightedDecayed(lanes, 3, Decays{Repo: 0.5, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: repository b is represented, and the strongest hit still leads.
 	if got[0].ChunkID != 1 {
@@ -78,7 +78,7 @@ func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeightedDiverse(lanes, 3, 0.4)
+	got := FuseWeightedDecayed(lanes, 3, Decays{Repo: 0.4, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then
 	if rankOf(got, 9) >= len(got) {
@@ -94,8 +94,8 @@ func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	}
 
 	// When: run twice, asking for more than there is.
-	first := FuseWeightedDiverse(lanes, 99, 0.05)
-	second := FuseWeightedDiverse(lanes, 99, 0.05)
+	first := FuseWeightedDecayed(lanes, 99, Decays{Repo: 0.05, Test: DefaultTestDecay, Doc: DefaultDocDecay})
+	second := FuseWeightedDecayed(lanes, 99, Decays{Repo: 0.05, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: nothing is dropped — reordering is not filtering — and two runs
 	// agree. A search that returns a different list for the same corpus reads
@@ -120,11 +120,11 @@ func TestFuseWeightedDiverse_outOfRangeDecayIsOff(t *testing.T) {
 		{Name: "semantic:0", Hits: append(repoHits("a", 1, 2, 3), repoHits("b", 4)...), Weight: WeightSemantic},
 		{Name: "keyword:strict", Hits: repoHits("a", 2), Weight: WeightKeywordStrict},
 	}
-	plain := FuseWeighted(lanes, 4)
+	plain := FuseWeightedDecayed(lanes, 4, shippedDecays)
 
 	for _, decay := range []float64{0, -1, 2} {
 		// When
-		got := FuseWeightedDiverse(lanes, 4, decay)
+		got := FuseWeightedDecayed(lanes, 4, Decays{Repo: decay, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 		// Then
 		for i := range plain {

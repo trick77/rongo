@@ -81,14 +81,14 @@ func TestSearchKeyword_parkedRepoIsNotReturned(t *testing.T) {
 	park(t, db)
 
 	// When
-	hits, err := NewStore(db).SearchKeyword(context.Background(), "send", 10, nil)
+	hits, err := NewStore(db).SearchKeywordIn(context.Background(), "send", 10, nil, nil)
 
 	// Then
 	if err != nil {
-		t.Fatalf("SearchKeyword() err = %v", err)
+		t.Fatalf("SearchKeywordIn() err = %v", err)
 	}
 	if len(hits) != 1 || hits[0].Repo != "loom" {
-		t.Errorf("SearchKeyword() = %v, want only loom's chunk", hits)
+		t.Errorf("SearchKeywordIn() = %v, want only loom's chunk", hits)
 	}
 }
 

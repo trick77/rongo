@@ -2,6 +2,10 @@ package retrieve
 
 import "testing"
 
+// shippedDecays is what retrieve.New runs with: the three demotions at their
+// defaults. Fusion tests that are not about a decay fuse under it.
+var shippedDecays = Decays{Repo: DefaultRepoDecay, Test: DefaultTestDecay, Doc: DefaultDocDecay}
+
 func hitsOf(ids ...int64) []Hit {
 	out := make([]Hit, len(ids))
 	for i, id := range ids {
@@ -20,7 +24,7 @@ func TestFuseWeighted_aLiteralMatchOutranksACloserSemanticHit(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeighted(lanes, 8)
+	got := FuseWeightedDecayed(lanes, 8, shippedDecays)
 
 	// Then: chunk 1 (keyword, rank 3) must come out above chunk 2 (semantic,
 	// rank 0). Flatten the weights and the order inverts, because 1/60 beats
@@ -56,7 +60,7 @@ func TestFuseWeighted_recordsScoreAndLanes(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeighted(lanes, 5)
+	got := FuseWeightedDecayed(lanes, 5, shippedDecays)
 
 	// Then: a caller cannot recover either afterwards, and "which lane found
 	// this" is what separates a literal match from a semantic guess.
@@ -80,11 +84,11 @@ func TestFuseWeighted_mutesANonPositiveWeight(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeighted(lanes, 5)
+	got := FuseWeightedDecayed(lanes, 5, shippedDecays)
 
 	// Then
 	if len(got) != 1 || got[0].ChunkID != 2 {
-		t.Errorf("FuseWeighted() = %v, want only the semantic lane's hit", got)
+		t.Errorf("FuseWeightedDecayed() = %v, want only the semantic lane's hit", got)
 	}
 }
 
@@ -99,7 +103,7 @@ func TestFuseWeighted_keepsTheDistanceFromWhicheverLaneHasOne(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeighted(lanes, 5)
+	got := FuseWeightedDecayed(lanes, 5, shippedDecays)
 
 	// Then
 	if got[0].Distance != 0.42 {
@@ -109,11 +113,11 @@ func TestFuseWeighted_keepsTheDistanceFromWhicheverLaneHasOne(t *testing.T) {
 
 func TestFuseWeighted_noLanesIsEmptyNotNil(t *testing.T) {
 	// Given / When
-	got := FuseWeighted(nil, 5)
+	got := FuseWeightedDecayed(nil, 5, shippedDecays)
 
 	// Then
 	if len(got) != 0 {
-		t.Errorf("FuseWeighted(nil) = %v, want no hits", got)
+		t.Errorf("FuseWeightedDecayed(nil) = %v, want no hits", got)
 	}
 }
 

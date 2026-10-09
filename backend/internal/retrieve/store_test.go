@@ -265,24 +265,24 @@ func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
 	addChunk(t, db, "shop", "Other.java", "run", "public void run() { cart.clear(); }", nearVec)
 
 	// When
-	hits, err := NewStore(db).SearchKeyword(context.Background(), BuildFTSMatch("promoMailer"), 10, nil)
+	hits, err := NewStore(db).SearchKeywordIn(context.Background(), BuildFTSMatch("promoMailer"), 10, nil, nil)
 
 	// Then
 	if err != nil {
-		t.Fatalf("SearchKeyword() err = %v", err)
+		t.Fatalf("SearchKeywordIn() err = %v", err)
 	}
 	if len(hits) != 1 || hits[0].Path != "PromoMailJob.java" {
-		t.Errorf("SearchKeyword() = %v, want the chunk containing the identifier", hits)
+		t.Errorf("SearchKeywordIn() = %v, want the chunk containing the identifier", hits)
 	}
 }
 
 func TestSearchKeyword_emptyMatchTouchesNothing(t *testing.T) {
 	// Given / When
-	hits, err := NewStore(storetest.Open(t, dim)).SearchKeyword(context.Background(), "", 10, nil)
+	hits, err := NewStore(storetest.Open(t, dim)).SearchKeywordIn(context.Background(), "", 10, nil, nil)
 
 	// Then
 	if err != nil || len(hits) != 0 {
-		t.Errorf("SearchKeyword(\"\") = %v, %v; want no hits and no error", hits, err)
+		t.Errorf("SearchKeywordIn(\"\") = %v, %v; want no hits and no error", hits, err)
 	}
 }
 
@@ -335,9 +335,9 @@ func TestSearch_equalRankingOrdersByAddress(t *testing.T) {
 		hits func(t *testing.T, db *sql.DB) []Hit
 	}{
 		{"keyword", func(t *testing.T, db *sql.DB) []Hit {
-			hits, err := NewStore(db).SearchKeyword(context.Background(), BuildFTSMatch("promoMailer"), 10, nil)
+			hits, err := NewStore(db).SearchKeywordIn(context.Background(), BuildFTSMatch("promoMailer"), 10, nil, nil)
 			if err != nil {
-				t.Fatalf("SearchKeyword() err = %v", err)
+				t.Fatalf("SearchKeywordIn() err = %v", err)
 			}
 			return hits
 		}},
