@@ -1,4 +1,4 @@
-package main
+package exttools
 
 import (
 	"os"
@@ -23,7 +23,7 @@ func onlyPath(t *testing.T, dir string) {
 	t.Setenv("PATH", dir)
 }
 
-func TestResolveExtTools_acceptsUniversalCtags(t *testing.T) {
+func TestResolve_acceptsUniversalCtags(t *testing.T) {
 	// Given
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
@@ -31,18 +31,18 @@ func TestResolveExtTools_acceptsUniversalCtags(t *testing.T) {
 	onlyPath(t, dir)
 
 	// When
-	paths, err := resolveExtTools()
+	paths, err := Resolve()
 
 	// Then
 	if err != nil {
-		t.Fatalf("resolveExtTools() err = %v, want nil", err)
+		t.Fatalf("Resolve() err = %v, want nil", err)
 	}
 	if paths.Ctags != filepath.Join(dir, "ctags") {
 		t.Errorf("Ctags = %q, want %q", paths.Ctags, filepath.Join(dir, "ctags"))
 	}
 }
 
-func TestResolveExtTools_rejectsBSDCtags(t *testing.T) {
+func TestResolve_rejectsBSDCtags(t *testing.T) {
 	// Given: macOS ships this at /usr/bin/ctags. Accepting it would produce an
 	// empty symbol index rather than an error, which is far worse.
 	dir := t.TempDir()
@@ -51,43 +51,43 @@ func TestResolveExtTools_rejectsBSDCtags(t *testing.T) {
 	onlyPath(t, dir)
 
 	// When
-	_, err := resolveExtTools()
+	_, err := Resolve()
 
 	// Then
 	if err == nil {
-		t.Fatal("resolveExtTools() err = nil, want a rejection of BSD ctags")
+		t.Fatal("Resolve() err = nil, want a rejection of BSD ctags")
 	}
 	if !strings.Contains(err.Error(), "universal-ctags") {
 		t.Errorf("error = %q, want it to name universal-ctags so the fix is obvious", err)
 	}
 }
 
-func TestResolveExtTools_reportsMissingBinary(t *testing.T) {
+func TestResolve_reportsMissingBinary(t *testing.T) {
 	// Given: git present, ctags absent.
 	dir := t.TempDir()
 	fakeBin(t, dir, "git", "git version 2.48.0")
 	onlyPath(t, dir)
 
 	// When
-	_, err := resolveExtTools()
+	_, err := Resolve()
 
 	// Then
 	if err == nil {
-		t.Fatal("resolveExtTools() err = nil, want an error naming ctags")
+		t.Fatal("Resolve() err = nil, want an error naming ctags")
 	}
 	if !strings.Contains(err.Error(), "ctags not found in PATH") {
 		t.Errorf("error = %q, want it to say ctags is not on PATH", err)
 	}
 }
 
-func TestResolveExtTools_reportsMissingGit(t *testing.T) {
+func TestResolve_reportsMissingGit(t *testing.T) {
 	// Given: ctags present, git absent.
 	dir := t.TempDir()
 	fakeBin(t, dir, "ctags", "Universal Ctags 6.1.0, Copyright (C) 2015-2024\njson supports json format output")
 	onlyPath(t, dir)
 
 	// When
-	_, err := resolveExtTools()
+	_, err := Resolve()
 
 	// Then
 	if err == nil || !strings.Contains(err.Error(), "git not found in PATH") {
@@ -95,7 +95,7 @@ func TestResolveExtTools_reportsMissingGit(t *testing.T) {
 	}
 }
 
-func TestResolveExtTools_rejectsAUniversalCtagsBuiltWithoutJSON(t *testing.T) {
+func TestResolve_rejectsAUniversalCtagsBuiltWithoutJSON(t *testing.T) {
 	// Given: the right ctags, built without the json feature. Every extraction
 	// asks for --output-format=json, so this one fails on every file, the
 	// caller falls back to line windows, and the symbol index ends up empty
@@ -107,11 +107,11 @@ func TestResolveExtTools_rejectsAUniversalCtagsBuiltWithoutJSON(t *testing.T) {
 	onlyPath(t, dir)
 
 	// When
-	_, err := resolveExtTools()
+	_, err := Resolve()
 
 	// Then
 	if err == nil {
-		t.Fatal("resolveExtTools() err = nil, want a rejection of a ctags without json output")
+		t.Fatal("Resolve() err = nil, want a rejection of a ctags without json output")
 	}
 	if !strings.Contains(err.Error(), "json") {
 		t.Errorf("error = %q, want it to name the missing json feature", err)

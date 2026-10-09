@@ -1,4 +1,12 @@
-package main
+// Package exttools locates the external binaries rongo shells out to and
+// verifies they are the ones it actually needs.
+//
+// The dev environment runs without a container, so the binaries come from the
+// developer's machine and cannot be assumed correct. ctags in particular: macOS
+// ships Apple's BSD ctags at /usr/bin/ctags, which rejects long options. Using
+// it would yield an empty symbol index instead of an error, so rongo refuses to
+// start rather than indexing silently wrong.
+package exttools
 
 import (
 	"fmt"
@@ -6,34 +14,26 @@ import (
 	"strings"
 )
 
-// extTools holds the resolved absolute paths of the external binaries rongo
-// shells out to.
-type extTools struct {
+// Paths holds the resolved absolute paths of the external tools.
+type Paths struct {
 	Git   string
 	Ctags string
 }
 
-// resolveExtTools finds every required binary and verifies it is the one
-// rongo actually needs. It returns the first problem it finds, phrased so the
-// fix is obvious from the message.
-//
-// The dev environment runs without a container, so the binaries come from the
-// developer's machine and cannot be assumed correct. ctags in particular: macOS
-// ships Apple's BSD ctags at /usr/bin/ctags, which rejects long options. Using
-// it would yield an empty symbol index instead of an error, so rongo refuses to
-// start rather than indexing silently wrong.
-func resolveExtTools() (extTools, error) {
-	var p extTools
+// Resolve finds every required binary and validates ctags. It returns the
+// first problem it finds, phrased so the fix is obvious from the message.
+func Resolve() (Paths, error) {
+	var p Paths
 	var err error
 
 	if p.Git, err = exec.LookPath("git"); err != nil {
-		return extTools{}, fmt.Errorf("git not found in PATH: %w", err)
+		return Paths{}, fmt.Errorf("git not found in PATH: %w", err)
 	}
 	if p.Ctags, err = exec.LookPath("ctags"); err != nil {
-		return extTools{}, fmt.Errorf("ctags not found in PATH (install universal-ctags): %w", err)
+		return Paths{}, fmt.Errorf("ctags not found in PATH (install universal-ctags): %w", err)
 	}
 	if err := verifyUniversalCtags(p.Ctags); err != nil {
-		return extTools{}, err
+		return Paths{}, err
 	}
 	return p, nil
 }

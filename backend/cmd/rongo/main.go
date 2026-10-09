@@ -24,6 +24,7 @@ import (
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/config"
 	"github.com/trick77/rongo/internal/embed"
+	"github.com/trick77/rongo/internal/exttools"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/httpapi"
@@ -148,7 +149,7 @@ func main() {
 		Level: parseLevel(cfg.LogLevel),
 	})))
 
-	tools, err := resolveExtTools()
+	tools, err := exttools.Resolve()
 	if err != nil {
 		slog.Error("required external tool missing or wrong", "err", err)
 		os.Exit(1)
