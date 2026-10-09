@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { shortSha } from "./turns";
+import { shortSha } from "./paths";
 import { MermaidSvg, useDrawn, type FlowNode, type FlowSpec } from "./diagram";
 import { toMermaid } from "./diagramExport";
 import { ModalShell, cancelButton, saveButton } from "./ThreadModals";
@@ -61,7 +61,7 @@ export function historyLine(r: Repo): string {
 }
 
 /** Project is one product and the repositories it is made of. */
-export type Project = { name: string; repos: Repo[] };
+type Project = { name: string; repos: Repo[] };
 
 /** byProject groups the flat list the API returns, projects sorted by name and
  * members sorted within each. The API already sorts by repository name; the
@@ -70,7 +70,7 @@ export type Project = { name: string; repos: Repo[] };
 export function byProject(repos: Repo[]): Project[] {
   const at = new Map<string, Repo[]>();
   for (const r of repos) {
-    const key = r.project || r.name;
+    const key = projectOf(r);
     const list = at.get(key);
     if (list) list.push(r);
     else at.set(key, [r]);
@@ -120,11 +120,7 @@ export function usedBy(library: string, repos: Repo[]): string[] {
  * a picture of unconnected boxes says less than the table under it. */
 export function wiringSpec(p: Project, libraries: Set<string> = new Set()): FlowSpec | null {
   const member = new Set(p.repos.map((r) => r.name));
-  const edges = p.repos.flatMap((r) =>
-    (r.uses ?? [])
-      .filter((u) => member.has(u) || libraries.has(u))
-      .map((u) => ({ from: r.name, to: u })),
-  );
+  const edges = edgesOf(p, libraries);
   if (edges.length === 0) return null;
   const reached = new Set(edges.map((e) => e.to));
   // Only the repositories an edge actually touches. A member nothing connects
@@ -180,7 +176,6 @@ export function parkedSummary(repos: Repo[]): Parked | null {
   const parked = repos.filter((r) => !r.enabled);
   if (parked.length === 0) return null;
 
-  const projectOf = (r: Repo) => r.project || r.name;
   const projects = new Set(parked.map(projectOf));
   const live = new Set(repos.filter((r) => r.enabled).map(projectOf));
   const whole = [...projects].filter((p) => !live.has(p)).length;
@@ -214,17 +209,22 @@ export function parkedSummary(repos: Repo[]): Parked | null {
  * project reaches them, and that is a fact worth stating — it is what keeps an
  * answer about the storefront from attributing a call to the admin API. */
 export function unconnected(p: Project, libraries: Set<string> = new Set()): Repo[] {
-  const member = new Set(p.repos.map((r) => r.name));
-  const touched = new Set<string>();
-  for (const r of p.repos) {
-    for (const u of r.uses ?? []) {
-      if (member.has(u) || libraries.has(u)) {
-        touched.add(r.name);
-        touched.add(u);
-      }
-    }
-  }
+  const touched = new Set(edgesOf(p, libraries).flatMap((e) => [e.from, e.to]));
   return touched.size === 0 ? [] : p.repos.filter((r) => !touched.has(r.name));
+}
+
+/** The project a repository is drawn under: its own name when it declares none. */
+const projectOf = (r: Repo) => r.project || r.name;
+
+/** The declared uses edges that land on a member or a declared library. An
+ * arrow to anything else is a dependency the page cannot draw. */
+function edgesOf(p: Project, libraries: Set<string>): { from: string; to: string }[] {
+  const member = new Set(p.repos.map((r) => r.name));
+  return p.repos.flatMap((r) =>
+    (r.uses ?? [])
+      .filter((u) => member.has(u) || libraries.has(u))
+      .map((u) => ({ from: r.name, to: u })),
+  );
 }
 
 /**
@@ -313,7 +313,7 @@ function Stat({
 
 /** What a re-index confirmation is about: one repository, one project's
  * members, or every active repository. */
-export type ReindexScope =
+type ReindexScope =
   | { kind: "repo"; name: string }
   | { kind: "project"; name: string; repos: string[] }
   | { kind: "all"; count: number };

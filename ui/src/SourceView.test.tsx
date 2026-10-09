@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { serve } from "./__tests__/helpers";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SourceView from "./SourceView";
@@ -12,17 +13,6 @@ const source = {
   end_line: 4,
   sha: "0123abcdef",
 };
-
-function serve(status: number, body: unknown) {
-  const fetchMock = vi.fn(async () => ({
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-    text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
-  }));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
 
 afterEach(() => vi.unstubAllGlobals());
 

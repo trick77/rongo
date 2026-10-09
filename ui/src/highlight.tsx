@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { splitPath } from "./paths";
 import { createLowlight, common } from "lowlight";
 import dockerfile from "highlight.js/lib/languages/dockerfile";
 import type { Element, ElementContent, Root } from "hast";
@@ -74,7 +75,7 @@ const byBasename: Record<string, string> = {
 
 /** languageForPath picks the grammar for a file by its name. */
 export function languageForPath(path: string): string | null {
-  const base = path.slice(path.lastIndexOf("/") + 1);
+  const { base } = splitPath(path);
   const dot = base.lastIndexOf(".");
   const hit =
     byBasename[base.toLowerCase()] ??

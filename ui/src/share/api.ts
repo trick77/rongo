@@ -1,3 +1,5 @@
+import { goneOk } from "../http";
+
 /**
  * The four things an owner can do to a link, and the one read that lists them.
  *
@@ -50,7 +52,7 @@ export async function shareFor(threadID: string): Promise<Share | null> {
 export async function revokeShare(threadID: string): Promise<boolean> {
   const res = await fetch(`/api/threads/${threadID}/share`, { method: "DELETE" });
   // A 404 is a link that is already gone, which is what was asked for.
-  return res.ok || res.status === 404;
+  return goneOk(res);
 }
 
 /**

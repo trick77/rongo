@@ -5,11 +5,12 @@
  * conclusion is never shown - it is prose in the question's language making
  * claims about code nothing cites.
  */
+import { num, str, strs } from "./wire";
 
 /** A file as the trace names it: the base name, the rest on hover. */
 export type LocateFile = { name: string; title: string };
 
-export type LocateLine = {
+type LocateLine = {
   /** What was asked, up to a file name when there is one. */
   lead: string;
   file?: LocateFile;
@@ -19,7 +20,7 @@ export type LocateLine = {
   result: string;
 };
 
-export type LocateSummary = {
+type LocateSummary = {
   header: string;
   steps: LocateLine[];
   /** Why the loop stopped before it was done, as a sentence. */
@@ -46,9 +47,6 @@ type WireStep = {
 
 type WirePlace = { repo?: string; path?: string; line?: number };
 
-const str = (v: unknown): string => (typeof v === "string" ? v : "");
-const num = (v: unknown): number => (typeof v === "number" ? v : 0);
-const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function fileOf(path: string, repo?: string): LocateFile {

@@ -1,26 +1,18 @@
 import { StrictMode } from "react";
+import { ask, ev, pickLanguage } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
-import { languages } from "./turns";
 
 // The language list is a listbox, not a native select: the pill opens it and
 // the row is clicked, as the reader does it.
-async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
-  const name = languages.find((l) => l.code === code)?.name ?? code;
-  await user.click(screen.getByRole("combobox", { name: "Answer language" }));
-  await user.click(screen.getByRole("option", { name }));
-}
-
 /**
  * A finished answer offers what to ask next. The pills belong to the answer
  * they were written from: only the newest one shows them, a click asks the
  * question in that turn's own role and language, and the answer it came from
  * is left exactly as it was.
  */
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 
 /** Streams a fresh set of frames per call, so a second turn gets its own. */
 function streamPerCall(frameSets: string[][]) {
@@ -58,19 +50,6 @@ const answered = (followups: string[], text = "Through a grant.") => [
   ev("followups", followups),
   ev("done", { message_id: 5 }),
 ];
-
-async function ask(text: string, language?: string) {
-  const user = userEvent.setup();
-  render(
-    <StrictMode>
-      <Ask />
-    </StrictMode>,
-  );
-  if (language) await pickLanguage(user, language);
-  await user.type(screen.getByLabelText("Question"), text);
-  await user.click(screen.getByRole("button", { name: "Ask" }));
-  return user;
-}
 
 afterEach(() => {
   vi.unstubAllGlobals();

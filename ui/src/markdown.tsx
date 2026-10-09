@@ -324,7 +324,7 @@ function startsBlock(line: string): boolean {
   );
 }
 
-export type MarkerHooks = {
+type MarkerHooks = {
   onHover?: (marker: number | null) => void;
   /** Opens the source behind a marker; the chip is a button only once
    * `backed` says there is one. */
@@ -465,9 +465,8 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       // and climb back.
       out.push(
         // A table wider than the column scrolls inside its own box rather
-        // than pushing the answer sideways. md-table names the box so the
-        // stylesheet can size it apart from the prose around it.
-        <div key={key} className="md-table overflow-x-auto">
+        // than pushing the answer sideways.
+        <div key={key} className="overflow-x-auto">
           <table>
             <thead>
               <tr>
@@ -543,6 +542,6 @@ function Markdown({
  *
  * The props are stable by construction: the text and the citation set belong
  * to a turn, and the callers hand over callbacks that keep their identity
- * (see Ask's markerOpen).
+ * (see ThreadView's markerOpen).
  */
 export default memo(Markdown);

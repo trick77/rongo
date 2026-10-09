@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import ThreadView, { useSourcesPane, SourcesPane } from "../ThreadView";
 import { pageColumn } from "../page";
 
-import SourceView, { isCommit, type SourceRef } from "../SourceView";
-import CommitView from "../CommitView";
-import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "../ThreadView";
+import { type SourceRef } from "../SourceView";
+import CitationViewer from "../CitationViewer";
 import ThreadUsageBadge from "../ThreadUsageBadge";
 import {
-  linkChosenCandidates,
-  storedRetries,
-  storedTurn,
   type Message,
   type ThreadTotal,
   type Turn,
+  turnsFromRecord,
 } from "../turns";
 
 /**
@@ -45,10 +43,8 @@ export default function SharePage({ token }: { token: string }) {
   // from then on. A share is one thread and never changes, so nothing resets
   // it. The audience is on the wire — handlePublicShare drops the follow-ups,
   // the per-turn usage and the timeline, and nothing else.
-  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
-  // The turn the reader pointed the pane at from the chip under it; null is
-  // the newest citing turn. Nothing resets it: a share never gains a turn.
-  const [sourceTurn, setSourceTurn] = useState<number | null>(null);
+  // Nothing resets it: a share never gains a turn.
+  const pane = useSourcesPane(state.s === "ready" ? state.turns : []);
 
   // Belt and braces with the X-Robots-Tag the two public endpoints set: a
   // crawler that reaches the page rather than the API sees this one. Removed
@@ -93,7 +89,7 @@ export default function SharePage({ token }: { token: string }) {
           // The same three passes the app runs over a stored thread: retries
           // and re-explains fold under the question they belong to, and a
           // card shows which candidate was chosen.
-          turns: storedRetries(linkChosenCandidates(list, list.map(storedTurn))),
+          turns: turnsFromRecord(list),
           // No total means the thread paid for nothing: show nothing, not a
           // zero. A total without a cost means no call was priced.
           usage: body.total_tokens == null ? null : { tokens: body.total_tokens, cost: body.cost_usd ?? null },
@@ -138,18 +134,7 @@ export default function SharePage({ token }: { token: string }) {
     );
   }
 
-  const showSources = sourcesOpen ?? paneAudienceTurn(state.turns)?.audience === "dev";
-  const listedTurn = sourceTurn ?? sourceTurnOf(state.turns);
-  // As in Ask: the chip shuts the pane only when it is open on that very
-  // turn; from any other turn it moves the pane there.
-  const toggleSources = (i: number) => {
-    if (showSources && i === listedTurn) {
-      setSourcesOpen(false);
-      return;
-    }
-    setSourceTurn(i);
-    setSourcesOpen(true);
-  };
+  const { showSources, listedTurn, toggleSources, closeSources } = pane;
 
   return (
     // The app's own shell: a 56px header over the thread, and the Sources
@@ -219,29 +204,21 @@ export default function SharePage({ token }: { token: string }) {
             sourceTurn={listedTurn}
             hot={hot}
             onOpen={setViewing}
-            onClose={() => setSourcesOpen(false)}
+            onClose={closeSources}
           />
         )}
       </div>
 
       {/* The share's own endpoint, never /api/source: that one takes any
           repo/path/sha and would be a reader for the whole indexed corpus. */}
-      {viewing &&
-        (isCommit(viewing) ? (
-          // No onOpenFile: the share's file endpoint serves only what a turn
-          // cites, and a commit's touched files are not citations.
-          <CommitView
-            source={viewing}
-            endpoint={`/api/shares/${encodeURIComponent(token)}/commit`}
-            onClose={closeViewer}
-          />
-        ) : (
-          <SourceView
-            source={viewing}
-            endpoint={`/api/shares/${encodeURIComponent(token)}/source`}
-            onClose={closeViewer}
-          />
-        ))}
+      <CitationViewer
+        viewing={viewing}
+        onClose={closeViewer}
+        endpoints={{
+          source: `/api/shares/${encodeURIComponent(token)}/source`,
+          commit: `/api/shares/${encodeURIComponent(token)}/commit`,
+        }}
+      />
     </div>
   );
 }

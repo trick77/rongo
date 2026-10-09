@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { serverMessage } from "./http";
 import type { Thread } from "./Threads";
 import { DeleteThreadModal, RenameThreadModal } from "./ThreadModals";
 import ShareDialog from "./share/ShareDialog";
@@ -69,7 +70,7 @@ export function useThreadActions({
       if (!res.ok) {
         // A refused title (too long, say) is the reader's to fix, so the
         // dialog stays and says why.
-        setRenameError((await res.text()).trim() || `The server answered with ${res.status}.`);
+        setRenameError(await serverMessage(res));
         return;
       }
       setRenaming(null);

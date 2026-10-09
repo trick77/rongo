@@ -22,6 +22,14 @@ function asFeedback(v: unknown): Feedback | null {
   return { verdict: f.verdict, reason: typeof f.reason === "string" ? f.reason : "", upToMessageId: f.upToMessageId };
 }
 
+/** The stored verdict on a thread: null for none, undefined when the server
+ * would not say. */
+async function readFeedback(threadId: string): Promise<Feedback | null | undefined> {
+  const res = await fetch(`/api/threads/${threadId}/feedback`);
+  if (!res.ok) return undefined;
+  return asFeedback(await res.json());
+}
+
 /** A turn the server counts as a finished answer, the one thing a verdict can
  * cover: written, not failed, not a card asking back. */
 export const finished = (t: Turn) =>
@@ -77,10 +85,8 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
     setPickingAt(null);
     (async () => {
       try {
-        const res = await fetch(`/api/threads/${threadId}/feedback`);
-        if (!res.ok || shown.current !== threadId) return;
-        const got = asFeedback(await res.json());
-        if (shown.current === threadId && !touched.current) setFb(got);
+        const got = await readFeedback(threadId);
+        if (got !== undefined && shown.current === threadId && !touched.current) setFb(got);
       } catch {
         // No verdict on screen is what a failed read leaves: the thumbs still
         // work, and the next click writes the truth.
@@ -98,8 +104,8 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
 
   const reload = async () => {
     try {
-      const res = await fetch(`/api/threads/${threadId}/feedback`);
-      if (res.ok && shown.current === threadId) setFb(asFeedback(await res.json()));
+      const got = await readFeedback(threadId);
+      if (got !== undefined && shown.current === threadId) setFb(got);
     } catch {
       // Nothing better to show than what is on screen.
     }

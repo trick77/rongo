@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { useOpenUntil } from "./hooks";
 import { Chevron } from "./icons";
 import { locateSummary, type LocateFile } from "./locateTrace";
+import { str, strs } from "./wire";
 
 /**
  * The activity trace has more than two states: a turn that ended by asking
@@ -12,7 +14,7 @@ import { locateSummary, type LocateFile } from "./locateTrace";
 export type TraceState = "running" | "done" | "waiting" | "decided" | "failed";
 
 /** What a step found, as the backend reports it once the step is done. */
-export type StepDetail = Record<string, unknown>;
+type StepDetail = Record<string, unknown>;
 
 /** One status event, with the moment it arrived, and what the step found. */
 // at is on the browser's clock. serverAt, on a live step, is the server's time
@@ -83,8 +85,6 @@ function seconds(ms: number): string {
   return (Math.max(ms, 0) / 1000).toFixed(1) + "s";
 }
 
-const asStrings = (v: unknown): string[] =>
-  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 const asNumber = (v: unknown): number | null => (typeof v === "number" ? v : null);
 
 function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
@@ -131,11 +131,11 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           </div>
         );
       }
-      const terms = asStrings(detail.terms);
-      const code = asStrings(detail.code_terms);
-      const repos = asStrings(detail.repos);
-      const unknown = asStrings(detail.unknown_repos);
-      const outside = asStrings(detail.outside_repos);
+      const terms = strs(detail.terms);
+      const code = strs(detail.code_terms);
+      const repos = strs(detail.repos);
+      const unknown = strs(detail.unknown_repos);
+      const outside = strs(detail.outside_repos);
       let scope: string;
       if (repos.length > 0) {
         scope = repos.join(", ") + (detail.pinned ? ", the thread's scope" : ", named by the question");
@@ -169,12 +169,12 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       // A release turn read the infrastructure repository's overlays and the
       // commits between two deployed versions: the pair, the images, the
       // commits per component, and the verdicts that yielded no range.
-      const between = asStrings(detail.between);
+      const between = strs(detail.between);
       if (between.length === 2) {
         const commits = asNumber(detail.commits) ?? 0;
         const images = asNumber(detail.images) ?? 0;
         const notes = (detail.notes ?? {}) as Record<string, number>;
-        const infra = typeof detail.infrastructure === "string" ? detail.infrastructure : "";
+        const infra = str(detail.infrastructure);
         return (
           <div className="trace-detail">
             {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">between</span> {between[0]}{" "}
@@ -207,7 +207,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       if (detail.since_days != null) {
         const commits = asNumber(detail.commits) ?? 0;
         const days = asNumber(detail.since_days) ?? 0;
-        const topic = typeof detail.topic === "string" ? detail.topic : "";
+        const topic = str(detail.topic);
         return (
           <div className="trace-detail">
             {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">in the last</span> {days}{" "}
@@ -229,7 +229,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       }
       const hits = asNumber(detail.hits) ?? 0;
       const best = (detail.best ?? null) as { repo?: string; path?: string; lanes?: string[] } | null;
-      const lanes = asStrings(best?.lanes).map((l) => l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"));
+      const lanes = strs(best?.lanes).map((l) => l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"));
       return (
         <div className="trace-detail">
           {hits} {hits === 1 ? "hit" : "hits"}
@@ -259,7 +259,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
     case "routing": {
       const decision = String(detail.decision ?? "answer");
       const rung = String(detail.rung ?? "");
-      const candidates = asStrings(detail.candidates);
+      const candidates = strs(detail.candidates);
       return (
         <div className="trace-detail">
           {rungSentence(decision, rung)}
@@ -329,7 +329,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
             </span>
           ))}
           {locate && (
-            <div className="trace-locate">
+            <div>
               <div>
                 {locate.header}
                 {locate.steps.length > 0 && ":"}
@@ -373,11 +373,11 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           </div>
         );
       }
-      const memoryText = typeof detail.memory === "string" ? detail.memory : "";
-      const scope = typeof detail.scope === "string" ? detail.scope : "";
-      const dropped = typeof detail.scope_dropped === "string" ? detail.scope_dropped : "";
-      const replaced = asStrings(detail.replaced);
-      const removed = asStrings(detail.removed);
+      const memoryText = str(detail.memory);
+      const scope = str(detail.scope);
+      const dropped = str(detail.scope_dropped);
+      const replaced = strs(detail.replaced);
+      const removed = strs(detail.removed);
       return (
         <div className="trace-detail">
           {memoryText && (
@@ -422,7 +422,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const sourceTok = asNumber(detail.prompt_sources);
       const attempts = asNumber(detail.attempts);
       const memories = asNumber(detail.memories);
-      const readAt = asStrings(detail.read_at);
+      const readAt = strs(detail.read_at);
       return (
         <div className="trace-detail">
           {inTok !== null && <>{tokens(inTok)} tokens in</>}
@@ -517,15 +517,10 @@ export default function Trace({
   // Open only while the turn is still running. A trace that mounts already
   // closed has no roll-up to wait for: a superseded attempt reopened with Show
   // remounts finished, and so does a turn read back out of the record.
-  const [open, setOpen] = useState(state === "running");
-  // On the transition, never on every render: a reader who opened a finished
-  // trace keeps it open, and a later state change (waiting -> decided) does not
-  // shut it under them. Same ref pattern as Clarify and Narrow.
-  const wasRunning = useRef(state === "running");
-  useEffect(() => {
-    if (wasRunning.current && state !== "running") setOpen(false);
-    wasRunning.current = state === "running";
-  }, [state]);
+  // Shuts when the run ends and never reopens by itself: a reader who opened
+  // a finished trace keeps it open, and a later state change (waiting ->
+  // decided) does not shut it under them.
+  const [open, setOpen] = useOpenUntil(state !== "running", false);
   useEffect(() => {
     if (state !== "running") return;
     const id = setInterval(() => setNow(Date.now()), 500);

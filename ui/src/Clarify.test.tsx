@@ -1,12 +1,10 @@
-import { StrictMode } from "react";
+import { strict } from "./__tests__/helpers";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Clarify from "./Clarify";
 
 // Every test mounts under StrictMode, the way the real app renders it.
-const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
-
 const candidates = [
   {
     idx: 0,

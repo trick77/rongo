@@ -22,7 +22,7 @@ export type Route =
   /** The public page. Never rendered inside the app — see main.tsx. */
   | { view: "share"; token: string };
 
-export const sharePrefix = "/share/";
+const sharePrefix = "/share/";
 const threadPrefix = "/thread/";
 
 /** What threads.newToken mints: 16 random bytes as 22 URL-safe characters. */

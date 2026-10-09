@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useOpenUntil } from "./hooks";
 import { Chevron } from "./icons";
 
 /** One entry on the clarification card, as the SSE event and the stored
@@ -44,18 +44,10 @@ export default function Clarify({
    */
   readOnly?: boolean;
 }) {
-  const [open, setOpen] = useState(chosenIdx == null);
   // Collapses the instant a choice lands, and opens again if that choice is
   // taken back because the turn it started failed — the card is "your move"
-  // once more. Neither fights a reader who toggles it by hand: the effect
-  // only fires on a transition, never on a re-render that leaves chosenIdx
-  // unchanged.
-  const prevChosen = useRef(chosenIdx);
-  useEffect(() => {
-    if (prevChosen.current == null && chosenIdx != null) setOpen(false);
-    if (prevChosen.current != null && chosenIdx == null) setOpen(true);
-    prevChosen.current = chosenIdx;
-  }, [chosenIdx]);
+  // once more.
+  const [open, setOpen] = useOpenUntil(chosenIdx != null);
 
   const chosen = chosenIdx != null ? candidates.find((c) => c.idx === chosenIdx) : undefined;
 

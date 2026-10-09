@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { ev } from "./__tests__/helpers";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
@@ -57,8 +58,6 @@ function liveStream(stored: Record<string, unknown>) {
     },
   };
 }
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 
 afterEach(() => {
   vi.unstubAllGlobals();

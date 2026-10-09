@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
+import { useLoaded, useReportCount } from "../hooks";
 import { Icon } from "../Icon";
 import { forgetMemory, listMemories, type Memory } from "./api";
 
@@ -10,8 +11,6 @@ import { forgetMemory, listMemories, type Memory } from "./api";
  * question. English rows on an English page: memory is chrome, not an
  * answer, and one rule serves threads in four languages.
  */
-type State = { s: "loading" } | { s: "failed" } | { s: "loaded"; enabled: boolean; memories: Memory[] };
-
 function day(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -26,37 +25,20 @@ export default function MemoryPage({
   onCount?: (n: number | null) => void;
   onOpenThread: (id: string) => void;
 }) {
-  const [state, setState] = useState<State>({ s: "loading" });
+  const [state, setState] = useLoaded(async () => {
+    const page = await listMemories();
+    return { enabled: page.enabled, memories: page.memories };
+  }, []);
   const [busy, setBusy] = useState<number | null>(null);
 
-  const count = state.s === "loaded" && state.enabled ? state.memories.length : null;
-  useEffect(() => {
-    onCount(count);
-    return () => onCount(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const page = await listMemories();
-        if (!cancelled) setState({ s: "loaded", enabled: page.enabled, memories: page.memories });
-      } catch {
-        if (!cancelled) setState({ s: "failed" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useReportCount(state.state === "ready" && state.enabled ? state.memories.length : null, onCount);
 
   async function forget(m: Memory) {
     setBusy(m.id);
     try {
       if (!(await forgetMemory(m.id))) return;
       setState((prev) =>
-        prev.s === "loaded" ? { ...prev, memories: prev.memories.filter((x) => x.id !== m.id) } : prev,
+        prev.state === "ready" ? { ...prev, memories: prev.memories.filter((x) => x.id !== m.id) } : prev,
       );
     } catch {
       // The row stays: saying a rule is gone when it is not is worse than
@@ -66,8 +48,8 @@ export default function MemoryPage({
     }
   }
 
-  if (state.s === "loading") return <p className="text-muted">Loading…</p>;
-  if (state.s === "failed")
+  if (state.state === "loading") return <p className="text-muted">Loading…</p>;
+  if (state.state === "error")
     return (
       <p role="alert" className="text-accent-strong">
         The memory cannot be fetched.

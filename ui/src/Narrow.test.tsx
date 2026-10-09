@@ -1,10 +1,8 @@
-import { StrictMode } from "react";
+import { strict } from "./__tests__/helpers";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Narrow from "./Narrow";
-
-const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 
 const repos = [
   { repo: "peeq", branch: "master" },

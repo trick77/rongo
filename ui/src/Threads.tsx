@@ -10,12 +10,12 @@ import { useThreadActions } from "./useThreadActions";
  * How much history the rail carries: ../loom's 30. The rest is on the
  * Threads page, which the foot of the list opens.
  */
-export const railLimit = 30;
+const railLimit = 30;
 /**
  * The starred list is not a page: every starred thread, however old, or a
  * star stops doing its job at the 31st. The server's ceiling on one page.
  */
-export const starredLimit = 1000;
+const starredLimit = 1000;
 
 export type Thread = {
   /**
@@ -127,12 +127,10 @@ export default function Threads({
   // Which row's menu is open. An id rather than an object: the list reloads
   // underneath it.
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const patch = (id: string, change: Partial<Thread>) => (prev: Thread[]) =>
-    prev.map((x) => (x.id === id ? { ...x, ...change } : x));
   const actions = useThreadActions({
     onRenamed: (id, title) => {
-      setThreads(patch(id, { title }));
-      setStarred(patch(id, { title }));
+      setThreads(patch<Thread>(id, { title }));
+      setStarred(patch<Thread>(id, { title }));
       onRenamed();
     },
     onDeleted: (id) => {
@@ -142,15 +140,15 @@ export default function Threads({
     },
     onShared: (id, shared) => {
       // The row's marker follows the link, without waiting for a reload.
-      setThreads(patch(id, { shared }));
-      setStarred(patch(id, { shared }));
+      setThreads(patch<Thread>(id, { shared }));
+      setStarred(patch<Thread>(id, { shared }));
       onShared();
     },
     onStarred: (id, isStarred) => {
       // The row changes section on the spot. Starred is newest first like
       // the rest, so a row joining it is placed by its id's order among the
       // rows already there — a reload would put it in the same place.
-      setThreads(patch(id, { starred: isStarred }));
+      setThreads(patch<Thread>(id, { starred: isStarred }));
       setStarred((prev) => {
         if (!isStarred) return prev.filter((x) => x.id !== id);
         const row = threads.find((x) => x.id === id);
@@ -406,3 +404,9 @@ export default function Threads({
     </nav>
   );
 }
+
+/** One row of a list, changed in place; the rest untouched. */
+export const patch =
+  <T extends { id: string }>(id: string, change: Partial<T>) =>
+  (prev: T[]): T[] =>
+    prev.map((x) => (x.id === id ? { ...x, ...change } : x));
