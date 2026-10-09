@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/symbols"
@@ -441,11 +442,21 @@ func TestReplaceFile_keepsSqlTablesButNotColumns(t *testing.T) {
 }
 
 // TestDeleteFile_survivesAWriterOnAnotherConnection: the HTTP side writes
-// titles, usage and steps while an incremental run deletes paths. In WAL a
-// transaction that opens with a read holds a snapshot, and its first write
-// after another connection has committed fails at once with "database is
-// locked" — the busy timeout never runs for a stale snapshot. Writing first
-// takes the lock and waits instead.
+// titles, usage and steps while an incremental run deletes paths. Under a
+// deferred BEGIN a transaction that read before its first write — and a
+// connection's first use of chunks_fts reads at prepare time — failed that
+// write at once with "database is locked" once the other side had committed.
+// store.Open begins IMMEDIATE, so the other writer waits instead; the
+// deterministic proof is store's TestOpen_aTransactionThatReadsFirstStillGetsItsWrite,
+// this is the two paths racing for real.
+//
+// The other writer pauses a millisecond after every commit rather than
+// spinning: a writer that re-takes the lock the instant it commits holds it
+// almost without a gap, and under a loaded -race run the busy handler's
+// sleeps all land while it is held, until the ten-second timeout fails the
+// test for a reason that is not the one it is about. The pause is a sleep
+// after the commit, not a ticker: a ticker keeps one tick buffered, so once a
+// commit outlasts the interval the loop is back to back again.
 func TestDeleteFile_survivesAWriterOnAnotherConnection(t *testing.T) {
 	db := writeDB(t)
 	testee := NewWriter(db)
@@ -465,9 +476,10 @@ func TestDeleteFile_survivesAWriterOnAnotherConnection(t *testing.T) {
 			default:
 			}
 			_, _ = db.Exec(`UPDATE files SET size = ? WHERE path = 'src/Other.java'`, i)
+			time.Sleep(time.Millisecond)
 		}
 	}()
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 50; i++ {
 		if err := testee.ReplaceFile(ctx, "shop", "src/A.java", "abc123", "java", 64,
 			sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 			t.Fatalf("ReplaceFile %d beside another writer: %v", i, err)

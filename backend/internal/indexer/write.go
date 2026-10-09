@@ -226,20 +226,17 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The transaction WRITES first. In WAL mode a transaction that opens with
-	// a read holds a snapshot, and its first write after another connection
-	// has committed fails at once with "database is locked" — the busy timeout
-	// never runs for a stale snapshot. The HTTP side writes titles, usage and
-	// steps all the time, so the old "SELECT id, then delete" shape failed
-	// whole incremental runs on a race every test missed.
-	//
 	// The mirrors go first: foreign_keys is ON, so deleting the files row
 	// cascades chunks away, and chunks_vec and chunks_fts are NOT part of that
 	// cascade. Letting it fire first would orphan them permanently, and an
 	// orphaned vector keeps answering questions about deleted code.
 	//
-	// chunks_fts goes first because it is a write: the id read chunks_vec
-	// needs comes only once the transaction holds the lock.
+	// The transaction holds the write lock from BEGIN (store.Open begins
+	// IMMEDIATE), so the reads below cannot leave a stale WAL snapshot under
+	// the first write. The HTTP side writes titles, usage and steps all the
+	// time; with a deferred BEGIN that race failed whole incremental runs with
+	// "database is locked", and writing first did not close it: fts5 reads its
+	// shadow tables when a connection first touches chunks_fts, at prepare.
 	const owned = `SELECT id FROM chunks WHERE file_id IN (SELECT id FROM files WHERE repo = ?1 AND path = ?2)`
 	if _, err := tx.ExecContext(ctx, `DELETE FROM chunks_fts WHERE rowid IN (`+owned+`)`, repo, path); err != nil {
 		return fmt.Errorf("delete %s/%s: %w", repo, path, err)
@@ -268,9 +265,7 @@ func (w *Writer) DeleteFile(ctx context.Context, repo, path string) error {
 const deleteVecRow = `DELETE FROM chunks_vec WHERE rowid = ?`
 
 // deleteVecRows deletes the chunks_vec row of every chunk id query selects.
-// The ids are read in full before the first delete. tx must already have
-// written: a transaction that opens with this read holds a WAL snapshot and
-// fails its first write with "database is locked" (see DeleteFile).
+// The ids are read in full before the first delete.
 func deleteVecRows(ctx context.Context, tx *sql.Tx, query string, args ...any) error {
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -316,8 +311,7 @@ func upsertFile(ctx context.Context, tx *sql.Tx, repo, path, sha, lang string, s
 
 // clearFileContent removes a file's chunks from all three tables and its
 // symbols, in the order the mirrors demand: gather the ids, delete the vec0 and
-// fts5 rows by rowid, and only then the chunks themselves. Every caller has
-// already written (upsertFile), so the id read holds no stale snapshot.
+// fts5 rows by rowid, and only then the chunks themselves.
 func clearFileContent(ctx context.Context, tx *sql.Tx, fileID int64) error {
 	if err := deleteVecRows(ctx, tx, `SELECT id FROM chunks WHERE file_id = ?`, fileID); err != nil {
 		return err
