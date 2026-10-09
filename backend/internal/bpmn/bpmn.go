@@ -253,23 +253,23 @@ func NodeKinds() []string {
 }
 
 func enclosingNode(stack []frame) *Node {
-	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i].node != nil {
-			return stack[i].node
-		}
-		if stack[i].flow != nil || stack[i].proc != nil {
-			return nil
-		}
-	}
-	return nil
+	return enclosing(stack, func(f frame) *Node { return f.node })
 }
 
 func enclosingFlow(stack []frame) *Flow {
+	return enclosing(stack, func(f frame) *Flow { return f.flow })
+}
+
+// enclosing walks the open elements innermost first and returns the one
+// get picks out, or nil once a frame holding any other element — a process,
+// a node or a flow — is reached: a child element belongs to its nearest
+// owner, never to an owner further out.
+func enclosing[T any](stack []frame, get func(frame) *T) *T {
 	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i].flow != nil {
-			return stack[i].flow
+		if p := get(stack[i]); p != nil {
+			return p
 		}
-		if stack[i].node != nil || stack[i].proc != nil {
+		if stack[i].proc != nil || stack[i].node != nil || stack[i].flow != nil {
 			return nil
 		}
 	}
