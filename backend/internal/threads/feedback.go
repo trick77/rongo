@@ -2,9 +2,9 @@ package threads
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
+
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // Feedback is the reader's verdict on a thread. It is kept for reading later
@@ -45,14 +45,7 @@ func (s *Store) SetFeedback(ctx context.Context, subject string, threadID int64,
 		   up_to_message_id = excluded.up_to_message_id,
 		   updated_at = excluded.updated_at`,
 		verdict, reason, threadID, subject)
-	if err != nil {
-		return false, fmt.Errorf("set feedback: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("set feedback: %w", err)
-	}
-	return n > 0, nil
+	return sqlutil.Affected(res, err, "set feedback")
 }
 
 // ClearFeedback takes the verdict away. Reports false only for a thread that
@@ -72,16 +65,16 @@ func (s *Store) ClearFeedback(ctx context.Context, subject string, threadID int6
 // none was given or the thread is not theirs.
 func (s *Store) Feedback(ctx context.Context, subject string, threadID int64) (Feedback, bool, error) {
 	var f Feedback
-	err := s.db.QueryRowContext(ctx, `
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `
 		SELECT f.verdict, f.reason, f.up_to_message_id
 		  FROM thread_feedback f JOIN threads t ON t.id = f.thread_id
-		 WHERE f.thread_id = ? AND t.user_subject = ?`, threadID, subject).
-		Scan(&f.Verdict, &f.Reason, &f.UpToMessageID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Feedback{}, false, nil
-	}
+		 WHERE f.thread_id = ? AND t.user_subject = ?`, threadID, subject),
+		&f.Verdict, &f.Reason, &f.UpToMessageID)
 	if err != nil {
 		return Feedback{}, false, fmt.Errorf("read feedback: %w", err)
+	}
+	if !found {
+		return Feedback{}, false, nil
 	}
 	return f, true, nil
 }

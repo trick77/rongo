@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // Evidence is the checkout as the record reads it back: a file at the commit
@@ -214,8 +215,8 @@ func (s *Store) chunkSource(ctx context.Context, r recorded, files map[string]fi
 // failed lookup counts as listed, so the doubt is logged loudly.
 func (s *Store) listed(ctx context.Context, repo string) bool {
 	var one int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM repo_state WHERE name = ?`, repo).Scan(&one)
-	return !errors.Is(err, sql.ErrNoRows)
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `SELECT 1 FROM repo_state WHERE name = ?`, repo), &one)
+	return found || err != nil
 }
 
 // window is r's lines read from git at its commit, or false: no identity,

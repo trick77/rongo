@@ -40,7 +40,7 @@ func libraryMap(t *testing.T) projects.Map {
 
 func TestProjectCandidatesFoldALibraryIntoTheProductBesideIt(t *testing.T) {
 	pm := libraryMap(t)
-	repos := repoCandidates([]Candidate{
+	repos := RepoCandidates([]Candidate{
 		{Repo: "acme-commons", ModuleKey: "util", Score: 0.70, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.70}}},
 		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 2, Score: 0.60}}},
 	})
@@ -65,7 +65,7 @@ func TestProjectCandidatesFoldALibraryIntoTheProductBesideIt(t *testing.T) {
 
 func TestProjectCandidatesPutALibraryOnEveryProductBesideItThatUsesIt(t *testing.T) {
 	pm := libraryMap(t)
-	repos := repoCandidates([]Candidate{
+	repos := RepoCandidates([]Candidate{
 		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}}},
 		{Repo: "billing-api", ModuleKey: "invoice", Score: 0.55, Hits: []retrieve.Hit{{ChunkID: 2, Score: 0.55}}},
 		{Repo: "acme-commons", ModuleKey: "util", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 3, Score: 0.50}}},
@@ -91,7 +91,7 @@ func TestProjectCandidatesPutALibraryOnEveryProductBesideItThatUsesIt(t *testing
 
 func TestProjectCandidatesLeaveALibraryAloneWhenNoProductBesideItUsesIt(t *testing.T) {
 	pm := libraryMap(t)
-	repos := repoCandidates([]Candidate{
+	repos := RepoCandidates([]Candidate{
 		{Repo: "legacy-crm", ModuleKey: "crm", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}}},
 		{Repo: "acme-commons", ModuleKey: "util", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 2, Score: 0.50}}},
 	})

@@ -349,14 +349,7 @@ func (s *Store) Rename(ctx context.Context, subject string, id int64, title stri
 	// renamed and leave it alone.
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE threads SET title = ?, title_settled = 1 WHERE id = ? AND user_subject = ?`, title, id, subject)
-	if err != nil {
-		return false, fmt.Errorf("rename thread: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("rename thread: %w", err)
-	}
-	return n > 0, nil
+	return sqlutil.Affected(res, err, "rename thread")
 }
 
 // SetStarred marks or unmarks a thread as the reader's own. Reports whether a
@@ -366,14 +359,7 @@ func (s *Store) Rename(ctx context.Context, subject string, id int64, title stri
 func (s *Store) SetStarred(ctx context.Context, subject string, id int64, starred bool) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE threads SET starred = ? WHERE id = ? AND user_subject = ?`, starred, id, subject)
-	if err != nil {
-		return false, fmt.Errorf("star thread: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("star thread: %w", err)
-	}
-	return n > 0, nil
+	return sqlutil.Affected(res, err, "star thread")
 }
 
 // Delete removes a thread and, through the schema's cascades, every message,
@@ -383,14 +369,7 @@ func (s *Store) SetStarred(ctx context.Context, subject string, id int64, starre
 func (s *Store) Delete(ctx context.Context, subject string, id int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
 		`DELETE FROM threads WHERE id = ? AND user_subject = ?`, id, subject)
-	if err != nil {
-		return false, fmt.Errorf("delete thread: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("delete thread: %w", err)
-	}
-	return n > 0, nil
+	return sqlutil.Affected(res, err, "delete thread")
 }
 
 // AddQuestion appends a question and returns the message it created. The answer
@@ -540,14 +519,7 @@ func (s *Store) SetScope(ctx context.Context, messageID int64, sc ask.Scope) err
 	// and it bought nothing: scanScope decodes any blob to the zero value,
 	// and ThreadScope reads Known after decoding, so a stored empty scope
 	// says exactly what an empty column says.
-	blob, err := json.Marshal(sc)
-	if err != nil {
-		return fmt.Errorf("encode scope: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET scope = ? WHERE id = ?`, string(blob), messageID); err != nil {
-		return fmt.Errorf("store scope: %w", err)
-	}
-	return nil
+	return s.setJSON(ctx, "scope", messageID, sc)
 }
 
 // SetMemory records the standing instruction a turn saved, so the chip under
@@ -567,7 +539,7 @@ func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string)
 	if len(qs) == 0 {
 		return nil
 	}
-	return s.saveJSON(ctx, messageID, "followups", qs)
+	return s.setJSON(ctx, "followups", messageID, qs)
 }
 
 // SavePastedTexts records which trailing blocks of the question were pasted.
@@ -579,7 +551,7 @@ func (s *Store) SavePastedTexts(ctx context.Context, messageID int64, ps []Paste
 	if len(ps) == 0 {
 		return nil
 	}
-	return s.saveJSON(ctx, messageID, "pasted_texts", ps)
+	return s.setJSON(ctx, "pasted_texts", messageID, ps)
 }
 
 // SaveSteps records the activity timeline the reader watched this turn
@@ -591,79 +563,82 @@ func (s *Store) SaveSteps(ctx context.Context, messageID int64, tr timeline.Trac
 	if len(tr.Steps) == 0 {
 		return nil
 	}
-	return s.saveJSON(ctx, messageID, "steps", tr)
+	return s.setJSON(ctx, "steps", messageID, tr)
 }
 
-// saveJSON writes v as the JSON of one message column. col is always a
-// literal from the three callers above, never input: it is spliced into the
-// statement. The error names the column in words.
-func (s *Store) saveJSON(ctx context.Context, messageID int64, col string, v any) error {
+// jsonColumns is every message column written as JSON, each with the whole
+// statement that sets it. The column name reaches the SQL only through this
+// table, never from a caller's string: a name not listed is refused.
+var jsonColumns = map[string]string{
+	"scope":        `UPDATE messages SET scope = ? WHERE id = ?`,
+	"followups":    `UPDATE messages SET followups = ? WHERE id = ?`,
+	"pasted_texts": `UPDATE messages SET pasted_texts = ? WHERE id = ?`,
+	"steps":        `UPDATE messages SET steps = ? WHERE id = ?`,
+}
+
+// setJSON writes v as the JSON of one message column. The error names the
+// column in words.
+func (s *Store) setJSON(ctx context.Context, col string, messageID int64, v any) error {
 	label := strings.ReplaceAll(col, "_", " ")
+	stmt, ok := jsonColumns[col]
+	if !ok {
+		return fmt.Errorf("store %s: not a json column", label)
+	}
 	blob, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", label, err)
 	}
-	//nolint:gosec // col is a literal column name from the callers above; the values are bound ? parameters
-	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET `+col+` = ? WHERE id = ?`, string(blob), messageID); err != nil {
+	if _, err := s.db.ExecContext(ctx, stmt, string(blob), messageID); err != nil {
 		return fmt.Errorf("store %s: %w", label, err)
 	}
 	return nil
 }
 
-// scanSteps decodes a stored steps column, on the same terms as scanScope:
-// unreadable JSON costs the trace, never the message.
-func scanSteps(blob string) *timeline.Trace {
+// decodeJSON reads a stored JSON column as T. Empty and unreadable are both
+// the zero value rather than an error: a message whose provenance cannot be
+// read is still a message, and the record must stay legible.
+func decodeJSON[T any](blob string) T {
+	var v T
 	if blob == "" {
-		return nil
+		return v
 	}
-	var tr timeline.Trace
-	if err := json.Unmarshal([]byte(blob), &tr); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(blob), &v); err != nil {
+		var zero T
+		return zero
 	}
+	return v
+}
+
+// scanSteps decodes a stored steps column; a trace with no steps is no
+// trace, so unreadable JSON costs the trace, never the message.
+func scanSteps(blob string) *timeline.Trace {
+	tr := decodeJSON[timeline.Trace](blob)
 	if len(tr.Steps) == 0 {
 		return nil
 	}
 	return &tr
 }
 
-// scanFollowups decodes a stored followups column, on the same terms as
-// scanScope: unreadable JSON costs the pills, never the message.
+// scanFollowups decodes a stored followups column: unreadable JSON costs the
+// pills, never the message.
 func scanFollowups(blob string) []string {
-	if blob == "" {
-		return nil
-	}
-	var qs []string
-	if err := json.Unmarshal([]byte(blob), &qs); err != nil {
-		return nil
-	}
-	return qs
+	return decodeJSON[[]string](blob)
 }
 
-// scanPastedTexts decodes a stored pasted_texts column, on the same terms as
-// scanFollowups: unreadable JSON costs the chips, never the message.
+// scanPastedTexts decodes a stored pasted_texts column: unreadable JSON, or
+// the "[]" an empty list was once written as, costs the chips, never the
+// message.
 func scanPastedTexts(blob string) []PastedText {
-	if blob == "" || blob == "[]" {
-		return nil
-	}
-	var ps []PastedText
-	if err := json.Unmarshal([]byte(blob), &ps); err != nil || len(ps) == 0 {
+	ps := decodeJSON[[]PastedText](blob)
+	if len(ps) == 0 {
 		return nil
 	}
 	return ps
 }
 
-// scanScope decodes a stored scope column. Unreadable JSON yields the zero
-// scope rather than an error: a message whose provenance cannot be read is
-// still a message, and the record must stay legible.
+// scanScope decodes a stored scope column: unreadable JSON is the zero scope.
 func scanScope(blob string) ask.Scope {
-	if blob == "" {
-		return ask.Scope{}
-	}
-	var sc ask.Scope
-	if err := json.Unmarshal([]byte(blob), &sc); err != nil {
-		return ask.Scope{}
-	}
-	return sc
+	return decodeJSON[ask.Scope](blob)
 }
 
 // SaveUsage records the paid calls one turn made. Called on EVERY way a turn
@@ -874,15 +849,10 @@ func (s *Store) LastTurnBefore(ctx context.Context, subject string, threadID int
 const messageColumns = `m.id, m.thread_id, m.ordinal, m.audience, m.language, m.question, m.answer, m.error,
 	m.scope, m.followups, m.pasted_texts, m.steps, m.from_candidate_idx, m.from_clarification_id, m.head_message_id, m.created_at`
 
-// scanner is *sql.Row and *sql.Rows.
-type scanner interface {
-	Scan(dest ...any) error
-}
-
 // scanMessage reads messageColumns off one row, plus extra, and derives the
 // fields a Message carries beside its columns. The side tables — citations,
 // the card, the calls — are the caller's.
-func scanMessage(row scanner, extra ...any) (Message, error) {
+func scanMessage(row sqlutil.Scanner, extra ...any) (Message, error) {
 	var m Message
 	var created, scope, followups, pasted, steps string
 	var fromClar sql.NullInt64
@@ -898,18 +868,8 @@ func scanMessage(row scanner, extra ...any) (Message, error) {
 	m.Steps = scanSteps(steps)
 	m.Notice = ask.ScopeNotice(ask.Language(m.Language), m.Scope)
 	m.NarrowedTo = narrowedTo(m)
-	m.CreatedAt = parseStamp(created)
+	m.CreatedAt = sqlutil.ParseStamp(created)
 	return m, nil
-}
-
-// sqliteStamp is the layout datetime('now') writes.
-const sqliteStamp = "2006-01-02 15:04:05"
-
-// parseStamp reads a stored stamp; an unreadable one is the zero time, as
-// every read here has always treated it.
-func parseStamp(s string) time.Time {
-	t, _ := time.Parse(sqliteStamp, s)
-	return t
 }
 
 // Message returns one turn by id, or false when it does not belong to a
@@ -942,17 +902,14 @@ func (s *Store) Message(ctx context.Context, subject string, messageID int64) (M
 // citations.
 func (s *Store) MessageOrdinal(ctx context.Context, subject string, messageID int64) (int, bool, error) {
 	var ordinal int
-	err := s.db.QueryRowContext(ctx, `
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `
 		SELECT m.ordinal
 		FROM messages m JOIN threads t ON t.id = m.thread_id
-		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject).Scan(&ordinal)
-	if err == sql.ErrNoRows {
-		return 0, false, nil
-	}
+		WHERE m.id = ? AND t.user_subject = ?`, messageID, subject), &ordinal)
 	if err != nil {
 		return 0, false, fmt.Errorf("read message ordinal: %w", err)
 	}
-	return ordinal, true, nil
+	return ordinal, found, nil
 }
 
 // Messages returns a thread's turns in order, with their citations.
@@ -1021,18 +978,11 @@ func (s *Store) messages(ctx context.Context, subject string, threadID, ceiling 
 	}
 	for i := range out {
 		// Non-nil when empty, so the wire says [] rather than null.
-		out[i].Citations = orEmpty(cites[out[i].ID])
+		out[i].Citations = sqlutil.OrEmpty(cites[out[i].ID])
 		out[i].Clarification = cards[out[i].ID]
-		out[i].Calls = orEmpty(calls[out[i].ID])
+		out[i].Calls = sqlutil.OrEmpty(calls[out[i].ID])
 	}
 	return out, nil
-}
-
-func orEmpty[T any](s []T) []T {
-	if s == nil {
-		return []T{}
-	}
-	return s
 }
 
 // inChunk is how many ids one statement binds: SQLite's variable limit is far
@@ -1045,7 +995,7 @@ func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation,
 	if err != nil {
 		return nil, err
 	}
-	return orEmpty(by[messageID]), nil
+	return sqlutil.OrEmpty(by[messageID]), nil
 }
 
 // citationsFor reads the citations of every message in ids, keyed by message.
@@ -1092,15 +1042,12 @@ func (s *Store) Resolve(ctx context.Context, publicID string) (int64, bool, erro
 	// "AND public_id != ''" is what lets the partial index (idx_threads_public_id,
 	// WHERE public_id != '') answer this; on a bound parameter alone the
 	// planner cannot prove the predicate and scans the table on every route.
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM threads WHERE public_id = ? AND public_id != ''`, publicID).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx,
+		`SELECT id FROM threads WHERE public_id = ? AND public_id != ''`, publicID), &id)
 	if err != nil {
 		return 0, false, fmt.Errorf("resolve thread: %w", err)
 	}
-	return id, true, nil
+	return id, found, nil
 }
 
 // PublicIDFor is the way back, for the paths that reach a thread through a
@@ -1109,12 +1056,8 @@ func (s *Store) Resolve(ctx context.Context, publicID string) (int64, bool, erro
 // which thread to put in the address bar.
 func (s *Store) PublicIDFor(ctx context.Context, id int64) (string, error) {
 	var publicID string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT public_id FROM threads WHERE id = ?`, id).Scan(&publicID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
+	if _, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx,
+		`SELECT public_id FROM threads WHERE id = ?`, id), &publicID); err != nil {
 		return "", fmt.Errorf("read thread address: %w", err)
 	}
 	return publicID, nil
@@ -1140,15 +1083,9 @@ func (s *Store) BackfillPublicIDs(ctx context.Context) error {
 		res, err := s.db.ExecContext(ctx,
 			`UPDATE threads SET public_id = ?
 			 WHERE id = (SELECT id FROM threads WHERE public_id = '' LIMIT 1)`, publicID)
-		if err != nil {
-			return fmt.Errorf("give a thread its address: %w", err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("give a thread its address: %w", err)
-		}
-		if n == 0 {
-			return nil
+		named, err := sqlutil.Affected(res, err, "give a thread its address")
+		if err != nil || !named {
+			return err
 		}
 	}
 }

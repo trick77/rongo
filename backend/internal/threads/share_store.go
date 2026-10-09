@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // ErrNoShare is what every public lookup returns for a token that is unknown,
@@ -100,6 +101,24 @@ func (s *Store) ceilingFor(ctx context.Context, subject string, threadID int64) 
 	return id, id != 0, rows > 0, nil
 }
 
+// shareCeiling is ceilingFor with its two refusals named: ErrUnfinished for
+// a thread whose only turn is still being written, ErrNoShare for one with
+// no turn at all or one that is not this reader's. The second two are one
+// answer on purpose — telling them apart would say whose thread it is.
+func (s *Store) shareCeiling(ctx context.Context, subject string, threadID int64) (int64, error) {
+	newest, found, live, err := s.ceilingFor(ctx, subject, threadID)
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		if live {
+			return 0, ErrUnfinished
+		}
+		return 0, ErrNoShare
+	}
+	return newest, nil
+}
+
 // Share makes this thread readable by anyone holding the link, or un-revokes
 // the link it already had. Either way the ceiling moves to the newest turn.
 //
@@ -107,21 +126,10 @@ func (s *Store) ceilingFor(ctx context.Context, subject string, threadID int64) 
 // somebody's inbox, and minting a second one would leave the first revoked
 // without anybody being told.
 func (s *Store) Share(ctx context.Context, subject string, threadID int64) (Share, error) {
-	newest, found, live, err := s.ceilingFor(ctx, subject, threadID)
+	newest, err := s.shareCeiling(ctx, subject, threadID)
 	if err != nil {
 		return Share{}, err
 	}
-	if !found {
-		// A thread whose only turn is still being written can be shared in a
-		// moment; one with no turn at all, or one that is not this reader's,
-		// cannot. The second two are one answer on purpose — telling them
-		// apart would say whose thread it is.
-		if live {
-			return Share{}, ErrUnfinished
-		}
-		return Share{}, ErrNoShare
-	}
-
 	token, err := newToken()
 	if err != nil {
 		return Share{}, err
@@ -146,24 +154,19 @@ func (s *Store) Share(ctx context.Context, subject string, threadID int64) (Shar
 // the link was made become part of it. The token does not change: the point of
 // Update is that the link already sent out keeps working.
 func (s *Store) RaiseShare(ctx context.Context, subject string, threadID int64) (Share, error) {
-	newest, found, live, err := s.ceilingFor(ctx, subject, threadID)
+	newest, err := s.shareCeiling(ctx, subject, threadID)
 	if err != nil {
 		return Share{}, err
-	}
-	if !found {
-		if live {
-			return Share{}, ErrUnfinished
-		}
-		return Share{}, ErrNoShare
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE shared_threads SET up_to_message_id = ?, updated_at = datetime('now')
 		WHERE thread_id = ? AND user_subject = ? AND revoked = 0`,
 		newest, threadID, subject)
+	raised, err := sqlutil.Affected(res, err, "raise share")
 	if err != nil {
-		return Share{}, fmt.Errorf("raise share: %w", err)
+		return Share{}, err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if !raised {
 		return Share{}, ErrNoShare
 	}
 	return s.ShareFor(ctx, subject, threadID)
@@ -175,11 +178,7 @@ func (s *Store) RevokeShare(ctx context.Context, subject string, threadID int64)
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE shared_threads SET revoked = 1, updated_at = datetime('now')
 		WHERE thread_id = ? AND user_subject = ? AND revoked = 0`, threadID, subject)
-	if err != nil {
-		return false, fmt.Errorf("revoke share: %w", err)
-	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return sqlutil.Affected(res, err, "revoke share")
 }
 
 // shareColumns is the row every share read builds a Share from. Turns and
@@ -200,8 +199,8 @@ func scanShare(row interface{ Scan(...any) error }) (Share, error) {
 		return Share{}, err
 	}
 	sh.Path = SharePath + sh.Token
-	sh.SharedAt = parseStamp(sharedAt)
-	sh.UpdatedAt = parseStamp(updatedAt)
+	sh.SharedAt = sqlutil.ParseStamp(sharedAt)
+	sh.UpdatedAt = sqlutil.ParseStamp(updatedAt)
 	return sh, nil
 }
 
@@ -295,15 +294,15 @@ func (s *Store) SharedThread(ctx context.Context, token string) (Share, []Messag
 // Revoked answers the same as unknown, the way every public read here does.
 func (s *Store) SharedTitle(ctx context.Context, token string) (string, error) {
 	var title string
-	err := s.db.QueryRowContext(ctx, `
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `
 		SELECT t.title
 		FROM shared_threads sh JOIN threads t ON t.id = sh.thread_id
-		WHERE sh.token = ? AND sh.revoked = 0`, token).Scan(&title)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNoShare
-	}
+		WHERE sh.token = ? AND sh.revoked = 0`, token), &title)
 	if err != nil {
 		return "", fmt.Errorf("read shared title: %w", err)
+	}
+	if !found {
+		return "", ErrNoShare
 	}
 	return title, nil
 }
@@ -314,32 +313,13 @@ func (s *Store) SharedTitle(ctx context.Context, token string) (string, error) {
 // indexed corpus, so the public route serves only what the turns on the link
 // were actually written from.
 func (s *Store) SharedCitation(ctx context.Context, token, repo, path, sha string) (bool, error) {
-	return s.sharedCitation(ctx, token, repo, path, sha, "")
+	return s.citation(ctx, sharedScope, []any{token}, repo, path, sha, "")
 }
 
 // SharedCommit is SharedCitation for a commit citation: the commit view on
 // a share link opens only a commit a covered turn cites.
 func (s *Store) SharedCommit(ctx context.Context, token, repo, sha string) (bool, error) {
-	return s.sharedCitation(ctx, token, repo, "", sha, ask.SourceCommit)
-}
-
-func (s *Store) sharedCitation(ctx context.Context, token, repo, path, sha, kind string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT 1
-		FROM citations c
-		JOIN messages m ON m.id = c.message_id
-		JOIN shared_threads sh ON sh.thread_id = m.thread_id
-		WHERE sh.token = ? AND sh.revoked = 0 AND m.id <= sh.up_to_message_id
-		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ?
-		LIMIT 1`, token, repo, path, sha, kind).Scan(&n)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("read shared citation: %w", err)
-	}
-	return true, nil
+	return s.citation(ctx, sharedScope, []any{token}, repo, "", sha, ask.SourceCommit)
 }
 
 // CitedBy reports whether a thread this subject owns has a turn citing that
@@ -347,30 +327,52 @@ func (s *Store) sharedCitation(ctx context.Context, token, repo, path, sha, kind
 // lets the signed-in viewer open a cited file the index has since dropped,
 // without opening every path at every commit to whoever is signed in.
 func (s *Store) CitedBy(ctx context.Context, subject, repo, path, sha string) (bool, error) {
-	return s.citedBy(ctx, subject, repo, path, sha, "")
+	return s.citation(ctx, ownerScope, []any{subject}, repo, path, sha, "")
 }
 
 // CommitCitedBy is CitedBy for a commit citation: what lets the owner open a
 // cited commit the lane has since dropped.
 func (s *Store) CommitCitedBy(ctx context.Context, subject, repo, sha string) (bool, error) {
-	return s.citedBy(ctx, subject, repo, "", sha, ask.SourceCommit)
+	return s.citation(ctx, ownerScope, []any{subject}, repo, "", sha, ask.SourceCommit)
 }
 
-func (s *Store) citedBy(ctx context.Context, subject, repo, path, sha, kind string) (bool, error) {
+// citationScope is who may see a citation: the join and predicate that
+// narrow the citations table to one reader's turns, and the words the read
+// fails with.
+type citationScope struct {
+	join, what string
+}
+
+// sharedScope is the public read: a live link, and only the turns under its
+// ceiling — a turn asked since the link was made cites nothing on it.
+var sharedScope = citationScope{
+	join: `JOIN shared_threads sh ON sh.thread_id = m.thread_id
+		WHERE sh.token = ? AND sh.revoked = 0 AND m.id <= sh.up_to_message_id`,
+	what: "read shared citation",
+}
+
+// ownerScope is the signed-in read: every turn of the subject's own threads.
+var ownerScope = citationScope{
+	join: `JOIN threads t ON t.id = m.thread_id
+		WHERE t.user_subject = ?`,
+	what: "read owner citation",
+}
+
+// citation reports whether a turn within scope cites that exact file (or
+// commit, by kind) at that exact commit. A row or no row, never a third
+// answer: unknown, revoked and deleted all read as "not cited".
+func (s *Store) citation(ctx context.Context, scope citationScope, scopeArgs []any, repo, path, sha, kind string) (bool, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `
+	args := append(scopeArgs, repo, path, sha, kind)
+	found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx, `
 		SELECT 1
 		FROM citations c
 		JOIN messages m ON m.id = c.message_id
-		JOIN threads t ON t.id = m.thread_id
-		WHERE t.user_subject = ?
+		`+scope.join+`
 		  AND c.repo = ? AND c.path = ? AND c.sha = ? AND c.kind = ?
-		LIMIT 1`, subject, repo, path, sha, kind).Scan(&n)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
+		LIMIT 1`, args...), &n)
 	if err != nil {
-		return false, fmt.Errorf("read owner citation: %w", err)
+		return false, fmt.Errorf("%s: %w", scope.what, err)
 	}
-	return true, nil
+	return found, nil
 }
