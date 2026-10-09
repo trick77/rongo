@@ -246,13 +246,5 @@ func spellFor(lang Language) func(string) string {
 // like the renumberer does for the stream.
 func swissMarkdown(s string) string {
 	sp := &speller{}
-	var b strings.Builder
-	last := 0
-	for _, m := range codeSplitRe.FindAllStringIndex(s, -1) {
-		b.WriteString(sp.prose(s[last:m[0]]))
-		b.WriteString(s[m[0]:m[1]])
-		last = m[1]
-	}
-	b.WriteString(sp.prose(s[last:]))
-	return b.String()
+	return mapOutside(codeSplitRe, s, sp.prose)
 }

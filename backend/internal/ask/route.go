@@ -3,7 +3,6 @@ package ask
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -11,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
-
-	"github.com/trick77/llmwire"
 
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/modules"
@@ -75,10 +72,12 @@ func candidates(hits []retrieve.Hit, moduleOf func(repo, path string) string) []
 	return out
 }
 
-// dominates reports whether the leading candidate is far enough ahead to answer
+// Dominates reports whether the leading candidate is far enough ahead to answer
 // without asking. Relative, not absolute: fused scores have no fixed range, so
-// a constant gap would mean something different for every question.
-func dominates(cs []Candidate, margin float64) bool {
+// a constant gap would mean something different for every question. The rule
+// Route applies at its first rung; exported for the eval harness's margin
+// sweep.
+func Dominates(cs []Candidate, margin float64) bool {
 	if len(cs) < 2 {
 		return true
 	}
@@ -131,7 +130,7 @@ func worthOffering(cs []Candidate) []Candidate {
 		// who asked how a thing is TESTED, or what the README says about it,
 		// is entitled to it — including the card, when two repositories put
 		// the same thing in two places. Returning the leader alone here would
-		// silently answer from one of them: dominates() cannot ask about a
+		// silently answer from one of them: Dominates() cannot ask about a
 		// list of one.
 		return keptWithSupporting
 	}
@@ -232,7 +231,7 @@ func RepoCandidates(cs []Candidate) []Candidate {
 // hide repositories from the manifest-dependency check: five repositories
 // where only the fifth depends on the first would be asked about as four, the
 // edge would go unseen, and the turn would card where AGENTS.md says compose.
-// Route caps with capRepoCandidates, after Related has seen every one.
+// Route caps to maxRepoCandidates, after Related has seen every one.
 func repoCandidates(cs []Candidate) []Candidate {
 	index := map[string]int{}
 	var out []Candidate
@@ -261,7 +260,7 @@ func repoCandidates(cs []Candidate) []Candidate {
 //
 // It is a SECOND fold rather than a change to repoCandidates, and the
 // separation is load-bearing. Route hands repoCandidates' output to Related,
-// and anyDependency passes each candidate's Repo straight to
+// and Related passes each candidate's Repo straight to
 // repodeps.AnyDependency, which joins repo_deps on the repository name. A project name has
 // no rows in that table, so folding one step earlier would lose every go.mod
 // edge for repositories belonging to a multi-repo project — and no measurement
@@ -326,13 +325,6 @@ func projectCandidates(cs []Candidate, pm projects.Map) []Candidate {
 	return out
 }
 
-// capRepoCandidates cuts the regrouping to what a card may show. Separate from
-// repoCandidates so the manifest-dependency check runs over every repository
-// and only the question put to the reader is shortened.
-func capRepoCandidates(cs []Candidate) []Candidate {
-	return cs[:min(maxRepoCandidates, len(cs))]
-}
-
 // withAllRepos appends the card's last entry: the reader saying they meant
 // every repository after all. It is an ordinary candidate row with an empty
 // Repo — not a sentinel on the wire — so the range check, the stored
@@ -341,12 +333,6 @@ func capRepoCandidates(cs []Candidate) []Candidate {
 func withAllRepos(cs []Candidate, lang Language) []Candidate {
 	title, summary := AllReposChoice(lang)
 	return append(cs, Candidate{Title: title, Summary: summary})
-}
-
-// lastSlash finds the final path separator, so a directory can be taken as a
-// module key without pulling in path/filepath's OS-specific behaviour.
-func lastSlash(p string) int {
-	return strings.LastIndexByte(p, '/')
 }
 
 // maxCandidates is how many the card may offer. The spec says two to five;
@@ -579,7 +565,7 @@ func (r *Router) Rank(ctx context.Context, hits []retrieve.Hit) (Ranked, error) 
 // is not worth paying for a number nobody decides on.
 func (r *Router) rankByPath(hits []retrieve.Hit) Ranked {
 	return rankWith(hits, func(_, path string) string {
-		if i := lastSlash(path); i >= 0 {
+		if i := strings.LastIndexByte(path, '/'); i >= 0 {
 			return path[:i]
 		}
 		return "."
@@ -593,31 +579,6 @@ func rankWith(hits []retrieve.Hit, moduleOf func(repo, path string) string) Rank
 		capped = capped[:maxCandidates]
 	}
 	return Ranked{All: all, Capped: capped}
-}
-
-// Dominates reports whether the leading candidate in cs is far enough ahead of
-// the runner-up to answer without asking, at the given margin — the rule
-// Route applies at its first rung. Exported for the eval harness's margin
-// sweep.
-func Dominates(cs []Candidate, margin float64) bool {
-	return dominates(cs, margin)
-}
-
-// Related reports whether any two of cs are joined by a manifest dependency —
-// Route's composition rung. This is the expensive, O(n²) database query the
-// ladder is ordered to avoid on the common path: Route calls it when Dominates
-// has said no, OR when the repository rung is live (SpansRepos), because that
-// rung sits below composition and above the margin. Callers that reproduce the
-// ladder outside Route (the eval harness's margin sweep) must keep BOTH
-// conditions — paying for it on the margin alone measures a card where the
-// product composes, and calling it unconditionally is the regression this
-// method's separation from Rank exists to prevent.
-//
-// What is passed matters as much as when. On the repository rung it takes
-// RepoCandidates over the UNCAPPED ranking: a capped list can leave out the
-// one repository holding the manifest edge.
-func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
-	return r.anyDependency(ctx, cs)
 }
 
 // Projects reads the declared grouping for this turn. Deliberately not cached:
@@ -650,22 +611,6 @@ func (r *Router) Stages(ctx context.Context) (stages.Set, error) {
 		return nil, nil
 	}
 	return stages.Load(ctx, r.db)
-}
-
-// Judge asks the model whether cs are independent alternatives or parts of one
-// mechanism — the rung that decides whether the CODE is ambiguous. Exported so
-// the eval harness can call it once per question and reuse the answer across
-// every margin in its sweep, rather than paying for the model call at each one.
-func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
-	return r.judge(ctx, question, cs)
-}
-
-// Choosable asks whether the named candidates are a choice the Analyst can
-// make — the rung that decides whether the READER is equipped to answer what
-// the judge found ambiguous. Route runs it for the Analyst only, over
-// candidates that have already been named.
-func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
-	return r.choosable(ctx, question, cs)
 }
 
 // Decide is the ladder's decision, given what each rung found: the question's
@@ -999,7 +944,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// top five modules can sit in two repositories while a third repository's
 	// best module ranks sixth, and the fifth repository can be the only one
 	// with an edge to the first: a capped list misses that edge and cards
-	// where AGENTS.md says compose. anyDependency skips same-repo pairs, so
+	// where AGENTS.md says compose. Related skips same-repo pairs, so
 	// one entry per repository is fewer queries than the module list, not
 	// more. The cap is applied to the card alone, below.
 	repos := repoCandidates(ranked.All)
@@ -1039,12 +984,9 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// gate does not apply to it (see Decide). Name the repositories and ask.
 	if spans {
 		// projectCandidates AFTER Related has seen the repository-grained list:
-		// anyDependency joins repo_deps on a repository name, and a project
+		// Related joins repo_deps on a repository name, and a project
 		// name has no rows there.
-		named, allNamed, err := r.name(ctx, question, audience, lang, capRepoCandidates(projectCandidates(repos, pm)))
-		if err != nil {
-			return Decision{}, l, err
-		}
+		named, allNamed := r.name(ctx, question, audience, lang, firstN(projectCandidates(repos, pm), maxRepoCandidates))
 		// The role gate does not read this on a repository card — see Decide —
 		// but the log does. A naming call that failed here leaves the bare
 		// repository name on the card, and "all_named: true" would rule out
@@ -1053,10 +995,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 		return Decision{Ask: true, Candidates: withAllRepos(named, lang)}, l, nil
 	}
 
-	named, allNamed, err := r.name(ctx, question, audience, lang, cs)
-	if err != nil {
-		return Decision{}, l, err
-	}
+	named, allNamed := r.name(ctx, question, audience, lang, cs)
 	l.allNamed = allNamed
 
 	roleCanChoose := true
@@ -1116,14 +1055,14 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 		if key, ok := byRepo[repo][path]; ok {
 			return key
 		}
-		if i := lastSlash(path); i >= 0 {
+		if i := strings.LastIndexByte(path, '/'); i >= 0 {
 			return path[:i]
 		}
 		return "."
 	}, nil
 }
 
-// anyDependency reports whether any ordered pair of distinct repositories
+// Related reports whether any ordered pair of distinct repositories
 // among the candidates is joined by a manifest edge. This is a hard signal:
 // when one repo requires what another publishes, the two are parts of one
 // mechanism, and no model needs to be asked.
@@ -1131,7 +1070,20 @@ func (r *Router) moduleLookup(ctx context.Context, hits []retrieve.Hit) (func(re
 // One query over every repository and one per repository over its module
 // keys, not one per ordered pair: the pair loop ran n² sequential reads on
 // a wide candidate list for a yes/no the tables answer in one pass.
-func (r *Router) anyDependency(ctx context.Context, cs []Candidate) (bool, error) {
+//
+// This is Route's composition rung, and the expensive database query the
+// ladder is ordered to avoid on the common path: Route calls it when Dominates
+// has said no, OR when the repository rung is live (SpansRepos), because that
+// rung sits below composition and above the margin. Callers that reproduce the
+// ladder outside Route (the eval harness's margin sweep) must keep BOTH
+// conditions — paying for it on the margin alone measures a card where the
+// product composes, and calling it unconditionally is the regression this
+// method's separation from Rank exists to prevent.
+//
+// What is passed matters as much as when. On the repository rung it takes
+// RepoCandidates over the UNCAPPED ranking: a capped list can leave out the
+// one repository holding the manifest edge.
+func (r *Router) Related(ctx context.Context, cs []Candidate) (bool, error) {
 	if r.db == nil {
 		return false, nil
 	}
@@ -1183,7 +1135,7 @@ type gateDecision struct {
 	Decision string `json:"decision"`
 }
 
-// judge asks the model whether the candidates are alternatives or parts of one
+// Judge asks the model whether the candidates are alternatives or parts of one
 // mechanism. A reply that fails to decode means ask, never a crash: asking
 // costs the reader one click, silently composing unrelated mechanisms does
 // not recover.
@@ -1195,7 +1147,11 @@ type gateDecision struct {
 // the baseline exactly. The evidence is a real lever on the unambiguous
 // cohort and the threshold is the unsolved part; that is written up rather
 // than left half-wired here.
-func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
+//
+// The rung that decides whether the CODE is ambiguous. Exported so the eval
+// harness can call it once per question and reuse the answer across every
+// margin in its sweep, rather than paying for the model call at each one.
+func (r *Router) Judge(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Question: %s\n\nCandidates:\n", question)
 	for i, c := range cs {
@@ -1225,8 +1181,7 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	// them apart.
 	ask, decoded := true, true
 	var got gateDecision
-	body, _ := llmwire.JSONObject(out)
-	if err := json.Unmarshal([]byte(body), &got); err != nil {
+	if err := llm.DecodeReply(out, &got); err != nil {
 		decoded = false
 	} else {
 		ask = got.Decision != "compose"
@@ -1236,15 +1191,19 @@ func (r *Router) judge(ctx context.Context, question string, cs []Candidate) (bo
 	return ask, nil
 }
 
-// choosable asks whether the card just named is one the Analyst can answer. It
+// Choosable asks whether the card just named is one the Analyst can answer. It
 // sees the titles and summaries, not the code: that is the reader's view of
 // the ambiguity, and a choice that cannot be made from it cannot be made.
 //
-// A reply that fails to decode means compose, the mirror of judge's fallback:
+// A reply that fails to decode means compose, the mirror of Judge's fallback:
 // there the safe side is asking, because a composed answer across independent
 // mechanisms is wrong; here it is answering, because a question the reader
 // cannot answer ends the turn with nothing at all.
-func (r *Router) choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
+//
+// The rung that decides whether the READER is equipped to answer what the
+// judge found ambiguous. Route runs it for the Analyst only, over candidates
+// that have already been named.
+func (r *Router) Choosable(ctx context.Context, question string, cs []Candidate) (bool, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Question: %s\n\nOptions:\n", question)
 	for i, c := range cs {
@@ -1265,8 +1224,7 @@ func (r *Router) choosable(ctx context.Context, question string, cs []Candidate)
 	// downstream as "cannot".
 	choose, decoded := false, true
 	var got gateDecision
-	body, _ := llmwire.JSONObject(out)
-	if err := json.Unmarshal([]byte(body), &got); err != nil {
+	if err := llm.DecodeReply(out, &got); err != nil {
 		decoded = false
 	} else {
 		choose = got.Decision == "choose"
@@ -1289,7 +1247,7 @@ type nameResult struct {
 // is what lets the Analyst's rung refuse a card carrying a path.
 //
 // The Analyst's prompt carries nameBA, the Developer's is unchanged.
-func (r *Router) name(ctx context.Context, question string, audience Audience, lang Language, cs []Candidate) ([]Candidate, bool, error) { //nolint:unparam // the error is part of the shape the other routing steps share; both callers already handle it
+func (r *Router) name(ctx context.Context, question string, audience Audience, lang Language, cs []Candidate) ([]Candidate, bool) {
 	name := languageName(lang)
 	system := fmt.Sprintf(nameSystem, name)
 	if audience != AudienceDev {
@@ -1335,8 +1293,7 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 				return
 			}
 			var got nameResult
-			body, _ := llmwire.JSONObject(out)
-			if err := json.Unmarshal([]byte(body), &got); err != nil {
+			if err := llm.DecodeReply(out, &got); err != nil {
 				return
 			}
 			if got.Title != "" {
@@ -1348,19 +1305,12 @@ func (r *Router) name(ctx context.Context, question string, audience Audience, l
 	}
 	wg.Wait()
 
-	allNamed := true
-	for _, ok := range ok {
-		if !ok {
-			allNamed = false
-			break
-		}
-	}
-	return named, allNamed, nil
+	return named, !slices.Contains(ok, false)
 }
 
-// firstN returns at most n hits.
-func firstN(hits []retrieve.Hit, n int) []retrieve.Hit {
-	return hits[:min(n, len(hits))]
+// firstN returns at most n of s.
+func firstN[T any](s []T, n int) []T {
+	return s[:min(n, len(s))]
 }
 
 // excerptOf trims raw chunk text to a short excerpt, so a judge or naming

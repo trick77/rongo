@@ -24,6 +24,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/trick77/rongo/internal/xmlutil"
 )
 
 // Model is one file's worth of processes.
@@ -86,14 +88,7 @@ type Flow struct {
 func Parse(body []byte) (*Model, error) {
 	m := &Model{Errors: map[string]string{}, Signals: map[string]string{}, Escalations: map[string]string{}}
 	messages := map[string]string{}
-	lines := lineStarts(body)
-	lineOf := func(off int64) int {
-		i := bytes.LastIndexByte(body[:off], '<')
-		if i < 0 {
-			i = int(off) - 1
-		}
-		return sort.Search(len(lines), func(j int) bool { return lines[j] > i })
-	}
+	lineOf := xmlutil.NewLineMap(body).TagStart
 
 	var stack []frame
 	var scope *Process
@@ -119,28 +114,28 @@ func Parse(body []byte) (*Model, error) {
 			}
 			f := frame{local: t.Name.Local}
 			text.Reset()
-			id, name := attr(t, "id"), attr(t, "name")
+			id, name := xmlutil.Attr(t, "id"), xmlutil.Attr(t, "name")
 			switch {
 			case t.Name.Local == "process":
-				p := &Process{ID: id, Name: name, Executable: attr(t, "isExecutable") == "true"}
+				p := &Process{ID: id, Name: name, Executable: xmlutil.Attr(t, "isExecutable") == "true"}
 				m.Processes = append(m.Processes, p)
 				f.proc, scope = p, p
 			case t.Name.Local == "error":
-				m.Errors[id] = cmp.Or(name, attr(t, "errorCode"), id)
+				m.Errors[id] = cmp.Or(name, xmlutil.Attr(t, "errorCode"), id)
 			case t.Name.Local == "signal":
 				m.Signals[id] = cmp.Or(name, id)
 			case t.Name.Local == "escalation":
-				m.Escalations[id] = cmp.Or(name, attr(t, "escalationCode"), id)
+				m.Escalations[id] = cmp.Or(name, xmlutil.Attr(t, "escalationCode"), id)
 			case t.Name.Local == "message":
 				messages[id] = cmp.Or(name, id)
 			case t.Name.Local == "sequenceFlow" && scope != nil:
-				fl := &Flow{ID: id, Source: attr(t, "sourceRef"), Target: attr(t, "targetRef"), Name: name}
+				fl := &Flow{ID: id, Source: xmlutil.Attr(t, "sourceRef"), Target: xmlutil.Attr(t, "targetRef"), Name: name}
 				scope.Flows = append(scope.Flows, fl)
 				f.flow = fl
 			case nodeKinds[t.Name.Local] && scope != nil:
-				n := &Node{ID: id, Kind: t.Name.Local, Name: name, Called: attr(t, "calledElement"),
-					Default: attr(t, "default"), AttachedTo: attr(t, "attachedToRef"), Line: lineOf(dec.InputOffset()),
-					Delegate: cmp.Or(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))}
+				n := &Node{ID: id, Kind: t.Name.Local, Name: name, Called: xmlutil.Attr(t, "calledElement"),
+					Default: xmlutil.Attr(t, "default"), AttachedTo: xmlutil.Attr(t, "attachedToRef"), Line: lineOf(dec.InputOffset()),
+					Delegate: cmp.Or(xmlutil.Attr(t, "delegateExpression"), xmlutil.Attr(t, "class"), xmlutil.Attr(t, "expression"), xmlutil.Attr(t, "topic"))}
 				scope.Nodes = append(scope.Nodes, n)
 				f.node = n
 				if containerKinds[t.Name.Local] {
@@ -150,26 +145,26 @@ func Parse(body []byte) (*Model, error) {
 				}
 			case t.Name.Local == "errorEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Error = cmp.Or(attr(t, "errorRef"), "error")
+					n.Error = cmp.Or(xmlutil.Attr(t, "errorRef"), "error")
 				}
 			case t.Name.Local == "signalEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Signal = cmp.Or(attr(t, "signalRef"), "signal")
+					n.Signal = cmp.Or(xmlutil.Attr(t, "signalRef"), "signal")
 				}
 			case t.Name.Local == "escalationEventDefinition":
 				if n := enclosingNode(stack); n != nil {
-					n.Escalation = cmp.Or(attr(t, "escalationRef"), "escalation")
+					n.Escalation = cmp.Or(xmlutil.Attr(t, "escalationRef"), "escalation")
 				}
 			case t.Name.Local == "messageEventDefinition":
 				if n := enclosingNode(stack); n != nil {
 					// Unlike the others, a message with no reference says
 					// nothing worth a word: the engine's throw goes through
 					// the delegate, which is listed.
-					n.Message = attr(t, "messageRef")
+					n.Message = xmlutil.Attr(t, "messageRef")
 					// A message throw event carries its delegate on the
 					// definition, not on the event.
 					if n.Delegate == "" {
-						n.Delegate = cmp.Or(attr(t, "delegateExpression"), attr(t, "class"), attr(t, "expression"), attr(t, "topic"))
+						n.Delegate = cmp.Or(xmlutil.Attr(t, "delegateExpression"), xmlutil.Attr(t, "class"), xmlutil.Attr(t, "expression"), xmlutil.Attr(t, "topic"))
 					}
 				}
 			case t.Name.Local == "terminateEventDefinition":
@@ -288,23 +283,4 @@ type frame struct {
 	proc  *Process
 	node  *Node
 	flow  *Flow
-}
-
-func attr(el xml.StartElement, name string) string {
-	for _, a := range el.Attr {
-		if a.Name.Local == name {
-			return strings.Join(strings.Fields(a.Value), " ")
-		}
-	}
-	return ""
-}
-
-func lineStarts(body []byte) []int {
-	starts := []int{0}
-	for i, b := range body {
-		if b == '\n' && i+1 < len(body) {
-			starts = append(starts, i+1)
-		}
-	}
-	return starts
 }

@@ -353,7 +353,7 @@ func main() {
 		HistoryDepth: cfg.HistoryDepth,
 		// Tokens are read from the environment by the variable name the YAML
 		// entry declared. The value never appears in repos.yaml.
-		Tokens: func(tokenEnv string) string { return os.Getenv(tokenEnv) },
+		Tokens: os.Getenv,
 	})
 
 	// Indexing can be switched off for a deployment that only serves the UI.
@@ -558,9 +558,10 @@ func main() {
 	workers.Wait()
 }
 
-// parseLevel maps BACKEND_LOG_LEVEL onto slog levels, defaulting to info.
+// parseLevel maps BACKEND_LOG_LEVEL, already lower-cased and checked by
+// config, onto slog levels.
 func parseLevel(s string) slog.Level {
-	switch strings.ToLower(s) {
+	switch s {
 	case "debug":
 		return slog.LevelDebug
 	case "warn":

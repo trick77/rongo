@@ -25,7 +25,7 @@ import (
 // moduleByDir is the mapping the real router gets from internal/modules: a
 // path's directory is its module.
 func moduleByDir(_ string, p string) string {
-	if i := lastSlash(p); i >= 0 {
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
 		return p[:i]
 	}
 	return "."
@@ -64,16 +64,16 @@ func TestDominatesComparesTheTopTwo(t *testing.T) {
 	cs := []Candidate{{Score: 0.60}, {Score: 0.40}}
 
 	// (0.60-0.40)/0.60 = 0.33
-	if !dominates(cs, 0.25) {
+	if !Dominates(cs, 0.25) {
 		t.Error("a third clear of the runner-up must run on silently")
 	}
-	if dominates(cs, 0.50) {
+	if Dominates(cs, 0.50) {
 		t.Error("under a stricter margin the same pair must be asked about")
 	}
-	if !dominates([]Candidate{{Score: 0.6}}, 0.25) {
+	if !Dominates([]Candidate{{Score: 0.6}}, 0.25) {
 		t.Error("a single candidate has nothing to be ambiguous with")
 	}
-	if !dominates(nil, 0.25) {
+	if !Dominates(nil, 0.25) {
 		t.Error("no candidates is the nothing-found path, not a clarification")
 	}
 }
@@ -544,7 +544,7 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 	if len(all) != 9 {
 		t.Errorf("regrouped to %d repositories, want all 9: a capped list hides manifest edges from Related", len(all))
 	}
-	got := capRepoCandidates(all)
+	got := firstN(all, maxRepoCandidates)
 	if len(got) != maxRepoCandidates {
 		t.Errorf("offered %d repositories, want %d so the \"all repositories\" entry keeps the card at %d buttons",
 			len(got), maxRepoCandidates, maxCandidates)

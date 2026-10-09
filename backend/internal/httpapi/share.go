@@ -2,12 +2,10 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -93,12 +91,10 @@ func (s *Server) writeShare(w http.ResponseWriter, sh threads.Share, err error) 
 		http.Error(w, "This thread's first answer is still being written.", http.StatusConflict)
 		return
 	default:
-		slog.Error("share thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "share thread failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(sh)
+	writeJSON(w, sh)
 }
 
 func (s *Server) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
@@ -108,8 +104,7 @@ func (s *Server) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 	}
 	revoked, err := s.deps.Threads.RevokeShare(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("revoke share failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "revoke share failed", err)
 		return
 	}
 	if !revoked {
@@ -124,19 +119,16 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	list, err := s.deps.Threads.Shares(r.Context(), u.Subject)
 	if err != nil {
-		slog.Error("list shares failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "list shares failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(list)
+	writeJSON(w, list)
 }
 
 // handlePublicShare serves a shared thread to anyone holding the link.
@@ -191,8 +183,7 @@ func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		out.TotalTokens = &report.Total
 		out.CostUSD = report.CostUSD
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // shareTitle is what the SPA shell puts in a link preview's og:title, so a
@@ -247,8 +238,7 @@ func (s *Server) handlePublicShareSource(w http.ResponseWriter, r *http.Request)
 	repo, path, sha := q.Get("repo"), q.Get("path"), q.Get("sha")
 	cited, err := s.deps.Threads.SharedCitation(r.Context(), r.PathValue("token"), repo, path, sha)
 	if err != nil {
-		slog.Error("read shared citation failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read shared citation failed", err)
 		return
 	}
 	if !cited {

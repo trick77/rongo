@@ -295,11 +295,7 @@ func (g *Gatherer) allowed() map[string]bool {
 	if len(g.ceiling) == 0 {
 		return nil
 	}
-	set := make(map[string]bool, len(g.ceiling))
-	for _, r := range g.ceiling {
-		set[r] = true
-	}
-	return set
+	return setOf(g.ceiling)
 }
 
 // forTurn is the gatherer a turn gathers with. A resumed turn never runs the
@@ -433,7 +429,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 		if len(turn.Calls) > locateMaxCalls {
 			for _, over := range turn.Calls[locateMaxCalls:] {
 				report.Refused = append(report.Refused, over.Name+"(over the call limit)")
-				overLimit = append(overLimit, callStep(over).refusedAs("", "over the limit of calls in one round"))
+				overLimit = append(overLimit, callStepOnly(over).refusedAs("", "over the limit of calls in one round"))
 			}
 			turn.Calls = turn.Calls[:locateMaxCalls]
 		}
@@ -559,7 +555,7 @@ func (g *Gatherer) Locate(ctx context.Context, question string, sources []Source
 			// offset happened to reach.
 			for _, rest := range turn.Calls[refusedFrom+1:] {
 				report.Refused = append(report.Refused, rest.Name+"(not tried)")
-				report.Steps = append(report.Steps, callStep(rest).refusedAs("", "the token budget for this step was spent"))
+				report.Steps = append(report.Steps, callStepOnly(rest).refusedAs("", "the token budget for this step was spent"))
 			}
 			report.Steps = append(report.Steps, overLimit...)
 			break
@@ -698,11 +694,11 @@ and say so plainly instead of guessing.`
 // got wrong is not an error: it is a call that found nothing, and the model is
 // told why.
 func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources []Source, known []string, stage retrieve.StagePrefixes, shown shownFiles) (step LocateStep, refused, display string, landings []Source, err error) {
-	var args locateArgs
-	if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
-		return LocateStep{Tool: call.Name}.refusedAs(call.Name+"(unparseable)", "the call was malformed"), locateUnparseable, "", nil, nil //nolint:nilerr // malformed arguments are the model's mistake, told back to it, never a failed turn
+	step, parsed := callStep(call)
+	if parsed == nil {
+		return LocateStep{Tool: call.Name}.refusedAs(call.Name+"(unparseable)", "the call was malformed"), locateUnparseable, "", nil, nil
 	}
-	step = callStep(call)
+	args := *parsed
 
 	// The restriction, narrowed by what the model asked for and never widened
 	// past it. A name outside the ceiling is refused out loud: silently
@@ -796,7 +792,7 @@ func (g *Gatherer) runLocateTool(ctx context.Context, call llm.ToolCall, sources
 		if err != nil {
 			return LocateStep{}, "", "", nil, err
 		}
-		landings = capLandings(landings, locateMaxLandings)
+		landings = firstN(landings, locateMaxLandings)
 		return step.as("symbol(" + args.Name + ")"), "", "", reasoned(landings, "locate:symbol "+args.Name), nil
 
 	case "read":
@@ -838,18 +834,25 @@ type locateArgs struct {
 	Line    int    `json:"line"`
 }
 
-// callStep is the step a call asks for, before it runs. Arguments that do not
-// parse leave the tool name alone.
-func callStep(call llm.ToolCall) LocateStep {
+// callStep is the step a call asks for, before it runs, with its arguments
+// parsed once for whoever runs it. Arguments that do not parse leave the tool
+// name alone and return nil arguments.
+func callStep(call llm.ToolCall) (LocateStep, *locateArgs) {
 	var args locateArgs
 	step := LocateStep{Tool: call.Name}
 	if json.Unmarshal([]byte(call.Arguments), &args) != nil {
-		return step
+		return step, nil
 	}
 	step.Arg, step.Repo = cmp.Or(args.Query, args.Pattern, args.Name), args.Repo
 	if call.Name == "read" {
 		step.Path, step.Line = args.Path, args.Line
 	}
+	return step, &args
+}
+
+// callStepOnly is callStep for a call that will not run.
+func callStepOnly(call llm.ToolCall) LocateStep {
+	step, _ := callStep(call)
 	return step
 }
 
@@ -882,13 +885,18 @@ const locateUnparseable = "The arguments were not valid JSON, so nothing was loo
 func hitSources(hits []retrieve.Hit, reason string) []Source {
 	out := make([]Source, 0, len(hits))
 	for _, h := range hits {
-		out = append(out, Source{
-			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
-			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
-			SHA: h.SHA, Text: h.RawText, Reason: reason,
-		})
+		out = append(out, hitSource(h, reason))
 	}
 	return out
+}
+
+// hitSource is a retrieval hit as a source, arrived for the reason given.
+func hitSource(h retrieve.Hit, reason string) Source {
+	return Source{
+		ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
+		Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
+		SHA: h.SHA, Text: h.RawText, Reason: reason,
+	}
 }
 
 // reasoned stamps how a landing arrived. symbolLandings and chunkAt set
@@ -951,12 +959,6 @@ func (g *Gatherer) indexed(ctx context.Context, repo string) bool {
 	err := g.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM repo_state WHERE name = ? AND enabled = 1`, repo).Scan(&n)
 	return err == nil && n > 0
-}
-
-// capLandings trims landings to at most n, so one broad call cannot spend the
-// reserve.
-func capLandings(ss []Source, n int) []Source {
-	return ss[:min(n, len(ss))]
 }
 
 // locateResult is what a search, symbol or read call reports back to the

@@ -15,3 +15,13 @@ import "strings"
 func Placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
+
+// Args is a slice as the bind parameters of one IN list: the values boxed
+// for QueryContext's variadic any, in order. Empty for none.
+func Args[T any](vs []T) []any {
+	out := make([]any, len(vs))
+	for i, v := range vs {
+		out[i] = v
+	}
+	return out
+}

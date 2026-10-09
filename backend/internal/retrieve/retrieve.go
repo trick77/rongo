@@ -575,13 +575,9 @@ func (r *Retriever) Parked(ctx context.Context, names []string) ([]string, error
 	if len(names) == 0 {
 		return nil, nil
 	}
-	args := make([]any, len(names))
-	for i, n := range names {
-		args[i] = n
-	}
 	//nolint:gosec // only a ?-placeholder list is interpolated; every name is a bound parameter
 	rows, err := r.store.db.QueryContext(ctx,
-		`SELECT name FROM repo_state WHERE enabled = 0 AND name IN (`+sqlutil.Placeholders(len(names))+`)`, args...)
+		`SELECT name FROM repo_state WHERE enabled = 0 AND name IN (`+sqlutil.Placeholders(len(names))+`)`, sqlutil.Args(names)...)
 	if err != nil {
 		return nil, fmt.Errorf("read parked repositories: %w", err)
 	}

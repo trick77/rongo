@@ -23,8 +23,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/trick77/llmwire"
-
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/memory"
 )
@@ -573,8 +571,7 @@ func (u *Understander) Understand(ctx context.Context, question string, t Thread
 	}
 
 	var got Understanding
-	body, _ := llmwire.JSONObject(out)
-	if err := json.Unmarshal([]byte(body), &got); err != nil {
+	if err := llm.DecodeReply(out, &got); err != nil {
 		// Not a silent fallback to the raw question: that is precisely the
 		// behaviour this step replaces, and it would show up later as "the
 		// expansion did not help" rather than as "the expansion never ran".

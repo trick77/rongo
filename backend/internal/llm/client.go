@@ -376,10 +376,7 @@ func (c *Client) underBudget(ctx context.Context) error {
 }
 
 // Deployment reports which profile a lane is served by.
-func (c *Client) Deployment(lane Lane) string { return c.deployment(lane) }
-
-// deployment maps a lane to the name sent on the wire.
-func (c *Client) deployment(lane Lane) string {
+func (c *Client) Deployment(lane Lane) string {
 	if lane == LaneGate {
 		return c.gate
 	}
@@ -499,7 +496,7 @@ func resolve(opts []Option) callOptions {
 // special keeps llmwire's strict validation.
 func (c *Client) request(msgs []Message, o callOptions) llmwire.ChatRequest {
 	req := llmwire.ChatRequest{
-		Model:           c.deployment(o.lane),
+		Model:           c.Deployment(o.lane),
 		Messages:        make([]llmwire.Message, 0, len(msgs)),
 		MaxAnswerTokens: &o.maxTokens,
 	}
@@ -577,12 +574,12 @@ func (c *Client) complete(ctx context.Context, o callOptions, msgs []Message) (s
 	// generating.
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, c.request(msgs, o))
-	c.warn(c.deployment(o.lane), warnings)
+	c.warn(c.Deployment(o.lane), warnings)
 	if err != nil {
 		return "", Usage{}, err
 	}
 	u := usageFrom(resp.Usage)
-	record(ctx, o, c.deployment(o.lane), u, time.Since(started))
+	record(ctx, o, c.Deployment(o.lane), u, time.Since(started))
 	// A reply cut at the cap is not a reply. Every caller here parses the
 	// content, and a truncated JSON body read as "unparseable" would hide
 	// that the budget was the cause.
@@ -634,7 +631,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	// the answer call that is the whole time the reader watched it write.
 	started := time.Now()
 	stream, warnings, err := c.wire.ChatStream(ctx, c.request(msgs, o))
-	c.warn(c.deployment(o.lane), warnings)
+	c.warn(c.Deployment(o.lane), warnings)
 	if err != nil {
 		return Usage{}, 0, err
 	}
@@ -652,7 +649,7 @@ func (c *Client) stream(ctx context.Context, o callOptions, msgs []Message, onTo
 	res, err := stream.Collect(onToken)
 	got := usageFrom(res.Usage)
 	if _, ok := res.Usage.Total(); ok {
-		record(ctx, o, c.deployment(o.lane), got, time.Since(started))
+		record(ctx, o, c.Deployment(o.lane), got, time.Since(started))
 	}
 	if err != nil {
 		return got, res.Chars, err

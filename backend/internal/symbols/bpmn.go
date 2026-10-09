@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 
 	"github.com/trick77/rongo/internal/bpmn"
+	"github.com/trick77/rongo/internal/xmlutil"
 )
 
 // ExtractBPMN reads a BPMN 2.0 process model and returns one Symbol per flow
@@ -47,8 +47,8 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil
 	}
-	lm := newLineMap(body)
-	lineOf, tagStart := lm.lineOf, lm.tagStart
+	lm := xmlutil.NewLineMap(body)
+	lineOf, tagStart := lm.LineOf, lm.TagStart
 
 	type open struct {
 		sym   int // index into out, -1 for elements that are not symbols
@@ -108,8 +108,8 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 				o.sym = len(out) - 1
 			case bpmn.NodeKind(local):
 				closeFlows()
-				name := attr(t, "name")
-				id := attr(t, "id")
+				name := xmlutil.Attr(t, "name")
+				id := xmlutil.Attr(t, "id")
 				if name == "" {
 					if bpmnEventKinds[local] {
 						// Unnamed event: not a symbol, see above.
@@ -128,7 +128,7 @@ func ExtractBPMN(body []byte) ([]Symbol, error) {
 				}
 			case local == "process":
 				closeFlows()
-				if id := attr(t, "id"); id != "" {
+				if id := xmlutil.Attr(t, "id"); id != "" {
 					o.scopeName, o.scopeKind = id, "process"
 				}
 			}
@@ -189,47 +189,3 @@ func BPMNStructuralKinds() []string {
 // DiagramKind is the kind of the one symbol that marks the diagram-interchange
 // block; the chunker drops that region.
 const DiagramKind = "diagram"
-
-// attr returns one attribute with its whitespace collapsed: a modeller breaks
-// a long label across the canvas with &#10;, which the decoder turns into a
-// newline, and a newline has no place in a symbol name or a breadcrumb line.
-func attr(el xml.StartElement, name string) string {
-	for _, a := range el.Attr {
-		if a.Name.Local == name {
-			return strings.Join(strings.Fields(a.Value), " ")
-		}
-	}
-	return ""
-}
-
-// lineMap maps a decoder's byte offsets back to 1-based lines.
-type lineMap struct {
-	body   []byte
-	starts []int // byte offset each line begins at
-}
-
-func newLineMap(body []byte) lineMap {
-	starts := []int{0}
-	for i, b := range body {
-		if b == '\n' && i+1 < len(body) {
-			starts = append(starts, i+1)
-		}
-	}
-	return lineMap{body: body, starts: starts}
-}
-
-// lineOf is the line holding the byte at offset.
-func (m lineMap) lineOf(offset int64) int {
-	return sort.Search(len(m.starts), func(i int) bool { return m.starts[i] > int(offset) })
-}
-
-// tagStart is the line a start tag opens on. InputOffset after a start tag is
-// the byte past its ">"; the tag's own line is where its "<" sits. A "<"
-// cannot occur inside a tag, so the last one before end is it.
-func (m lineMap) tagStart(end int64) int {
-	i := bytes.LastIndexByte(m.body[:end], '<')
-	if i < 0 {
-		return m.lineOf(end - 1)
-	}
-	return m.lineOf(int64(i))
-}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/llm"
 )
 
@@ -82,7 +83,7 @@ func readAt(sources []Source) []string {
 		if s.IsCommit() || s.SHA == "" {
 			continue
 		}
-		k := s.Repo + " " + shortSHA(s.SHA)
+		k := s.Repo + " " + gitrepo.ShortSHA(s.SHA)
 		if !seen[k] {
 			seen[k] = true
 			out = append(out, k)

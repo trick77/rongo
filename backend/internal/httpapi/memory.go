@@ -2,12 +2,9 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
 
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/memory"
 )
 
@@ -20,23 +17,20 @@ type memoryPage struct {
 
 // handleMemory lists the reader's standing instructions, newest first.
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	out := memoryPage{Memories: []memory.Row{}}
 	if s.deps.Memory != nil {
 		rows, err := s.deps.Memory.List(r.Context(), u.Subject)
 		if err != nil {
-			slog.Error("list memories failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			serverError(w, "list memories failed", err)
 			return
 		}
 		out.Enabled, out.Memories = true, rows
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // handleForgetMemory deletes one rule: the page's ×, and the undo under the
@@ -46,9 +40,8 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "memory unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -58,8 +51,7 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.deps.Memory.Remove(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("forget memory failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "forget memory failed", err)
 		return
 	}
 	if !found {

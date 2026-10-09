@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
@@ -201,9 +200,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -1000,9 +998,8 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

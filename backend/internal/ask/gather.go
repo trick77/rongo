@@ -164,11 +164,7 @@ func (g *Gatherer) GatherSeeded(ctx context.Context, hits []retrieve.Hit, seeds 
 			continue
 		}
 		a.seen[h.ChunkID] = true
-		a.out = append(a.out, Source{
-			ChunkID: h.ChunkID, Repo: h.Repo, Branch: h.Branch, Path: h.Path,
-			Symbol: h.Symbol, StartLine: h.StartLine, EndLine: h.EndLine,
-			SHA: h.SHA, Text: h.RawText, Reason: "hit", Hop: 0,
-		})
+		a.out = append(a.out, hitSource(h, "hit"))
 		a.spent += estimateTokens(h.RawText)
 	}
 	for _, s := range seeds {
@@ -525,7 +521,7 @@ func (g *Gatherer) wholeFile(ctx context.Context, h retrieve.Hit) ([]Source, err
 	total := 0
 	for rows.Next() {
 		var s Source
-		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text); err != nil {
+		if err := rows.Scan(sourceDest(&s)...); err != nil {
 			return nil, fmt.Errorf("scan a chunk of %s/%s: %w", h.Repo, h.Path, err)
 		}
 		total += estimateTokens(s.Text)
@@ -719,8 +715,7 @@ func (g *Gatherer) chunkAt(ctx context.Context, repo, path string, line int) (So
 		-- the chunk's position in its FILE, not its id, so the same line
 		-- lands on the same chunk after a re-index.
 		ORDER BY c.ordinal
-		LIMIT 1`, repo, path, line).Scan(
-		&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text)
+		LIMIT 1`, repo, path, line).Scan(sourceDest(&s)...)
 	if err == sql.ErrNoRows {
 		return Source{}, false, nil
 	}
@@ -828,11 +823,7 @@ WHERE NOT (f.repo = ? AND f.path = ?)
 -- moves on a re-index that changed no code.
 ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 
-	args := make([]any, 0, len(names)+5)
-	for _, n := range names {
-		args = append(args, n)
-	}
-	args = append(args, maxDefiners, home, notRepo, notPath, home)
+	args := append(sqlutil.Args(names), maxDefiners, home, notRepo, notPath, home)
 
 	rows, err := g.db.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -845,8 +836,7 @@ ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 		var s Source
 		var sym string
 		var definers int
-		if err := rows.Scan(&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol,
-			&s.StartLine, &s.EndLine, &s.Text, &sym, &definers); err != nil {
+		if err := rows.Scan(append(sourceDest(&s), &sym, &definers)...); err != nil {
 			return nil, fmt.Errorf("scan reference: %w", err)
 		}
 		s.Reason = "reference:" + sym
@@ -856,6 +846,12 @@ ORDER BY definers ASC, f.path, f.repo, c.ordinal, s.name`
 		return nil, fmt.Errorf("read definers: %w", err)
 	}
 	return out, nil
+}
+
+// sourceDest is where a chunk row lands, in the column order every chunk
+// query here selects: id, repo, branch, path, sha, symbol, start, end, text.
+func sourceDest(s *Source) []any {
+	return []any{&s.ChunkID, &s.Repo, &s.Branch, &s.Path, &s.SHA, &s.Symbol, &s.StartLine, &s.EndLine, &s.Text}
 }
 
 // identifiers pulls the word-shaped tokens out of source text. Deliberately

@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -66,8 +65,7 @@ func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path,
 	if errors.Is(err, sourceview.ErrNotIndexed) && sha != "" && cited != nil {
 		ok, cerr := cited(r.Context())
 		if cerr != nil {
-			slog.Error("read citation failed", "err", cerr)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			serverError(w, "read citation failed", cerr)
 			return
 		}
 		if ok {
@@ -92,10 +90,8 @@ func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path,
 		http.Error(w, "This file is too large to show here.", http.StatusRequestEntityTooLarge)
 		return
 	default:
-		slog.Error("read source failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read source failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(f)
+	writeJSON(w, f)
 }

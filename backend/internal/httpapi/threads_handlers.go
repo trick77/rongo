@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,9 +19,8 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	limit, ok := listLimit(w, r)
@@ -37,12 +35,10 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 		StarredOnly: r.URL.Query().Get("starred") == "true",
 	})
 	if err != nil {
-		slog.Error("list threads failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "list threads failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(page)
+	writeJSON(w, page)
 }
 
 // listLimit reads ?limit=: absent means the store's default, and a number
@@ -68,9 +64,8 @@ func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -84,12 +79,10 @@ func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 	}
 	hits, err := s.deps.Threads.Search(r.Context(), u.Subject, q, limit)
 	if err != nil {
-		slog.Error("search threads failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "search threads failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
+	writeJSON(w, struct {
 		Items []threads.Hit `json:"items"`
 	}{Items: hits})
 }
@@ -106,8 +99,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	// "exists, but not yours" apart, while every other one answers 404 to both.
 	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("check thread owner failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "check thread owner failed", err)
 		return
 	}
 	if !owns {
@@ -116,8 +108,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("read thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read thread failed", err)
 		return
 	}
 	// Priced here, from the current table, never from a stored figure: the
@@ -131,8 +122,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 			msgs[i].Usage = &report
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(msgs)
+	writeJSON(w, msgs)
 }
 
 // handleThreadSummary is one thread's row — its title, for the header of a
@@ -145,16 +135,14 @@ func (s *Server) handleThreadSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	t, found, err := s.deps.Threads.Get(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("read thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read thread failed", err)
 		return
 	}
 	if !found {
 		http.Error(w, "no such thread", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(t)
+	writeJSON(w, t)
 }
 
 // threadRequest is what the rail's own actions send: a rename carries the new
@@ -190,8 +178,7 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	}
 	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
 	if err != nil {
-		slog.Error("rename thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "rename thread failed", err)
 		return
 	}
 	if !renamed {
@@ -208,8 +195,7 @@ func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 	}
 	deleted, err := s.deps.Threads.Delete(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("delete thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "delete thread failed", err)
 		return
 	}
 	if !deleted {
@@ -246,8 +232,7 @@ func (s *Server) handleSetThreadStarred(w http.ResponseWriter, r *http.Request, 
 	}
 	found, err := s.deps.Threads.SetStarred(r.Context(), u.Subject, id, starred)
 	if err != nil {
-		slog.Error("star thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "star thread failed", err)
 		return
 	}
 	if !found {
@@ -266,9 +251,8 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
 		return auth.User{}, 0, false
 	}
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return auth.User{}, 0, false
 	}
 	// An address that names no thread is a 404 and not a 400: to the reader
@@ -277,8 +261,7 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 	// that way by pairing the id with an ownership predicate.
 	id, ok, err := s.deps.Threads.Resolve(r.Context(), r.PathValue("id"))
 	if err != nil {
-		slog.Error("resolve thread failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "resolve thread failed", err)
 		return auth.User{}, 0, false
 	}
 	if !ok {

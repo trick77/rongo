@@ -21,19 +21,19 @@ func TestRelated_twoUnitsOfOneRepositoryThatUseEachOtherCompose(t *testing.T) {
 	}
 	r := newTestRouter(t, testLLM(t, func(string) string { return "" }), db)
 
-	linked, err := r.anyDependency(context.Background(), []Candidate{
+	linked, err := r.Related(context.Background(), []Candidate{
 		{Repo: "peeq", ModuleKey: "apps/claims"}, {Repo: "peeq", ModuleKey: "libs/shared"},
 	})
 	if err != nil || !linked {
 		t.Errorf("app and the library it uses: related = %v, %v; want true", linked, err)
 	}
-	linked, err = r.anyDependency(context.Background(), []Candidate{
+	linked, err = r.Related(context.Background(), []Candidate{
 		{Repo: "peeq", ModuleKey: "apps/claims"}, {Repo: "peeq", ModuleKey: "apps/other"},
 	})
 	if err != nil || linked {
 		t.Errorf("two apps with no declared link: related = %v, %v; want false", linked, err)
 	}
-	linked, err = r.anyDependency(context.Background(), []Candidate{
+	linked, err = r.Related(context.Background(), []Candidate{
 		{Repo: "peeq", ModuleKey: "backend/internal/rag"}, {Repo: "peeq", ModuleKey: "backend/internal/httpapi"},
 	})
 	if err != nil || linked {

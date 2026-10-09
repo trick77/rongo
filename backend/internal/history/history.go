@@ -194,9 +194,7 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	args = append(args, q.Since.UTC().Format(time.RFC3339))
 	if len(q.Repos) > 0 {
 		b.WriteString(` AND c.repo IN (` + sqlutil.Placeholders(len(q.Repos)) + `)`)
-		for _, r := range q.Repos {
-			args = append(args, r)
-		}
+		args = append(args, sqlutil.Args(q.Repos)...)
 	}
 	if match != "" {
 		b.WriteString(` AND commits_fts MATCH ?`)
@@ -215,20 +213,32 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	defer func() { _ = rows.Close() }()
 	out := []Commit{}
 	for rows.Next() {
-		var c Commit
-		var at, paths string
-		if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
+		c, err := scanCommit(rows)
+		if err != nil {
 			return nil, err
-		}
-		if c.CommittedAt, err = time.Parse(time.RFC3339, at); err != nil {
-			return nil, fmt.Errorf("commit %s: committed_at %q: %w", c.SHA, at, err)
-		}
-		if paths != "" {
-			c.Paths = strings.Split(paths, "\n")
 		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// scanCommit reads one commit row as Search and BySHAs project it. The
+// paths column holds newline-joined paths; empty means none, not one empty
+// path.
+func scanCommit(rows *sql.Rows) (Commit, error) {
+	var c Commit
+	var at, paths string
+	if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
+		return Commit{}, err
+	}
+	var err error
+	if c.CommittedAt, err = time.Parse(time.RFC3339, at); err != nil {
+		return Commit{}, fmt.Errorf("commit %s: committed_at %q: %w", c.SHA, at, err)
+	}
+	if paths != "" {
+		c.Paths = strings.Split(paths, "\n")
+	}
+	return c, nil
 }
 
 // BySHAs reads one repository's rows for the shas given, in the order
@@ -240,10 +250,7 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	if len(shas) == 0 {
 		return []Commit{}, nil
 	}
-	args := []any{repo}
-	for _, sha := range shas {
-		args = append(args, sha)
-	}
+	args := append([]any{repo}, sqlutil.Args(shas)...)
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
@@ -255,16 +262,9 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	defer func() { _ = rows.Close() }()
 	by := map[string]Commit{}
 	for rows.Next() {
-		var c Commit
-		var at, paths string
-		if err := rows.Scan(&c.ID, &c.Repo, &c.Branch, &c.SHA, &at, &c.Subject, &c.Body, &paths); err != nil {
+		c, err := scanCommit(rows)
+		if err != nil {
 			return nil, err
-		}
-		if c.CommittedAt, err = time.Parse(time.RFC3339, at); err != nil {
-			return nil, fmt.Errorf("commit %s: committed_at %q: %w", c.SHA, at, err)
-		}
-		if paths != "" {
-			c.Paths = strings.Split(paths, "\n")
 		}
 		by[c.SHA] = c
 	}

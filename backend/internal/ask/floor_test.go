@@ -131,7 +131,7 @@ func TestRankKeepsATestOnlyLeaderWhenNothingElseIsLeft(t *testing.T) {
 // TestRankStillAsksWhenEveryCandidateIsATest is the question the drop must not
 // swallow: "wie wird das getestet?", answered by two repositories that test
 // the same thing in two places. Falling back to the leader alone would make
-// dominates() true by arithmetic — a list of one cannot be asked about — and
+// Dominates() true by arithmetic — a list of one cannot be asked about — and
 // the reader would silently get one of the two.
 func TestRankStillAsksWhenEveryCandidateIsATest(t *testing.T) {
 	// Given
