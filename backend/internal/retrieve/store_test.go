@@ -257,7 +257,7 @@ func TestSearch_noStageMeansNoRestriction(t *testing.T) {
 	}
 }
 
-func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
+func TestSearchKeywordIn_findsTheLiteralIdentifier(t *testing.T) {
 	// Given
 	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
@@ -276,7 +276,7 @@ func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
 	}
 }
 
-func TestSearchKeyword_emptyMatchTouchesNothing(t *testing.T) {
+func TestSearchKeywordIn_emptyMatchTouchesNothing(t *testing.T) {
 	// Given / When
 	hits, err := NewStore(storetest.Open(t, dim)).SearchKeywordIn(context.Background(), "", 10, nil, nil)
 

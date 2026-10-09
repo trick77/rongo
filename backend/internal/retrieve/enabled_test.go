@@ -71,7 +71,7 @@ func TestSearchVector_parkedRepoIsPreFiltered(t *testing.T) {
 // TestSearchKeyword_parkedRepoIsNotReturned: FTS5 is not a top-k operator, so
 // the join predicate is a pre-filter by construction. The claim to pin is
 // simply that a parked repository never reaches an answer.
-func TestSearchKeyword_parkedRepoIsNotReturned(t *testing.T) {
+func TestSearchKeywordIn_parkedRepoIsNotReturned(t *testing.T) {
 	// Given
 	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")

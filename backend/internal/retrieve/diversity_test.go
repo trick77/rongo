@@ -19,15 +19,15 @@ func reposOf(hits []Hit) []string {
 	return out
 }
 
-func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
+func TestFuseWeightedDecayed_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 	// Given: two repositories, interleaved by the lanes.
 	lanes := []Lane{
 		{Name: "semantic:0", Hits: append(repoHits("a", 1, 2, 3), repoHits("b", 4, 5)...), Weight: WeightSemantic},
 		{Name: "keyword:strict", Hits: repoHits("a", 3, 1), Weight: WeightKeywordStrict},
 	}
 
-	// When: the decay is switched off.
-	plain := FuseWeightedDecayed(lanes, 5, shippedDecays)
+	// When: the decay is switched off, against a fusion that never ran it.
+	plain := FuseWeightedDecayed(lanes, 5, Decays{Repo: 0, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 	got := FuseWeightedDecayed(lanes, 5, Decays{Repo: 1.0, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: byte for byte the undiversified ranking. The knob's off position
@@ -44,7 +44,7 @@ func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
+func TestFuseWeightedDecayed_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	// Given: one repository owns the whole top of the list and the second
 	// implementation sits just below the cut. This is the measured failure:
 	// on the raw question only 7 of 16 ambiguous questions retrieved both of
@@ -68,7 +68,7 @@ func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
+func TestFuseWeightedDecayed_diversifiesBeforeTruncating(t *testing.T) {
 	// Given: the second repository's only hit is at rank 5 of the fused list,
 	// below a cut of 3. Diversifying the already-truncated list could not
 	// possibly find it — the material has to be there when the decay is
@@ -86,7 +86,7 @@ func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
+func TestFuseWeightedDecayed_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	// Given: a harsh decay, which all but zeroes every repeat from a
 	// repository.
 	lanes := []Lane{
@@ -110,7 +110,7 @@ func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_outOfRangeDecayIsOff(t *testing.T) {
+func TestFuseWeightedDecayed_outOfRangeDecayIsOff(t *testing.T) {
 	// Given: settings nobody should pass. Zero is the one that matters: it is
 	// the zero value of the field, so a Retriever assembled as a struct literal
 	// must rank exactly as it shipped rather than at the harshest diversity

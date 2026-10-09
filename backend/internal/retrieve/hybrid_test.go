@@ -14,7 +14,7 @@ func hitsOf(ids ...int64) []Hit {
 	return out
 }
 
-func TestFuseWeighted_aLiteralMatchOutranksACloserSemanticHit(t *testing.T) {
+func TestFuseWeightedDecayed_aLiteralMatchOutranksACloserSemanticHit(t *testing.T) {
 	// Given: the semantic lane put chunk 2 at rank 0, the keyword lane found
 	// chunk 1 only at rank 3. Unweighted RRF would rank 2 first (1/60 beats
 	// 1/63) — which is the whole failure the weights exist to prevent.
@@ -52,7 +52,7 @@ func ids(hits []Hit) []int64 {
 	return out
 }
 
-func TestFuseWeighted_recordsScoreAndLanes(t *testing.T) {
+func TestFuseWeightedDecayed_recordsScoreAndLanes(t *testing.T) {
 	// Given: one chunk found by both lanes.
 	lanes := []Lane{
 		{Name: "semantic:0", Hits: hitsOf(1), Weight: WeightSemantic},
@@ -75,7 +75,7 @@ func TestFuseWeighted_recordsScoreAndLanes(t *testing.T) {
 	}
 }
 
-func TestFuseWeighted_mutesANonPositiveWeight(t *testing.T) {
+func TestFuseWeightedDecayed_mutesANonPositiveWeight(t *testing.T) {
 	// Given: zero is the value a caller reaches for to silence a lane. Promoting
 	// it to full confidence would make it shout loudest instead.
 	lanes := []Lane{
@@ -92,7 +92,7 @@ func TestFuseWeighted_mutesANonPositiveWeight(t *testing.T) {
 	}
 }
 
-func TestFuseWeighted_keepsTheDistanceFromWhicheverLaneHasOne(t *testing.T) {
+func TestFuseWeightedDecayed_keepsTheDistanceFromWhicheverLaneHasOne(t *testing.T) {
 	// Given: the keyword lane leaves Distance 0, the vector lane brings a real
 	// one. A chunk found by both should end up with it.
 	withDistance := hitsOf(1)
@@ -111,7 +111,7 @@ func TestFuseWeighted_keepsTheDistanceFromWhicheverLaneHasOne(t *testing.T) {
 	}
 }
 
-func TestFuseWeighted_noLanesIsEmptyNotNil(t *testing.T) {
+func TestFuseWeightedDecayed_noLanesIsEmptyNotNil(t *testing.T) {
 	// Given / When
 	got := FuseWeightedDecayed(nil, 5, shippedDecays)
 

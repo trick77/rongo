@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSelect_decisionTable(t *testing.T) {
+func TestSelectBody_decisionTable(t *testing.T) {
 	// The table IS the specification for what rongo indexes. Every skip reason
 	// exists because that content would either cost money for nothing or
 	// actively dilute results: a vendored dependency outranks the real answer
@@ -356,7 +356,7 @@ func xsdOfSize(n int) string {
 	return "<xsd:schema>" + strings.Repeat(el, n/len(el)+1) + "</xsd:schema>"
 }
 
-func TestSelect_schemaCeilingIsConfigurable(t *testing.T) {
+func TestSelectBody_schemaCeilingIsConfigurable(t *testing.T) {
 	// The schema ceiling is its own knob, and its reason names it, so the
 	// operator raises the right number.
 	s := NewSelector(SelectOptions{MaxSchemaBytes: 128})
@@ -372,7 +372,7 @@ func TestSelect_schemaCeilingIsConfigurable(t *testing.T) {
 	}
 }
 
-func TestSelect_nameBeatsSize(t *testing.T) {
+func TestSelectBody_nameBeatsSize(t *testing.T) {
 	// A generated translation bundle is reported as generated, not as data,
 	// whether it is 3 KB or 300 KB: the name is the better reason.
 	s := NewSelector(DefaultSelectOptions())
@@ -386,7 +386,7 @@ func TestSelect_nameBeatsSize(t *testing.T) {
 	}
 }
 
-func TestSelect_dataCeilingIsConfigurable(t *testing.T) {
+func TestSelectBody_dataCeilingIsConfigurable(t *testing.T) {
 	// The ceiling is a knob, and the logged reason names it, so an operator
 	// who sees "why is my openapi.json missing" learns which number to raise.
 	s := NewSelector(SelectOptions{MaxDataBytes: 64})
@@ -448,7 +448,7 @@ func TestSelectBody_returnsTheRedactedBody(t *testing.T) {
 	}
 }
 
-func TestSelect_excludedPaths(t *testing.T) {
+func TestSelectBody_excludedPaths(t *testing.T) {
 	// The patterns are anchored at the repository root and matched segment by
 	// segment, so a directory name is never mistaken for a prefix of another
 	// and a nested copy is only excluded when the pattern says "**".
@@ -532,7 +532,7 @@ func TestSelect_excludedPaths(t *testing.T) {
 	}
 }
 
-func TestSelect_secretDetectionBeatsExcluded(t *testing.T) {
+func TestSelectBody_secretDetectionBeatsExcluded(t *testing.T) {
 	// Given: an excluded document that also holds a credential. Exclusion is
 	// about relevance; the secret verdict is about a credential never leaving
 	// the network, and it also decides what gets reported.
@@ -568,7 +568,7 @@ func TestValidateExclude(t *testing.T) {
 	}
 }
 
-func TestSelect_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
+func TestSelectBody_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
 	// Given: a vendored file that also contains a credential. The vendored
 	// verdict alone would be harmless, but the ORDER matters for a different
 	// reason: whichever check wins decides what gets reported, and a credential
@@ -583,7 +583,7 @@ func TestSelect_secretDetectionBeatsEveryOtherSkip(t *testing.T) {
 	}
 }
 
-func TestSelect_secretDetectionRunsBeforeEmbedding(t *testing.T) {
+func TestSelectBody_secretDetectionRunsBeforeEmbedding(t *testing.T) {
 	// Given: this is the property the whole check exists for. Code leaves the
 	// network when it is embedded; an accidentally committed credential must
 	// not leave with it. The selector is the only thing standing between the

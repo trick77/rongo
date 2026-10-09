@@ -32,6 +32,9 @@ func Heartbeat(ctx context.Context, every time.Duration, fn func()) (stop func()
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if ctx.Err() != nil {
+					return
+				}
 				fn()
 			}
 		}

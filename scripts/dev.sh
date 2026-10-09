@@ -24,10 +24,6 @@ REPOS_FILE=${BACKEND_REPOS_FILE:-./repos.yaml}
 # ./data and ./repos at the repo root and .gitignore anchors them there too.
 # Resolve here, once, so the path means the same thing regardless of where
 # the process actually runs.
-#
-# The repository list too: left relative it resolved to backend/repos.yaml,
-# and dev booted with "no repository list on disk" against a file that was
-# sitting at the repo root all along.
 abs() {
   case "$1" in
     /*) printf '%s\n' "$1" ;;
@@ -36,6 +32,9 @@ abs() {
 }
 DB_PATH=$(abs "$DB_PATH")
 REPO_ROOT=$(abs "$REPO_ROOT")
+# The repository list too: left relative it resolved to backend/repos.yaml,
+# and dev booted with "no repository list on disk" against a file that was
+# sitting at the repo root all along.
 REPOS_FILE=$(abs "$REPOS_FILE")
 
 # Enable job control so the backend subshell gets its own process group;
