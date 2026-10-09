@@ -1,28 +1,14 @@
 package threads
 
 import (
-	"context"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
 )
 
-// answered adds a finished turn to the thread and hands back its row id.
-func answered(ctx context.Context, t *testing.T, s *Store, threadID int64) int64 {
-	t.Helper()
-	m, err := s.AddQuestion(ctx, threadID, "ba", "en", "How?", 0)
-	if err != nil {
-		t.Fatalf("AddQuestion: %v", err)
-	}
-	if err := s.Finish(ctx, m.ID, "Like so.", []ask.Citation{{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2}}); err != nil {
-		t.Fatalf("Finish: %v", err)
-	}
-	return m.ID
-}
-
 func TestSetFeedback_aSecondVerdictReplacesTheFirst(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
-	answered(ctx, t, s, th)
+	answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 
 	if ok, err := s.SetFeedback(ctx, testSubject, th, 1, ""); err != nil || !ok {
 		t.Fatalf("SetFeedback up: ok=%v err=%v", ok, err)
@@ -42,7 +28,7 @@ func TestSetFeedback_aSecondVerdictReplacesTheFirst(t *testing.T) {
 
 func TestSetFeedback_anotherReadersThreadIsNotFound(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
-	answered(ctx, t, s, th)
+	answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 
 	ok, err := s.SetFeedback(ctx, "bob", th, 1, "")
 	if err != nil {
@@ -77,11 +63,11 @@ func TestSetFeedback_aThreadWithNoFinishedAnswerIsNotFound(t *testing.T) {
 // one moves it along.
 func TestSetFeedback_coversTheNewestFinishedAnswer(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
-	first := answered(ctx, t, s, th)
+	first := answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 	if _, err := s.SetFeedback(ctx, testSubject, th, 1, ""); err != nil {
 		t.Fatalf("SetFeedback: %v", err)
 	}
-	second := answered(ctx, t, s, th)
+	second := answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 	failed, _ := s.AddQuestion(ctx, th, "ba", "en", "And?", 0)
 	_ = s.Fail(ctx, failed.ID, "boom")
 
@@ -101,7 +87,7 @@ func TestSetFeedback_coversTheNewestFinishedAnswer(t *testing.T) {
 
 func TestClearFeedback_takesTheVerdictAway(t *testing.T) {
 	s, ctx, th, _ := newThreadStore(t)
-	answered(ctx, t, s, th)
+	answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 	_, _ = s.SetFeedback(ctx, testSubject, th, 1, "")
 
 	if ok, err := s.ClearFeedback(ctx, "bob", th); err != nil || ok {
@@ -121,7 +107,7 @@ func TestClearFeedback_takesTheVerdictAway(t *testing.T) {
 
 func TestDelete_takesTheFeedbackWithTheThread(t *testing.T) {
 	s, ctx, th, db := newThreadStore(t)
-	answered(ctx, t, s, th)
+	answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 	_, _ = s.SetFeedback(ctx, testSubject, th, -1, "wrong")
 
 	if _, err := s.Delete(ctx, testSubject, th); err != nil {
@@ -139,7 +125,7 @@ func TestDelete_takesTheFeedbackWithTheThread(t *testing.T) {
 
 func TestFeedback_aDatabaseThatCannotAnswerIsAnError(t *testing.T) {
 	s, ctx, th, db := newThreadStore(t)
-	answered(ctx, t, s, th)
+	answeredTurn(t, s, th, "How?", "Like so.", ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2})
 	_ = db.Close()
 
 	if _, err := s.SetFeedback(ctx, testSubject, th, 1, ""); err == nil {

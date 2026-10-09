@@ -11,14 +11,14 @@ import (
 	"github.com/trick77/rongo/internal/store/storetest"
 )
 
-func seedIndexed(t *testing.T, db *sql.DB, repo, path string, chunks int) {
+func seedIndexed(t *testing.T, db *sql.DB, path string) {
 	t.Helper()
-	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES (?, ?, 'sha')`, repo, path)
+	res, err := db.Exec(`INSERT INTO files (repo, path, sha) VALUES ('peeq', ?, 'sha')`, path)
 	if err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
 	id, _ := res.LastInsertId()
-	for i := 0; i < chunks; i++ {
+	for i := 0; i < 5; i++ {
 		if _, err := db.Exec(
 			`INSERT INTO chunks (file_id, ordinal, start_line, end_line, raw_text, content_hash)
 			 VALUES (?, ?, 1, 2, 'r', ?)`, id, i, path+string(rune('a'+i))); err != nil {
@@ -36,8 +36,8 @@ func TestRepoStatus_countsModulesFromTheIndex(t *testing.T) {
 		Image: "registry.example.invalid/acme/peeq"}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
-	seedIndexed(t, db, "peeq", "backend/internal/cookie/netscape.go", 5)
+	seedIndexed(t, db, "backend/internal/download/run.go")
+	seedIndexed(t, db, "backend/internal/cookie/netscape.go")
 
 	// When
 	got, err := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100}).RepoStatus(ctx)
@@ -67,8 +67,8 @@ func TestRepoStatus_theClusteringConstantsActuallyReachTheCount(t *testing.T) {
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
-	seedIndexed(t, db, "peeq", "backend/internal/cookie/netscape.go", 5)
+	seedIndexed(t, db, "backend/internal/download/run.go")
+	seedIndexed(t, db, "backend/internal/cookie/netscape.go")
 
 	loose, err := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100}).RepoStatus(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestRepoStatus_aRepositoryThatLeftTheListIsGoneFromThePage(t *testing.T) {
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	seedIndexed(t, db, "backend/internal/download/run.go")
 	if _, err := state.SyncSpecs(ctx, nil); err != nil {
 		t.Fatalf("resync without peeq: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRepoStatus_aParkedRepositoryKeepsItsIndexAndLeavesThePage(t *testing.T)
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	seedIndexed(t, db, "backend/internal/download/run.go")
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: false}}); err != nil {
 		t.Fatalf("resync with peeq disabled: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRepoStatus_clustersOnceUntilTheIndexMoves(t *testing.T) {
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	seedIndexed(t, db, "peeq", "backend/internal/download/run.go", 5)
+	seedIndexed(t, db, "backend/internal/download/run.go")
 	s := New(db, modules.Opts{MinChunks: 3, MaxChunks: 100})
 
 	for i := 0; i < 3; i++ {

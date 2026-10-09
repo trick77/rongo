@@ -15,7 +15,7 @@ func TestParked_namesOnlyTheParkedOnes(t *testing.T) {
 	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, nil)
 
 	got, err := r.Parked(context.Background(), []string{"loom", "peeq", "purged"})
@@ -31,11 +31,11 @@ func TestParked_namesOnlyTheParkedOnes(t *testing.T) {
 	}
 }
 
-// park sets enabled = 0 the way SyncSpecs does for `enabled: false`.
-func park(t *testing.T, db *sql.DB, name string) {
+// park sets peeq's enabled = 0 the way SyncSpecs does for `enabled: false`.
+func park(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if _, err := db.Exec(`UPDATE repo_state SET enabled = 0 WHERE name = ?`, name); err != nil {
-		t.Fatalf("park %s: %v", name, err)
+	if _, err := db.Exec(`UPDATE repo_state SET enabled = 0 WHERE name = 'peeq'`); err != nil {
+		t.Fatalf("park: %v", err)
 	}
 }
 
@@ -54,7 +54,7 @@ func TestSearchVector_parkedRepoIsPreFiltered(t *testing.T) {
 	addChunk(t, db, "peeq", "b.go", "B", "bravo", nearVec)
 	addChunk(t, db, "peeq", "c.go", "C", "charlie", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "delta", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 
 	// When: no repository restriction at all
 	hits, err := NewStore(db).SearchVector(context.Background(), queryVec, 2, DefaultMaxDistance, nil)
@@ -78,7 +78,7 @@ func TestSearchKeyword_parkedRepoIsNotReturned(t *testing.T) {
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "sender.send()", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "sender.send()", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 
 	// When
 	hits, err := NewStore(db).SearchKeyword(context.Background(), "send", 10, nil)
@@ -101,7 +101,7 @@ func TestSearch_parkedRepoIsInvisibleToTheWholePipeline(t *testing.T) {
 	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addChunk(t, db, "peeq", "a.go", "A", "sender.send()", nearVec)
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, fixedEmbedder{vec: queryVec})
 
 	// When
@@ -128,7 +128,7 @@ func TestKnownRepos_parkedRepoReadsAsUnknown(t *testing.T) {
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "alpha", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "delta", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, fixedEmbedder{vec: queryVec})
 
 	// When
