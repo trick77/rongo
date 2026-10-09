@@ -9,13 +9,14 @@ import (
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 	// Given: a remote with two commits, a poller with the commit lane wired.
 	src := fixtureRemote(t)
 	writeAndCommit(t, src, "b.txt", "b\n", "second")
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -85,7 +86,7 @@ func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 
 func TestPollOnce_withoutTheLaneRecordsNothing(t *testing.T) {
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

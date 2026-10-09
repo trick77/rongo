@@ -3,6 +3,8 @@ package units
 import (
 	"context"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestScan_aRootPomIsTheRepositoryNotAPart: a single-module Maven build has
@@ -27,7 +29,7 @@ func TestScan_aRootPomIsTheRepositoryNotAPart(t *testing.T) {
 		t.Errorf("a root build claimed a file as a part")
 	}
 
-	db := unitsDB(t)
+	db := storetest.Open(t, 4)
 	if err := Sync(context.Background(), db, "orders", us, deps); err != nil {
 		t.Fatal(err)
 	}

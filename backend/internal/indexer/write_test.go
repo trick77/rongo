@@ -3,11 +3,10 @@ package indexer
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/symbols"
 )
 
@@ -17,14 +16,7 @@ const writeDim = 4
 // reference repo_state.
 func writeDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "w.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, writeDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, writeDim)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('shop', 'file:///x', 'master')`); err != nil {
 		t.Fatalf("seed repo_state: %v", err)
 	}

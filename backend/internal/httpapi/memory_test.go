@@ -12,6 +12,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/memory"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -19,7 +20,7 @@ import (
 // memory store, with the fake asker the test configures.
 func memoryServer(t *testing.T, f *fakeAsker) (*Server, *threads.Store, *memory.Store, *sql.DB) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	for _, subject := range []string{testSubject, otherSubject} {
 		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {

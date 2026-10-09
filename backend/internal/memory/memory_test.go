@@ -5,23 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "m.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, 4)
 	for _, s := range []string{"jan", "other"} {
 		if _, err := db.Exec(`INSERT INTO users (subject, email) VALUES (?, ?)`, s, s+"@x.invalid"); err != nil {
 			t.Fatalf("seed user: %v", err)

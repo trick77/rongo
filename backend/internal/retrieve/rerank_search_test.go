@@ -4,13 +4,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestSearch_withARerankerReordersADeeperPoolAndCutsToK: the reranker sees a
 // pool deeper than K, the lanes reach as deep as the pool, and what the model
 // picked lands first in the K the caller asked for.
 func TestSearch_withARerankerReordersADeeperPoolAndCutsToK(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "Near1.java", "a", "irgendein anderer text", nearVec)
 	addChunk(t, db, "shop", "Near2.java", "b", "yet another text", nearVec)

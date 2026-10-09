@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // equivalenceCorpus holds every case the rung decides on, sized so that the
@@ -15,7 +17,7 @@ import (
 // too.
 func equivalenceCorpus(t *testing.T) *Store {
 	t.Helper()
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "app", "master")
 	addRepo(t, db, "lib", "main")
 	addRepo(t, db, "parked", "master")
@@ -148,7 +150,7 @@ func TestSearchSubstringsIn_theComparisonIsOverListsThatHoldSomething(t *testing
 }
 
 func TestSearchSubstringsIn_aClosedDatabaseIsAnErrorNotAnEmptyLane(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "app", "master")
 	s := NewStore(db)
 	_ = db.Close()

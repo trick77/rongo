@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // A deployment in dev or token mode has no OIDC service. The route must say so
@@ -180,7 +181,7 @@ func (f *fakeOIDC) ClearTransientCookies(http.ResponseWriter) { f.cleared = true
 
 func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 	// Given: the proxy in front already signed the browser in.
-	svc := auth.NewService(authDB(t), "proxy", "")
+	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
 	srv := NewServer(Deps{Auth: svc})
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
 	req.Header.Set(auth.ProxyUserHeader, "jdoe")
@@ -200,7 +201,7 @@ func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 func TestAuthLogin_proxyModeHaltsWhenTheProxyNamesNobody(t *testing.T) {
 	// Given: a proxy that forwards without the user header. Sending the
 	// browser to the root would 401 and come straight back here.
-	svc := auth.NewService(authDB(t), "proxy", "")
+	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
 	srv := NewServer(Deps{Auth: svc})
 
 	// When
@@ -241,7 +242,7 @@ func TestAuthLogout_revokesEvenWhenTheTabClosedOnTheWayOut(t *testing.T) {
 
 func TestAuthLogout_proxyModeHandsOffToTheProxy(t *testing.T) {
 	// Given
-	svc := auth.NewService(authDB(t), "proxy", "")
+	svc := auth.NewService(storetest.Open(t, 4), "proxy", "")
 	srv := NewServer(Deps{Auth: svc, CookieSecure: true})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.Header.Set(auth.ProxyUserHeader, "jdoe")

@@ -6,13 +6,15 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func TestNew_shipsTheCodeRungOn(t *testing.T) {
 	// The product has the rung; the zero value is off, the way TestDecay and
 	// DocDecay read theirs, so the harness's baseline arm is a struct field
 	// left alone rather than a second constructor.
-	if got := New(testDB(t), fixedEmbedder{vec: queryVec}).CodeWeight; got != WeightKeywordCode {
+	if got := New(storetest.Open(t, dim), fixedEmbedder{vec: queryVec}).CodeWeight; got != WeightKeywordCode {
 		t.Errorf("New().CodeWeight = %v, want %v", got, WeightKeywordCode)
 	}
 	if got := (&Retriever{}).CodeWeight; got != 0 {
@@ -24,7 +26,7 @@ func TestSearch_theCodeTextsFloorCarriesItsOwnWeight(t *testing.T) {
 	// Given: a chunk the OR floor of the code-terms text reaches. That rung is
 	// "one of these words appears here", and the claim is stronger when the
 	// words are guessed identifiers than when they are the question's prose.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "src/Promo.java", "send", "promoMailer dispatch of the nightly batch", nearVec)
 
@@ -64,7 +66,7 @@ func TestSearch_saysSoWhenTheCodeTextIsNotOneOfTheTexts(t *testing.T) {
 	// separately from them turns the rung off and nothing downstream can tell.
 	// Loud once, because the operator would otherwise read a table as a lane
 	// that never ran.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "src/Promo.java", "send", "promoMailer dispatch of the nightly batch", nearVec)
 
@@ -101,7 +103,7 @@ func TestSearch_theCodeRungKeepsItsNameUnderASweptWeight(t *testing.T) {
 	// The weight is a swept value. Labelling the lane by the number would make
 	// a sweep that passes 0.7 report the code rung as the prefix rung — four
 	// rungs appearing to move when only one did.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "src/Promo.java", "send", "promoMailer dispatch of the nightly batch", nearVec)
 

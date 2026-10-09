@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -278,7 +277,7 @@ func newTestServerWithStore(t *testing.T, opts ...func(*fakeAsker)) (*Server, *t
 // (chunks, files, repo_state) no threads.Store method writes.
 func newTestServerWithDB(t *testing.T, opts ...func(*fakeAsker)) (*Server, *threads.Store, *sql.DB) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	// Both users have to exist before a thread references them: threads have
 	// a foreign key on the owning subject.
@@ -525,23 +524,10 @@ func seedChunk(t *testing.T, db *sql.DB) int64 {
 	return chunkID
 }
 
-func askDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
-
 // askDeps wires a dev-auth server over a real thread store.
 func askDeps(t *testing.T, a Asker) (Deps, *threads.Store) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	return Deps{Auth: svc, Ask: a, Threads: threads.NewStore(db)}, threads.NewStore(db)
 }
@@ -660,7 +646,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 	// the cut question back in the header the moment a reader answered a card
 	// before the first turn's title had landed.
 	ctx := context.Background()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	// The dev user is made on the first request; this thread has to exist
 	// before one, so its owner does too.
@@ -940,7 +926,7 @@ func TestAsk_anEmptyQuestionIsRejectedBeforeAnythingIsRecorded(t *testing.T) {
 }
 
 func TestAsk_withoutAPipelineAnswers503(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	deps := Deps{Auth: auth.NewService(db, "dev", ""), Threads: threads.NewStore(db)}
 
 	rec := postAsk(t, deps, `{"question":"How?"}`)
@@ -1214,7 +1200,7 @@ func (c *clarifyFailingThreads) Clarify(context.Context, int64, ask.Clarificatio
 func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	// Given a pipeline that ends by asking, but a store that cannot write
 	// the clarification
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed user: %v", err)
@@ -1328,7 +1314,7 @@ func TestAsk_anOrdinaryTurnFinishesWithNoCardLink(t *testing.T) {
 
 func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
 	// Given a pipeline that answers, and a store that cannot write the answer
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
 		t.Fatalf("seed user: %v", err)

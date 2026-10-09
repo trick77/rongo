@@ -2,17 +2,15 @@ package httpapi
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // fakeRepos stands in for the status source. No test in this package touches a
@@ -26,22 +24,10 @@ func (f fakeRepos) RepoStatus(context.Context) ([]RepoStatus, error) { return f.
 
 // authDB is a migrated database, because the auth service records the user it
 // logs in. Nothing here reaches a network.
-func authDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "auth.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
 
 func devAuth(t *testing.T) *auth.Service {
 	t.Helper()
-	return auth.NewService(authDB(t), "dev", "")
+	return auth.NewService(storetest.Open(t, 4), "dev", "")
 }
 
 func getRepos(t *testing.T, deps Deps) *httptest.ResponseRecorder {
@@ -141,7 +127,7 @@ func TestRepos_requiresAuth(t *testing.T) {
 	// test at all — it logs every caller in automatically, so the assertion
 	// would pass with the route unguarded.
 	deps := Deps{
-		Auth:  auth.NewService(authDB(t), "token", "s3cret"),
+		Auth:  auth.NewService(storetest.Open(t, 4), "token", "s3cret"),
 		Repos: fakeRepos{out: []RepoStatus{{Name: "peeq"}}},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/repos", nil)

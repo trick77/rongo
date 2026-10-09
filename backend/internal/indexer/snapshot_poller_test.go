@@ -10,6 +10,7 @@ import (
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // snapshotPoller builds a poller over a repository root the test can write
@@ -69,7 +70,7 @@ func stateOf(t *testing.T, s *StateStore, name string) RepoState {
 // before this existed.
 func TestPollOnce_snapshotIndexesTheDropOnce(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -108,7 +109,7 @@ func TestPollOnce_snapshotIndexesTheDropOnce(t *testing.T) {
 // run still counts as a success.
 func TestPollOnce_snapshotIsOneOff(t *testing.T) {
 	// Given: a snapshot already indexed
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -140,7 +141,7 @@ func TestPollOnce_snapshotIsOneOff(t *testing.T) {
 // drop costs a diff, not a full re-index — the two commits share an object store.
 func TestPollOnce_reExtractedDropIsIncremental(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -174,7 +175,7 @@ func TestPollOnce_reExtractedDropIsIncremental(t *testing.T) {
 // against it fails with "bad object" on every cycle, forever. Reset instead.
 func TestPollOnce_replacedDropReIndexesInFull(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -218,7 +219,7 @@ func TestPollOnce_replacedDropReIndexesInFull(t *testing.T) {
 // index that looks healthy.
 func TestPollOnce_missingDropIsRecordedLoudly(t *testing.T) {
 	// Given: an entry with nothing extracted for it
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -247,7 +248,7 @@ func TestPollOnce_missingDropIsRecordedLoudly(t *testing.T) {
 func TestPollOnce_snapshotAndRemoteSideBySide(t *testing.T) {
 	// Given
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

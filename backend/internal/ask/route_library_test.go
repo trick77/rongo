@@ -2,27 +2,19 @@ package ask
 
 import (
 	"context"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // libraryMap is shop and billing built on acme-commons, and legacy-crm, which
 // is not.
 func libraryMap(t *testing.T) projects.Map {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("Open() err = %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("Migrate() err = %v", err)
-	}
+	db := storetest.Open(t, 1536)
 	for _, r := range [][3]string{
 		{"shop-ui", "shop", "0"}, {"shop-backend", "shop", "0"},
 		{"billing-api", "billing", "0"}, {"legacy-crm", "legacy-crm", "0"},

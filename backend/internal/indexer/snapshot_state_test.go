@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestSyncSpecs_snapshotRoundTripsAsAnEmptyCloneURL: no column and no migration.
 // The empty clone_url IS the fact, and RepoState.Snapshot reads it back.
 func TestSyncSpecs_snapshotRoundTripsAsAnEmptyCloneURL(t *testing.T) {
 	// Given
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 
@@ -45,7 +46,7 @@ func TestSyncSpecs_snapshotRoundTripsAsAnEmptyCloneURL(t *testing.T) {
 // branch alone, or every YAML tweak would re-index the drop.
 func TestSyncSpecs_aSnapshotStructureEditIsNotAReIndex(t *testing.T) {
 	// Given: an indexed snapshot
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -93,7 +94,7 @@ func TestSyncSpecs_aSnapshotStructureEditIsNotAReIndex(t *testing.T) {
 // created.
 func TestSyncSpecs_reportsWhetherAPurgedRepoWasASnapshot(t *testing.T) {
 	// Given
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

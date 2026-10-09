@@ -13,7 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func gitRun(t *testing.T, dir string, args ...string) string {
@@ -65,14 +65,7 @@ func fixture(t *testing.T) (*Git, map[string]string) {
 		t.Fatalf("EnsureCloned: %v", err)
 	}
 
-	db, err := store.Open(filepath.Join(t.TempDir(), "r.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatal(err)
-	}
+	db := storetest.Open(t, 4)
 	seed(t, db, "shop", src, "main", shas["c2"])
 	seed(t, db, "drop", "", "snapshot", shas["c1"])
 	return New(client, db, 500), shas

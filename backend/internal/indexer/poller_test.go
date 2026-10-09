@@ -11,6 +11,7 @@ import (
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // gitRun runs git with a deterministic identity so a developer's own git config
@@ -84,7 +85,7 @@ func newPoller(t *testing.T, s *StateStore, idx IndexFunc) *Poller {
 func TestPollOnce_fullIndexOnFirstSight(t *testing.T) {
 	// Given: a repository never indexed before (LastSHA empty).
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -113,7 +114,7 @@ func TestPollOnce_aDeclaredStageWithNoFilesLandsOnTheReposPage(t *testing.T) {
 	// Given: a repository declaring a stage whose directory the checkout does
 	// not have. The index runs fine; the entry is what is wrong.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -146,7 +147,7 @@ func TestPollOnce_aDeclaredStageWithNoFilesLandsOnTheReposPage(t *testing.T) {
 func TestPollOnce_skipsWhenHeadIsUnchanged(t *testing.T) {
 	// Given: a repository already indexed at the current HEAD.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -177,7 +178,7 @@ func TestPollOnce_skipsWhenHeadIsUnchanged(t *testing.T) {
 func TestPollOnce_incrementalIndexPassesOnlyChangedPaths(t *testing.T) {
 	// Given: an indexed repository that then receives one new file.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -212,7 +213,7 @@ func TestPollOnce_resolvesAnOmittedBranchAndRecordsIt(t *testing.T) {
 	// is main, and assuming master would break exactly the third-party
 	// repositories this corpus needs.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -243,7 +244,7 @@ func TestPollOnce_recordsAVanishedBranchAndKeepsGoing(t *testing.T) {
 	// exist upstream.
 	src := fixtureRemote(t)
 	other := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -285,7 +286,7 @@ func TestPollOnce_doesNotAdvanceTheShaWhenIndexingFails(t *testing.T) {
 	// the next run would see "unchanged" and the repository would stay
 	// permanently un-indexed while looking healthy.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -336,7 +337,7 @@ func TestNewPoller_firstDelayIsShorterThanTheInterval(t *testing.T) {
 func TestRun_pollsOnTheFirstDelayNotTheInterval(t *testing.T) {
 	// Given an immediate first delay and an interval far longer than this test
 	src := fixtureRemote(t)
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(context.Background(), []repos.Spec{
 		{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true},
 	}); err != nil {
@@ -388,7 +389,7 @@ func TestPollOnce_reClonesWhenTheCheckoutPointsAtAnotherRemote(t *testing.T) {
 	// named after the entry, and until this check nothing compared the two.
 	first := fixtureRemote(t)
 	second := fixtureRemote(t)
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -458,7 +459,7 @@ func TestPollOnce_reResolvesTheBranchAfterARemoteChange(t *testing.T) {
 	gitRun(t, second, "init", "-q", "-b", "master")
 	writeAndCommit(t, second, "b.txt", "second\n", "second")
 
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -505,7 +506,7 @@ func TestPollOnce_recordsAnUnreadableCheckoutInsteadOfIndexingIt(t *testing.T) {
 	// Repos page says so; indexing it anyway would file whatever is there under
 	// this entry's name.
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -542,7 +543,7 @@ func TestPollOnce_leavesAMatchingCheckoutAlone(t *testing.T) {
 	// The check must not fire on the ordinary case: the URL is unchanged, so the
 	// second poll finds nothing new and the index is not thrown away.
 	src := fixtureRemote(t)
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
@@ -578,7 +579,7 @@ func TestPollOnce_aGitThatCannotAnswerKeepsTheIndex(t *testing.T) {
 	// it fails fatally rather than reporting the object missing, as a
 	// broken process or object store does.
 	src := fixtureRemote(t)
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -622,7 +623,7 @@ func TestPollOnce_anIndexedCommitTheCheckoutLacksIndexesInFull(t *testing.T) {
 	// the remote it was indexed from, by whatever route. Diffing from it fails
 	// "bad object" on every cycle while the old chunks keep answering.
 	src := fixtureRemote(t)
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -672,7 +673,7 @@ func TestPollOnce_anIndexedCommitTheCheckoutLacksIndexesInFull(t *testing.T) {
 // throughout so a failed run leaves the index as it was.
 func TestPollOnce_aRequestedReindexRunsInFullAndIsThenCleared(t *testing.T) {
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -724,7 +725,7 @@ func TestPollOnce_aRequestedReindexRunsInFullAndIsThenCleared(t *testing.T) {
 // while the repository is being indexed is not the request that run served.
 func TestPollOnce_aReindexRequestedMidRunSurvivesThatRun(t *testing.T) {
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -770,7 +771,7 @@ func TestPollOnce_aReindexRequestedMidRunSurvivesThatRun(t *testing.T) {
 // rather than on the interval.
 func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -816,7 +817,7 @@ func TestRun_aNudgeStartsTheCycleNow(t *testing.T) {
 
 func TestRequestReindex_throughThePollerRefusesWhatItDoesNotServeAndCountsAll(t *testing.T) {
 	src := fixtureRemote(t)
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

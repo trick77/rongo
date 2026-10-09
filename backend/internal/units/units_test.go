@@ -2,12 +2,10 @@ package units
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func fixtureRead(files map[string]string) (paths []string, read Read) {
@@ -166,21 +164,8 @@ func TestOf_picksTheLongestPrefix(t *testing.T) {
 	}
 }
 
-func unitsDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "u.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
-
 func TestSync_replacesAndLoadsAndLinks(t *testing.T) {
-	db := unitsDB(t)
+	db := storetest.Open(t, 4)
 	ctx := context.Background()
 	us := []Unit{{Key: "apps/claims", Kind: KindNxApp, Name: "claims", Tags: []string{"type:app"}}, {Key: "libs/shared", Kind: KindNxLib, Name: "shared"}}
 	if err := Sync(ctx, db, "ui", us, []Dep{{From: "apps/claims", To: "libs/shared"}, {From: "apps/claims", Coordinate: "@angular/core"}}); err != nil {
@@ -211,7 +196,7 @@ func TestSync_replacesAndLoadsAndLinks(t *testing.T) {
 }
 
 func TestImportDeps_readsAliasImportsOutOfTheIndex(t *testing.T) {
-	db := unitsDB(t)
+	db := storetest.Open(t, 4)
 	ctx := context.Background()
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('ui', 'file:///x', 'main')`); err != nil {
 		t.Fatal(err)
@@ -275,7 +260,7 @@ func TestDescribe_rendersPartsAndConnectionsAndNothingForAPlainRepository(t *tes
 }
 
 func TestAnyLinked_isLinkedOverEveryPair(t *testing.T) {
-	db := unitsDB(t)
+	db := storetest.Open(t, 4)
 	ctx := context.Background()
 	us := []Unit{{Key: "apps/claims", Kind: KindNxApp, Name: "claims"}, {Key: "libs/shared", Kind: KindNxLib, Name: "shared"}, {Key: "libs/other", Kind: KindNxLib, Name: "other"}}
 	if err := Sync(ctx, db, "ui", us, []Dep{{From: "apps/claims", To: "libs/shared"}}); err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestRun_aShutdownMidCycleIsNotAFailure: a cancelled run is the process
@@ -19,7 +20,7 @@ import (
 func TestRun_aShutdownMidCycleIsNotAFailure(t *testing.T) {
 	// Given a repository whose index run sees the shutdown arrive, and one
 	// after it the cycle never reaches
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	if _, err := s.SyncSpecs(context.Background(), []repos.Spec{
 		snapshotSpec("acme-core"), snapshotSpec("acme-web"),
@@ -142,7 +143,7 @@ func loggingPoller(t *testing.T, s *StateStore, idx IndexFunc) (*Poller, string,
 // whether a push has landed in the answers yet.
 func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -185,7 +186,7 @@ func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 // nobody could see. The value has to be rendered before it is logged.
 func TestPollOnce_durationsAreReadable(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -221,7 +222,7 @@ func TestPollOnce_durationsAreReadable(t *testing.T) {
 // beside it or it reads as five thousand files touched when one was.
 func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -266,7 +267,7 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 // unhealthy run obvious without reading every repository's own line.
 func TestPollOnce_bracketsTheCycleWithCounts(t *testing.T) {
 	// Given: one repository that indexes, and a second poll where nothing moved
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -316,7 +317,7 @@ func TestPollOnce_bracketsTheCycleWithCounts(t *testing.T) {
 // reported.
 func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 	// Given: a snapshot whose drop was never extracted, beside a healthy one
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -358,7 +359,7 @@ func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 // and reading which happened is the whole reason to log the mode.
 func TestPollOnce_saysWhenAnIndexWasIncremental(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -391,7 +392,7 @@ func TestPollOnce_saysWhenAnIndexWasIncremental(t *testing.T) {
 // an error verbatim, and both are places a secret has leaked before.
 func TestPollOnce_neverLogsATokenOrACredential(t *testing.T) {
 	// Given: a repository whose remote does not exist, so the failure path runs
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

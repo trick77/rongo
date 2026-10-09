@@ -3,10 +3,9 @@ package projects
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // seed opens a migrated database and fills repo_state and repo_uses directly.
@@ -14,14 +13,7 @@ import (
 // the indexer would drag its whole dependency tree into a test about grouping.
 func seed(t *testing.T, rows [][4]string, edges [][2]string) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("Open() err = %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("Migrate() err = %v", err)
-	}
+	db := storetest.Open(t, 1536)
 	for _, r := range rows {
 		if _, err := db.Exec(
 			`INSERT INTO repo_state (name, clone_url, project, part, description)

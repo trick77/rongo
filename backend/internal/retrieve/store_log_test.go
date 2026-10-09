@@ -7,13 +7,15 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func TestSearchVector_logsASlowSearch(t *testing.T) {
 	// A vector search that took minutes was invisible: the turn died on the
 	// reader's timeout and the log had only the interrupt. A slow one says
 	// so, with what it searched.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "A.java", "a", "class A {}", nearVec)
 	var log bytes.Buffer
@@ -37,7 +39,7 @@ func TestSearchVector_logsASlowSearch(t *testing.T) {
 }
 
 func TestSearchVector_quietWhenFast(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	var log bytes.Buffer
 	restore := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
@@ -54,7 +56,7 @@ func TestSearchVector_quietWhenFast(t *testing.T) {
 func TestSearchVector_anInterruptSaysSo(t *testing.T) {
 	// sqlite-vec reports an interrupt as "SQL logic error: chunks iter
 	// error"; the error has to name the cancel and how long the search ran.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(errors.New("reader went away"))
 

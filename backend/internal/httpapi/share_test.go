@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
@@ -24,7 +25,7 @@ import (
 // way an anonymous browser would.
 func shareServer(t *testing.T) (*Server, *threads.Store, *fakeSource) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	for _, subject := range []string{testSubject, otherSubject} {
 		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
@@ -511,7 +512,7 @@ func TestShares_listsThisReadersLiveLinks(t *testing.T) {
 // half of each handler no happy-path test ever reaches.
 func brokenShares(t *testing.T) (*Server, threads.Thread) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, "", true); err != nil {
 		t.Fatalf("seed user: %v", err)

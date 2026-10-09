@@ -2,12 +2,11 @@ package indexer
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/edges"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/symbols"
 )
 
@@ -17,14 +16,7 @@ import (
 // part of what is measured.
 func BenchmarkReplaceFile(b *testing.B) {
 	const benchDim = 1536
-	db, err := store.Open(filepath.Join(b.TempDir(), "w.db"))
-	if err != nil {
-		b.Fatalf("open: %v", err)
-	}
-	b.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, benchDim); err != nil {
-		b.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(b, benchDim)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES ('shop', 'file:///x', 'master')`); err != nil {
 		b.Fatalf("seed repo_state: %v", err)
 	}

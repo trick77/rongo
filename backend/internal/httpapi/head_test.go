@@ -10,6 +10,7 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -17,7 +18,7 @@ import (
 // thread before the first request, so its owner has to exist by then.
 func headDeps(t *testing.T, a Asker) (Deps, *threads.Store) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@x.invalid", false); err != nil {
 		t.Fatalf("UpsertUser: %v", err)

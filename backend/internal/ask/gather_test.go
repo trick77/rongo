@@ -4,24 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func gatherDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "g.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, 4)
 	if _, err := db.Exec(
 		`INSERT INTO repo_state (name, clone_url, branch) VALUES ('peeq', 'file:///x', 'master')`); err != nil {
 		t.Fatalf("seed repo: %v", err)

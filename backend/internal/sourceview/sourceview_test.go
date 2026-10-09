@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/gitrepo"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // gitRun runs git with a fixed identity, so a developer's own config cannot
@@ -79,14 +79,7 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 	commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
 	head := commit(t, dir, "prod/application.properties", []byte("acme.cron.send-digest=0 0 * ? * * *\ndb.password=ENC(fixture-cipher)\nacme.key=${MASTER_KEY}\n"), "config")
 
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatal(err)
-	}
+	db := storetest.Open(t, 4)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch, enabled, last_sha) VALUES ('peeq', 'x', 'main', 1, ?)`, head); err != nil {
 		t.Fatal(err)
 	}

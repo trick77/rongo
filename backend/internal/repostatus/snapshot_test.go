@@ -7,6 +7,7 @@ import (
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/modules"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestRepoStatus_saysWhichRowsAreSnapshots: a snapshot's last_sha never moves on
@@ -14,7 +15,7 @@ import (
 // poller that quietly stopped.
 func TestRepoStatus_saysWhichRowsAreSnapshots(t *testing.T) {
 	// Given
-	db := statusDB(t)
+	db := storetest.Open(t, 4)
 	state := indexer.NewStateStore(db)
 	ctx := context.Background()
 	if _, err := state.SyncSpecs(ctx, []repos.Spec{

@@ -13,6 +13,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -117,7 +118,7 @@ const recordedSHA = "abc1234"
 // testSubject from a.go and otherSubject from secret.go.
 func recordServer(t *testing.T) (*Server, *threads.Store, *sql.DB, threads.Thread) {
 	t.Helper()
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	ctx := context.Background()
 	svc := auth.NewService(db, "dev", "")
 	for _, subject := range []string{testSubject, otherSubject} {

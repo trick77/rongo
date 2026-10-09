@@ -3,30 +3,16 @@ package indexer
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/trick77/rongo/internal/repos"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
-
-func newDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
 
 func TestSyncSpecs_insertsAndUpdates(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 
@@ -54,7 +40,7 @@ func TestSyncSpecs_insertsAndUpdates(t *testing.T) {
 func TestSyncSpecs_writesStagesAndEmptyStagesNamesTheOnesNoFileIsUnder(t *testing.T) {
 	// Given: an infrastructure repository declaring two stages, and an
 	// index holding a file under only one of them.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "acme-infra", CloneURL: "/tmp/acme-infra", Enabled: true, Stages: []repos.Stage{
@@ -107,7 +93,7 @@ func TestSyncSpecs_keepsAResolvedBranchWhenTheYamlNamesNone(t *testing.T) {
 	// not wipe it: the branch travels with every citation, and a forge URL
 	// without it may 404 off the default branch.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	spec := repos.Spec{Name: "peeq", CloneURL: "file:///x", Enabled: true}
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
@@ -138,7 +124,7 @@ func TestSyncSpecs_dropsAResolvedBranchWhenTheCloneURLChanges(t *testing.T) {
 	// repository whose default is `main` would ask for `master` on every cycle,
 	// report "configured branch not found" forever, and never re-resolve.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "file:///old", Enabled: true},
 	}); err != nil {
@@ -169,7 +155,7 @@ func TestSyncSpecs_aNamedBranchSurvivesACloneURLChange(t *testing.T) {
 	// The clause above must not reach a branch the YAML actually names: that one
 	// is the operator's instruction, not a value resolved from the old remote.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "file:///old", Branch: "release-2024.3", Enabled: true},
 	}); err != nil {
@@ -197,7 +183,7 @@ func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
 	// The other half: naming a branch in the YAML overrides whatever was
 	// resolved earlier, or a corrected entry would never take effect.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{{Name: "shop", CloneURL: "file:///x", Enabled: true}}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)
 	}
@@ -220,23 +206,11 @@ func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
 // purgeDB is newDB at the write tests' embedding dimension, so a purge test can
 // put real chunks — and therefore real vec0 and fts5 rows — into the tables it
 // then expects to be empty.
-func purgeDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "purge.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, writeDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
 
 func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	// Given: two indexed repositories, one of which is about to be dropped from
 	// repos.yaml.
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	w := NewWriter(db)
 	ctx := context.Background()
@@ -316,7 +290,7 @@ func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 func TestSyncSpecs_aReAddedRepoIndexesFromScratch(t *testing.T) {
 	// Given: a repo removed from the list, then put back — which is now a purge
 	// followed by a fresh entry, not a reactivation.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true}
@@ -351,7 +325,7 @@ func TestSyncSpecs_aReAddedRepoIndexesFromScratch(t *testing.T) {
 
 func TestSyncSpecs_respectsAnExplicitlyDisabledEntry(t *testing.T) {
 	// Given: the entry is present in the YAML but marked enabled: false.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 
@@ -372,7 +346,7 @@ func TestSyncSpecs_respectsAnExplicitlyDisabledEntry(t *testing.T) {
 func TestSyncSpecs_carriesTheProjectStructure(t *testing.T) {
 	// Given: one product in two repositories, the UI declaring the edge.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 
 	// When
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -413,7 +387,7 @@ func TestSyncSpecs_carriesTheTokenUser(t *testing.T) {
 	// forge insists on has to survive the round trip or the fetch goes out
 	// as x-access-token and is refused.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 
 	// When
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -437,7 +411,7 @@ func TestSyncSpecs_carriesTheTokenAuth(t *testing.T) {
 	// Given: same round trip as token_user; a bearer entry that came back as
 	// basic auth would be refused by the forge with no hint in the YAML.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 
 	// When
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -462,7 +436,7 @@ func TestActive_dropsAnEdgeToADisabledSibling(t *testing.T) {
 	// page and the prompt are built from, and neither carries the disabled
 	// repository, so an arrow to it would point at nothing.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "shop-backend", CloneURL: "file:///b", Enabled: false, Project: "shop", Part: "backend"},
 		{Name: "shop-ui", CloneURL: "file:///u", Enabled: true, Project: "shop",
@@ -500,7 +474,7 @@ func TestSyncSpecs_replacesUsesRatherThanAppending(t *testing.T) {
 	// page keeps drawing an arrow that no longer exists — the same reason
 	// repodeps.Sync deletes before it inserts.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	first := []repos.Spec{
 		{Name: "a", CloneURL: "file:///a", Enabled: true, Project: "p"},
 		{Name: "b", CloneURL: "file:///b", Enabled: true, Project: "p", Uses: []string{"a"}},
@@ -533,7 +507,7 @@ func TestSyncSpecs_aStructureEditIsNotAReIndex(t *testing.T) {
 	// so it must not reset the SHA and send the next poll into a full re-index.
 	// The reset trigger is clone_url, and only clone_url.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
 		{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true, Project: "peeq"},
 	}); err != nil {
@@ -572,7 +546,7 @@ func TestSetCounts_touchesOnlyTheTotals(t *testing.T) {
 	// sweep refreshes the totals after removing excluded content, and it must
 	// not pose as a poll: the SHA and the error both stay.
 	ctx := context.Background()
-	s := NewStateStore(newDB(t))
+	s := NewStateStore(storetest.Open(t, 1536))
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{{Name: "peeq", CloneURL: "file:///x", Branch: "master", Enabled: true}}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
@@ -610,7 +584,7 @@ func TestSetCounts_touchesOnlyTheTotals(t *testing.T) {
 
 func TestMarkError_isVisibleAndClearedByASuccess(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -643,7 +617,7 @@ func TestMarkError_isVisibleAndClearedByASuccess(t *testing.T) {
 func TestSetBranch_recordsTheResolvedBranch(t *testing.T) {
 	// Given: an entry whose YAML omitted the branch, so it is empty until the
 	// git layer resolves the remote's default.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -668,7 +642,7 @@ func TestPollRepo_readsTheTokenByItsEnvironmentVariableName(t *testing.T) {
 	// Given: repos.yaml names the variable, never the value. Asking TokenFunc
 	// for the REPOSITORY name resolved every token to "" and every private
 	// repository was fetched anonymously while the config looked right.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	state := NewStateStore(db)
 	spec := repos.Spec{
 		Name: "private", CloneURL: "https://forge.invalid/a.git",
@@ -711,7 +685,7 @@ func TestLastIndexedAt_movesOnlyWhenTheIndexIsWritten(t *testing.T) {
 	// Given: a repository indexed once. A quiet poll and a failed poll both
 	// move last_run_at, which the page used to read as "indexed": the column
 	// that answers that question must sit still through both.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	state := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "shop", CloneURL: "https://forge.invalid/a.git", Branch: "main", Enabled: true}
@@ -755,7 +729,7 @@ func TestLastIndexedAt_movesOnlyWhenTheIndexIsWritten(t *testing.T) {
 func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 	// Given: a repository that failed once and has had no new commit since.
 	// Without this the error stays on the Repos page until someone pushes.
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	state := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "shop", CloneURL: "https://forge.invalid/a.git", Branch: "main", Enabled: true}
@@ -788,7 +762,7 @@ func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 // both mirrors, ready to be purged.
 func seedPurgeable(t *testing.T, name string) (*sql.DB, *StateStore) {
 	t.Helper()
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -891,7 +865,7 @@ func TestResetRepo_dropsTheContentAndKeepsTheRow(t *testing.T) {
 	// Given: a repository whose checkout turned out to point at a different
 	// remote. The entry is still in repos.yaml and has to survive; everything
 	// built out of the wrong code has to go.
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true}
@@ -982,7 +956,7 @@ func TestSyncSpecs_cloneURLChangeResetsTheIndexWithoutACheckout(t *testing.T) {
 	// Given: an indexed repository whose checkout the operator removed. With
 	// no .git the poller's origin check has nothing to compare, so only the
 	// list itself can tell that the entry now names another repository.
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -1034,7 +1008,7 @@ func TestSyncSpecs_cloneURLChangeResetsTheIndexWithoutACheckout(t *testing.T) {
 }
 
 func TestRequestReindex_isAGenerationClearedOnlyByTheRunThatReadIt(t *testing.T) {
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

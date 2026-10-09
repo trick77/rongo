@@ -13,12 +13,13 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"golang.org/x/crypto/bcrypt"
 )
 
 func passwordAuth(t *testing.T) *auth.Service {
 	t.Helper()
-	svc := auth.NewService(authDB(t), "password", "")
+	svc := auth.NewService(storetest.Open(t, 4), "password", "")
 	hash, err := bcrypt.GenerateFromPassword([]byte("hunter2"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash: %v", err)

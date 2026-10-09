@@ -12,6 +12,7 @@ import (
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -41,7 +42,7 @@ func (f *fakeCommit) RecordedCommit(_ context.Context, _, _ string) (sourceview.
 // in it. A turn citing it is the permission, owner and share link alike; an
 // uncited commit stays refused.
 func TestCommit_aCitedCommitTheLaneHasDroppedStillOpens(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
 		t.Fatal(err)
@@ -125,7 +126,7 @@ func TestCommit_servesTheCitedCommit_andSaysWhyNot(t *testing.T) {
 }
 
 func TestPublicShareCommit_opensACitedCommitAndNothingElse(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	svc := auth.NewService(db, "dev", "")
 	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
 		t.Fatal(err)

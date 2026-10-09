@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 const dim = 4
@@ -35,19 +35,6 @@ func (e fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 		out[i] = e.vec
 	}
 	return out, nil
-}
-
-func testDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "r.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, dim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
 }
 
 // addRepo registers a repository so files can reference it and hits can carry
@@ -131,7 +118,7 @@ func TestSearchVector_dropsHitsBeyondTheDistanceBound(t *testing.T) {
 	// Given: one chunk close to the query and one orthogonal to it. Without a
 	// bound a KNN cannot fail — it returns k rows for any input whatsoever —
 	// so this bound is what makes an empty result possible at all.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "A.java", "run", "sender.send()", nearVec)
 	addChunk(t, db, "shop", "B.java", "other", "unrelated body", farVec)
@@ -153,7 +140,7 @@ func TestSearchVector_repoFilterIsAPreFilter(t *testing.T) {
 	// restriction were applied AFTER the KNN, asking for "loom" would return
 	// nothing — which is what happens to every repository holding a small slice
 	// of the corpus, i.e. most of them.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "alpha", nearVec)
@@ -178,7 +165,7 @@ func TestSearchVector_repoFilterIsAPreFilter(t *testing.T) {
 // same key, so only the stage restriction decides what comes back.
 func stageFixture(t *testing.T) *sql.DB {
 	t.Helper()
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "acme-service", "master")
 	addRepo(t, db, "acme-infra", "main")
 	addChunk(t, db, "acme-service", "src/main/resources/application-default.properties", "", "acme.cron.send-digest=0/20", nearVec)
@@ -244,7 +231,7 @@ func TestSearchVector_stageRestrictionIsAPreFilter(t *testing.T) {
 	// Given: k = 1 and the infra repository's other stages nearer to the
 	// query than prod. A post-filter would hand back one syst row and drop
 	// it, leaving prod unreachable.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "acme-infra", "main")
 	addChunk(t, db, "acme-infra", "syst/a.properties", "", "x", nearVec)
 	addChunk(t, db, "acme-infra", "intg/a.properties", "", "x", nearVec)
@@ -272,7 +259,7 @@ func TestSearch_noStageMeansNoRestriction(t *testing.T) {
 
 func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "PromoMailJob.java", "send", "public void send() { promoMailer.dispatch(); }", farVec)
 	addChunk(t, db, "shop", "Other.java", "run", "public void run() { cart.clear(); }", nearVec)
@@ -291,7 +278,7 @@ func TestSearchKeyword_findsTheLiteralIdentifier(t *testing.T) {
 
 func TestSearchKeyword_emptyMatchTouchesNothing(t *testing.T) {
 	// Given / When
-	hits, err := NewStore(testDB(t)).SearchKeyword(context.Background(), "", 10, nil)
+	hits, err := NewStore(storetest.Open(t, dim)).SearchKeyword(context.Background(), "", 10, nil)
 
 	// Then
 	if err != nil || len(hits) != 0 {
@@ -366,7 +353,7 @@ func TestSearch_equalRankingOrdersByAddress(t *testing.T) {
 		for _, c := range cases {
 			t.Run(lane.name+"/"+c.name, func(t *testing.T) {
 				// Given
-				db := testDB(t)
+				db := storetest.Open(t, dim)
 				addRepo(t, db, "shop", "master")
 				c.seed(t, db)
 
@@ -391,7 +378,7 @@ func TestSearch_literalIdentifierRanksAheadOfSemanticNoise(t *testing.T) {
 	// that literally contains the identifier but sits far away in vector space.
 	// This is the whole reason the hybrid exists: the vector lane finds
 	// "Teaser-Mail", the keyword lane finds PromoMailJob.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "Near1.java", "a", "irgendein anderer text", nearVec)
 	addChunk(t, db, "shop", "Near2.java", "b", "yet another text", nearVec)
@@ -421,7 +408,7 @@ func TestSearch_noMatchesIsAnEmptySliceAndNoError(t *testing.T) {
 	// every chunk and none of its words occur. "No hit means no hit": the
 	// caller reports that with the terms it tried, and an error here would be
 	// indistinguishable from a broken database.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "master")
 	addChunk(t, db, "shop", "A.java", "run", "sender dispatch cart", farVec)
 	r := New(db, fixedEmbedder{vec: queryVec})
@@ -443,7 +430,7 @@ func TestSearch_noMatchesIsAnEmptySliceAndNoError(t *testing.T) {
 
 func TestSearch_everyHitIsCitable(t *testing.T) {
 	// Given: every claim rongo makes must name repo, branch, file and line.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "shop", "release-2024.3")
 	addChunk(t, db, "shop", "src/A.java", "run", "sender.send()", nearVec)
 	r := New(db, fixedEmbedder{vec: queryVec})
@@ -472,7 +459,7 @@ func TestSearch_everyHitIsCitable(t *testing.T) {
 
 func TestSearch_repoFilterSurvivesTheWholePipeline(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "sender dispatch", nearVec)
@@ -511,7 +498,7 @@ func TestSearch_repoFilterSurvivesTheWholePipeline(t *testing.T) {
 // restricting, empty result and all.
 func TestSearch_dropsARepositoryNameTheIndexDoesNotKnow(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addChunk(t, db, "peeq", "a.go", "A", "sender dispatch", nearVec)
 	r := New(db, fixedEmbedder{vec: queryVec})

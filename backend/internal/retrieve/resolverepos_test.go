@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func TestResolveReposSplitsWhatTheIndexCarriesFromWhatItDoesNot(t *testing.T) {
 	// Given an index carrying two of the names a question might use.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "rongo", "master")
 	r := New(db, nil)
@@ -35,7 +37,7 @@ func TestResolveReposDoesNotReportAMisspellingAsMissing(t *testing.T) {
 	// carrying its owner. Reporting any of them as "not in the index" would
 	// put a false sentence in front of the reader and hand the answer model a
 	// rule about a repository whose code is right there in the sources.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	r := New(db, nil)
 
@@ -59,7 +61,7 @@ func TestResolveReposDoesNotReportAMisspellingAsMissing(t *testing.T) {
 
 func TestResolveReposReportsANameThatResemblesNothing(t *testing.T) {
 	// The case the notice exists for: a repository that is simply not there.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "rongo", "master")
 	r := New(db, nil)
@@ -82,7 +84,7 @@ func TestResolveReposDoesNotReportAnOwnerPrefixedNameAsMissing(t *testing.T) {
 	// it match no row, and before the notice existed that cost nothing. It
 	// must not now become "no repository called asg017/sqlite-vec is indexed"
 	// about a repository the index has.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "sqlite-vec", "main")
 	r := New(db, nil)
 
@@ -101,7 +103,7 @@ func TestResolveReposFollowsTheQuestionsOwnWords(t *testing.T) {
 	// word, and the rung upstream keys off that union: a comparison the
 	// understanding step failed to guess still reads as one, because the
 	// reader typed both names.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "rongo", "master")
 	r := New(db, nil)
@@ -122,7 +124,7 @@ func TestResolveReposFollowsTheQuestionsOwnWords(t *testing.T) {
 
 func TestResolveReposNamesADuplicateOnlyOnce(t *testing.T) {
 	// A repeated guess must not become two notices about the same repository.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	r := New(db, nil)
 
 	known, unknown, err := r.ResolveRepos(context.Background(), []string{"loom", "loom"}, "")
@@ -141,7 +143,7 @@ func TestResolveReposNamesADuplicateOnlyOnce(t *testing.T) {
 func TestResolveReposOnNoNamesIsNoRestriction(t *testing.T) {
 	// The ordinary question names nothing, and must not be reported as
 	// naming something the index lacks.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	r := New(db, nil)
 
 	known, unknown, err := r.ResolveRepos(context.Background(), nil, "")
@@ -168,7 +170,7 @@ func TestResolveReposExpandsAProjectNameToItsMembers(t *testing.T) {
 	// "How does checkout work in Shop?" — the reader named the product, which
 	// is the name an Analyst actually knows. It resolves to every repository
 	// the product is made of.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	addMember(t, db, "legacy-crm", "legacy-crm")
@@ -191,7 +193,7 @@ func TestResolveReposReadsAProjectNameOutOfTheQuestion(t *testing.T) {
 	// The guess is allowed to miss, and the reader's own words are the
 	// narrowest signal there is — the same union knownRepos already applies to
 	// repository names.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	r := New(db, nil)
@@ -211,7 +213,7 @@ func TestResolveReposKeepsNamingAMemberNarrow(t *testing.T) {
 	// repository asked about that repository, and a follow-up inside a
 	// project-pinned thread has to be able to narrow — a thread narrows, never
 	// widens.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	r := New(db, nil)
@@ -230,7 +232,7 @@ func TestResolveReposReportsAProjectTheIndexDoesNotCarry(t *testing.T) {
 	// Said out loud, the same way an unknown repository is: dropped from the
 	// search, named in the notice, and the prompt forbidden to claim anything
 	// about it.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	r := New(db, nil)
 
@@ -248,7 +250,7 @@ func TestResolveReposDoesNotReadACommonWordProjectOutOfAQuestion(t *testing.T) {
 	// commonWords exists so a repository called "backend" does not narrow every
 	// question that says the word. A project named one of them is guess-only
 	// for exactly the same reason, and the guard is the same guard.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "svc-a", "backend")
 	addMember(t, db, "svc-b", "backend")
 	r := New(db, nil)
@@ -266,7 +268,7 @@ func TestResolveReposDoesNotReadACommonWordProjectOutOfAQuestion(t *testing.T) {
 func TestResolveReposDoesNotReportHalfOfAHyphenatedNameAsMissing(t *testing.T) {
 	// Given the index carrying transmission-ui and nothing called
 	// transmission, and a question that only ever wrote the full name.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "transmission-ui", "transmission-ui")
 	r := New(db, nil)
 
@@ -293,7 +295,7 @@ func TestResolveReposStillReportsAHyphenSegmentTheQuestionNames(t *testing.T) {
 	// The other half of the same rule. Here the reader really did name two
 	// systems, and one of them is genuinely not indexed - which is the case
 	// the notice exists for.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "transmission-ui", "transmission-ui")
 	r := New(db, nil)
 
@@ -314,7 +316,7 @@ func TestResolveReposStillReportsAPluralSegmentTheQuestionNames(t *testing.T) {
 	// the reader typed "tools". Testing only the folded spelling finds an
 	// occurrence whose own s is a word rune, and the question that names the
 	// missing repository outright would read as never naming it.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "media-tools", "media-tools")
 	r := New(db, nil)
 
@@ -335,7 +337,7 @@ func TestResolveReposDropsAHyphenSegmentWhicheverHalfCarriesThePlural(t *testing
 	// "media-tools" and not from "tools-media", so the halves have to be
 	// folded one by one or the same invented name is suppressed in one order
 	// and reported in the other.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "tools-media", "tools-media")
 	r := New(db, nil)
 
@@ -355,7 +357,7 @@ func TestResolveReposStillReportsANameThatIsNoSegment(t *testing.T) {
 	// names a repository the current question does not spell. That name is
 	// still reported: it resembles nothing indexed and is nobody's misreading
 	// of a hyphen.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	r := New(db, nil)
 
@@ -384,7 +386,7 @@ func TestResolveReposReadsARepoPlusItsPartAsThatRepo(t *testing.T) {
 	// glued the repository and the part it plays into one guess. The reader
 	// named an indexed repository, so the turn narrows to it and says nothing
 	// about a repository the index lacks.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMemberPart(t, db, "shop-service", "shop", "backend")
 	addMemberPart(t, db, "shop-ui", "shop", "ui")
 	r := New(db, nil)
@@ -406,7 +408,7 @@ func TestResolveReposReadsARepoPlusItsPartAsThatRepo(t *testing.T) {
 func TestResolveReposNarrowsToARepoNamedOnlyWithItsPart(t *testing.T) {
 	// The glued guess alone, the question carrying nothing: the repository
 	// still comes back, because the reader did name it.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMemberPart(t, db, "shop-service", "shop", "backend")
 	addMemberPart(t, db, "shop-ui", "shop", "ui")
 	r := New(db, nil)
@@ -424,7 +426,7 @@ func TestResolveReposNarrowsToARepoNamedOnlyWithItsPart(t *testing.T) {
 func TestResolveReposReadsOnlyTheDeclaredPart(t *testing.T) {
 	// The part is declared, never guessed: a repository declared as a consumer
 	// does not swallow "backend", and the name stays reported.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMemberPart(t, db, "shop-service", "shop", "consumer")
 	r := New(db, nil)
 
@@ -445,7 +447,7 @@ func TestResolveReposDoesNotGlueAPartOntoAnIndexedName(t *testing.T) {
 	// orders-api is a repository of its own. Reading it as orders plus its
 	// part would add orders and turn a one-repository question into a
 	// comparison nobody asked for.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMemberPart(t, db, "orders", "orders", "api")
 	addMemberPart(t, db, "orders-api", "orders-api", "backend")
 	r := New(db, nil)
@@ -463,7 +465,7 @@ func TestResolveReposDoesNotGlueAPartOntoAnIndexedName(t *testing.T) {
 func TestResolveReposReadsAProjectInAHyphenatedCompound(t *testing.T) {
 	// German writes "das Shop-Frontend". No member is called shop-frontend,
 	// so the word names the product and the turn narrows to it.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	addMember(t, db, "legacy-crm", "legacy-crm")
@@ -483,7 +485,7 @@ func TestResolveReposKeepsAHyphenatedMemberInTheQuestionNarrow(t *testing.T) {
 	// "shop-ui" in the reader's words names the member, not the project whose
 	// name is its first half. Reading the hyphen as a boundary searched all
 	// seven members of a product for a question about one of them.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	r := New(db, nil)

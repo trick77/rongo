@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -37,7 +38,7 @@ func (c checkout) ReadFile(_ context.Context, _ repos.Spec, sha, path string) ([
 // "zeichne ein diagramm des ablaufs" refused because every chunk of that
 // file had a new id. The basis is read at the commit it was read at.
 func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	chunkID := seedChunk(t, db)
 	src := ask.Source{ChunkID: chunkID, Repo: "peeq", Path: "a.go", SHA: "abc1234", StartLine: 2, EndLine: 3, Reason: "hit"}
 	a := &fakeAsker{tokens: []string{"x"}, sources: []ask.Source{src}}
@@ -71,7 +72,7 @@ func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
 // way to read it, whole or not — the count says which. The text is read only
 // when asked for: every follow-up needs the refs, only a rework the files.
 func TestAsk_aFollowUpCarriesThePreviousAnswersSources(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	chunkID := seedChunk(t, db)
 	// The first turn claims two sources; only one of them is a chunk the
 	// index holds, the other stands for one a re-index has since removed.

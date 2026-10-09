@@ -14,7 +14,7 @@ import (
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/symbols"
 )
 
@@ -159,14 +159,7 @@ func newHarnessFiles(t testing.TB, files map[string]string, symbolExtractor func
 	if err != nil {
 		t.Skip("ctags not available")
 	}
-	db, err := store.Open(filepath.Join(t.TempDir(), "idx.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, writeDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, writeDim)
 
 	var src string
 	if files != nil {

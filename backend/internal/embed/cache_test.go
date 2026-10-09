@@ -2,33 +2,18 @@ package embed
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"math"
-	"path/filepath"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 const testDim = 4
 
-func testDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, testDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
-
 func TestCache_getReturnsOnlyWhatItHolds(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	testee := NewCache(db, "text-embedding-3-small", testDim)
 	if err := testee.Put(context.Background(), "hash-a", vecOf(1, testDim)); err != nil {
 		t.Fatalf("Put() err = %v", err)
@@ -53,7 +38,7 @@ func TestCache_getReturnsOnlyWhatItHolds(t *testing.T) {
 func TestCache_roundTripsAVectorBitForBit(t *testing.T) {
 	// Given: values chosen so a float32/float64 confusion or a byte-order slip
 	// shows up as an inequality rather than as a rounding difference.
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	testee := NewCache(db, "m", testDim)
 	want := []float32{0.1, -0.2, float32(math.Pi), 1e-8}
 	if err := testee.Put(context.Background(), "h", want); err != nil {
@@ -76,7 +61,7 @@ func TestCache_roundTripsAVectorBitForBit(t *testing.T) {
 
 func TestCache_isKeyedByModelSoAnotherModelMisses(t *testing.T) {
 	// Given: the same content under one model.
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	small := NewCache(db, "text-embedding-3-small", testDim)
 	if err := small.Put(context.Background(), "h", vecOf(1, testDim)); err != nil {
 		t.Fatalf("Put() err = %v", err)
@@ -100,7 +85,7 @@ func TestCache_getHandlesMoreHashesThanSQLiteTakesVariables(t *testing.T) {
 	// Given: a real index passes thousands of hashes at once. A single
 	// IN (?,?,…) blows SQLite's variable limit — a hard failure on the first
 	// real run that a two-hash test never reaches.
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	testee := NewCache(db, "m", testDim)
 	const n = 1500
 	hashes := make([]string, n)
@@ -129,7 +114,7 @@ func TestCache_getHandlesMoreHashesThanSQLiteTakesVariables(t *testing.T) {
 func TestCache_putRejectsAWrongDimension(t *testing.T) {
 	// Given: a short vector stored here would reach vec0 much later, far from
 	// whatever produced it.
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	testee := NewCache(db, "m", testDim)
 
 	// When
@@ -144,7 +129,7 @@ func TestCache_putRejectsAWrongDimension(t *testing.T) {
 func TestCache_putIsIdempotent(t *testing.T) {
 	// Given: re-indexing the same content hits Put again for content already
 	// cached, which must not fail on the primary key.
-	db := testDB(t)
+	db := storetest.Open(t, testDim)
 	testee := NewCache(db, "m", testDim)
 	if err := testee.Put(context.Background(), "h", vecOf(1, testDim)); err != nil {
 		t.Fatalf("first Put() err = %v", err)
@@ -165,7 +150,7 @@ func TestCache_putIsIdempotent(t *testing.T) {
 
 func TestCache_getWithNoHashesTouchesNothing(t *testing.T) {
 	// Given / When
-	got, err := NewCache(testDB(t), "m", testDim).Get(context.Background(), nil)
+	got, err := NewCache(storetest.Open(t, testDim), "m", testDim).Get(context.Background(), nil)
 
 	// Then
 	if err != nil || len(got) != 0 {

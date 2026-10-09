@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +18,7 @@ import (
 	"github.com/trick77/rongo/internal/projects"
 	"github.com/trick77/rongo/internal/repodeps"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // moduleByDir is the mapping the real router gets from internal/modules: a
@@ -119,14 +118,7 @@ func testLLM(t *testing.T, fn func(prompt string) string) *llm.Client {
 // each deps entry's go.mod into repo_deps.
 func testDBWithDeps(t *testing.T, deps map[string]string) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("Open() err = %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("Migrate() err = %v", err)
-	}
+	db := storetest.Open(t, 1536)
 	for _, repo := range []string{"peeq", "loom", "go-sqlite3"} {
 		if _, err := db.Exec(
 			`INSERT OR IGNORE INTO repo_state (name, clone_url) VALUES (?, ?)`,
@@ -556,14 +548,7 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 // so the tests cannot drift from what production sees.
 func shopMap(t *testing.T) projects.Map {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("Open() err = %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("Migrate() err = %v", err)
-	}
+	db := storetest.Open(t, 1536)
 	for _, r := range [][2]string{
 		{"shop-ui", "shop"}, {"shop-backend", "shop"}, {"shop-events", "shop"},
 		{"legacy-crm", "legacy-crm"},
