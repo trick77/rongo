@@ -280,14 +280,20 @@ func (s *StateStore) ResetRepo(ctx context.Context, name string) error {
 
 // resetTx is ResetRepo inside the caller's transaction.
 func resetTx(ctx context.Context, tx *sql.Tx, name string) error {
+	return purgeThen(ctx, tx, name, "reset", `
+		UPDATE repo_state
+		SET last_sha = '', last_indexed_at = '', last_error = '', file_count = 0, chunk_count = 0
+		WHERE name = ?`)
+}
+
+// purgeThen is purgeContent followed by one statement over the repo_state
+// row, bound to name; verb words the error ("reset", "purge").
+func purgeThen(ctx context.Context, tx *sql.Tx, name, verb, stmt string) error {
 	if err := purgeContent(ctx, tx, name); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE repo_state
-		SET last_sha = '', last_indexed_at = '', last_error = '', file_count = 0, chunk_count = 0
-		WHERE name = ?`, name); err != nil {
-		return fmt.Errorf("reset %s: %w", name, err)
+	if _, err := tx.ExecContext(ctx, stmt, name); err != nil {
+		return fmt.Errorf("%s %s: %w", verb, name, err)
 	}
 	return nil
 }
@@ -334,13 +340,7 @@ type knownRepo struct {
 // purgeRepoTx is purgeContent plus the repo_state row itself, which takes
 // repo_deps with it through the cascade.
 func purgeRepoTx(ctx context.Context, tx *sql.Tx, name string) error {
-	if err := purgeContent(ctx, tx, name); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM repo_state WHERE name = ?`, name); err != nil {
-		return fmt.Errorf("purge %s: %w", name, err)
-	}
-	return nil
+	return purgeThen(ctx, tx, name, "purge", `DELETE FROM repo_state WHERE name = ?`)
 }
 
 // purgeContent removes every file the index holds for one repository, in the

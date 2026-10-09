@@ -94,7 +94,7 @@ type Retriever struct {
 	// Candidates is how many rows each lane fetches before fusion.
 	Candidates int
 	// RepoDecay demotes a repository's repeated hits so a second repository
-	// has room in the cut; see FuseWeightedDiverse. 1 is off, which is what
+	// has room in the cut; see Decays.Repo. 1 is off, which is what
 	// ships until the evaluation names a value.
 	RepoDecay float64
 	// TestDecay cuts a test hit's fused score; see DefaultTestDecay. 1 — and

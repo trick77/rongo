@@ -19,6 +19,7 @@ import (
 
 	"github.com/trick77/llmwire"
 
+	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -175,26 +176,9 @@ func embedError(err error, took time.Duration) error {
 }
 
 // startHeartbeat logs at intervals while a request is in flight and returns a
-// stop function. peeq keeps this in its llm package; rongo has none, and one
-// ticker does not justify inventing one.
+// stop function.
 func (c *Client) startHeartbeat(ctx context.Context, inputs int) func() {
-	if c.heartbeat <= 0 {
-		return func() {}
-	}
-	done := make(chan struct{})
-	go func() {
-		t := time.NewTicker(c.heartbeat)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				c.log.Info("embed: still waiting for response", "inputs", inputs, "model", c.model)
-			}
-		}
-	}()
-	return func() { close(done) }
+	return sched.Heartbeat(ctx, c.heartbeat, func() {
+		c.log.Info("embed: still waiting for response", "inputs", inputs, "model", c.model)
+	})
 }

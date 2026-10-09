@@ -86,64 +86,40 @@ type Lane struct {
 	Weight float64
 }
 
-// FuseWeighted merges pre-ranked hit lists via weighted Reciprocal Rank Fusion:
-// a hit's score is the sum over lanes of weight/(rrfK + rank). Hits are
-// identified across lanes by chunk id. Returns up to k hits, best first; ties
-// break on the chunk's ADDRESS, never on its id — see lessByAddress.
-//
-// A lane whose weight is zero or negative is MUTED rather than promoted to full
-// confidence — the one value a caller would reach for to silence a lane must
-// not be the value that makes it shout loudest.
-//
-// The test and documentation demotions are included, at their defaults: they
-// are what ships, so the plainest-named fusion has to be the one the product
-// runs. Pure weighted RRF is FuseWeightedDecayed(lanes, k, Decays{Repo: 1}).
-func FuseWeighted(lanes []Lane, k int) []Hit {
-	return FuseWeightedDiverse(lanes, k, DefaultRepoDecay)
-}
-
-// FuseWeightedDiverse is FuseWeighted with a per-repository decay applied
-// before the list is cut to k: a repository's nth hit is ordered as if its
-// score were score*decay^n, while the score written onto the hit stays the
-// fusion score. Anything outside the open interval (0,1) is OFF — zero
-// included, so a Retriever built as a struct literal rather than through New
-// falls back to no decay instead of silently running the harshest setting
-// there is. Retriever.TestDecay and Retriever.DocDecay read their zeros the
-// same way, which means a struct-literal Retriever also runs with the test and
-// documentation demotions OFF while retrieve.New — the only constructor the
-// product uses — runs the shipped values. Every knob defaults to "do nothing"
-// in the hand-built case; New is where the shipped values live.
-//
-// It exists because the binding constraint moved from routing to retrieval.
-// Measured on the mixed corpus, only 7 of 16 ambiguous questions retrieved
-// BOTH of their alternatives into the top 20 — one repository filled the list,
-// and the router was then asked to arbitrate between candidates that were
-// never in it. Demoting a repository's repeats is the cheapest way to leave
-// room for the second implementation; it cannot invent a candidate the lanes
-// did not return.
-//
-// That 7 of 16 is the RAW question, which the product does not run: under the
-// shipped query expansion the same corpus measures 12 of 16, so the constraint
-// is much smaller than the premise made it look. See
-// docs/measurements/2026-08-22-repo-diversity.md — which is also why the decay
-// ships off.
-//
-// The decay is deliberately gentle rather than a hard per-repository cap: a
-// question whose answer genuinely lives in twelve chunks of one repository
-// must not lose eight of them to make room for a repository that has nothing
-// to say.
-func FuseWeightedDiverse(lanes []Lane, k int, decay float64) []Hit {
-	return FuseWeightedDecayed(lanes, k, Decays{Repo: decay, Test: DefaultTestDecay, Doc: DefaultDocDecay})
-}
-
 // Decays are the three demotions fusion applies, gathered into one value so
 // the evaluation harness can sweep any of them and so adding a fourth is not a
 // fifth positional argument nobody can read at a call site. Anything outside
 // the open interval (0,1) is OFF for each of them independently — the zero
 // value therefore means "demote nothing", which is what a hand-built
-// Retriever gets.
+// Retriever gets: Retriever.TestDecay and Retriever.DocDecay read their zeros
+// the same way, so a struct-literal Retriever runs with every demotion OFF
+// while retrieve.New — the only constructor the product uses — runs the
+// shipped values. Every knob defaults to "do nothing" in the hand-built case;
+// New is where the shipped values live.
 type Decays struct {
-	// Repo demotes a repository's repeated hits; see FuseWeightedDiverse.
+	// Repo demotes a repository's repeated hits before the list is cut to
+	// k: a repository's nth hit is ordered as if its score were
+	// score*decay^n, while the score written onto the hit stays the fusion
+	// score.
+	//
+	// It exists because the binding constraint moved from routing to
+	// retrieval. Measured on the mixed corpus, only 7 of 16 ambiguous
+	// questions retrieved BOTH of their alternatives into the top 20 — one
+	// repository filled the list, and the router was then asked to
+	// arbitrate between candidates that were never in it. Demoting a
+	// repository's repeats is the cheapest way to leave room for the second
+	// implementation; it cannot invent a candidate the lanes did not return.
+	//
+	// That 7 of 16 is the RAW question, which the product does not run:
+	// under the shipped query expansion the same corpus measures 12 of 16,
+	// so the constraint is much smaller than the premise made it look. See
+	// docs/measurements/2026-08-22-repo-diversity.md — which is also why the
+	// decay ships off (DefaultRepoDecay).
+	//
+	// The decay is deliberately gentle rather than a hard per-repository
+	// cap: a question whose answer genuinely lives in twelve chunks of one
+	// repository must not lose eight of them to make room for a repository
+	// that has nothing to say.
 	Repo float64
 	// Test cuts a test hit's score; see DefaultTestDecay.
 	Test float64
@@ -151,17 +127,27 @@ type Decays struct {
 	Doc float64
 }
 
-// FuseWeightedDecayed is FuseWeightedDiverse with the test and documentation
-// demotions made explicit, so the evaluation harness can sweep them the way it
-// sweeps the repo decay.
+// FuseWeightedDecayed merges pre-ranked hit lists via weighted Reciprocal
+// Rank Fusion: a hit's score is the sum over lanes of weight/(rrfK + rank).
+// Hits are identified across lanes by chunk id. Returns up to k hits, best
+// first; ties break on the chunk's ADDRESS, never on its id — see
+// lessByAddress.
 //
-// Unlike the repo decay, those two are applied to the hit's OWN Score and not
-// only to the ordering key. The repo decay is a question of arrangement — the
-// hit is as good as fusion said, it just steps aside — while a test and a
-// document are genuinely weaker evidence about how a mechanism works than the
-// mechanism is. The routing floor in internal/ask reads this score to decide
-// what may reach the clarification card, so a demotion the score hid would be
-// a demotion that never happened.
+// A lane whose weight is zero or negative is MUTED rather than promoted to full
+// confidence — the one value a caller would reach for to silence a lane must
+// not be the value that makes it shout loudest.
+//
+// d carries the three demotions; what ships is Decays{Repo: DefaultRepoDecay,
+// Test: DefaultTestDecay, Doc: DefaultDocDecay}, set by retrieve.New, and pure
+// weighted RRF is Decays{Repo: 1}.
+//
+// Unlike the repo decay, the test and documentation demotions are applied to
+// the hit's OWN Score and not only to the ordering key. The repo decay is a
+// question of arrangement — the hit is as good as fusion said, it just steps
+// aside — while a test and a document are genuinely weaker evidence about how
+// a mechanism works than the mechanism is. The routing floor in internal/ask
+// reads this score to decide what may reach the clarification card, so a
+// demotion the score hid would be a demotion that never happened.
 //
 // A path that is both a test and a document — docs/plans/foo_test.go, or a
 // README under testdata — takes the HARSHER of the two once, never the

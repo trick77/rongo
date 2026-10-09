@@ -301,21 +301,17 @@ var manifestFiles = map[string]bool{
 // sees under .bpmn and which carry diagram geometry past any ceiling.
 var exemptSuffixes = []string{".bpmn20.xml", ".bpmn.xml"}
 
-// Select decides what to do with one file and returns a human-readable reason
-// for anything it skips. The reason is stored on the file row so the answer
-// layer can say "that file exists but was not indexed" — the "never invent"
-// invariant applied to the index itself.
-func (s *Selector) Select(p string, body []byte) (Decision, string) {
-	d, reason, _ := s.SelectBody(p, body)
-	return d, reason
-}
-
-// SelectBody is Select returning the body the pipeline must index: for a
-// configuration file that is the REDACTED body, with credential values
-// replaced by redact.Marker. Every consumer downstream — ctags, the chunker,
-// the embedding, the edge extractor, the content hash — reads this one, so
-// what is stored, embedded and later shown is the same bytes; the source
-// viewer applies the same function on its own read.
+// SelectBody decides what to do with one file and returns a human-readable
+// reason for anything it skips, plus the body the pipeline must index. The
+// reason is stored on the file row so the answer layer can say "that file
+// exists but was not indexed" — the "never invent" invariant applied to the
+// index itself.
+//
+// For a configuration file the returned body is the REDACTED one, with
+// credential values replaced by redact.Marker. Every consumer downstream —
+// ctags, the chunker, the embedding, the edge extractor, the content hash —
+// reads this one, so what is stored, embedded and later shown is the same
+// bytes; the source viewer applies the same function on its own read.
 func (s *Selector) SelectBody(p string, body []byte) (Decision, string, []byte) {
 	// The two cheap, certain verdicts go first. Both are decided in one pass or
 	// none, while the secret scan runs eight regexes over the WHOLE body — so

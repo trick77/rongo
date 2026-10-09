@@ -19,16 +19,16 @@ func reposOf(hits []Hit) []string {
 	return out
 }
 
-func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
+func TestFuseWeightedDecayed_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 	// Given: two repositories, interleaved by the lanes.
 	lanes := []Lane{
 		{Name: "semantic:0", Hits: append(repoHits("a", 1, 2, 3), repoHits("b", 4, 5)...), Weight: WeightSemantic},
 		{Name: "keyword:strict", Hits: repoHits("a", 3, 1), Weight: WeightKeywordStrict},
 	}
 
-	// When: the decay is switched off.
-	plain := FuseWeighted(lanes, 5)
-	got := FuseWeightedDiverse(lanes, 5, 1.0)
+	// When: the decay is switched off, against a fusion that never ran it.
+	plain := FuseWeightedDecayed(lanes, 5, Decays{Repo: 0, Test: DefaultTestDecay, Doc: DefaultDocDecay})
+	got := FuseWeightedDecayed(lanes, 5, Decays{Repo: 1.0, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: byte for byte the undiversified ranking. The knob's off position
 	// has to be the behaviour that shipped, or every measurement against it
@@ -44,7 +44,7 @@ func TestFuseWeightedDiverse_decayOfOneLeavesTheOrderAlone(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
+func TestFuseWeightedDecayed_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	// Given: one repository owns the whole top of the list and the second
 	// implementation sits just below the cut. This is the measured failure:
 	// on the raw question only 7 of 16 ambiguous questions retrieved both of
@@ -56,7 +56,7 @@ func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	}
 
 	// When: three hits are wanted and the decay is on.
-	got := FuseWeightedDiverse(lanes, 3, 0.5)
+	got := FuseWeightedDecayed(lanes, 3, Decays{Repo: 0.5, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: repository b is represented, and the strongest hit still leads.
 	if got[0].ChunkID != 1 {
@@ -68,7 +68,7 @@ func TestFuseWeightedDiverse_liftsASecondRepositoryIntoTheCut(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
+func TestFuseWeightedDecayed_diversifiesBeforeTruncating(t *testing.T) {
 	// Given: the second repository's only hit is at rank 5 of the fused list,
 	// below a cut of 3. Diversifying the already-truncated list could not
 	// possibly find it — the material has to be there when the decay is
@@ -78,7 +78,7 @@ func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
 	}
 
 	// When
-	got := FuseWeightedDiverse(lanes, 3, 0.4)
+	got := FuseWeightedDecayed(lanes, 3, Decays{Repo: 0.4, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then
 	if rankOf(got, 9) >= len(got) {
@@ -86,7 +86,7 @@ func TestFuseWeightedDiverse_diversifiesBeforeTruncating(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
+func TestFuseWeightedDecayed_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	// Given: a harsh decay, which all but zeroes every repeat from a
 	// repository.
 	lanes := []Lane{
@@ -94,8 +94,8 @@ func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	}
 
 	// When: run twice, asking for more than there is.
-	first := FuseWeightedDiverse(lanes, 99, 0.05)
-	second := FuseWeightedDiverse(lanes, 99, 0.05)
+	first := FuseWeightedDecayed(lanes, 99, Decays{Repo: 0.05, Test: DefaultTestDecay, Doc: DefaultDocDecay})
+	second := FuseWeightedDecayed(lanes, 99, Decays{Repo: 0.05, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 	// Then: nothing is dropped — reordering is not filtering — and two runs
 	// agree. A search that returns a different list for the same corpus reads
@@ -110,7 +110,7 @@ func TestFuseWeightedDiverse_keepsEveryHitAndStaysDeterministic(t *testing.T) {
 	}
 }
 
-func TestFuseWeightedDiverse_outOfRangeDecayIsOff(t *testing.T) {
+func TestFuseWeightedDecayed_outOfRangeDecayIsOff(t *testing.T) {
 	// Given: settings nobody should pass. Zero is the one that matters: it is
 	// the zero value of the field, so a Retriever assembled as a struct literal
 	// must rank exactly as it shipped rather than at the harshest diversity
@@ -120,11 +120,11 @@ func TestFuseWeightedDiverse_outOfRangeDecayIsOff(t *testing.T) {
 		{Name: "semantic:0", Hits: append(repoHits("a", 1, 2, 3), repoHits("b", 4)...), Weight: WeightSemantic},
 		{Name: "keyword:strict", Hits: repoHits("a", 2), Weight: WeightKeywordStrict},
 	}
-	plain := FuseWeighted(lanes, 4)
+	plain := FuseWeightedDecayed(lanes, 4, shippedDecays)
 
 	for _, decay := range []float64{0, -1, 2} {
 		// When
-		got := FuseWeightedDiverse(lanes, 4, decay)
+		got := FuseWeightedDecayed(lanes, 4, Decays{Repo: decay, Test: DefaultTestDecay, Doc: DefaultDocDecay})
 
 		// Then
 		for i := range plain {
