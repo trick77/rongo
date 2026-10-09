@@ -8,14 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
 func TestLog_listsCommitsNewestFirstWithPaths(t *testing.T) {
 	// Given: a fixture with three commits, the last one carrying a body.
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "b.txt", "b\n", "second: add b")
-	writeAndCommit(t, src, "c.txt", "c\n", "third\n\nA body line.\nAnother.")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("b\n"), "second: add b")
+	gittest.Commit(t, src, "c.txt", []byte("c\n"), "third\n\nA body line.\nAnother.")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -62,9 +63,9 @@ func TestLog_listsCommitsNewestFirstWithPaths(t *testing.T) {
 // poll that records history before marking the index failed every cycle.
 func TestLog_aMessageMayHoldTheRecordSeparator(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "b.txt", "b\n", "pasted \x1e here\n\nbody \x1e too")
-	writeAndCommit(t, src, "c.txt", "c\n", "after")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("b\n"), "pasted \x1e here\n\nbody \x1e too")
+	gittest.Commit(t, src, "c.txt", []byte("c\n"), "after")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -95,15 +96,15 @@ func TestLog_aMessageMayHoldTheRecordSeparator(t *testing.T) {
 // back verbatim, so the commit lane and the commit view must too, or the
 // view's indexed flag and the changes lane miss exactly those files.
 func TestLogAndShow_namePathsAsTheIndexDoes(t *testing.T) {
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	odd := []string{`say "hi".md`, "trail ", "tab\there.md"}
 	for _, name := range odd {
 		if err := os.WriteFile(filepath.Join(src, name), []byte("x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	gitRun(t, src, "add", "-A")
-	gitRun(t, src, "commit", "-qm", "odd")
+	gittest.Run(t, src, "add", "-A")
+	gittest.Run(t, src, "commit", "-qm", "odd")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -140,7 +141,7 @@ func TestLogAndShow_namePathsAsTheIndexDoes(t *testing.T) {
 
 func TestLog_fromToListsOnlyTheNewSide_andLimitCaps(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -148,8 +149,8 @@ func TestLog_fromToListsOnlyTheNewSide_andLimitCaps(t *testing.T) {
 		t.Fatalf("EnsureCloned() err = %v", err)
 	}
 	before, _ := c.HeadSHA(ctx, spec, "main")
-	writeAndCommit(t, src, "b.txt", "b\n", "second")
-	writeAndCommit(t, src, "c.txt", "c\n", "third")
+	gittest.Commit(t, src, "b.txt", []byte("b\n"), "second")
+	gittest.Commit(t, src, "c.txt", []byte("c\n"), "third")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}
@@ -179,12 +180,12 @@ func TestLog_fromToListsOnlyTheNewSide_andLimitCaps(t *testing.T) {
 func TestLog_firstParentCollapsesAMergeToOneEntry(t *testing.T) {
 	// Given: main with a side branch of two commits merged in with a merge
 	// commit, the way a forge's merge button leaves history.
-	src := fixtureRepo(t)
-	gitRun(t, src, "checkout", "-qb", "side")
-	writeAndCommit(t, src, "s1.txt", "1\n", "side one")
-	writeAndCommit(t, src, "s2.txt", "2\n", "side two")
-	gitRun(t, src, "checkout", "-q", "main")
-	gitRun(t, src, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from side", "side")
+	src := gittest.Fixture(t)
+	gittest.Run(t, src, "checkout", "-qb", "side")
+	gittest.Commit(t, src, "s1.txt", []byte("1\n"), "side one")
+	gittest.Commit(t, src, "s2.txt", []byte("2\n"), "side two")
+	gittest.Run(t, src, "checkout", "-q", "main")
+	gittest.Run(t, src, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from side", "side")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -222,10 +223,10 @@ func TestLog_firstParentCollapsesAMergeToOneEntry(t *testing.T) {
 func TestLogAndShow_dropTrailersAndSplitARename(t *testing.T) {
 	// Given: a commit whose body carries a sign-off and a co-author, then a
 	// rename of the file it added.
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "b.txt", "b\n", "second\n\nThe reason.\n\nSigned-off-by: Some One <one@example.invalid>\nCo-authored-by: Other <two@example.invalid>")
-	gitRun(t, src, "mv", "b.txt", "c.txt")
-	gitRun(t, src, "commit", "-qm", "rename")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("b\n"), "second\n\nThe reason.\n\nSigned-off-by: Some One <one@example.invalid>\nCo-authored-by: Other <two@example.invalid>")
+	gittest.Run(t, src, "mv", "b.txt", "c.txt")
+	gittest.Run(t, src, "commit", "-qm", "rename")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -259,8 +260,8 @@ func TestLogAndShow_dropTrailersAndSplitARename(t *testing.T) {
 
 func TestShow_reportsOneCommitWithCounts(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "b.txt", "one\ntwo\n", "second\n\nWhy it changed.")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("one\ntwo\n"), "second\n\nWhy it changed.")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()

@@ -46,7 +46,7 @@ func TestRun_aShutdownMidCycleIsNotAFailure(t *testing.T) {
 		FirstDelay: time.Millisecond,
 		Logger:     slog.New(cap),
 	})
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	p.Run(ctx)
@@ -150,7 +150,7 @@ func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -193,7 +193,7 @@ func TestPollOnce_durationsAreReadable(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -235,7 +235,7 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 		return Counts{Files: 5000, Chunks: 40000}, nil
 	}
 	p, root, cap := loggingPoller(t, s, index)
-	extract(t, root, "acme-core", map[string]string{
+	extract(t, root, map[string]string{
 		"a.go": "package a\n", "b.go": "package b\n", "c.go": "package c\n",
 	})
 	if err := p.PollOnce(ctx); err != nil {
@@ -244,7 +244,7 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 
 	// When: one file of three changes
 	cap.records = nil
-	extract(t, root, "acme-core", map[string]string{"b.go": "package b // v2\n"})
+	extract(t, root, map[string]string{"b.go": "package b // v2\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -274,7 +274,7 @@ func TestPollOnce_bracketsTheCycleWithCounts(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
@@ -327,7 +327,7 @@ func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -366,14 +366,14 @@ func TestPollOnce_saysWhenAnIndexWasIncremental(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
 
 	// When: a newer archive lands over the drop
 	cap.records = nil
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a // v2\n"})
+	extract(t, root, map[string]string{"a.go": "package a // v2\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}

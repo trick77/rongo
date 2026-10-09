@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -179,6 +180,6 @@ func assertTooLarge(t *testing.T, h *harness, path string, size int) {
 // git2 commits everything in dir.
 func git2(t *testing.T, dir string) {
 	t.Helper()
-	git(t, dir, "add", "-A")
-	git(t, dir, "commit", "-qm", "grow")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-qm", "grow")
 }

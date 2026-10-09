@@ -758,19 +758,19 @@ func TestMarkChecked_clearsAStaleErrorOnAQuietPoll(t *testing.T) {
 	}
 }
 
-// seedPurgeable builds a database holding one repository with real chunks in
+// seedPurgeable builds a database holding one repository, peeq, with real chunks in
 // both mirrors, ready to be purged.
-func seedPurgeable(t *testing.T, name string) (*sql.DB, *StateStore) {
+func seedPurgeable(t *testing.T) (*sql.DB, *StateStore) {
 	t.Helper()
 	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
-		{Name: name, CloneURL: "/tmp/" + name, Branch: "master", Enabled: true},
+		{Name: "peeq", CloneURL: "/tmp/peeq", Branch: "master", Enabled: true},
 	}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
-	if err := NewWriter(db).ReplaceFile(ctx, name, "src/A.java", "sha", "java", 10,
+	if err := NewWriter(db).ReplaceFile(ctx, "peeq", "src/A.java", "sha", "java", 10,
 		sampleChunks(), [][]float32{vec(1), vec(2)}, nil, nil); err != nil {
 		t.Fatalf("ReplaceFile() err = %v", err)
 	}
@@ -789,7 +789,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("a closed database", func(t *testing.T) {
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		db.Close()
 		if _, err := s.SyncSpecs(ctx, nil); err == nil {
 			t.Error("SyncSpecs() err = nil, want the transaction failure")
@@ -800,7 +800,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 	})
 
 	t.Run("the repository table is unreadable", func(t *testing.T) {
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
 			t.Fatalf("sabotage: %v", err)
 		}
@@ -810,7 +810,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 	})
 
 	t.Run("the vector mirror is unreachable", func(t *testing.T) {
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		if _, err := db.Exec(`DROP TABLE chunks_vec`); err != nil {
 			t.Fatalf("sabotage: %v", err)
 		}
@@ -823,7 +823,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 	})
 
 	t.Run("the keyword mirror is unreachable", func(t *testing.T) {
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		if _, err := db.Exec(`DROP TABLE chunks_fts`); err != nil {
 			t.Fatalf("sabotage: %v", err)
 		}
@@ -838,7 +838,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 	})
 
 	t.Run("the units table is unreachable", func(t *testing.T) {
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		if _, err := db.Exec(`DROP TABLE units`); err != nil {
 			t.Fatalf("sabotage: %v", err)
 		}
@@ -851,7 +851,7 @@ func TestPurge_reportsADatabaseFailureRatherThanPurgingHalfway(t *testing.T) {
 		// The content clears, and only the UPDATE that puts the repository back
 		// at "nothing indexed yet" fails. A reset reporting success here would
 		// leave last_sha pointing at a commit whose chunks no longer exist.
-		db, s := seedPurgeable(t, "peeq")
+		db, s := seedPurgeable(t)
 		if _, err := db.Exec(`DROP TABLE repo_state`); err != nil {
 			t.Fatalf("sabotage: %v", err)
 		}

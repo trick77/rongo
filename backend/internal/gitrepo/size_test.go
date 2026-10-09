@@ -3,10 +3,10 @@ package gitrepo
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -14,7 +14,7 @@ import (
 // before reading it, so both listings say how big each blob is. A submodule
 // pointer names a commit, not a blob, and has no size to report.
 func TestEntries_carryTheBlobSize(t *testing.T) {
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
@@ -25,9 +25,9 @@ func TestEntries_carryTheBlobSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadSHA() err = %v", err)
 	}
-	writeAndCommit(t, src, "big.txt", strings.Repeat("x", 5000), "big")
-	gitRun(t, src, "update-index", "--add", "--cacheinfo", "160000,"+first+",sub")
-	gitRun(t, src, "commit", "-qm", "submodule")
+	gittest.Commit(t, src, "big.txt", []byte(strings.Repeat("x", 5000)), "big")
+	gittest.Run(t, src, "update-index", "--add", "--cacheinfo", "160000,"+first+",sub")
+	gittest.Run(t, src, "commit", "-qm", "submodule")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}
@@ -63,7 +63,7 @@ func TestEntries_carryTheBlobSize(t *testing.T) {
 // name wins over the blob, and an ambiguous one fails the run. Tags named
 // like every likely abbreviation of the blob must not change its size.
 func TestChangedEntries_sizesByTheFullObjectID(t *testing.T) {
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
@@ -74,14 +74,10 @@ func TestChangedEntries_sizesByTheFullObjectID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadSHA() err = %v", err)
 	}
-	writeAndCommit(t, src, "big.txt", strings.Repeat("x", 5000), "big")
-	out, err := exec.Command("git", "-C", src, "rev-parse", "HEAD:big.txt").Output()
-	if err != nil {
-		t.Fatalf("rev-parse: %v", err)
-	}
-	oid := strings.TrimSpace(string(out))
+	gittest.Commit(t, src, "big.txt", []byte(strings.Repeat("x", 5000)), "big")
+	oid := gittest.Run(t, src, "rev-parse", "HEAD:big.txt")
 	for n := 4; n <= 16; n++ {
-		gitRun(t, src, "tag", oid[:n], first)
+		gittest.Run(t, src, "tag", oid[:n], first)
 	}
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
@@ -104,8 +100,8 @@ func TestChangedEntries_sizesByTheFullObjectID(t *testing.T) {
 // blob is skipped on the stream, never held, and the next read on the same
 // process returns its own file.
 func TestReader_aLimitedReadRefusesABigBlobAndStaysInStep(t *testing.T) {
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "big.txt", strings.Repeat("x", 5000), "big")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "big.txt", []byte(strings.Repeat("x", 5000)), "big")
 	c := newClient(t)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}

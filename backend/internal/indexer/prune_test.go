@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 )
 
 // orphanedEmbeddings counts cached vectors no chunk uses any more.
@@ -25,8 +27,8 @@ func TestIndexRepo_prunesEmbeddingsNoChunkUsesAnyMore(t *testing.T) {
 
 	// When: the README is rewritten, so its old chunks go.
 	write(t, h.src, "README.md", "# shop backend\n\nNew text about the cart.\n")
-	git(t, h.src, "add", "-A")
-	git(t, h.src, "commit", "-qm", "rewrite readme")
+	gittest.Run(t, h.src, "add", "-A")
+	gittest.Run(t, h.src, "commit", "-qm", "rewrite readme")
 	st.LastSHA = firstSHA
 	if _, err := h.ix.IndexRepo(context.Background(), st, h.head(t), []string{"README.md"}); err != nil {
 		t.Fatalf("incremental IndexRepo() err = %v", err)

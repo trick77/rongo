@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -48,7 +49,7 @@ func TestEveryCommandCarriesSafeDirectory(t *testing.T) {
 func TestEnsureSnapshot_refusesADirectoryHoldingOnlyGit(t *testing.T) {
 	// Given: an indexed snapshot whose source files are then all removed
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	spec := dropSource(t, c, map[string]string{"a.go": "package a\n"})
 	if _, err := c.EnsureSnapshot(context.Background(), spec); err != nil {
 		t.Fatalf("EnsureSnapshot() err = %v", err)
 	}
@@ -101,7 +102,7 @@ func TestEnsureSnapshot_readFailureIsNotReportedAsMissing(t *testing.T) {
 func TestOriginURL_saysWhenASnapshotSitsWhereACloneBelongs(t *testing.T) {
 	// Given: a snapshot's drop, committed
 	c := newClient(t)
-	snap := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	snap := dropSource(t, c, map[string]string{"a.go": "package a\n"})
 	if _, err := c.EnsureSnapshot(context.Background(), snap); err != nil {
 		t.Fatalf("EnsureSnapshot() err = %v", err)
 	}
@@ -132,7 +133,7 @@ func TestOriginURL_saysWhenASnapshotSitsWhereACloneBelongs(t *testing.T) {
 func TestOriginURL_stillReportsARealCloneUnchanged(t *testing.T) {
 	// Given
 	c := newClient(t)
-	source := fixtureRepo(t)
+	source := gittest.Fixture(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: source, Enabled: true}
 	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
 		t.Fatalf("EnsureCloned() err = %v", err)

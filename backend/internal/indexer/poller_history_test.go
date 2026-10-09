@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store/storetest"
@@ -14,8 +15,8 @@ import (
 
 func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 	// Given: a remote with two commits, a poller with the commit lane wired.
-	src := fixtureRemote(t)
-	writeAndCommit(t, src, "b.txt", "b\n", "second")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("b\n"), "second")
 	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
@@ -46,7 +47,7 @@ func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 	}
 
 	// When: a push, then an incremental poll.
-	writeAndCommit(t, src, "c.txt", "c\n", "third: the new one")
+	gittest.Commit(t, src, "c.txt", []byte("c\n"), "third: the new one")
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -62,7 +63,7 @@ func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 	}
 
 	// When: the last commit is amended upstream (a rewritten history).
-	gitRun(t, src, "commit", "-q", "--amend", "-m", "third: amended")
+	gittest.Run(t, src, "commit", "-q", "--amend", "-m", "third: amended")
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("third PollOnce() err = %v", err)
 	}
@@ -85,7 +86,7 @@ func TestPollOnce_recordsTheHistoryFullThenIncremental(t *testing.T) {
 }
 
 func TestPollOnce_withoutTheLaneRecordsNothing(t *testing.T) {
-	src := fixtureRemote(t)
+	src := gittest.Fixture(t)
 	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()

@@ -3,24 +3,11 @@ package gitrepo
 import (
 	"context"
 	"errors"
-	"os/exec"
-	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
-
-// gitOut runs git in dir and returns its trimmed stdout.
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // taggedFixture is a remote with two commits on main, a lightweight tag on
 // the first, an annotated tag on the second, and a third commit on a side
@@ -28,17 +15,17 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 // way production does: from the checkout, never from the source directory.
 func taggedFixture(t *testing.T) (*Client, repos.Spec, map[string]string) {
 	t.Helper()
-	src := fixtureRepo(t)
-	gitRun(t, src, "tag", "1.0.0")
-	writeAndCommit(t, src, "b.txt", "second\n", "second")
-	gitRun(t, src, "tag", "-a", "v1.1.0", "-m", "release 1.1.0")
-	gitRun(t, src, "checkout", "-qb", "hotfix", "1.0.0")
-	writeAndCommit(t, src, "c.txt", "hotfix\n", "hotfix")
-	gitRun(t, src, "tag", "1.0.1")
-	gitRun(t, src, "checkout", "-q", "main")
+	src := gittest.Fixture(t)
+	gittest.Run(t, src, "tag", "1.0.0")
+	gittest.Commit(t, src, "b.txt", []byte("second\n"), "second")
+	gittest.Run(t, src, "tag", "-a", "v1.1.0", "-m", "release 1.1.0")
+	gittest.Run(t, src, "checkout", "-qb", "hotfix", "1.0.0")
+	gittest.Commit(t, src, "c.txt", []byte("hotfix\n"), "hotfix")
+	gittest.Run(t, src, "tag", "1.0.1")
+	gittest.Run(t, src, "checkout", "-q", "main")
 	shas := map[string]string{}
 	for _, tag := range []string{"1.0.0", "v1.1.0", "1.0.1"} {
-		shas[tag] = gitOut(t, src, "rev-list", "-n", "1", tag)
+		shas[tag] = gittest.Run(t, src, "rev-list", "-n", "1", tag)
 	}
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
@@ -90,8 +77,8 @@ func TestFetch_bringsNewTagsAndDropsDeletedOnes(t *testing.T) {
 	c, spec, _ := taggedFixture(t)
 	ctx := context.Background()
 	src := spec.CloneURL
-	gitRun(t, src, "tag", "-d", "1.0.0")
-	gitRun(t, src, "tag", "2.0.0")
+	gittest.Run(t, src, "tag", "-d", "1.0.0")
+	gittest.Run(t, src, "tag", "2.0.0")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/store/storetest"
 )
@@ -30,11 +31,11 @@ func snapshotPoller(t *testing.T, s *StateStore, idx IndexFunc) (*Poller, string
 	}), root
 }
 
-// extract writes an archive's worth of files where a snapshot's drop belongs.
-func extract(t *testing.T, root, name string, files map[string]string) {
+// extract writes an archive's worth of files where acme-core's snapshot drop belongs.
+func extract(t *testing.T, root string, files map[string]string) {
 	t.Helper()
 	for path, body := range files {
-		full := filepath.Join(root, name, path)
+		full := filepath.Join(root, "acme-core", path)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +79,7 @@ func TestPollOnce_snapshotIndexesTheDropOnce(t *testing.T) {
 	}
 	rec := &recordingIndex{}
 	p, root := snapshotPoller(t, s, rec.fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -117,7 +118,7 @@ func TestPollOnce_snapshotIsOneOff(t *testing.T) {
 	}
 	rec := &recordingIndex{}
 	p, root := snapshotPoller(t, s, rec.fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
@@ -149,13 +150,13 @@ func TestPollOnce_reExtractedDropIsIncremental(t *testing.T) {
 	}
 	rec := &recordingIndex{}
 	p, root := snapshotPoller(t, s, rec.fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n", "b.go": "package b\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n", "b.go": "package b\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
 
 	// When: a newer archive lands over it
-	extract(t, root, "acme-core", map[string]string{"b.go": "package b // v2\n"})
+	extract(t, root, map[string]string{"b.go": "package b // v2\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -183,7 +184,7 @@ func TestPollOnce_replacedDropReIndexesInFull(t *testing.T) {
 	}
 	rec := &recordingIndex{}
 	p, root := snapshotPoller(t, s, rec.fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
@@ -193,7 +194,7 @@ func TestPollOnce_replacedDropReIndexesInFull(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(root, "acme-core")); err != nil {
 		t.Fatal(err)
 	}
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n", "c.go": "package c\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n", "c.go": "package c\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -247,7 +248,7 @@ func TestPollOnce_missingDropIsRecordedLoudly(t *testing.T) {
 // must not send the remote down its path or the other way round.
 func TestPollOnce_snapshotAndRemoteSideBySide(t *testing.T) {
 	// Given
-	src := fixtureRemote(t)
+	src := gittest.Fixture(t)
 	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
@@ -259,7 +260,7 @@ func TestPollOnce_snapshotAndRemoteSideBySide(t *testing.T) {
 	}
 	rec := &recordingIndex{}
 	p, root := snapshotPoller(t, s, rec.fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
