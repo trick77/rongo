@@ -129,13 +129,7 @@ func AnyDependency(ctx context.Context, db *sql.DB, repos []string) (bool, error
 	if len(repos) < 2 {
 		return false, nil
 	}
-	args := make([]any, 0, 2*len(repos))
-	for _, r := range repos {
-		args = append(args, r)
-	}
-	for _, r := range repos {
-		args = append(args, r)
-	}
+	args := append(sqlutil.Args(repos), sqlutil.Args(repos)...)
 	in := sqlutil.Placeholders(len(repos))
 	var one int
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter

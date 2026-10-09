@@ -662,17 +662,14 @@ func safeDirectory(dir string, args ...string) []string {
 }
 
 func (c *Client) run(ctx context.Context, dir string, args ...string) (string, error) {
-	return c.runEnv(ctx, dir, nil, args...)
+	out, err := c.runIn(ctx, dir, nil, nil, args...)
+	return string(out), err
 }
 
 // runRemote is run for a command that talks to the entry's remote: it adds
 // what the token needs beyond the URL, which today is the bearer header.
 func (c *Client) runRemote(ctx context.Context, dir string, spec repos.Spec, token string, args ...string) (string, error) {
-	return c.runEnv(ctx, dir, bearerEnv(spec, token), args...)
-}
-
-func (c *Client) runEnv(ctx context.Context, dir string, extra []string, args ...string) (string, error) {
-	out, err := c.runIn(ctx, dir, nil, extra, args...)
+	out, err := c.runIn(ctx, dir, nil, bearerEnv(spec, token), args...)
 	return string(out), err
 }
 
@@ -833,22 +830,21 @@ func subcommand(args []string) string {
 // nulFields splits -z output into its fields, verbatim: a path may end in a
 // space, so nothing is trimmed.
 func nulFields(s string) []string {
-	var out []string
-	for _, f := range strings.Split(s, "\x00") {
-		if f != "" {
-			out = append(out, f)
-		}
-	}
-	return out
+	return splitNonEmpty(s, "\x00")
 }
 
-// nonEmptyLines splits s into its lines, verbatim: a path line may end in a
-// space, so nothing is trimmed.
+// nonEmptyLines splits s into its lines, verbatim, for nulFields' reason.
 func nonEmptyLines(s string) []string {
+	return splitNonEmpty(s, "\n")
+}
+
+// splitNonEmpty is strings.Split without the empty fields a trailing
+// separator leaves.
+func splitNonEmpty(s, sep string) []string {
 	var out []string
-	for _, line := range strings.Split(s, "\n") {
-		if line != "" {
-			out = append(out, line)
+	for _, f := range strings.Split(s, sep) {
+		if f != "" {
+			out = append(out, f)
 		}
 	}
 	return out

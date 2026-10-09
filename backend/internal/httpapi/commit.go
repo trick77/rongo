@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -49,8 +48,7 @@ func (s *Server) handlePublicShareCommit(w http.ResponseWriter, r *http.Request)
 	repo, sha := q.Get("repo"), q.Get("sha")
 	cited, err := s.deps.Threads.SharedCommit(r.Context(), r.PathValue("token"), repo, sha)
 	if err != nil {
-		slog.Error("read shared commit citation failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read shared commit citation failed", err)
 		return
 	}
 	if !cited {
@@ -69,8 +67,7 @@ func (s *Server) serveCommit(w http.ResponseWriter, r *http.Request, repo, sha s
 	if errors.Is(err, sourceview.ErrNotInLane) && cited != nil {
 		ok, cerr := cited(r.Context())
 		if cerr != nil {
-			slog.Error("read commit citation failed", "err", cerr)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			serverError(w, "read commit citation failed", cerr)
 			return
 		}
 		if ok {
@@ -87,10 +84,8 @@ func (s *Server) serveCommit(w http.ResponseWriter, r *http.Request, repo, sha s
 		http.Error(w, "This commit is not in Rongo's checkout.", http.StatusNotFound)
 		return
 	default:
-		slog.Error("read commit failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read commit failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(c)
+	writeJSON(w, c)
 }

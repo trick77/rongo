@@ -103,14 +103,6 @@ func NewClient(cfg Config, hc *http.Client) (*Client, error) {
 	}, nil
 }
 
-// Model names the deployment this client embeds against. It is configuration
-// rather than a secret — it rides on every request body — and the cache is
-// keyed by it.
-func (c *Client) Model() string { return c.model }
-
-// Dim is the vector width this client expects back.
-func (c *Client) Dim() int { return c.dim }
-
 // Embed returns one vector per input, aligned to INPUT ORDER; llmwire splits
 // a large input set across several requests of sixty-four. Empty input yields
 // no vectors and makes no request.

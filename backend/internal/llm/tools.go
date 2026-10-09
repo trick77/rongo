@@ -109,12 +109,12 @@ func (c *Client) CallTools(ctx context.Context, msgs []ToolMessage, tools []Tool
 
 	started := time.Now()
 	resp, warnings, err := c.wire.Chat(ctx, req)
-	c.warn(c.deployment(o.lane), warnings)
+	c.warn(c.Deployment(o.lane), warnings)
 	if err != nil {
 		return ToolTurn{}, err
 	}
 	u := usageFrom(resp.Usage)
-	record(ctx, o, c.deployment(o.lane), u, time.Since(started))
+	record(ctx, o, c.Deployment(o.lane), u, time.Since(started))
 
 	turn := ToolTurn{Content: resp.Content}
 	for _, call := range resp.ToolCalls {

@@ -567,14 +567,7 @@ func (s *Store) SaveFollowups(ctx context.Context, messageID int64, qs []string)
 	if len(qs) == 0 {
 		return nil
 	}
-	blob, err := json.Marshal(qs)
-	if err != nil {
-		return fmt.Errorf("encode followups: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET followups = ? WHERE id = ?`, string(blob), messageID); err != nil {
-		return fmt.Errorf("store followups: %w", err)
-	}
-	return nil
+	return s.saveJSON(ctx, messageID, "followups", qs)
 }
 
 // SavePastedTexts records which trailing blocks of the question were pasted.
@@ -586,14 +579,7 @@ func (s *Store) SavePastedTexts(ctx context.Context, messageID int64, ps []Paste
 	if len(ps) == 0 {
 		return nil
 	}
-	blob, err := json.Marshal(ps)
-	if err != nil {
-		return fmt.Errorf("encode pasted texts: %w", err)
-	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET pasted_texts = ? WHERE id = ?`, string(blob), messageID); err != nil {
-		return fmt.Errorf("store pasted texts: %w", err)
-	}
-	return nil
+	return s.saveJSON(ctx, messageID, "pasted_texts", ps)
 }
 
 // SaveSteps records the activity timeline the reader watched this turn
@@ -605,12 +591,21 @@ func (s *Store) SaveSteps(ctx context.Context, messageID int64, tr timeline.Trac
 	if len(tr.Steps) == 0 {
 		return nil
 	}
-	blob, err := json.Marshal(tr)
+	return s.saveJSON(ctx, messageID, "steps", tr)
+}
+
+// saveJSON writes v as the JSON of one message column. col is always a
+// literal from the three callers above, never input: it is spliced into the
+// statement. The error names the column in words.
+func (s *Store) saveJSON(ctx context.Context, messageID int64, col string, v any) error {
+	label := strings.ReplaceAll(col, "_", " ")
+	blob, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("encode steps: %w", err)
+		return fmt.Errorf("encode %s: %w", label, err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET steps = ? WHERE id = ?`, string(blob), messageID); err != nil {
-		return fmt.Errorf("store steps: %w", err)
+	//nolint:gosec // col is a literal column name from the callers above; the values are bound ? parameters
+	if _, err := s.db.ExecContext(ctx, `UPDATE messages SET `+col+` = ? WHERE id = ?`, string(blob), messageID); err != nil {
+		return fmt.Errorf("store %s: %w", label, err)
 	}
 	return nil
 }
@@ -691,7 +686,7 @@ func (s *Store) SaveUsage(ctx context.Context, messageID int64, calls []usage.Ca
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO message_usage (message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd)
 			VALUES (?,?,?,?,?,?,?,?,?)`, messageID, c.Step, c.Model, c.Prompt, c.Completion,
-			nullable(c.Cached), nullable(c.Reasoning), nullable(c.Ms), nullableNano(c.CostNanoUSD)); err != nil {
+			nullable(c.Cached), nullable(c.Reasoning), nullable(c.Ms), nullable(c.CostNanoUSD)); err != nil {
 			return fmt.Errorf("store usage of %s: %w", c.Step, err)
 		}
 	}
@@ -705,7 +700,7 @@ func (s *Store) callsFor(ctx context.Context, ids []int64) (map[int64][]usage.Ca
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, step, model, prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, ms, cost_nano_usd
-			 FROM message_usage WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, id`, idArgs(part)...)
+			 FROM message_usage WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, id`, sqlutil.Args(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read usage: %w", err)
 		}
@@ -734,16 +729,8 @@ func (s *Store) callsFor(ctx context.Context, ids []int64) (map[int64][]usage.Ca
 	return out, nil
 }
 
-// nullable writes an absent count as NULL.
-func nullable(n *int) any {
-	if n == nil {
-		return nil
-	}
-	return *n
-}
-
-// nullableNano is nullable for a cost.
-func nullableNano(n *int64) any {
+// nullable writes an absent count or cost as NULL.
+func nullable[T any](n *T) any {
 	if n == nil {
 		return nil
 	}
@@ -1053,14 +1040,6 @@ func orEmpty[T any](s []T) []T {
 // the thread should not be the one that finds the limit.
 const inChunk = 500
 
-func idArgs(ids []int64) []any {
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	return args
-}
-
 func (s *Store) citations(ctx context.Context, messageID int64) ([]ask.Citation, error) {
 	by, err := s.citationsFor(ctx, []int64{messageID})
 	if err != nil {
@@ -1076,7 +1055,7 @@ func (s *Store) citationsFor(ctx context.Context, ids []int64) (map[int64][]ask.
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx,
 			`SELECT message_id, marker, repo, branch, path, start_line, end_line, sha, kind, subject, committed_at FROM citations
-			 WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, marker`, idArgs(part)...)
+			 WHERE message_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY message_id, marker`, sqlutil.Args(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read citations: %w", err)
 		}
@@ -1273,7 +1252,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 			JOIN messages m ON m.id = c.message_id
 			JOIN threads t ON t.id = m.thread_id
 			WHERE c.message_id IN (`+sqlutil.Placeholders(len(part))+`) AND (t.user_subject = ? OR ? = ?)`,
-			append(idArgs(part), subject, subject, anySubject)...)
+			append(sqlutil.Args(part), subject, subject, anySubject)...)
 		if err != nil {
 			return nil, fmt.Errorf("read clarification: %w", err)
 		}
@@ -1309,7 +1288,7 @@ func (s *Store) clarificationsFor(ctx context.Context, subject string, ids []int
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT clarification_id, idx, repo, branch, module_key, title, summary, members
-			FROM clarification_candidates WHERE clarification_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY clarification_id, idx`, idArgs(part)...)
+			FROM clarification_candidates WHERE clarification_id IN (`+sqlutil.Placeholders(len(part))+`) ORDER BY clarification_id, idx`, sqlutil.Args(part)...)
 		if err != nil {
 			return nil, fmt.Errorf("read candidates: %w", err)
 		}

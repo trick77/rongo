@@ -3,7 +3,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -352,16 +351,14 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	// The version rides on the session request rather than an endpoint of its
 	// own: it is chrome the UI wants before its first render, and this is the
 	// one call it already makes there.
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"subject":  u.Subject,
 		"email":    u.Email,
 		"is_admin": u.IsAdmin,

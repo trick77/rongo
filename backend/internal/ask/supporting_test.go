@@ -47,7 +47,7 @@ func TestWorthOfferingFallsBackWhenEverythingIsSupportingMaterial(t *testing.T) 
 	// "What does the README say about X" and "how is this tested?" are real
 	// questions. A filter that can empty the list would turn a weak answer
 	// into no answer at all — and returning the leader alone would silently
-	// answer from one of two, because dominates() cannot ask about a list of
+	// answer from one of two, because Dominates() cannot ask about a list of
 	// one.
 	hits := []retrieve.Hit{
 		{ChunkID: 1, Repo: "rongo", Path: "docs/models.md", Score: 0.90},

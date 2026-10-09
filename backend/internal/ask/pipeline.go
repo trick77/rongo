@@ -477,10 +477,7 @@ func (p *Pipeline) onlyOneProduct(ctx context.Context, scope *Scope) bool {
 	if len(covered) != 1 || len(looseOf(scope.Known, covered, pm)) != 0 {
 		return false
 	}
-	have := make(map[string]bool, len(scope.Known))
-	for _, r := range scope.Known {
-		have[r] = true
-	}
+	have := setOf(scope.Known)
 	for _, m := range pm.Members(covered[0]) {
 		if !have[m] {
 			return false
@@ -570,10 +567,7 @@ func outsideThePin(named, pin []string) []string {
 	if len(pin) == 0 || len(named) == 0 {
 		return nil
 	}
-	in := make(map[string]bool, len(pin))
-	for _, p := range pin {
-		in[p] = true
-	}
+	in := setOf(pin)
 	var out []string
 	for _, n := range named {
 		if !in[n] {
@@ -583,13 +577,19 @@ func outsideThePin(named, pin []string) []string {
 	return out
 }
 
+// setOf is names as a membership set.
+func setOf(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	return set
+}
+
 // intersect is the names in both, in the order the question named them — the
 // thread narrowing further inside what it already carries.
 func intersect(named, pin []string) []string {
-	in := make(map[string]bool, len(pin))
-	for _, p := range pin {
-		in[p] = true
-	}
+	in := setOf(pin)
 	var out []string
 	for _, n := range named {
 		if in[n] {
@@ -624,10 +624,7 @@ func (p *Pipeline) unresolved(ctx context.Context, missing []string, goneFormat 
 // the order want holds them. A set comparison, not a count: a library folded
 // into two products is one repository named twice, never one missing.
 func missingRepos(want, resolved []string) []string {
-	have := make(map[string]bool, len(resolved))
-	for _, r := range resolved {
-		have[r] = true
-	}
+	have := setOf(resolved)
 	var out []string
 	for _, w := range want {
 		if !have[w] {

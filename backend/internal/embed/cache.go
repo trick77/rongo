@@ -41,11 +41,7 @@ func (c *Cache) Get(ctx context.Context, hashes []string) (map[string][]float32,
 	for start := 0; start < len(hashes); start += getBatch {
 		end := min(start+getBatch, len(hashes))
 		batch := hashes[start:end]
-		args := make([]any, 0, len(batch)+1)
-		args = append(args, c.model)
-		for _, h := range batch {
-			args = append(args, h)
-		}
+		args := append([]any{c.model}, sqlutil.Args(batch)...)
 		//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 		q := `SELECT content_hash, embedding FROM embed_cache WHERE model = ? AND content_hash IN (` +
 			sqlutil.Placeholders(len(batch)) + `)`

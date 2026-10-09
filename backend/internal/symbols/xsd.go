@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/trick77/rongo/internal/xmlutil"
 )
 
 // ExtractXSD reads an XML Schema or a WSDL 1.1 contract and returns one Symbol
@@ -37,7 +39,7 @@ func ExtractXSD(body []byte) ([]Symbol, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		return nil, nil
 	}
-	lm := newLineMap(body)
+	lm := xmlutil.NewLineMap(body)
 
 	type open struct {
 		sym   int // index into out, -1 for elements that are not symbols
@@ -61,13 +63,13 @@ func ExtractXSD(body []byte) ([]Symbol, error) {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			o := open{sym: -1, local: t.Name.Local, name: attr(t, "name")}
+			o := open{sym: -1, local: t.Name.Local, name: xmlutil.Attr(t, "name")}
 			var parent open
 			if len(stack) > 0 {
 				parent = stack[len(stack)-1]
 			}
 			if o.name != "" && xsdAnchors[parent.local][o.local] {
-				s := Symbol{Name: o.name, Kind: o.local, Line: lm.tagStart(dec.InputOffset())}
+				s := Symbol{Name: o.name, Kind: o.local, Line: lm.TagStart(dec.InputOffset())}
 				if parent.local == "portType" {
 					s.Scope, s.ScopeKind = parent.name, "portType"
 				}
@@ -82,7 +84,7 @@ func ExtractXSD(body []byte) ([]Symbol, error) {
 			o := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			if o.sym >= 0 {
-				out[o.sym].End = lm.lineOf(dec.InputOffset() - 1)
+				out[o.sym].End = lm.LineOf(dec.InputOffset() - 1)
 			}
 		}
 	}

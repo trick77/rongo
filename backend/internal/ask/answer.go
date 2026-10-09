@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/trick77/rongo/internal/llm"
@@ -1568,14 +1569,22 @@ func renderRework(instruction string, t Thread, declared stages.Set) string {
 // prose and leaves its fenced blocks alone: a marker is [1], and so is an
 // index expression in a code block a dev answer quoted.
 func stripMarkersOutsideFences(answer string) string {
+	return mapOutside(fenceRe, answer, func(prose string) string {
+		return markerGroupRe.ReplaceAllString(prose, "")
+	})
+}
+
+// mapOutside applies f to the text between re's matches and copies the
+// matches as they came: the shape of every "prose only, code untouched" pass.
+func mapOutside(re *regexp.Regexp, s string, f func(string) string) string {
 	var b strings.Builder
 	last := 0
-	for _, f := range fenceRe.FindAllStringIndex(answer, -1) {
-		b.WriteString(markerGroupRe.ReplaceAllString(answer[last:f[0]], ""))
-		b.WriteString(answer[f[0]:f[1]])
-		last = f[1]
+	for _, m := range re.FindAllStringIndex(s, -1) {
+		b.WriteString(f(s[last:m[0]]))
+		b.WriteString(s[m[0]:m[1]])
+		last = m[1]
 	}
-	b.WriteString(markerGroupRe.ReplaceAllString(answer[last:], ""))
+	b.WriteString(f(s[last:]))
 	return b.String()
 }
 

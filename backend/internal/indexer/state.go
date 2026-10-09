@@ -545,7 +545,7 @@ func (s *StateStore) ClearReindex(ctx context.Context, name string, gen int) err
 // stale failure cannot alarm forever. It is the only writer of
 // last_indexed_at: a poll that found nothing new moves last_run_at alone.
 func (s *StateStore) MarkIndexed(ctx context.Context, name, sha string, c Counts) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := nowStamp()
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE repo_state
 		SET last_sha = ?, last_run_at = ?, last_indexed_at = ?, last_error = '', file_count = ?, chunk_count = ?
@@ -573,7 +573,7 @@ func (s *StateStore) SetCounts(ctx context.Context, name string, c Counts) error
 func (s *StateStore) MarkChecked(ctx context.Context, name string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE repo_state SET last_error = '', last_run_at = ? WHERE name = ?`,
-		time.Now().UTC().Format(time.RFC3339), name)
+		nowStamp(), name)
 	return err
 }
 
@@ -583,7 +583,7 @@ func (s *StateStore) MarkChecked(ctx context.Context, name string) error {
 func (s *StateStore) MarkError(ctx context.Context, name, msg string) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE repo_state SET last_error = ?, last_run_at = ? WHERE name = ?`,
-		msg, time.Now().UTC().Format(time.RFC3339), name)
+		msg, nowStamp(), name)
 	return err
 }
 
@@ -594,4 +594,9 @@ func (s *StateStore) SetBranch(ctx context.Context, name, branch string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE repo_state SET branch = ? WHERE name = ?`,
 		branch, name)
 	return err
+}
+
+// nowStamp is the current time as the state table records it.
+func nowStamp() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }

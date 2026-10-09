@@ -413,20 +413,12 @@ func (s *Selector) SelectPath(p string) (d Decision, reason string, decided bool
 // never reads, so a rule that ships with a newer build retires what an older
 // one embedded.
 func (s *Selector) selectByPath(p string, size int) (Decision, string) {
-	// The operator's list before the built-in ones: a document under an
-	// excluded directory is reported as excluded, whichever other rule would
-	// also have caught it.
-	if pat, ok := s.Excluded(p); ok {
-		return SkipExcluded, "matches exclusion pattern " + pat
-	}
-	if seg := vendoredSegment(p); seg != "" {
-		return SkipVendored, "lives under " + seg + "/"
-	}
-	// The name before the size: a generated translation bundle is reported as
-	// generated whether it is 3 KB or 300 KB, and a manifest under a
-	// generated directory is generated like ownPaths says.
-	if reason := generatedByName(p); reason != "" {
-		return SkipGenerated, reason
+	// The path-only verdicts first, in SelectPath's order: the operator's
+	// list, then vendored, then the name — so a generated translation bundle
+	// is reported as generated whether it is 3 KB or 300 KB, before the size
+	// gets a say.
+	if d, reason, decided := s.SelectPath(p); decided {
+		return d, reason
 	}
 	if reason := dataReason(p, size, s.opts.MaxDataBytes, s.opts.MaxSchemaBytes); reason != "" {
 		return SkipData, reason
@@ -443,8 +435,13 @@ func isBinary(body []byte) bool {
 // vendoredSegment reports the vendored directory a path lives under, matching
 // full segments so "vendors.go" or "my-node_modules-notes.md" are not caught.
 func vendoredSegment(p string) string {
+	return segmentIn(p, vendoredDirs)
+}
+
+// segmentIn is the first path segment found in dirs, or empty.
+func segmentIn(p string, dirs map[string]bool) string {
 	for _, seg := range strings.Split(path.Clean(p), "/") {
-		if vendoredDirs[seg] {
+		if dirs[seg] {
 			return seg
 		}
 	}
@@ -506,12 +503,7 @@ func generatedByName(p string) string {
 
 // catalogueSegment reports the translation directory a path lives under.
 func catalogueSegment(p string) string {
-	for _, seg := range strings.Split(path.Clean(p), "/") {
-		if catalogueDirs[seg] {
-			return seg
-		}
-	}
-	return ""
+	return segmentIn(p, catalogueDirs)
 }
 
 // dataReason reports why a path is data: a format that only ever holds rows,

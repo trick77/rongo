@@ -127,7 +127,7 @@ func (p StagePrefixes) clause(alias string) (string, []any) {
 	sort.Strings(repos)
 	var args []any
 	q := " AND (" + alias + ".repo NOT IN (" + sqlutil.Placeholders(len(repos)) + ")"
-	args = append(args, toAny(repos)...)
+	args = append(args, sqlutil.Args(repos)...)
 	for _, r := range repos {
 		// length() in SQL, not len() in Go: substr counts characters and
 		// len counts bytes, and a prefix with an umlaut would never match.
@@ -161,14 +161,10 @@ func (s *Store) SearchVectorIn(ctx context.Context, vec []float32, k int, maxDis
 		" JOIN files f2 ON f2.id = c2.file_id" +
 		" JOIN repo_state r2 ON r2.name = f2.repo" +
 		" WHERE r2.enabled = 1"
-	if len(repos) > 0 {
-		inner += " AND f2.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
-		args = append(args, toAny(repos)...)
-	}
 	// The stage restriction rides in the same subquery, for the same reason.
-	stageQ, stageArgs := stage.clause("f2")
-	inner += stageQ
-	args = append(args, stageArgs...)
+	scopeQ, scopeArgs := repoScope("f2", repos, stage)
+	inner += scopeQ
+	args = append(args, scopeArgs...)
 	inner += ")"
 	// Ties on distance are broken on the chunk's ADDRESS, never left to the
 	// rowid the row happens to carry: rowids are handed out in index order, so
@@ -216,8 +212,7 @@ func (s *Store) scanVector(ctx context.Context, q string, args []any) ([]Hit, er
 	var out []Hit
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA, &h.Distance); err != nil {
+		if err := scanHit(rows, &h, &h.Distance); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -253,13 +248,9 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 		FROM chunks_fts x` + fmt.Sprintf(hitJoins, "x") + `
 		WHERE x.raw_text MATCH ?`
 	args := []any{match}
-	if len(repos) > 0 {
-		q += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
-		args = append(args, toAny(repos)...)
-	}
-	stageQ, stageArgs := stage.clause("f")
-	q += stageQ
-	args = append(args, stageArgs...)
+	scopeQ, scopeArgs := repoScope("f", repos, stage)
+	q += scopeQ
+	args = append(args, scopeArgs...)
 	// Address after bm25, for the reason SearchVector gives: two chunks the
 	// ranking cannot separate must not be separated by their rowids, which
 	// are index order.
@@ -274,8 +265,7 @@ func (s *Store) SearchKeywordIn(ctx context.Context, match string, n int, repos 
 	var out []Hit
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+		if err := scanHit(rows, &h); err != nil {
 			return nil, fmt.Errorf("keyword search: %w", err)
 		}
 		out = append(out, h)
@@ -369,13 +359,9 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 
 	where := "\n\t\tWHERE " + match
 	args := append([]any{}, matchArgs...)
-	if len(repos) > 0 {
-		where += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
-		args = append(args, toAny(repos)...)
-	}
-	stageQ, stageArgs := stage.clause("f")
-	where += stageQ
-	args = append(args, stageArgs...)
+	laneQ, laneArgs := repoScope("f", repos, stage)
+	where += laneQ
+	args = append(args, laneArgs...)
 
 	// The hub guard, before the rows are fetched: a term in more than
 	// substringHubShare of the corpus is not evidence, and counting is cheaper
@@ -392,20 +378,11 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 		FROM chunks c
 		JOIN files f ON f.id = c.file_id
 		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1`
-	scopeWhere := ""
-	scopeArgs := []any{}
-	if len(repos) > 0 {
-		scopeWhere += " WHERE f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
-		scopeArgs = append(scopeArgs, toAny(repos)...)
-	}
-	stageOnly, stageOnlyArgs := stage.clause("f")
-	if stageOnly != "" {
-		if scopeWhere == "" {
-			// stage.clause emits a leading " AND"; it needs a WHERE to hang on.
-			scopeWhere = " WHERE 1=1"
-		}
-		scopeWhere += stageOnly
-		scopeArgs = append(scopeArgs, stageOnlyArgs...)
+	// The same repoScope as the numerator's WHERE, hung on a WHERE of its own:
+	// the clause opens with " AND", so an always-true predicate carries it.
+	scopeWhere, scopeArgs := repoScope("f", repos, stage)
+	if scopeWhere != "" {
+		scopeWhere = " WHERE 1=1" + scopeWhere
 	}
 
 	//nolint:gosec // only fixed SQL structure is interpolated; every value is a bound ? parameter
@@ -447,8 +424,7 @@ func (s *Store) SearchSubstringIn(ctx context.Context, term string, n int, repos
 	var out []Hit
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+		if err := scanHit(rows, &h); err != nil {
 			return nil, fmt.Errorf("substring search: %w", err)
 		}
 		out = append(out, h)
@@ -546,15 +522,7 @@ func (s *Store) SearchSubstringsIn(ctx context.Context, terms []string, n int, r
 		JOIN files f ON f.id = c.file_id
 		JOIN repo_state r ON r.name = f.repo AND r.enabled = 1
 		WHERE 1=1`
-	scope := ""
-	var scopeArgs []any
-	if len(repos) > 0 {
-		scope += " AND f.repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
-		scopeArgs = append(scopeArgs, toAny(repos)...)
-	}
-	stageQ, stageArgs := stage.clause("f")
-	scope += stageQ
-	scopeArgs = append(scopeArgs, stageArgs...)
+	scope, scopeArgs := repoScope("f", repos, stage)
 
 	// The fold is the cost, not the scan: lower() copies the chunk, and written
 	// into each term's own expression it runs once per term per chunk — one
@@ -730,8 +698,7 @@ func readHits(ctx context.Context, tx *sql.Tx, q string, args []any, into map[in
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
-			&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA); err != nil {
+		if err := scanHit(rows, &h); err != nil {
 			return fmt.Errorf("substring search: %w", err)
 		}
 		into[h.ChunkID] = h
@@ -756,10 +723,26 @@ func substringKindRank(path string) int {
 	}
 }
 
-func toAny(ss []string) []any {
-	out := make([]any, len(ss))
-	for i, s := range ss {
-		out[i] = s
+// scanHit reads one hitColumns row into h, plus whatever a lane selects
+// after them (the vec lane's distance). One scan for the four lanes, so the
+// projection and its reader cannot drift apart.
+func scanHit(rows *sql.Rows, h *Hit, extra ...any) error {
+	dst := append([]any{&h.ChunkID, &h.Repo, &h.Branch, &h.Path, &h.Symbol,
+		&h.RawText, &h.StartLine, &h.EndLine, &h.Ordinal, &h.SHA}, extra...)
+	return rows.Scan(dst...)
+}
+
+// repoScope is the repository and stage restriction of one lane as a clause
+// hanging off an existing WHERE: " AND alias.repo IN (…)" for a named list,
+// nothing for the whole corpus, then the stage prefixes. Repo first, stage
+// second, in every lane, so the SQL a test captured stays the SQL it compares.
+func repoScope(alias string, repos []string, stage StagePrefixes) (string, []any) {
+	var q string
+	var args []any
+	if len(repos) > 0 {
+		q = " AND " + alias + ".repo IN (" + sqlutil.Placeholders(len(repos)) + ")"
+		args = sqlutil.Args(repos)
 	}
-	return out
+	stageQ, stageArgs := stage.clause(alias)
+	return q + stageQ, append(args, stageArgs...)
 }

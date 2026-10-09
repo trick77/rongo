@@ -2,7 +2,6 @@ package retrieve
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -149,8 +148,7 @@ func (r *LLMReranker) Rerank(ctx context.Context, question string, hits []Hit, k
 	var reply struct {
 		Relevant []int `json:"relevant"`
 	}
-	body, _ := llmwire.JSONObject(out)
-	if err := json.Unmarshal([]byte(body), &reply); err != nil {
+	if err := llm.DecodeReply(out, &reply); err != nil {
 		r.logger().Warn("rerank reply was not JSON; fused order kept", "reply", llmwire.Truncate(out, 120))
 		return cut(hits, k), nil //nolint:nilerr // a failed or unparseable rerank keeps the fused order rather than failing retrieval (logged above)
 	}

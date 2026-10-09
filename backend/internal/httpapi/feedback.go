@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 
 	"github.com/trick77/rongo/internal/threads"
@@ -25,8 +24,7 @@ func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	owns, err := s.deps.Threads.Owns(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("check thread owner failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "check thread owner failed", err)
 		return
 	}
 	if !owns {
@@ -35,16 +33,14 @@ func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	fb, found, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("read feedback failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read feedback failed", err)
 		return
 	}
 	var body *threads.Feedback
 	if found {
 		body = &fb
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(body)
+	writeJSON(w, body)
 }
 
 // handlePutFeedback stores the verdict, replacing any earlier one. A thread
@@ -71,8 +67,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.deps.Threads.SetFeedback(r.Context(), u.Subject, id, req.Verdict, req.Reason)
 	if err != nil {
-		slog.Error("set feedback failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "set feedback failed", err)
 		return
 	}
 	if !found {
@@ -81,12 +76,10 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	fb, _, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("read feedback failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "read feedback failed", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(fb)
+	writeJSON(w, fb)
 }
 
 // handleDeleteFeedback takes the verdict back.
@@ -97,8 +90,7 @@ func (s *Server) handleDeleteFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.deps.Threads.ClearFeedback(r.Context(), u.Subject, id)
 	if err != nil {
-		slog.Error("clear feedback failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "clear feedback failed", err)
 		return
 	}
 	if !found {

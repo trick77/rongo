@@ -405,19 +405,9 @@ func (p *Poller) pollRepo(ctx context.Context, st RepoState) (pollResult, error)
 		}
 	}
 
-	var paths []string
-	if st.LastSHA != "" {
-		// Only the changed paths. This is what keeps a push from costing a full
-		// re-index. Valid across a branch change too, since both commits live
-		// in the same object store.
-		changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, head)
-		if err != nil {
-			return pollResult{}, err
-		}
-		paths = changed
-		p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
-			"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(head),
-			"paths", len(changed))
+	paths, err := p.changedSince(ctx, spec, st, head)
+	if err != nil {
+		return pollResult{}, err
 	}
 
 	return p.indexAndMark(ctx, st, head, paths, func() error {
@@ -534,19 +524,30 @@ func (p *Poller) pollSnapshot(ctx context.Context, st RepoState) (pollResult, er
 		}
 	}
 
-	var paths []string
-	if st.LastSHA != "" {
-		changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, sha)
-		if err != nil {
-			return pollResult{}, err
-		}
-		paths = changed
-		p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
-			"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(sha),
-			"paths", len(changed))
+	paths, err := p.changedSince(ctx, spec, st, sha)
+	if err != nil {
+		return pollResult{}, err
 	}
 
 	return p.indexAndMark(ctx, st, sha, paths, nil)
+}
+
+// changedSince is the paths touched between the indexed commit and to, and
+// nil — the whole tree — for a repository indexed never. Only the changed
+// paths is what keeps a push from costing a full re-index. Valid across a
+// branch change too, since both commits live in the same object store.
+func (p *Poller) changedSince(ctx context.Context, spec repos.Spec, st RepoState, to string) ([]string, error) {
+	if st.LastSHA == "" {
+		return nil, nil
+	}
+	changed, err := p.git.ChangedPaths(ctx, spec, st.LastSHA, to)
+	if err != nil {
+		return nil, err
+	}
+	p.log.Debug("changed paths since the indexed commit", "repo", st.Name,
+		"from", gitrepo.ShortSHA(st.LastSHA), "to", gitrepo.ShortSHA(to),
+		"paths", len(changed))
+	return changed, nil
 }
 
 // resetIfLost drops the index and forgets st.LastSHA when the checkout does

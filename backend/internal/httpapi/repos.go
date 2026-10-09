@@ -2,12 +2,9 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/trick77/rongo/internal/auth"
 )
 
 // RepoStatus is one row of the Repos page. The page is read-only status, never
@@ -97,8 +94,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := s.deps.Repos.RepoStatus(r.Context())
 	if err != nil {
-		slog.Error("repository status failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		serverError(w, "repository status failed", err)
 		return
 	}
 
@@ -146,8 +142,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 	// rather than as the browser ignoring the server. Everything here changes
 	// on a restart or a poll, so none of it is worth caching for any interval.
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // handleReindex queues a full re-index of one repository, or of every active
@@ -156,9 +151,8 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 // the poller runs it on its next pass; the page shows the request queued
 // until then.
 func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
-	u, ok := auth.UserFrom(r.Context())
+	u, ok := requireUser(w, r)
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if !u.IsAdmin {
@@ -169,12 +163,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "re-indexing unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	queued := 0
+	var queued int
 	if name := r.PathValue("name"); name != "" {
 		found, err := s.deps.Reindex.RequestReindex(r.Context(), name)
 		if err != nil {
-			slog.Error("re-index request failed", "repo", name, "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			serverError(w, "re-index request failed", err, "repo", name)
 			return
 		}
 		if !found {
@@ -187,14 +180,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 	} else {
 		n, err := s.deps.Reindex.RequestReindexAll(r.Context())
 		if err != nil {
-			slog.Error("re-index request failed", "err", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			serverError(w, "re-index request failed", err)
 			return
 		}
 		queued = n
 	}
 	slog.Info("full re-index requested", "by", u.Subject, "repositories", queued)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]any{"queued": queued})
+	writeJSONStatus(w, http.StatusAccepted, map[string]any{"queued": queued})
 }

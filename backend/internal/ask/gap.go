@@ -2,7 +2,6 @@ package ask
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -161,8 +160,7 @@ func (g *Gatherer) FillGaps(ctx context.Context, question string, sources []Sour
 	var reply struct {
 		Missing []GapName `json:"missing"`
 	}
-	body, _ := llmwire.JSONObject(out)
-	if err := json.Unmarshal([]byte(body), &reply); err != nil {
+	if err := llm.DecodeReply(out, &reply); err != nil {
 		g.logger().Warn("gap reply was not JSON; the gathered sources kept", "reply", llmwire.Truncate(out, 120))
 		return sources, GapReport{Skipped: "not json"}, nil //nolint:nilerr // a failed or unparseable gap call keeps the gathered sources and reports Skipped; it must not fail the turn (logged above)
 	}

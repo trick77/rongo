@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/history"
 	"github.com/trick77/rongo/internal/llm"
 )
@@ -147,7 +148,7 @@ const (
 // numbers a chunk: the marker, the repository, the short commit, the date,
 // the subject, then the body and the paths it touched, both bounded.
 func renderCommit(b *strings.Builder, n int, s Source) {
-	fmt.Fprintf(b, "\n[%d] %s commit %s %s: %s\n", n, s.Repo, shortSHA(s.SHA),
+	fmt.Fprintf(b, "\n[%d] %s commit %s %s: %s\n", n, s.Repo, gitrepo.ShortSHA(s.SHA),
 		s.CommittedAt.UTC().Format("2006-01-02"), s.Subject)
 	if s.Text != "" {
 		body := s.Text
@@ -167,13 +168,6 @@ func renderCommit(b *strings.Builder, n int, s Source) {
 		}
 		b.WriteString("\n")
 	}
-}
-
-func shortSHA(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
 }
 
 // changesBlock is the prompt rule for a changes turn: what the sources are

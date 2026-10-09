@@ -170,13 +170,7 @@ func AnyLinked(ctx context.Context, db *sql.DB, repo string, keys []string) (boo
 		return false, nil
 	}
 	in := sqlutil.Placeholders(len(keys))
-	args := make([]any, 0, 1+2*len(keys))
-	args = append(args, repo)
-	for i := 0; i < 2; i++ {
-		for _, k := range keys {
-			args = append(args, k)
-		}
-	}
+	args := append(append([]any{repo}, sqlutil.Args(keys)...), sqlutil.Args(keys)...)
 	var n int
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list); every value is a bound ? parameter
 	err := db.QueryRowContext(ctx, `
