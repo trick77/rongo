@@ -99,6 +99,18 @@ function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
   );
 }
 
+/** Per-key counts — hits per repository, notes — as dim chips after a
+ * separator, or nothing when there are none. */
+function Counts({ of }: { of: Record<string, number> }) {
+  if (Object.keys(of).length === 0) return null;
+  return (
+    <>
+      {" · "}
+      <Chips dim values={Object.entries(of).map(([k, n]) => `${k} ${n}`)} />
+    </>
+  );
+}
+
 /** A file named by the locate loop: the base name, repository and path on hover. */
 function LocateFileName({ file }: { file: LocateFile }) {
   return (
@@ -187,18 +199,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
                 <span className="trace-k">in</span> <Chips values={[infra]} />
               </>
             )}
-            {Object.keys(perRepo).length > 0 && (
-              <>
-                {" · "}
-                <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
-              </>
-            )}
-            {Object.keys(notes).length > 0 && (
-              <>
-                {" · "}
-                <Chips dim values={Object.entries(notes).map(([k, n]) => `${k} ${n}`)} />
-              </>
-            )}
+            <Counts of={perRepo} />
+            <Counts of={notes} />
           </div>
         );
       }
@@ -218,12 +220,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
                 <span className="trace-k">about</span> <Chips values={[topic]} />
               </>
             )}
-            {Object.keys(perRepo).length > 0 && (
-              <>
-                {" · "}
-                <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
-              </>
-            )}
+            <Counts of={perRepo} />
           </div>
         );
       }
@@ -233,12 +230,7 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       return (
         <div className="trace-detail">
           {hits} {hits === 1 ? "hit" : "hits"}
-          {Object.keys(perRepo).length > 0 && (
-            <>
-              {" · "}
-              <Chips dim values={Object.entries(perRepo).map(([r, n]) => `${r} ${n}`)} />
-            </>
-          )}
+          <Counts of={perRepo} />
           {best?.path && (
             <>
               {" · best "}

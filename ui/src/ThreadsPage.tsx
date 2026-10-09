@@ -2,7 +2,8 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 
 import { Icon } from "./Icon";
 import { ThreadMenuFor } from "./ThreadMenu";
-import { pageItems, type Thread, patch } from "./Threads";
+import { pageItems, type Thread } from "./Threads";
+import { patch } from "./lists";
 import { useInfiniteList, type Page } from "./useInfiniteList";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";

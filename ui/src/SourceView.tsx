@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { shortSha, splitPath } from "./paths";
 import { useLoaded } from "./hooks";
 import { fetchJSON } from "./http";
-import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
-import { useBackdropDismiss } from "./dismiss";
+import OverlayShell, { overlayClose } from "./OverlayShell";
 import { highlightLines, languageForPath } from "./highlight";
 import PlantUmlSheet from "./PlantUmlSheet";
 import { isPlantUml } from "./plantuml";
@@ -56,27 +55,15 @@ export default function SourceView({
    */
   endpoint?: string;
 }) {
-  const closeButton = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
   // A PlantUML file opens as the picture it describes: its source says
   // nothing to an Analyst. The source stays one click away, because the
   // cited lines are marked there and nowhere in the picture.
   const drawable = isPlantUml(source.path);
   const [view, setView] = useState<"diagram" | "source">(drawable ? "diagram" : "source");
-  const dismiss = useBackdropDismiss(onClose);
 
-  useFocusOnOpen(closeButton);
-
-  // Escape closes. Tab stays inside: the dialog is modal, and a Tab that left
-  // it would land in the dimmed page behind the overlay. Its controls are the
-  // close button and, on a PlantUML file, the two views and each picture's
-  // downloads. The same two hooks as DiagramView and CommitView.
-  useEscape(onClose);
-  useTabTrap(dialog);
-
-  const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
   const [loaded] = useLoaded(async () => {
+    const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
     const file = await fetchJSON(`${endpoint}?${q}`);
     const content: string = file.content ?? "";
     const lines = content.split("\n");
@@ -113,27 +100,19 @@ export default function SourceView({
   );
 
   return (
-    <div
-      // Edge to edge on a phone: 24px of scrim on each side buys nothing when
-      // the code inside is already scrolling sideways.
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
-      // A press beside the dialog closes it and does nothing else: see
-      // useBackdropDismiss for why that is the click and not the pointerdown.
-      ref={dismiss.ref}
-      onPointerDown={dismiss.onPointerDown}
-      onPointerUp={dismiss.onPointerUp}
-    >
-      <div
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Source ${source.marker}: ${source.path}`}
-        // minmax(0,1fr), not the implicit auto column: the column can never
-        // be wider than the sheet, so nothing in the header can end up past
-        // its edge and pull the sheet sideways when it takes focus.
-        className="grid h-full w-full max-w-[1100px] grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
-      >
-        <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3.5 sm:px-4.5 sm:py-3">
+    <OverlayShell
+      label={`Source ${source.marker}: ${source.path}`}
+      // minmax(0,1fr), not the implicit auto column: the column can never
+      // be wider than the sheet, so nothing in the header can end up past
+      // its edge and pull the sheet sideways when it takes focus.
+      dialogClassName="grid h-full w-full max-w-[1100px] grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
+      // ml-auto only where the pills beside it are not rendered — with
+      // both carrying it, flexbox splits the free space and the pills
+      // drift away from the button.
+      closeClassName={(drawable ? "" : "ml-auto ") + overlayClose + " sm:ml-0"}
+      onClose={onClose}
+      header={
+        <>
           <span className="font-mono font-semibold text-accent-strong">{source.marker}</span>
           <span className="min-w-0 truncate font-mono text-[13.5px] text-muted">
             {source.repo} · {dir}
@@ -176,69 +155,54 @@ export default function SourceView({
               ))}
             </div>
           )}
-          <button
-            ref={closeButton}
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            // ml-auto only where the pills beside it are not rendered — with
-            // both carrying it, flexbox splits the free space and the pills
-            // drift away from the button.
-            className={
-              (drawable ? "" : "ml-auto ") +
-              "grid h-11 w-11 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink sm:ml-0 sm:h-8 sm:w-8"
-            }
-          >
-            ×
-          </button>
-        </header>
-
-        <div className="min-h-0 overflow-auto py-2.5 font-mono text-[12.5px] leading-[1.55]">
-          {loaded.state === "loading" && <p className="px-5 py-3 text-muted">Reading the file…</p>}
-          {loaded.state === "error" && (
-            <p role="alert" className="px-5 py-3 text-muted">
-              {loaded.message}
-            </p>
-          )}
-          {loaded.state === "ready" && view === "diagram" && (
-            <PlantUmlSheet text={loaded.lines.join("\n")} path={source.path} onSource={() => setView("source")} />
-          )}
-          {view === "source" && moved && (
-            <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
-              The file has changed since the answer was written: it has {loaded.lines.length} lines at this
-              commit, and the cited range starts at line {source.start_line}.
-            </p>
-          )}
-          {loaded.state === "ready" &&
-            view === "source" &&
-            loaded.lines.map((line, i) => {
-              const n = i + 1;
-              const hit = n >= source.start_line && n <= source.end_line;
-              return (
-                <div
-                  key={n}
-                  ref={n === anchorLine ? anchor : undefined}
-                  data-line={n}
-                  data-hit={hit || undefined}
-                  className={
-                    // 40px still holds a four-digit line number and gives the
-                    // code back 16px of a 360px screen.
-                    "grid grid-cols-[40px_1fr] sm:grid-cols-[56px_1fr] border-l-2 whitespace-pre " +
-                    (hit ? "border-accent bg-accent-dim/35" : "border-transparent")
-                  }
+        </>
+      }
+    >
+      <div className="min-h-0 overflow-auto py-2.5 font-mono text-[12.5px] leading-[1.55]">
+        {loaded.state === "loading" && <p className="px-5 py-3 text-muted">Reading the file…</p>}
+        {loaded.state === "error" && (
+          <p role="alert" className="px-5 py-3 text-muted">
+            {loaded.message}
+          </p>
+        )}
+        {loaded.state === "ready" && view === "diagram" && (
+          <PlantUmlSheet text={loaded.lines.join("\n")} path={source.path} onSource={() => setView("source")} />
+        )}
+        {view === "source" && moved && (
+          <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
+            The file has changed since the answer was written: it has {loaded.lines.length} lines at this
+            commit, and the cited range starts at line {source.start_line}.
+          </p>
+        )}
+        {loaded.state === "ready" &&
+          view === "source" &&
+          loaded.lines.map((line, i) => {
+            const n = i + 1;
+            const hit = n >= source.start_line && n <= source.end_line;
+            return (
+              <div
+                key={n}
+                ref={n === anchorLine ? anchor : undefined}
+                data-line={n}
+                data-hit={hit || undefined}
+                className={
+                  // 40px still holds a four-digit line number and gives the
+                  // code back 16px of a 360px screen.
+                  "grid grid-cols-[40px_1fr] sm:grid-cols-[56px_1fr] border-l-2 whitespace-pre " +
+                  (hit ? "border-accent bg-accent-dim/35" : "border-transparent")
+                }
+              >
+                <span
+                  aria-hidden="true"
+                  className={"pr-2 text-right select-none sm:pr-4 " + (hit ? "text-accent-strong" : "text-faint")}
                 >
-                  <span
-                    aria-hidden="true"
-                    className={"pr-2 text-right select-none sm:pr-4 " + (hit ? "text-accent-strong" : "text-faint")}
-                  >
-                    {n}
-                  </span>
-                  <span className="pr-5 text-ink-dim">{coloured[i] ?? line}</span>
-                </div>
-              );
-            })}
-        </div>
+                  {n}
+                </span>
+                <span className="pr-5 text-ink-dim">{coloured[i] ?? line}</span>
+              </div>
+            );
+          })}
       </div>
-    </div>
+    </OverlayShell>
   );
 }

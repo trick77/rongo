@@ -1,4 +1,5 @@
 import { memo, type ReactNode } from "react";
+import { chip } from "./chip";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
 import Narrow from "./Narrow";
@@ -123,11 +124,7 @@ function TurnAttempt({
                 {turn.clarification &&
                   (turn.clarification.tooBroad ? (
                     <Narrow
-                      repos={turn.clarification.candidates.map((c) => ({
-                        repo: c.repo,
-                        branch: c.branch,
-                        members: c.members,
-                      }))}
+                      repos={turn.clarification.candidates}
                       narrowedTo={turn.narrowedTo}
                       onAsk={(repos) => actions?.onNarrow(i, repos)}
                       readOnly={!actions}
@@ -195,7 +192,7 @@ function TurnAttempt({
                         type="button"
                         disabled={busy}
                         onClick={() => actions.onRetry(i)}
-                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                        className={chip + " disabled:opacity-50"}
                       >
                         Retry
                       </button>
@@ -225,7 +222,7 @@ function TurnAttempt({
                       type="button"
                       aria-expanded={sourcesExpanded}
                       onClick={() => onToggleSources(i)}
-                      className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
+                      className={"inline-flex items-center gap-2 " + chip}
                     >
                       <span className="font-mono text-xs text-accent-strong">{turn.citations.length}</span>
                       Sources
@@ -248,7 +245,7 @@ function TurnAttempt({
                         type="button"
                         disabled={busy}
                         onClick={() => actions.onFollowup(i, q)}
-                        className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-left text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                        className={chip + " text-left disabled:opacity-50"}
                       >
                         {q}
                       </button>
@@ -275,7 +272,7 @@ function TurnAttempt({
                               type="button"
                               disabled={busy}
                               onClick={() => actions.onReexplain(i)}
-                              className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active disabled:opacity-50"
+                              className={chip + " disabled:opacity-50"}
                             >
                               {turn.audience === "dev" ? "Explain as Analyst" : "Explain as Developer"}
                             </button>
@@ -283,7 +280,7 @@ function TurnAttempt({
                           <button
                             type="button"
                             onClick={() => onCopy(i)}
-                            className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active"
+                            className={chip}
                           >
                             {copied ? "Copied" : "Copy as Markdown"}
                           </button>

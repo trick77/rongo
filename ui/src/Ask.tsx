@@ -750,7 +750,7 @@ export default function Ask({
    */
   async function chooseCandidate(turnIndex: number, idx: number) {
     if (busy) return;
-    await resumeCard(turnIndex, { chosenIdx: idx }, { choice: idx }, { chosenIdx: null });
+    await resumeCard(turnIndex, { chosenIdx: idx }, { choice: idx });
   }
 
   /**
@@ -758,10 +758,11 @@ export default function Ask({
    * the card the reader decided on. The card belongs to the thread it was
    * asked in, and turnIndex is an index into that thread's turns — in another
    * one it points at a different turn entirely. A failed turn hands the card
-   * back by unmarking it; a reader who has moved on gets the unlock from the
-   * record instead, since the decision is stored only when an answer lands.
+   * back by setting every mark to null; a reader who has moved on gets the
+   * unlock from the record instead, since the decision is stored only when an
+   * answer lands.
    */
-  async function resumeCard(turnIndex: number, mark: Partial<Turn>, extra: Record<string, unknown>, unmark: Partial<Turn>) {
+  async function resumeCard(turnIndex: number, mark: Partial<Turn>, extra: Record<string, unknown>) {
     const turn = turns[turnIndex];
     if (!turn.clarification || turn.chosenIdx != null) return;
 
@@ -782,6 +783,8 @@ export default function Ask({
       ...pastedField(turn.pastes),
     }, false);
     if (!ok && shown.current === cardThread) {
+      // Every mark set back to null: the card is open again.
+      const unmark = Object.fromEntries(Object.keys(mark).map((k) => [k, null]));
       setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, ...unmark } : t)));
     }
   }
@@ -797,7 +800,7 @@ export default function Ask({
    */
   async function narrowTo(turnIndex: number, repos: string[]) {
     if (busy || repos.length === 0) return;
-    await resumeCard(turnIndex, { chosenIdx: -1, narrowedTo: repos }, { repos }, { chosenIdx: null, narrowedTo: null });
+    await resumeCard(turnIndex, { chosenIdx: -1, narrowedTo: repos }, { repos });
   }
 
   /**
