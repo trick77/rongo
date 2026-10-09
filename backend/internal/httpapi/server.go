@@ -232,39 +232,39 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("GET /api/auth/callback", s.handleAuthCallback)
 	s.mux.HandleFunc("POST /api/auth/password", s.handleAuthPassword)
-	s.mux.Handle("POST /api/auth/logout", s.requireAuth(http.HandlerFunc(s.handleAuthLogout)))
-	s.mux.Handle("GET /api/me", s.requireAuth(http.HandlerFunc(s.handleMe)))
-	s.mux.Handle("GET /api/repos", s.requireAuth(http.HandlerFunc(s.handleRepos)))
-	s.mux.Handle("POST /api/repos/reindex", s.requireAuth(http.HandlerFunc(s.handleReindex)))
-	s.mux.Handle("POST /api/repos/{name}/reindex", s.requireAuth(http.HandlerFunc(s.handleReindex)))
-	s.mux.Handle("GET /api/threads", s.requireAuth(http.HandlerFunc(s.handleThreads)))
-	s.mux.Handle("GET /api/threads/search", s.requireAuth(http.HandlerFunc(s.handleSearchThreads)))
-	s.mux.Handle("GET /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleThread)))
-	s.mux.Handle("GET /api/threads/{id}/summary", s.requireAuth(http.HandlerFunc(s.handleThreadSummary)))
-	s.mux.Handle("PATCH /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleRenameThread)))
-	s.mux.Handle("DELETE /api/threads/{id}", s.requireAuth(http.HandlerFunc(s.handleDeleteThread)))
-	s.mux.Handle("POST /api/threads/{id}/star", s.requireAuth(http.HandlerFunc(s.handleStarThread)))
-	s.mux.Handle("POST /api/threads/{id}/unstar", s.requireAuth(http.HandlerFunc(s.handleUnstarThread)))
-	s.mux.Handle("GET /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handleGetFeedback)))
-	s.mux.Handle("PUT /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handlePutFeedback)))
-	s.mux.Handle("DELETE /api/threads/{id}/feedback", s.requireAuth(http.HandlerFunc(s.handleDeleteFeedback)))
-	s.mux.Handle("GET /api/source", s.requireAuth(http.HandlerFunc(s.handleSource)))
-	s.mux.Handle("GET /api/commit", s.requireAuth(http.HandlerFunc(s.handleCommit)))
-	s.mux.Handle("POST /api/ask", s.requireAuth(http.HandlerFunc(s.handleAsk)))
-	s.mux.Handle("POST /api/messages/{id}/reexplain", s.requireAuth(http.HandlerFunc(s.handleReexplain)))
+	s.authed("POST /api/auth/logout", s.handleAuthLogout)
+	s.authed("GET /api/me", s.handleMe)
+	s.authed("GET /api/repos", s.handleRepos)
+	s.authed("POST /api/repos/reindex", s.handleReindex)
+	s.authed("POST /api/repos/{name}/reindex", s.handleReindex)
+	s.authed("GET /api/threads", s.handleThreads)
+	s.authed("GET /api/threads/search", s.handleSearchThreads)
+	s.authed("GET /api/threads/{id}", s.handleThread)
+	s.authed("GET /api/threads/{id}/summary", s.handleThreadSummary)
+	s.authed("PATCH /api/threads/{id}", s.handleRenameThread)
+	s.authed("DELETE /api/threads/{id}", s.handleDeleteThread)
+	s.authed("POST /api/threads/{id}/star", s.handleStarThread)
+	s.authed("POST /api/threads/{id}/unstar", s.handleUnstarThread)
+	s.authed("GET /api/threads/{id}/feedback", s.handleGetFeedback)
+	s.authed("PUT /api/threads/{id}/feedback", s.handlePutFeedback)
+	s.authed("DELETE /api/threads/{id}/feedback", s.handleDeleteFeedback)
+	s.authed("GET /api/source", s.handleSource)
+	s.authed("GET /api/commit", s.handleCommit)
+	s.authed("POST /api/ask", s.handleAsk)
+	s.authed("POST /api/messages/{id}/reexplain", s.handleReexplain)
 
 	// The reader's standing instructions: listed on the Memory page, deleted
 	// there or by the undo under the answer that saved one. Written only
 	// through chat, so there is no POST.
-	s.mux.Handle("GET /api/memory", s.requireAuth(http.HandlerFunc(s.handleMemory)))
-	s.mux.Handle("DELETE /api/memory/{id}", s.requireAuth(http.HandlerFunc(s.handleForgetMemory)))
+	s.authed("GET /api/memory", s.handleMemory)
+	s.authed("DELETE /api/memory/{id}", s.handleForgetMemory)
 
 	// Making, moving and taking back a link is the owner's, so these are gated
 	// like every other thread action.
-	s.mux.Handle("POST /api/threads/{id}/share", s.requireAuth(http.HandlerFunc(s.handleShare)))
-	s.mux.Handle("POST /api/threads/{id}/share/update", s.requireAuth(http.HandlerFunc(s.handleShareUpdate)))
-	s.mux.Handle("DELETE /api/threads/{id}/share", s.requireAuth(http.HandlerFunc(s.handleRevokeShare)))
-	s.mux.Handle("GET /api/shares", s.requireAuth(http.HandlerFunc(s.handleShares)))
+	s.authed("POST /api/threads/{id}/share", s.handleShare)
+	s.authed("POST /api/threads/{id}/share/update", s.handleShareUpdate)
+	s.authed("DELETE /api/threads/{id}/share", s.handleRevokeShare)
+	s.authed("GET /api/shares", s.handleShares)
 
 	// The only unauthenticated output path in rongo. Registered with
 	// HandleFunc, so they never enter the middleware at all: an anonymous
@@ -280,6 +280,11 @@ func (s *Server) routes() {
 	// with the thread's own question — no crawler runs the JavaScript that
 	// would otherwise set it.
 	s.mux.Handle("/", web.HandlerWithShareTitles(s.shareTitle))
+}
+
+// authed mounts h behind requireAuth.
+func (s *Server) authed(pattern string, h http.HandlerFunc) {
+	s.mux.Handle(pattern, s.requireAuth(h))
 }
 
 // requireAuth is the single gate every authenticated route goes through.

@@ -16,7 +16,6 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
-	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -189,6 +188,18 @@ func candidateRepos(c threads.Candidate) []string {
 	return nil
 }
 
+// addUnique appends the names seen has not met, in order, and marks them.
+func addUnique(dst []string, seen map[string]bool, names ...string) []string {
+	for _, n := range names {
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		dst = append(dst, n)
+	}
+	return dst
+}
+
 // handleAsk answers a question over SSE.
 //
 // This is the only streaming route in rongo. Everything the pipeline does
@@ -206,8 +217,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req askRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	req.Question = strings.TrimSpace(req.Question)
@@ -342,14 +352,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 					http.Error(w, "that repository was not offered", http.StatusBadRequest)
 					return
 				}
-				if seen[r] {
-					// A repeat is one repository named twice, not two sides of
-					// a comparison. Folded rather than refused — the reader
-					// cannot produce one, and it narrows nothing.
-					continue
-				}
-				seen[r] = true
-				narrowed = append(narrowed, r)
+				// A repeat is one repository named twice, not two sides of
+				// a comparison. Folded rather than refused — the reader
+				// cannot produce one, and it narrows nothing.
+				narrowed = addUnique(narrowed, seen, r)
 			}
 			if len(narrowed) > maxNarrowRepos {
 				http.Error(w, "too many repositories to compare at once", http.StatusBadRequest)
@@ -387,14 +393,8 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			seen := map[string]bool{}
 			for _, cand := range c.Candidates {
 				for _, picked := range narrowed {
-					if cand.Repo != picked {
-						continue
-					}
-					for _, r := range candidateRepos(cand) {
-						if !seen[r] {
-							seen[r] = true
-							resumeRepos = append(resumeRepos, r)
-						}
+					if cand.Repo == picked {
+						resumeRepos = addUnique(resumeRepos, seen, candidateRepos(cand)...)
 					}
 				}
 			}
@@ -621,15 +621,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx = llm.WithThreadID(ctx, thread.ID)
-	// Every paid call this turn makes lands in one meter, the gates included.
-	// Attached after the thread id and before the title goroutine forks off:
-	// the title gets a meter of its own below.
-	meter := usage.New()
-	ctx = usage.WithMeter(ctx, meter)
-	// And every step it announces lands in one recorder, so the trace the
-	// reader watched is still there when they come back to the thread.
-	steps := timeline.New()
-	ctx = timeline.With(ctx, steps)
 	// Registered from here on, where there is a thread id to register it
 	// under. Everything before this is validation; the paid work starts below.
 	defer s.turns.add(thread.ID, cancelTurn)()
@@ -667,9 +658,12 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		"language":   string(lang),
 	})
 
-	// The record is written on a context that outlives the request; see turn.
-	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, thread.ID, msg.ID, meter, steps, st)
+	// The turn's meter and recorder are attached here, after the thread id
+	// and before the title goroutine forks off: the title gets a meter of its
+	// own below. The record is written on a context that outlives the
+	// request; see turn.
+	ctx, tr := s.beginTurn(ctx, thread.ID, msg.ID, st)
+	record := tr.record
 
 	// The title is written alongside the answer and never in front of it. It is
 	// a label; the answer must not wait for it, and a title that never arrives
@@ -698,7 +692,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	events := tr.events()
 	events.OnNotice = func(text string) { send("notice", map[string]any{"text": text}) }
 	events.OnMemory = s.onMemory(record, u.Subject, msg.ID, send)
-	closeRecord := tr.closeRecord
 
 	if resume != nil {
 		// The resumed turn is a turn of its own: it says what its scope was
@@ -720,8 +713,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			answer, err = s.deps.Ask.Resume(ctx, req.Question, audience, lang, resumeHits, resumeScope, prior, events)
 		}
 		if err != nil {
-			turnStopped(ctx, "resumed turn failed", thread.ID, err, tr.progress()...)
-			tr.fail(failureMessage(err))
+			tr.stop("resumed turn failed", err)
 			return
 		}
 		// Written a second time, over the scope stored before the call: the
@@ -744,26 +736,23 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
 			return
 		}
-		s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, resumeScope, lang, tr.streamed, send, closeRecord)
+		tr.finishTurn(req.Question, answer, audience, resumeScope, lang)
 		return
 	}
 
 	answer, clar, err := s.deps.Ask.Run(ctx, req.Question, audience, lang, prior, events)
 	if err != nil {
-		turnStopped(ctx, "turn failed", thread.ID, err, tr.progress()...)
-		// A generic message: the error may quote an upstream body, and that is
-		// not something to hand a browser.
-		tr.fail(failureMessage(err))
+		tr.stop("turn failed", err)
 		return
 	}
 	// Stored whichever way the turn ended, before the ending is sent: a card
 	// and an answer both belong to a question that named repositories, and a
 	// resumed turn reads the scope back off this row.
+	scope := answer.Scope
 	if clar != nil {
-		if serr := s.deps.Threads.SetScope(record, msg.ID, clar.Scope); serr != nil {
-			recordFailed(ctx, "record scope failed", serr)
-		}
-	} else if serr := s.deps.Threads.SetScope(record, msg.ID, answer.Scope); serr != nil {
+		scope = clar.Scope
+	}
+	if serr := s.deps.Threads.SetScope(record, msg.ID, scope); serr != nil {
 		recordFailed(ctx, "record scope failed", serr)
 	}
 
@@ -780,7 +769,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			tr.fail(turnFailed)
 			return
 		}
-		closeRecord()
+		tr.closeRecord()
 		send("clarification", map[string]any{"message_id": msg.ID, "too_broad": clar.TooBroad,
 			"candidates": wireCandidates(clar.Candidates)})
 		send("done", map[string]any{"message_id": msg.ID})
@@ -790,7 +779,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if !tr.finish(answer.Text, answer.Citations, answer.Sources) {
 		return
 	}
-	s.finishTurn(ctx, record, msg.ID, req.Question, answer, audience, answer.Scope, lang, tr.streamed, send, closeRecord)
+	tr.finishTurn(req.Question, answer, audience, answer.Scope, lang)
 }
 
 const (
@@ -820,108 +809,6 @@ const (
 	// anything slower is not worth the wait and is dropped.
 	followupsCallTimeout = 8 * time.Second
 )
-
-// finishTurn ends a turn that produced an answer: the citations, the follow-up
-// questions it offers next, what it paid, and the event that closes it. All
-// three answering paths - a fresh turn, a resumed clarification and a
-// re-explain - end here, so the order they end in cannot drift apart.
-//
-// ctx is the turn's context, meter and all: the suggestion call is part of
-// what the turn cost and is metered with the rest of it. record outlives the
-// request, so the row is written even for a reader who closed the tab.
-// scope is passed rather than read off the answer: only Run fills Answer.Scope,
-// so a resumed or re-explained turn would hand the suggestion prompt an empty
-// one and lose the rule that keeps a pill off a repository the index lacks.
-// Both callers already have the scope in hand - they record it a few lines up.
-func (s *Server) finishTurn(
-	ctx, record context.Context,
-	messageID int64,
-	question string,
-	answer ask.Answer,
-	audience ask.Audience,
-	scope ask.Scope,
-	lang ask.Language,
-	streamed bool,
-	send func(string, any),
-	closeRecord func(),
-) {
-	// A turn with no sources was answered by a template, never a stream:
-	// nothing found, no commits in the window, an instruction kept. The
-	// text is on the record, and this is the one place it reaches the
-	// browser live; without it the reader saw the trace close over an empty
-	// answer until a reload. Only when nothing streamed: a text sent twice
-	// is an answer read twice.
-	sourceless := len(answer.Sources) == 0
-	if !streamed && answer.Text != "" {
-		send("token", map[string]any{"text": answer.Text})
-	}
-	send("citations", answer.Citations)
-	s.suggestFollowups(ctx, record, messageID, question, answer, audience, scope, lang, send)
-	closeRecord()
-	// Language again, for the re-explain path: it opens no thread event, and
-	// its turn is filed in the thread's language whatever it asked for.
-	// Sourceless too: the page hides "Explain as Developer" on a turn that
-	// has nothing to re-explain from, live as on a reload.
-	send("done", map[string]any{"message_id": messageID, "language": string(lang), "sourceless": sourceless})
-}
-
-// suggestFollowups offers two or three questions to ask next, under the answer
-// that prompted them.
-//
-// Synchronous, unlike the title: it is written FROM the answer, so it cannot
-// start earlier, and running it inline is what puts its tokens in the turn's
-// own usage report instead of a meter nobody reads until the next reload. The
-// step is announced first, because a wait a person can see is a wait and a
-// wait they cannot is a hang.
-//
-// An answer with no sources is the nothing-found reply. There is nothing to
-// follow up on, and suggesting anything there would be inventing a question
-// the index cannot answer.
-func (s *Server) suggestFollowups(
-	ctx, record context.Context,
-	messageID int64,
-	question string,
-	answer ask.Answer,
-	audience ask.Audience,
-	scope ask.Scope,
-	lang ask.Language,
-	send func(string, any),
-) {
-	// Never for a thread the reader deleted while it was being answered: the
-	// message row this would be written to is already gone with it, and the
-	// call would be paid for to fill a column nobody will ever read.
-	if s.deps.Suggester == nil || len(answer.Sources) == 0 || threadWasDeleted(ctx) {
-		return
-	}
-	send("status", map[string]any{"step": "suggesting", "at": timeline.Record(ctx, "suggesting")})
-	// record, not ctx: a reader who closes the tab, reloads, or loses the
-	// connection between the last word and this call cancelled the request,
-	// and with it the only chance this answer ever had at suggestions - the
-	// column is written once, here, and nothing goes back for it later. The
-	// answer itself is already stored on record a few lines up for the same
-	// reason. The meter rides along: WithoutCancel keeps the values.
-	call, cancel := context.WithTimeout(record, followupsCallTimeout)
-	defer cancel()
-	// Dropping the request's cancellation does not mean dropping the thread's:
-	// a reader who deletes the thread WHILE this call is running is owed the
-	// same stop as one who deleted it a moment earlier, and the row the answer
-	// would be written to is going with it either way.
-	defer context.AfterFunc(ctx, func() {
-		if threadWasDeleted(ctx) {
-			cancel()
-		}
-	})()
-	qs := s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
-	if len(qs) == 0 {
-		return
-	}
-	if err := s.deps.Threads.SaveFollowups(record, messageID, qs); err != nil {
-		// The pills are worth a warning and nothing more: the answer is
-		// written and the turn is finished either way.
-		recordMissed(ctx, "record followups failed", err)
-	}
-	send("followups", qs)
-}
 
 // writeTitle names a thread in the background and returns the wait its caller
 // defers. The answer never waits for a title; this is the connection lingering
@@ -1015,8 +902,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		// one — which a re-explain always does — the record wins.
 		Language string `json:"language"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	audience := parseAudience(req.Audience)
@@ -1040,10 +926,6 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	// same upstream node as the turn it re-answers.
 	ctx = llm.WithThreadID(ctx, msg.ThreadID)
 	defer s.turns.add(msg.ThreadID, cancelTurn)()
-	meter := usage.New()
-	ctx = usage.WithMeter(ctx, meter)
-	steps := timeline.New()
-	ctx = timeline.With(ctx, steps)
 	// The reader's standing instructions apply to a re-explain as they do
 	// to any answer: same reader, same rules.
 	ctx, err = s.memoryHolder(ctx, u.Subject)
@@ -1107,8 +989,8 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 
 	// The record is written on a context that outlives the request, the same
 	// as every other write in this package.
-	record := context.WithoutCancel(ctx)
-	tr := s.beginTurn(ctx, record, msg.ThreadID, newMsg.ID, meter, steps, st)
+	ctx, tr := s.beginTurn(ctx, msg.ThreadID, newMsg.ID, st)
+	record := tr.record
 
 	// The scope of the turn being re-explained carries over with its sources:
 	// same question, same corpus, so the same rules about what was and was not
@@ -1133,8 +1015,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 		answer, err = s.deps.Ask.Reexplain(ctx, msg.Question, audience, lang, sources, msg.Scope, events)
 	}
 	if err != nil {
-		turnStopped(ctx, "reexplain failed", msg.ThreadID, err, tr.progress()...)
-		tr.fail(failureMessage(err))
+		tr.stop("reexplain failed", err)
 		return
 	}
 	// The same sources, not answer.Sources: a re-explain answers from exactly
@@ -1143,7 +1024,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if !tr.finish(answer.Text, answer.Citations, sources) {
 		return
 	}
-	s.finishTurn(ctx, record, newMsg.ID, msg.Question, answer, audience, msg.Scope, lang, tr.streamed, send, tr.closeRecord)
+	tr.finishTurn(msg.Question, answer, audience, msg.Scope, lang)
 }
 
 // reworkAgain re-answers a rework row for the other audience: the same

@@ -40,8 +40,28 @@ type turn struct {
 	step    string
 }
 
-func (s *Server) beginTurn(ctx, record context.Context, threadID, msgID int64, meter *usage.Meter, steps *timeline.Recorder, st *sseStream) *turn {
-	return &turn{s: s, ctx: ctx, record: record, threadID: threadID, msgID: msgID, meter: meter, steps: steps, st: st, started: time.Now()}
+// beginTurn opens the turn on ctx and returns the context the pipeline runs
+// on: every paid call lands in one meter, the gates included, and every step
+// it announces in one recorder, so the trace the reader watched is still
+// there when they come back to the thread. The record context is derived
+// AFTER both are attached, so the writes that outlive the request still see
+// the meter.
+func (s *Server) beginTurn(ctx context.Context, threadID, msgID int64, st *sseStream) (context.Context, *turn) {
+	meter := usage.New()
+	ctx = usage.WithMeter(ctx, meter)
+	steps := timeline.New()
+	ctx = timeline.With(ctx, steps)
+	return ctx, &turn{s: s, ctx: ctx, record: context.WithoutCancel(ctx), threadID: threadID, msgID: msgID,
+		meter: meter, steps: steps, st: st, started: time.Now()}
+}
+
+// stop ends a turn whose pipeline returned an error: the log line that says
+// where it was, then the failure on the record and the stream. The message
+// is generic: the error may quote an upstream body, and that is not
+// something to hand a browser.
+func (t *turn) stop(msg string, err error) {
+	turnStopped(t.ctx, msg, t.threadID, err, t.progress()...)
+	t.fail(failureMessage(err))
 }
 
 // mark notes the step the pipeline reported last.
@@ -144,6 +164,87 @@ func (t *turn) finish(text string, cites []ask.Citation, sources []ask.Source) b
 
 // errEmptyAnswer is why a turn whose pipeline returned no text failed.
 var errEmptyAnswer = errors.New("the answer is empty")
+
+// finishTurn ends a turn that produced an answer: the citations, the follow-up
+// questions it offers next, what it paid, and the event that closes it. All
+// three answering paths - a fresh turn, a resumed clarification and a
+// re-explain - end here, so the order they end in cannot drift apart.
+//
+// The suggestion call runs on the turn's context, meter and all: it is part
+// of what the turn cost and is metered with the rest of it. scope is passed
+// rather than read off the answer: only Run fills Answer.Scope, so a resumed
+// or re-explained turn would hand the suggestion prompt an empty one and lose
+// the rule that keeps a pill off a repository the index lacks. Every caller
+// already has the scope in hand - they record it a few lines up.
+func (t *turn) finishTurn(question string, answer ask.Answer, audience ask.Audience, scope ask.Scope, lang ask.Language) {
+	// A turn with no sources was answered by a template, never a stream:
+	// nothing found, no commits in the window, an instruction kept. The
+	// text is on the record, and this is the one place it reaches the
+	// browser live; without it the reader saw the trace close over an empty
+	// answer until a reload. Only when nothing streamed: a text sent twice
+	// is an answer read twice.
+	sourceless := len(answer.Sources) == 0
+	if !t.streamed && answer.Text != "" {
+		t.st.send("token", map[string]any{"text": answer.Text})
+	}
+	t.st.send("citations", answer.Citations)
+	t.suggestFollowups(question, answer, audience, scope, lang)
+	t.closeRecord()
+	// Language again, for the re-explain path: it opens no thread event, and
+	// its turn is filed in the thread's language whatever it asked for.
+	// Sourceless too: the page hides "Explain as Developer" on a turn that
+	// has nothing to re-explain from, live as on a reload.
+	t.st.send("done", map[string]any{"message_id": t.msgID, "language": string(lang), "sourceless": sourceless})
+}
+
+// suggestFollowups offers two or three questions to ask next, under the answer
+// that prompted them.
+//
+// Synchronous, unlike the title: it is written FROM the answer, so it cannot
+// start earlier, and running it inline is what puts its tokens in the turn's
+// own usage report instead of a meter nobody reads until the next reload. The
+// step is announced first, because a wait a person can see is a wait and a
+// wait they cannot is a hang.
+//
+// An answer with no sources is the nothing-found reply. There is nothing to
+// follow up on, and suggesting anything there would be inventing a question
+// the index cannot answer.
+func (t *turn) suggestFollowups(question string, answer ask.Answer, audience ask.Audience, scope ask.Scope, lang ask.Language) {
+	// Never for a thread the reader deleted while it was being answered: the
+	// message row this would be written to is already gone with it, and the
+	// call would be paid for to fill a column nobody will ever read.
+	if t.s.deps.Suggester == nil || len(answer.Sources) == 0 || threadWasDeleted(t.ctx) {
+		return
+	}
+	t.st.send("status", map[string]any{"step": "suggesting", "at": timeline.Record(t.ctx, "suggesting")})
+	// record, not ctx: a reader who closes the tab, reloads, or loses the
+	// connection between the last word and this call cancelled the request,
+	// and with it the only chance this answer ever had at suggestions - the
+	// column is written once, here, and nothing goes back for it later. The
+	// answer itself is already stored on record a few lines up for the same
+	// reason. The meter rides along: WithoutCancel keeps the values.
+	call, cancel := context.WithTimeout(t.record, followupsCallTimeout)
+	defer cancel()
+	// Dropping the request's cancellation does not mean dropping the thread's:
+	// a reader who deletes the thread WHILE this call is running is owed the
+	// same stop as one who deleted it a moment earlier, and the row the answer
+	// would be written to is going with it either way.
+	defer context.AfterFunc(t.ctx, func() {
+		if threadWasDeleted(t.ctx) {
+			cancel()
+		}
+	})()
+	qs := t.s.deps.Suggester(call, question, answer.Text, audience, answer.Sources, scope, lang)
+	if len(qs) == 0 {
+		return
+	}
+	if err := t.s.deps.Threads.SaveFollowups(t.record, t.msgID, qs); err != nil {
+		// The pills are worth a warning and nothing more: the answer is
+		// written and the turn is finished either way.
+		recordMissed(t.ctx, "record followups failed", err)
+	}
+	t.st.send("followups", qs)
+}
 
 // parseAudience reads the wire value; anything but the Developer's is the
 // Analyst's.
