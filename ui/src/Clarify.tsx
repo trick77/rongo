@@ -1,5 +1,5 @@
 import { useOpenUntil } from "./hooks";
-import { Chevron } from "./icons";
+import DecisionCard from "./DecisionCard";
 
 /** One entry on the clarification card, as the SSE event and the stored
  * thread both send it (a stored candidate may also carry module_key, which
@@ -52,19 +52,12 @@ export default function Clarify({
   const chosen = chosenIdx != null ? candidates.find((c) => c.idx === chosenIdx) : undefined;
 
   return (
-    <div
-      className={
-        "mt-4 rounded-ui border bg-panel " +
-        (chosenIdx == null && !readOnly ? "border-ochre" : "border-border")
-      }
-    >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left text-[14.5px]"
-      >
-        <Chevron open={open} />
+    <DecisionCard
+      ochre={chosenIdx == null && !readOnly}
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+      title={
+        <>
         {chosenIdx == null ? (
           readOnly ? (
             // Not a question here: nobody on this page can answer it, and
@@ -84,9 +77,10 @@ export default function Clarify({
             )}
           </>
         )}
-      </button>
-
-      {open && (
+        </>
+      }
+    >
+      {() => (
         <ul className="grid gap-2 px-4 pb-4">
           {candidates.map((c) => (
             <li key={c.idx} className={c.repo ? undefined : "mt-1 border-t border-border pt-3"}>
@@ -130,6 +124,6 @@ export default function Clarify({
           ))}
         </ul>
       )}
-    </div>
+    </DecisionCard>
   );
 }

@@ -2069,9 +2069,10 @@ describe("Ask, a language the record decided", () => {
 });
 
 describe("Ask, the streaming mark on an answer", () => {
-  // The `streaming` class is what the text fade keys on while an answer
-  // arrives; it comes off with the done event. It once also drew a caret on
-  // the last block, and that is gone: no `.caret` element, no ::after rule.
+  // The `streaming` class marks an answer still arriving and comes off with
+  // the done event; nothing styles it, the text fade is Markdown's fade prop.
+  // It once also drew a caret on the last block, and that is gone: no
+  // `.caret` element, no ::after rule.
   // The connection stays open for the assertions: a stream that closes with
   // no `done` is a lost connection now, and the turn ends with an error rather
   // than sitting there mid-answer.

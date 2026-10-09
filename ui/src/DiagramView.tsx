@@ -1,8 +1,7 @@
 import { useRef } from "react";
-import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { MermaidSvg, diagramTitle } from "./diagram";
 import { download, fileName, toSvgFile } from "./diagramExport";
-import { useBackdropDismiss } from "./dismiss";
+import OverlayShell from "./OverlayShell";
 import { DownloadIcon } from "./icons";
 
 /**
@@ -10,9 +9,7 @@ import { DownloadIcon } from "./icons";
  * into a prose column, so a five-actor sequence is read small; here it has
  * the width of the sheet.
  *
- * The shell is SourceView's, down to the z-index: the reader is stepping out
- * of the answer for a moment and goes straight back, and one overlay at a time
- * is what the app does.
+ * The shell is OverlayShell, as for a file or a commit.
  */
 export default function DiagramView({
   src,
@@ -23,43 +20,25 @@ export default function DiagramView({
   svg: string;
   onClose: () => void;
 }) {
-  const closeButton = useRef<HTMLButtonElement>(null);
-  const dialog = useRef<HTMLDivElement>(null);
-  const dismiss = useBackdropDismiss(onClose);
   const body = useRef<HTMLDivElement>(null);
   const title = diagramTitle(src);
-
-  useFocusOnOpen(closeButton);
-
-  // Escape closes, and Tab stays inside (see useTabTrap for why).
-  useEscape(onClose);
-  useTabTrap(dialog);
 
   function save() {
     download(fileName(src), toSvgFile({ svg }, body.current));
   }
 
   return (
-    <div
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
-      // A press beside the sheet closes it and does nothing else: see
-      // useBackdropDismiss for why that is the click and not the pointerdown.
-      ref={dismiss.ref}
-      onPointerDown={dismiss.onPointerDown}
-      onPointerUp={dismiss.onPointerUp}
-    >
-      {/* font-sans explicitly: this is mounted from inside the answer's
-          .ui-markdown wrapper, which is serif prose, and the dialog is chrome.
-          SourceView needs no such line because Ask.tsx mounts it outside the
-          prose. */}
-      <div
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel font-sans shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
-      >
-        <header className="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4.5 sm:py-3">
+    <OverlayShell
+      label={title}
+      // font-sans explicitly: this is mounted from inside the answer's
+      // .ui-markdown wrapper, which is serif prose, and the dialog is chrome.
+      // SourceView needs no such line because Ask.tsx mounts it outside the
+      // prose.
+      dialogClassName="grid h-full w-full max-w-[1100px] grid-rows-[auto_1fr] overflow-hidden rounded-none border-0 bg-panel font-sans shadow-panel sm:rounded-ui-lg sm:border sm:border-elevated-border"
+      headerClassName="flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4.5 sm:py-3"
+      onClose={onClose}
+      header={
+        <>
           <span className="min-w-0 truncate text-[13.5px] text-ink">{title}</span>
           <span className="ml-auto" />
           <button
@@ -70,26 +49,17 @@ export default function DiagramView({
             <DownloadIcon />
             Download SVG
           </button>
-          <button
-            ref={closeButton}
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-11 w-11 place-items-center rounded-ui-sm text-lg leading-none text-muted hover:bg-active hover:text-ink sm:h-8 sm:w-8"
-          >
-            ×
-          </button>
-        </header>
-
-        {/* The drawing scales to the sheet's width and no further: the SVG
-            carries its own max-width, so a small diagram stays 1:1 and is
-            centred, and a wide one fits. */}
-        <div ref={body} className="grid min-h-0 place-items-center overflow-auto p-6">
-          <div className="w-full">
-            <MermaidSvg svg={svg} title={title} />
-          </div>
+        </>
+      }
+    >
+      {/* The drawing scales to the sheet's width and no further: the SVG
+          carries its own max-width, so a small diagram stays 1:1 and is
+          centred, and a wide one fits. */}
+      <div ref={body} className="grid min-h-0 place-items-center overflow-auto p-6">
+        <div className="w-full">
+          <MermaidSvg svg={svg} title={title} />
         </div>
       </div>
-    </div>
+    </OverlayShell>
   );
 }

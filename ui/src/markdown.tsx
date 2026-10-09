@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { JSX, ReactNode } from "react";
 import { highlightBlock, highlightFinished, languageOf } from "./highlight";
-import Diagram, { diagramSource } from "./diagram";
+import Diagram, { DiagramPending, diagramSource } from "./diagram";
 
 /**
  * A small Markdown renderer covering exactly what the answer prompt produces:
@@ -369,14 +369,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
         // a stored answer holding one) is shown as the text it is, never a
         // placeholder that waits for nothing.
         if (!closed && hooks.backed === undefined) {
-          out.push(
-            <div
-              key={k++}
-              className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted"
-            >
-              Drawing the diagram…
-            </div>,
-          );
+          out.push(<DiagramPending key={k++} />);
           continue;
         }
         tag = "";

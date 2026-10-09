@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { chip } from "./chip";
 import { ThumbDownIcon, ThumbUpIcon } from "./icons";
 import { groupByQuestion, type Turn } from "./turns";
 
@@ -52,9 +53,6 @@ function firstUncovered(turns: Turn[], upTo: number): number | null {
 // the follow-up chips): ink-dim at 13.5px on the panel, active on hover.
 const thumb =
   "inline-flex h-7 w-6.5 items-center justify-center rounded-full text-ink-dim hover:bg-active hover:text-ink aria-pressed:bg-elevated aria-pressed:text-ink";
-const chip =
-  "rounded-full border border-border bg-panel px-3.5 py-1.5 text-[13.5px] text-ink-dim hover:border-elevated-border hover:bg-active";
-
 /**
  * The reader's verdict on the whole thread, drawn among the buttons under the
  * newest answer — where the reader stops reading. ThreadView puts it on that

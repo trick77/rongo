@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useOpenUntil } from "./hooks";
-import { Chevron } from "./icons";
+import DecisionCard from "./DecisionCard";
 
 /** One project the question matched, as the SSE event and the stored thread
  * both send it. The panel has no titles and no summaries: nothing was named by
@@ -64,18 +64,12 @@ export default function Narrow({
     setPicked((p) => (p.includes(repo) ? p.filter((r) => r !== repo) : [...p, repo]));
 
   return (
-    <div
-      className={
-        "mt-4 rounded-ui border bg-panel " + (decided || readOnly ? "border-border" : "border-ochre")
-      }
-    >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left text-[14.5px]"
-      >
-        <Chevron open={open} />
+    <DecisionCard
+      ochre={!(decided || readOnly)}
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+      title={
+        <>
         {decided ? (
           <>
             <span>Narrowed to</span>
@@ -88,9 +82,10 @@ export default function Narrow({
         ) : (
           <span className="font-medium text-ochre">That is too broad to ask about.</span>
         )}
-      </button>
-
-      {open && (
+        </>
+      }
+    >
+      {() => (
         <div className="px-4 pb-4">
           <p className="m-0 mb-3 max-w-[70ch] text-sm text-muted">
             <span className="font-medium text-ink-dim">{repos.length} projects</span> match this
@@ -156,6 +151,6 @@ export default function Narrow({
           )}
         </div>
       )}
-    </div>
+    </DecisionCard>
   );
 }

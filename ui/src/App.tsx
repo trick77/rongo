@@ -13,6 +13,7 @@ import ThreadsPage from "./ThreadsPage";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 import { railRow } from "./rail";
+import { RailLink } from "./RailLink";
 import SharedLinks from "./share/SharedLinks";
 import MemoryPage from "./memory/MemoryPage";
 import { PlusIcon } from "./icons";
@@ -282,6 +283,11 @@ export default function App() {
   // phone left the thread 90px. Not a route: it is not somewhere you are, and
   // Back must close a thread rather than a drawer.
   const [navOpen, setNavOpen] = useState(false);
+  // A rail link: go there and shut the drawer it was pressed in.
+  const goNav = (route: Route) => {
+    go(route);
+    setNavOpen(false);
+  };
   const page: Page =
     route.view === "threads" || route.view === "projects" || route.view === "shared" || route.view === "memory"
       ? route.view
@@ -541,23 +547,15 @@ export default function App() {
                 </span>
               )}
             </>
-          ) : page === "threads" ? (
-            <span className="font-serif text-[19px] font-medium text-accent-strong">Threads</span>
-          ) : page === "projects" ? (
-            <span className="font-serif text-[19px] font-medium text-accent-strong">Projects</span>
-          ) : page === "memory" ? (
+          ) : (
             <>
-              <span className="font-serif text-[19px] font-medium text-accent-strong">Memory</span>
-              {memoryCount !== null && (
+              <span className="font-serif text-[19px] font-medium text-accent-strong">{pageTitles[page]}</span>
+              {page === "memory" && memoryCount !== null && (
                 <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
                   {memoryCount === 1 ? "1 rule" : `${memoryCount} rules`}
                 </span>
               )}
-            </>
-          ) : (
-            <>
-              <span className="font-serif text-[19px] font-medium text-accent-strong">Shared</span>
-              {sharedCount !== null && (
+              {page === "shared" && sharedCount !== null && (
                 <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
                   {sharedCount === 1 ? "1 live" : `${sharedCount} live`}
                 </span>
@@ -634,72 +632,16 @@ export default function App() {
             {/* Every thread, under the one action, as ../loom's Sidebar has
                 it: the history below is the latest 30, and this is where the
                 rest of it is. */}
-            <button
-              type="button"
-              aria-current={page === "threads" ? "page" : undefined}
-              onClick={() => {
-                go({ view: "threads" });
-                setNavOpen(false);
-              }}
-              className={railRow + " " + (page === "threads" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
-            >
-              <span className="grid h-5 w-5 shrink-0 place-items-center">
-                <Icon name="messages" size="21px" className="text-ink-dim" />
-              </span>
-              Threads
-            </button>
+            <RailLink icon="messages" label="Threads" current={page === "threads"} onClick={() => goNav({ view: "threads" })} />
             {/* The audit view for the links this reader has handed out. On
                 the rail rather than in a settings modal Rongo does not have: a
                 live link is a place, and it has to be somewhere you can go. */}
-            <button
-              type="button"
-              aria-current={page === "shared" ? "page" : undefined}
-              onClick={() => {
-                go({ view: "shared" });
-                setNavOpen(false);
-              }}
-              className={railRow + " " + (page === "shared" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
-            >
-              {/* The same 20px slot as the plus disc above. The Icon glyph is
-                  text, so its box is whatever advance width the font gives it
-                  — 21px here — and without the slot the two labels start a
-                  pixel apart. */}
-              <span className="grid h-5 w-5 shrink-0 place-items-center">
-                <Icon name="upload" size="21px" className="text-ink-dim" />
-              </span>
-              Shared
-            </button>
-            <button
-              type="button"
-              aria-current={page === "projects" ? "page" : undefined}
-              onClick={() => {
-                go({ view: "projects" });
-                setNavOpen(false);
-              }}
-              className={railRow + " " + (page === "projects" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
-            >
-              <span className="grid h-5 w-5 shrink-0 place-items-center">
-                <Icon name="code" size="21px" className="text-ink-dim" />
-              </span>
-              Projects
-            </button>
+            <RailLink icon="upload" label="Shared" current={page === "shared"} onClick={() => goNav({ view: "shared" })} />
+            <RailLink icon="code" label="Projects" current={page === "projects"} onClick={() => goNav({ view: "projects" })} />
             {/* What rongo keeps in mind for this reader. A place, like Shared:
                 a rule given in chat has to be somewhere you can go and take
                 back. */}
-            <button
-              type="button"
-              aria-current={page === "memory" ? "page" : undefined}
-              onClick={() => {
-                go({ view: "memory" });
-                setNavOpen(false);
-              }}
-              className={railRow + " " + (page === "memory" ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")}
-            >
-              <span className="grid h-5 w-5 shrink-0 place-items-center">
-                <Icon name="memory" size="21px" className="text-ink-dim" />
-              </span>
-              Memory
-            </button>
+            <RailLink icon="memory" label="Memory" current={page === "memory"} onClick={() => goNav({ view: "memory" })} />
           </div>
           {/* No heading over the list: everything below the two actions is
               history, and a label saying so named the obvious. The 20px that
@@ -857,3 +799,6 @@ export default function App() {
     </div>
   );
 }
+
+/** The header of each page that is not a thread. */
+const pageTitles = { threads: "Threads", projects: "Projects", memory: "Memory", shared: "Shared" } as const;

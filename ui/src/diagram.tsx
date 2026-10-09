@@ -361,13 +361,7 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   const card = useRef<HTMLDivElement>(null);
   const title = diagramTitle(src);
 
-  if (out === null) {
-    return (
-      <div className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted">
-        Drawing the diagram…
-      </div>
-    );
-  }
+  if (out === null) return <DiagramPending />;
   if ("error" in out) {
     return (
       <details className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted">
@@ -409,6 +403,16 @@ export default function Diagram({ src }: { src: string }): ReactNode {
       </div>
       <MermaidSvg svg={out.svg} title={title} />
       {full && <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />}
+    </div>
+  );
+}
+
+/** The box a diagram's place holds while the picture is still being drawn,
+ * or its fence still being streamed. */
+export function DiagramPending() {
+  return (
+    <div className="mt-3 rounded-ui-sm border border-border bg-panel p-3 font-sans text-sm text-muted">
+      Drawing the diagram…
     </div>
   );
 }

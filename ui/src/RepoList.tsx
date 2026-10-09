@@ -720,12 +720,16 @@ function ProjectPanel({
         <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
             <tr className="bg-panel">
-              <th className={th + " border-b border-border"}>Repository</th>
-              <th className={th + " border-b border-border"}>State</th>
-              <th className={th + " border-b border-border"}>Indexed</th>
-              <th className={th + " border-b border-border text-right"}>Files</th>
-              <th className={th + " border-b border-border text-right"}>Chunks</th>
-              <th className={th + " border-b border-border text-right"}>Modules</th>
+              {["Repository", "State", "Indexed"].map((h) => (
+                <th key={h} className={th + " border-b border-border"}>
+                  {h}
+                </th>
+              ))}
+              {["Files", "Chunks", "Modules"].map((h) => (
+                <th key={h} className={th + " border-b border-border text-right"}>
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -839,15 +843,11 @@ function ProjectPanel({
                         that pushed Modules out of the panel. */}
                     <code className="block font-mono text-xs text-faint">{shortSha(r.last_sha)}</code>
                   </td>
-                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
-                    {r.files}
-                  </td>
-                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
-                    {r.chunks}
-                  </td>
-                  <td className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
-                    {r.modules}
-                  </td>
+                  {[r.files, r.chunks, r.modules].map((n, i) => (
+                    <td key={i} className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
+                      {n}
+                    </td>
+                  ))}
                 </tr>
                 {/* The description gets the whole table width instead of the
                     name column, where 180 characters wrapped to six lines and

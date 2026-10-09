@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
+import { patch } from "./lists";
+import { RailLink } from "./RailLink";
 import { Icon } from "./Icon";
 import { ThreadMenuFor } from "./ThreadMenu";
-import { railLabel, railRow } from "./rail";
+import { railLabel } from "./rail";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 
@@ -388,25 +390,10 @@ export default function Threads({
             an empty rail with "All threads" under it would promise a page
             with nothing on it. */}
         {threads.length > 0 && (
-          <button
-            type="button"
-            onClick={onAllThreads}
-            className={railRow + " mt-1.5 text-rail hover:bg-rail-hover"}
-          >
-            <span className="grid h-5 w-5 shrink-0 place-items-center">
-              <Icon name="allThreads" size="21px" className="text-ink-dim" />
-            </span>
-            All threads
-          </button>
+          <RailLink icon="allThreads" label="All threads" extra="mt-1.5" onClick={onAllThreads} />
         )}
       </div>
       {actions.dialogs}
     </nav>
   );
 }
-
-/** One row of a list, changed in place; the rest untouched. */
-export const patch =
-  <T extends { id: string }>(id: string, change: Partial<T>) =>
-  (prev: T[]): T[] =>
-    prev.map((x) => (x.id === id ? { ...x, ...change } : x));
