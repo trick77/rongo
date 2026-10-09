@@ -22,9 +22,8 @@ type fakeRepos struct {
 
 func (f fakeRepos) RepoStatus(context.Context) ([]RepoStatus, error) { return f.out, f.err }
 
-// authDB is a migrated database, because the auth service records the user it
-// logs in. Nothing here reaches a network.
-
+// devAuth is a dev-mode auth service over a migrated database, because the
+// service records the user it logs in. Nothing here reaches a network.
 func devAuth(t *testing.T) *auth.Service {
 	t.Helper()
 	return auth.NewService(storetest.Open(t, 4), "dev", "")

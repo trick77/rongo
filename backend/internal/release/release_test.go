@@ -23,8 +23,7 @@ func fixture(t *testing.T) (*Git, map[string]string) {
 	if err != nil {
 		t.Skip("git not available")
 	}
-	src := t.TempDir()
-	gittest.Run(t, src, "init", "-q", "-b", "main")
+	src := gittest.Init(t)
 	shas := map[string]string{}
 	shas["c1"] = gittest.Commit(t, src, "a.txt", []byte("first\n"), "first")
 	gittest.Run(t, src, "tag", "1.0.0")

@@ -203,10 +203,9 @@ func TestSyncSpecs_anExplicitBranchStillWins(t *testing.T) {
 	}
 }
 
-// purgeDB is newDB at the write tests' embedding dimension, so a purge test can
-// put real chunks — and therefore real vec0 and fts5 rows — into the tables it
-// then expects to be empty.
-
+// The purge tests open their database at the write tests' embedding
+// dimension, so they can put real chunks — and therefore real vec0 and fts5
+// rows — into the tables they then expect to be empty.
 func TestSyncSpecs_purgesARepoThatLeftTheList(t *testing.T) {
 	// Given: two indexed repositories, one of which is about to be dropped from
 	// repos.yaml.

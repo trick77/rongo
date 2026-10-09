@@ -4,6 +4,7 @@
 package gittest
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,9 +28,15 @@ func Run(tb testing.TB, dir string, args ...string) string {
 		"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
 		"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false",
 	)
-	out, err := cmd.CombinedOutput()
+	// Stdout only: callers slice the result as a SHA or object id, and a
+	// stderr "warning:" or "hint:" line must not land in front of it.
+	out, err := cmd.Output()
 	if err != nil {
-		tb.Fatalf("git %v: %v\n%s", args, err, out)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			tb.Fatalf("git %v: %v\n%s", args, err, exit.Stderr)
+		}
+		tb.Fatalf("git %v: %v", args, err)
 	}
 	return strings.TrimSpace(string(out))
 }

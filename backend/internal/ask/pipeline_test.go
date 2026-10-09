@@ -227,9 +227,9 @@ func withSearch(s Searcher) pipelineOpt {
 	return func(f *pipelineFakes) { f.search = s }
 }
 
-// withSearcher overrides the searcher a test pipeline is built with.
+// withSearcher is withSearch for a bare function.
 func withSearcher(fn func(retrieve.Query) ([]retrieve.Hit, error)) pipelineOpt {
-	return func(f *pipelineFakes) { f.search = searchFunc(fn) }
+	return withSearch(searchFunc(fn))
 }
 
 // withDB builds the gatherer over the database the test seeded, so the
@@ -283,6 +283,9 @@ func newTestPipeline(t *testing.T, opts ...pipelineOpt) *Pipeline {
 	// database and a fake server are not free.
 	if f.upstream == nil {
 		f.upstream = twoStepUpstream(t, appleTVReply, "Answer [1].")
+	}
+	if f.gatherer != nil && f.db != nil {
+		t.Fatal("withDB and withGatherer together: the gatherer already holds a database")
 	}
 	if f.gatherer == nil {
 		if f.db == nil {

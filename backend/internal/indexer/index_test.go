@@ -59,8 +59,7 @@ func fixtureCorpus(t testing.TB) string {
 // map and returns its path.
 func fixtureCorpusFiles(t testing.TB, files map[string]string) string {
 	t.Helper()
-	dir := t.TempDir()
-	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	dir := gittest.Init(t)
 	for path, body := range files {
 		write(t, dir, path, body)
 	}
