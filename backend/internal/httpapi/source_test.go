@@ -11,9 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
-	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
@@ -116,16 +114,9 @@ const recordedSHA = "abc1234"
 // checkout holding a.go and secret.go at recordedSHA, and a files row for
 // a.go only — secret.go is a path the index never served. The thread answered
 // testSubject from a.go and otherSubject from secret.go.
-func recordServer(t *testing.T) (*Server, *threads.Store, *sql.DB, threads.Thread) {
+func recordServer(t *testing.T) (*Server, *sql.DB, threads.Thread) {
 	t.Helper()
-	db := storetest.Open(t, 4)
-	ctx := context.Background()
-	svc := auth.NewService(db, "dev", "")
-	for _, subject := range []string{testSubject, otherSubject} {
-		if _, err := svc.UpsertUser(ctx, subject, subject+"@example.invalid", true); err != nil {
-			t.Fatalf("seed user %q: %v", subject, err)
-		}
-	}
+	deps, st, db := testDeps(t)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch, enabled, last_sha) VALUES ('rongo', 'x', 'master', 1, ?)`, recordedSHA); err != nil {
 		t.Fatalf("seed repo: %v", err)
 	}
@@ -133,27 +124,16 @@ func recordServer(t *testing.T) (*Server, *threads.Store, *sql.DB, threads.Threa
 		t.Fatalf("seed file: %v", err)
 	}
 	git := checkout{recordedSHA + ":a.go": "package a\n", recordedSHA + ":secret.go": "package secret\n"}
-	st := threads.NewStore(db)
-	srv := NewServer(Deps{Auth: svc, Threads: st, Source: sourceview.New(db, git, 1<<20)})
+	deps.Source = sourceview.New(db, git, 1<<20)
 
 	answer := func(subject, path string) threads.Thread {
-		th, err := st.Create(ctx, subject, "How does it start?")
-		if err != nil {
-			t.Fatalf("create thread: %v", err)
-		}
-		m, err := st.AddQuestion(ctx, th.ID, "dev", "en", "How does it start?", 0)
-		if err != nil {
-			t.Fatalf("add question: %v", err)
-		}
-		if err := st.Finish(ctx, m.ID, "Here [1].", []ask.Citation{
-			{Marker: 1, Repo: "rongo", Branch: "master", Path: path, StartLine: 1, EndLine: 1, SHA: recordedSHA},
-		}); err != nil {
-			t.Fatalf("finish: %v", err)
-		}
+		th, _ := answerTurn(t, st, subject, "How does it start?", "Here [1].", forDeveloper(), citing(
+			ask.Citation{Marker: 1, Repo: "rongo", Branch: "master", Path: path, StartLine: 1, EndLine: 1, SHA: recordedSHA},
+		))
 		return th
 	}
 	answer(otherSubject, "secret.go")
-	return srv, st, db, answer(testSubject, "a.go")
+	return NewServer(deps), db, answer(testSubject, "a.go")
 }
 
 func dropFromIndex(t *testing.T, db *sql.DB, path string) {
@@ -180,7 +160,7 @@ func wantContent(t *testing.T, rec *httptest.ResponseRecorder, want string) {
 // A file renamed or deleted since the answer is still in the commit the
 // answer was read at, and the link has authorised exactly that triple.
 func TestPublicShareSourceOpensFileGoneFromIndex(t *testing.T) {
-	srv, _, db, th := recordServer(t)
+	srv, db, th := recordServer(t)
 	sh := share(t, srv, th.PublicID)
 	dropFromIndex(t, db, "a.go")
 
@@ -191,7 +171,7 @@ func TestPublicShareSourceOpensFileGoneFromIndex(t *testing.T) {
 }
 
 func TestSourceOwnerCitationOpensFileGoneFromIndex(t *testing.T) {
-	srv, _, db, _ := recordServer(t)
+	srv, db, _ := recordServer(t)
 	dropFromIndex(t, db, "a.go")
 
 	rec := httptest.NewRecorder()
@@ -205,7 +185,7 @@ func TestSourceOwnerCitationOpensFileGoneFromIndex(t *testing.T) {
 // citation opens a path, or a signed-in reader could open what the index
 // never served at a commit before it ran.
 func TestSourceUncitedPathWithoutRowIs404(t *testing.T) {
-	srv, _, _, _ := recordServer(t)
+	srv, _, _ := recordServer(t)
 
 	for name, sha := range map[string]string{
 		// secret.go is cited, but in otherSubject's thread.
@@ -225,7 +205,7 @@ func TestSourceUncitedPathWithoutRowIs404(t *testing.T) {
 // no longer lists the file: an indexed file opens without it, even when the
 // record could not answer.
 func TestSource_anIndexedFileNeverAsksTheRecord(t *testing.T) {
-	srv, _, db, _ := recordServer(t)
+	srv, db, _ := recordServer(t)
 	if _, err := db.Exec(`ALTER TABLE citations RENAME TO citations_gone`); err != nil {
 		t.Fatalf("break citations: %v", err)
 	}
@@ -240,7 +220,7 @@ func TestSource_anIndexedFileNeverAsksTheRecord(t *testing.T) {
 // A record that cannot say whether the reader cited a file is a 500, never a
 // guess either way.
 func TestSource_aBrokenRecordIsAnError(t *testing.T) {
-	srv, _, db, _ := recordServer(t)
+	srv, db, _ := recordServer(t)
 	dropFromIndex(t, db, "a.go")
 	if _, err := db.Exec(`ALTER TABLE citations RENAME TO citations_gone`); err != nil {
 		t.Fatalf("break citations: %v", err)

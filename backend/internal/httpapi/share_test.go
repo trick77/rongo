@@ -11,9 +11,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
-	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
@@ -25,38 +23,21 @@ import (
 // way an anonymous browser would.
 func shareServer(t *testing.T) (*Server, *threads.Store, *fakeSource) {
 	t.Helper()
-	db := storetest.Open(t, 4)
-	svc := auth.NewService(db, "dev", "")
-	for _, subject := range []string{testSubject, otherSubject} {
-		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
-			t.Fatalf("seed user %q: %v", subject, err)
-		}
-	}
+	deps, st, _ := testDeps(t)
 	src := &fakeSource{file: sourceview.File{
 		Repo: "rongo", Branch: "master", Path: "a.go", SHA: "abc", Content: "package a\n",
 	}}
-	st := threads.NewStore(db)
-	return NewServer(Deps{Auth: svc, Threads: st, Source: src}), st, src
+	deps.Source = src
+	return NewServer(deps), st, src
 }
 
-// sharedTurn is a thread with one finished, cited turn — the smallest thing
-// worth sharing.
+// sharedTurn is a thread with one finished turn citing the fake checkout's
+// file — the smallest thing worth sharing.
 func sharedTurn(t *testing.T, st *threads.Store, subject string) threads.Thread {
 	t.Helper()
-	ctx := context.Background()
-	th, err := st.Create(ctx, subject, "How does routing decide?")
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	m, err := st.AddQuestion(ctx, th.ID, "ba", "en", "How does routing decide?", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := st.Finish(ctx, m.ID, "It is a ladder [1].", []ask.Citation{
-		{Marker: 1, Repo: "rongo", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 4, SHA: "abc"},
-	}); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
+	th, _ := answerTurn(t, st, subject, "How does routing decide?", "It is a ladder [1].", citing(
+		ask.Citation{Marker: 1, Repo: "rongo", Branch: "master", Path: "a.go", StartLine: 1, EndLine: 4, SHA: "abc"},
+	))
 	return th
 }
 
@@ -512,17 +493,13 @@ func TestShares_listsThisReadersLiveLinks(t *testing.T) {
 // half of each handler no happy-path test ever reaches.
 func brokenShares(t *testing.T) (*Server, threads.Thread) {
 	t.Helper()
-	db := storetest.Open(t, 4)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "", true); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	st := threads.NewStore(db)
+	deps, st, db := testDeps(t)
 	th, err := st.Create(context.Background(), testSubject, "How?")
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	srv := NewServer(Deps{Auth: svc, Threads: st, Source: &fakeSource{}})
+	deps.Source = &fakeSource{}
+	srv := NewServer(deps)
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}

@@ -70,7 +70,7 @@ func refusedBeforeTheStream(t *testing.T, rec *httptest.ResponseRecorder, st *th
 func threadWithOneAnswer(t *testing.T, a *fakeAsker) (Deps, *threads.Store, *readFailingThreads, threads.Thread) {
 	t.Helper()
 	a.tokens, a.scope = []string{"x"}, ask.Scope{Known: []string{"rongo"}}
-	deps, st := headDeps(t, a)
+	deps, st := askDeps(t, a)
 	postAsk(t, deps, `{"question":"How does rongo cite sources?","audience":"ba"}`)
 	list, err := st.List(context.Background(), testSubject)
 	if err != nil || len(list) != 1 {

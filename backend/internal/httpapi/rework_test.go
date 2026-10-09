@@ -7,11 +7,8 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/sourceview"
-	"github.com/trick77/rongo/internal/store/storetest"
-	"github.com/trick77/rongo/internal/threads"
 )
 
 // checkout is file bytes by "sha:path", as sourceview reads git.
@@ -38,12 +35,13 @@ func (c checkout) ReadFile(_ context.Context, _ repos.Spec, sha, path string) ([
 // "zeichne ein diagramm des ablaufs" refused because every chunk of that
 // file had a new id. The basis is read at the commit it was read at.
 func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
-	db := storetest.Open(t, 4)
+	deps, st, db := testDeps(t)
 	chunkID := seedChunk(t, db)
 	src := ask.Source{ChunkID: chunkID, Repo: "peeq", Path: "a.go", SHA: "abc1234", StartLine: 2, EndLine: 3, Reason: "hit"}
 	a := &fakeAsker{tokens: []string{"x"}, sources: []ask.Source{src}}
+	deps.Ask = a
 	viewer := sourceview.New(db, checkout{"abc1234:a.go": "package a\nfunc Bypass() {\n}\n"}, 1<<20)
-	deps := Deps{Auth: auth.NewService(db, "dev", ""), Ask: a, Threads: threads.NewStore(db).WithEvidence(viewer)}
+	deps.Threads = st.WithEvidence(viewer)
 	postAsk(t, deps, `{"question":"wie funktioniert der bypass?","audience":"ba"}`)
 	if _, err := db.Exec(`DELETE FROM chunks WHERE id = ?`, chunkID); err != nil {
 		t.Fatalf("re-index: %v", err)
@@ -72,12 +70,12 @@ func TestAsk_aFollowUpAfterAPollStillHasTheWholeBasis(t *testing.T) {
 // way to read it, whole or not — the count says which. The text is read only
 // when asked for: every follow-up needs the refs, only a rework the files.
 func TestAsk_aFollowUpCarriesThePreviousAnswersSources(t *testing.T) {
-	db := storetest.Open(t, 4)
+	deps, _, db := testDeps(t)
 	chunkID := seedChunk(t, db)
 	// The first turn claims two sources; only one of them is a chunk the
 	// index holds, the other stands for one a re-index has since removed.
 	a := &fakeAsker{tokens: []string{"x"}, sources: []ask.Source{{ChunkID: chunkID, Reason: "hit"}, {ChunkID: chunkID + 1000, Reason: "hit"}}}
-	deps := Deps{Auth: auth.NewService(db, "dev", ""), Ask: a, Threads: threads.NewStore(db)}
+	deps.Ask = a
 	postAsk(t, deps, `{"question":"How does peeq issue grants?","audience":"ba"}`)
 
 	list, err := deps.Threads.List(context.Background(), testSubject)

@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
-	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -70,17 +68,12 @@ func (sp *suggesterSpy) fn(ctx context.Context, question, answer string, audienc
 // shared builder has no room for.
 func newSuggestingServer(t *testing.T, sp *suggesterSpy, opts ...func(*fakeAsker)) (*Server, *threads.Store, *sql.DB) {
 	t.Helper()
-	db := storetest.Open(t, 4)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
-		t.Fatalf("seed dev user: %v", err)
-	}
+	deps, st, db := testDeps(t)
 	f := &fakeAsker{}
 	for _, o := range opts {
 		o(f)
 	}
-	st := threads.NewStore(db)
-	deps := Deps{Auth: svc, Ask: f, Threads: st}
+	deps.Ask = f
 	if sp != nil {
 		deps.Suggester = sp.fn
 	}

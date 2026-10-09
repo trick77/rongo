@@ -10,10 +10,7 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
-	"github.com/trick77/rongo/internal/store/storetest"
-	"github.com/trick77/rongo/internal/threads"
 )
 
 type fakeCommit struct {
@@ -42,23 +39,13 @@ func (f *fakeCommit) RecordedCommit(_ context.Context, _, _ string) (sourceview.
 // in it. A turn citing it is the permission, owner and share link alike; an
 // uncited commit stays refused.
 func TestCommit_aCitedCommitTheLaneHasDroppedStillOpens(t *testing.T) {
-	db := storetest.Open(t, 4)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
-		t.Fatal(err)
-	}
-	st := threads.NewStore(db)
+	deps, st, _ := testDeps(t)
 	old := sourceview.Commit{Repo: "rongo", SHA: "aaa1111", Subject: "Old"}
-	c := &fakeCommit{err: fmt.Errorf("x: %w", sourceview.ErrNotInLane), recorded: &old}
-	srv := NewServer(Deps{Auth: svc, Threads: st, Commit: c})
-	ctx := context.Background()
-	th, _ := st.Create(ctx, testSubject, "What changed?")
-	m, _ := st.AddQuestion(ctx, th.ID, "ba", "en", "What changed?", 0)
-	if err := st.Finish(ctx, m.ID, "This [1].", []ask.Citation{
-		{Marker: 1, Repo: "rongo", Branch: "master", SHA: "aaa1111", Kind: ask.SourceCommit, Subject: "Old"},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	deps.Commit = &fakeCommit{err: fmt.Errorf("x: %w", sourceview.ErrNotInLane), recorded: &old}
+	srv := NewServer(deps)
+	th, _ := answerTurn(t, st, testSubject, "What changed?", "This [1].", citing(
+		ask.Citation{Marker: 1, Repo: "rongo", Branch: "master", SHA: "aaa1111", Kind: ask.SourceCommit, Subject: "Old"},
+	))
 	owner := func(sha string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/commit?"+url.Values{"repo": {"rongo"}, "sha": {sha}}.Encode(), nil))
@@ -126,22 +113,12 @@ func TestCommit_servesTheCitedCommit_andSaysWhyNot(t *testing.T) {
 }
 
 func TestPublicShareCommit_opensACitedCommitAndNothingElse(t *testing.T) {
-	db := storetest.Open(t, 4)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, testSubject+"@example.invalid", true); err != nil {
-		t.Fatal(err)
-	}
-	st := threads.NewStore(db)
-	c := &fakeCommit{commit: sourceview.Commit{Repo: "rongo", SHA: "aaa1111", Subject: "Newest"}}
-	srv := NewServer(Deps{Auth: svc, Threads: st, Commit: c})
-	ctx := context.Background()
-	th, _ := st.Create(ctx, testSubject, "What changed?")
-	m, _ := st.AddQuestion(ctx, th.ID, "ba", "en", "What changed?", 0)
-	if err := st.Finish(ctx, m.ID, "This [1].", []ask.Citation{
-		{Marker: 1, Repo: "rongo", Branch: "master", SHA: "aaa1111", Kind: ask.SourceCommit, Subject: "Newest", CommittedAt: "2026-09-17T10:00:00Z"},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	deps, st, _ := testDeps(t)
+	deps.Commit = &fakeCommit{commit: sourceview.Commit{Repo: "rongo", SHA: "aaa1111", Subject: "Newest"}}
+	srv := NewServer(deps)
+	th, _ := answerTurn(t, st, testSubject, "What changed?", "This [1].", citing(
+		ask.Citation{Marker: 1, Repo: "rongo", Branch: "master", SHA: "aaa1111", Kind: ask.SourceCommit, Subject: "Newest", CommittedAt: "2026-09-17T10:00:00Z"},
+	))
 	sh := share(t, srv, th.PublicID)
 	q := func(repo, sha string) string {
 		return "/api/shares/" + sh.Token + "/commit?" + url.Values{"repo": {repo}, "sha": {sha}}.Encode()
