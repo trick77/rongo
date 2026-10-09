@@ -1,12 +1,43 @@
 // Package sched holds the loop primitives the background workers share:
-// cancellable sleep and jittered intervals.
+// cancellable sleep, jittered intervals and the heartbeat a long call logs
+// while it runs.
 package sched
 
 import (
 	"context"
 	"math/rand/v2"
+	"sync"
 	"time"
 )
+
+// Heartbeat calls fn every interval until the returned stop is called or ctx
+// ends, on its own goroutine. stop waits for that goroutine, so no beat lands
+// after it returns and a caller may read what the beats recorded. A
+// non-positive interval is OFF: stop is a no-op and fn never runs.
+func Heartbeat(ctx context.Context, every time.Duration, fn func()) (stop func()) {
+	if every <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				fn()
+			}
+		}
+	}()
+	return func() { close(done); wg.Wait() }
+}
 
 // Jittered spreads d by up to ±20%, so several repositories polled on the same
 // interval do not all hit their forge in the same second.

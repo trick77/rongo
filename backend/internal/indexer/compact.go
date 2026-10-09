@@ -8,6 +8,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/trick77/rongo/internal/sched"
 )
 
 // VecCompaction is what one CompactVectors call found and did. Chunks are
@@ -89,25 +91,11 @@ func (p *compactProgress) state() (step string, done, total int64) {
 
 // heartbeat logs msg every compactHeartbeat until the returned stop is
 // called, with whatever attrs returns at that moment and the time elapsed.
-func heartbeat(log *slog.Logger, msg string, attrs func() []any) (stop func()) {
+func heartbeat(ctx context.Context, log *slog.Logger, msg string, attrs func() []any) (stop func()) {
 	start := time.Now()
-	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		t := time.NewTicker(compactHeartbeat)
-		defer t.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-t.C:
-				log.Info(msg, append(attrs(), "elapsed", took(start))...)
-			}
-		}
-	}()
-	return func() { close(done); wg.Wait() }
+	return sched.Heartbeat(ctx, compactHeartbeat, func() {
+		log.Info(msg, append(attrs(), "elapsed", took(start))...)
+	})
 }
 
 func compactVectors(ctx context.Context, db *sql.DB, p *compactProgress) (VecCompaction, error) {
@@ -247,7 +235,7 @@ func WarnVectorBloat(ctx context.Context, db *sql.DB, log *slog.Logger, args ...
 func CompactVectorsAndLog(ctx context.Context, db *sql.DB, log *slog.Logger, args ...any) (c VecCompaction, ok bool) {
 	start := time.Now()
 	p := &compactProgress{log: log, args: args}
-	stop := heartbeat(log, "compacting the vector index, still running", func() []any {
+	stop := heartbeat(ctx, log, "compacting the vector index, still running", func() []any {
 		step, done, total := p.state()
 		return append(slices.Clone(args), "step", step, "done", done, "total", total)
 	})
@@ -288,7 +276,7 @@ func VacuumAndLog(ctx context.Context, db *sql.DB, log *slog.Logger) {
 	before, err := dbBytes(ctx, db)
 	if err == nil {
 		log.Info("vacuuming the database", "bytes_before", before)
-		stop := heartbeat(log, "vacuuming the database, still running", func() []any { return nil })
+		stop := heartbeat(ctx, log, "vacuuming the database, still running", func() []any { return nil })
 		_, err = db.ExecContext(ctx, `VACUUM`)
 		stop()
 	}
