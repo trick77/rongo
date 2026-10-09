@@ -3,10 +3,9 @@ package retrieve
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // benchDB builds a corpus of n chunks through the same driver and schema the
@@ -17,14 +16,7 @@ import (
 // corpus looks like and keeps the hub guard out of the measurement.
 func benchDB(b *testing.B, n int) *sql.DB {
 	b.Helper()
-	db, err := store.Open(filepath.Join(b.TempDir(), "bench.db"))
-	if err != nil {
-		b.Fatalf("open: %v", err)
-	}
-	b.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, dim); err != nil {
-		b.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(b, dim)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch) VALUES (?,?,?)`,
 		"bench", "file:///bench", "master"); err != nil {
 		b.Fatalf("insert repo: %v", err)

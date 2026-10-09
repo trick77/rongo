@@ -124,8 +124,7 @@ func TestPipelineSaysWhenTheTurnStoodOnDocumentationAlone(t *testing.T) {
 	var notices []string
 	c := twoStepUpstream(t, `{"intent":"how","terms":["models"],"code_terms":[],"repos":[]}`,
 		"AGENTS.md states two deployments [1].")
-	p := NewPipeline(c, &fakeSearch{hits: docOnlyHits()},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(&fakeSearch{hits: docOnlyHits()}))
 
 	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
@@ -154,8 +153,7 @@ func TestPipelineSaysNothingWhenTheTurnHadCode(t *testing.T) {
 	hits := append(docOnlyHits(),
 		retrieve.Hit{ChunkID: 3, Repo: "peeq", Path: "internal/llm/client.go", RawText: "func New() {}"})
 	c := twoStepUpstream(t, `{"intent":"how","terms":["models"],"code_terms":[],"repos":[]}`, "x")
-	p := NewPipeline(c, &fakeSearch{hits: hits},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(&fakeSearch{hits: hits}))
 
 	got, _, err := p.Run(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
@@ -179,7 +177,7 @@ func TestResumedTurnSaysItStoodOnDocumentationAlone(t *testing.T) {
 	db := gatherDB(t)
 	var notices []string
 	c := twoStepUpstream(t, "{}", "AGENTS.md states two deployments [1].")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 
 	got, err := p.Resume(context.Background(), "How are the models chosen?", AudienceBA, LanguageEN,
 		docOnlyHits(), Scope{}, Thread{}, Events{OnNotice: func(text string) { notices = append(notices, text) }})
@@ -204,7 +202,7 @@ func TestResumeRepoSaysItStoodOnDocumentationAlone(t *testing.T) {
 	db := gatherDB(t)
 	var notices []string
 	c := twoStepUpstream(t, "{}", "AGENTS.md states two deployments [1].")
-	p := NewPipeline(c, &fakeSearch{hits: docOnlyHits()}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(&fakeSearch{hits: docOnlyHits()}))
 
 	got, err := p.ResumeRepo(context.Background(), "How are the models chosen?", Understanding{}, nil,
 		AudienceBA, LanguageEN, Scope{}, Thread{}, Events{OnNotice: func(text string) { notices = append(notices, text) }})

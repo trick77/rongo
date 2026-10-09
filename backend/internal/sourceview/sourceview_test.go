@@ -11,44 +11,9 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/gitrepo"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
-
-// gitRun runs git with a fixed identity, so a developer's own config cannot
-// change what the fixture looks like. Automatic maintenance is off: a commit
-// may otherwise detach a background gc that is still writing under .git
-// while t.TempDir removes it, which failed once on CI as "directory not
-// empty".
-func gitRun(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
-		"GIT_CONFIG_COUNT=2",
-		"GIT_CONFIG_KEY_0=gc.auto", "GIT_CONFIG_VALUE_0=0",
-		"GIT_CONFIG_KEY_1=maintenance.auto", "GIT_CONFIG_VALUE_1=false",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func commit(t *testing.T, dir, name string, body []byte, msg string) string {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, dir, "add", name)
-	gitRun(t, dir, "commit", "-qm", msg)
-	return gitRun(t, dir, "rev-parse", "HEAD")
-}
 
 // fixture is a checkout under root/<repo> and a database that knows it. The
 // paths the index "took" have a files row; a secret has one with a
@@ -71,22 +36,15 @@ func newFixture(t *testing.T, maxBytes int) fixture {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, dir, "init", "-q", "-b", "main")
-	first := commit(t, dir, "internal/a.go", []byte("package a\n\nfunc One() {}\n"), "one")
-	second := commit(t, dir, "internal/a.go", []byte("package a\n\n// moved\nfunc One() {}\n"), "two")
-	commit(t, dir, "img.png", []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe}, "binary")
-	commit(t, dir, "notes.txt", []byte("caf\xe9 latin-1\n"), "latin1")
-	commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
-	head := commit(t, dir, "prod/application.properties", []byte("acme.cron.send-digest=0 0 * ? * * *\ndb.password=ENC(fixture-cipher)\nacme.key=${MASTER_KEY}\n"), "config")
+	gittest.Run(t, dir, "init", "-q", "-b", "main")
+	first := gittest.Commit(t, dir, "internal/a.go", []byte("package a\n\nfunc One() {}\n"), "one")
+	second := gittest.Commit(t, dir, "internal/a.go", []byte("package a\n\n// moved\nfunc One() {}\n"), "two")
+	gittest.Commit(t, dir, "img.png", []byte{0x89, 'P', 'N', 'G', 0, 0xff, 0xfe}, "binary")
+	gittest.Commit(t, dir, "notes.txt", []byte("caf\xe9 latin-1\n"), "latin1")
+	gittest.Commit(t, dir, "config/prod.env", []byte("TOKEN=hunter2\n"), "secret")
+	head := gittest.Commit(t, dir, "prod/application.properties", []byte("acme.cron.send-digest=0 0 * ? * * *\ndb.password=ENC(fixture-cipher)\nacme.key=${MASTER_KEY}\n"), "config")
 
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatal(err)
-	}
+	db := storetest.Open(t, 4)
 	if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url, branch, enabled, last_sha) VALUES ('peeq', 'x', 'main', 1, ?)`, head); err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +173,8 @@ func TestRead_refusesAnOlderCommitWhoseBodyTheIndexerWouldSkip(t *testing.T) {
 	// Given: internal/aws.go is indexed today; an older commit held a key.
 	f := newFixture(t, 1<<20)
 	dir := filepath.Join(f.root, "peeq")
-	leaky := commit(t, dir, "internal/aws.go", []byte("package a\n\nconst key = \"AKIAABCDEFGHIJKLMNOP\"\n"), "oops")
-	clean := commit(t, dir, "internal/aws.go", []byte("package a\n\nvar key = os.Getenv(\"K\")\n"), "fix")
+	leaky := gittest.Commit(t, dir, "internal/aws.go", []byte("package a\n\nconst key = \"AKIAABCDEFGHIJKLMNOP\"\n"), "oops")
+	clean := gittest.Commit(t, dir, "internal/aws.go", []byte("package a\n\nvar key = os.Getenv(\"K\")\n"), "fix")
 	if _, err := f.db.Exec(`INSERT INTO files (repo, path, sha, skip_reason) VALUES ('peeq', 'internal/aws.go', ?, '')`, clean); err != nil {
 		t.Fatal(err)
 	}

@@ -617,16 +617,13 @@ func TestLoad_aMalformedSettingRefusesToStart(t *testing.T) {
 }
 
 // oidcEnv is a complete oidc setup, for tests about something beside it.
-func oidcEnv(extra map[string]string) map[string]string {
+func oidcEnv() map[string]string {
 	env := map[string]string{
 		"BACKEND_AUTH_MODE":          "oidc",
 		"BACKEND_OIDC_ISSUER":        "https://auth.example.com",
 		"BACKEND_OIDC_CLIENT_ID":     "rongo",
 		"BACKEND_OIDC_CLIENT_SECRET": "s3cret",
 		"BACKEND_OIDC_REDIRECT_URL":  "https://rongo.example.com/api/auth/callback",
-	}
-	for k, v := range extra {
-		env[k] = v
 	}
 	return env
 }
@@ -646,7 +643,7 @@ func TestLoad_cookieSecureMalformedIsRefusedInEveryMode(t *testing.T) {
 			"BACKEND_ADMIN_USER":          "jan",
 			"BACKEND_ADMIN_PASSWORD_HASH": string(hash),
 		},
-		"oidc": oidcEnv(nil),
+		"oidc": oidcEnv(),
 		"dev":  {},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -667,7 +664,7 @@ func TestLoad_cookieSecureMalformedIsRefusedInEveryMode(t *testing.T) {
 // BACKEND_COOKIE_SECURE=false looked active and was ignored.
 func TestLoad_cookieSecureIsRefusedOutsidePasswordMode(t *testing.T) {
 	for name, env := range map[string]map[string]string{
-		"oidc":  oidcEnv(nil),
+		"oidc":  oidcEnv(),
 		"dev":   {},
 		"token": {"BACKEND_AUTH_MODE": "token", "BACKEND_ADMIN_TOKEN": "t0ken"},
 		"proxy": {"BACKEND_AUTH_MODE": "proxy"},
@@ -698,7 +695,7 @@ func TestLoad_proxyAdminGroup(t *testing.T) {
 	}
 
 	for name, env := range map[string]map[string]string{
-		"oidc": oidcEnv(nil),
+		"oidc": oidcEnv(),
 		"dev":  {},
 	} {
 		t.Run("refused in "+name, func(t *testing.T) {
@@ -727,10 +724,10 @@ func TestLoad_aModeBoundSettingIsRefusedInAModeThatNeverReadsIt(t *testing.T) {
 		{"BACKEND_OIDC_CLIENT_ID", map[string]string{"BACKEND_AUTH_MODE": "token", "BACKEND_ADMIN_TOKEN": "t0ken"}},
 		{"BACKEND_OIDC_CLIENT_SECRET", map[string]string{}},
 		{"BACKEND_OIDC_REDIRECT_URL", map[string]string{}},
-		{"BACKEND_ADMIN_TOKEN", oidcEnv(nil)},
+		{"BACKEND_ADMIN_TOKEN", oidcEnv()},
 		{"BACKEND_ADMIN_USER", map[string]string{"BACKEND_AUTH_MODE": "proxy"}},
 		{"BACKEND_ADMIN_PASSWORD_HASH", map[string]string{}},
-		{"BACKEND_PROXY_ADMIN_GROUP", oidcEnv(nil)},
+		{"BACKEND_PROXY_ADMIN_GROUP", oidcEnv()},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			env := map[string]string{tc.key: "x"}

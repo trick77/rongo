@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/indexer"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // snapshotFixture is one extracted drop under a temp repo root, recorded in a
@@ -26,7 +28,7 @@ func snapshotFixture(t *testing.T) (*gitrepo.Client, *indexer.StateStore, string
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(dir, "main.txt"), "first\n")
-	state := indexer.NewStateStore(queryCacheDB(t))
+	state := indexer.NewStateStore(storetest.Open(t, embed.Dim()))
 	spec := repos.Spec{Name: "widget-drop", Snapshot: true, Enabled: true}
 	if _, err := state.SyncSpecs(context.Background(), []repos.Spec{spec}); err != nil {
 		t.Fatalf("SyncSpecs: %v", err)

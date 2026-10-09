@@ -3,12 +3,8 @@ package ask
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -183,47 +179,24 @@ func releaseCorpus(t *testing.T, db *sql.DB) (*fakeReleaser, *releaseHistory, st
 	return rel, h, declared, pm
 }
 
-func releaseUpstream(t *testing.T, understanding string, answerTokens ...string) (*Pipeline, *releaseHistory, *fakeReleaser, *[]string) {
+// releaseUpstream builds a pipeline over a two-step upstream and the release
+// corpus, and hands back the releaser and the answer call's prompts.
+func releaseUpstream(t *testing.T, understanding string, answerTokens ...string) (*Pipeline, *fakeReleaser, *[]string) {
 	t.Helper()
-	var prompts []string
-	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Stream   bool `json:"stream"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(body, &req)
-		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
-			return
-		}
-		calls++
-		for _, m := range req.Messages {
-			prompts = append(prompts, m.Content)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, answerTokens, "")
-	}))
-	t.Cleanup(srv.Close)
+	c, up := twoStep(t, understanding, answerTokens...)
 	db := gatherDB(t)
 	rel, h, declared, pm := releaseCorpus(t, db)
-	router := &fakeRouter{projects: pm, stages: declared}
-	p := NewPipeline(fakeLLM(t, srv), &fakeSearch{indexed: []string{"shop-infra", "shop-backend", "shop-ui"}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), router).
+	p := newTestPipeline(t, withUpstream(c), withDB(db),
+		withSearch(&fakeSearch{indexed: []string{"shop-infra", "shop-backend", "shop-ui"}}),
+		withRouter(&fakeRouter{projects: pm, stages: declared})).
 		WithHistory(h, func() time.Time { return fixedNow }).WithReleases(rel)
-	return p, h, rel, &prompts
+	return p, rel, &up.prompts
 }
 
 const releaseUnderstanding = `{"intent":"release","between":["prod","test"],"terms":[],"code_terms":[],"repos":["shop"]}`
 
 func TestRun_releaseAnswersFromTheCommitsBetweenTwoDeployedVersions(t *testing.T) {
-	p, _, _, prompts := releaseUpstream(t, releaseUnderstanding, "The backend moved [1][2].")
+	p, _, prompts := releaseUpstream(t, releaseUnderstanding, "The backend moved [1][2].")
 	var steps []string
 
 	got, clar, err := p.Run(context.Background(), "release notes for shop between production and testing", AudienceBA, LanguageEN, Thread{},
@@ -282,7 +255,7 @@ func TestRun_releaseAnswersFromTheCommitsBetweenTwoDeployedVersions(t *testing.T
 }
 
 func TestRun_releaseWithNothingBetweenIsTemplated(t *testing.T) {
-	p, _, rel, prompts := releaseUpstream(t, releaseUnderstanding, "never")
+	p, rel, prompts := releaseUpstream(t, releaseUnderstanding, "never")
 	// prod catches up with test.
 	rel.tags["shop-backend/v1.0.0"] = "c3"
 
@@ -505,7 +478,7 @@ func TestRun_releaseRefusesWithoutTwoStagesOrAnInfrastructureRepository(t *testi
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			p, _, _, prompts := releaseUpstream(t, tc.understanding, "never")
+			p, _, prompts := releaseUpstream(t, tc.understanding, "never")
 			got, _, err := p.Run(context.Background(), tc.question, AudienceBA, LanguageEN, Thread{}, Events{})
 			if err != nil {
 				t.Fatalf("Run: %v", err)
@@ -523,7 +496,7 @@ func TestRun_releaseRefusesWithoutTwoStagesOrAnInfrastructureRepository(t *testi
 func TestRun_releaseTakesTheStagesFromTheReadersOwnWords(t *testing.T) {
 	// The model's field is a guess; "production" and "testing" in the
 	// question are aliases and win.
-	p, _, _, _ := releaseUpstream(t,
+	p, _, _ := releaseUpstream(t,
 		`{"intent":"release","between":[],"terms":[],"code_terms":[],"repos":[]}`, "ok [1]")
 	got, _, err := p.Run(context.Background(), "what is between production and testing?", AudienceDev, LanguageEN, Thread{}, Events{})
 	if err != nil {

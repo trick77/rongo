@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -18,18 +19,18 @@ import (
 // name with a space and an umlaut, and a directory.
 func clonedFixture(t *testing.T) (*Client, repos.Spec, string) {
 	t.Helper()
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "empty.txt", "", "empty")
-	writeAndCommit(t, src, "fähig one.go", "package a\n\nfunc A() {}\n", "umlaut")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "empty.txt", []byte(""), "empty")
+	gittest.Commit(t, src, "fähig one.go", []byte("package a\n\nfunc A() {}\n"), "umlaut")
 	if err := os.MkdirAll(filepath.Join(src, "dir"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	writeAndCommit(t, src, "dir/b.txt", "second\nline\n", "nested")
+	gittest.Commit(t, src, "dir/b.txt", []byte("second\nline\n"), "nested")
 	if err := os.WriteFile(filepath.Join(src, "bin.dat"), []byte{0, 1, 2, '\n', 0xff, '\n'}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, src, "add", "bin.dat")
-	gitRun(t, src, "commit", "-qm", "binary")
+	gittest.Run(t, src, "add", "bin.dat")
+	gittest.Run(t, src, "commit", "-qm", "binary")
 
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}

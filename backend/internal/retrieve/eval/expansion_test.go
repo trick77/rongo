@@ -62,13 +62,20 @@ func (e expansion) code(t *testing.T) string {
 // readExpansions parses the frozen file, or skips the arm if it is not there.
 func readExpansions(t *testing.T) []expansion {
 	t.Helper()
-	body, err := os.ReadFile(expansionsFile)
+	return readExpansionFile(t, expansionsFile, "TestExpandQuestions")
+}
+
+// readExpansionFile parses one frozen expansion file, or skips the arm naming
+// the test that writes it when the file is not there yet.
+func readExpansionFile(t *testing.T, file, writer string) []expansion {
+	t.Helper()
+	body, err := os.ReadFile(file)
 	if err != nil {
-		t.Skipf("no %s yet; run TestExpandQuestions first", expansionsFile)
+		t.Skipf("no %s yet; run %s first", file, writer)
 	}
 	var list []expansion
 	if err := json.Unmarshal(body, &list); err != nil {
-		t.Fatalf("parse %s: %v", expansionsFile, err)
+		t.Fatalf("parse %s: %v", file, err)
 	}
 	return list
 }

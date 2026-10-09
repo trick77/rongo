@@ -9,27 +9,12 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
-	"github.com/trick77/rongo/internal/auth"
-	"github.com/trick77/rongo/internal/threads"
 )
-
-// headDeps is askDeps with the dev user already made: these tests seed a
-// thread before the first request, so its owner has to exist by then.
-func headDeps(t *testing.T, a Asker) (Deps, *threads.Store) {
-	t.Helper()
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@x.invalid", false); err != nil {
-		t.Fatalf("UpsertUser: %v", err)
-	}
-	st := threads.NewStore(db)
-	return Deps{Auth: svc, Ask: a, Threads: st}, st
-}
 
 // A retry is another attempt at a question already asked, so it joins that
 // question's turn instead of putting the same words in the record twice.
 func TestAsk_retryJoinsTheTurnItRetries(t *testing.T) {
-	deps, st := headDeps(t, &fakeAsker{tokens: []string{"antwort"}})
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"antwort"}})
 	ctx := context.Background()
 	th, err := st.Create(ctx, testSubject, "frage")
 	if err != nil {
@@ -66,7 +51,7 @@ func TestAsk_retryJoinsTheTurnItRetries(t *testing.T) {
 // thread is resolved, so a bad head cannot create an empty conversation on
 // its way to a 403 — and a good one names its own thread, the way a card does.
 func TestAsk_aRefusedHeadOpensNoThread(t *testing.T) {
-	deps, st := headDeps(t, &fakeAsker{tokens: []string{"antwort"}})
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"antwort"}})
 	ctx := context.Background()
 
 	rec := postAsk(t, deps, `{"question":"frage","audience":"ba","head_message_id":9999}`)
@@ -85,7 +70,7 @@ func TestAsk_aRefusedHeadOpensNoThread(t *testing.T) {
 // The browser names the row a retry joins, so the server checks it: a head in
 // another thread would file an answer under a question it never came from.
 func TestAsk_refusesAHeadFromAnotherThread(t *testing.T) {
-	deps, st := headDeps(t, &fakeAsker{tokens: []string{"antwort"}})
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"antwort"}})
 	ctx := context.Background()
 	mine, err := st.Create(ctx, testSubject, "frage")
 	if err != nil {
@@ -120,7 +105,7 @@ func TestAsk_refusesAHeadFromAnotherThread(t *testing.T) {
 
 // The head link is what the browser groups by, so it has to be on the wire.
 func TestThreadMessagesCarryTheHeadLink(t *testing.T) {
-	deps, st := headDeps(t, &fakeAsker{tokens: []string{"antwort"}})
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"antwort"}})
 	ctx := context.Background()
 	th, err := st.Create(ctx, testSubject, "frage")
 	if err != nil {

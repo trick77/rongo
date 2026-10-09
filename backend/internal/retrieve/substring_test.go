@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // The line that motivated the rung. The identifier "anzahlfahrzeuge" occurs in it
@@ -154,7 +156,7 @@ func TestBuildSubstringTerms_emptyWhenNothingUsable(t *testing.T) {
 // returns nothing for the bare identifier and the substring lane returns the
 // chunk.
 func TestSubstringFindsWhatFTSCannot(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "policenantrag", "master")
 	addChunk(t, db, "policenantrag", "src/ConverterVorgangsregistrierung.java", "toVertragsnehmerType",
 		converterLine, farVec)
@@ -188,7 +190,7 @@ func TestSubstringFindsWhatFTSCannot(t *testing.T) {
 
 func TestSearchSubstringIn_foldsCase(t *testing.T) {
 	// The corpus writes setAnzahlfahrzeuge; the reader may type any casing.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "policenantrag", "master")
 	addChunk(t, db, "policenantrag", "src/C.java", "sym", converterLine, farVec)
 
@@ -208,7 +210,7 @@ func TestSearchSubstringIn_honoursTheRepoFilter(t *testing.T) {
 	// Parked repositories and a narrowed scope must filter here exactly as
 	// they do in the keyword lane, or the rung answers from a repo the turn
 	// excluded.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "kept", "master")
 	addRepo(t, db, "parked", "master")
 	addChunk(t, db, "kept", "a.java", "sym", converterLine, farVec)
@@ -228,7 +230,7 @@ func TestSearchSubstringIn_honoursTheRepoFilter(t *testing.T) {
 }
 
 func TestSearchSubstringIn_emptyTermIsNoLane(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	addChunk(t, db, "r", "a.java", "sym", converterLine, farVec)
 
@@ -245,7 +247,7 @@ func TestSearchSubstringIn_ordersDeterministically(t *testing.T) {
 	// No bm25 here: a scan has no ranking of its own. Address order is what
 	// keeps two runs over one database identical, so a one-part move in a
 	// measurement is real rather than row order.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	addChunk(t, db, "r", "b/second.java", "sym", converterLine, farVec)
 	addChunk(t, db, "r", "a/first.java", "sym", converterLine, farVec)
@@ -273,7 +275,7 @@ func TestSearchSubstringIn_putsCodeAheadOfDocsAndTests(t *testing.T) {
 	// A scan has no bm25 to lean on, so the one ordering it can justify is
 	// the kind of file: code, then tests, then documentation, and address
 	// within each. Code is truth; a diagram naming the field is context.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	addChunk(t, db, "r", "aaa/doc/Diagramm-Entities.puml", "sym", converterCodeOnly, farVec)
 	addChunk(t, db, "r", "bbb/src/test/java/ConverterTest.java", "sym", converterCodeOnly, farVec)
@@ -299,7 +301,7 @@ func TestSearchSubstringIn_skipsAHubTerm(t *testing.T) {
 	// only applies past substringHubFloor: a share over a handful of chunks
 	// says nothing, and the one chunk that legitimately holds an identifier
 	// IS a large share of a fixture.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	for i := range substringHubFloor + 10 {
 		body := "package main // filler"
@@ -328,7 +330,7 @@ func TestSearch_severalTermsHittingOneChunkScoreItOnce(t *testing.T) {
 	// below it. Worse, the fused hit would report one lane while carrying the
 	// score of three, so the trace and any lane-based measurement would
 	// misattribute the movement.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	addChunk(t, db, "r", "src/Converter.java", "sym", converterCodeOnly, farVec)
 
@@ -402,7 +404,7 @@ func TestSearch_aWideTermDoesNotEvictANarrowOnesHits(t *testing.T) {
 	// "policenantrag" returned 40 hits on its own, the whole lane, while
 	// staying under the hub share. "anzahlfahrzeuge" and its single chunk — the
 	// mapping the rung exists to recover — were cut before fusion saw them.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "policenantrag", "master")
 	for i := range 200 {
 		addChunkAt(t, db, "policenantrag", fmt.Sprintf("lib/persistence/F%04d.java", i), 0, 1, 2,
@@ -463,7 +465,7 @@ func TestSearchSubstringIn_weighsTheHubShareAgainstTheScopedCorpus(t *testing.T)
 	// out-of-scope repository permanently disarms the guard for every live
 	// one — the same mistake the vec lane's rowid subquery rule exists to
 	// stop.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "kept", "master")
 	addRepo(t, db, "big", "master")
 	for i := range substringHubFloor + 10 {
@@ -492,7 +494,7 @@ func TestSearchSubstringIn_reachesASnakeCaseSpelling(t *testing.T) {
 	// no run of letters spelling "anzahlfahrzeuge", so no case variant of the
 	// glued needle can find it. Without the separator spelling the rung is
 	// silently dead over Python, Rust, C and Ruby.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "r", "master")
 	addChunk(t, db, "r", "a.py", "sym", "ws.set_anzahl_fahrzeuge(v)", farVec)
 
@@ -518,7 +520,7 @@ func TestNew_shipsTheSubstringRungOn(t *testing.T) {
 	// Same shape as the code rung: the product has it, a struct-literal
 	// Retriever does not, so the harness's baseline arm is a field left alone
 	// rather than a second constructor.
-	if got := New(testDB(t), fixedEmbedder{vec: queryVec}).SubstringWeight; got != WeightKeywordSubstring {
+	if got := New(storetest.Open(t, dim), fixedEmbedder{vec: queryVec}).SubstringWeight; got != WeightKeywordSubstring {
 		t.Errorf("New().SubstringWeight = %v, want %v", got, WeightKeywordSubstring)
 	}
 	if got := (&Retriever{}).SubstringWeight; got != 0 {
@@ -530,7 +532,7 @@ func TestSearch_theSubstringRungReachesInsideAToken(t *testing.T) {
 	// The end-to-end claim, through Search rather than the store: a question
 	// whose identifier exists only inside a larger token reaches the chunk
 	// with the rung on, and does not without it.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "policenantrag", "master")
 	// The CODE line alone, without the German comment that happens to sit
 	// above it in the real file. That comment spells "Anzahl" and "Fahrzeuge" as

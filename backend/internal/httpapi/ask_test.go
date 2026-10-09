@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +17,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
 )
@@ -26,6 +25,80 @@ import (
 // testSubject is the identity dev auth mode signs in under. Every seed
 // helper that does not take an explicit owner uses it.
 const testSubject = "dev-user"
+
+// otherSubject is anyone who is not the reader making the request.
+const otherSubject = "someone-else"
+
+// testDeps wires a dev-auth service and a thread store over a fresh database,
+// with both readers seeded: a thread references its owner, and Create fails
+// against a subject with no user row. Each test adds what its handler needs.
+// Dev auth re-admits testSubject on every request, so what it is seeded with
+// here never reaches a handler.
+func testDeps(t *testing.T) (Deps, *threads.Store, *sql.DB) {
+	t.Helper()
+	db := storetest.Open(t, 4)
+	svc := auth.NewService(db, "dev", "")
+	for _, subject := range []string{testSubject, otherSubject} {
+		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
+			t.Fatalf("seed user %q: %v", subject, err)
+		}
+	}
+	st := threads.NewStore(db)
+	return Deps{Auth: svc, Threads: st}, st, db
+}
+
+// turnSeed is what answerTurn writes beyond the question and the answer.
+type turnSeed struct {
+	audience  string
+	citations []ask.Citation
+	sources   []ask.Source
+}
+
+type turnOption func(*turnSeed)
+
+// citing is what the answer's markers point at.
+func citing(c ...ask.Citation) turnOption {
+	return func(s *turnSeed) { s.citations = c }
+}
+
+// withSources records the chunks the answer was written from, saved after the
+// turn finished the way the pipeline does.
+func withSources(src ...ask.Source) turnOption {
+	return func(s *turnSeed) { s.sources = src }
+}
+
+// forDeveloper asks as a Developer; the default is an Analyst.
+func forDeveloper() turnOption {
+	return func(s *turnSeed) { s.audience = "dev" }
+}
+
+// answerTurn seeds a thread of subject's with one finished turn: the question,
+// its answer and whatever opts add. It hands back the thread and the message.
+func answerTurn(t *testing.T, st *threads.Store, subject, question, answer string, opts ...turnOption) (threads.Thread, threads.Message) {
+	t.Helper()
+	seed := turnSeed{audience: "ba"}
+	for _, o := range opts {
+		o(&seed)
+	}
+	ctx := context.Background()
+	th, err := st.Create(ctx, subject, question)
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	m, err := st.AddQuestion(ctx, th.ID, seed.audience, "en", question, 0)
+	if err != nil {
+		t.Fatalf("add question: %v", err)
+	}
+	if err := st.Finish(ctx, m.ID, answer, seed.citations); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if seed.sources != nil {
+		if err := st.SaveSources(ctx, m.ID, seed.sources); err != nil {
+			t.Fatalf("save sources: %v", err)
+		}
+	}
+	return th, m
+}
 
 // fakeAsker drives the handler without a model endpoint. It emits its tokens
 // one at a time, so a handler that assembles the answer before writing fails.
@@ -278,22 +351,13 @@ func newTestServerWithStore(t *testing.T, opts ...func(*fakeAsker)) (*Server, *t
 // (chunks, files, repo_state) no threads.Store method writes.
 func newTestServerWithDB(t *testing.T, opts ...func(*fakeAsker)) (*Server, *threads.Store, *sql.DB) {
 	t.Helper()
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	// Both users have to exist before a thread references them: threads have
-	// a foreign key on the owning subject.
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
-		t.Fatalf("seed dev user: %v", err)
-	}
-	if _, err := svc.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
-		t.Fatalf("seed other user: %v", err)
-	}
+	deps, st, db := testDeps(t)
 	f := &fakeAsker{}
 	for _, o := range opts {
 		o(f)
 	}
-	st := threads.NewStore(db)
-	return NewServer(Deps{Auth: svc, Ask: f, Threads: st}), st, db
+	deps.Ask = f
+	return NewServer(deps), st, db
 }
 
 func doSSE(t *testing.T, srv *Server, path, body string) string {
@@ -304,9 +368,10 @@ func doSSE(t *testing.T, srv *Server, path, body string) string {
 	return rec.Body.String()
 }
 
-func doStatus(t *testing.T, srv *Server, path, body string) int {
+// doStatus posts body to /api/ask and returns the status alone.
+func doStatus(t *testing.T, srv *Server, body string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/ask", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	return rec.Code
@@ -357,7 +422,7 @@ func seedClarificationOwnedBy(t *testing.T, store *threads.Store, subject string
 // all. The empty module key is the discriminator the handler reads, so this
 // helper differs from seedClarification in exactly the way a stored repository
 // card does.
-func seedRepoClarification(t *testing.T, store *threads.Store) (msgID, clarID int64) {
+func seedRepoClarification(t *testing.T, store *threads.Store) (msgID int64) {
 	t.Helper()
 	ctx := context.Background()
 	th, err := store.Create(ctx, testSubject, "how are token costs calculated in $?")
@@ -371,7 +436,7 @@ func seedRepoClarification(t *testing.T, store *threads.Store) (msgID, clarID in
 	if err := store.SetScope(ctx, msg.ID, ask.Scope{Unknown: []string{"shopfront"}}); err != nil {
 		t.Fatalf("set scope: %v", err)
 	}
-	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
+	if _, err := store.Clarify(ctx, msg.ID, ask.Clarification{
 		Understanding: ask.Understanding{CodeTerms: []string{"pricing"}},
 		Candidates: []ask.Candidate{
 			{Repo: "peeq", Branch: "master", Title: "Token cost per turn", Summary: "s1"},
@@ -379,11 +444,10 @@ func seedRepoClarification(t *testing.T, store *threads.Store) (msgID, clarID in
 			{Title: "All repositories", Summary: "Answer across every indexed repository."},
 		},
 		Scope: ask.Scope{Unknown: []string{"shopfront"}},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("clarify: %v", err)
 	}
-	return msg.ID, clarID
+	return msg.ID
 }
 
 // threadOf resolves the thread a clarifying message belongs to, the same way
@@ -404,42 +468,9 @@ func threadOf(t *testing.T, store *threads.Store, msgID int64) int64 {
 // joinable sources — a repo, a file and a chunk row, not just a bare chunk id.
 func seedAnsweredMessageWithSources(t *testing.T, store *threads.Store, db *sql.DB) int64 {
 	t.Helper()
-	ctx := context.Background()
-	chunkID := seedChunk(t, db)
-	th, err := store.Create(ctx, testSubject, "frage")
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	if err := store.SaveSources(ctx, msg.ID, []ask.Source{{ChunkID: chunkID, Reason: "hit"}}); err != nil {
-		t.Fatalf("save sources: %v", err)
-	}
-	return msg.ID
-}
-
-// seedAnsweredMessageWithoutSources seeds a finished turn that never had its
-// sources saved — standing in for a chunk a re-index later removed.
-func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64 {
-	t.Helper()
-	ctx := context.Background()
-	th, err := store.Create(ctx, testSubject, "frage")
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	return msg.ID
+	_, m := answerTurn(t, store, testSubject, "frage", "antwort",
+		withSources(ask.Source{ChunkID: seedChunk(t, db), Reason: "hit"}))
+	return m.ID
 }
 
 // seedAnsweredMessageWithOneVanishedSource seeds a finished turn whose answer
@@ -448,30 +479,16 @@ func seedAnsweredMessageWithoutSources(t *testing.T, store *threads.Store) int64
 // evidence, not all of it.
 func seedAnsweredMessageWithOneVanishedSource(t *testing.T, store *threads.Store, db *sql.DB) int64 {
 	t.Helper()
-	ctx := context.Background()
 	chunkA := seedChunk(t, db)
 	chunkB := seedChunkAt(t, db, "b.go")
-	th, err := store.Create(ctx, testSubject, "frage")
-	if err != nil {
-		t.Fatalf("create thread: %v", err)
-	}
-	msg, err := store.AddQuestion(ctx, th.ID, "ba", "en", "frage", 0)
-	if err != nil {
-		t.Fatalf("add question: %v", err)
-	}
-	if err := store.Finish(ctx, msg.ID, "antwort", nil); err != nil {
-		t.Fatalf("finish: %v", err)
-	}
-	if err := store.SaveSources(ctx, msg.ID, []ask.Source{
-		{ChunkID: chunkA, Reason: "hit"},
-		{ChunkID: chunkB, Reason: "hit"},
-	}); err != nil {
-		t.Fatalf("save sources: %v", err)
-	}
+	_, m := answerTurn(t, store, testSubject, "frage", "antwort", withSources(
+		ask.Source{ChunkID: chunkA, Reason: "hit"},
+		ask.Source{ChunkID: chunkB, Reason: "hit"},
+	))
 	if _, err := db.Exec(`DELETE FROM chunks WHERE id = ?`, chunkB); err != nil {
 		t.Fatalf("delete chunk: %v", err)
 	}
-	return msg.ID
+	return m.ID
 }
 
 // seedChunkAt is seedChunk for a second file in the same repo, so a message
@@ -525,25 +542,12 @@ func seedChunk(t *testing.T, db *sql.DB) int64 {
 	return chunkID
 }
 
-func askDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "a.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
-
-// askDeps wires a dev-auth server over a real thread store.
+// askDeps is testDeps with the asker wired in.
 func askDeps(t *testing.T, a Asker) (Deps, *threads.Store) {
 	t.Helper()
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	return Deps{Auth: svc, Ask: a, Threads: threads.NewStore(db)}, threads.NewStore(db)
+	deps, st, _ := testDeps(t)
+	deps.Ask = a
+	return deps, st
 }
 
 func postAsk(t *testing.T, deps Deps, body string) *httptest.ResponseRecorder {
@@ -660,15 +664,7 @@ func TestAsk_aLaterTurnDoesNotSettleATitleStillInFlight(t *testing.T) {
 	// the cut question back in the header the moment a reader answered a card
 	// before the first turn's title had landed.
 	ctx := context.Background()
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	// The dev user is made on the first request; this thread has to exist
-	// before one, so its owner does too.
-	if _, err := svc.UpsertUser(context.Background(), "dev-user", "dev@x.invalid", false); err != nil {
-		t.Fatalf("UpsertUser: %v", err)
-	}
-	st := threads.NewStore(db)
-	deps := Deps{Auth: svc, Ask: &fakeAsker{tokens: []string{"And that is the rest of it."}}, Threads: st}
+	deps, st := askDeps(t, &fakeAsker{tokens: []string{"And that is the rest of it."}})
 	th, err := st.Create(ctx, "dev-user", "How does shipping work, and what happens when it does not?")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -888,12 +884,7 @@ func TestAsk_anotherUsersThreadIsRefused(t *testing.T) {
 	// The thread id comes from the browser. Continuing someone else's
 	// conversation must not be a matter of guessing a number.
 	deps, st := askDeps(t, &fakeAsker{tokens: []string{"x"}})
-	// The other user has to exist: threads reference users, and a thread with
-	// no owner would make this test pass for the wrong reason.
-	if _, err := deps.Auth.UpsertUser(context.Background(), "someone-else", "other@x.invalid", false); err != nil {
-		t.Fatalf("seed other user: %v", err)
-	}
-	other, err := st.Create(context.Background(), "someone-else", "Someone else's question?")
+	other, err := st.Create(context.Background(), otherSubject, "Someone else's question?")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -940,8 +931,7 @@ func TestAsk_anEmptyQuestionIsRejectedBeforeAnythingIsRecorded(t *testing.T) {
 }
 
 func TestAsk_withoutAPipelineAnswers503(t *testing.T) {
-	db := askDB(t)
-	deps := Deps{Auth: auth.NewService(db, "dev", ""), Threads: threads.NewStore(db)}
+	deps, _, _ := testDeps(t)
 
 	rec := postAsk(t, deps, `{"question":"How?"}`)
 
@@ -1214,13 +1204,9 @@ func (c *clarifyFailingThreads) Clarify(context.Context, int64, ask.Clarificatio
 func TestAskWhenClarifyFailsToWriteTheCardIsNeverSent(t *testing.T) {
 	// Given a pipeline that ends by asking, but a store that cannot write
 	// the clarification
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	st := threads.NewStore(db)
-	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &clarifyFailingThreads{Store: st}}
+	deps, st, _ := testDeps(t)
+	deps.Ask = &fakeAsker{}
+	deps.Threads = &clarifyFailingThreads{Store: st}
 	withAskerAsking()(deps.Ask.(*fakeAsker))
 
 	// When
@@ -1308,7 +1294,7 @@ func TestResume_linkChoiceFailureDoesNotLeaveTheCardAnswerable(t *testing.T) {
 	if c, _ := st.Clarification(context.Background(), testSubject, msgID); c == nil || !c.Answered {
 		t.Fatalf("card = %+v, want it closed by the answer", c)
 	}
-	if code := doStatus(t, srv, "/api/ask", req); code != http.StatusConflict {
+	if code := doStatus(t, srv, req); code != http.StatusConflict {
 		t.Errorf("third choice status = %d, want 409 — the card is answered", code)
 	}
 }
@@ -1328,13 +1314,9 @@ func TestAsk_anOrdinaryTurnFinishesWithNoCardLink(t *testing.T) {
 
 func TestAskWhenTheAnswerCannotBeWrittenTheTurnIsRecordedAsFailed(t *testing.T) {
 	// Given a pipeline that answers, and a store that cannot write the answer
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	if _, err := svc.UpsertUser(context.Background(), testSubject, "dev@example.invalid", true); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	st := threads.NewStore(db)
-	deps := Deps{Auth: svc, Ask: &fakeAsker{}, Threads: &finishFailingThreads{Store: st}}
+	deps, st, _ := testDeps(t)
+	deps.Ask = &fakeAsker{}
+	deps.Threads = &finishFailingThreads{Store: st}
 
 	// When
 	rec := postAsk(t, deps, `{"question":"how is sign-in done?"}`)
@@ -1372,7 +1354,7 @@ func TestAsk_aResumeNamingAnotherThreadIsRefused(t *testing.T) {
 		t.Fatalf("create thread: %v", err)
 	}
 
-	code := doStatus(t, srv, "/api/ask", fmt.Sprintf(
+	code := doStatus(t, srv, fmt.Sprintf(
 		`{"thread_id":%q,"question":"how is sign-in done?","clarification_message_id":%d,"choice":1}`, other.PublicID, msgID))
 
 	if code != http.StatusForbidden {
@@ -1516,7 +1498,7 @@ func TestAChainedResumeFollowsWhatTheFirstCardFollowed(t *testing.T) {
 func TestChoosingARepositorySearchesItAgainRatherThanReplayingHits(t *testing.T) {
 	var asker *fakeAsker
 	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
-	msgID, _ := seedRepoClarification(t, store)
+	msgID := seedRepoClarification(t, store)
 
 	body := doSSE(t, srv, "/api/ask",
 		fmt.Sprintf(`{"question":"how are token costs calculated in $?","clarification_message_id":%d,"choice":1}`, msgID))
@@ -1550,7 +1532,7 @@ func TestChoosingARepositorySearchesItAgainRatherThanReplayingHits(t *testing.T)
 func TestChoosingAllRepositoriesAnswersAcrossTheCorpusAndRecordsThat(t *testing.T) {
 	var asker *fakeAsker
 	srv, store := newTestServerWithStore(t, withAskerResuming(), func(f *fakeAsker) { asker = f })
-	msgID, _ := seedRepoClarification(t, store)
+	msgID := seedRepoClarification(t, store)
 
 	doSSE(t, srv, "/api/ask",
 		fmt.Sprintf(`{"question":"how are token costs calculated in $?","clarification_message_id":%d,"choice":2}`, msgID))
@@ -1611,7 +1593,7 @@ func TestAClarificationIsAnsweredOnceAndASecondChoiceIsRefused(t *testing.T) {
 	}
 
 	// When the same card is answered again, with the other candidate
-	code := doStatus(t, srv, "/api/ask",
+	code := doStatus(t, srv,
 		fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":0}`, msgID))
 
 	// Then
@@ -1639,7 +1621,7 @@ func TestAClarificationBeingAnsweredRefusesASecondChoice(t *testing.T) {
 	var second int
 	asker.during = func(context.Context) {
 		asker.during = nil
-		second = doStatus(t, srv, "/api/ask",
+		second = doStatus(t, srv,
 			fmt.Sprintf(`{"question":"how is sign-in done?","clarification_message_id":%d,"choice":0}`, msgID))
 	}
 
@@ -1689,7 +1671,7 @@ func TestAResumeThatFailedLeavesTheCardOpenForARetry(t *testing.T) {
 	if clar.Answered {
 		t.Fatal("a failed resume must leave the card open")
 	}
-	code := doStatus(t, srv, "/api/ask",
+	code := doStatus(t, srv,
 		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":1}`, msgID))
 	if code == http.StatusConflict {
 		t.Error("the retry after a failed resume was refused as already answered")
@@ -1700,7 +1682,7 @@ func TestChoiceOutOfRangeIsRefusedNotGuessed(t *testing.T) {
 	srv, store := newTestServerWithStore(t, withAskerResuming())
 	msgID, _ := seedClarification(t, store)
 
-	code := doStatus(t, srv, "/api/ask",
+	code := doStatus(t, srv,
 		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":7}`, msgID))
 	if code != http.StatusBadRequest {
 		t.Errorf("status %d, want 400 — answering from a candidate nobody offered is worse than refusing", code)
@@ -1713,7 +1695,7 @@ func TestAClarificationOfSomeoneElsesThreadIsRefused(t *testing.T) {
 	srv, store := newTestServerWithStore(t, withAskerResuming())
 	msgID, _ := seedClarificationOwnedBy(t, store, "someone-else")
 
-	code := doStatus(t, srv, "/api/ask",
+	code := doStatus(t, srv,
 		fmt.Sprintf(`{"question":"frage","clarification_message_id":%d,"choice":0}`, msgID))
 	if code != http.StatusForbidden {
 		t.Errorf("status %d, want 403", code)
@@ -1782,7 +1764,10 @@ func TestReexplainAddsANewTurnAndLeavesThePreviousAnswerUntouched(t *testing.T) 
 
 func TestReexplainSaysSoWhenTheBasisIsGone(t *testing.T) {
 	srv, store := newTestServerWithStore(t, withAskerReexplaining())
-	msgID := seedAnsweredMessageWithoutSources(t, store)
+	// A finished turn that never had its sources saved — standing in for a
+	// chunk a re-index later removed.
+	_, m := answerTurn(t, store, testSubject, "frage", "antwort")
+	msgID := m.ID
 
 	body := doSSE(t, srv, fmt.Sprintf("/api/messages/%d/reexplain", msgID), `{"audience":"dev"}`)
 	if !strings.Contains(body, "event: error") {
@@ -1837,7 +1822,7 @@ func TestReexplainAFailedTurnIsRecordedAsFailedNotFinished(t *testing.T) {
 // seedTooBroad seeds a turn that ended by asking for a narrower question:
 // five repositories, no written titles, and no "all repositories" entry —
 // answering across all of them is the thing this panel exists to refuse.
-func seedTooBroad(t *testing.T, store *threads.Store) (msgID, clarID int64) {
+func seedTooBroad(t *testing.T, store *threads.Store) (msgID int64) {
 	t.Helper()
 	ctx := context.Background()
 	th, err := store.Create(ctx, testSubject, "how is retry done?")
@@ -1848,7 +1833,7 @@ func seedTooBroad(t *testing.T, store *threads.Store) (msgID, clarID int64) {
 	if err != nil {
 		t.Fatalf("add question: %v", err)
 	}
-	clarID, err = store.Clarify(ctx, msg.ID, ask.Clarification{
+	if _, err := store.Clarify(ctx, msg.ID, ask.Clarification{
 		TooBroad:      true,
 		Understanding: ask.Understanding{CodeTerms: []string{"retry"}},
 		Candidates: []ask.Candidate{
@@ -1858,11 +1843,10 @@ func seedTooBroad(t *testing.T, store *threads.Store) (msgID, clarID int64) {
 			{Repo: "gateway", Branch: "main"},
 			{Repo: "ingest", Branch: "main"},
 		},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("clarify: %v", err)
 	}
-	return msg.ID, clarID
+	return msg.ID
 }
 
 func TestAsk_theTooBroadPanelSaysSoOnTheWire(t *testing.T) {
@@ -1935,7 +1919,7 @@ func TestAsk_narrowingToTwoProjectsSharingALibrarySearchesItOnce(t *testing.T) {
 func TestAsk_theTooBroadPanelResumesAcrossEveryRepositoryPicked(t *testing.T) {
 	srv, st := newTestServerWithStore(t, withAskerResuming())
 	asker := srv.deps.Ask.(*fakeAsker)
-	msgID, _ := seedTooBroad(t, st)
+	msgID := seedTooBroad(t, st)
 
 	body := doSSE(t, srv, "/api/ask",
 		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,"repos":["peeq","ledger"]}`, msgID))
@@ -1970,7 +1954,7 @@ func TestAsk_aNarrowingIsRefusedBeyondWhatWasOffered(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, st := newTestServerWithStore(t, withAskerResuming())
 			asker := srv.deps.Ask.(*fakeAsker)
-			msgID, _ := seedTooBroad(t, st)
+			msgID := seedTooBroad(t, st)
 
 			req := fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d,%s}`, msgID, tc.body)
 
@@ -1983,7 +1967,7 @@ func TestAsk_aNarrowingIsRefusedBeyondWhatWasOffered(t *testing.T) {
 				}
 				return
 			}
-			if code := doStatus(t, srv, "/api/ask", req); code != http.StatusBadRequest {
+			if code := doStatus(t, srv, req); code != http.StatusBadRequest {
 				t.Errorf("status = %d, want 400", code)
 			}
 			if asker.resumedRepoCall {
@@ -2000,9 +1984,9 @@ func TestAsk_theTooBroadPanelIsNotResumableAsACard(t *testing.T) {
 	// choice they never made.
 	srv, st := newTestServerWithStore(t, withAskerResuming())
 	asker := srv.deps.Ask.(*fakeAsker)
-	msgID, _ := seedTooBroad(t, st)
+	msgID := seedTooBroad(t, st)
 
-	code := doStatus(t, srv, "/api/ask",
+	code := doStatus(t, srv,
 		fmt.Sprintf(`{"question":"how is retry done?","audience":"ba","clarification_message_id":%d}`, msgID))
 
 	if code != http.StatusBadRequest {

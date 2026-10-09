@@ -3,6 +3,8 @@ package retrieve
 import (
 	"context"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestSearch_aQuestionThatNamesARepositorySearchesIt is the defect the card
@@ -12,7 +14,7 @@ import (
 // guess and nothing else; now the question's own words are read too.
 func TestSearch_aQuestionThatNamesARepositorySearchesIt(t *testing.T) {
 	// Given: two repositories that both answer the question's words.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "rongo", "master")
 	addRepo(t, db, "loom", "master")
 	addChunk(t, db, "rongo", "a.go", "A", "sender dispatch", nearVec)
@@ -42,7 +44,7 @@ func TestSearch_aQuestionThatNamesARepositorySearchesIt(t *testing.T) {
 
 func TestSearch_theQuestionsNamesJoinTheGuessedOnes(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "rongo", "master")
 	addRepo(t, db, "loom", "master")
 	addRepo(t, db, "peeq", "master")
@@ -78,7 +80,7 @@ func TestSearch_theQuestionsNamesJoinTheGuessedOnes(t *testing.T) {
 
 func TestSearch_aRepositoryNameMustBeAWholeWord(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "loom", "master")
 	addRepo(t, db, "rongo", "master")
 	addChunk(t, db, "loom", "b.go", "B", "sender dispatch", nearVec)
@@ -109,7 +111,7 @@ func TestSearch_aRepositoryNameMustBeAWholeWord(t *testing.T) {
 func TestSearch_aRepositoryNameGluedToAGermanWordIsNotAMention(t *testing.T) {
 	// Given: the questions are German, and a boundary test that counts bytes
 	// reads the leading byte of an umlaut as a word break.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "loom", "master")
 	addRepo(t, db, "rongo", "master")
 	addChunk(t, db, "loom", "b.go", "B", "sender dispatch", nearVec)
@@ -143,7 +145,7 @@ func TestSearch_aRepositoryNameGluedToAGermanWordIsNotAMention(t *testing.T) {
 // asked to narrow.
 func TestSearch_anOrdinaryWordIsNotAMention(t *testing.T) {
 	// Given: a repository actually called "search".
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "search", "master")
 	addRepo(t, db, "loom", "master")
 	addChunk(t, db, "search", "a.go", "A", "sender dispatch", nearVec)

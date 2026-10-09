@@ -3,24 +3,16 @@ package stages
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/trick77/rongo/internal/repos"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func stagesDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, 4)
 	for _, r := range []struct {
 		name    string
 		enabled int

@@ -12,28 +12,17 @@ import (
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/threads"
 )
 
 // threadActions wires a dev-auth server over a real thread store and hands
 // back both, so a test can act through HTTP and read the record directly.
-// Both readers are seeded: a thread references its owner, and Create fails
-// against a subject with no user row.
 func threadActions(t *testing.T) (*Server, *threads.Store) {
 	t.Helper()
-	db := askDB(t)
-	svc := auth.NewService(db, "dev", "")
-	for _, subject := range []string{testSubject, otherSubject} {
-		if _, err := svc.UpsertUser(context.Background(), subject, subject+"@example.invalid", true); err != nil {
-			t.Fatalf("seed user %q: %v", subject, err)
-		}
-	}
-	st := threads.NewStore(db)
-	return NewServer(Deps{Auth: svc, Threads: st}), st
+	deps, st, _ := testDeps(t)
+	return NewServer(deps), st
 }
-
-// otherSubject is anyone who is not the reader making the request.
-const otherSubject = "someone-else"
 
 // act sends one thread action, on the shared `do` from auth_handlers_test.go.
 func act(srv *Server, method, path, body string) *httptest.ResponseRecorder {
@@ -209,7 +198,7 @@ func TestRenameThread_anotherReadersThreadIsNotFound(t *testing.T) {
 }
 
 func TestThreadActions_withoutAStoreAnswer503(t *testing.T) {
-	db := askDB(t)
+	db := storetest.Open(t, 4)
 	srv := NewServer(Deps{Auth: auth.NewService(db, "dev", "")})
 
 	for _, c := range []struct{ method, path, body string }{

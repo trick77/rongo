@@ -92,16 +92,8 @@ func TestExpandFlowQuestions(t *testing.T) {
 
 func loadFlowExpansions(t *testing.T) map[string]expansion {
 	t.Helper()
-	body, err := os.ReadFile(flowExpansionsFile())
-	if err != nil {
-		t.Skipf("no %s yet; run TestExpandFlowQuestions first", flowExpansionsFile())
-	}
-	var list []expansion
-	if err := json.Unmarshal(body, &list); err != nil {
-		t.Fatalf("parse %s: %v", flowExpansionsFile(), err)
-	}
 	out := map[string]expansion{}
-	for _, e := range list {
+	for _, e := range readExpansionFile(t, flowExpansionsFile(), "TestExpandFlowQuestions") {
 		out[e.Question] = e
 	}
 	return out

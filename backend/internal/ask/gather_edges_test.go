@@ -687,9 +687,8 @@ func TestPipeline_configDoesNotCrossToConfigOnAnUnrelatedQuestion(t *testing.T) 
 		t.Fatalf("projects.Load: %v", err)
 	}
 	namesNothing := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
-	p := NewPipeline(twoStepUpstream(t, namesNothing, "So [1]."),
-		&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, namesNothing, "So [1].")),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 
 	answer, _, err := p.Run(context.Background(), "How is the pet count sent to the ledger?",
 		AudienceDev, LanguageEN, Thread{}, Events{})
@@ -717,9 +716,8 @@ func TestPipeline_theUnderstandingsWordsReachTheCrossing(t *testing.T) {
 	}
 	reply := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
 	reply = strings.Replace(reply, `"AirPlay"`, `"consoleEnabled"`, 1)
-	p := NewPipeline(twoStepUpstream(t, reply, "So [1]."),
-		&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, reply, "So [1].")),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 
 	answer, _, err := p.Run(context.Background(), "Ist die Konsole in Produktion aktiviert?",
 		AudienceDev, LanguageEN, Thread{}, Events{})

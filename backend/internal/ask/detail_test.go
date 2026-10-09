@@ -29,8 +29,8 @@ func TestPipeline_reportsWhatEachStepFound(t *testing.T) {
 		t.Fatalf("projects.Load: %v", err)
 	}
 	c := twoStepUpstream(t, appleTVReply, "So [1] and [2].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 	details := map[string]map[string]any{}
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{},
@@ -78,8 +78,8 @@ func TestPipeline_reportsTheGapPassUnderTheGatheringStep(t *testing.T) {
 	// No symbol hop: what reaches price.go can only be the gap pass.
 	g := NewGatherer(db, GatherOptions{MaxHops: 0, TokenBudget: 5000}).
 		WithGapPass(gapLLM(t, missing(name("unitPrice", "symbol")), nil))
-	p := NewPipeline(twoStepUpstream(t, appleTVReply, "So [1] and [2]."),
-		&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}, g, &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, appleTVReply, "So [1] and [2].")),
+		withGatherer(g), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	details := map[string]map[string]any{}
 
 	if _, _, err := p.Run(context.Background(), "How is the total computed?", AudienceBA, LanguageEN, Thread{},
@@ -110,9 +110,8 @@ func TestPipeline_reportsTheGapPassUnderTheGatheringStep(t *testing.T) {
 func TestPipeline_saysNothingAboutAGapPassThatIsOff(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "cart.go", 0, 1, 10, "total", "func total() {}")
-	p := NewPipeline(twoStepUpstream(t, appleTVReply, "So [1]."),
-		&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, appleTVReply, "So [1].")),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	details := map[string]map[string]any{}
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{},

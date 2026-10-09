@@ -51,7 +51,7 @@ func TestAComparisonKeepsItsHitsWhenOnlyTheCallerGaveUp(t *testing.T) {
 		cancel:     cancel,
 	}
 	c := twoStepUpstream(t, threeReposReply, "x")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	// When
 	got, err := p.searchScoped(ctx, "q", "", []string{"q"}, "", []string{"peeq", "rongo"}, nil, false)
@@ -69,7 +69,7 @@ func TestAComparisonStopsItsOtherSearchesWhenOneFails(t *testing.T) {
 	boom := errors.New("embedding endpoint down")
 	search := &oneSideFails{fakeSearch: &fakeSearch{indexed: []string{"peeq", "rongo", "go-sqlite3"}}, failing: "go-sqlite3", err: boom}
 	c := twoStepUpstream(t, threeReposReply, "x")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	// When
 	_, err := p.searchScoped(context.Background(), "q", "", []string{"q"}, "", []string{"peeq", "rongo", "go-sqlite3"}, nil, false)

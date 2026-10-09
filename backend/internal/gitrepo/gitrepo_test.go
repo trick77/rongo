@@ -9,45 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
-
-// gitRun runs git in dir with a deterministic identity, so a developer's own
-// git config cannot change what these tests build.
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
-// fixtureRepo builds a real local repository whose default branch is main. The
-// "remote" is a directory on disk, so no test ever touches the network.
-func fixtureRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	gitRun(t, dir, "init", "-q", "-b", "main")
-	writeAndCommit(t, dir, "a.txt", "first\n", "first")
-	return dir
-}
-
-func writeAndCommit(t *testing.T, dir, name, body, msg string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitRun(t, dir, "add", name)
-	gitRun(t, dir, "commit", "-qm", msg)
-}
 
 func newClient(t *testing.T) *Client {
 	t.Helper()
@@ -60,7 +26,7 @@ func newClient(t *testing.T) *Client {
 
 func TestDefaultBranch_resolvesFromRemoteNotAssumed(t *testing.T) {
 	// Given: a remote whose default branch is main, not master.
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Enabled: true}
 
@@ -78,7 +44,7 @@ func TestDefaultBranch_resolvesFromRemoteNotAssumed(t *testing.T) {
 
 func TestChangedPaths_reportsOnlyTheDiff(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -91,7 +57,7 @@ func TestChangedPaths_reportsOnlyTheDiff(t *testing.T) {
 	}
 
 	// When: exactly one new file upstream.
-	writeAndCommit(t, src, "b.txt", "second\n", "second")
+	gittest.Commit(t, src, "b.txt", []byte("second\n"), "second")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}
@@ -115,8 +81,8 @@ func TestChangedPaths_reportsOnlyTheDiff(t *testing.T) {
 
 func TestChangedEntries_separatesDeletionsFromModifications(t *testing.T) {
 	// Given: a repository with two files.
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "gone.txt", "doomed\n", "add gone")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "gone.txt", []byte("doomed\n"), "add gone")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -129,9 +95,9 @@ func TestChangedEntries_separatesDeletionsFromModifications(t *testing.T) {
 	}
 
 	// When: one file is modified and the other deleted in the same push.
-	writeAndCommit(t, src, "a.txt", "changed\n", "modify a")
-	gitRun(t, src, "rm", "-q", "gone.txt")
-	gitRun(t, src, "commit", "-qm", "delete gone")
+	gittest.Commit(t, src, "a.txt", []byte("changed\n"), "modify a")
+	gittest.Run(t, src, "rm", "-q", "gone.txt")
+	gittest.Run(t, src, "commit", "-qm", "delete gone")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}
@@ -165,7 +131,7 @@ func TestHeadSHA_reportsErrBranchGone(t *testing.T) {
 	// Given: a configured branch that does not exist upstream. This must be an
 	// identifiable error — a silent stop freezes the index while every status
 	// looks healthy, and answers then come from months-old code.
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "release-2024.3", Enabled: true}
 	ctx := context.Background()
@@ -184,7 +150,7 @@ func TestHeadSHA_reportsErrBranchGone(t *testing.T) {
 
 func TestReadFile_readsFromTheIndexedCommit(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -210,8 +176,8 @@ func TestReadFile_readsFromTheIndexedCommit(t *testing.T) {
 
 func TestListPaths_listsTrackedFilesAtCommit(t *testing.T) {
 	// Given: two files at HEAD.
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "b.txt", "second\n", "second")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "b.txt", []byte("second\n"), "second")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -272,8 +238,8 @@ func dumbHTTPRemote(t *testing.T, src string) string {
 	t.Helper()
 	root := t.TempDir()
 	bare := filepath.Join(root, "repo.git")
-	gitRun(t, root, "clone", "--quiet", "--bare", src, bare)
-	gitRun(t, bare, "update-server-info")
+	gittest.Run(t, root, "clone", "--quiet", "--bare", src, bare)
+	gittest.Run(t, bare, "update-server-info")
 	srv := httptest.NewServer(http.FileServer(http.Dir(root)))
 	t.Cleanup(srv.Close)
 	return srv.URL + "/repo.git"
@@ -284,7 +250,7 @@ func TestEnsureCloned_leavesNoCredentialInGitConfig(t *testing.T) {
 	// clone URL as remote.origin.url, so without a fix-up the token sits in
 	// .git/config on disk from then on — the one place the invariant says it
 	// must never be, and every later command passes its own URL anyway.
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: dumbHTTPRemote(t, src), Branch: "main", Enabled: true}
 
@@ -311,8 +277,8 @@ func TestListPaths_handlesNonAsciiFilenames(t *testing.T) {
 	// ("f\303\244hig.go"), and the quoted form is NOT a path — git show then
 	// fails on it, so the file drops out of the index while merely looking
 	// unreadable. A German corpus is full of these.
-	src := fixtureRepo(t)
-	writeAndCommit(t, src, "verfügbarkeit.go", "package a\n", "umlaut")
+	src := gittest.Fixture(t)
+	gittest.Commit(t, src, "verfügbarkeit.go", []byte("package a\n"), "umlaut")
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -352,14 +318,11 @@ func TestListPaths_handlesNonAsciiFilenames(t *testing.T) {
 // failed every indexing run of its repository.
 func TestListings_returnPathsGitQuotesOrPads(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
-	from := strings.TrimSpace(func() string {
-		out, _ := exec.Command("git", "-C", src, "rev-parse", "HEAD").Output()
-		return string(out)
-	}())
+	src := gittest.Fixture(t)
+	from := gittest.Run(t, src, "rev-parse", "HEAD")
 	odd := []string{`say "hi".md`, `back\slash.md`, "trail ", "tab\there.md"}
 	for _, name := range odd {
-		writeAndCommit(t, src, name, "x\n", "odd")
+		gittest.Commit(t, src, name, []byte("x\n"), "odd")
 	}
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
@@ -427,7 +390,7 @@ func TestChangedPaths_emptyDiffIsEmptyNotNil(t *testing.T) {
 	// Given: a new commit that changes no file (an empty commit, an amend, a
 	// revert to the same tree). A nil path list means "index everything" to the
 	// pipeline, so nil here re-reads and re-chunks the entire repository.
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	ctx := context.Background()
@@ -438,7 +401,7 @@ func TestChangedPaths_emptyDiffIsEmptyNotNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HeadSHA() err = %v", err)
 	}
-	gitRun(t, src, "commit", "-q", "--allow-empty", "-m", "empty")
+	gittest.Run(t, src, "commit", "-q", "--allow-empty", "-m", "empty")
 	if err := c.Fetch(ctx, spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}
@@ -488,8 +451,8 @@ func TestOriginURL_reportsTheRemoteTheCheckoutCameFrom(t *testing.T) {
 	// Given: a checkout cloned from one remote, and an entry of the same name
 	// now naming a different one — the shape of a corrected clone_url, and the
 	// shape of a checkout serving one repository under another's name.
-	src := fixtureRepo(t)
-	other := fixtureRepo(t)
+	src := gittest.Fixture(t)
+	other := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
@@ -547,7 +510,7 @@ func TestOriginURL_reportsAnUnreadableCheckoutRatherThanNoRemote(t *testing.T) {
 
 func TestRemoveCheckout_deletesTheDirectory(t *testing.T) {
 	// Given
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
@@ -581,7 +544,7 @@ func TestRemoveCheckout_refusesANameThatWouldLeaveTheRoot(t *testing.T) {
 // pointer from a file BEFORE the read. A deleted entry has no mode to speak
 // of and says so.
 func TestChangedEntries_carriesTheModeOfEachEntry(t *testing.T) {
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}
 	if err := c.EnsureCloned(context.Background(), spec, ""); err != nil {
@@ -600,8 +563,8 @@ func TestChangedEntries_carriesTheModeOfEachEntry(t *testing.T) {
 	if err := os.Remove(filepath.Join(src, "a.txt")); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, src, "add", "-A")
-	gitRun(t, src, "commit", "-qm", "link, script, delete")
+	gittest.Run(t, src, "add", "-A")
+	gittest.Run(t, src, "commit", "-qm", "link, script, delete")
 	if err := c.Fetch(context.Background(), spec, ""); err != nil {
 		t.Fatalf("Fetch() err = %v", err)
 	}

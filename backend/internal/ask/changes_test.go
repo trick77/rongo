@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -31,32 +28,11 @@ func (f *fakeHistory) BySHAs(context.Context, string, []string) ([]history.Commi
 
 var fixedNow = time.Date(2026, 9, 17, 18, 0, 0, 0, time.UTC)
 
+// changesUpstream builds a pipeline over a two-step upstream and a commit lane
+// holding two commits, and hands back the answer call's prompts.
 func changesUpstream(t *testing.T, understanding string, answerTokens ...string) (*fakeHistory, *Pipeline, *[]string) {
 	t.Helper()
-	var prompts []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Stream   bool `json:"stream"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(body, &req)
-		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
-			return
-		}
-		for _, m := range req.Messages {
-			prompts = append(prompts, m.Content)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, answerTokens, "")
-	}))
-	t.Cleanup(srv.Close)
+	c, up := twoStep(t, understanding, answerTokens...)
 	h := &fakeHistory{commits: []history.Commit{
 		{ID: 7, Repo: "rongo", Branch: "master", SHA: "7f2a492abcdef0123456789", CommittedAt: fixedNow.Add(-2 * time.Hour),
 			Subject: "Test sources are labelled", Body: "So the model can tell a fake from the client.", Paths: []string{"backend/internal/ask/answer.go"}},
@@ -64,9 +40,9 @@ func changesUpstream(t *testing.T, understanding string, answerTokens ...string)
 			Subject: "token_auth: bearer for Bitbucket", Paths: []string{"backend/internal/gitrepo/gitrepo.go"}},
 	}}
 	search := &fakeSearch{hits: []retrieve.Hit{{ChunkID: 1, Repo: "rongo", Path: "a.go"}}}
-	p := NewPipeline(fakeLLM(t, srv), search, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{}).
+	p := newTestPipeline(t, withUpstream(c), withSearch(search)).
 		WithHistory(h, func() time.Time { return fixedNow })
-	return h, p, &prompts
+	return h, p, &up.prompts
 }
 
 func TestRun_changesAnswersFromTheCommitLaneNotTheFiles(t *testing.T) {
@@ -178,8 +154,8 @@ func TestRun_withoutTheLaneAChangesQuestionRunsTheOrdinaryPipeline(t *testing.T)
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
 	c := twoStepUpstream(t, `{"intent":"changes","since_days":2,"terms":["x"],"code_terms":[]}`, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	var steps []string
 	if _, _, err := p.Run(context.Background(), "what changed?", AudienceBA, LanguageEN, Thread{},
 		Events{OnStatus: func(s string) { steps = append(steps, s) }}); err != nil {

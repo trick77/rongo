@@ -2,16 +2,14 @@ package eval
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/trick77/rongo/internal/embed"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // fakeEmbedServer answers /embeddings with a vector per input whose every
@@ -53,19 +51,6 @@ func fakeEmbedServer(t *testing.T) (*httptest.Server, func() [][]string) {
 	}
 }
 
-func queryCacheDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "q.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, embed.Dim()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
-}
-
 func fakeClient(t *testing.T, srv *httptest.Server) *embed.Client {
 	t.Helper()
 	c, err := embed.NewClient(embed.Config{BaseURL: srv.URL, APIKey: "invented", HeartbeatInterval: -1}, srv.Client())
@@ -78,7 +63,7 @@ func fakeClient(t *testing.T, srv *httptest.Server) *embed.Client {
 func TestQueryCache_secondCallWithTheSameTextMakesNoRequest(t *testing.T) {
 	// Given
 	srv, seen := fakeEmbedServer(t)
-	testee := newQueryCache(fakeClient(t, srv), queryCacheDB(t))
+	testee := newQueryCache(fakeClient(t, srv), storetest.Open(t, embed.Dim()))
 	ctx := context.Background()
 
 	// When
@@ -103,7 +88,7 @@ func TestQueryCache_secondCallWithTheSameTextMakesNoRequest(t *testing.T) {
 func TestQueryCache_embedsOnlyMissesAndKeepsInputOrder(t *testing.T) {
 	// Given: one text already cached.
 	srv, seen := fakeEmbedServer(t)
-	testee := newQueryCache(fakeClient(t, srv), queryCacheDB(t))
+	testee := newQueryCache(fakeClient(t, srv), storetest.Open(t, embed.Dim()))
 	ctx := context.Background()
 	if _, err := testee.Embed(ctx, []string{"abc"}); err != nil {
 		t.Fatalf("warm: %v", err)
@@ -137,7 +122,7 @@ func TestQueryCache_embedsOnlyMissesAndKeepsInputOrder(t *testing.T) {
 func TestQueryCache_emptyInputMakesNoRequest(t *testing.T) {
 	// Given
 	srv, seen := fakeEmbedServer(t)
-	testee := newQueryCache(fakeClient(t, srv), queryCacheDB(t))
+	testee := newQueryCache(fakeClient(t, srv), storetest.Open(t, embed.Dim()))
 
 	// When
 	got, err := testee.Embed(context.Background(), nil)

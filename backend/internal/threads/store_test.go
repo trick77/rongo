@@ -3,13 +3,12 @@ package threads
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/usage"
 )
 
@@ -77,14 +76,7 @@ func deleteChunk(t *testing.T, db *sql.DB, id int64) {
 
 func threadDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 4); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, 4)
 	for _, s := range []string{"anna", "bruno"} {
 		if _, err := db.Exec(`INSERT INTO users (subject, email, is_admin) VALUES (?, ?, 0)`, s, s+"@x.invalid"); err != nil {
 			t.Fatalf("seed user: %v", err)

@@ -3,6 +3,8 @@ package indexer
 import (
 	"context"
 	"testing"
+
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 )
 
 func TestARenamedFileLeavesTheIndexUnderItsOldPath(t *testing.T) {
@@ -19,8 +21,8 @@ func TestARenamedFileLeavesTheIndexUnderItsOldPath(t *testing.T) {
 	}
 
 	// When a file is renamed and the next poll indexes what the diff names
-	git(t, h.src, "mv", "README.md", "GUIDE.md")
-	git(t, h.src, "commit", "-qm", "rename the readme")
+	gittest.Run(t, h.src, "mv", "README.md", "GUIDE.md")
+	gittest.Run(t, h.src, "commit", "-qm", "rename the readme")
 	next := h.head(t)
 	paths, err := h.gitc.ChangedPaths(ctx, h.spec, first, next)
 	if err != nil {

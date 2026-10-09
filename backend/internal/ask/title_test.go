@@ -74,10 +74,7 @@ func titleLLM(t *testing.T, replies ...titleReply) (*llm.Client, *titleUpstream)
 			w.WriteHeader(reply.status)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": reply.content}}},
-		})
+		writeCompletion(w, reply.content)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), up

@@ -7,14 +7,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
 // dropSource writes a plain directory of files where a snapshot's checkout
 // belongs — an extracted archive, with no .git anywhere in it.
-func dropSource(t *testing.T, c *Client, name string, files map[string]string) repos.Spec {
+func dropSource(t *testing.T, c *Client, files map[string]string) repos.Spec {
 	t.Helper()
-	spec := repos.Spec{Name: name, Snapshot: true, Enabled: true}
+	spec := repos.Spec{Name: "acme-core", Snapshot: true, Enabled: true}
 	dir := c.Dir(spec)
 	for path, body := range files {
 		full := filepath.Join(dir, path)
@@ -34,7 +35,7 @@ func dropSource(t *testing.T, c *Client, name string, files map[string]string) r
 func TestEnsureSnapshot_commitsAPlainDirectory(t *testing.T) {
 	// Given
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{
+	spec := dropSource(t, c, map[string]string{
 		"go.mod":         "module acme\n",
 		"internal/a.go":  "package a\n",
 		"docs/README.md": "# acme\n",
@@ -77,7 +78,7 @@ func TestEnsureSnapshot_commitsAPlainDirectory(t *testing.T) {
 func TestEnsureSnapshot_isIdempotent(t *testing.T) {
 	// Given
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	spec := dropSource(t, c, map[string]string{"a.go": "package a\n"})
 	first, err := c.EnsureSnapshot(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("EnsureSnapshot() err = %v", err)
@@ -101,7 +102,7 @@ func TestEnsureSnapshot_isIdempotent(t *testing.T) {
 func TestEnsureSnapshot_reExtractedDropIsADiff(t *testing.T) {
 	// Given
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{
+	spec := dropSource(t, c, map[string]string{
 		"a.go": "package a\n",
 		"b.go": "package b\n",
 	})
@@ -175,7 +176,7 @@ func TestEnsureSnapshot_missingAndEmptyAreLoud(t *testing.T) {
 func TestEnsureSnapshot_refusesAClone(t *testing.T) {
 	// Given: a genuine clone where the drop should be
 	c := newClient(t)
-	source := fixtureRepo(t)
+	source := gittest.Fixture(t)
 	remote := repos.Spec{Name: "acme-core", CloneURL: source, Enabled: true}
 	if err := c.EnsureCloned(context.Background(), remote, ""); err != nil {
 		t.Fatalf("EnsureCloned() err = %v", err)
@@ -200,7 +201,7 @@ func TestEnsureSnapshot_refusesAClone(t *testing.T) {
 func TestEnsureSnapshot_dropWithGitignoreSkipsWhatItNames(t *testing.T) {
 	// Given
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{
+	spec := dropSource(t, c, map[string]string{
 		".gitignore":  "dist/\n",
 		"a.go":        "package a\n",
 		"dist/out.js": "// built\n",
@@ -229,7 +230,7 @@ func TestEnsureSnapshot_dropWithGitignoreSkipsWhatItNames(t *testing.T) {
 // real error text discarded.
 func TestSnapshotDiffers_aBrokenIndexIsAnErrorNotAChange(t *testing.T) {
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	spec := dropSource(t, c, map[string]string{"a.go": "package a\n"})
 	if _, err := c.EnsureSnapshot(context.Background(), spec); err != nil {
 		t.Fatalf("EnsureSnapshot() err = %v", err)
 	}

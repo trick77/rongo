@@ -4,16 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestParked_namesOnlyTheParkedOnes: a resolver drops a parked repository the
 // same way it drops a purged one, and a thread pinned to either fails — but
 // parked is not gone, and the turn has to say which.
 func TestParked_namesOnlyTheParkedOnes(t *testing.T) {
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, nil)
 
 	got, err := r.Parked(context.Background(), []string{"loom", "peeq", "purged"})
@@ -29,11 +31,11 @@ func TestParked_namesOnlyTheParkedOnes(t *testing.T) {
 	}
 }
 
-// park sets enabled = 0 the way SyncSpecs does for `enabled: false`.
-func park(t *testing.T, db *sql.DB, name string) {
+// park sets peeq's enabled = 0 the way SyncSpecs does for `enabled: false`.
+func park(t *testing.T, db *sql.DB) {
 	t.Helper()
-	if _, err := db.Exec(`UPDATE repo_state SET enabled = 0 WHERE name = ?`, name); err != nil {
-		t.Fatalf("park %s: %v", name, err)
+	if _, err := db.Exec(`UPDATE repo_state SET enabled = 0 WHERE name = 'peeq'`); err != nil {
+		t.Fatalf("park: %v", err)
 	}
 }
 
@@ -45,14 +47,14 @@ func park(t *testing.T, db *sql.DB, name string) {
 // TestSearchVector_repoFilterIsAPreFilter, and the same fix.
 func TestSearchVector_parkedRepoIsPreFiltered(t *testing.T) {
 	// Given: the global top-2 is entirely the parked repository
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "alpha", nearVec)
 	addChunk(t, db, "peeq", "b.go", "B", "bravo", nearVec)
 	addChunk(t, db, "peeq", "c.go", "C", "charlie", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "delta", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 
 	// When: no repository restriction at all
 	hits, err := NewStore(db).SearchVector(context.Background(), queryVec, 2, DefaultMaxDistance, nil)
@@ -71,12 +73,12 @@ func TestSearchVector_parkedRepoIsPreFiltered(t *testing.T) {
 // simply that a parked repository never reaches an answer.
 func TestSearchKeyword_parkedRepoIsNotReturned(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "sender.send()", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "sender.send()", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 
 	// When
 	hits, err := NewStore(db).SearchKeyword(context.Background(), "send", 10, nil)
@@ -96,10 +98,10 @@ func TestSearchKeyword_parkedRepoIsNotReturned(t *testing.T) {
 // cited out of an index the Repos page said was parked.
 func TestSearch_parkedRepoIsInvisibleToTheWholePipeline(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addChunk(t, db, "peeq", "a.go", "A", "sender.send()", nearVec)
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, fixedEmbedder{vec: queryVec})
 
 	// When
@@ -121,12 +123,12 @@ func TestSearch_parkedRepoIsInvisibleToTheWholePipeline(t *testing.T) {
 // found" about a whole corpus.
 func TestKnownRepos_parkedRepoReadsAsUnknown(t *testing.T) {
 	// Given
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addRepo(t, db, "peeq", "master")
 	addRepo(t, db, "loom", "main")
 	addChunk(t, db, "peeq", "a.go", "A", "alpha", nearVec)
 	addChunk(t, db, "loom", "d.go", "D", "delta", midVec)
-	park(t, db, "peeq")
+	park(t, db)
 	r := New(db, fixedEmbedder{vec: queryVec})
 
 	// When

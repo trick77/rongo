@@ -3,11 +3,10 @@ package repodeps
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // testDB opens a fresh migrated database and returns it ready for repo_deps
@@ -15,14 +14,7 @@ import (
 // since repo_deps.repo is a foreign key into repo_state(name).
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "rongo.db"))
-	if err != nil {
-		t.Fatalf("Open() err = %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, 1536); err != nil {
-		t.Fatalf("Migrate() err = %v", err)
-	}
+	db := storetest.Open(t, 1536)
 	// repo_deps.repo is a foreign key into repo_state(name); seed the rows
 	// for every repository name the tests in this file use.
 	for _, repo := range []string{"peeq", "go-sqlite3", "loom"} {

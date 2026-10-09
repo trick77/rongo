@@ -2,14 +2,9 @@ package ask
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/retrieve"
 )
 
@@ -202,37 +197,6 @@ func TestCensus_nothingForNoRepository(t *testing.T) {
 	}
 }
 
-// twoStepUpstreamPrompt is twoStepUpstream with the ANSWER call's prompt
-// captured, for a test that reads what the census put in front of the model.
-func twoStepUpstreamPrompt(t *testing.T, understanding string, answerTokens ...string) (*llm.Client, *string) {
-	t.Helper()
-	var prompt string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Stream   bool `json:"stream"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(body, &req)
-		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
-			return
-		}
-		for _, m := range req.Messages {
-			prompt += m.Content + "\n"
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, answerTokens, "")
-	}))
-	t.Cleanup(srv.Close)
-	return fakeLLM(t, srv), &prompt
-}
-
 // TestRunReadsTheLinkCensusWhenTheQuestionAsksForOne: no search hit names
 // the portal link, the understanding says census, the repository is named,
 // and the answer is written from the census landings with the listing in
@@ -244,9 +208,9 @@ func TestRunReadsTheLinkCensusWhenTheQuestionAsksForOne(t *testing.T) {
 	seedChunkIn(t, db, "claims-ui", "src/nav.html", 0, 1, 20, "", `<a href="https://portal.example.ch">Portal</a>`)
 	seedTokenIn(t, db, "claims-ui", "src/nav.html", "link", "https://portal.example.ch", 7)
 	search := &fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}, indexed: []string{"claims-ui"}}
-	c, prompt := twoStepUpstreamPrompt(t, `{"intent":"where","terms":["links"],"code_terms":["href"],"repos":["claims-ui"],"census":"link"}`,
+	c, up := twoStep(t, `{"intent":"where","terms":["links"],"code_terms":["href"],"repos":["claims-ui"],"census":"link"}`,
 		"It links to the portal [2].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 	var gathering map[string]any
 	ev := Events{OnDetail: func(step string, d map[string]any) {
 		if step == "gathering" {
@@ -262,14 +226,14 @@ func TestRunReadsTheLinkCensusWhenTheQuestionAsksForOne(t *testing.T) {
 	if got.Scope.Census != CensusLink {
 		t.Errorf("scope.Census = %q, want the record to carry it", got.Scope.Census)
 	}
-	if !strings.Contains(*prompt, "https://portal.example.ch  claims-ui/src/nav.html:7") {
-		t.Errorf("the listing never reached the model:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "https://portal.example.ch  claims-ui/src/nav.html:7") {
+		t.Errorf("the listing never reached the model:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "read from the index") {
-		t.Errorf("the block must say what it is:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "read from the index") {
+		t.Errorf("the block must say what it is:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "[link site https://portal.example.ch]") {
-		t.Errorf("the landing must say how it arrived:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "[link site https://portal.example.ch]") {
+		t.Errorf("the landing must say how it arrived:\n%s", up.prompt())
 	}
 	if gathering["link_sites"] != 1 || gathering["links"] != 1 {
 		t.Errorf("the trace does not report the census: %v", gathering)
@@ -285,7 +249,7 @@ func TestReexplainRebuildsTheLinkListing(t *testing.T) {
 	seedChunkIn(t, db, "claims-ui", "src/nav.html", 0, 1, 20, "", `<a href="https://portal.example.ch">Portal</a>`)
 	seedTokenIn(t, db, "claims-ui", "src/nav.html", "link", "https://portal.example.ch", 7)
 	c, prompt, _ := streamUpstream(t, "x")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 
 	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
 		[]Source{{ChunkID: 1, Repo: "claims-ui", Path: "src/nav.html", Text: "<a>", StartLine: 1, EndLine: 1}},
@@ -307,14 +271,14 @@ func TestRunWithoutANamedRepositoryRunsNoCensus(t *testing.T) {
 	seedChunkIn(t, db, "claims-ui", "src/nav.html", 0, 1, 20, "", `<a href="https://portal.example.ch">Portal</a>`)
 	seedTokenIn(t, db, "claims-ui", "src/nav.html", "link", "https://portal.example.ch", 7)
 	search := &fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}}
-	c, prompt := twoStepUpstreamPrompt(t, `{"intent":"where","terms":["links"],"code_terms":["href"],"repos":[],"census":"link"}`, "Nothing [1].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c, up := twoStep(t, `{"intent":"where","terms":["links"],"code_terms":["href"],"repos":[],"census":"link"}`, "Nothing [1].")
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	if _, _, err := p.Run(context.Background(), "what links lead outside?", AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if strings.Contains(*prompt, "portal.example.ch") {
-		t.Errorf("a census ran over the corpus:\n%s", *prompt)
+	if strings.Contains(up.prompt(), "portal.example.ch") {
+		t.Errorf("a census ran over the corpus:\n%s", up.prompt())
 	}
 }
 

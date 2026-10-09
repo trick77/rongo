@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 	"testing"
+
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 func TestResolveReposExpandsAProjectNameToItsMembersAndTheLibraryTheyUse(t *testing.T) {
@@ -11,7 +13,7 @@ func TestResolveReposExpandsAProjectNameToItsMembersAndTheLibraryTheyUse(t *test
 	// library: the product is searched with the code it is built on, so the
 	// library is in the restriction — and later in the pin, where naming it
 	// narrows instead of being reported as outside the thread.
-	db := testDB(t)
+	db := storetest.Open(t, dim)
 	addMember(t, db, "shop-backend", "shop")
 	addMember(t, db, "shop-ui", "shop")
 	addMember(t, db, "billing-api", "billing")

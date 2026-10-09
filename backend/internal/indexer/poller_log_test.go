@@ -11,6 +11,7 @@ import (
 
 	"github.com/trick77/rongo/internal/gitrepo"
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestRun_aShutdownMidCycleIsNotAFailure: a cancelled run is the process
@@ -19,7 +20,7 @@ import (
 func TestRun_aShutdownMidCycleIsNotAFailure(t *testing.T) {
 	// Given a repository whose index run sees the shutdown arrive, and one
 	// after it the cycle never reaches
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	if _, err := s.SyncSpecs(context.Background(), []repos.Spec{
 		snapshotSpec("acme-core"), snapshotSpec("acme-web"),
@@ -45,7 +46,7 @@ func TestRun_aShutdownMidCycleIsNotAFailure(t *testing.T) {
 		FirstDelay: time.Millisecond,
 		Logger:     slog.New(cap),
 	})
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	p.Run(ctx)
@@ -142,14 +143,14 @@ func loggingPoller(t *testing.T, s *StateStore, idx IndexFunc) (*Poller, string,
 // whether a push has landed in the answers yet.
 func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -185,14 +186,14 @@ func TestPollOnce_reportsWhatItIndexed(t *testing.T) {
 // nobody could see. The value has to be rendered before it is logged.
 func TestPollOnce_durationsAreReadable(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -221,7 +222,7 @@ func TestPollOnce_durationsAreReadable(t *testing.T) {
 // beside it or it reads as five thousand files touched when one was.
 func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
@@ -234,7 +235,7 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 		return Counts{Files: 5000, Chunks: 40000}, nil
 	}
 	p, root, cap := loggingPoller(t, s, index)
-	extract(t, root, "acme-core", map[string]string{
+	extract(t, root, map[string]string{
 		"a.go": "package a\n", "b.go": "package b\n", "c.go": "package c\n",
 	})
 	if err := p.PollOnce(ctx); err != nil {
@@ -243,7 +244,7 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 
 	// When: one file of three changes
 	cap.records = nil
-	extract(t, root, "acme-core", map[string]string{"b.go": "package b // v2\n"})
+	extract(t, root, map[string]string{"b.go": "package b // v2\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -266,14 +267,14 @@ func TestPollOnce_incrementalRunSaysHowMuchChanged(t *testing.T) {
 // unhealthy run obvious without reading every repository's own line.
 func TestPollOnce_bracketsTheCycleWithCounts(t *testing.T) {
 	// Given: one repository that indexes, and a second poll where nothing moved
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
@@ -316,7 +317,7 @@ func TestPollOnce_bracketsTheCycleWithCounts(t *testing.T) {
 // reported.
 func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 	// Given: a snapshot whose drop was never extracted, beside a healthy one
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -326,7 +327,7 @@ func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {
@@ -358,21 +359,21 @@ func TestPollOnce_countsAFailureWithoutStoppingTheCycle(t *testing.T) {
 // and reading which happened is the whole reason to log the mode.
 func TestPollOnce_saysWhenAnIndexWasIncremental(t *testing.T) {
 	// Given
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{snapshotSpec("acme-core")}); err != nil {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, root, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a\n"})
+	extract(t, root, map[string]string{"a.go": "package a\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("first PollOnce() err = %v", err)
 	}
 
 	// When: a newer archive lands over the drop
 	cap.records = nil
-	extract(t, root, "acme-core", map[string]string{"a.go": "package a // v2\n"})
+	extract(t, root, map[string]string{"a.go": "package a // v2\n"})
 	if err := p.PollOnce(ctx); err != nil {
 		t.Fatalf("second PollOnce() err = %v", err)
 	}
@@ -391,7 +392,7 @@ func TestPollOnce_saysWhenAnIndexWasIncremental(t *testing.T) {
 // an error verbatim, and both are places a secret has leaked before.
 func TestPollOnce_neverLogsATokenOrACredential(t *testing.T) {
 	// Given: a repository whose remote does not exist, so the failure path runs
-	db := newDB(t)
+	db := storetest.Open(t, 1536)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{

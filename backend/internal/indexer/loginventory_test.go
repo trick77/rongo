@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/trick77/rongo/internal/repos"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // TestLogInventory_announcesEveryRepositoryAndTheTotals: nothing verified that a
 // boot says what it holds, which is the whole point of the lines.
 func TestLogInventory_announcesEveryRepositoryAndTheTotals(t *testing.T) {
 	// Given
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -59,7 +60,7 @@ func TestLogInventory_announcesEveryRepositoryAndTheTotals(t *testing.T) {
 // serving a configuration that exists nowhere.
 func TestLogInventory_namesTheCorpusNobodyConfigured(t *testing.T) {
 	// Given
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	ctx := context.Background()
 	if _, err := s.SyncSpecs(ctx, []repos.Spec{
@@ -94,7 +95,7 @@ func TestLogInventory_namesTheCorpusNobodyConfigured(t *testing.T) {
 // never a reason to fail a boot.
 func TestLogInventory_survivesAnUnreadableDatabase(t *testing.T) {
 	// Given: a database closed out from under it
-	db := purgeDB(t)
+	db := storetest.Open(t, writeDim)
 	s := NewStateStore(db)
 	db.Close()
 	cap := &capture{}

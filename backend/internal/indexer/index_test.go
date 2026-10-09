@@ -13,24 +13,13 @@ import (
 
 	"github.com/trick77/rongo/internal/embed"
 	"github.com/trick77/rongo/internal/gitrepo"
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 	"github.com/trick77/rongo/internal/symbols"
 )
 
 // --- fixture repository -------------------------------------------------
-
-func git(t testing.TB, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
 
 func write(t testing.TB, dir, name, body string) {
 	t.Helper()
@@ -70,13 +59,12 @@ func fixtureCorpus(t testing.TB) string {
 // map and returns its path.
 func fixtureCorpusFiles(t testing.TB, files map[string]string) string {
 	t.Helper()
-	dir := t.TempDir()
-	git(t, dir, "init", "-q", "-b", "main")
+	dir := gittest.Init(t)
 	for path, body := range files {
 		write(t, dir, path, body)
 	}
-	git(t, dir, "add", "-A")
-	git(t, dir, "commit", "-qm", "initial")
+	gittest.Run(t, dir, "add", "-A")
+	gittest.Run(t, dir, "commit", "-qm", "initial")
 	return dir
 }
 
@@ -159,14 +147,7 @@ func newHarnessFiles(t testing.TB, files map[string]string, symbolExtractor func
 	if err != nil {
 		t.Skip("ctags not available")
 	}
-	db, err := store.Open(filepath.Join(t.TempDir(), "idx.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, writeDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, writeDim)
 
 	var src string
 	if files != nil {
@@ -500,9 +481,9 @@ func TestIndexRepo_incrementalTouchesOnlyTheNamedPaths(t *testing.T) {
 
 	// When: one file changes and another is deleted upstream.
 	write(t, h.src, "README.md", "# shop backend\n\nNew text about the cart.\n")
-	git(t, h.src, "rm", "-q", "node_modules/left-pad/index.js")
-	git(t, h.src, "add", "-A")
-	git(t, h.src, "commit", "-qm", "change and delete")
+	gittest.Run(t, h.src, "rm", "-q", "node_modules/left-pad/index.js")
+	gittest.Run(t, h.src, "add", "-A")
+	gittest.Run(t, h.src, "commit", "-qm", "change and delete")
 	st.LastSHA = firstSHA
 	nextSHA := h.head(t)
 	counts, err := h.ix.IndexRepo(context.Background(), st, nextSHA,
@@ -622,8 +603,8 @@ func TestIndexRepo_aRepositoryThatDropsItsManifestsDropsItsDependencies(t *testi
 	if _, err := h.ix.IndexRepo(context.Background(), st, first, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
-	git(t, h.src, "rm", "-q", "go.mod")
-	git(t, h.src, "commit", "-qm", "no module")
+	gittest.Run(t, h.src, "rm", "-q", "go.mod")
+	gittest.Run(t, h.src, "commit", "-qm", "no module")
 	st.LastSHA = first
 
 	if _, err := h.ix.IndexRepo(context.Background(), st, h.head(t), []string{"go.mod"}); err != nil {
@@ -683,8 +664,8 @@ func TestIndexRepo_anUnreadableModifiedFileFailsTheRun(t *testing.T) {
 	}
 	before := countOf(t, h.db, `SELECT COUNT(*) FROM chunks c JOIN files f ON f.id = c.file_id WHERE f.path = 'README.md'`)
 	write(t, h.src, "README.md", "# shop backend\n\nNew text about the cart.\n")
-	git(t, h.src, "add", "-A")
-	git(t, h.src, "commit", "-qm", "change")
+	gittest.Run(t, h.src, "add", "-A")
+	gittest.Run(t, h.src, "commit", "-qm", "change")
 	st.LastSHA = firstSHA
 	nextSHA := h.head(t)
 	h.ix.git = failingRead{GitClient: h.gitc, path: "README.md"}
@@ -710,8 +691,8 @@ func TestIndexRepo_aSymlinkIsNotAFile(t *testing.T) {
 	if err := os.Symlink("README.md", filepath.Join(h.src, "LINK.md")); err != nil {
 		t.Fatal(err)
 	}
-	git(t, h.src, "add", "-A")
-	git(t, h.src, "commit", "-qm", "add a symlink")
+	gittest.Run(t, h.src, "add", "-A")
+	gittest.Run(t, h.src, "commit", "-qm", "add a symlink")
 	sha := h.head(t)
 
 	if _, err := h.ix.IndexRepo(context.Background(), st, sha, nil); err != nil {
@@ -728,8 +709,8 @@ func TestIndexRepo_aSymlinkIsNotAFile(t *testing.T) {
 	if err := os.Symlink("go.mod", filepath.Join(h.src, "LINK.md")); err != nil {
 		t.Fatal(err)
 	}
-	git(t, h.src, "add", "-A")
-	git(t, h.src, "commit", "-qm", "repoint the symlink")
+	gittest.Run(t, h.src, "add", "-A")
+	gittest.Run(t, h.src, "commit", "-qm", "repoint the symlink")
 	st.LastSHA = sha
 	next := h.head(t)
 	if _, err := h.ix.IndexRepo(context.Background(), st, next, []string{"LINK.md"}); err != nil {
@@ -754,8 +735,8 @@ func TestIndexRepo_aFullRunRetiresFilesTheTreeNoLongerHolds(t *testing.T) {
 	if n := countOf(t, h.db, `SELECT COUNT(*) FROM files WHERE path = 'README.md'`); n != 1 {
 		t.Fatalf("README rows = %d before, want 1", n)
 	}
-	git(t, h.src, "rm", "-q", "README.md")
-	git(t, h.src, "commit", "-qm", "drop the readme")
+	gittest.Run(t, h.src, "rm", "-q", "README.md")
+	gittest.Run(t, h.src, "commit", "-qm", "drop the readme")
 	second := h.head(t)
 
 	// A full run at the new commit, as a requested re-index is.

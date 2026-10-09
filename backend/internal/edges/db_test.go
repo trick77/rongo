@@ -2,10 +2,9 @@ package edges
 
 import (
 	"database/sql"
-	"path/filepath"
 	"testing"
 
-	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 const testDim = 4
@@ -16,14 +15,7 @@ const testDim = 4
 // an embedding endpoint to prove something about two SQL queries.
 func edgeDB(t *testing.T, repos ...string) *sql.DB {
 	t.Helper()
-	db, err := store.Open(filepath.Join(t.TempDir(), "e.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := store.Migrate(db, testDim); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := storetest.Open(t, testDim)
 	for _, name := range repos {
 		if _, err := db.Exec(`INSERT INTO repo_state (name, clone_url) VALUES (?, 'file:///x')`, name); err != nil {
 			t.Fatalf("seed repo_state %s: %v", name, err)

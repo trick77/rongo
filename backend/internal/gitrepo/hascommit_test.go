@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/trick77/rongo/internal/gitrepo/gittest"
 	"github.com/trick77/rongo/internal/repos"
 )
 
@@ -12,7 +13,7 @@ import (
 // object" is absence. Anything else read as absence would reset a healthy
 // clone's whole index over one failed process.
 func TestHasCommit_tellsAMissingCommitFromAGitThatFailed(t *testing.T) {
-	src := fixtureRepo(t)
+	src := gittest.Fixture(t)
 	c := newClient(t)
 	ctx := context.Background()
 	spec := repos.Spec{Name: "fixture", CloneURL: src, Branch: "main", Enabled: true}

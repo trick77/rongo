@@ -17,7 +17,7 @@ import (
 func TestReadFile_andObject_reportWhatTheyCouldNotRead(t *testing.T) {
 	// Given: a snapshot with one committed file
 	c := newClient(t)
-	spec := dropSource(t, c, "acme-core", map[string]string{"a.go": "package a\n"})
+	spec := dropSource(t, c, map[string]string{"a.go": "package a\n"})
 	sha, err := c.EnsureSnapshot(context.Background(), spec)
 	if err != nil {
 		t.Fatalf("EnsureSnapshot() err = %v", err)

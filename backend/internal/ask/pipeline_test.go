@@ -2,6 +2,7 @@ package ask
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -206,15 +207,46 @@ func (f *fakeRouter) Stages(_ context.Context) (stages.Set, error) {
 // pipelineFakes is what newTestPipeline wires by default; an option overrides
 // one piece without a test having to restate the rest.
 type pipelineFakes struct {
-	search Searcher
-	router Routes
+	upstream *llm.Client
+	search   Searcher
+	db       *sql.DB
+	gatherer *Gatherer
+	router   Routes
 }
 
 type pipelineOpt func(*pipelineFakes)
 
-// withSearcher overrides the searcher a test pipeline is built with.
+// withUpstream overrides the model client a test pipeline talks to.
+func withUpstream(c *llm.Client) pipelineOpt {
+	return func(f *pipelineFakes) { f.upstream = c }
+}
+
+// withSearch overrides the searcher with a value the test keeps a handle on,
+// typically a *fakeSearch it later reads the recorded query from.
+func withSearch(s Searcher) pipelineOpt {
+	return func(f *pipelineFakes) { f.search = s }
+}
+
+// withSearcher is withSearch for a bare function.
 func withSearcher(fn func(retrieve.Query) ([]retrieve.Hit, error)) pipelineOpt {
-	return func(f *pipelineFakes) { f.search = searchFunc(fn) }
+	return withSearch(searchFunc(fn))
+}
+
+// withDB builds the gatherer over the database the test seeded, so the
+// pipeline reads the chunks the test wrote.
+func withDB(db *sql.DB) pipelineOpt {
+	return func(f *pipelineFakes) { f.db = db }
+}
+
+// withGatherer hands the pipeline a gatherer the test built itself, for a
+// test about the gatherer's own options.
+func withGatherer(g *Gatherer) pipelineOpt {
+	return func(f *pipelineFakes) { f.gatherer = g }
+}
+
+// withRouter overrides the router a test pipeline is built with.
+func withRouter(r Routes) pipelineOpt {
+	return func(f *pipelineFakes) { f.router = r }
 }
 
 // withRouterAsking makes the router end the turn with n named candidates,
@@ -247,33 +279,81 @@ func newTestPipeline(t *testing.T, opts ...pipelineOpt) *Pipeline {
 	for _, o := range opts {
 		o(&f)
 	}
-	db := gatherDB(t)
-	c := twoStepUpstream(t, appleTVReply, "Answer [1].")
-	return NewPipeline(c, f.search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), f.router)
+	// Defaults are built only when the test did not bring its own: a migrated
+	// database and a fake server are not free.
+	if f.upstream == nil {
+		f.upstream = twoStepUpstream(t, appleTVReply, "Answer [1].")
+	}
+	if f.gatherer != nil && f.db != nil {
+		t.Fatal("withDB and withGatherer together: the gatherer already holds a database")
+	}
+	if f.gatherer == nil {
+		if f.db == nil {
+			f.db = gatherDB(t)
+		}
+		f.gatherer = NewGatherer(f.db, GatherOptions{MaxHops: 1, TokenBudget: 5000})
+	}
+	return NewPipeline(f.upstream, f.search, f.gatherer, f.router)
 }
 
-// twoStepUpstream answers the understanding call with JSON and the answer call
-// with a stream, telling them apart by whether streaming was requested.
-func twoStepUpstream(t *testing.T, understanding string, answerTokens ...string) *llm.Client {
+// seen is what a two-step upstream recorded of its ANSWER calls; the
+// understanding call leaves no trace, so a test can say the turn made no
+// answer call by any of these being empty.
+type seen struct {
+	streams int      // answer calls streamed
+	prompts []string // every message of every answer call, in order
+	system  string   // the system message of the last answer call
+}
+
+// prompt is every recorded message joined, one per line, the shape a test
+// greps with strings.Contains.
+func (s *seen) prompt() string {
+	var p string
+	for _, m := range s.prompts {
+		p += m + "\n"
+	}
+	return p
+}
+
+// twoStep answers the understanding call with the JSON and the answer call
+// with a stream of the tokens, telling them apart by whether streaming was
+// requested, and records what the answer call was handed.
+func twoStep(t *testing.T, understanding string, tokens ...string) (*llm.Client, *seen) {
 	t.Helper()
+	s := &seen{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req struct {
-			Stream bool `json:"stream"`
+			Stream   bool `json:"stream"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
 		}
 		_ = json.Unmarshal(body, &req)
 		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
+			writeCompletion(w, understanding)
 			return
 		}
+		s.streams++
+		for _, m := range req.Messages {
+			s.prompts = append(s.prompts, m.Content)
+			if m.Role == "system" {
+				s.system = m.Content
+			}
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, answerTokens, "")
+		writeSSE(w, tokens, "")
 	}))
 	t.Cleanup(srv.Close)
-	return fakeLLM(t, srv)
+	return fakeLLM(t, srv), s
+}
+
+// twoStepUpstream is twoStep for a test that reads nothing back from it.
+func twoStepUpstream(t *testing.T, understanding string, answerTokens ...string) *llm.Client {
+	t.Helper()
+	c, _ := twoStep(t, understanding, answerTokens...)
+	return c
 }
 
 func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
@@ -283,7 +363,7 @@ func TestPipeline_searchesWithTheExpansionNotJustTheQuestion(t *testing.T) {
 	hitID := seedChunk(t, db, "backend/internal/playbackgrant/store.go", 0, 1, 20, "NewGrant", "func NewGrant() {}")
 	search := &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}
 	c := twoStepUpstream(t, appleTVReply, "Access runs through a grant [1].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 	q := "How does an Apple TV get at the media file without signing in?"
 
 	got, _, err := p.Run(context.Background(), q, AudienceBA, LanguageEN, Thread{}, Events{})
@@ -311,7 +391,7 @@ func TestPipeline_nothingFoundNamesTheTermsItTried(t *testing.T) {
 	// whatever happened to be in context.
 	db := gatherDB(t)
 	c := twoStepUpstream(t, appleTVReply, "I suspect ...")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 
 	got, _, err := p.Run(context.Background(), "How does shipping work?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
@@ -333,8 +413,8 @@ func TestPipeline_reportsEveryStepInOrder(t *testing.T) {
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
 	c := twoStepUpstream(t, appleTVReply, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	var steps []string
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{},
@@ -415,7 +495,7 @@ func TestRunCarriesTheIntentIntoTheScopeTheAnswererSees(t *testing.T) {
 	search := &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}
 	c := twoStepUpstream(t, `{"intent":"where","terms":["grant"],"code_terms":["NewGrant"]}`,
 		"It lives in the grant store [1].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	got, _, err := p.Run(context.Background(), "Where is the grant issued?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
@@ -438,10 +518,10 @@ func TestResumeCarriesTheFollowUpRule(t *testing.T) {
 	// A resumed turn runs no understanding step, so the answer call is the
 	// only one the upstream sees and streamUpstream records it.
 	c, prompt, _ := streamUpstream(t, "Answer [1].")
-	p := NewPipeline(c, indexedSearch{searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
+	p := newTestPipeline(t, withUpstream(c), withIndexedSearcher([]string{"peeq"}, func(retrieve.Query) ([]retrieve.Hit, error) {
 		t.Fatal("a resumed turn must not search again")
 		return nil, nil
-	}, indexed: []string{"peeq"}}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	}))
 
 	if _, err := p.Resume(context.Background(), "und wo wird das entschieden?", AudienceBA, LanguageEN,
 		[]retrieve.Hit{{ChunkID: 1, Repo: "peeq", Path: "a.go"}}, Scope{},
@@ -464,7 +544,7 @@ func TestResumeRepoCarriesTheFollowUpRule(t *testing.T) {
 	search := indexedSearch{indexed: []string{"loom"}, searchFunc: func(retrieve.Query) ([]retrieve.Hit, error) {
 		return []retrieve.Hit{{ChunkID: 1, Repo: "loom", Path: "a.go"}}, nil
 	}}
-	p := NewPipeline(c, search, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withSearch(search))
 
 	if _, err := p.ResumeRepo(context.Background(), "und wo wird das entschieden?", Understanding{}, []string{"loom"},
 		AudienceBA, LanguageEN, Scope{Known: []string{"loom"}},
@@ -628,7 +708,7 @@ func TestRunCarriesTheAllReposSignalToTheRouterAndTheRecord(t *testing.T) {
 	fr := &fakeRouter{}
 	db := gatherDB(t)
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withRouter(fr))
 
 	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
@@ -653,7 +733,7 @@ func TestRunAnswersAFollowUpOutOfTheThreadsOwnRepository(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search), withRouter(fr))
 
 	// When the turn runs with the thread's pin.
 	got, clar, err := p.Run(context.Background(), "Kannst du das in einem Diagramm aufzeigen?",
@@ -685,7 +765,7 @@ func TestRunNeverWidensAPinnedThread(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search), withRouter(fr))
 
 	got, _, err := p.Run(context.Background(), "in all repos, how are token costs calculated?",
 		AudienceBA, LanguageEN, Thread{Pin: []string{"rongo"}}, Events{})
@@ -707,7 +787,7 @@ func TestRunSaysWhichNamedRepositoryTheThreadLeftOut(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["loom"]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	var notices []string
 	got, _, err := p.Run(context.Background(), "und wie macht das loom?", AudienceBA, LanguageEN,
@@ -748,7 +828,7 @@ func TestRunFailsWhenTheThreadsRepositoryLeftTheIndex(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"peeq"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	_, _, err := p.Run(context.Background(), "und wie schnell ist das?", AudienceBA, LanguageEN,
 		Thread{Pin: []string{"rongo"}}, Events{})
@@ -772,7 +852,7 @@ func TestRunSaysSoWhenAPinnedThreadCannotAnswerAcrossTheCorpus(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"all_repos":true}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	var notices []string
 	got, _, err := p.Run(context.Background(), "vergleiche das mit allen anderen Repositories", AudienceBA, LanguageEN,
@@ -929,7 +1009,7 @@ func TestRun_aPinMissingOneRepositoryFailsTheTurn(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	_, _, err := p.Run(context.Background(), "und das?", AudienceBA, LanguageEN,
 		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
@@ -953,7 +1033,7 @@ func TestRun_aPinWithAParkedMemberSaysItIsParked(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"rongo"}, parked: []string{"peeq"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	_, _, err := p.Run(context.Background(), "und das?", AudienceBA, LanguageEN,
 		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
@@ -1016,7 +1096,7 @@ func TestRun_aThreadCarryingAllAnswersAcrossTheCorpus(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"loom", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), fr)
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search), withRouter(fr))
 
 	got, _, err := p.Run(context.Background(), "how are token costs calculated?", AudienceBA, LanguageEN,
 		Thread{All: true}, Events{})
@@ -1035,7 +1115,7 @@ func TestRunNarrowsFurtherInsideThePin(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"peeq", "rongo"}}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["rongo"]}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	got, _, err := p.Run(context.Background(), "and in rongo?", AudienceBA, LanguageEN,
 		Thread{Pin: []string{"peeq", "rongo"}}, Events{})
@@ -1097,9 +1177,7 @@ func TestReexplainSaysWhichCommitItsBasisWasReadAt(t *testing.T) {
 // audience.
 func TestReexplainRebuildsTheProjectStructure(t *testing.T) {
 	c, prompt, _ := streamUpstream(t, "x")
-	p := NewPipeline(c, &fakeSearch{},
-		NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}),
-		&fakeRouter{projects: shopMap(t)})
+	p := newTestPipeline(t, withUpstream(c), withRouter(&fakeRouter{projects: shopMap(t)}))
 
 	_, err := p.Reexplain(context.Background(), "frage", AudienceDev, LanguageEN,
 		[]Source{{ChunkID: 1, Repo: "shop-ui", Path: "a.ts", Text: "export {}", StartLine: 1, EndLine: 1}},
@@ -1215,8 +1293,8 @@ func TestResumeRepoRunsTheGapPassToo(t *testing.T) {
 	// No symbol hop: what reaches price.go can only be the gap pass.
 	g := NewGatherer(db, GatherOptions{MaxHops: 0, TokenBudget: 5000}).
 		WithGapPass(gapLLM(t, missing(name("unitPrice", "symbol")), nil))
-	p := NewPipeline(twoStepUpstream(t, appleTVReply, "So [1] and [2]."),
-		&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}, g, &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, appleTVReply, "So [1] and [2].")),
+		withGatherer(g), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	details := map[string]map[string]any{}
 
 	answer, err := p.ResumeRepo(context.Background(), "How is the total computed?", Understanding{}, []string{"peeq"},

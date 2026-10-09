@@ -14,6 +14,7 @@ import (
 	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/llm/llmtest"
 	"github.com/trick77/rongo/internal/store"
+	"github.com/trick77/rongo/internal/store/storetest"
 )
 
 // The hosts are llmwire's profiles' and the keys are llmwire's to read from
@@ -99,14 +100,7 @@ func TestMigrateForModel_refusesAFileBuiltForAnotherWidth(t *testing.T) {
 		t.Fatalf("built %d, want %d", built, embed.Dim())
 	}
 
-	other, err := store.Open(filepath.Join(t.TempDir(), "other.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer other.Close()
-	if err := store.Migrate(other, embed.Dim()+1); err != nil {
-		t.Fatal(err)
-	}
+	other := storetest.Open(t, embed.Dim()+1)
 	err = migrateForModel(other)
 	if err == nil || !strings.Contains(err.Error(), embed.Model) {
 		t.Fatalf("got %v, want a refusal naming the model", err)

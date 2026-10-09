@@ -16,18 +16,8 @@ import (
 // answeredThread is a thread of owner's with one finished answer.
 func answeredThread(t *testing.T, st *threads.Store, owner string) threads.Thread {
 	t.Helper()
-	ctx := context.Background()
-	th, err := st.Create(ctx, owner, "How?")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	m, err := st.AddQuestion(ctx, th.ID, "ba", "en", "How?", 0)
-	if err != nil {
-		t.Fatalf("AddQuestion: %v", err)
-	}
-	if err := st.Finish(ctx, m.ID, "Like so [1].", []ask.Citation{{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2}}); err != nil {
-		t.Fatalf("Finish: %v", err)
-	}
+	th, _ := answerTurn(t, st, owner, "How?", "Like so [1].",
+		citing(ask.Citation{Marker: 1, Repo: "r", Path: "a.go", StartLine: 1, EndLine: 2}))
 	return th
 }
 
