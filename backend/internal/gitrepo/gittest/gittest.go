@@ -18,7 +18,7 @@ import (
 // once on CI as "directory not empty".
 func Run(tb testing.TB, dir string, args ...string) string {
 	tb.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // the arguments are the test's own fixture commands, not request data
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
@@ -39,10 +39,10 @@ func Run(tb testing.TB, dir string, args ...string) string {
 func Commit(tb testing.TB, dir, name string, body []byte, msg string) string {
 	tb.Helper()
 	full := filepath.Join(dir, name)
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 		tb.Fatal(err)
 	}
-	if err := os.WriteFile(full, body, 0o644); err != nil {
+	if err := os.WriteFile(full, body, 0o600); err != nil {
 		tb.Fatal(err)
 	}
 	Run(tb, dir, "add", name)
