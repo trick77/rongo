@@ -24,21 +24,19 @@ REPOS_FILE=${BACKEND_REPOS_FILE:-./repos.yaml}
 # ./data and ./repos at the repo root and .gitignore anchors them there too.
 # Resolve here, once, so the path means the same thing regardless of where
 # the process actually runs.
-case "$DB_PATH" in
-  /*) ;;
-  *) DB_PATH="$ROOT/${DB_PATH#./}" ;;
-esac
-case "$REPO_ROOT" in
-  /*) ;;
-  *) REPO_ROOT="$ROOT/${REPO_ROOT#./}" ;;
-esac
+#
 # The repository list too: left relative it resolved to backend/repos.yaml,
 # and dev booted with "no repository list on disk" against a file that was
 # sitting at the repo root all along.
-case "$REPOS_FILE" in
-  /*) ;;
-  *) REPOS_FILE="$ROOT/${REPOS_FILE#./}" ;;
-esac
+abs() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$ROOT/${1#./}" ;;
+  esac
+}
+DB_PATH=$(abs "$DB_PATH")
+REPO_ROOT=$(abs "$REPO_ROOT")
+REPOS_FILE=$(abs "$REPOS_FILE")
 
 # Enable job control so the backend subshell gets its own process group;
 # without it, $! is the subshell's PID but `kill` on that PID alone never
