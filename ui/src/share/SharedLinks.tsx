@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
+import { copyText } from "../http";
+import { useFlash, useLoaded, useReportCount } from "../hooks";
 import { Icon } from "../Icon";
 import { listShares, revokeShare, shareURL, type Share } from "./api";
 
@@ -15,8 +17,6 @@ import { listShares, revokeShare, shareURL, type Share } from "./api";
  * badge; the place to act on it is the thread's own dialog, where the reader
  * can see the turns that would be added.
  */
-type State = { s: "loading" } | { s: "failed" } | { s: "loaded"; shares: Share[] };
-
 const th = "px-3.5 py-2.5 text-[11px] font-medium uppercase tracking-[.09em] text-faint";
 const action =
   "ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-panel px-3 " +
@@ -43,50 +43,16 @@ export default function SharedLinks({
   onCount?: (n: number | null) => void;
   onOpenThread: (id: string) => void;
 }) {
-  const [state, setState] = useState<State>({ s: "loading" });
-  const [copied, setCopied] = useState<string | null>(null);
+  const [state, setState] = useLoaded(async () => ({ shares: await listShares() }), []);
+  const [copied, flashCopied] = useFlash<string>();
   const [busy, setBusy] = useState<string | null>(null);
-  const copyTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
-  // The count follows the list, and is withdrawn with it: a pill saying
-  // "0 live" over a list that failed to load would be a claim.
-  const count = state.s === "loaded" ? state.shares.length : null;
-  useEffect(() => {
-    onCount(count);
-    return () => onCount(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const shares = await listShares();
-        if (!cancelled) setState({ s: "loaded", shares });
-      } catch {
-        if (!cancelled) setState({ s: "failed" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useReportCount(state.state === "ready" ? state.shares.length : null, onCount);
 
   async function copy(share: Share) {
-    try {
-      await navigator.clipboard.writeText(shareURL(share));
-      setCopied(share.token);
-      // Cleared only if it is still THIS row's: copying a second row before
-      // the first has faded would otherwise take the label off the new one.
-      copyTimer.current = window.setTimeout(
-        () => setCopied((t) => (t === share.token ? null : t)),
-        1500,
-      );
-    } catch {
-      // The URL is on the row to select. Nothing to say that the row does not
-      // already show.
-    }
+    // Nothing said when the clipboard refused: the URL is on the row to
+    // select, and the row already shows it.
+    if (await copyText(shareURL(share))) flashCopied(share.token);
   }
 
   async function revoke(share: Share) {
@@ -94,7 +60,7 @@ export default function SharedLinks({
     try {
       if (!(await revokeShare(share.thread_id))) return;
       setState((prev) =>
-        prev.s === "loaded" ? { s: "loaded", shares: prev.shares.filter((x) => x.token !== share.token) } : prev,
+        prev.state === "ready" ? { ...prev, shares: prev.shares.filter((x) => x.token !== share.token) } : prev,
       );
       onChange();
     } catch {
@@ -105,8 +71,8 @@ export default function SharedLinks({
     }
   }
 
-  if (state.s === "loading") return <p className="text-muted">Loading…</p>;
-  if (state.s === "failed")
+  if (state.state === "loading") return <p className="text-muted">Loading…</p>;
+  if (state.state === "error")
     return (
       <p role="alert" className="text-accent-strong">
         The shared links cannot be fetched.

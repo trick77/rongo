@@ -2,22 +2,22 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 
 import { Icon } from "./Icon";
 import { ThreadMenuFor } from "./ThreadMenu";
-import { pageItems, type Thread } from "./Threads";
+import { pageItems, type Thread, patch } from "./Threads";
 import { useInfiniteList, type Page } from "./useInfiniteList";
 import { useMenuDismiss } from "./useMenuDismiss";
 import { useThreadActions } from "./useThreadActions";
 
 /** A thread the search found and, when found by a message, the passage. */
-export type Hit = Thread & {
+type Hit = Thread & {
   /** The matching passage, matches between « and », … where it was cut. */
   snippet?: string;
 };
 
 // ../loom's figures. Fifty a page for the scroll; a search answers up to 200
 // in one go and is not paged, bounded only to keep one render cheap.
-export const pageSize = 50;
-export const searchLimit = 200;
-export const searchDebounceMs = 250;
+const pageSize = 50;
+const searchLimit = 200;
+const searchDebounceMs = 250;
 
 /**
  * Every thread, searchable — what the rail's 30 are a cut of. ../loom's
@@ -124,28 +124,23 @@ export default function ThreadsPage({
     };
   }, [term, searching, reload]);
 
+  // A row is patched in both the list and the search's hits, whichever is on
+  // screen, so the change shows without a reload.
+  const patchRow = (id: string, change: Partial<Thread>) => {
+    list.setItems(patch(id, change));
+    setSearch((prev) => prev && { ...prev, hits: patch<Hit>(id, change)(prev.hits) });
+    changed();
+  };
   const actions = useThreadActions({
-    onRenamed: (id, title) => {
-      list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, title } : x)));
-      setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, title } : x)) });
-      changed();
-    },
+    onRenamed: (id, title) => patchRow(id, { title }),
     onDeleted: (id) => {
       list.setItems((prev) => prev.filter((x) => x.id !== id));
       setSearch((prev) => prev && { ...prev, hits: prev.hits.filter((x) => x.id !== id) });
       ownBumps.current++;
       onDeleted(id);
     },
-    onShared: (id, shared) => {
-      list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, shared } : x)));
-      setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, shared } : x)) });
-      changed();
-    },
-    onStarred: (id, starred) => {
-      list.setItems((prev) => prev.map((x) => (x.id === id ? { ...x, starred } : x)));
-      setSearch((prev) => prev && { ...prev, hits: prev.hits.map((x) => (x.id === id ? { ...x, starred } : x)) });
-      changed();
-    },
+    onShared: (id, shared) => patchRow(id, { shared }),
+    onStarred: (id, starred) => patchRow(id, { starred }),
   });
 
   useMenuDismiss(openMenu !== null, () => setOpenMenu(null));

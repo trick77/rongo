@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
+import { copyText } from "../http";
+import { useFlash } from "../hooks";
 import { ModalShell, cancelButton, saveButton } from "../ThreadModals";
 import { conflict, createShare, revokeShare, shareURL, updateShare, type Share } from "./api";
 
@@ -34,11 +36,7 @@ export default function ShareDialog({
   const [share, setShare] = useState<Share | null>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  // Cleared on unmount: the dialog closes well inside 1500 ms, and a timer
-  // firing into a gone component is a warning in the console and a leak.
-  const copyTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+  const [copied, flashCopied] = useFlash<boolean>();
 
   async function run(call: () => Promise<Share | number>) {
     setBusy(true);
@@ -81,15 +79,13 @@ export default function ShareDialog({
 
   async function copy() {
     if (!share) return;
-    try {
-      await navigator.clipboard.writeText(shareURL(share));
-      setCopied(true);
-      copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // No fallback: execCommand is gone, and the URL is right there to
-      // select. Saying so beats a button that silently does nothing.
-      setError("The link could not be copied. Select it and copy it by hand.");
+    if (await copyText(shareURL(share))) {
+      flashCopied(true);
+      return;
     }
+    // No fallback: execCommand is gone, and the URL is right there to
+    // select. Saying so beats a button that silently does nothing.
+    setError("The link could not be copied. Select it and copy it by hand.");
   }
 
   const when = share ? new Date(share.updated_at) : null;

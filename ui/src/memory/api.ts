@@ -1,3 +1,5 @@
+import { goneOk } from "../http";
+
 /**
  * The reader's standing instructions: one read for the page, one delete for
  * the page's × and for the undo under an answer. Nothing writes here — a rule
@@ -33,5 +35,5 @@ export async function listMemories(): Promise<MemoryPage> {
  * was: both are what the reader asked for. */
 export async function forgetMemory(id: number): Promise<boolean> {
   const res = await fetch(`/api/memory/${id}`, { method: "DELETE" });
-  return res.ok || res.status === 404;
+  return goneOk(res);
 }

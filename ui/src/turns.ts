@@ -5,10 +5,8 @@
  * ThreadView draws these, Ask streams into them, and the share page — which
  * has no composer and no stream at all — reads them straight off the record.
  * Nothing here talks to the network; that stays in the views.
- *
- * Every export was already in Ask.tsx and is unchanged; the only edits are the
- * `export` keywords the second reader needs.
  */
+import { isoDay, shortSha } from "./paths";
 import { type ClarifyCandidate } from "./Clarify";
 import { type Step, type TraceState } from "./Trace";
 import { isCommit, type SourceRef } from "./SourceView";
@@ -28,7 +26,7 @@ export const languages: { code: string; name: string }[] = [
 ];
 /** The clarification a turn ended with, as this view needs it: the id of the
  * message that carries the card (used to resume it) and its candidates. */
-export type TurnClarification = {
+type TurnClarification = {
   messageId: number;
   candidates: ClarifyCandidate[];
   // True when the turn ended by asking for a NARROWER question rather than by
@@ -41,7 +39,7 @@ export type TurnClarification = {
  * request that failed, kept so a retry re-issues exactly that. Null on a turn
  * that has nothing to offer — one still running, one that answered, and a
  * resume, whose card is its own retry. */
-export type RetryRequest = {
+type RetryRequest = {
   url: string;
   body: Record<string, unknown>;
 };
@@ -282,7 +280,7 @@ export type Message = {
  * closes after the last step, and the total on the closing row is the span the
  * reader was actually shown.
  */
-export type StoredTrace = {
+type StoredTrace = {
   started_at: number;
   ended_at: number;
   steps: Step[];
@@ -414,6 +412,13 @@ export function headOf(t: Turn): number | null {
   return t.headId ?? t.messageId;
 }
 
+/** The turns of a stored thread, as the record is read back: each message a
+ * turn, every card linked to the choice made on it, every failed turn given
+ * its retry. */
+export function turnsFromRecord(list: Message[]): Turn[] {
+  return storedRetries(linkChosenCandidates(list, list.map(storedTurn)));
+}
+
 /**
  * Gives every failed turn in a restored thread the request that asks it
  * again, and points that request at the turn it retries so the record keeps
@@ -479,14 +484,9 @@ export function forgeLine(c: Citation): string {
   return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
 }
 
-/** The first seven characters of a commit, the way git prints one. */
-export function shortSha(sha: string | undefined): string {
-  return (sha ?? "").slice(0, 7);
-}
-
 /** The day a commit citation was made, as YYYY-MM-DD, or "" when unknown. */
 export function commitDay(c: Citation): string {
-  return (c.committed_at ?? "").slice(0, 10);
+  return isoDay(c.committed_at);
 }
 
 export function roleName(a: Audience): string {

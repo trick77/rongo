@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import ThreadView, { threadGrid, useSourcesPane, SourcesPane } from "./ThreadView";
+import CitationViewer from "./CitationViewer";
+import { copyText } from "./http";
 import { pageColumn } from "./page";
-import ThreadView, { SourcesPane, paneAudienceTurn, sourceTurnOf } from "./ThreadView";
-import SourceView, { isCommit } from "./SourceView";
-import CommitView from "./CommitView";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
@@ -13,17 +13,15 @@ import {
   freshTurn,
   headOf,
   languages,
-  linkChosenCandidates,
   pastedField,
   roleName,
-  storedRetries,
-  storedTurn,
   threadUsage,
   type Audience,
   type Citation,
   type Message,
   type ThreadTotal,
   type Turn,
+  turnsFromRecord,
 } from "./turns";
 import { applyEvent, endsTurn } from "./turnEvents";
 
@@ -151,7 +149,6 @@ export default function Ask({
   onCloseThreadStats?: () => void;
   /** Something changed that the thread list should see. */
   onActivity?: () => void;
-  /** Reports whether a turn is in flight, so the thread list can lock. */
   /** Whether a turn is running, and the thread it is being written into. */
   onBusy?: (busy: boolean, threadId: string | null) => void;
   /** Reports the thread's running total — every turn on screen summed, the
@@ -206,12 +203,7 @@ export default function Ask({
   // an Analyst was given an explanation with no paths in it on purpose and
   // the list is noise. A click on the × or on the chip settles it for the
   // rest of the thread; opening another thread asks the question again.
-  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
-  // The turn the reader pointed the pane at, by clicking the chip under it.
-  // null is "none in particular", and the pane lists the newest citing turn.
-  // A new turn clears it: the reader asked again, and the answer to that is
-  // what they are reading now, so its sources are the ones beside it.
-  const [sourceTurn, setSourceTurn] = useState<number | null>(null);
+  const pane = useSourcesPane(turns);
   const threadId = useRef<string | null>(openThread);
   // shown is the thread whose turns are already on screen. Without it the
   // stream's own thread event — which travels up to the parent and back down as
@@ -385,8 +377,7 @@ export default function Ask({
     // And the pane goes back to answering to the audience rather than to the
     // last thread's reader: a × pressed on one conversation is not a standing
     // instruction about the next one.
-    setSourcesOpen(null);
-    setSourceTurn(null);
+    pane.reset();
     // The thread being written comes back from the parked copy, never from the
     // server: the record has no answer on it yet — the row is only finished
     // when the turn is — so a fetch would replace a half-written answer with
@@ -479,7 +470,7 @@ export default function Ask({
           closed();
           return;
         }
-        arrive(storedRetries(linkChosenCandidates(list, list.map(storedTurn))));
+        arrive(turnsFromRecord(list));
       } catch {
         // The turns are cleared rather than left standing: the ids have already
         // moved to the new thread, and a visible conversation that belongs to
@@ -527,7 +518,7 @@ export default function Ask({
   // A turn added or a thread swapped in: the reader's pick of a turn for the
   // pane is an index into what was there before, and means nothing now.
   useEffect(() => {
-    setSourceTurn(null);
+    pane.clearSourceTurn();
   }, [turns.length]);
 
   // The running total follows the turns: it grows when a usage event lands
@@ -576,6 +567,7 @@ export default function Ask({
     // nothing patched the turn, so the trace ticked on with no answer, no
     // error and no way out.
     let closed = false;
+    const fail = (error: string) => patchLast((t) => ({ ...t, error, done: true, endedAt: Date.now() }));
     // The request the turn was made with, so a failure can be asked again. A
     // resume passes retryable false: its card unlocks itself on failure, and a
     // button beside the error would be a second way to spend the same call.
@@ -587,7 +579,7 @@ export default function Ask({
         body: JSON.stringify(body),
       });
       if (!res.ok || !res.body) {
-        patchLast((t) => ({ ...t, error: `The server answered with ${res.status}.`, done: true, endedAt: Date.now() }));
+        fail(`The server answered with ${res.status}.`);
         ok = false;
         return false;
       }
@@ -647,11 +639,11 @@ export default function Ask({
       // the same thing as losing the connection, so it reads the same.
       if (!closed) {
         ok = false;
-        patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
+        fail("The connection was lost.");
       }
     } catch {
       ok = false;
-      patchLast((t) => ({ ...t, error: "The connection was lost.", done: true, endedAt: Date.now() }));
+      fail("The connection was lost.");
     } finally {
       // The turn is over, so the parked copy is dropped: from here the record
       // is complete — answer, citations, suggestions and all — and coming back
@@ -680,7 +672,8 @@ export default function Ask({
   const threadLanguage = turns.find((t) => t.recorded)?.language ?? null;
   // What the next question will actually be answered in.
   const asking = threadLanguage ?? language;
-  const invite = (welcome[asking] ?? welcome.en)[turns.length > 0 ? "followUp" : "placeholder"];
+  const words = welcome[asking] ?? welcome.en;
+  const invite = words[turns.length > 0 ? "followUp" : "placeholder"];
 
   /**
    * A paste past the threshold is a chip, not text. Native insertion is
@@ -757,18 +750,27 @@ export default function Ask({
    */
   async function chooseCandidate(turnIndex: number, idx: number) {
     if (busy) return;
+    await resumeCard(turnIndex, { chosenIdx: idx }, { choice: idx }, { chosenIdx: null });
+  }
+
+  /**
+   * A card or panel answered: the turn goes on from the same words, marked on
+   * the card the reader decided on. The card belongs to the thread it was
+   * asked in, and turnIndex is an index into that thread's turns — in another
+   * one it points at a different turn entirely. A failed turn hands the card
+   * back by unmarking it; a reader who has moved on gets the unlock from the
+   * record instead, since the decision is stored only when an answer lands.
+   */
+  async function resumeCard(turnIndex: number, mark: Partial<Turn>, extra: Record<string, unknown>, unmark: Partial<Turn>) {
     const turn = turns[turnIndex];
     if (!turn.clarification || turn.chosenIdx != null) return;
 
     retireLoad();
     appendTurn(
       freshTurn(turn.question, turn.audience, turn.language, headOf(turn), turn.pastes),
-      (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: idx } : t)),
+      (list) => list.map((t, i) => (i === turnIndex ? { ...t, ...mark } : t)),
     );
 
-    // The card belongs to the thread it was asked in, and turnIndex is an
-    // index into that thread's turns — in another one it points at a
-    // different turn entirely.
     const cardThread = threadId.current;
     const ok = await stream("/api/ask", {
       thread_id: threadId.current ?? "",
@@ -776,14 +778,11 @@ export default function Ask({
       audience: turn.audience,
       language: turn.language,
       clarification_message_id: turn.clarification.messageId,
-      choice: idx,
+      ...extra,
       ...pastedField(turn.pastes),
     }, false);
-    // A reader who has moved on gets the unlock from the record instead: the
-    // choice is stored only when an answer lands, so the card they come back
-    // to is open again anyway.
     if (!ok && shown.current === cardThread) {
-      setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null } : t)));
+      setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, ...unmark } : t)));
     }
   }
 
@@ -798,31 +797,7 @@ export default function Ask({
    */
   async function narrowTo(turnIndex: number, repos: string[]) {
     if (busy || repos.length === 0) return;
-    const turn = turns[turnIndex];
-    if (!turn.clarification || turn.chosenIdx != null) return;
-
-    retireLoad();
-    appendTurn(
-      freshTurn(turn.question, turn.audience, turn.language, headOf(turn), turn.pastes),
-      (list) => list.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: -1, narrowedTo: repos } : t)),
-    );
-
-    // The panel belongs to the thread it was asked in, the way a card does.
-    const panelThread = threadId.current;
-    const ok = await stream("/api/ask", {
-      thread_id: threadId.current ?? "",
-      question: turn.question,
-      audience: turn.audience,
-      language: turn.language,
-      clarification_message_id: turn.clarification.messageId,
-      repos,
-      ...pastedField(turn.pastes),
-    }, false);
-    if (!ok && shown.current === panelThread) {
-      setTurns((prev) =>
-        prev.map((t, i) => (i === turnIndex ? { ...t, chosenIdx: null, narrowedTo: null } : t)),
-      );
-    }
+    await resumeCard(turnIndex, { chosenIdx: -1, narrowedTo: repos }, { repos }, { chosenIdx: null, narrowedTo: null });
   }
 
   /**
@@ -910,15 +885,10 @@ export default function Ask({
   // clears busy without touching the turns, and a memo keyed on the turns kept
   // the handlers that still refused — enabled buttons that did nothing.
   //
-  // Both copies report whether the clipboard took it: in an insecure context,
-  // or with the permission refused, a button saying "Copied" over a clipboard
-  // that still holds whatever was there before is a plain lie. Nothing else is
-  // said about it — the text is on screen to select, and a banner would be
-  // noise.
   // Stable, so the overlays' keydown listeners are attached once rather
   // than on every streamed token.
   const closeViewer = useCallback(() => setViewing(null), []);
-  const closeSources = useCallback(() => setSourcesOpen(false), []);
+  const { showSources, listedTurn, toggleSources, closeSources } = pane;
   // The pane is one thing with two ways in, so closing it clears both: a
   // reader who opened a turn from the header's thread pane must not be left
   // with the thread pane behind it. Through a ref, because the parent's
@@ -943,27 +913,13 @@ export default function Ask({
     () => ({
       onRetry: (i: number) => handlers.current.retry(i),
       onReexplain: (i: number) => handlers.current.reexplain(i),
-      onCopy: async (i: number) => {
-        try {
-          await navigator.clipboard.writeText(asMarkdown(live.current[i]));
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      onCopy: (i: number) => copyText(asMarkdown(live.current[i])),
       // The question alone, as it was typed. Not asMarkdown's heading: this
       // is for quoting the question somewhere else — a ticket, a message, the
       // composer of another thread — and a `# ` in front of it is rongo's
       // formatting, not the reader's words. The full text is always in the
       // DOM, so a folded question copies whole.
-      onCopyQuestion: async (i: number) => {
-        try {
-          await navigator.clipboard.writeText(live.current[i].question);
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      onCopyQuestion: (i: number) => copyText(live.current[i].question),
       onFollowup: (i: number, question: string) => handlers.current.askFollowup(i, question),
       onChoose: (i: number, idx: number) => handlers.current.chooseCandidate(i, idx),
       onNarrow: (i: number, repos: string[]) => handlers.current.narrowTo(i, repos),
@@ -972,38 +928,10 @@ export default function Ask({
     [],
   );
 
-  // Untouched, the pane follows the turn it would be showing: open for a
-  // Developer, shut for an Analyst. A re-explain therefore opens or closes it
-  // by itself when the new answer arrives — which is still the reader's own
-  // click, one step removed.
-  const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
-  // The turn the pane lists: the one the reader pointed it at, else the
-  // newest that cited anything.
-  const listedTurn = sourceTurn ?? sourceTurnOf(turns);
-  // The chip under a turn: opens the pane on that turn, or shuts it when it
-  // is already open on that very turn. On any other turn it moves the pane
-  // rather than closing it — the reader asked for a different list, not for
-  // no list.
-  const toggleSources = (i: number) => {
-    if (showSources && i === listedTurn) {
-      setSourcesOpen(false);
-      return;
-    }
-    setSourceTurn(i);
-    setSourcesOpen(true);
-  };
-
   return (
-    // The Sources pane takes a fixed column only when it is open AND there is
-    // room for it; below that (every iPad in portrait, the 11" in landscape)
-    // the thread has the width, the chips in the text open the sources, and
-    // the per-answer details block still lists them.
-    <div
-      className={
-        "grid h-full min-h-0 grid-cols-1" +
-        (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "")
-      }
-    >
+    // A re-explain opens or closes the pane by itself when the new answer
+    // arrives — which is still the reader's own click, one step removed.
+    <div className={threadGrid(showSources)}>
       <div className="relative flex min-h-0 min-w-0 flex-col">
         {busy && <div className="busybar" aria-hidden="true" />}
         <div
@@ -1063,12 +991,10 @@ export default function Ask({
           />
           <div className={`${pageColumn} w-full flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3`}>
             {/* No top margin on the welcome: it starts where the Repositories
-                heading starts, both pages' first line on the same rule. That
-                rule is now a shared cap and a shared centring rather than a
-                shared left edge — every page is 900px wide and centred, so
-                the two first lines land on the same x whatever the window is
-                doing. Change the cap here and change it on Repositories and
-                Shared in the same edit, or the rule quietly stops holding. */}
+                heading starts, both pages' first line on the same rule. The
+                rule is pageColumn (page.tsx), the one cap and centring every
+                page shares, so the two first lines land on the same x
+                whatever the window is doing. */}
             {gone && !loading && (
               <div className="max-w-[52ch]" role="alert">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
@@ -1083,9 +1009,9 @@ export default function Ask({
             {turns.length === 0 && !loading && !gone && (
               <div className="max-w-[52ch]">
                 <h2 className="font-serif text-[22px] font-medium leading-tight tracking-tight text-ink sm:text-[28px]">
-                  {(welcome[asking] ?? welcome.en).title}
+                  {words.title}
                 </h2>
-                <p className="mt-3 text-muted">{(welcome[asking] ?? welcome.en).body}</p>
+                <p className="mt-3 text-muted">{words.body}</p>
               </div>
             )}
 
@@ -1301,14 +1227,7 @@ export default function Ask({
         <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={closeSources} />
       )}
 
-      {/* A commit citation opens the commit view, whose touched files open
-          the source viewer in turn, whole, at their indexed commit. */}
-      {viewing &&
-        (isCommit(viewing) ? (
-          <CommitView source={viewing} onClose={closeViewer} onOpenFile={setViewing} />
-        ) : (
-          <SourceView source={viewing} onClose={closeViewer} />
-        ))}
+      <CitationViewer viewing={viewing} onClose={closeViewer} onOpenFile={setViewing} />
     </div>
   );
 }

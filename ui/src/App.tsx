@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useEscape } from "./dialog";
 import Ask from "./Ask";
 import ThreadUsageBadge from "./ThreadUsageBadge";
 import type { ThreadTotal } from "./turns";
@@ -336,6 +337,13 @@ export default function App() {
   // than added to, or Back would return to the dead one, the correction would
   // fire again, and Back could never leave the app.
   const closeDeadThread = useCallback(() => selectThread(null, true), [selectThread]);
+  // A thread was deleted from a list: if it is the one on screen, close it,
+  // so the view falls back to the empty ask page rather than holding a
+  // conversation whose record is gone.
+  const onThreadDeleted = (id: string) => {
+    if (id === threadId) closeDeadThread();
+    refreshThreads();
+  };
 
   // The address bar has to say what is on screen from the first paint. "/" is
   // the everyday case, but so is anything that does not name a route — "/",
@@ -395,15 +403,10 @@ export default function App() {
   }, [threadId, inRail, threadsVersion]);
 
   // Escape closes the drawer, the second way out beside the backdrop. Bound
-  // unconditionally rather than only while open: a listener added and removed
-  // on every toggle is more moving parts than one that reads the state.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setNavOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // once, whether or not it is open: a listener added and removed on every
+  // toggle is more moving parts than one that reads the state.
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  useEscape(closeNav);
 
   // Only a settled title reaches the header. Until the model's title call
   // lands, the row holds the question's first 48 runes, and putting that up
@@ -716,13 +719,7 @@ export default function App() {
             onList={setThreads}
             onShared={refreshThreads}
             onStarred={refreshThreads}
-            onDeleted={(id) => {
-              // The thread on screen has just been deleted: close it, so the
-              // view falls back to the empty ask page rather than holding a
-              // conversation whose record is gone.
-              if (id === threadId) closeDeadThread();
-              refreshThreads();
-            }}
+            onDeleted={onThreadDeleted}
             onRenamed={refreshThreads}
             onAllThreads={() => {
               go({ view: "threads" });
@@ -798,10 +795,7 @@ export default function App() {
                 version={threadsVersion}
                 onSelect={(id) => selectThread(id)}
                 onChanged={refreshThreads}
-                onDeleted={(id) => {
-                  if (id === threadId) closeDeadThread();
-                  refreshThreads();
-                }}
+                onDeleted={onThreadDeleted}
               />
             </PageShell>
           )}
@@ -850,9 +844,7 @@ export default function App() {
             >
               <SharedLinks
                 onCount={setSharedCount}
-                onChange={() => {
-                  refreshThreads();
-                }}
+                onChange={refreshThreads}
                 onOpenThread={(id) => selectThread(id)}
               />
             </PageShell>

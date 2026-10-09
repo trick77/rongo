@@ -1,9 +1,8 @@
-import { StrictMode } from "react";
+import { strict } from "./__tests__/helpers";
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import Trace from "./Trace";
 
-const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 const t0 = 1_000_000;
 
 describe("Trace, what each step found", () => {

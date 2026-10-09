@@ -1,4 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import { shortSha, splitPath } from "./paths";
+import { useFlash } from "./hooks";
 import Question from "./Question";
 import PasteChip from "./PasteChip";
 import { strip } from "./pastes";
@@ -12,7 +14,6 @@ import {
   languages,
   pill,
   roleName,
-  shortSha,
   stageLabel,
   type Citation,
   type Turn,
@@ -53,7 +54,7 @@ export type ThreadActions = {
   onOpenStats: (i: number) => void;
 };
 
-export type ThreadViewProps = {
+type ThreadViewProps = {
   turns: Turn[];
   /** Locks every action while a turn is in flight. Always false read-only. */
   busy?: boolean;
@@ -223,11 +224,11 @@ export default function ThreadView({
   onToggleSources,
   threadKey = null,
 }: ThreadViewProps) {
-  const [copied, setCopied] = useState<number | null>(null);
+  const [copied, flashCopied, clearCopied] = useFlash<number>();
   // The question copied, by the index of the turn it was asked in. Its own
   // state: copying the question and copying the answer are two controls, and
   // one flag would light both.
-  const [copiedQuestion, setCopiedQuestion] = useState<number | null>(null);
+  const [copiedQuestion, flashCopiedQuestion, clearCopiedQuestion] = useFlash<number>();
   // The superseded failures the reader has unfolded. A failure stays in the
   // record and stays on the page, but a turn that went on to answer should
   // not open with the attempt that broke — so it folds to a line, and the
@@ -255,8 +256,8 @@ export default function ThreadView({
   // Another thread: the indices this view is holding mean something else now.
   useEffect(() => {
     setOpenFailure(new Set());
-    setCopied(null);
-    setCopiedQuestion(null);
+    clearCopied();
+    clearCopiedQuestion();
   }, [threadKey]);
 
   // The thread's verdict sits among the buttons of the newest finished answer,
@@ -282,19 +283,6 @@ export default function ThreadView({
         <ThreadFeedback key={threadKey} threadId={threadKey} turns={turns} />
       ) : null,
     [rated, threadKey, turns],
-  );
-
-  // The "Copied" feedback times out through these, cleared on unmount so a
-  // reader who leaves within the moment does not have state set on a view
-  // that is gone.
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const copyQuestionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      if (copyQuestionTimer.current) clearTimeout(copyQuestionTimer.current);
-    },
-    [],
   );
 
   // Stable, or the memoized Markdown of the source turn — the previous
@@ -342,19 +330,15 @@ export default function ThreadView({
     // with the permission refused, the button saying "Copied" would be a
     // plain lie — and the reader would paste whatever was there before.
     if (!(await actions.onCopy(turnIndex))) return;
-    setCopied(turnIndex);
-    if (copyTimer.current) clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(null), 1500);
-  }, []);
+    flashCopied(turnIndex);
+  }, [flashCopied]);
 
   const copyQuestion = useCallback(async (turnIndex: number) => {
     const actions = latest.current.actions;
     if (!actions) return;
     if (!(await actions.onCopyQuestion(turnIndex))) return;
-    setCopiedQuestion(turnIndex);
-    if (copyQuestionTimer.current) clearTimeout(copyQuestionTimer.current);
-    copyQuestionTimer.current = setTimeout(() => setCopiedQuestion(null), 1500);
-  }, []);
+    flashCopiedQuestion(turnIndex);
+  }, [flashCopiedQuestion]);
 
   // One article per question. The list itself stays flat — every action here
   // addresses a turn by its position in it — and only the rendering groups.
@@ -536,9 +520,9 @@ export function SourcesPane({
               </span>
             ) : (
               <span className="font-mono text-xs break-all text-muted">
-                {c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/") + 1) : ""}
+                {splitPath(c.path).dir}
                 <b className="font-medium text-ink-dim underline-offset-[3px] group-hover:underline group-hover:decoration-accent">
-                  {c.path.slice(c.path.lastIndexOf("/") + 1)}
+                  {splitPath(c.path).base}
                 </b>
                 :{c.start_line}-{c.end_line}
               </span>
@@ -548,4 +532,53 @@ export function SourcesPane({
       </div>
     </aside>
   );
+}
+
+/** The thread's grid: one column, and a fixed Sources column only when the
+ * pane is open AND there is room for it; below that (every iPad in portrait,
+ * the 11" in landscape) the thread has the width, the chips in the text open
+ * the sources, and the per-answer details block still lists them. */
+export function threadGrid(showSources: boolean): string {
+  return "grid h-full min-h-0 grid-cols-1" + (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "");
+}
+
+/**
+ * useSourcesPane is the Sources pane's state, the same on the answering page
+ * and a shared one. Whether the pane is showing: null until the reader
+ * decides, and untouched it follows the turn it would be showing — open for a
+ * Developer, shut for an Analyst, who was given an explanation with no paths
+ * in it on purpose. A click on the × or on the chip settles it. The turn the
+ * pane lists: the one the reader pointed it at from the chip under it, else
+ * the newest that cited anything.
+ */
+export function useSourcesPane(turns: Turn[]) {
+  const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
+  const [sourceTurn, setSourceTurn] = useState<number | null>(null);
+  const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
+  const listedTurn = sourceTurn ?? sourceTurnOf(turns);
+  // The chip under a turn: opens the pane on that turn, or shuts it when it
+  // is already open on that very turn. On any other turn it moves the pane
+  // rather than closing it — the reader asked for a different list, not for
+  // no list.
+  const toggleSources = (i: number) => {
+    if (showSources && i === listedTurn) {
+      setSourcesOpen(false);
+      return;
+    }
+    setSourceTurn(i);
+    setSourcesOpen(true);
+  };
+  // Stable, so the pane's listeners are attached once rather than on every
+  // streamed token.
+  const closeSources = useCallback(() => setSourcesOpen(false), []);
+  // Another thread asks the audience question again, and its newest turn is
+  // the one beside the reader.
+  const reset = useCallback(() => {
+    setSourcesOpen(null);
+    setSourceTurn(null);
+  }, []);
+  // A new turn: the reader asked again, and the answer to that is what they
+  // are reading now, so its sources are the ones beside it.
+  const clearSourceTurn = useCallback(() => setSourceTurn(null), []);
+  return { showSources, listedTurn, toggleSources, closeSources, reset, clearSourceTurn };
 }

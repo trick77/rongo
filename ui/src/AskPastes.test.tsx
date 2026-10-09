@@ -1,6 +1,6 @@
-import { StrictMode } from "react";
+import { ev, strict } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
 import { asMarkdown, freshTurn } from "./turns";
@@ -12,8 +12,6 @@ import { PASTE_CHAR_THRESHOLD, PASTE_LINE_THRESHOLD, MAX_QUESTION_BYTES } from "
  * toEqual stays exactly as it was, because a turn without a paste sends no
  * pasted_texts key at all.
  */
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 
 function queuedFetch(responses: string[][], threadsJson: unknown = []) {
   const encoder = new TextEncoder();
@@ -50,8 +48,6 @@ const posts = (mock: ReturnType<typeof vi.fn>) =>
 function paste(text: string) {
   return fireEvent.paste(screen.getByLabelText("Question"), { clipboardData: { getData: () => text } });
 }
-
-const strict = (ui: React.ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 
 afterEach(() => {
   vi.unstubAllGlobals();

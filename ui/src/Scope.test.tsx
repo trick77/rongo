@@ -1,46 +1,8 @@
-import { StrictMode } from "react";
+import { ask, ev, streamFrames } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import Ask from "./Ask";
-
-function streamFrames(frames: string[]) {
-  const encoder = new TextEncoder();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      body: {
-        getReader() {
-          let i = 0;
-          return {
-            async read() {
-              if (i >= frames.length) return { done: true, value: undefined };
-              return { done: false, value: encoder.encode(frames[i++]) };
-            },
-          };
-        },
-      },
-    })),
-  );
-}
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+import { screen, waitFor } from "@testing-library/react";
 
 afterEach(() => vi.unstubAllGlobals());
-
-async function ask(text: string) {
-  const user = userEvent.setup();
-  render(
-    <StrictMode>
-      <Ask />
-    </StrictMode>,
-  );
-  await user.type(screen.getByLabelText("Question"), text);
-  await user.click(screen.getByRole("button", { name: "Ask" }));
-  return user;
-}
 
 describe("the scope notice", () => {
   it("is shown above the answer when a named repository is not indexed", async () => {

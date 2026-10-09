@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useOpenUntil } from "./hooks";
 import { Chevron } from "./icons";
 
 /** One project the question matched, as the SSE event and the stored thread
  * both send it. The panel has no titles and no summaries: nothing was named by
  * a model, because the names were already known. */
-export type NarrowRepo = {
+type NarrowRepo = {
   repo: string;
   branch: string;
   /** The repositories behind a project of more than one, so the pill can say
@@ -53,19 +54,11 @@ export default function Narrow({
   onAsk: (repos: string[]) => void;
 }) {
   const decided = narrowedTo != null && narrowedTo.length > 0;
-  const [open, setOpen] = useState(!decided);
-  const [picked, setPicked] = useState<string[]>([]);
-
   // Collapses the instant the turn goes on, and opens again if that turn
   // failed and the narrowing was taken back — the panel is "your move" once
-  // more. Only fires on a transition, so a reader who toggles it by hand is
-  // never fought.
-  const prevDecided = useRef(decided);
-  useEffect(() => {
-    if (!prevDecided.current && decided) setOpen(false);
-    if (prevDecided.current && !decided) setOpen(true);
-    prevDecided.current = decided;
-  }, [decided]);
+  // more.
+  const [open, setOpen] = useOpenUntil(decided);
+  const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (repo: string) =>
     setPicked((p) => (p.includes(repo) ? p.filter((r) => r !== repo) : [...p, repo]));

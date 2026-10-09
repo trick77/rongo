@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { splitPath } from "./paths";
 import { drawPlantUml } from "./plantuml";
 import { useResolved } from "./useResolved";
 import { download, toPng, toXml, withGround } from "./diagramExport";
@@ -33,7 +34,7 @@ export default function PlantUmlSheet({
       </p>
     );
   }
-  const stem = path.slice(path.lastIndexOf("/") + 1).replace(/\.[^.]*$/, "");
+  const stem = splitPath(path).base.replace(/\.[^.]*$/, "");
   return (
     <div className="flex flex-col items-center gap-6 px-5 py-3">
       {out.svgs.map((svg, i) => (
@@ -95,7 +96,7 @@ function Sheet({ svg, label, name }: { svg: string; label: string; name: string 
         // White paper, whatever the theme: see plantuml.ts. The engine
         // writes width and height in pixels, so the picture is capped at
         // the sheet, scaled by the viewBox, never grown past 1:1.
-        className="plantuml [&_svg]:h-auto [&_svg]:max-w-full"
+        className="[&_svg]:h-auto [&_svg]:max-w-full"
         dangerouslySetInnerHTML={{ __html: svg }}
       />
       {failed !== null && (

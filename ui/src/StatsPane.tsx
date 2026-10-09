@@ -435,7 +435,7 @@ function ThreadStats({ turns }: { turns: Turn[] }) {
   );
 }
 
-export type StatsTarget = { kind: "turn"; index: number } | { kind: "thread" };
+type StatsTarget = { kind: "turn"; index: number } | { kind: "thread" };
 
 /** StatsPane is the drawer. Escape closes it, the way the modals do. */
 export function StatsPane({ target, turns, onClose }: { target: StatsTarget; turns: Turn[]; onClose: () => void }) {
@@ -446,6 +446,7 @@ export function StatsPane({ target, turns, onClose }: { target: StatsTarget; tur
   useEscape(onClose);
 
   const turn = target.kind === "turn" ? turns[target.index] : null;
+  const withUsage = turns.filter((t) => t.usage).length;
 
   return (
     <>
@@ -463,7 +464,7 @@ export function StatsPane({ target, turns, onClose }: { target: StatsTarget; tur
             <p className="mt-0.5 text-[12.5px] text-faint">
               {tab === "turn" && turn
                 ? turn.question
-                : `${turns.filter((t) => t.usage).length} turn${turns.filter((t) => t.usage).length === 1 ? "" : "s"} with usage on record`}
+                : `${withUsage} turn${withUsage === 1 ? "" : "s"} with usage on record`}
             </p>
           </div>
           <button

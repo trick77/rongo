@@ -36,11 +36,11 @@ import { DownloadIcon, ExpandIcon } from "./icons";
 
 export type FlowKind = "start" | "end" | "step" | "decision";
 export type FlowNode = { id: string; label: string; kind: FlowKind; src: number[] };
-export type FlowEdge = { from: string; to: string; label?: string };
+type FlowEdge = { from: string; to: string; label?: string };
 export type FlowSpec = { type: "flow"; nodes: FlowNode[]; edges: FlowEdge[] };
-export type Actor = { id: string; label: string };
-export type StepKind = "call" | "return" | "async";
-export type SeqStep = { from: string; to: string; label: string; kind: StepKind; src: number[] };
+type Actor = { id: string; label: string };
+type StepKind = "call" | "return" | "async";
+type SeqStep = { from: string; to: string; label: string; kind: StepKind; src: number[] };
 export type SequenceSpec = { type: "sequence"; actors: Actor[]; steps: SeqStep[] };
 export type DiagramSpec = FlowSpec | SequenceSpec;
 
@@ -151,7 +151,7 @@ export function diagramSource(tag: string, body: string): string | null {
 
 /** specRe says a fence body opens as a legacy spec. Anchored on the brace, so
  * prose about the format inside a code block is not mistaken for one. */
-export const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
+const specRe = /^\s*\{\s*"type"\s*:\s*"(?:flow|sequence)"/;
 
 /** diagramKind is the first word of the source, which is the diagram type in
  * mermaid's grammar: `flowchart`, `sequenceDiagram`, `stateDiagram-v2`. A

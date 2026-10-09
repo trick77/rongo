@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
+import { isoDay, shortSha, splitPath } from "./paths";
+import { useLoaded } from "./hooks";
+import { fetchJSON } from "./http";
 import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { type SourceRef } from "./SourceView";
@@ -7,11 +10,6 @@ import { type SourceRef } from "./SourceView";
  * the source viewer can open it: a path the indexer skipped, or one the
  * commit deleted, has nothing to show. */
 type FileChange = { path: string; added: number; deleted: number; indexed: boolean };
-
-type Loaded =
-  | { state: "loading" }
-  | { state: "error"; message: string }
-  | { state: "ready"; sha: string; branch: string; committed_at: string; subject: string; body: string; files: FileChange[] };
 
 /**
  * CommitView opens a cited commit: its message, its date and the files it
@@ -36,7 +34,6 @@ export default function CommitView({
   /** Where the commit is read from; the share page passes its own. */
   endpoint?: string;
 }) {
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const dismiss = useBackdropDismiss(onClose);
@@ -47,43 +44,23 @@ export default function CommitView({
   // file went on into the answer behind the scrim.
   useTabTrap(dialog);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoaded({ state: "loading" });
-    (async () => {
-      try {
-        const q = new URLSearchParams({ repo: source.repo, sha: source.sha ?? "" });
-        const res = await fetch(`${endpoint}?${q}`);
-        if (cancelled) return;
-        if (!res.ok) {
-          const message = (await res.text()).trim() || `The server answered with ${res.status}.`;
-          if (!cancelled) setLoaded({ state: "error", message });
-          return;
-        }
-        const c = await res.json();
-        if (cancelled) return;
-        setLoaded({
-          state: "ready",
-          sha: c.sha ?? "",
-          branch: c.branch ?? source.branch,
-          committed_at: c.committed_at ?? "",
-          subject: c.subject ?? "",
-          body: c.body ?? "",
-          files: Array.isArray(c.files) ? c.files : [],
-        });
-      } catch {
-        if (!cancelled) setLoaded({ state: "error", message: "The connection was lost." });
-      }
-    })();
-    return () => {
-      cancelled = true;
+  const q = new URLSearchParams({ repo: source.repo, sha: source.sha ?? "" });
+  const [loaded] = useLoaded(async () => {
+    const c = await fetchJSON(`${endpoint}?${q}`);
+    return {
+      sha: (c.sha ?? "") as string,
+      branch: (c.branch ?? source.branch) as string,
+      committed_at: (c.committed_at ?? "") as string,
+      subject: (c.subject ?? "") as string,
+      body: (c.body ?? "") as string,
+      files: (Array.isArray(c.files) ? c.files : []) as FileChange[],
     };
   }, [source, endpoint]);
 
-  const shortSha = (loaded.state === "ready" ? loaded.sha : source.sha ?? "").slice(0, 7);
+  const sha = shortSha(loaded.state === "ready" ? loaded.sha : source.sha);
   const branch = loaded.state === "ready" ? loaded.branch : source.branch;
   const subject = loaded.state === "ready" ? loaded.subject : source.subject ?? "";
-  const day = (loaded.state === "ready" ? loaded.committed_at : source.committed_at ?? "").slice(0, 10);
+  const day = isoDay(loaded.state === "ready" ? loaded.committed_at : source.committed_at);
 
   return (
     <div
@@ -106,7 +83,7 @@ export default function CommitView({
           </span>
           <span className="ml-auto hidden shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint sm:flex">
             <span className="rounded-full border border-border px-2 py-px">{branch}</span>
-            {shortSha && <span className="rounded-full border border-border px-2 py-px">{shortSha}</span>}
+            {sha && <span className="rounded-full border border-border px-2 py-px">{sha}</span>}
             {day && <span>{day}</span>}
           </span>
           <button
@@ -138,9 +115,7 @@ export default function CommitView({
               </h2>
               <ul className="font-mono text-xs">
                 {loaded.files.map((f) => {
-                  const slash = f.path.lastIndexOf("/");
-                  const dir = slash >= 0 ? f.path.slice(0, slash + 1) : "";
-                  const base = f.path.slice(slash + 1);
+                  const { dir, base } = splitPath(f.path);
                   // A path the viewer can open is a button; one it cannot
                   // (skipped, deleted, or on a share page) is text.
                   return (

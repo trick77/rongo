@@ -24,7 +24,7 @@ import type { ThreadActions } from "./ThreadView";
  * parent would undo the whole thing, silently —
  * ThreadViewRenders.test.tsx is what would say so.
  */
-export type TurnAttemptProps = {
+type TurnAttemptProps = {
   turn: Turn;
   /** The turn's position in the thread: what every action addresses it by. */
   i: number;
@@ -145,10 +145,10 @@ function TurnAttempt({
                     same block ../loom uses. The measure stays capped here:
                     rongo's answer column is wider than loom's rail.
 
-                    streaming is what the text fade keys on (markdown.tsx):
-                    text still arriving fades in, and the class comes off with
-                    the done event. Nothing else marks a streaming answer — the
-                    caret it once drew is gone. */}
+                    streaming marks an answer still arriving, and comes off
+                    with the done event; nothing styles it any more. The text
+                    fade is Markdown's fade prop, and the caret it once drew is
+                    gone. */}
                 {turn.text && (
                   <div
                     className={`ui-markdown mt-4 max-w-[68ch]${turn.done ? "" : " streaming"}`}

@@ -1,47 +1,12 @@
 import { StrictMode } from "react";
+import { ask, ev, pickLanguage, streamFrames } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
-import { languages } from "./turns";
 
 // The language list is a listbox, not a native select: the pill opens it and
 // the row is clicked, as the reader does it.
-async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
-  const name = languages.find((l) => l.code === code)?.name ?? code;
-  await user.click(screen.getByRole("combobox", { name: "Answer language" }));
-  await user.click(screen.getByRole("option", { name }));
-}
-
-/**
- * Streams the given SSE frames one chunk at a time. A fake that returned the
- * whole body at once would let a component that waits for the end pass, and the
- * symptom in the real app is an answer that appears only when it is finished.
- */
-function streamFrames(frames: string[], status = 200) {
-  const encoder = new TextEncoder();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => ({
-      ok: status >= 200 && status < 300,
-      status,
-      body: {
-        getReader() {
-          let i = 0;
-          return {
-            async read() {
-              if (i >= frames.length) return { done: true, value: undefined };
-              return { done: false, value: encoder.encode(frames[i++]) };
-            },
-          };
-        },
-      },
-    })),
-  );
-}
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
-
 afterEach(() => {
   vi.unstubAllGlobals();
   // The composer's language survives a reload now, so it survives a test too.
@@ -52,18 +17,6 @@ afterEach(() => {
 // mounts the real app: StrictMode runs each effect twice, and a component
 // that only tolerates a single run passes here while coming back empty on a
 // real reload.
-async function ask(text: string) {
-  const user = userEvent.setup();
-  render(
-    <StrictMode>
-      <Ask />
-    </StrictMode>,
-  );
-  await user.type(screen.getByLabelText("Question"), text);
-  await user.click(screen.getByRole("button", { name: "Ask" }));
-  return user;
-}
-
 // The pane is shut on an Analyst turn, and `ask` asks as an Analyst — that is
 // the default the composer opens with. A test that wants the pane says so, by
 // pressing the same chip the reader presses.

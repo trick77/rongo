@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { shortSha, splitPath } from "./paths";
+import { useLoaded } from "./hooks";
+import { fetchJSON } from "./http";
 import { useEscape, useFocusOnOpen, useTabTrap } from "./dialog";
 import { useBackdropDismiss } from "./dismiss";
 import { highlightLines, languageForPath } from "./highlight";
@@ -29,11 +32,6 @@ export function isCommit(c: SourceRef): boolean {
   return c.kind === "commit";
 }
 
-type Loaded =
-  | { state: "loading" }
-  | { state: "error"; message: string }
-  | { state: "ready"; sha: string; branch: string; lines: string[] };
-
 /** How many lines of context sit above the cited range when the viewer opens.
  * Enough to see the enclosing declaration, not enough to lose the range. */
 const contextAbove = 3;
@@ -58,7 +56,6 @@ export default function SourceView({
    */
   endpoint?: string;
 }) {
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
@@ -78,35 +75,14 @@ export default function SourceView({
   useEscape(onClose);
   useTabTrap(dialog);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoaded({ state: "loading" });
-    (async () => {
-      try {
-        const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
-        const res = await fetch(`${endpoint}?${q}`);
-        if (cancelled) return;
-        if (!res.ok) {
-          // The server's message is written for the reader (not in the
-          // checkout, binary, too large); a bare status is not.
-          const message = (await res.text()).trim() || `The server answered with ${res.status}.`;
-          if (!cancelled) setLoaded({ state: "error", message });
-          return;
-        }
-        const file = await res.json();
-        if (cancelled) return;
-        const content: string = file.content ?? "";
-        const lines = content.split("\n");
-        // A file ending in a newline has no empty last line to show.
-        if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-        setLoaded({ state: "ready", sha: file.sha ?? "", branch: file.branch ?? source.branch, lines });
-      } catch {
-        if (!cancelled) setLoaded({ state: "error", message: "The connection was lost." });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
+  const [loaded] = useLoaded(async () => {
+    const file = await fetchJSON(`${endpoint}?${q}`);
+    const content: string = file.content ?? "";
+    const lines = content.split("\n");
+    // A file ending in a newline has no empty last line to show.
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+    return { sha: (file.sha ?? "") as string, branch: (file.branch ?? source.branch) as string, lines };
   }, [source, endpoint]);
 
   // Once the file is there, the cited range comes into view with a little
@@ -119,11 +95,9 @@ export default function SourceView({
       anchor.current?.scrollIntoView?.({ block: "start", inline: "start" });
   }, [loaded.state, view]);
 
-  const slash = source.path.lastIndexOf("/");
-  const dir = slash >= 0 ? source.path.slice(0, slash + 1) : "";
-  const base = source.path.slice(slash + 1);
+  const { dir, base } = splitPath(source.path);
   const anchorLine = Math.max(source.start_line - contextAbove, 1);
-  const shortSha = (loaded.state === "ready" ? loaded.sha : source.sha ?? "").slice(0, 7);
+  const sha = shortSha(loaded.state === "ready" ? loaded.sha : source.sha);
   const branch = loaded.state === "ready" ? loaded.branch : source.branch;
   // A citation without its own commit is read at the commit the file was
   // last indexed at, which can be newer than the answer. If the file has
@@ -170,7 +144,7 @@ export default function SourceView({
               all in the citation list under the answer as well. */}
           <span className="ml-auto hidden shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint sm:flex">
             <span className="rounded-full border border-border px-2 py-px">{branch}</span>
-            {shortSha && <span className="rounded-full border border-border px-2 py-px">{shortSha}</span>}
+            {sha && <span className="rounded-full border border-border px-2 py-px">{sha}</span>}
             {/* No range on a file opened whole from a commit view. */}
             {source.end_line >= source.start_line && (
               <span>

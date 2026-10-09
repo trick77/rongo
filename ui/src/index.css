@@ -472,10 +472,11 @@ body {
   z-index: 30;
 }
 
-/* A streaming answer carries the `streaming` class for the text fade
-   (markdown.tsx). It used to draw a blinking caret on its last block as well;
-   that is gone - the fade already says where the text ends, and a cursor on a
-   page nobody types into read as an invitation to. */
+/* A streaming answer carries the `streaming` class, which nothing here styles:
+   the text fade is Markdown's own (its fade prop). It used to draw a blinking
+   caret on its last block as well; that is gone - the fade already says where
+   the text ends, and a cursor on a page nobody types into read as an
+   invitation to. */
 
 /* What a step found, under its label in the activity timeline: spans the
    label and duration columns of the steps grid, and reads a size down. */

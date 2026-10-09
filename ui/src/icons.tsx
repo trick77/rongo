@@ -19,7 +19,7 @@
 export function Chevron({ open = false, up = false }: { open?: boolean; up?: boolean }) {
   return (
     <svg
-      className={"chev inline-block h-3 w-3 transition-transform " + (open ? (up ? "-rotate-90" : "rotate-90") : "")}
+      className={"inline-block h-3 w-3 transition-transform " + (open ? (up ? "-rotate-90" : "rotate-90") : "")}
       viewBox="0 0 12 12"
       aria-hidden="true"
     >

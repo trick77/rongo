@@ -1,4 +1,5 @@
 import { StrictMode } from "react";
+import { ev, streamFrames } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,33 +12,6 @@ import { storedTurn } from "./turns";
  * the turn carries it as a chip, and the record brings it back on a reload
  * for as long as the rule exists.
  */
-
-const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
-
-function streamFrames(frames: string[]) {
-  const encoder = new TextEncoder();
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string) => {
-      if (String(url).startsWith("/api/threads/")) return { ok: true, status: 200, json: async () => [] };
-      return {
-        ok: true,
-        status: 200,
-        body: {
-          getReader() {
-            let i = 0;
-            return {
-              async read() {
-                if (i >= frames.length) return { done: true, value: undefined };
-                return { done: false, value: encoder.encode(frames[i++]) };
-              },
-            };
-          },
-        },
-      };
-    }),
-  );
-}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -54,7 +28,7 @@ describe("memory in the thread", () => {
       ev("token", { text: 'Noted: "Never draw flowchart diagrams."' }),
       ev("citations", []),
       ev("done", { message_id: 5 }),
-    ]);
+    ], { threads: [] });
     const user = userEvent.setup();
     render(
       <StrictMode>
@@ -78,7 +52,7 @@ describe("memory in the thread", () => {
       ev("token", { text: 'Forgotten: "Keep it short."' }),
       ev("citations", []),
       ev("done", { message_id: 5 }),
-    ]);
+    ], { threads: [] });
     const user = userEvent.setup();
     render(
       <StrictMode>
@@ -101,7 +75,7 @@ describe("memory in the thread", () => {
       ev("token", { text: 'Noted: "Never draw flowchart diagrams".' }),
       ev("citations", []),
       ev("done", { message_id: 5, sourceless: true }),
-    ]);
+    ], { threads: [] });
     const user = userEvent.setup();
     render(
       <StrictMode>
