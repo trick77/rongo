@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/trick77/rongo/internal/projects"
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // MaxRows caps a reader's rules. Past it a new rule is refused with its own
@@ -115,7 +116,7 @@ func (s *Store) List(ctx context.Context, subject string) ([]Row, error) {
 		if err := rows.Scan(&r.ID, &r.Text, &r.Scope, &created, &r.ThreadID); err != nil {
 			return nil, fmt.Errorf("scan memory: %w", err)
 		}
-		r.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", created)
+		r.CreatedAt = sqlutil.ParseStamp(created)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -281,12 +282,12 @@ func deleteRows(ctx context.Context, tx *sql.Tx, subject string, ids []int64) ([
 	var goneIDs []int64
 	for _, id := range ids {
 		var text string
-		err := tx.QueryRowContext(ctx, `DELETE FROM memories WHERE id = ? AND user_subject = ? RETURNING text`, id, subject).Scan(&text)
-		if err == sql.ErrNoRows {
-			continue
-		}
+		found, err := sqlutil.ScanOne(tx.QueryRowContext(ctx, `DELETE FROM memories WHERE id = ? AND user_subject = ? RETURNING text`, id, subject), &text)
 		if err != nil {
 			return nil, nil, fmt.Errorf("delete memory: %w", err)
+		}
+		if !found {
+			continue
 		}
 		gone = append(gone, text)
 		goneIDs = append(goneIDs, id)
@@ -298,14 +299,7 @@ func deleteRows(ctx context.Context, tx *sql.Tx, subject string, ids []int64) ([
 // theirs — the caller answers the same for a rule that is someone else's.
 func (s *Store) Remove(ctx context.Context, subject string, id int64) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM memories WHERE id = ? AND user_subject = ?`, id, subject)
-	if err != nil {
-		return false, fmt.Errorf("delete memory: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return sqlutil.Affected(res, err, "delete memory")
 }
 
 // Sanitize makes a rule safe for the prompt: one line, no fence, no heading

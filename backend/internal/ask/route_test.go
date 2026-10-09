@@ -498,7 +498,7 @@ func TestRouteDoesNotAskWhichRepositoryWhenTheyDependOnEachOther(t *testing.T) {
 // the naming call reads the repository's strongest code rather than whichever
 // module happened to come first.
 func TestRepoCandidatesUnionTheHitsBestFirst(t *testing.T) {
-	got := repoCandidates([]Candidate{
+	got := RepoCandidates([]Candidate{
 		{Repo: "peeq", ModuleKey: "a", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}, {ChunkID: 2, Score: 0.30}}},
 		{Repo: "loom", ModuleKey: "c", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 4, Score: 0.50}}},
 		{Repo: "peeq", ModuleKey: "b", Score: 0.55, Hits: []retrieve.Hit{{ChunkID: 3, Score: 0.55}}},
@@ -529,7 +529,7 @@ func TestRepoCandidatesCapAtFourSoTheAllEntryFits(t *testing.T) {
 	}
 	// The regrouping itself keeps every repository — the dependency check has
 	// to see all of them — and only the card is cut.
-	all := repoCandidates(cs)
+	all := RepoCandidates(cs)
 	if len(all) != 9 {
 		t.Errorf("regrouped to %d repositories, want all 9: a capped list hides manifest edges from Related", len(all))
 	}
@@ -569,7 +569,7 @@ func shopMap(t *testing.T) projects.Map {
 // of option AGENTS.md says an Analyst can always tell apart.
 func TestProjectCandidatesFoldOneProductIntoOneButton(t *testing.T) {
 	pm := shopMap(t)
-	repos := repoCandidates([]Candidate{
+	repos := RepoCandidates([]Candidate{
 		{Repo: "shop-backend", ModuleKey: "checkout", Score: 0.60, Hits: []retrieve.Hit{{ChunkID: 1, Score: 0.60}}},
 		{Repo: "legacy-crm", ModuleKey: "crm", Score: 0.55, Hits: []retrieve.Hit{{ChunkID: 2, Score: 0.55}}},
 		{Repo: "shop-ui", ModuleKey: "cart", Score: 0.50, Hits: []retrieve.Hit{{ChunkID: 3, Score: 0.50}}},
@@ -610,7 +610,7 @@ func TestProjectCandidatesFoldOneProductIntoOneButton(t *testing.T) {
 //
 // anyDependency hands a candidate's Repo straight to repodeps.AnyDependency,
 // which joins repo_deps on the repository name. A project name has no rows there, so folding
-// inside repoCandidates would lose every go.mod edge for repositories that
+// inside RepoCandidates would lose every go.mod edge for repositories that
 // belong to a multi-repo project — and no measurement would catch it, because
 // the eval corpus is one project per repository, where the two names are the
 // same string.
@@ -620,9 +620,9 @@ func TestRepoCandidatesStayRepositoryGrainedForTheManifestCheck(t *testing.T) {
 		{Repo: "shop-ui", ModuleKey: "cart", Score: 0.50},
 	}
 
-	for _, c := range repoCandidates(cs) {
+	for _, c := range RepoCandidates(cs) {
 		if c.Repo == "shop" {
-			t.Fatal("repoCandidates folded by project — Related would ask repo_deps about a project name and never find an edge")
+			t.Fatal("RepoCandidates folded by project — Related would ask repo_deps about a project name and never find an edge")
 		}
 	}
 }
@@ -681,7 +681,7 @@ func TestTheZeroMapIsTodaysBehaviour(t *testing.T) {
 	if !SpansRepos(spread, 0, none) {
 		t.Error("two repositories with no project declared still span")
 	}
-	if got := projectCandidates(repoCandidates(spread), none); len(got) != 2 ||
+	if got := projectCandidates(RepoCandidates(spread), none); len(got) != 2 ||
 		got[0].Repo != "peeq" || got[1].Repo != "loom" {
 		t.Errorf("projectCandidates = %+v, want the repositories unchanged", got)
 	}

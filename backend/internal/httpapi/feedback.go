@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 
 	"github.com/trick77/rongo/internal/threads"
@@ -52,8 +52,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req feedbackRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Verdict != 1 && req.Verdict != -1 {
@@ -84,18 +83,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteFeedback takes the verdict back.
 func (s *Server) handleDeleteFeedback(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	found, err := s.deps.Threads.ClearFeedback(r.Context(), u.Subject, id)
-	if err != nil {
-		serverError(w, "clear feedback failed", err)
-		return
-	}
-	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.threadAction(w, r, "clear feedback failed", "no such thread", func(ctx context.Context, subject string, id int64) (bool, error) {
+		return s.deps.Threads.ClearFeedback(ctx, subject, id)
+	})
 }

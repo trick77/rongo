@@ -184,7 +184,7 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	}
 	args := []any{}
 	var b strings.Builder
-	b.WriteString(`SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
+	b.WriteString(`SELECT ` + commitColumns + `
 		FROM commits c JOIN repo_state r ON r.name = c.repo`)
 	match := topicMatch(q.Topic)
 	if match != "" {
@@ -222,9 +222,14 @@ func (s *Store) Search(ctx context.Context, q Query) ([]Commit, error) {
 	return out, rows.Err()
 }
 
-// scanCommit reads one commit row as Search and BySHAs project it. The
-// paths column holds newline-joined paths; empty means none, not one empty
-// path.
+// commitColumns is every column a Commit is read from, in the order
+// scanCommit reads them, with commits aliased c and repo_state r. Every
+// SELECT that feeds scanCommit names them through this, so a column added
+// here is added everywhere at once.
+const commitColumns = `c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths`
+
+// scanCommit reads commitColumns off one row. The paths column holds
+// newline-joined paths; empty means none, not one empty path.
 func scanCommit(rows *sql.Rows) (Commit, error) {
 	var c Commit
 	var at, paths string
@@ -253,7 +258,7 @@ func (s *Store) BySHAs(ctx context.Context, repo string, shas []string) ([]Commi
 	args := append([]any{repo}, sqlutil.Args(shas)...)
 	//nolint:gosec // only fixed SQL structure is interpolated (a ?-placeholder list or a literal table name); every value is a bound ? parameter
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT c.id, c.repo, r.branch, c.sha, c.committed_at, c.subject, c.body, c.paths
+		SELECT `+commitColumns+`
 		FROM commits c JOIN repo_state r ON r.name = c.repo
 		WHERE c.repo = ? AND c.sha IN (`+sqlutil.Placeholders(len(shas))+`)`, args...)
 	if err != nil {

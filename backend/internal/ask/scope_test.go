@@ -32,6 +32,41 @@ func bothReposSources() []Source {
 	}
 }
 
+// TestRepoSetFiltersKeepOrderDuplicatesAndNil pins the three helpers every
+// repository-set filter is written with. Order is the question's, duplicates
+// pass through keepIn and dropIn untouched (ResolveRepos can name a library
+// twice), and no match is nil, never an empty slice: a Scope field serialised
+// from it reads null today and must go on doing so.
+func TestRepoSetFiltersKeepOrderDuplicatesAndNil(t *testing.T) {
+	pin := []string{"peeq", "loom"}
+	named := []string{"rongo", "loom", "peeq", "loom"}
+
+	if got := keepIn(named, pin); !slices.Equal(got, []string{"loom", "peeq", "loom"}) {
+		t.Errorf("keepIn = %q", got)
+	}
+	if got := dropIn(named, pin); !slices.Equal(got, []string{"rongo"}) {
+		t.Errorf("dropIn = %q", got)
+	}
+	if got := keepIn([]string{"rongo"}, pin); got != nil {
+		t.Errorf("keepIn with no match = %#v, want nil", got)
+	}
+	if got := dropIn([]string{"peeq"}, pin); got != nil {
+		t.Errorf("dropIn with no match = %#v, want nil", got)
+	}
+	if got := keepIn(nil, pin); got != nil {
+		t.Errorf("keepIn of nothing = %#v, want nil", got)
+	}
+
+	// distinct keeps the first of each and judges nothing about the names:
+	// the callers that must drop an empty repository name do so themselves.
+	if got := distinct([]string{"peeq", "", "loom", "peeq", "", "loom"}); !slices.Equal(got, []string{"peeq", "", "loom"}) {
+		t.Errorf("distinct = %q", got)
+	}
+	if got := distinct(nil); got != nil {
+		t.Errorf("distinct of nothing = %#v, want nil", got)
+	}
+}
+
 func TestAnswerDoesNotPromiseToCoverARepositoryWithNoSources(t *testing.T) {
 	// A named repository can be indexed, be searched on its own and still
 	// return nothing for this question. "Cover every one of them" would then

@@ -140,7 +140,6 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	auth.ClearSessionCookie(w, s.deps.CookieSecure)
-	w.Header().Set("Content-Type", "application/json")
 	// Not "/": the provider's session is untouched by this, so landing on the
 	// app root would auto-redirect to the provider, get a token without a
 	// prompt, and sign the user straight back in — a logout button that visibly
@@ -155,5 +154,5 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		// lands on its sign-in page, which is the visible signed-out state.
 		target = "/oauth/sign_out"
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"redirect_url": target})
+	writeJSON(w, map[string]string{"redirect_url": target})
 }

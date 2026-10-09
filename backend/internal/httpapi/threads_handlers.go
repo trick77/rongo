@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,11 +15,7 @@ import (
 // handleThreads answers one page of the reader's threads: the rail asks for
 // 30, the Threads page for 50 at a time and then the page after, by cursor.
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := requireUser(w, r)
+	u, ok := s.reader(w, r)
 	if !ok {
 		return
 	}
@@ -60,11 +56,7 @@ func listLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 // handleSearchThreads answers the Threads page's search box: every thread of
 // the reader's whose title or messages match, title hits first.
 func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := requireUser(w, r)
+	u, ok := s.reader(w, r)
 	if !ok {
 		return
 	}
@@ -160,8 +152,7 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	// Capped like every other body this package reads: a title is a line of
 	// text, and one that is not would be buffered here and then shipped with
 	// the list on every load of the rail.
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	title := strings.TrimSpace(req.Title)
@@ -177,12 +168,7 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
-	if err != nil {
-		serverError(w, "rename thread failed", err)
-		return
-	}
-	if !renamed {
-		http.Error(w, "no such thread", http.StatusNotFound)
+	if !actionOutcome(w, renamed, err, "rename thread failed", "no such thread") {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -194,12 +180,7 @@ func (s *Server) handleDeleteThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleted, err := s.deps.Threads.Delete(r.Context(), u.Subject, id)
-	if err != nil {
-		serverError(w, "delete thread failed", err)
-		return
-	}
-	if !deleted {
-		http.Error(w, "no such thread", http.StatusNotFound)
+	if !actionOutcome(w, deleted, err, "delete thread failed", "no such thread") {
 		return
 	}
 	// Everything else the thread left behind, and only once the delete has
@@ -226,20 +207,9 @@ func (s *Server) handleUnstarThread(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetThreadStarred(w http.ResponseWriter, r *http.Request, starred bool) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	found, err := s.deps.Threads.SetStarred(r.Context(), u.Subject, id, starred)
-	if err != nil {
-		serverError(w, "star thread failed", err)
-		return
-	}
-	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.threadAction(w, r, "star thread failed", "no such thread", func(ctx context.Context, subject string, id int64) (bool, error) {
+		return s.deps.Threads.SetStarred(ctx, subject, id, starred)
+	})
 }
 
 // threadTarget resolves the reader and the thread id both single-thread
@@ -247,11 +217,7 @@ func (s *Server) handleSetThreadStarred(w http.ResponseWriter, r *http.Request, 
 // that is not this reader's is never told apart from one that is gone: both
 // end as the 404 the handlers write once the store reports no row.
 func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User, int64, bool) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return auth.User{}, 0, false
-	}
-	u, ok := requireUser(w, r)
+	u, ok := s.reader(w, r)
 	if !ok {
 		return auth.User{}, 0, false
 	}

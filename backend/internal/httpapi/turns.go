@@ -89,10 +89,16 @@ func threadWasDeleted(ctx context.Context) bool {
 // asked to be rid of. ctx is the TURN's context, never the record's: the record
 // outlives the request precisely by dropping the cancellation this reads.
 func recordFailed(ctx context.Context, msg string, err error) {
+	recordLost(ctx, slog.LevelError, msg, err)
+}
+
+// recordLost is recordFailed and recordMissed: the one rule about a deleted
+// thread, at the level the write deserves.
+func recordLost(ctx context.Context, level slog.Level, msg string, err error) {
 	if err == nil || threadWasDeleted(ctx) {
 		return
 	}
-	slog.Error(msg, "err", err)
+	slog.Log(context.Background(), level, msg, "err", err)
 }
 
 // turnStopped reports a turn that ended without an answer, and separates the
@@ -123,10 +129,7 @@ func turnStopped(ctx context.Context, msg string, threadID int64, err error, pro
 // recordMissed is recordFailed for the writes a turn can lose without losing
 // anything a reader needs — a title, the follow-up pills.
 func recordMissed(ctx context.Context, msg string, err error) {
-	if err == nil || threadWasDeleted(ctx) {
-		return
-	}
-	slog.Warn(msg, "err", err)
+	recordLost(ctx, slog.LevelWarn, msg, err)
 }
 
 // claims is the clarifications being answered right now. A card is closed by

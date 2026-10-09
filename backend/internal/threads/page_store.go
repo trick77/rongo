@@ -3,9 +3,10 @@ package threads
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/trick77/rongo/internal/sqlutil"
 )
 
 // The rail asks for 30, the Threads page for 50 at a time; nothing needs
@@ -60,34 +61,26 @@ func (s *Store) ListPage(ctx context.Context, subject string, opts ListOptions) 
 	// The cursor is resolved to the row number here, owner-checked, and never
 	// leaves: `id < ?` is the whole of the paging, since a thread's row id
 	// only ever grows with its age.
-	var after int64
+	where, args := ` WHERE user_subject = ?`, []any{subject}
 	if opts.Cursor != "" {
-		err := s.db.QueryRowContext(ctx,
-			`SELECT id FROM threads WHERE public_id = ? AND user_subject = ?`, opts.Cursor, subject).Scan(&after)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ThreadPage{Items: []Thread{}}, nil
-		}
+		var after int64
+		found, err := sqlutil.ScanOne(s.db.QueryRowContext(ctx,
+			`SELECT id FROM threads WHERE public_id = ? AND user_subject = ?`, opts.Cursor, subject), &after)
 		if err != nil {
 			return ThreadPage{}, fmt.Errorf("resolve cursor: %w", err)
 		}
+		if !found {
+			return ThreadPage{Items: []Thread{}}, nil
+		}
+		where += ` AND id < ?`
+		args = append(args, after)
 	}
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	starred := ""
 	if opts.StarredOnly {
-		starred = " AND starred = 1"
+		where += ` AND starred = 1`
 	}
-	if after > 0 {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT `+threadColumns+` FROM threads
-			WHERE user_subject = ? AND id < ?`+starred+` ORDER BY id DESC LIMIT ?`, subject, after, limit)
-	} else {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT `+threadColumns+` FROM threads
-			WHERE user_subject = ?`+starred+` ORDER BY id DESC LIMIT ?`, subject, limit)
-	}
+	//nolint:gosec // only fixed SQL structure is interpolated (the column list and the predicates above); every value is a bound ? parameter
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+threadColumns+` FROM threads`+where+` ORDER BY id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return ThreadPage{}, fmt.Errorf("list threads: %w", err)
 	}
@@ -202,13 +195,9 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	defer func() { _ = content.Close() }()
 	seen := map[int64]bool{}
 	for content.Next() {
-		var (
-			t       Thread
-			created string
-			settled bool
-			snippet string
-		)
-		if err := content.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created, &t.Starred, &snippet); err != nil {
+		var snippet string
+		t, err := scanThread(content, &snippet)
+		if err != nil {
 			return nil, fmt.Errorf("scan hit: %w", err)
 		}
 		if seen[t.ID] {
@@ -222,8 +211,6 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 		if len(hits) >= limit {
 			continue
 		}
-		t.TitlePending = !settled
-		t.CreatedAt = parseStamp(created)
 		hits = append(hits, Hit{Thread: t, Snippet: snippet})
 	}
 	if err := content.Err(); err != nil {
@@ -245,24 +232,37 @@ func (s *Store) Search(ctx context.Context, subject, query string, limit int) ([
 	return hits, nil
 }
 
-// threadColumns is the list's six columns, in the order scanThreads reads
-// them. Every SELECT that feeds scanThreads names them through this, so a
-// column added here is added everywhere at once — the scan is positional and
-// a missing column fails at run time, not at compile time.
+// threadColumns is the list's six columns, in the order scanThread reads
+// them. Every SELECT that feeds scanThread names them through this, or spells
+// them out in this order under an alias, so a column added here is added
+// everywhere at once — the scan is positional and a missing column fails at
+// run time, not at compile time.
 const threadColumns = "id, public_id, title, title_settled, created_at, starred"
+
+// scanThread reads threadColumns off one row, plus extra, and derives the
+// fields a Thread carries beside its columns. Shared is the caller's: it
+// comes from another query.
+func scanThread(row sqlutil.Scanner, extra ...any) (Thread, error) {
+	var t Thread
+	var created string
+	var settled bool
+	dest := []any{&t.ID, &t.PublicID, &t.Title, &settled, &created, &t.Starred}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
+		return Thread{}, err
+	}
+	t.TitlePending = !settled
+	t.CreatedAt = sqlutil.ParseStamp(created)
+	return t, nil
+}
 
 // scanThreads reads threadColumns off every row.
 func scanThreads(rows *sql.Rows) ([]Thread, error) {
 	out := []Thread{}
 	for rows.Next() {
-		var t Thread
-		var created string
-		var settled bool
-		if err := rows.Scan(&t.ID, &t.PublicID, &t.Title, &settled, &created, &t.Starred); err != nil {
+		t, err := scanThread(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan thread: %w", err)
 		}
-		t.TitlePending = !settled
-		t.CreatedAt = parseStamp(created)
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {

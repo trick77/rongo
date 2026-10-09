@@ -327,7 +327,7 @@ func (p *Pipeline) Run(ctx context.Context, question string, audience Audience, 
 		// follow-up, and the one that named a repository the thread left
 		// behind — falls back to the whole pin, because the alternative is an
 		// empty restriction, which means the whole corpus.
-		if narrowed := intersect(known, pin); len(narrowed) > 0 {
+		if narrowed := keepIn(known, pin); len(narrowed) > 0 {
 			known = narrowed
 		} else {
 			known = pin
@@ -505,15 +505,13 @@ func looseOf(known, covered []string, pm projects.Map) []string {
 
 // hitRepoNames is the repositories the search hits came from, deduplicated.
 func hitRepoNames(hits []retrieve.Hit) []string {
-	seen := map[string]bool{}
-	var out []string
+	var names []string
 	for _, h := range hits {
-		if h.Repo != "" && !seen[h.Repo] {
-			seen[h.Repo] = true
-			out = append(out, h.Repo)
+		if h.Repo != "" {
+			names = append(names, h.Repo)
 		}
 	}
-	return out
+	return distinct(names)
 }
 
 // hitRepos is the repositories a turn's SEARCH HITS came from, deduplicated
@@ -521,16 +519,28 @@ func hitRepoNames(hits []retrieve.Hit) []string {
 // question never asked for, and counting those would name a repository the
 // turn merely passed through.
 func hitRepos(sources []Source) []string {
-	seen := map[string]bool{}
-	var out []string
+	var names []string
 	for _, s := range sources {
-		if s.Hop != 0 || s.Repo == "" || seen[s.Repo] {
-			continue
+		if s.Hop == 0 && s.Repo != "" {
+			names = append(names, s.Repo)
 		}
-		seen[s.Repo] = true
-		out = append(out, s.Repo)
 	}
+	out := distinct(names)
 	sort.Strings(out)
+	return out
+}
+
+// distinct is names each once, first occurrence kept, in the order given.
+// Nothing to keep is nil, never an empty slice.
+func distinct(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	var out []string
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
 	return out
 }
 
@@ -564,17 +574,12 @@ func withoutPrior(texts []string, prior string) []string {
 // silently dropped half of what was asked about reads exactly like an answer
 // that covered it.
 func outsideThePin(named, pin []string) []string {
-	if len(pin) == 0 || len(named) == 0 {
+	// No pin is the whole corpus, so nothing is outside it — and dropIn over
+	// an empty set would say every named repository is.
+	if len(pin) == 0 {
 		return nil
 	}
-	in := setOf(pin)
-	var out []string
-	for _, n := range named {
-		if !in[n] {
-			out = append(out, n)
-		}
-	}
-	return out
+	return dropIn(named, pin)
 }
 
 // setOf is names as a membership set.
@@ -586,13 +591,26 @@ func setOf(names []string) map[string]bool {
 	return set
 }
 
-// intersect is the names in both, in the order the question named them — the
-// thread narrowing further inside what it already carries.
-func intersect(named, pin []string) []string {
-	in := setOf(pin)
+// keepIn is the names that are in the set, in the order and multiplicity
+// given. Nothing kept is nil, never an empty slice.
+func keepIn(names, set []string) []string {
+	in := setOf(set)
 	var out []string
-	for _, n := range named {
+	for _, n := range names {
 		if in[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// dropIn is the names that are not in the set, in the order and multiplicity
+// given. Nothing left is nil, never an empty slice.
+func dropIn(names, set []string) []string {
+	in := setOf(set)
+	var out []string
+	for _, n := range names {
+		if !in[n] {
 			out = append(out, n)
 		}
 	}
@@ -624,15 +642,7 @@ func (p *Pipeline) unresolved(ctx context.Context, missing []string, goneFormat 
 // the order want holds them. A set comparison, not a count: a library folded
 // into two products is one repository named twice, never one missing.
 func missingRepos(want, resolved []string) []string {
-	have := setOf(resolved)
-	var out []string
-	for _, w := range want {
-		if !have[w] {
-			have[w] = true
-			out = append(out, w)
-		}
-	}
-	return out
+	return dropIn(distinct(want), resolved)
 }
 
 // describeProjects fills in the two project fields of a scope: which projects

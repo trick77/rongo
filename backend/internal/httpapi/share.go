@@ -57,28 +57,29 @@ func notFound(w http.ResponseWriter) {
 }
 
 func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	sh, err := s.deps.Threads.Share(r.Context(), u.Subject, id)
-	s.writeShare(w, sh, err)
+	s.shareAction(w, r, func(ctx context.Context, subject string, id int64) (threads.Share, error) {
+		return s.deps.Threads.Share(ctx, subject, id)
+	})
 }
 
 func (s *Server) handleShareUpdate(w http.ResponseWriter, r *http.Request) {
+	s.shareAction(w, r, func(ctx context.Context, subject string, id int64) (threads.Share, error) {
+		return s.deps.Threads.RaiseShare(ctx, subject, id)
+	})
+}
+
+// shareAction answers the two endpoints that hand a link back. A thread with
+// no turn, a thread that is not this reader's and a link that was never made
+// are all 404: the record has nothing to share either way, and the three
+// differ only in a detail that would say whose thread it is.
+func (s *Server) shareAction(w http.ResponseWriter, r *http.Request,
+	fn func(ctx context.Context, subject string, id int64) (threads.Share, error)) {
+
 	u, id, ok := s.threadTarget(w, r)
 	if !ok {
 		return
 	}
-	sh, err := s.deps.Threads.RaiseShare(r.Context(), u.Subject, id)
-	s.writeShare(w, sh, err)
-}
-
-// writeShare answers the two endpoints that hand a link back. A thread with no
-// turn, a thread that is not this reader's and a link that was never made are
-// all 404: the record has nothing to share either way, and the three differ
-// only in a detail that would say whose thread it is.
-func (s *Server) writeShare(w http.ResponseWriter, sh threads.Share, err error) {
+	sh, err := fn(r.Context(), u.Subject, id)
 	switch {
 	case err == nil:
 	case errors.Is(err, threads.ErrNoShare):
@@ -98,28 +99,13 @@ func (s *Server) writeShare(w http.ResponseWriter, sh threads.Share, err error) 
 }
 
 func (s *Server) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
-	u, id, ok := s.threadTarget(w, r)
-	if !ok {
-		return
-	}
-	revoked, err := s.deps.Threads.RevokeShare(r.Context(), u.Subject, id)
-	if err != nil {
-		serverError(w, "revoke share failed", err)
-		return
-	}
-	if !revoked {
-		http.Error(w, "no such share", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	s.threadAction(w, r, "revoke share failed", "no such share", func(ctx context.Context, subject string, id int64) (bool, error) {
+		return s.deps.Threads.RevokeShare(ctx, subject, id)
+	})
 }
 
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	u, ok := requireUser(w, r)
+	u, ok := s.reader(w, r)
 	if !ok {
 		return
 	}
@@ -229,24 +215,40 @@ var errNoThreads = errors.New("threads unavailable")
 // an unknown token gets. A reader can check every claim in front of them and
 // reach nothing else.
 func (s *Server) handlePublicShareSource(w http.ResponseWriter, r *http.Request) {
-	noindex(w)
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	q := r.URL.Query()
 	repo, path, sha := q.Get("repo"), q.Get("path"), q.Get("sha")
-	cited, err := s.deps.Threads.SharedCitation(r.Context(), r.PathValue("token"), repo, path, sha)
-	if err != nil {
-		serverError(w, "read shared citation failed", err)
-		return
-	}
-	if !cited {
-		notFound(w)
+	ok := s.sharedCited(w, r, "read shared citation failed", func(ctx context.Context, token string) (bool, error) {
+		return s.deps.Threads.SharedCitation(ctx, token, repo, path, sha)
+	})
+	if !ok {
 		return
 	}
 	// The link cites this triple, so a path dropped from the index since is
 	// read at its commit. A citation older than the commit travelling with it
 	// has no sha and reads the file where it was last indexed.
 	s.serveSource(w, r, repo, path, sha, alwaysCited)
+}
+
+// sharedCited is the public citation routes' gate: noindex, no record is a
+// 503, and the token must cover a turn citing what is asked for, or the
+// answer is the one 404 an unknown token gets. check asks the record with the
+// link's token; its failure is a 500 logged under logMsg.
+func (s *Server) sharedCited(w http.ResponseWriter, r *http.Request, logMsg string,
+	check func(ctx context.Context, token string) (bool, error)) bool {
+
+	noindex(w)
+	if s.deps.Threads == nil {
+		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	cited, err := check(r.Context(), r.PathValue("token"))
+	if err != nil {
+		serverError(w, logMsg, err)
+		return false
+	}
+	if !cited {
+		notFound(w)
+		return false
+	}
+	return true
 }

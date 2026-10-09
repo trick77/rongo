@@ -1,6 +1,7 @@
-// Package sqlutil holds the few string helpers every store builds SQL with.
-// A leaf on purpose: it imports nothing of rongo's, and no driver, so any
-// package may use it without taking on the database's dependencies.
+// Package sqlutil holds the few helpers every store builds and reads SQL
+// with: placeholders, the one-row read, the matched-a-row tail, the stamp
+// layout. A leaf on purpose: it imports nothing of rongo's, and no driver, so
+// any package may use it without taking on the database's dependencies.
 package sqlutil
 
 import "strings"

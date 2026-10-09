@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -41,4 +42,58 @@ func requireUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}
 	return u, ok
+}
+
+// reader is requireUser for a route that reads or writes the thread record:
+// no record is a 503 before anyone is asked who they are.
+func (s *Server) reader(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
+	if s.deps.Threads == nil {
+		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		return auth.User{}, false
+	}
+	return requireUser(w, r)
+}
+
+// decodeJSON reads a request body into v, or answers 400. Every body this
+// package reads is capped at a megabyte: the largest is a question with its
+// pasted texts, and the rest are a line of text or a verdict.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(v); err != nil {
+		http.Error(w, "malformed request", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// actionOutcome answers for a store call that reports whether it found a row:
+// an error is a 500 logged under logMsg, no row is a 404 with notFoundMsg, and
+// a row is the caller's to finish. A thread that is not this reader's and one
+// that is gone are the same "no row", so the 404 never tells them apart.
+func actionOutcome(w http.ResponseWriter, found bool, err error, logMsg, notFoundMsg string) bool {
+	if err != nil {
+		serverError(w, logMsg, err)
+		return false
+	}
+	if !found {
+		http.Error(w, notFoundMsg, http.StatusNotFound)
+		return false
+	}
+	return true
+}
+
+// threadAction is one owner's action on one thread that answers with no body:
+// resolve the reader and the thread, run the store call, 204 when it found
+// the row. The handlers whose work is only that call go through here.
+func (s *Server) threadAction(w http.ResponseWriter, r *http.Request, logMsg, notFoundMsg string,
+	fn func(ctx context.Context, subject string, id int64) (bool, error)) {
+
+	u, id, ok := s.threadTarget(w, r)
+	if !ok {
+		return
+	}
+	found, err := fn(r.Context(), u.Subject, id)
+	if !actionOutcome(w, found, err, logMsg, notFoundMsg) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

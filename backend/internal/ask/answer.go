@@ -1121,20 +1121,11 @@ func AllReposChoice(lang Language) (title, summary string) {
 // coveredRepos is the named repositories that actually have a source in front
 // of the model, in the order the question named them.
 func coveredRepos(known []string, sources []Source) []string {
-	if len(known) == 0 {
-		return nil
-	}
-	has := make(map[string]bool, len(sources))
+	repos := make([]string, 0, len(sources))
 	for _, s := range sources {
-		has[s.Repo] = true
+		repos = append(repos, s.Repo)
 	}
-	var out []string
-	for _, n := range known {
-		if has[n] {
-			out = append(out, n)
-		}
-	}
-	return out
+	return keepIn(known, repos)
 }
 
 // StructureBlock renders what a project is made of, for the answer prompt.

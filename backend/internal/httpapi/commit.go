@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
 )
 
@@ -26,12 +25,9 @@ type CommitReader interface {
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	repo, sha := q.Get("repo"), q.Get("sha")
-	var cited citedFunc
-	if u, ok := auth.UserFrom(r.Context()); ok && s.deps.Threads != nil {
-		cited = func(ctx context.Context) (bool, error) {
-			return s.deps.Threads.CommitCitedBy(ctx, u.Subject, repo, sha)
-		}
-	}
+	cited := s.ownerCited(r, func(ctx context.Context, subject string) (bool, error) {
+		return s.deps.Threads.CommitCitedBy(ctx, subject, repo, sha)
+	})
 	s.serveCommit(w, r, repo, sha, cited)
 }
 
@@ -39,20 +35,12 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 // pair has to be cited by a turn the link covers, or it is the same 404 an
 // unknown token gets. Same reasoning as handlePublicShareSource.
 func (s *Server) handlePublicShareCommit(w http.ResponseWriter, r *http.Request) {
-	noindex(w)
-	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	q := r.URL.Query()
 	repo, sha := q.Get("repo"), q.Get("sha")
-	cited, err := s.deps.Threads.SharedCommit(r.Context(), r.PathValue("token"), repo, sha)
-	if err != nil {
-		serverError(w, "read shared commit citation failed", err)
-		return
-	}
-	if !cited {
-		notFound(w)
+	ok := s.sharedCited(w, r, "read shared commit citation failed", func(ctx context.Context, token string) (bool, error) {
+		return s.deps.Threads.SharedCommit(ctx, token, repo, sha)
+	})
+	if !ok {
 		return
 	}
 	s.serveCommit(w, r, repo, sha, alwaysCited)
@@ -63,29 +51,20 @@ func (s *Server) serveCommit(w http.ResponseWriter, r *http.Request, repo, sha s
 		http.Error(w, "commit view unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	c, err := s.deps.Commit.Commit(r.Context(), repo, sha)
-	if errors.Is(err, sourceview.ErrNotInLane) && cited != nil {
-		ok, cerr := cited(r.Context())
-		if cerr != nil {
-			serverError(w, "read commit citation failed", cerr)
-			return
-		}
-		if ok {
-			c, err = s.deps.Commit.RecordedCommit(r.Context(), repo, sha)
-		}
-	}
-	switch {
-	case err == nil:
-	case errors.Is(err, sourceview.ErrInvalid):
-		http.Error(w, "malformed commit request", http.StatusBadRequest)
-		return
-	case errors.Is(err, sourceview.ErrNotFound):
-		slog.Info("commit not found", "repo", repo, "sha", sha, "err", err)
-		http.Error(w, "This commit is not in Rongo's checkout.", http.StatusNotFound)
-		return
-	default:
-		serverError(w, "read commit failed", err)
-		return
-	}
-	writeJSON(w, c)
+	serveCited(w, r, cited, citedView[sourceview.Commit]{
+		read: func(ctx context.Context) (sourceview.Commit, error) {
+			return s.deps.Commit.Commit(ctx, repo, sha)
+		},
+		readRecorded: func(ctx context.Context) (sourceview.Commit, error) {
+			return s.deps.Commit.RecordedCommit(ctx, repo, sha)
+		},
+		fromRecord:  func(err error) bool { return errors.Is(err, sourceview.ErrNotInLane) },
+		citationLog: "read commit citation failed",
+		readLog:     "read commit failed",
+		statuses: []errStatus{
+			{err: sourceview.ErrInvalid, status: http.StatusBadRequest, body: "malformed commit request"},
+			{err: sourceview.ErrNotFound, status: http.StatusNotFound, body: "This commit is not in Rongo's checkout.",
+				log: func(err error) { slog.Info("commit not found", "repo", repo, "sha", sha, "err", err) }},
+		},
+	})
 }

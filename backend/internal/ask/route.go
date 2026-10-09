@@ -206,16 +206,11 @@ func DecideWhySpans(all []Candidate, margin float64, related, judged bool, named
 	return decideWhy(all, margin, related, judged, namedRepos, allRepos, roleCanChoose, spans, pm)
 }
 
-// RepoCandidates is the repository-grained regrouping Route asks Related
-// about once SpansRepos is true. Exported for the same reason: the harness
-// must query the same set, or it measures a manifest edge the product sees and
-// it does not.
-func RepoCandidates(cs []Candidate) []Candidate {
-	return repoCandidates(cs)
-}
-
-// repoCandidates regroups module candidates into one entry per repository,
-// best first, for the card that asks WHICH REPOSITORY was meant.
+// RepoCandidates regroups module candidates into one entry per repository,
+// best first, for the card that asks WHICH REPOSITORY was meant. It is the
+// regrouping Route asks Related about once SpansRepos is true, exported for
+// the same reason as Decide: the harness must query the same set, or it
+// measures a manifest edge the product sees and it does not.
 //
 // It takes the candidates worthOffering already kept, so the floor and the
 // test-only drop have run once and are not applied a second time at a
@@ -232,7 +227,7 @@ func RepoCandidates(cs []Candidate) []Candidate {
 // where only the fifth depends on the first would be asked about as four, the
 // edge would go unseen, and the turn would card where AGENTS.md says compose.
 // Route caps to maxRepoCandidates, after Related has seen every one.
-func repoCandidates(cs []Candidate) []Candidate {
+func RepoCandidates(cs []Candidate) []Candidate {
 	index := map[string]int{}
 	var out []Candidate
 	for _, c := range cs {
@@ -258,8 +253,8 @@ func repoCandidates(cs []Candidate) []Candidate {
 // projectCandidates folds the repository-grained regrouping by project, for the
 // card that asks WHICH PRODUCT was meant.
 //
-// It is a SECOND fold rather than a change to repoCandidates, and the
-// separation is load-bearing. Route hands repoCandidates' output to Related,
+// It is a SECOND fold rather than a change to RepoCandidates, and the
+// separation is load-bearing. Route hands RepoCandidates' output to Related,
 // and Related passes each candidate's Repo straight to
 // repodeps.AnyDependency, which joins repo_deps on the repository name. A project name has
 // no rows in that table, so folding one step earlier would lose every go.mod
@@ -931,12 +926,12 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// Past what a card can show, the turn stops here. It pays for neither the
 	// manifest query nor the naming call: the panel prints repository names
 	// the index already carries, and there is no fifth row to write. This is
-	// also why repoCandidates' refusal to cap no longer has to protect the
+	// also why RepoCandidates' refusal to cap no longer has to protect the
 	// manifest check from a hidden fifth repository — with more than four
 	// there is no card left to protect.
 	if spans && distinctProjects(ranked.All, pm) > maxRepoCandidates {
 		_, l.rung = DecideWhy(ranked.All, r.margin, false, false, len(namedRepos), allRepos, true, pm)
-		return Decision{Ask: true, TooBroad: true, Candidates: projectCandidates(repoCandidates(ranked.All), pm)}, l, nil
+		return Decision{Ask: true, TooBroad: true, Candidates: projectCandidates(RepoCandidates(ranked.All), pm)}, l, nil
 	}
 
 	// Over EVERY repository when the repository rung is live, not over the
@@ -947,7 +942,7 @@ func (r *Router) route(ctx context.Context, question string, audience Audience, 
 	// where AGENTS.md says compose. Related skips same-repo pairs, so
 	// one entry per repository is fewer queries than the module list, not
 	// more. The cap is applied to the card alone, below.
-	repos := repoCandidates(ranked.All)
+	repos := RepoCandidates(ranked.All)
 	cs := ranked.Capped
 	depsOver := cs
 	if spans {
