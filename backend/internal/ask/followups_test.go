@@ -55,10 +55,7 @@ func followupsLLM(t *testing.T, reply string, status int) (*llm.Client, *followu
 			w.WriteHeader(status)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
-		})
+		writeCompletion(w, reply)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), up

@@ -2,15 +2,10 @@ package ask
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/llm"
 	"github.com/trick77/rongo/internal/memory"
 	"github.com/trick77/rongo/internal/retrieve"
 )
@@ -72,46 +67,10 @@ func TestUnderstand_readsTheMemoryFieldsToleratingStringIds(t *testing.T) {
 	}
 }
 
-// memoryUpstream answers the understanding call with the directive and
-// counts the streamed answer calls, so a test can say the turn made none.
-func memoryUpstream(t *testing.T, understanding string, answerTokens ...string) (*llm.Client, *int, *string) {
-	t.Helper()
-	var streams int
-	var system string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Stream   bool `json:"stream"`
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(body, &req)
-		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
-			return
-		}
-		streams++
-		for _, m := range req.Messages {
-			if m.Role == "system" {
-				system = m.Content
-			}
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, answerTokens, "")
-	}))
-	t.Cleanup(srv.Close)
-	return fakeLLM(t, srv), &streams, &system
-}
-
 func TestPipeline_aDirectiveAloneIsRememberedAndAnsweredWithoutAModel(t *testing.T) {
 	db := gatherDB(t)
-	c, streams, _ := memoryUpstream(t, flowchartDirective, "never")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c, up := twoStep(t, flowchartDirective, "never")
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 	var got memory.Directive
 	var steps []string
 	details := map[string]map[string]any{}
@@ -133,8 +92,8 @@ func TestPipeline_aDirectiveAloneIsRememberedAndAnsweredWithoutAModel(t *testing
 	if got.Text != "Never draw flowchart diagrams." || len(got.Replaces) != 1 {
 		t.Fatalf("directive handed to the caller = %+v", got)
 	}
-	if *streams != 0 {
-		t.Fatalf("%d answer calls, want none for a turn that was only a rule", *streams)
+	if up.streams != 0 {
+		t.Fatalf("%d answer calls, want none for a turn that was only a rule", up.streams)
 	}
 	if answer.Scope.Intent != IntentMemory || len(answer.Sources) != 0 {
 		t.Fatalf("answer = %+v", answer)
@@ -159,9 +118,9 @@ func TestPipeline_aDirectiveBesideAQuestionIsAppliedToThatSameAnswer(t *testing.
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
 	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams.","memory_marker":"never"}`
-	c, streams, system := memoryUpstream(t, reply, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c, up := twoStep(t, reply, "So [1].")
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
 		return memory.Added{Row: memory.Row{ID: 1, Text: d.Text, ScopeLive: true}}, nil
 	}}
@@ -170,11 +129,11 @@ func TestPipeline_aDirectiveBesideAQuestionIsAppliedToThatSameAnswer(t *testing.
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if *streams != 1 || answer.Scope.Intent != "how" {
-		t.Fatalf("streams = %d, intent = %q: the question must still be answered", *streams, answer.Scope.Intent)
+	if up.streams != 1 || answer.Scope.Intent != "how" {
+		t.Fatalf("streams = %d, intent = %q: the question must still be answered", up.streams, answer.Scope.Intent)
 	}
-	if !strings.Contains(*system, "- Never draw flowchart diagrams.\n") {
-		t.Fatalf("the rule given in the same breath is missing from the prompt:\n%s", *system)
+	if !strings.Contains(up.system, "- Never draw flowchart diagrams.\n") {
+		t.Fatalf("the rule given in the same breath is missing from the prompt:\n%s", up.system)
 	}
 	if answer.Memories != 1 {
 		t.Fatalf("Memories = %d", answer.Memories)
@@ -183,8 +142,8 @@ func TestPipeline_aDirectiveBesideAQuestionIsAppliedToThatSameAnswer(t *testing.
 
 func TestPipeline_aMemoryIntentWithNothingToKeepRunsAsAQuestion(t *testing.T) {
 	db := gatherDB(t)
-	c, streams, _ := memoryUpstream(t, `{"intent":"memory","terms":[],"code_terms":[],"repos":[],"memory":""}`, "x")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c, up := twoStep(t, `{"intent":"memory","terms":[],"code_terms":[],"repos":[],"memory":""}`, "x")
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 
 	// With memory off entirely, and with it on but the model naming no
 	// rule, the intent is dropped and the question searched.
@@ -200,7 +159,7 @@ func TestPipeline_aMemoryIntentWithNothingToKeepRunsAsAQuestion(t *testing.T) {
 			t.Fatalf("answer = %+v", answer)
 		}
 	}
-	if *streams != 0 {
+	if up.streams != 0 {
 		t.Fatalf("nothing found must not call the model")
 	}
 }
@@ -219,7 +178,7 @@ func TestPipeline_aRuleWithoutTheReadersWordForItIsNotKept(t *testing.T) {
 			"memory":"Draw a diagram for the answer.","memory_marker":""}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			c, streams, _ := memoryUpstream(t, reply, "So [1].")
+			c, up := twoStep(t, reply, "So [1].")
 			p := reworkPipeline(t, c)
 			ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
 				t.Fatalf("kept %+v with no word of the reader's saying it lasts", d)
@@ -231,8 +190,8 @@ func TestPipeline_aRuleWithoutTheReadersWordForItIsNotKept(t *testing.T) {
 				t.Fatalf("Run: %v", err)
 			}
 			// What is left is a request for the previous answer drawn.
-			if answer.Scope.Intent != IntentRework || *streams != 1 {
-				t.Errorf("intent = %q, streams = %d; want the previous answer reworked", answer.Scope.Intent, *streams)
+			if answer.Scope.Intent != IntentRework || up.streams != 1 {
+				t.Errorf("intent = %q, streams = %d; want the previous answer reworked", answer.Scope.Intent, up.streams)
 			}
 		})
 	}
@@ -243,8 +202,8 @@ func TestPipeline_aRuleWithoutTheReadersWordForItIsNotKept(t *testing.T) {
 func TestPipeline_theReadersWordKeepsTheRuleWhateverItsCase(t *testing.T) {
 	reply := `{"intent":"memory","terms":[],"code_terms":[],"repos":[],
 		"memory":"Draw a diagram in every answer.","memory_marker":"ab jetzt"}`
-	c, _, _ := memoryUpstream(t, reply)
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c := twoStepUpstream(t, reply)
+	p := newTestPipeline(t, withUpstream(c))
 	var got memory.Directive
 	ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
 		got = d
@@ -314,8 +273,8 @@ func TestKeptRule_readsTheMarkerTheWayTheReaderTypedIt(t *testing.T) {
 // on dropping one.
 func TestPipeline_forgettingNeedsNoMarker(t *testing.T) {
 	reply := `{"intent":"memory","terms":[],"code_terms":[],"repos":[],"memory":"","memory_removes":[3]}`
-	c, _, _ := memoryUpstream(t, reply)
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c := twoStepUpstream(t, reply)
+	p := newTestPipeline(t, withUpstream(c))
 	var got memory.Directive
 	ev := Events{OnMemory: func(d memory.Directive) (memory.Added, error) {
 		got = d
@@ -332,8 +291,8 @@ func TestPipeline_forgettingNeedsNoMarker(t *testing.T) {
 
 func TestPipeline_aFullMemoryRefusesTheRuleAndSaysSo(t *testing.T) {
 	db := gatherDB(t)
-	c, _, _ := memoryUpstream(t, flowchartDirective)
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c := twoStepUpstream(t, flowchartDirective)
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 	var detail map[string]any
 	ev := Events{
 		OnDetail: func(s string, d map[string]any) {
@@ -369,9 +328,9 @@ func TestPipeline_aFailedWriteBesideAQuestionIsATraceLineNotAFailedTurn(t *testi
 	db := gatherDB(t)
 	hitID := seedChunk(t, db, "a.go", 0, 1, 10, "f", "func f() {}")
 	reply := `{"intent":"how","terms":["t"],"code_terms":["f"],"repos":[],"memory":"Never draw flowchart diagrams.","memory_marker":"never"}`
-	c, streams, _ := memoryUpstream(t, reply, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	c, up := twoStep(t, reply, "So [1].")
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}))
 	var detail map[string]any
 	ev := Events{
 		OnDetail: func(s string, d map[string]any) {
@@ -386,8 +345,8 @@ func TestPipeline_aFailedWriteBesideAQuestionIsATraceLineNotAFailedTurn(t *testi
 	if err != nil {
 		t.Fatalf("the question died of an aside: %v", err)
 	}
-	if *streams != 1 || !strings.Contains(answer.Text, "So [1].") {
-		t.Fatalf("streams = %d, text = %q", *streams, answer.Text)
+	if up.streams != 1 || !strings.Contains(answer.Text, "So [1].") {
+		t.Fatalf("streams = %d, text = %q", up.streams, answer.Text)
 	}
 	if detail["refused"] != "failed" {
 		t.Fatalf("detail = %v, want the trace to say the rule was not kept", detail)

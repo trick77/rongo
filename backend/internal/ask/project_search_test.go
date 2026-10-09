@@ -42,9 +42,8 @@ func TestRun_aNamedProjectIsOneSearchOverItsMembers(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			search := &fakeSearch{}
-			p := NewPipeline(twoStepUpstream(t, namingRepos(t, c.named...), "So."), search,
-				NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}),
-				&fakeRouter{projects: libraryMap(t)})
+			p := newTestPipeline(t, withUpstream(twoStepUpstream(t, namingRepos(t, c.named...), "So.")),
+				withSearch(search), withRouter(&fakeRouter{projects: libraryMap(t)}))
 
 			if _, _, err := p.Run(context.Background(), "How?", AudienceDev, LanguageEN, Thread{}, Events{}); err != nil {
 				t.Fatalf("Run: %v", err)
@@ -94,8 +93,8 @@ func TestResumeRepo_aChosenProductIsOneSearch(t *testing.T) {
 // the project map; one turn reads it once.
 func TestRun_readsTheProjectMapOnce(t *testing.T) {
 	router := &fakeRouter{projects: libraryMap(t)}
-	p := NewPipeline(twoStepUpstream(t, namingRepos(t, "shop-ui", "shop-backend", "acme-commons"), "So."),
-		&fakeSearch{}, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), router)
+	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, namingRepos(t, "shop-ui", "shop-backend", "acme-commons"), "So.")),
+		withRouter(router))
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceDev, LanguageEN, Thread{}, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)

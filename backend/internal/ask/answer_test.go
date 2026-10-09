@@ -44,6 +44,16 @@ func writeSSE(w http.ResponseWriter, tokens []string, finishReason string) {
 	_ = fl.Flush()
 }
 
+// writeCompletion answers a non-streaming call with one completion whose
+// message is content; the fake gate endpoints differ in how the content is
+// chosen, not in the frame.
+func writeCompletion(w http.ResponseWriter, content string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
+	})
+}
+
 // streamUpstream streams the given tokens and records the prompt it was sent.
 func streamUpstream(t *testing.T, tokens ...string) (*llm.Client, *string, *int) {
 	t.Helper()

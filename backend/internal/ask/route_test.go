@@ -103,10 +103,7 @@ func testLLM(t *testing.T, fn func(prompt string) string) *llm.Client {
 		mu.Lock()
 		content := fn(prompt)
 		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
-		})
+		writeCompletion(w, content)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv)
@@ -816,10 +813,7 @@ func testLLMWithModel(t *testing.T, fn func(prompt string) string) (*llm.Client,
 		models = append(models, req.Model)
 		content := fn(prompt)
 		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
-		})
+		writeCompletion(w, content)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), &models
@@ -1117,10 +1111,7 @@ func TestBothRoutingCallsRunOnTheCheapLane(t *testing.T) {
 		mu.Lock()
 		models[kind] = req.Model
 		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
-		})
+		writeCompletion(w, reply)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -1182,10 +1173,7 @@ func TestEveryGateCallPinsItsTemperature(t *testing.T) {
 		if strings.Contains(prompt, judgeMarker) {
 			reply = `{"decision":"ask"}`
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},
-		})
+		writeCompletion(w, reply)
 	}))
 	t.Cleanup(srv.Close)
 

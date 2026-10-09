@@ -287,7 +287,7 @@ func TestPipelineSearchesEachNamedRepositoryOnItsOwn(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"peeq", "rongo"}}
 	c := twoStepUpstream(t, twoReposReply, "Both keep a session [1].")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	// When
 	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ in session handling?",
@@ -326,7 +326,7 @@ func TestPipelineCapsWhatAComparisonCarriesOutOfRetrieval(t *testing.T) {
 	}
 	search := &fakeSearch{hits: hits, indexed: []string{"peeq", "rongo", "go-sqlite3"}}
 	c := twoStepUpstream(t, threeReposReply, "x")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(search))
 
 	got, err := p.searchScoped(context.Background(), "q", "", []string{"q"}, "", []string{"peeq", "rongo", "go-sqlite3"}, nil, false)
 	if err != nil {
@@ -351,8 +351,8 @@ func TestPipelineTellsTheRouterWhichRepositoriesWereNamed(t *testing.T) {
 	db := gatherDB(t)
 	router := &fakeRouter{}
 	c := twoStepUpstream(t, twoReposReply, "x")
-	p := NewPipeline(c, &fakeSearch{indexed: []string{"peeq", "rongo"}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), router)
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{indexed: []string{"peeq", "rongo"}}), withRouter(router))
 
 	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ?",
 		AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
@@ -371,8 +371,7 @@ func TestPipelineSaysWhenANamedRepositoryIsNotIndexed(t *testing.T) {
 	db := gatherDB(t)
 	var notices []string
 	c := twoStepUpstream(t, oneMissingReply, "rongo keeps no session [1].")
-	p := NewPipeline(c, &fakeSearch{indexed: []string{"peeq", "rongo"}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(&fakeSearch{indexed: []string{"peeq", "rongo"}}))
 
 	got, _, err := p.Run(context.Background(), "How do loom and rongo differ?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }})
@@ -403,8 +402,7 @@ func TestPipelineSaysNothingWhenEveryNamedRepositoryIsIndexed(t *testing.T) {
 	db := gatherDB(t)
 	var notices []string
 	c := twoStepUpstream(t, twoReposReply, "x")
-	p := NewPipeline(c, &fakeSearch{indexed: []string{"peeq", "rongo"}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db), withSearch(&fakeSearch{indexed: []string{"peeq", "rongo"}}))
 
 	if _, _, err := p.Run(context.Background(), "How do peeq and rongo differ?", AudienceBA, LanguageEN, Thread{},
 		Events{OnNotice: func(text string) { notices = append(notices, text) }}); err != nil {

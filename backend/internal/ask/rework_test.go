@@ -2,11 +2,7 @@ package ask
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -16,35 +12,11 @@ import (
 
 const reworkReply = `{"intent":"rework","terms":[],"code_terms":[],"repos":[]}`
 
-// reworkUpstream is twoStepUpstream with the answer call's prompt recorded:
-// the rework tests are about what the answering model was handed.
-func reworkUpstream(t *testing.T, understanding string) (*llm.Client, *string) {
+// reworkUpstream understands every question as a rework and answers it
+// short; the rework tests read what the answering model was handed.
+func reworkUpstream(t *testing.T) (*llm.Client, *seen) {
 	t.Helper()
-	var prompt string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Stream   bool `json:"stream"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(body, &req)
-		if !req.Stream {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]any{"content": understanding}}},
-			})
-			return
-		}
-		for _, m := range req.Messages {
-			prompt += m.Content + "\n"
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		writeSSE(w, []string{"Kurz: ", "[2]."}, "")
-	}))
-	t.Cleanup(srv.Close)
-	return fakeLLM(t, srv), &prompt
+	return twoStep(t, reworkReply, "Kurz: ", "[2].")
 }
 
 func reworkThread() Thread {
@@ -59,13 +31,10 @@ func reworkThread() Thread {
 
 func reworkPipeline(t *testing.T, c *llm.Client) *Pipeline {
 	t.Helper()
-	search := withSearcher(func(retrieve.Query) ([]retrieve.Hit, error) {
+	return newTestPipeline(t, withUpstream(c), withSearcher(func(retrieve.Query) ([]retrieve.Hit, error) {
 		t.Fatal("a rework must not search")
 		return nil, nil
-	})
-	f := pipelineFakes{router: &fakeRouter{}}
-	search(&f)
-	return NewPipeline(c, f.search, NewGatherer(gatherDB(t), GatherOptions{MaxHops: 1, TokenBudget: 5000}), f.router)
+	}))
 }
 
 // TestRunReworksThePreviousAnswerWithoutSearching: "summarize" is answered
@@ -73,7 +42,7 @@ func reworkPipeline(t *testing.T, c *llm.Client) *Pipeline {
 // answer prompt carries the previous text whole with its markers stripped,
 // and the record's basis is the previous turn's.
 func TestRunReworksThePreviousAnswerWithoutSearching(t *testing.T) {
-	c, prompt := reworkUpstream(t, reworkReply)
+	c, up := reworkUpstream(t)
 	p := reworkPipeline(t, c)
 	var steps []string
 
@@ -90,23 +59,23 @@ func TestRunReworksThePreviousAnswerWithoutSearching(t *testing.T) {
 			t.Errorf("a rework ran %q; steps: %v", s, steps)
 		}
 	}
-	if !strings.Contains(*prompt, "Previous answer:\nA grant is created by NewGrant  and handed out by the HTTP layer .") {
-		t.Errorf("the previous answer, markers stripped, never reached the prompt:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "Previous answer:\nA grant is created by NewGrant  and handed out by the HTTP layer .") {
+		t.Errorf("the previous answer, markers stripped, never reached the prompt:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "flowchart LR") {
-		t.Errorf("the previous answer's fence must stay, it is part of what is reworked:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "flowchart LR") {
+		t.Errorf("the previous answer's fence must stay, it is part of what is reworked:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "Instruction: summarize") {
-		t.Errorf("the instruction never reached the prompt:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "Instruction: summarize") {
+		t.Errorf("the instruction never reached the prompt:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "[2] peeq backend/internal/httpapi/grant.go:5-20") {
-		t.Errorf("the previous turn's sources are not in front of the model:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "[2] peeq backend/internal/httpapi/grant.go:5-20") {
+		t.Errorf("the previous turn's sources are not in front of the model:\n%s", up.prompt())
 	}
-	if strings.Contains(*prompt, "This is a follow-up") {
-		t.Errorf("the follow-up rule forbids restating, which is the whole task:\n%s", *prompt)
+	if strings.Contains(up.prompt(), "This is a follow-up") {
+		t.Errorf("the follow-up rule forbids restating, which is the whole task:\n%s", up.prompt())
 	}
-	if !strings.Contains(*prompt, "written again in another") {
-		t.Errorf("the rework rule is missing:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "written again in another") {
+		t.Errorf("the rework rule is missing:\n%s", up.prompt())
 	}
 	if len(got.Sources) != 2 || got.Sources[1].ChunkID != 2 {
 		t.Errorf("sources = %+v, want the previous turn's", got.Sources)
@@ -145,7 +114,7 @@ func TestRunTreatsAReworkOnAFirstTurnAsAnOrdinaryQuestion(t *testing.T) {
 // nor a fresh search: the turn fails with ErrBasisGone, and the handler says
 // which.
 func TestRunRefusesAReworkWhoseBasisIsGone(t *testing.T) {
-	c, prompt := reworkUpstream(t, reworkReply)
+	c, up := reworkUpstream(t)
 	p := reworkPipeline(t, c)
 	th := reworkThread()
 	th.Sources = th.Sources[:1]
@@ -154,8 +123,8 @@ func TestRunRefusesAReworkWhoseBasisIsGone(t *testing.T) {
 	if !errors.Is(err, ErrBasisGone) {
 		t.Fatalf("err = %v, want ErrBasisGone", err)
 	}
-	if *prompt != "" {
-		t.Errorf("nothing may be answered from a partial basis:\n%s", *prompt)
+	if up.prompt() != "" {
+		t.Errorf("nothing may be answered from a partial basis:\n%s", up.prompt())
 	}
 
 	th.Sources = nil
@@ -189,7 +158,7 @@ func TestRunTreatsAReworkOfAnAnswerWithoutABasisAsAnOrdinaryQuestion(t *testing.
 // alone when its basis did, and the reader is told while it is written, the
 // way a fresh turn tells them — not only after a reload reads the scope.
 func TestReworkOfADocsOnlyBasisSaysSoLive(t *testing.T) {
-	c, _ := reworkUpstream(t, reworkReply)
+	c, _ := reworkUpstream(t)
 	p := reworkPipeline(t, c)
 	th := reworkThread()
 	th.Sources = []Source{{ChunkID: 1, Repo: "peeq", Branch: "master", Path: "README.md",
@@ -213,15 +182,15 @@ func TestReworkOfADocsOnlyBasisSaysSoLive(t *testing.T) {
 // TestReworkIsTheSameLaneRunTakes: the handler's re-explain of a rework row
 // enters through Rework and has to land in the same prompt.
 func TestReworkIsTheSameLaneRunTakes(t *testing.T) {
-	c, prompt := reworkUpstream(t, reworkReply)
+	c, up := reworkUpstream(t)
 	p := reworkPipeline(t, c)
 
 	got, err := p.Rework(context.Background(), "summarize", AudienceDev, LanguageEN, reworkThread(), Scope{}, Events{})
 	if err != nil {
 		t.Fatalf("Rework: %v", err)
 	}
-	if !strings.Contains(*prompt, "Instruction: summarize") || strings.Contains(*prompt, "This is a follow-up") {
-		t.Errorf("Rework did not build the rework prompt:\n%s", *prompt)
+	if !strings.Contains(up.prompt(), "Instruction: summarize") || strings.Contains(up.prompt(), "This is a follow-up") {
+		t.Errorf("Rework did not build the rework prompt:\n%s", up.prompt())
 	}
 	if len(got.Sources) != 2 {
 		t.Errorf("sources = %+v, want the previous turn's", got.Sources)
@@ -241,7 +210,7 @@ func TestStripMarkersOutsideFences(t *testing.T) {
 // TestReworkMeasuresTheSourcesOnTheirOwn: the previous turn in the user
 // message is neither the question nor the code, and the split says so.
 func TestReworkMeasuresTheSourcesOnTheirOwn(t *testing.T) {
-	c, _ := reworkUpstream(t, reworkReply)
+	c, _ := reworkUpstream(t)
 	th := reworkThread()
 	th.Answer = strings.Repeat("A long previous answer. ", 200)
 	got, err := NewAnswerer(c).Rework(context.Background(), "summarize", AudienceBA, LanguageEN, th, Scope{}, nil)
@@ -285,12 +254,12 @@ func TestOnlyAReworkReadsTheBasis(t *testing.T) {
 		return twoSources(), len(full), nil
 	}
 
-	c, prompt := reworkUpstream(t, reworkReply)
+	c, up := reworkUpstream(t)
 	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if reads != 1 || !strings.Contains(*prompt, "func issueGrant() {}") {
-		t.Errorf("reads = %d; the rework must answer from the text it read:\n%s", reads, *prompt)
+	if reads != 1 || !strings.Contains(up.prompt(), "func issueGrant() {}") {
+		t.Errorf("reads = %d; the rework must answer from the text it read:\n%s", reads, up.prompt())
 	}
 
 	reads = 0
@@ -304,7 +273,7 @@ func TestOnlyAReworkReadsTheBasis(t *testing.T) {
 	}
 
 	refs.ReadBasis = func(context.Context) ([]Source, int, error) { return nil, 0, errors.New("git gone") }
-	c, _ = reworkUpstream(t, reworkReply)
+	c, _ = reworkUpstream(t)
 	if _, _, err := reworkPipeline(t, c).Run(context.Background(), "summarize", AudienceBA, LanguageEN, refs, Events{}); err == nil || !strings.Contains(err.Error(), "git gone") {
 		t.Errorf("err = %v, want the failed read", err)
 	}
@@ -313,7 +282,7 @@ func TestOnlyAReworkReadsTheBasis(t *testing.T) {
 // TestAReworkSaysWhichCommitsItsBasisWasReadAt: the basis is re-read from
 // git, not from the index as it is now, and the trace says where from.
 func TestAReworkSaysWhichCommitsItsBasisWasReadAt(t *testing.T) {
-	c, _ := reworkUpstream(t, reworkReply)
+	c, _ := reworkUpstream(t)
 	p := reworkPipeline(t, c)
 	th := reworkThread()
 	th.Sources[0].SHA = "0123456789abcdef"

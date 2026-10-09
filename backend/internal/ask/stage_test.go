@@ -62,7 +62,8 @@ func TestRunNarrowsTheSearchAndTheRecordToTheAskedStage(t *testing.T) {
 	// The understanding step guesses "production" as a repository, as it
 	// does, and names the stage too.
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":["production"],"stage":"prod"}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{stages: declaredStages})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(search), withRouter(&fakeRouter{stages: declaredStages}))
 
 	var details []map[string]any
 	got, _, err := p.Run(context.Background(), "how often is the digest sent in production?", AudienceBA, LanguageEN, Thread{},
@@ -93,7 +94,8 @@ func TestRunWithoutAStageRestrictsNothing(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{}
 	c := twoStepUpstream(t, `{"intent":"how","terms":["t"],"code_terms":["c"],"repos":[],"stage":""}`, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{stages: declaredStages})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(search), withRouter(&fakeRouter{stages: declaredStages}))
 
 	got, _, err := p.Run(context.Background(), "how often is the digest sent?", AudienceBA, LanguageEN, Thread{}, Events{})
 	if err != nil {
@@ -108,7 +110,8 @@ func TestResumeRepoSearchesUnderTheCardsStage(t *testing.T) {
 	db := gatherDB(t)
 	search := &fakeSearch{indexed: []string{"acme-service", "acme-infra"}}
 	c := twoStepUpstream(t, appleTVReply, "Answer.")
-	p := NewPipeline(c, search, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{stages: declaredStages})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(search), withRouter(&fakeRouter{stages: declaredStages}))
 
 	_, err := p.ResumeRepo(context.Background(), "q", Understanding{Terms: []string{"t"}}, []string{"acme-infra"},
 		AudienceBA, LanguageEN, Scope{Known: []string{"acme-infra"}, Stage: "intg"}, Thread{}, Events{})

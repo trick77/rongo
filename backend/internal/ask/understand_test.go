@@ -31,10 +31,7 @@ func modelUpstream(t *testing.T, content string) (*llm.Client, *string, *string)
 		for _, m := range req.Messages {
 			gotPrompt += m.Content + "\n"
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": content}}},
-		})
+		writeCompletion(w, content)
 	}))
 	t.Cleanup(srv.Close)
 	return fakeLLM(t, srv), &gotModel, &gotPrompt

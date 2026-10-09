@@ -175,7 +175,7 @@ func TestDescribeProcessesStopsAtTheCap(t *testing.T) {
 func TestReexplainRebuildsTheProcessListing(t *testing.T) {
 	db := gatherDB(t)
 	c, prompt, _ := streamUpstream(t, "So.")
-	p := NewPipeline(c, &fakeSearch{}, NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{})
+	p := newTestPipeline(t, withUpstream(c), withDB(db))
 	p.models = fakeModels{files: map[string]map[string]string{
 		"shop": {"workflow/order-intake.bpmn": orderIntakeModel(t)},
 	}}

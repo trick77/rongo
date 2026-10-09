@@ -97,8 +97,8 @@ func TestPipeline_theWalkStaysInTheProjectTheSearchLandedIn(t *testing.T) {
 
 	namesNothing := strings.Replace(appleTVReply, `"repos": ["peeq"]`, `"repos": []`, 1)
 	c := twoStepUpstream(t, namesNothing, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}},
-		NewGatherer(db, GatherOptions{MaxHops: 1, TokenBudget: 5000}), &fakeRouter{projects: pm})
+	p := newTestPipeline(t, withUpstream(c),
+		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 
 	answer, _, err := p.Run(context.Background(), "How?", AudienceDev, LanguageEN, Thread{}, Events{})
 	if err != nil {
@@ -138,8 +138,8 @@ func TestPipeline_locateOnATurnNamingNothingStaysInTheProject(t *testing.T) {
 		t.Fatal("the understanding fixture no longer names peeq; update the replacement")
 	}
 	c := twoStepUpstream(t, namesNothing, "So [1].")
-	p := NewPipeline(c, &fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}, g,
-		&fakeRouter{projects: pm})
+	p := newTestPipeline(t, withUpstream(c),
+		withGatherer(g), withSearch(&fakeSearch{hits: []retrieve.Hit{hitFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 
 	if _, _, err := p.Run(context.Background(), "How?", AudienceBA, LanguageEN, Thread{}, Events{}); err != nil {
 		t.Fatalf("Run: %v", err)
