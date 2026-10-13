@@ -77,7 +77,9 @@ func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
 		w.WriteHeader(status)
 	}))
 
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	for _, p := range []string{"/healthz", "/readyz"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, p, nil))
+	}
 	if buf.Len() != 0 {
 		t.Errorf("a healthy probe was logged: %s", buf.String())
 	}

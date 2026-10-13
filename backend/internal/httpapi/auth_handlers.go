@@ -39,7 +39,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	s.deps.OIDC.StartLogin(w, r)
+	s.deps.OIDC.Start(w, r)
 }
 
 // passwordMode reports whether the login form is the way in.
@@ -100,13 +100,12 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "oidc is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	claims, err := s.deps.OIDC.HandleCallback(r)
-	// Cleared whether the callback worked or not, so a spent or abandoned login
-	// does not leave a usable state value in the browser.
-	s.deps.OIDC.ClearTransientCookies(w)
+	// Callback clears the transient cookies whether it worked or not, so a
+	// spent or abandoned login does not leave a usable state value behind.
+	claims, err := s.deps.OIDC.Callback(w, r)
 	if err != nil {
-		// The browser only ever sees the one generic code. HandleCallback has
-		// four distinct failure modes — bad state, bad nonce, rejected code
+		// The browser only ever sees the one generic code. Callback has
+		// several distinct failure modes — bad state, bad nonce, rejected code
 		// exchange, failed token verification — and telling them apart from
 		// outside is exactly what an attacker probing the callback wants. The
 		// log keeps the real one, because otherwise a misconfigured provider is

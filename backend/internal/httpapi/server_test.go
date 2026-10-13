@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/version"
 )
 
@@ -25,8 +28,34 @@ func TestHealthz_returnsOK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if got, want := rec.Body.String(), `{"status":"ok"}`; got != want {
+	if got, want := rec.Body.String(), "ok\n"; got != want {
 		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+// Readiness runs the deployment's checks; liveness never does, so a database
+// outage takes the replica out of rotation instead of restarting it.
+func TestReadyz_failsOnAFailingCheck(t *testing.T) {
+	// Given
+	srv := NewServer(Deps{Ready: []httpx.Check{{Name: "database", Run: func(context.Context) error {
+		return errors.New("database is locked")
+	}}}})
+
+	// When
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	live := httptest.NewRecorder()
+	srv.ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	// Then
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"check":"database"`) {
+		t.Errorf("readyz = %d %s, want 503 naming the check", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "locked") {
+		t.Errorf("readyz body %q carries the error, which goes to the log only", rec.Body.String())
+	}
+	if live.Code != http.StatusOK {
+		t.Errorf("healthz = %d, want 200 whatever readiness says", live.Code)
 	}
 }
 

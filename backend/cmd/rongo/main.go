@@ -13,12 +13,14 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	kitauth "github.com/trick77/ship/kit/auth"
+	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/run"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -131,18 +133,7 @@ func main() {
 	}
 
 	if *healthcheck {
-		// Bounded: a healthcheck that hangs is a container never reported
-		// unhealthy.
-		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + cfg.Addr + "/healthz")
-		if err != nil {
-			os.Exit(1)
-		}
-		code := resp.StatusCode
-		_ = resp.Body.Close()
-		if code != http.StatusOK {
-			os.Exit(1)
-		}
-		os.Exit(0)
+		os.Exit(httpx.Healthcheck(httpx.LocalURL(cfg.Addr, "/healthz")))
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -408,6 +399,7 @@ func main() {
 		Commit:         source,
 		OIDCAdminGroup: cfg.OIDCAdminGroup,
 		CookieSecure:   cfg.CookieSecure,
+		Ready:          []httpx.Check{{Name: "database", Run: db.PingContext}},
 	}
 	// Discovery talks to the provider, so a rongo that cannot reach Authelia
 	// fails here rather than coming up healthy and rejecting every login. The
@@ -415,12 +407,17 @@ func main() {
 	// provider would otherwise hang the process instead of reporting it.
 	if cfg.AuthMode == config.AuthModeOIDC {
 		discoverCtx, cancelDiscover := context.WithTimeout(ctx, 30*time.Second)
-		oidcSvc, err := auth.NewOIDCServiceFromDiscovery(discoverCtx, auth.OIDCServiceConfig{
+		oidcSvc, err := kitauth.NewOIDC(discoverCtx, kitauth.OIDCConfig{
 			Issuer:       cfg.OIDCIssuer,
 			ClientID:     cfg.OIDCClientID,
 			ClientSecret: cfg.OIDCClientSecret,
 			RedirectURL:  cfg.OIDCRedirectURL,
-			SecureCookie: cfg.CookieSecure,
+			// Not kit's default: an Authelia client that does not list the groups
+			// scope refuses the whole request. Groups come off the ID token
+			// (auth.Claims), and admin is decided from them, never a login gate.
+			Scopes:       []string{"openid", "profile", "email"},
+			CookiePrefix: "rongo_",
+			Secure:       cfg.CookieSecure,
 		})
 		cancelDiscover()
 		if err != nil {
@@ -530,8 +527,8 @@ func main() {
 		serveErr <- httpServer.Serve(ln)
 	}()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	stopping, stopSignals := run.Context(context.Background())
+	defer stopSignals()
 
 	select {
 	case err := <-serveErr:
@@ -539,8 +536,8 @@ func main() {
 			slog.Error("server stopped", "err", err)
 			os.Exit(1)
 		}
-	case sig := <-sigCh:
-		slog.Info("shutting down", "signal", sig.String())
+	case <-stopping.Done():
+		slog.Info("shutting down")
 		cut, err := shutdown(httpServer, cancelHandlers, stopPolling, &workers, shutdownLimit)
 		if cut {
 			slog.Warn("answers still streaming were cut short", "limit", shutdownLimit.String())

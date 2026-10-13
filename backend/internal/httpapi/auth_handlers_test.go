@@ -95,22 +95,6 @@ func TestAuthCallback_redirectsWithGenericErrorOnFailure(t *testing.T) {
 	}
 }
 
-// Success or failure, the transient cookies go: an abandoned login must not
-// leave a usable state value behind for its full lifetime.
-func TestAuthCallback_clearsTransientCookiesOnFailure(t *testing.T) {
-	// Given
-	f := &fakeOIDC{err: errors.New("bad state")}
-	srv := NewServer(Deps{Auth: devAuth(t), OIDC: f})
-
-	// When
-	do(srv, httptest.NewRequest(http.MethodGet, "/api/auth/callback", nil))
-
-	// Then
-	if !f.cleared {
-		t.Fatal("ClearTransientCookies was not called after a failed callback")
-	}
-}
-
 func TestAuthLogout_revokesTheSessionAndClearsTheCookie(t *testing.T) {
 	// Given
 	svc := devAuth(t)
@@ -164,20 +148,17 @@ func cookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Coo
 }
 
 type fakeOIDC struct {
-	claims  auth.Claims
-	err     error
-	cleared bool
+	claims auth.Claims
+	err    error
 }
 
-func (f *fakeOIDC) StartLogin(w http.ResponseWriter, r *http.Request) {
+func (f *fakeOIDC) Start(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "https://auth.example.com/authorize", http.StatusFound)
 }
 
-func (f *fakeOIDC) HandleCallback(*http.Request) (auth.Claims, error) {
+func (f *fakeOIDC) Callback(http.ResponseWriter, *http.Request) (auth.Claims, error) {
 	return f.claims, f.err
 }
-
-func (f *fakeOIDC) ClearTransientCookies(http.ResponseWriter) { f.cleared = true }
 
 func TestAuthLogin_proxyModeSendsTheBrowserToTheApp(t *testing.T) {
 	// Given: the proxy in front already signed the browser in.
