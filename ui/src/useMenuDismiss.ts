@@ -17,7 +17,13 @@ export function useMenuDismiss(open: boolean, close: () => void) {
     if (!open) return;
     function onPointerDown(e: PointerEvent) {
       const target = e.target;
-      if (target instanceof Element && target.closest('[role="menu"], [aria-haspopup="menu"][aria-expanded="true"]')) return;
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[role="menu"], [aria-haspopup="menu"][aria-expanded="true"]',
+        )
+      )
+        return;
       close();
     }
     function onKeyDown(e: KeyboardEvent) {

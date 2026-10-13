@@ -23,7 +23,7 @@ export function clampRail(w: number): number {
  * better than a blank page. A hand-edited value is clamped rather than trusted.
  */
 export function storedRailWidth(): number {
-  let raw: string | null = null;
+  let raw: string | null;
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch {

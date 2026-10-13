@@ -1,12 +1,31 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
-import ThreadView, { threadGrid, useSourcesPane, SourcesPane } from "./ThreadView";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
+import ThreadView, {
+  threadGrid,
+  useSourcesPane,
+  SourcesPane,
+} from "./ThreadView";
 import CitationViewer from "./CitationViewer";
 import { copyText } from "./http";
 import { pageColumn } from "./page";
 import { StatsPane } from "./StatsPane";
 import LanguageSelect from "./LanguageSelect";
 import PasteChip from "./PasteChip";
-import { MAX_QUESTION_BYTES, byteLength, fold, pasteKey, shouldCollapse, stagePaste, type PastedText } from "./pastes";
+import {
+  MAX_QUESTION_BYTES,
+  byteLength,
+  fold,
+  pasteKey,
+  shouldCollapse,
+  stagePaste,
+  type PastedText,
+} from "./pastes";
 import {
   askBody,
   asMarkdown,
@@ -37,7 +56,10 @@ import { applyEvent, endsTurn } from "./turnEvents";
  * The role names are NOT translated: they are the labels on the controls
  * next to this text, and a body naming "un Analyste" beside a button
  * reading "Analyst" points at something that is not on the page. */
-const welcome: Record<string, { title: string; body: string; placeholder: string; followUp: string }> = {
+const welcome: Record<
+  string,
+  { title: string; body: string; placeholder: string; followUp: string }
+> = {
   en: {
     title: "Ask about the code.",
     placeholder: "Ask about the code…",
@@ -82,7 +104,10 @@ const welcome: Record<string, { title: string; body: string; placeholder: string
  * reader sees the first sentence before the last one exists, so this consumes
  * whatever has arrived and keeps the remainder for the next chunk.
  */
-function drain(buffer: string, onEvent: (name: string, data: string) => void): string {
+function drain(
+  buffer: string,
+  onEvent: (name: string, data: string) => void,
+): string {
   const blocks = buffer.split("\n\n");
   const rest = blocks.pop() ?? "";
   for (const block of blocks) {
@@ -96,7 +121,6 @@ function drain(buffer: string, onEvent: (name: string, data: string) => void): s
   }
   return rest;
 }
-
 
 /**
  * The composer's answer language, remembered across reloads — someone who
@@ -360,6 +384,7 @@ export default function Ask({
     // below: leaving for the unasked question after the refusal, and the
     // thread this composer just opened from under the panel, which the
     // stream adopted before its id came back down as a prop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a reset keyed on the address
     setGone(false);
     if (openThread === shown.current) return;
     // Bumped FIRST, on every run — including the one that opens a fresh thread.
@@ -382,7 +407,11 @@ export default function Ask({
     // server: the record has no answer on it yet — the row is only finished
     // when the turn is — so a fetch would replace a half-written answer with
     // an empty one and the rest of the tokens would land out of sight.
-    if (openThread !== null && openThread === liveThread.current && liveTurns.current) {
+    if (
+      openThread !== null &&
+      openThread === liveThread.current &&
+      liveTurns.current
+    ) {
       const parked = liveTurns.current;
       live.current = parked;
       setTurns(parked);
@@ -513,12 +542,14 @@ export default function Ask({
       return;
     }
     if (following.current) scrollSelf(el, el.scrollHeight);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per token; loading only gates it
   }, [turns]);
 
   // A turn added or a thread swapped in: the reader's pick of a turn for the
   // pane is an index into what was there before, and means nothing now.
   useEffect(() => {
     pane.clearSourceTurn();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the count is the trigger, pane is a fresh object per render
   }, [turns.length]);
 
   // The running total follows the turns: it grows when a usage event lands
@@ -558,7 +589,11 @@ export default function Ask({
    * needs that to undo it: a turn that failed left the server's record
    * untouched.
    */
-  async function stream(url: string, body: Record<string, unknown>, retryable = true): Promise<boolean> {
+  async function stream(
+    url: string,
+    body: Record<string, unknown>,
+    retryable = true,
+  ): Promise<boolean> {
     markBusy(true, liveThread.current);
     let ok = true;
     // Terminal events, the two ways a turn is meant to end. A stream that
@@ -567,7 +602,8 @@ export default function Ask({
     // nothing patched the turn, so the trace ticked on with no answer, no
     // error and no way out.
     let closed = false;
-    const fail = (error: string) => patchLast((t) => ({ ...t, error, done: true, endedAt: Date.now() }));
+    const fail = (error: string) =>
+      patchLast((t) => ({ ...t, error, done: true, endedAt: Date.now() }));
     // The request the turn was made with, so a failure can be asked again. A
     // resume passes retryable false: its card unlocks itself on failure, and a
     // button beside the error would be a second way to spend the same call.
@@ -693,7 +729,8 @@ export default function Ask({
     const el = e.currentTarget;
     const start = el.selectionStart ?? 0;
     const end = el.selectionEnd ?? 0;
-    const typed = end > start ? question.slice(0, start) + question.slice(end) : question;
+    const typed =
+      end > start ? question.slice(0, start) + question.slice(end) : question;
     const staged = stagePaste(text);
     if (byteLength(fold(typed, [...pastes, staged])) > MAX_QUESTION_BYTES) {
       setTooLong(true);
@@ -716,7 +753,13 @@ export default function Ask({
     // Weighed again here: typing after a large paste can cross the cap
     // without another paste to catch it, and the server would answer the
     // turn with a 400 nobody can act on.
-    const body = askBody(question, pastes, audience, asking, threadId.current ?? "");
+    const body = askBody(
+      question,
+      pastes,
+      audience,
+      asking,
+      threadId.current ?? "",
+    );
     if (byteLength(body.question) > MAX_QUESTION_BYTES) {
       setTooLong(true);
       return;
@@ -762,30 +805,48 @@ export default function Ask({
    * unlock from the record instead, since the decision is stored only when an
    * answer lands.
    */
-  async function resumeCard(turnIndex: number, mark: Partial<Turn>, extra: Record<string, unknown>) {
+  async function resumeCard(
+    turnIndex: number,
+    mark: Partial<Turn>,
+    extra: Record<string, unknown>,
+  ) {
     const turn = turns[turnIndex];
     if (!turn.clarification || turn.chosenIdx != null) return;
 
     retireLoad();
     appendTurn(
-      freshTurn(turn.question, turn.audience, turn.language, headOf(turn), turn.pastes),
+      freshTurn(
+        turn.question,
+        turn.audience,
+        turn.language,
+        headOf(turn),
+        turn.pastes,
+      ),
       (list) => list.map((t, i) => (i === turnIndex ? { ...t, ...mark } : t)),
     );
 
     const cardThread = threadId.current;
-    const ok = await stream("/api/ask", {
-      thread_id: threadId.current ?? "",
-      question: turn.question,
-      audience: turn.audience,
-      language: turn.language,
-      clarification_message_id: turn.clarification.messageId,
-      ...extra,
-      ...pastedField(turn.pastes),
-    }, false);
+    const ok = await stream(
+      "/api/ask",
+      {
+        thread_id: threadId.current ?? "",
+        question: turn.question,
+        audience: turn.audience,
+        language: turn.language,
+        clarification_message_id: turn.clarification.messageId,
+        ...extra,
+        ...pastedField(turn.pastes),
+      },
+      false,
+    );
     if (!ok && shown.current === cardThread) {
       // Every mark set back to null: the card is open again.
-      const unmark = Object.fromEntries(Object.keys(mark).map((k) => [k, null]));
-      setTurns((prev) => prev.map((t, i) => (i === turnIndex ? { ...t, ...unmark } : t)));
+      const unmark = Object.fromEntries(
+        Object.keys(mark).map((k) => [k, null]),
+      );
+      setTurns((prev) =>
+        prev.map((t, i) => (i === turnIndex ? { ...t, ...unmark } : t)),
+      );
     }
   }
 
@@ -800,7 +861,11 @@ export default function Ask({
    */
   async function narrowTo(turnIndex: number, repos: string[]) {
     if (busy || repos.length === 0) return;
-    await resumeCard(turnIndex, { chosenIdx: -1, narrowedTo: repos }, { repos });
+    await resumeCard(
+      turnIndex,
+      { chosenIdx: -1, narrowedTo: repos },
+      { repos },
+    );
   }
 
   /**
@@ -816,9 +881,19 @@ export default function Ask({
     const nextAudience: Audience = turn.audience === "dev" ? "ba" : "dev";
 
     retireLoad();
-    appendTurn(freshTurn(turn.question, nextAudience, turn.language, headOf(turn), turn.pastes));
+    appendTurn(
+      freshTurn(
+        turn.question,
+        nextAudience,
+        turn.language,
+        headOf(turn),
+        turn.pastes,
+      ),
+    );
 
-    await stream(`/api/messages/${turn.messageId}/reexplain`, { audience: nextAudience });
+    await stream(`/api/messages/${turn.messageId}/reexplain`, {
+      audience: nextAudience,
+    });
   }
 
   /**
@@ -860,7 +935,9 @@ export default function Ask({
     const head = headOf(turn);
 
     retireLoad();
-    appendTurn(freshTurn(turn.question, turn.audience, turn.language, head, turn.pastes));
+    appendTurn(
+      freshTurn(turn.question, turn.audience, turn.language, head, turn.pastes),
+    );
 
     // The thread id is taken now, not from the stored body: the thread may
     // have been created by the very turn that failed, and a stored turn's
@@ -873,7 +950,11 @@ export default function Ask({
     await stream(
       req.url,
       req.url === "/api/ask"
-        ? { ...req.body, thread_id: threadId.current ?? "", head_message_id: head }
+        ? {
+            ...req.body,
+            thread_id: threadId.current ?? "",
+            head_message_id: head,
+          }
         : req.body,
     );
   }
@@ -907,9 +988,21 @@ export default function Ask({
 
   // Moved on at the commit, not during render: a render React discards must
   // not leave its handlers behind for the next click.
-  const handlers = useRef({ retry, reexplain, askFollowup, chooseCandidate, narrowTo });
+  const handlers = useRef({
+    retry,
+    reexplain,
+    askFollowup,
+    chooseCandidate,
+    narrowTo,
+  });
   useLayoutEffect(() => {
-    handlers.current = { retry, reexplain, askFollowup, chooseCandidate, narrowTo };
+    handlers.current = {
+      retry,
+      reexplain,
+      askFollowup,
+      chooseCandidate,
+      narrowTo,
+    };
   });
 
   const actions = useMemo(
@@ -923,9 +1016,12 @@ export default function Ask({
       // formatting, not the reader's words. The full text is always in the
       // DOM, so a folded question copies whole.
       onCopyQuestion: (i: number) => copyText(live.current[i].question),
-      onFollowup: (i: number, question: string) => handlers.current.askFollowup(i, question),
-      onChoose: (i: number, idx: number) => handlers.current.chooseCandidate(i, idx),
-      onNarrow: (i: number, repos: string[]) => handlers.current.narrowTo(i, repos),
+      onFollowup: (i: number, question: string) =>
+        handlers.current.askFollowup(i, question),
+      onChoose: (i: number, idx: number) =>
+        handlers.current.chooseCandidate(i, idx),
+      onNarrow: (i: number, repos: string[]) =>
+        handlers.current.narrowTo(i, repos),
       onOpenStats: (i: number) => setTurnStats(i),
     }),
     [],
@@ -967,7 +1063,8 @@ export default function Ask({
             // clientHeight are whole numbers while scrollTop is snapped to
             // device pixels, so at a fractional device ratio the true foot
             // reads a pixel or two short of it.
-            if (el.scrollHeight - el.scrollTop - el.clientHeight > 4) stopFollowing();
+            if (el.scrollHeight - el.scrollTop - el.clientHeight > 4)
+              stopFollowing();
           }}
           // No stacking context on the scroller, deliberately: the full-screen
           // diagram view is rendered from inside a card in this column, and
@@ -992,7 +1089,9 @@ export default function Ask({
             aria-hidden="true"
             className="pointer-events-none sticky top-0 z-20 h-5 shrink-0 -mb-5 bg-gradient-to-b from-bg to-transparent lg:h-8 lg:-mb-8 [@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3"
           />
-          <div className={`${pageColumn} w-full flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3`}>
+          <div
+            className={`${pageColumn} w-full flex-1 px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10 [@media(max-height:500px)]:pt-3`}
+          >
             {/* No top margin on the welcome: it starts where the Repositories
                 heading starts, both pages' first line on the same rule. The
                 rule is pageColumn (page.tsx), the one cap and centring every
@@ -1004,7 +1103,8 @@ export default function Ask({
                   This thread is no longer available.
                 </h2>
                 <p className="mt-3 text-muted">
-                  It was deleted, or the address leads nowhere. Your other threads are in the rail.
+                  It was deleted, or the address leads nowhere. Your other
+                  threads are in the rail.
                 </p>
               </div>
             )}
@@ -1026,7 +1126,12 @@ export default function Ask({
               // role="status": a bare div may carry no accessible name, so a
               // reader who does not see the shape would be told nothing at all
               // while the thread is on its way.
-              <div className="max-w-[68ch]" role="status" aria-busy="true" aria-label="Opening the thread">
+              <div
+                className="max-w-[68ch]"
+                role="status"
+                aria-busy="true"
+                aria-label="Opening the thread"
+              >
                 <div className="skeleton h-3 w-[7ch] rounded-ui-sm" />
                 <div className="skeleton mt-2.5 h-7 w-[24ch] rounded-ui-sm" />
                 <div className="mt-4 flex gap-1.5">
@@ -1055,7 +1160,11 @@ export default function Ask({
             />
             {(turnStats !== null || threadStatsOpen) && (
               <StatsPane
-                target={turnStats !== null ? { kind: "turn", index: turnStats } : { kind: "thread" }}
+                target={
+                  turnStats !== null
+                    ? { kind: "turn", index: turnStats }
+                    : { kind: "thread" }
+                }
                 turns={turns}
                 onClose={closeStats}
               />
@@ -1089,7 +1198,7 @@ export default function Ask({
             onTouchStart={(e) => e.stopPropagation()}
             onTouchMove={(e) => e.stopPropagation()}
             className={`sticky bottom-0 z-10 ${pageColumn} w-full bg-bg px-4 pt-3 pb-3 sm:px-6 lg:px-10 [@media(max-height:500px)]:pt-1.5 [@media(max-height:500px)]:pb-2`}
-            >
+          >
             {/* The foot of the column, ../loom's way round: the composer is
                 opaque and the fade is a strip immediately above it, so prose
                 dissolves as it reaches the composer instead of being cut by it.
@@ -1112,7 +1221,12 @@ export default function Ask({
               {pastes.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 px-1 pt-1.5">
                   {pastes.map((p, i) => (
-                    <PasteChip key={pasteKey(p)} text={p.text} lines={p.lines} onRemove={() => removePaste(i)} />
+                    <PasteChip
+                      key={pasteKey(p)}
+                      text={p.text}
+                      lines={p.lines}
+                      onRemove={() => removePaste(i)}
+                    />
                   ))}
                 </div>
               )}
@@ -1124,7 +1238,11 @@ export default function Ask({
                 }}
                 onPaste={onPaste}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
                     e.preventDefault();
                     void submit();
                   }
@@ -1141,7 +1259,10 @@ export default function Ask({
                 className="block w-full resize-none bg-transparent px-1 py-2 text-[15px] text-ink outline-none pointer-coarse:text-base"
               />
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <fieldset className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5" aria-label="Role">
+                <fieldset
+                  className="inline-flex gap-0.5 rounded-full border border-border bg-bg p-0.5"
+                  aria-label="Role"
+                >
                   {(["ba", "dev"] as const).map((role) => (
                     <button
                       key={role}
@@ -1155,7 +1276,9 @@ export default function Ask({
                         // control on a touch screen instead of matching only on a
                         // desktop.
                         "rounded-full px-3 py-1 text-xs font-medium pointer-coarse:text-base " +
-                        (audience === role ? "bg-accent-fill text-ink" : "text-muted hover:text-ink")
+                        (audience === role
+                          ? "bg-accent-fill text-ink"
+                          : "text-muted hover:text-ink")
                       }
                     >
                       {roleName(role)}
@@ -1181,7 +1304,9 @@ export default function Ask({
                     rendered below sm, and with the push on it the Ask button
                     lost its right edge on exactly the width that needs it. */}
                 <div className="ml-auto flex items-center gap-2">
-                  <span className="hidden text-xs text-faint sm:inline">Shift+Enter for a new line</span>
+                  <span className="hidden text-xs text-faint sm:inline">
+                    Shift+Enter for a new line
+                  </span>
                   <button
                     type="submit"
                     disabled={busy}
@@ -1198,7 +1323,8 @@ export default function Ask({
                   thread being written, the running turn is right above. */}
               {busy && liveThread.current !== shown.current && (
                 <p className="mt-2 px-1 text-xs text-muted">
-                  Another thread is still being answered — the next question waits for it.
+                  Another thread is still being answered — the next question
+                  waits for it.
                 </p>
               )}
               {/* Refused for weight, said where the refusal happened. The
@@ -1206,7 +1332,8 @@ export default function Ask({
                   counts: a paste this size is a file, not a question. */}
               {tooLong && (
                 <p role="alert" className="mt-2 px-1 text-xs text-ochre">
-                  That is too much to ask at once — a question and its pasted text can be {MAX_QUESTION_BYTES / 1024} KB in all.
+                  That is too much to ask at once — a question and its pasted
+                  text can be {MAX_QUESTION_BYTES / 1024} KB in all.
                 </p>
               )}
             </div>
@@ -1220,17 +1347,29 @@ export default function Ask({
                 stamped — see App's Me. */}
             <p className="mt-3 text-center text-xs text-faint [@media(max-height:500px)]:hidden">
               Rongo can make mistakes. Please double-check responses.
-              {version !== "" && version !== "dev" && ` You're talking to Rongo v${version}.`}
+              {version !== "" &&
+                version !== "dev" &&
+                ` You're talking to Rongo v${version}.`}
             </p>
           </form>
         </div>
       </div>
 
       {showSources && (
-        <SourcesPane turns={turns} sourceTurn={listedTurn} hot={hot} onOpen={showSource} onClose={closeSources} />
+        <SourcesPane
+          turns={turns}
+          sourceTurn={listedTurn}
+          hot={hot}
+          onOpen={showSource}
+          onClose={closeSources}
+        />
       )}
 
-      <CitationViewer viewing={viewing} onClose={closeViewer} onOpenFile={setViewing} />
+      <CitationViewer
+        viewing={viewing}
+        onClose={closeViewer}
+        onOpenFile={setViewing}
+      />
     </div>
   );
 }

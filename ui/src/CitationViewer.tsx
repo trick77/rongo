@@ -21,7 +21,20 @@ export default function CitationViewer({
 }) {
   if (!viewing) return null;
   if (isCommit(viewing)) {
-    return <CommitView source={viewing} endpoint={endpoints?.commit} onClose={onClose} onOpenFile={onOpenFile} />;
+    return (
+      <CommitView
+        source={viewing}
+        endpoint={endpoints?.commit}
+        onClose={onClose}
+        onOpenFile={onOpenFile}
+      />
+    );
   }
-  return <SourceView source={viewing} endpoint={endpoints?.source} onClose={onClose} />;
+  return (
+    <SourceView
+      source={viewing}
+      endpoint={endpoints?.source}
+      onClose={onClose}
+    />
+  );
 }

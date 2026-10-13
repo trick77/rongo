@@ -45,14 +45,17 @@ export type Thread = {
 export function group(iso: string, now = new Date()): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "Earlier";
-  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const day = (x: Date) =>
+    new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86400000);
   if (diff <= 0) return "Today";
   if (diff === 1) return "Yesterday";
   if (diff < 7) return "This week";
-  return d.toLocaleString("en-GB", { month: "long", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+  return d.toLocaleString("en-GB", {
+    month: "long",
+    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  });
 }
-
 
 /**
  * Reads one page of threads off the list's envelope. Anything that is not
@@ -61,7 +64,11 @@ export function group(iso: string, now = new Date()): string {
  * the important path.
  */
 export function pageItems(body: unknown): Thread[] {
-  if (body && typeof body === "object" && Array.isArray((body as { items?: unknown }).items)) {
+  if (
+    body &&
+    typeof body === "object" &&
+    Array.isArray((body as { items?: unknown }).items)
+  ) {
     return (body as { items: Thread[] }).items;
   }
   return [];
@@ -156,7 +163,13 @@ export default function Threads({
         const row = threads.find((x) => x.id === id);
         if (!row || prev.some((x) => x.id === id)) return prev;
         const next = [...prev, { ...row, starred: true }];
-        next.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+        next.sort((a, b) =>
+          a.created_at < b.created_at
+            ? 1
+            : a.created_at > b.created_at
+              ? -1
+              : 0,
+        );
         return next;
       });
       onStarred();
@@ -221,43 +234,47 @@ export default function Threads({
     "flex h-7 w-full items-center gap-2 rounded-md pr-1 pl-1.5 text-left text-sm/5";
 
   const row = (t: Thread) => {
-                const active = t.id === activeId;
-                // The thread this turn is being written into. Its actions are
-                // the only ones a running turn withholds.
-                const writing = busy && t.id === busyId;
-                // Gated on the writing row as well as on the id: the trigger
-                // is dropped the moment that thread's turn starts, and a menu
-                // left standing over it would still offer Delete on the
-                // thread being written.
-                const menuOpen = openMenu === t.id && !writing;
-                return (
-                  <li key={t.id} className="relative min-w-0">
-                    <div
-                      className={
-                        item + " group " + (active ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover")
-                      }
-                    >
-                      <button
-                        type="button"
-                        aria-current={active ? "true" : undefined}
-                        onClick={() => onSelect(t.id)}
-                        // self-stretch, and it is not cosmetic: without it the
-                        // button is a flex child under items-center and shrinks
-                        // to its 20px line box inside a 28px row, leaving a 4px
-                        // dead band along the top and bottom of every row that
-                        // selects nothing. On a finger that is a third of the
-                        // row, and on the topmost row — where the 20px above it
-                        // is the group's own margin — a tap that lands high
-                        // hits nothing at all, while the same miss further down
-                        // lands on the row above and at least does something.
-                        // The button paints no ground of its own, so filling
-                        // the row moves not one pixel.
-                        // items-center keeps the title on the line it was on:
-                        // a 28px button holding a 20px line would otherwise
-                        // set the text 4px higher than it sits today.
-                        className="relative flex min-w-0 flex-1 items-center self-stretch overflow-hidden text-left whitespace-nowrap"
-                      >
-                        {/* ../loom's sidebar truncates in two ways, and which
+    const active = t.id === activeId;
+    // The thread this turn is being written into. Its actions are
+    // the only ones a running turn withholds.
+    const writing = busy && t.id === busyId;
+    // Gated on the writing row as well as on the id: the trigger
+    // is dropped the moment that thread's turn starts, and a menu
+    // left standing over it would still offer Delete on the
+    // thread being written.
+    const menuOpen = openMenu === t.id && !writing;
+    return (
+      <li key={t.id} className="relative min-w-0">
+        <div
+          className={
+            item +
+            " group " +
+            (active
+              ? "bg-rail-sel text-white"
+              : "text-rail hover:bg-rail-hover")
+          }
+        >
+          <button
+            type="button"
+            aria-current={active ? "true" : undefined}
+            onClick={() => onSelect(t.id)}
+            // self-stretch, and it is not cosmetic: without it the
+            // button is a flex child under items-center and shrinks
+            // to its 20px line box inside a 28px row, leaving a 4px
+            // dead band along the top and bottom of every row that
+            // selects nothing. On a finger that is a third of the
+            // row, and on the topmost row — where the 20px above it
+            // is the group's own margin — a tap that lands high
+            // hits nothing at all, while the same miss further down
+            // lands on the row above and at least does something.
+            // The button paints no ground of its own, so filling
+            // the row moves not one pixel.
+            // items-center keeps the title on the line it was on:
+            // a 28px button holding a 20px line would otherwise
+            // set the text 4px higher than it sits today.
+            className="relative flex min-w-0 flex-1 items-center self-stretch overflow-hidden text-left whitespace-nowrap"
+          >
+            {/* ../loom's sidebar truncates in two ways, and which
                             one is showing IS the selection. An idle row ends
                             in an ellipsis: the row paints no ground of its own
                             against the panel, and a gradient needs a colour to
@@ -278,15 +295,17 @@ export default function Threads({
 
                             The hover ground gets no fade: the row is still
                             idle, and loom leaves its ellipsis alone. */}
-                        <span className={"block " + (active ? "pr-7" : "truncate")}>{t.title}</span>
-                        {active && (
-                          <span
-                            aria-hidden="true"
-                            className="pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent to-rail-sel"
-                          />
-                        )}
-                      </button>
-                      {/* No dot on the row being written: a question is asked
+            <span className={"block " + (active ? "pr-7" : "truncate")}>
+              {t.title}
+            </span>
+            {active && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-y-0 right-0 w-9 bg-gradient-to-r from-transparent to-rail-sel"
+              />
+            )}
+          </button>
+          {/* No dot on the row being written: a question is asked
                           at the top of the rail and its row is the one right
                           there, under the actions, so a marker beside it says
                           what the reader just did. The one case it would speak
@@ -294,7 +313,7 @@ export default function Threads({
                           keeps its place down the list — is one the composer
                           already accounts for, and it is not worth a mark on
                           every other turn. */}
-                      {/* A live link is a different kind of fact: it is true
+          {/* A live link is a different kind of fact: it is true
                           of the thread until somebody revokes it, not for the
                           length of a turn, and it is the only way to see from
                           the rail that a conversation is readable by people
@@ -303,49 +322,53 @@ export default function Threads({
                           eat the title. The accent orange, not the status
                           line's green: green on the rail reads as "indexed",
                           and a link handed out is a different fact. */}
-                      {t.shared && (
-                        <span
-                          title="Shared with a link"
-                          className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-accent-strong"
-                        >
-                          <span className="sr-only">Shared</span>
-                        </span>
-                      )}
-                      {/* No actions on the thread being written: deleting it
+          {t.shared && (
+            <span
+              title="Shared with a link"
+              className="h-[7px] w-[7px] shrink-0 self-center rounded-full bg-accent-strong"
+            >
+              <span className="sr-only">Shared</span>
+            </span>
+          )}
+          {/* No actions on the thread being written: deleting it
                           would pull the record out from under the answer still
                           landing on it. Every other row keeps its own. */}
-                      {!writing && (
-                        <button
-                          type="button"
-                          aria-haspopup="menu"
-                          aria-expanded={menuOpen}
-                          aria-label={"Actions for " + t.title}
-                          onClick={() => setOpenMenu(menuOpen ? null : t.id)}
-                          // Quiet on an idle row, but never unreachable: it
-                          // comes back for the keyboard and on touch, where
-                          // there is no hover to reveal it.
-                          //
-                          // The 24px square is the paint; the tap box reaches
-                          // the row's full 28px through the after: rectangle,
-                          // for the same reason the title does. Extending the
-                          // square itself would enlarge the hover ground with
-                          // it, and that IS paint.
-                          className={
-                            "relative grid h-6 w-6 shrink-0 place-items-center rounded-md text-rail transition-colors after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-[''] hover:bg-active hover:text-ink " +
-                            (active || menuOpen
-                              ? ""
-                              : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
-                          }
-                        >
-                          <Icon name="moreVertical" size="18px" />
-                        </button>
-                      )}
-                    </div>
-                    {menuOpen && (
-                      <ThreadMenuFor thread={t} actions={actions} onPick={() => setOpenMenu(null)} />
-                    )}
-                  </li>
-                );
+          {!writing && (
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={"Actions for " + t.title}
+              onClick={() => setOpenMenu(menuOpen ? null : t.id)}
+              // Quiet on an idle row, but never unreachable: it
+              // comes back for the keyboard and on touch, where
+              // there is no hover to reveal it.
+              //
+              // The 24px square is the paint; the tap box reaches
+              // the row's full 28px through the after: rectangle,
+              // for the same reason the title does. Extending the
+              // square itself would enlarge the hover ground with
+              // it, and that IS paint.
+              className={
+                "relative grid h-6 w-6 shrink-0 place-items-center rounded-md text-rail transition-colors after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-[''] hover:bg-active hover:text-ink " +
+                (active || menuOpen
+                  ? ""
+                  : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
+              }
+            >
+              <Icon name="moreVertical" size="18px" />
+            </button>
+          )}
+        </div>
+        {menuOpen && (
+          <ThreadMenuFor
+            thread={t}
+            actions={actions}
+            onPick={() => setOpenMenu(null)}
+          />
+        )}
+      </li>
+    );
   };
 
   return (
@@ -373,12 +396,16 @@ export default function Threads({
                 "Recents" over a "Yesterday" is two labels stacked on the same
                 rows, and it read as a Recents group with nothing in it the
                 morning after the day's only thread was deleted. */}
-            {groups[0].label === "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>}
+            {groups[0].label === "Today" && (
+              <h3 className={"mt-5 mb-2 " + railLabel}>Recents</h3>
+            )}
             {groups.map((g) => (
               // Every painted day label carries the 20px a section heading
               // does: it is one, whether it follows today's rows or Starred.
               <div key={g.label}>
-                {g.label !== "Today" && <h3 className={"mt-5 mb-2 " + railLabel}>{g.label}</h3>}
+                {g.label !== "Today" && (
+                  <h3 className={"mt-5 mb-2 " + railLabel}>{g.label}</h3>
+                )}
                 <ul className="flex flex-col">{g.items.map(row)}</ul>
               </div>
             ))}
@@ -390,7 +417,12 @@ export default function Threads({
             an empty rail with "All threads" under it would promise a page
             with nothing on it. */}
         {threads.length > 0 && (
-          <RailLink icon="allThreads" label="All threads" extra="mt-1.5" onClick={onAllThreads} />
+          <RailLink
+            icon="allThreads"
+            label="All threads"
+            extra="mt-1.5"
+            onClick={onAllThreads}
+          />
         )}
       </div>
       {actions.dialogs}

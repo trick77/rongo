@@ -23,25 +23,35 @@ describe("SourceView", () => {
       branch: "master",
       path: source.path,
       sha: "0123abcdef",
-      content: "package sched\n\nfunc One() {}\nfunc Two() {}\nfunc Three() {}\n",
+      content:
+        "package sched\n\nfunc One() {}\nfunc Two() {}\nfunc Three() {}\n",
     });
 
     render(<SourceView source={source} onClose={() => {}} />);
 
     // A code line is split into coloured spans, so it is found by its number.
-    await waitFor(() => expect(document.querySelector('[data-line="3"]')).not.toBeNull());
+    await waitFor(() =>
+      expect(document.querySelector('[data-line="3"]')).not.toBeNull(),
+    );
     const url = String((fetchMock.mock.calls[0] as unknown[])[0]);
     expect(url).toContain("repo=peeq");
     expect(url).toContain("path=backend%2Finternal%2Fsched%2Fsched.go");
     expect(url).toContain("sha=0123abcdef");
 
     const hits = document.querySelectorAll("[data-hit]");
-    expect(Array.from(hits).map((h) => h.getAttribute("data-line"))).toEqual(["3", "4"]);
+    expect(Array.from(hits).map((h) => h.getAttribute("data-line"))).toEqual([
+      "3",
+      "4",
+    ]);
     // The trailing newline is not a sixth, empty line.
     expect(document.querySelectorAll("[data-line]").length).toBe(5);
     // Coloured by the file's language, the line text itself unchanged.
-    expect(document.querySelector('[data-line="3"] .hljs-keyword')?.textContent).toBe("func");
-    expect(document.querySelector('[data-line="3"]')?.textContent).toBe("3func One() {}");
+    expect(
+      document.querySelector('[data-line="3"] .hljs-keyword')?.textContent,
+    ).toBe("func");
+    expect(document.querySelector('[data-line="3"]')?.textContent).toBe(
+      "3func One() {}",
+    );
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("sched.go");
     expect(dialog.textContent).toContain("0123abc");
@@ -54,7 +64,11 @@ describe("SourceView", () => {
   // sideways alone. The scroll asks for the left edge outright, and the
   // sheet's one grid column is pinned so nothing inside can widen it.
   it("opens at the left edge of the cited lines", async () => {
-    serve(200, { content: "package sched\n\nfunc One() {}\nfunc Two() {}\n", sha: "0123abcdef", branch: "master" });
+    serve(200, {
+      content: "package sched\n\nfunc One() {}\nfunc Two() {}\n",
+      sha: "0123abcdef",
+      branch: "master",
+    });
     // jsdom has no scrollIntoView; the stub goes away again so the other
     // tests keep exercising the guard.
     const scrollIntoView = vi.fn();
@@ -63,8 +77,13 @@ describe("SourceView", () => {
       render(<SourceView source={source} onClose={() => {}} />);
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
 
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", inline: "start" });
-      expect(screen.getByRole("dialog").className).toContain("grid-cols-[minmax(0,1fr)]");
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        block: "start",
+        inline: "start",
+      });
+      expect(screen.getByRole("dialog").className).toContain(
+        "grid-cols-[minmax(0,1fr)]",
+      );
     } finally {
       delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     }
@@ -76,17 +95,26 @@ describe("SourceView", () => {
     render(<SourceView source={source} onClose={() => {}} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("not in Rongo's checkout");
+      expect(screen.getByRole("alert").textContent).toContain(
+        "not in Rongo's checkout",
+      );
     });
   });
 
   it("says so when the file has shrunk past the cited range", async () => {
     serve(200, { content: "one\ntwo\n", sha: "9999999", branch: "master" });
 
-    render(<SourceView source={{ ...source, start_line: 40, end_line: 42, sha: "" }} onClose={() => {}} />);
+    render(
+      <SourceView
+        source={{ ...source, start_line: 40, end_line: 42, sha: "" }}
+        onClose={() => {}}
+      />,
+    );
 
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("changed since the answer was written");
+      expect(screen.getByRole("status").textContent).toContain(
+        "changed since the answer was written",
+      );
     });
     expect(document.querySelectorAll("[data-hit]").length).toBe(0);
   });
@@ -99,9 +127,13 @@ describe("SourceView", () => {
     await screen.findByText("x");
 
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close" }),
+    );
     await user.tab({ shift: true });
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Close" }),
+    );
   });
 
   it("closes on a tap beside the dialog, not on one inside it", async () => {
@@ -172,6 +204,8 @@ describe("SourceView", () => {
     expect(dialog.className).toContain("rounded-none");
     expect(dialog.className).toContain("sm:rounded-ui-lg");
     // The first thing a thumb reaches for, and 32px is not a thumb.
-    expect(screen.getByRole("button", { name: "Close" }).className).toContain("h-11");
+    expect(screen.getByRole("button", { name: "Close" }).className).toContain(
+      "h-11",
+    );
   });
 });

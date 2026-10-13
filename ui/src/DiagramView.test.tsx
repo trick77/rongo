@@ -2,8 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, createEvent } from "@testing-library/react";
 import DiagramView from "./DiagramView";
 
-const src = "sequenceDiagram\n  Ask->>httpapi: POST /api/ask\n  httpapi-->>Ask: stream";
-const svg = '<svg viewBox="0 0 300 120" style="max-width: 300px"><g class="drawn"></g></svg>';
+const src =
+  "sequenceDiagram\n  Ask->>httpapi: POST /api/ask\n  httpapi-->>Ask: stream";
+const svg =
+  '<svg viewBox="0 0 300 120" style="max-width: 300px"><g class="drawn"></g></svg>';
 
 function view(onClose: () => void = () => {}) {
   return render(<DiagramView src={src} svg={svg} onClose={onClose} />);
@@ -17,7 +19,9 @@ describe("DiagramView", () => {
 
   it("names the picture in its header", () => {
     const { getByRole } = view();
-    expect(getByRole("dialog").getAttribute("aria-label")).toBe("Sequence diagram");
+    expect(getByRole("dialog").getAttribute("aria-label")).toBe(
+      "Sequence diagram",
+    );
     expect(getByRole("dialog").querySelector("svg .drawn")).toBeTruthy();
   });
 
@@ -84,14 +88,20 @@ describe("DiagramView", () => {
 
   it("downloads the picture it is showing", () => {
     const create = vi.fn(() => "blob:x");
-    Object.defineProperty(URL, "createObjectURL", { value: create, configurable: true });
-    Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
-    let name = "";
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
-      this: HTMLAnchorElement,
-    ) {
-      name = this.download;
+    Object.defineProperty(URL, "createObjectURL", {
+      value: create,
+      configurable: true,
     });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: vi.fn(),
+      configurable: true,
+    });
+    let name = "";
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        name = this.download;
+      });
     const { getByText } = view();
     fireEvent.click(getByText("Download SVG"));
     expect(create).toHaveBeenCalled();

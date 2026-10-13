@@ -43,9 +43,13 @@ describe("Clarify", () => {
   it("puts the repository above the title, not after it", () => {
     strict(<Clarify candidates={candidates} onChoose={() => {}} />);
 
-    const entry = screen.getByText("Through the login service").closest("button");
+    const entry = screen
+      .getByText("Through the login service")
+      .closest("button");
     const text = entry?.textContent ?? "";
-    expect(text.indexOf("peeq")).toBeLessThan(text.indexOf("Through the login service"));
+    expect(text.indexOf("peeq")).toBeLessThan(
+      text.indexOf("Through the login service"),
+    );
     // The separator went with the line break: a repo and a branch on their own
     // row do not need one, and it is what made the pair read as one grey blur.
     expect(text).not.toContain("·");
@@ -65,7 +69,9 @@ describe("Clarify", () => {
     // The decision belongs in the record: sometimes you only notice from the
     // answer that you picked the wrong mechanism, which is why the card
     // stays — just collapsed.
-    strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
+    strict(
+      <Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />,
+    );
 
     expect(screen.getByText(/Chosen: Through the login service/)).toBeTruthy();
     expect(screen.queryByText(/central login service/)).toBeNull();
@@ -74,13 +80,17 @@ describe("Clarify", () => {
 
   it("shows every candidate when the collapsed card is reopened, the chosen one marked", async () => {
     const user = userEvent.setup();
-    strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
+    strict(
+      <Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />,
+    );
 
     await user.click(screen.getByRole("button", { name: /Chosen/ }));
 
     expect(screen.getByText("Through the login service")).toBeTruthy();
     expect(screen.getByText("Through the legacy adapter")).toBeTruthy();
-    const chosenButton = screen.getByText("Through the login service").closest("button");
+    const chosenButton = screen
+      .getByText("Through the login service")
+      .closest("button");
     expect(chosenButton?.textContent).toContain("Chosen");
   });
 
@@ -89,15 +99,22 @@ describe("Clarify", () => {
     // decided, not a second chance to decide it.
     const onChoose = vi.fn();
     const user = userEvent.setup();
-    strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={onChoose} />);
+    strict(
+      <Clarify candidates={candidates} chosenIdx={0} onChoose={onChoose} />,
+    );
 
     await user.click(screen.getByRole("button", { name: /Chosen/ }));
     await user.click(screen.getByText("Through the legacy adapter"));
     await user.click(screen.getByText("Through the login service"));
 
     expect(onChoose).not.toHaveBeenCalled();
-    for (const title of ["Through the login service", "Through the legacy adapter"]) {
-      expect(screen.getByText(title).closest("button")?.hasAttribute("disabled")).toBe(true);
+    for (const title of [
+      "Through the login service",
+      "Through the legacy adapter",
+    ]) {
+      expect(
+        screen.getByText(title).closest("button")?.hasAttribute("disabled"),
+      ).toBe(true);
     }
   });
 
@@ -105,9 +122,27 @@ describe("Clarify", () => {
   // carries no repo and no branch. Printing the pair anyway leaves a bare "·"
   // where an identifier should be, which reads as a missing value.
   const repoCandidates = [
-    { idx: 0, title: "Token cost per turn", summary: "Prices a turn.", repo: "peeq", branch: "master" },
-    { idx: 1, title: "Per-request cost", summary: "Costs one request.", repo: "loom", branch: "master" },
-    { idx: 2, title: "All repositories", summary: "Answer across every indexed repository.", repo: "", branch: "" },
+    {
+      idx: 0,
+      title: "Token cost per turn",
+      summary: "Prices a turn.",
+      repo: "peeq",
+      branch: "master",
+    },
+    {
+      idx: 1,
+      title: "Per-request cost",
+      summary: "Costs one request.",
+      repo: "loom",
+      branch: "master",
+    },
+    {
+      idx: 2,
+      title: "All repositories",
+      summary: "Answer across every indexed repository.",
+      repo: "",
+      branch: "",
+    },
   ];
 
   it("offers the all-repositories entry without a repo line", async () => {
@@ -118,7 +153,9 @@ describe("Clarify", () => {
     const entry = screen.getByText("All repositories").closest("button");
     expect(entry?.textContent).not.toContain("peeq");
     expect(entry?.textContent).not.toContain("master");
-    const named = screen.getByText("Token cost per turn").closest("button")?.textContent ?? "";
+    const named =
+      screen.getByText("Token cost per turn").closest("button")?.textContent ??
+      "";
     expect(named).toContain("peeq");
     expect(named).toContain("master");
 
@@ -127,7 +164,9 @@ describe("Clarify", () => {
   });
 
   it("records the all-repositories choice without a bare separator", () => {
-    strict(<Clarify candidates={repoCandidates} chosenIdx={2} onChoose={() => {}} />);
+    strict(
+      <Clarify candidates={repoCandidates} chosenIdx={2} onChoose={() => {}} />,
+    );
 
     const header = screen.getByRole("button", { name: /Chosen/ });
     expect(header.textContent).toContain("Chosen: All repositories");
@@ -137,16 +176,22 @@ describe("Clarify", () => {
   it("rotates the chevron by 90 degrees on open, without swapping the glyph", async () => {
     // AGENTS.md: chevron only — no triangle, no plus/minus, no glyph swap.
     const user = userEvent.setup();
-    strict(<Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />);
+    strict(
+      <Clarify candidates={candidates} chosenIdx={0} onChoose={() => {}} />,
+    );
 
     const button = screen.getByRole("button", { name: /Chosen/ });
     const pathBefore = button.querySelector("svg path")?.getAttribute("d");
-    expect(button.querySelector("svg")?.getAttribute("class")).not.toContain("rotate-90");
+    expect(button.querySelector("svg")?.getAttribute("class")).not.toContain(
+      "rotate-90",
+    );
 
     await user.click(button);
 
     const pathAfter = button.querySelector("svg path")?.getAttribute("d");
-    expect(button.querySelector("svg")?.getAttribute("class")).toContain("rotate-90");
+    expect(button.querySelector("svg")?.getAttribute("class")).toContain(
+      "rotate-90",
+    );
     expect(pathAfter).toBe(pathBefore);
   });
 });

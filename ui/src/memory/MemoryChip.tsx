@@ -38,7 +38,11 @@ export default function MemoryChip({
 
   if (forgotten) {
     return (
-      <div role="note" aria-label="Memory" className="mt-4 inline-flex items-baseline gap-2 rounded-ui-sm border border-border bg-panel px-3 py-1.5 text-[13px] text-muted">
+      <div
+        role="note"
+        aria-label="Memory"
+        className="mt-4 inline-flex items-baseline gap-2 rounded-ui-sm border border-border bg-panel px-3 py-1.5 text-[13px] text-muted"
+      >
         <span className="font-medium text-ink-dim">Forgotten</span>
         <span className="line-through">{memory.text}</span>
       </div>
@@ -47,12 +51,20 @@ export default function MemoryChip({
 
   const kept = memory.text !== "";
   return (
-    <div role="note" aria-label="Memory" className="mt-4 flex max-w-[68ch] flex-wrap items-baseline gap-x-2 gap-y-1 rounded-ui-sm border border-border bg-panel px-3 py-1.5 text-[13px] text-muted">
+    <div
+      role="note"
+      aria-label="Memory"
+      className="mt-4 flex max-w-[68ch] flex-wrap items-baseline gap-x-2 gap-y-1 rounded-ui-sm border border-border bg-panel px-3 py-1.5 text-[13px] text-muted"
+    >
       {kept && (
         <>
           <span className="font-medium text-ink-dim">Remembered</span>
           <span>{memory.text}</span>
-          {memory.scope && <span className="rounded-full bg-active px-2 text-[11.5px]">{memory.scope}</span>}
+          {memory.scope && (
+            <span className="rounded-full bg-active px-2 text-[11.5px]">
+              {memory.scope}
+            </span>
+          )}
           {memory.scopeDropped && (
             <span className="text-faint">
               {memory.scopeDropped} is not indexed, so it applies everywhere
@@ -62,13 +74,16 @@ export default function MemoryChip({
       )}
       {memory.replaced.length > 0 && (
         <span className="text-faint">
-          {kept ? "replaces" : "Replaced"} {memory.replaced.map((r) => `"${r}"`).join(", ")}
+          {kept ? "replaces" : "Replaced"}{" "}
+          {memory.replaced.map((r) => `"${r}"`).join(", ")}
         </span>
       )}
       {memory.removed.length > 0 && (
         <span className={kept ? "text-faint" : "font-medium text-ink-dim"}>
           {kept ? "forgot" : "Forgotten"}{" "}
-          <span className="font-normal text-faint">{memory.removed.map((r) => `"${r}"`).join(", ")}</span>
+          <span className="font-normal text-faint">
+            {memory.removed.map((r) => `"${r}"`).join(", ")}
+          </span>
         </span>
       )}
       {kept && memory.id !== null && !readOnly && (

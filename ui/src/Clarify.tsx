@@ -49,7 +49,8 @@ export default function Clarify({
   // once more.
   const [open, setOpen] = useOpenUntil(chosenIdx != null);
 
-  const chosen = chosenIdx != null ? candidates.find((c) => c.idx === chosenIdx) : undefined;
+  const chosen =
+    chosenIdx != null ? candidates.find((c) => c.idx === chosenIdx) : undefined;
 
   return (
     <DecisionCard
@@ -58,32 +59,45 @@ export default function Clarify({
       onToggle={() => setOpen((o) => !o)}
       title={
         <>
-        {chosenIdx == null ? (
-          readOnly ? (
-            // Not a question here: nobody on this page can answer it, and
-            // asking anyway would leave a reader looking for a button.
-            <span className="text-muted">Asked back: which one was meant</span>
+          {chosenIdx == null ? (
+            readOnly ? (
+              // Not a question here: nobody on this page can answer it, and
+              // asking anyway would leave a reader looking for a button.
+              <span className="text-muted">
+                Asked back: which one was meant
+              </span>
+            ) : (
+              <span className="font-medium text-ochre">
+                Which one do you mean?
+              </span>
+            )
           ) : (
-            <span className="font-medium text-ochre">Which one do you mean?</span>
-          )
-        ) : (
-          <>
-            {chosen?.repo && (
-              <span className="font-mono text-[12.5px] font-medium text-ochre">{chosen.repo}</span>
-            )}
-            <span>Chosen: {chosen?.title}</span>
-            {chosen?.branch && (
-              <span className="ml-auto font-mono text-[11.5px] text-faint">{chosen.branch}</span>
-            )}
-          </>
-        )}
+            <>
+              {chosen?.repo && (
+                <span className="font-mono text-[12.5px] font-medium text-ochre">
+                  {chosen.repo}
+                </span>
+              )}
+              <span>Chosen: {chosen?.title}</span>
+              {chosen?.branch && (
+                <span className="ml-auto font-mono text-[11.5px] text-faint">
+                  {chosen.branch}
+                </span>
+              )}
+            </>
+          )}
         </>
       }
     >
       {() => (
         <ul className="grid gap-2 px-4 pb-4">
           {candidates.map((c) => (
-            <li key={c.idx} className={c.repo ? undefined : "mt-1 border-t border-border pt-3"}>
+            <li
+              key={c.idx}
+              className={
+                c.repo ? undefined : "mt-1 border-t border-border pt-3"
+              }
+            >
               <button
                 type="button"
                 onClick={() => onChoose(c.idx)}
@@ -91,7 +105,9 @@ export default function Clarify({
                 aria-pressed={c.idx === chosenIdx}
                 className={
                   "w-full rounded-ui-sm border border-l-[3px] bg-bg py-3 pr-3.5 pl-3 text-left " +
-                  (chosenIdx == null && !readOnly ? "hover:border-accent " : "") +
+                  (chosenIdx == null && !readOnly
+                    ? "hover:border-accent "
+                    : "") +
                   (c.idx === chosenIdx
                     ? "border-accent ring-1 ring-accent"
                     : "border-border " + (c.repo ? "border-l-accent-dim" : ""))
@@ -107,15 +123,24 @@ export default function Clarify({
                     the line is left out entirely rather than printed empty. */}
                 {c.repo && (
                   <div className="mb-1.5 flex items-center gap-2">
-                    <span className="font-mono text-[12.5px] font-medium text-ochre">{c.repo}</span>
-                    <span className="font-mono text-[11.5px] text-faint">{c.branch}</span>
-                    <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+                    <span className="font-mono text-[12.5px] font-medium text-ochre">
+                      {c.repo}
+                    </span>
+                    <span className="font-mono text-[11.5px] text-faint">
+                      {c.branch}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="h-px flex-1 bg-border-soft"
+                    />
                   </div>
                 )}
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-ink">{c.title}</span>
                   {c.idx === chosenIdx && (
-                    <span className="ml-auto text-xs font-medium text-accent-strong">Chosen</span>
+                    <span className="ml-auto text-xs font-medium text-accent-strong">
+                      Chosen
+                    </span>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-muted">{c.summary}</p>

@@ -1,4 +1,12 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
 import { shortSha, splitPath } from "./paths";
 import { useFlash } from "./hooks";
 import Question from "./Question";
@@ -128,10 +136,10 @@ const TurnHeader = memo(function TurnHeader({
   const { typed, matched } = strip(question, pastes);
   return (
     <>
-    <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
-      {roleName(audience)}
-    </div>
-    {/* The accent is the eyebrow's alone now: the question is what
+      <div className="text-[11px] font-medium uppercase tracking-[.1em] text-accent-strong">
+        {roleName(audience)}
+      </div>
+      {/* The accent is the eyebrow's alone now: the question is what
         was typed, at whatever length it was typed, and it reads as
         the reader's words rather than as a headline.
 
@@ -141,28 +149,34 @@ const TurnHeader = memo(function TurnHeader({
         record carrying a copy of these words. Printing the copies
         would say the reader typed the question again, which they
         did not. */}
-    {typed && <Question text={typed} />}
-    {/* Each paste folded to a line under the words, the way it
+      {typed && <Question text={typed} />}
+      {/* Each paste folded to a line under the words, the way it
         stood in the composer. Folded: the reader knows what
         they pasted, and the answer is what they came for. */}
-    {matched.some(Boolean) && (
-      <div className="mt-2 flex max-w-[68ch] flex-wrap gap-1.5 border-l-2 border-elevated pl-4">
-        {pastes.map((p, i) =>
-          matched[i] ? <PasteChip key={i} text={p.text} lines={p.lines} /> : null,
-        )}
-      </div>
-    )}
-    <div className="mt-2.5 flex items-center gap-1.5">
-      {askedAt && <time className="font-mono text-[11.5px] text-faint">{clock(askedAt)}</time>}
-      {/* Counted in questions, not in rows: a turn asked twice
-          because the first attempt broke is still the first turn. */}
-      <span className={pill + " bg-active text-muted"}>Turn {number}</span>
-      {language !== "en" && (
-        <span className={pill + " bg-active text-muted"}>
-          {languages.find((l) => l.code === language)?.name ?? language}
-        </span>
+      {matched.some(Boolean) && (
+        <div className="mt-2 flex max-w-[68ch] flex-wrap gap-1.5 border-l-2 border-elevated pl-4">
+          {pastes.map((p, i) =>
+            matched[i] ? (
+              <PasteChip key={i} text={p.text} lines={p.lines} />
+            ) : null,
+          )}
+        </div>
       )}
-      {/* The question's own copy, next to the words it copies.
+      <div className="mt-2.5 flex items-center gap-1.5">
+        {askedAt && (
+          <time className="font-mono text-[11.5px] text-faint">
+            {clock(askedAt)}
+          </time>
+        )}
+        {/* Counted in questions, not in rows: a turn asked twice
+          because the first attempt broke is still the first turn. */}
+        <span className={pill + " bg-active text-muted"}>Turn {number}</span>
+        {language !== "en" && (
+          <span className={pill + " bg-active text-muted"}>
+            {languages.find((l) => l.code === language)?.name ?? language}
+          </span>
+        )}
+        {/* The question's own copy, next to the words it copies.
           The answer's footer copies the whole turn as Markdown,
           which is the wrong thing to paste into a ticket or the
           composer of another thread; and selecting the prose by
@@ -173,18 +187,18 @@ const TurnHeader = memo(function TurnHeader({
           a shared page, where the footer's copy is gone too — one
           copy control without the other would read as an
           oversight rather than as a decision. */}
-      {canCopy && (
-        <button
-          type="button"
-          onClick={() => onCopy(head)}
-          aria-label={copied ? "Question copied" : "Copy the question"}
-          title={copied ? "Question copied" : "Copy the question"}
-          className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </button>
-      )}
-    </div>
+        {canCopy && (
+          <button
+            type="button"
+            onClick={() => onCopy(head)}
+            aria-label={copied ? "Question copied" : "Copy the question"}
+            title={copied ? "Question copied" : "Copy the question"}
+            className="-my-1 ml-0.5 grid h-8 w-8 place-items-center rounded-ui-sm text-faint transition-colors hover:bg-active hover:text-ink-dim sm:h-7 sm:w-7"
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </button>
+        )}
+      </div>
     </>
   );
 });
@@ -192,7 +206,8 @@ const TurnHeader = memo(function TurnHeader({
 /** The newest turn that cited anything: the one the pane shows, and the only
  * one whose markers can be pointed back to. */
 export function sourceTurnOf(turns: Turn[]): number {
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].citations.length > 0) return i;
+  for (let i = turns.length - 1; i >= 0; i--)
+    if (turns[i].citations.length > 0) return i;
   return -1;
 }
 
@@ -228,7 +243,8 @@ export default function ThreadView({
   // The question copied, by the index of the turn it was asked in. Its own
   // state: copying the question and copying the answer are two controls, and
   // one flag would light both.
-  const [copiedQuestion, flashCopiedQuestion, clearCopiedQuestion] = useFlash<number>();
+  const [copiedQuestion, flashCopiedQuestion, clearCopiedQuestion] =
+    useFlash<number>();
   // The superseded failures the reader has unfolded. A failure stays in the
   // record and stays on the page, but a turn that went on to answer should
   // not open with the attempt that broke — so it folds to a line, and the
@@ -251,13 +267,18 @@ export default function ThreadView({
   useLayoutEffect(() => {
     latest.current = { actions, onOpenSource, onToggleSources, onHot };
   });
-  const toggleSources = useCallback((i: number) => latest.current.onToggleSources?.(i), []);
+  const toggleSources = useCallback(
+    (i: number) => latest.current.onToggleSources?.(i),
+    [],
+  );
 
   // Another thread: the indices this view is holding mean something else now.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a reset keyed on the thread, once per switch
     setOpenFailure(new Set());
     clearCopied();
     clearCopiedQuestion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the clears are stable; the thread is the trigger
   }, [threadKey]);
 
   // The thread's verdict sits among the buttons of the newest finished answer,
@@ -270,9 +291,11 @@ export default function ThreadView({
   // drawn under that question, so the newest row is not the answer at the
   // bottom of the page.
   const rated = useMemo(() => {
-    if (!owner || typeof threadKey !== "string" || turns.some((t) => !t.done)) return -1;
+    if (!owner || typeof threadKey !== "string" || turns.some((t) => !t.done))
+      return -1;
     const drawn = groupByQuestion(turns).flat();
-    for (let k = drawn.length - 1; k >= 0; k--) if (finished(turns[drawn[k]])) return drawn[k];
+    for (let k = drawn.length - 1; k >= 0; k--)
+      if (finished(turns[drawn[k]])) return drawn[k];
     return -1;
   }, [owner, threadKey, turns]);
   const feedback = useMemo(
@@ -288,14 +311,19 @@ export default function ThreadView({
   // Stable, or the memoized Markdown of the source turn — the previous
   // answer while the next one streams — re-rendered and re-highlighted on
   // every token.
-  const setHot = useCallback((marker: number | null) => latest.current.onHot?.(marker), []);
+  const setHot = useCallback(
+    (marker: number | null) => latest.current.onHot?.(marker),
+    [],
+  );
 
   // Markdown is memoized, and a fresh arrow per render would defeat it on
   // every turn at once. One handler per turn index is kept instead, and it
   // reads the turns through a ref so it never goes stale: the index is the
   // position in the thread on screen, which is what the reader clicked in.
   const live = useRef(turns);
-  live.current = turns;
+  useLayoutEffect(() => {
+    live.current = turns;
+  });
   const markerOpen = useRef(new Map<number, (marker: number) => void>());
   function openMarker(i: number) {
     let f = markerOpen.current.get(i);
@@ -323,22 +351,28 @@ export default function ThreadView({
     return s;
   }
 
-  const copy = useCallback(async (turnIndex: number) => {
-    const actions = latest.current.actions;
-    if (!actions) return;
-    // Only on a clipboard that actually took it. In an insecure context, or
-    // with the permission refused, the button saying "Copied" would be a
-    // plain lie — and the reader would paste whatever was there before.
-    if (!(await actions.onCopy(turnIndex))) return;
-    flashCopied(turnIndex);
-  }, [flashCopied]);
+  const copy = useCallback(
+    async (turnIndex: number) => {
+      const actions = latest.current.actions;
+      if (!actions) return;
+      // Only on a clipboard that actually took it. In an insecure context, or
+      // with the permission refused, the button saying "Copied" would be a
+      // plain lie — and the reader would paste whatever was there before.
+      if (!(await actions.onCopy(turnIndex))) return;
+      flashCopied(turnIndex);
+    },
+    [flashCopied],
+  );
 
-  const copyQuestion = useCallback(async (turnIndex: number) => {
-    const actions = latest.current.actions;
-    if (!actions) return;
-    if (!(await actions.onCopyQuestion(turnIndex))) return;
-    flashCopiedQuestion(turnIndex);
-  }, [flashCopiedQuestion]);
+  const copyQuestion = useCallback(
+    async (turnIndex: number) => {
+      const actions = latest.current.actions;
+      if (!actions) return;
+      if (!(await actions.onCopyQuestion(turnIndex))) return;
+      flashCopiedQuestion(turnIndex);
+    },
+    [flashCopiedQuestion],
+  );
 
   // One article per question. The list itself stays flat — every action here
   // addresses a turn by its position in it — and only the rendering groups.
@@ -357,74 +391,87 @@ export default function ThreadView({
 
   return (
     <>
-            {groups.map((group, g) => {
-              const asked = turns[group[0]];
-              return (
-              <article
-                key={group[0]}
-                className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
-              >
-                <TurnHeader
-                  question={asked.question}
-                  pastes={asked.pastes}
-                  audience={asked.audience}
-                  language={asked.language}
-                  askedAt={asked.askedAt}
-                  number={g + 1}
-                  head={group[0]}
-                  canCopy={!!actions}
-                  copied={copiedQuestion === group[0]}
-                  onCopy={copyQuestion}
-                />
+      {/* eslint-disable-next-line react-hooks/refs -- openMarker and backedMarkers are per-turn caches that keep Markdown's props stable */}
+      {groups.map((group, g) => {
+        const asked = turns[group[0]];
+        return (
+          <article
+            key={group[0]}
+            className="mb-8 border-b border-border-soft pb-8 last:mb-0 last:border-b-0 [@media(max-height:500px)]:mb-4 [@media(max-height:500px)]:pb-4"
+          >
+            <TurnHeader
+              question={asked.question}
+              pastes={asked.pastes}
+              audience={asked.audience}
+              language={asked.language}
+              askedAt={asked.askedAt}
+              number={g + 1}
+              head={group[0]}
+              canCopy={!!actions}
+              copied={copiedQuestion === group[0]}
+              onCopy={copyQuestion}
+            />
 
-                {/* One entry per attempt. A turn answered on the first try has
+            {/* One entry per attempt. A turn answered on the first try has
                     exactly one and looks as it always did: no rail, no label,
                     nothing added for a thread that never needed grouping. */}
-                <div className={group.length > 1 ? "mt-3.5 grid gap-5 border-l-2 border-border pl-4" : ""}>
-                {group.map((i, k) => {
-                  const turn = turns[i];
-                  // A failure the reader has already moved past folds to a
-                  // line. The last one in a turn never folds: its Retry button
-                  // is the only way on from there.
-                  const superseded = !!turn.error && k < group.length - 1;
-                  // The turn's own answer: the first attempt that neither
-                  // asked back nor broke. Everything answered after it is a
-                  // re-explain of it.
-                  const firstAnswer =
-                    group.find((j) => !turns[j].clarification && !turns[j].error) === i;
-                  const folded = superseded && !openFailure.has(i);
-                  return (
-                    <TurnAttempt
-                      key={i}
-                      turn={turn}
-                      i={i}
-                      label={group.length > 1 ? stageLabel(turn, firstAnswer) : null}
-                      superseded={superseded}
-                      folded={folded}
-                      busy={busy}
-                      actions={actions}
-                      isLast={i === turns.length - 1}
-                      onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
-                      // Every turn, from its own list: the pane shows only
-                      // the newest, and a tablet has no pane at all.
-                      onMarkerOpen={openMarker(i)}
-                      // Known once the turn is done: the citations event is
-                      // the last thing before done, so a finished turn with
-                      // none has none.
-                      backed={backedMarkers(turn)}
-                      sourcesExpanded={sourcesOpen && i === sourceTurnIndex}
-                      onToggleSources={onToggleSources ? toggleSources : undefined}
-                      copied={copied === i}
-                      onCopy={copy}
-                      onToggleFailure={toggleFailure}
-                      feedback={i === rated ? feedback : null}
-                    />
-                  );
-                })}
-                </div>
-              </article>
-              );
-            })}
+            <div
+              className={
+                group.length > 1
+                  ? "mt-3.5 grid gap-5 border-l-2 border-border pl-4"
+                  : ""
+              }
+            >
+              {group.map((i, k) => {
+                const turn = turns[i];
+                // A failure the reader has already moved past folds to a
+                // line. The last one in a turn never folds: its Retry button
+                // is the only way on from there.
+                const superseded = !!turn.error && k < group.length - 1;
+                // The turn's own answer: the first attempt that neither
+                // asked back nor broke. Everything answered after it is a
+                // re-explain of it.
+                const firstAnswer =
+                  group.find(
+                    (j) => !turns[j].clarification && !turns[j].error,
+                  ) === i;
+                const folded = superseded && !openFailure.has(i);
+                return (
+                  <TurnAttempt
+                    key={i}
+                    turn={turn}
+                    i={i}
+                    label={
+                      group.length > 1 ? stageLabel(turn, firstAnswer) : null
+                    }
+                    superseded={superseded}
+                    folded={folded}
+                    busy={busy}
+                    actions={actions}
+                    isLast={i === turns.length - 1}
+                    onMarkerHover={i === sourceTurnIndex ? setHot : undefined}
+                    // Every turn, from its own list: the pane shows only
+                    // the newest, and a tablet has no pane at all.
+                    onMarkerOpen={openMarker(i)}
+                    // Known once the turn is done: the citations event is
+                    // the last thing before done, so a finished turn with
+                    // none has none.
+                    backed={backedMarkers(turn)}
+                    sourcesExpanded={sourcesOpen && i === sourceTurnIndex}
+                    onToggleSources={
+                      onToggleSources ? toggleSources : undefined
+                    }
+                    copied={copied === i}
+                    onCopy={copy}
+                    onToggleFailure={toggleFailure}
+                    feedback={i === rated ? feedback : null}
+                  />
+                );
+              })}
+            </div>
+          </article>
+        );
+      })}
     </>
   );
 }
@@ -454,14 +501,18 @@ export function SourcesPane({
   const listed = sourceTurnIndex >= 0 ? turns[sourceTurnIndex] : null;
   const groups = useMemo(() => groupByQuestion(turns), [turns]);
   return (
-    <aside aria-label="Sources" className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex">
+    <aside
+      aria-label="Sources"
+      className="hidden min-h-0 flex-col border-l border-border bg-panel xl:flex"
+    >
       <header className="flex items-center border-b border-border px-4.5 py-3.5 text-[11px] font-medium uppercase tracking-[.12em] text-faint">
         Sources
         {listed && (
           <span className="ml-auto font-mono tracking-normal">
             {/* The turn the reader sees, counted in questions like the pill
                 on the article — not the row's place in the record. */}
-            turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} · {listed.citations.length}
+            turn {groups.findIndex((g) => g.includes(sourceTurnIndex)) + 1} ·{" "}
+            {listed.citations.length}
           </span>
         )}
         {/* The same close the source viewer and the diagram draw: a × at the
@@ -485,7 +536,8 @@ export function SourcesPane({
       <div className="min-h-0 flex-1 overflow-auto">
         {!listed && (
           <p className="px-4.5 py-4 text-[13px] text-faint">
-            The files an answer was written from appear here, numbered like the markers in the text.
+            The files an answer was written from appear here, numbered like the
+            markers in the text.
           </p>
         )}
         {listed?.citations.map((c) => (
@@ -500,10 +552,14 @@ export function SourcesPane({
               (hot === c.marker ? "bg-active" : "hover:bg-active")
             }
           >
-            <span className="row-span-2 font-mono font-semibold text-accent-strong">{c.marker}</span>
+            <span className="row-span-2 font-mono font-semibold text-accent-strong">
+              {c.marker}
+            </span>
             <span className="font-medium text-ink">
               {c.repo}
-              <span className="ml-1.5 font-mono text-[11.5px] font-normal text-faint">{c.branch}</span>
+              <span className="ml-1.5 font-mono text-[11.5px] font-normal text-faint">
+                {c.branch}
+              </span>
             </span>
             {isCommit(c) ? (
               // A commit row: the short sha and the day in mono, the subject
@@ -539,7 +595,10 @@ export function SourcesPane({
  * the 11" in landscape) the thread has the width, the chips in the text open
  * the sources, and the per-answer details block still lists them. */
 export function threadGrid(showSources: boolean): string {
-  return "grid h-full min-h-0 grid-cols-1" + (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "");
+  return (
+    "grid h-full min-h-0 grid-cols-1" +
+    (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "")
+  );
 }
 
 /**
@@ -554,7 +613,8 @@ export function threadGrid(showSources: boolean): string {
 export function useSourcesPane(turns: Turn[]) {
   const [sourcesOpen, setSourcesOpen] = useState<boolean | null>(null);
   const [sourceTurn, setSourceTurn] = useState<number | null>(null);
-  const showSources = sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
+  const showSources =
+    sourcesOpen ?? paneAudienceTurn(turns)?.audience === "dev";
   const listedTurn = sourceTurn ?? sourceTurnOf(turns);
   // The chip under a turn: opens the pane on that turn, or shuts it when it
   // is already open on that very turn. On any other turn it moves the pane
@@ -580,5 +640,12 @@ export function useSourcesPane(turns: Turn[]) {
   // A new turn: the reader asked again, and the answer to that is what they
   // are reading now, so its sources are the ones beside it.
   const clearSourceTurn = useCallback(() => setSourceTurn(null), []);
-  return { showSources, listedTurn, toggleSources, closeSources, reset, clearSourceTurn };
+  return {
+    showSources,
+    listedTurn,
+    toggleSources,
+    closeSources,
+    reset,
+    clearSourceTurn,
+  };
 }

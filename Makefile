@@ -1,4 +1,4 @@
-.PHONY: build test coverage backend-coverage fe-build fe-test fe-coverage run dev tidy
+.PHONY: build test fe-build fe-test run dev tidy
 
 # Stamped into the binary and shown in the composer's footer. "dev" is the
 # honest answer for a local build, and the UI drops the version sentence for
@@ -12,34 +12,8 @@ tidy:
 test:
 	cd backend && CGO_ENABLED=1 go test -race ./...
 
-# Line coverage with the same floor and scripts as ../peeq and ../loom
-# (scripts/coverage-floors, scripts/coverage-gate.sh). CI runs the patch gate on top
-# (scripts/patch-coverage.sh); locally the floor is the thing to watch.
-coverage: backend-coverage fe-coverage
-
-# -coverpkg=./... attributes coverage across package boundaries: code exercised
-# only by another package's tests (httpapi drives threads and store) is
-# otherwise reported as uncovered. The race detector needs cgo; that is
-# independent of the app's CGO_ENABLED=0 build.
-#
-# -count=1 because a cached result carries the coverage counters of the file
-# set it was recorded against. Delete a Go file and the packages that did not
-# change still replay counters naming it, and the cobertura conversion dies on
-# a path that no longer exists ("unable to determine file path"). CI restores a
-# warm build cache, so without this any PR that removes a file fails there
-# while passing locally.
-backend-coverage:
-	mkdir -p coverage
-	cd backend && CGO_ENABLED=1 go test -count=1 -race -covermode=atomic -coverpkg=./... -coverprofile=../coverage/backend.out ./...
-	cd backend && go run github.com/boumenot/gocover-cobertura@v1.5.0 < ../coverage/backend.out > ../coverage/backend.xml
-	./scripts/coverage-gate.sh backend
-
 fe-test:
-	cd ui && npx tsc -b && npm run test -- --run
-
-fe-coverage:
-	cd ui && npm run test -- --run --coverage
-	./scripts/coverage-gate.sh ui
+	cd ui && npx tsc -b && npm run test
 
 # vite.config.ts sets emptyOutDir:false so the tracked backend/web/dist/.gitkeep
 # survives a build (go:embed needs it); we clean the whole build output here
@@ -54,7 +28,7 @@ fe-build:
 
 build: fe-build
 	cd backend && CGO_ENABLED=0 go build \
-		-ldflags="-s -w -X github.com/trick77/rongo/internal/version.Version=$(VERSION)" \
+		-ldflags="-s -w -X github.com/trick77/ship/kit/version.Version=$(VERSION)" \
 		-o ../bin/rongo ./cmd/rongo
 
 run:
@@ -62,3 +36,27 @@ run:
 
 dev:
 	./scripts/dev.sh
+
+# ship:begin (owned by ship init)
+# The gate: everything CI checks, configured in ship.yaml. Master's ship, as the pre-push hook and the @master
+# workflows run it: its sha asked of GitHub (a proxy lags on @master). A local ship: SHIP_CMD=<go-installed binary>,
+# one name for here and the hook, so make check and the push gate never run different ships.
+# Exactly refs/heads/master (ls-remote matches by suffix), a 40-hex sha or nothing runs, as in the workflows.
+SHIP_CMD ?= sha=$$(git ls-remote https://github.com/trick77/ship refs/heads/master | \
+		awk '$$2 == "refs/heads/master" { print $$1 }'); \
+	echo "$$sha" | grep -Eqx '[0-9a-f]{40}' || \
+		{ echo "cannot resolve ship's master on GitHub: '$$sha' (git ls-remote, error above)"; exit 1; }; \
+	go run github.com/trick77/ship@$$sha
+
+.PHONY: check hooks lint
+
+check:
+	$(SHIP_CMD) check
+
+hooks:
+	$(SHIP_CMD) hooks
+
+# Quick lint while editing, at the version check runs.
+lint:
+	$(SHIP_CMD) lint
+# ship:end

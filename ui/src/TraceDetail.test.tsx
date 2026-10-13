@@ -26,18 +26,24 @@ describe("Trace, what each step found", () => {
     );
     expect(screen.getByText("Vorerfassung abschicken")).toBeTruthy();
     expect(screen.getByText("ControllerVorerfassung")).toBeTruthy();
-    expect(screen.getByText(/policenantrag-service, named by the question/)).toBeTruthy();
+    expect(
+      screen.getByText(/policenantrag-service, named by the question/),
+    ).toBeTruthy();
   });
 
   it("says a rework reads the previous answer, never that it scoped every project", () => {
     strict(
       <Trace
-        steps={[{ step: "understanding", at: t0, detail: { intent: "rework" } }]}
+        steps={[
+          { step: "understanding", at: t0, detail: { intent: "rework" } },
+        ]}
         state="running"
         startedAt={t0}
       />,
     );
-    expect(screen.getByText(/the previous answer from its own sources/)).toBeTruthy();
+    expect(
+      screen.getByText(/the previous answer from its own sources/),
+    ).toBeTruthy();
     expect(screen.queryByText(/every indexed project/)).toBeNull();
   });
 
@@ -48,7 +54,12 @@ describe("Trace, what each step found", () => {
           {
             step: "searching",
             at: t0,
-            detail: { commits: 7, since_days: 2, topic: "snapshot handling", per_repo: { rongo: 7 } },
+            detail: {
+              commits: 7,
+              since_days: 2,
+              topic: "snapshot handling",
+              per_repo: { rongo: 7 },
+            },
           },
         ]}
         state="running"
@@ -97,13 +108,25 @@ describe("Trace, what each step found", () => {
   it("turns the routing rung into a sentence, never its identifier", () => {
     strict(
       <Trace
-        steps={[{ step: "routing", at: t0, detail: { decision: "ask", rung: "repository", candidates: ["peeq", "rongo"] } }]}
+        steps={[
+          {
+            step: "routing",
+            at: t0,
+            detail: {
+              decision: "ask",
+              rung: "repository",
+              candidates: ["peeq", "rongo"],
+            },
+          },
+        ]}
         state="waiting"
         startedAt={t0}
         endedAt={t0 + 100}
       />,
     );
-    expect(screen.getByText(/Asking back: the matches span several projects/)).toBeTruthy();
+    expect(
+      screen.getByText(/Asking back: the matches span several projects/),
+    ).toBeTruthy();
     expect(screen.queryByText(/repository/)).toBeNull();
     expect(screen.getByText("peeq")).toBeTruthy();
     expect(screen.getByText(/decided by rule, no model/)).toBeTruthy();
@@ -124,7 +147,13 @@ describe("Trace, what each step found", () => {
               repos: 2,
               tokens: 22000,
               budget: 24000,
-              crossed: [{ from: "shipping", to: "queue-master", via: "destination shipping-task" }],
+              crossed: [
+                {
+                  from: "shipping",
+                  to: "queue-master",
+                  via: "destination shipping-task",
+                },
+              ],
             },
           },
         ]}
@@ -146,7 +175,17 @@ describe("Trace, what each step found", () => {
           {
             step: "gathering",
             at: t0,
-            detail: { hits: 3, references: 2, crossings: 0, sources: 45, repos: 1, tokens: 9000, budget: 24000, link_sites: 57, links: 40 },
+            detail: {
+              hits: 3,
+              references: 2,
+              crossings: 0,
+              sources: 45,
+              repos: 1,
+              tokens: 9000,
+              budget: 24000,
+              link_sites: 57,
+              links: 40,
+            },
           },
         ]}
         state="running"
@@ -163,7 +202,16 @@ describe("Trace, what each step found", () => {
           {
             step: "gathering",
             at: t0,
-            detail: { hits: 20, references: 3, crossings: 0, sources: 40, repos: 1, tokens: 9000, budget: 24000, ...locate },
+            detail: {
+              hits: 20,
+              references: 3,
+              crossings: 0,
+              sources: 40,
+              repos: 1,
+              tokens: 9000,
+              budget: 24000,
+              ...locate,
+            },
           },
         ]}
         state="done"
@@ -178,32 +226,60 @@ describe("Trace, what each step found", () => {
       locate_steps: [
         { tool: "grep", arg: "encrypt", matches: 64 },
         { tool: "grep", arg: "setAnzahlHaustiere" },
-        { tool: "read", repo: "schadenmeldung-service", path: "service/src/main/java/ServiceLinkdata.java", line: 40, held: 1 },
+        {
+          tool: "read",
+          repo: "schadenmeldung-service",
+          path: "service/src/main/java/ServiceLinkdata.java",
+          line: 40,
+          held: 1,
+        },
         { tool: "symbol", arg: "LinkInfoDto", added: 2 },
         { tool: "grep", not_run: "the token budget for this step was spent" },
       ],
       locate_outcome: "pointed",
-      locate_place: { repo: "schadenmeldung-service", path: "service/src/main/java/ServiceLinkdata.java", line: 52 },
+      locate_place: {
+        repo: "schadenmeldung-service",
+        path: "service/src/main/java/ServiceLinkdata.java",
+        line: 52,
+      },
     });
     const text = container.textContent ?? "";
-    expect(text).toContain("Looked for the exact place in the code, 4 lookups in 3 rounds");
-    expect(text).toContain('searched the code for "encrypt" — 64 matching lines');
-    expect(text).toContain('searched the code for "setAnzahlHaustiere" — nothing');
-    expect(text).toContain("opened ServiceLinkdata.java at line 40 — already among the sources");
-    expect(text).toContain("looked up the symbol LinkInfoDto — added 2 sources");
+    expect(text).toContain(
+      "Looked for the exact place in the code, 4 lookups in 3 rounds",
+    );
+    expect(text).toContain(
+      'searched the code for "encrypt" — 64 matching lines',
+    );
+    expect(text).toContain(
+      'searched the code for "setAnzahlHaustiere" — nothing',
+    );
+    expect(text).toContain(
+      "opened ServiceLinkdata.java at line 40 — already among the sources",
+    );
+    expect(text).toContain(
+      "looked up the symbol LinkInfoDto — added 2 sources",
+    );
     expect(text).toContain("not run: the token budget for this step was spent");
     expect(text).toContain(
       "Found it: ServiceLinkdata.java line 52 (schadenmeldung-service). The answer is written starting from that source.",
     );
     // The full path is on hover, never in the line.
-    expect(screen.getAllByTitle("schadenmeldung-service · service/src/main/java/ServiceLinkdata.java").length).toBe(2);
+    expect(
+      screen.getAllByTitle(
+        "schadenmeldung-service · service/src/main/java/ServiceLinkdata.java",
+      ).length,
+    ).toBe(2);
   });
 
   it("says a lookup found only code outside the turn, never nothing", () => {
     const text =
-      gathered({ locate_rounds: 1, locate_steps: [{ tool: "search", arg: "pets", outside: 2 }] }).container
-        .textContent ?? "";
-    expect(text).toContain('searched by meaning for "pets" — found only code outside this turn\'s projects');
+      gathered({
+        locate_rounds: 1,
+        locate_steps: [{ tool: "search", arg: "pets", outside: 2 }],
+      }).container.textContent ?? "";
+    expect(text).toContain(
+      'searched by meaning for "pets" — found only code outside this turn\'s projects',
+    );
   });
 
   it("says plainly when the locate loop did not find the place", () => {
@@ -213,19 +289,33 @@ describe("Trace, what each step found", () => {
       locate_outcome: "not_found",
     });
     const text = container.textContent ?? "";
-    expect(text).toContain('searched by meaning for "Arbeitsunfähigkeit korrigieren" — nothing');
-    expect(text).toContain("Did not find the exact place. The answer uses the search results in their usual order.");
+    expect(text).toContain(
+      'searched by meaning for "Arbeitsunfähigkeit korrigieren" — nothing',
+    );
+    expect(text).toContain(
+      "Did not find the exact place. The answer uses the search results in their usual order.",
+    );
     expect(text).not.toContain("NOT FOUND");
   });
 
   it("says when a named place was not among the sources, or no conclusion came", () => {
     expect(
-      gathered({ locate_rounds: 1, locate_steps: [{ tool: "grep", arg: "x", matches: 1 }], locate_outcome: "unpinned" })
-        .container.textContent,
-    ).toContain("Named a place that is not among the sources, so their order was left unchanged.");
+      gathered({
+        locate_rounds: 1,
+        locate_steps: [{ tool: "grep", arg: "x", matches: 1 }],
+        locate_outcome: "unpinned",
+      }).container.textContent,
+    ).toContain(
+      "Named a place that is not among the sources, so their order was left unchanged.",
+    );
     expect(
-      gathered({ locate_rounds: 1, locate_steps: [{ tool: "grep", arg: "y", matches: 1 }] }).container.textContent,
-    ).toContain("Came to no conclusion, so the sources keep their usual order.");
+      gathered({
+        locate_rounds: 1,
+        locate_steps: [{ tool: "grep", arg: "y", matches: 1 }],
+      }).container.textContent,
+    ).toContain(
+      "Came to no conclusion, so the sources keep their usual order.",
+    );
   });
 
   it("reads a trace stored with call labels and the model's sentence the same way, prose dropped", () => {
@@ -239,25 +329,46 @@ describe("Trace, what each step found", () => {
       ],
       locate_landed: ["search(vorlage link)", "found(ServiceLinkdata.java:52)"],
       locate_empty: ["grep(setAnzahlHaustiere)"],
-      locate_refused: ["grep(over the call limit)", "grep(loom: outside this turn's repositories)", "grep()"],
+      locate_refused: [
+        "grep(over the call limit)",
+        "grep(loom: outside this turn's repositories)",
+        "grep()",
+      ],
       locate_found:
         "FOUND: schadenmeldung-service service/x/ServiceLinkdata.java:52 `public LinkInfoDto decrypt(final String base64Encoded) {` — der Vorlagen-Link wird verschlüsselt.",
     });
     const text = container.textContent ?? "";
     expect(text).toContain("4 lookups in 3 rounds");
-    expect(text).toContain('searched the code for "encrypt" — 64 matching lines');
-    expect(text).toContain('searched the code for "setAnzahlHaustiere" — nothing');
-    expect(text).toContain("opened application-openshift-schadenmeldung.properties at line 85");
-    expect(text).toContain('searched by meaning for "vorlage link" — added sources');
+    expect(text).toContain(
+      'searched the code for "encrypt" — 64 matching lines',
+    );
+    expect(text).toContain(
+      'searched the code for "setAnzahlHaustiere" — nothing',
+    );
+    expect(text).toContain(
+      "opened application-openshift-schadenmeldung.properties at line 85",
+    );
+    expect(text).toContain(
+      'searched by meaning for "vorlage link" — added sources',
+    );
     // Ran, landed nothing new, found something: what it found was already held.
-    expect(text).toContain("opened application-openshift-schadenmeldung.properties at line 85 — already among the sources");
-    expect(text).toContain("another code search — not run: over the limit of calls in one round");
-    expect(text).toContain("another code search in loom — not run: that repository is outside this turn");
-    expect(text).toContain("another code search — not run: it named nothing to look up");
+    expect(text).toContain(
+      "opened application-openshift-schadenmeldung.properties at line 85 — already among the sources",
+    );
+    expect(text).toContain(
+      "another code search — not run: over the limit of calls in one round",
+    );
+    expect(text).toContain(
+      "another code search in loom — not run: that repository is outside this turn",
+    );
+    expect(text).toContain(
+      "another code search — not run: it named nothing to look up",
+    );
     expect(text).toContain(
       "Named ServiceLinkdata.java line 52 (schadenmeldung-service) as the place to write the answer from.",
     );
-    for (const leak of ["FOUND", "grep(", "verschlüsselt", "decrypt"]) expect(text).not.toContain(leak);
+    for (const leak of ["FOUND", "grep(", "verschlüsselt", "decrypt"])
+      expect(text).not.toContain(leak);
   });
 
   it("reads a stored NOT FOUND sentence as the plain not-found line", () => {
@@ -266,7 +377,8 @@ describe("Trace, what each step found", () => {
         locate_rounds: 1,
         locate_calls: ["grep(Arbeitsunfaehigkeit)"],
         locate_empty: ["grep(Arbeitsunfaehigkeit)"],
-        locate_found: "NOT FOUND: the specific place where a bestehende Arbeitsunfähigkeit is corrected was not located.",
+        locate_found:
+          "NOT FOUND: the specific place where a bestehende Arbeitsunfähigkeit is corrected was not located.",
       }).container.textContent ?? "";
     expect(text).toContain("Did not find the exact place.");
     expect(text).not.toContain("bestehende");
@@ -279,7 +391,15 @@ describe("Trace, what each step found", () => {
           {
             step: "gathering",
             at: t0,
-            detail: { hits: 1, references: 0, crossings: 0, sources: 1, repos: 1, locate: "call failed", locate_rounds: 1 },
+            detail: {
+              hits: 1,
+              references: 0,
+              crossings: 0,
+              sources: 1,
+              repos: 1,
+              locate: "call failed",
+              locate_rounds: 1,
+            },
           },
         ]}
         state="done"
@@ -294,7 +414,12 @@ describe("Trace, what each step found", () => {
     // Every turn stored before the detail existed, and every step that has
     // nothing to say: the label and the duration alone, as before.
     const { container } = strict(
-      <Trace steps={[{ step: "searching", at: t0 }]} state="done" startedAt={t0} endedAt={t0 + 100} />,
+      <Trace
+        steps={[{ step: "searching", at: t0 }]}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 100}
+      />,
     );
     expect(container.querySelector(".trace-detail")).toBeNull();
   });

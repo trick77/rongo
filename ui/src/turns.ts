@@ -182,7 +182,12 @@ export type Usage = {
  * clock by the least delayed arrival so far, so a running step still ticks
  * against Date.now(). Without it, the arrival time, as before.
  */
-export function withStep(t: Turn, step: string, now: number, serverAt?: number): Turn {
+export function withStep(
+  t: Turn,
+  step: string,
+  now: number,
+  serverAt?: number,
+): Turn {
   if (serverAt === undefined) {
     return { ...t, steps: [...t.steps, { step, at: now }] };
   }
@@ -239,7 +244,11 @@ export type Message = {
   // The scope sentence, rendered by the backend in this message's own
   // language. Empty on every turn that named nothing the index lacked.
   notice?: string;
-  clarification: { id: number; candidates: ClarifyCandidate[]; too_broad?: boolean } | null;
+  clarification: {
+    id: number;
+    candidates: ClarifyCandidate[];
+    too_broad?: boolean;
+  } | null;
   // The repositories THIS turn was narrowed to off a too-broad panel. Absent
   // on every other turn; the panel above reads it back to say what it
   // narrowed to after a reload.
@@ -329,7 +338,14 @@ export function storedTurn(m: Message): Turn {
     followups: m.followups ?? [],
     sourceless: m.sourceless === true,
     memory: m.memory
-      ? { id: m.memory.id, text: m.memory.text, scope: "", replaced: [], removed: [], scopeDropped: "" }
+      ? {
+          id: m.memory.id,
+          text: m.memory.text,
+          scope: "",
+          replaced: [],
+          removed: [],
+          scopeDropped: "",
+        }
       : null,
   };
 }
@@ -394,14 +410,19 @@ export function linkChosenCandidates(list: Message[], turns: Turn[]): Turn[] {
   for (const m of list) {
     if (!m.from_clarification_id) continue;
     chosenByClarification.set(m.from_clarification_id, m.from_candidate_idx);
-    if (m.narrowed_to?.length) narrowedByClarification.set(m.from_clarification_id, m.narrowed_to);
+    if (m.narrowed_to?.length)
+      narrowedByClarification.set(m.from_clarification_id, m.narrowed_to);
   }
   return turns.map((t, i) => {
     const clarId = list[i].clarification?.id;
     if (clarId == null) return t;
     const idx = chosenByClarification.get(clarId);
     if (idx === undefined) return t;
-    return { ...t, chosenIdx: idx, narrowedTo: narrowedByClarification.get(clarId) ?? null };
+    return {
+      ...t,
+      chosenIdx: idx,
+      narrowedTo: narrowedByClarification.get(clarId) ?? null,
+    };
   });
 }
 
@@ -442,12 +463,25 @@ export function storedRetries(turns: Turn[]): Turn[] {
     if (!t.error) return t;
     const head = headOf(t);
     const openCard = t.headId
-      ? turns.some((o) => headOf(o) === head && o.clarification && o.chosenIdx == null)
+      ? turns.some(
+          (o) => headOf(o) === head && o.clarification && o.chosenIdx == null,
+        )
       : (() => {
           let j = i - 1;
-          while (j >= 0 && turns[j].error && !turns[j].clarification && turns[j].question === t.question) j--;
+          while (
+            j >= 0 &&
+            turns[j].error &&
+            !turns[j].clarification &&
+            turns[j].question === t.question
+          )
+            j--;
           const card = j >= 0 ? turns[j] : null;
-          return !!card && !!card.clarification && card.chosenIdx == null && card.question === t.question;
+          return (
+            !!card &&
+            !!card.clarification &&
+            card.chosenIdx == null &&
+            card.question === t.question
+          );
         })();
     if (openCard) return t;
     return {
@@ -480,7 +514,8 @@ export function traceState(turn: Turn): TraceState {
 /** How a citation reads on one line: in the list under an answer, and in the
  * Markdown a turn is copied as. */
 export function forgeLine(c: Citation): string {
-  if (isCommit(c)) return `${c.repo} · ${shortSha(c.sha)} ${commitDay(c)} ${c.subject ?? ""} (${c.branch})`;
+  if (isCommit(c))
+    return `${c.repo} · ${shortSha(c.sha)} ${commitDay(c)} ${c.subject ?? ""} (${c.branch})`;
   return `${c.repo} · ${c.path}:${c.start_line}-${c.end_line} (${c.branch})`;
 }
 
@@ -557,11 +592,16 @@ export function asMarkdown(turn: Turn): string {
   const { typed, matched } = strip(turn.question, turn.pastes);
   const lines = typed ? [`# ${typed}`] : [];
   turn.pastes.forEach((p, i) => {
-    if (matched[i]) lines.push(...(lines.length ? [""] : []), "```", p.text, "```");
+    if (matched[i])
+      lines.push(...(lines.length ? [""] : []), "```", p.text, "```");
   });
   lines.push("", mermaidize(turn.text.trim()));
   if (turn.citations.length > 0) {
-    lines.push("", "Sources:", ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`));
+    lines.push(
+      "",
+      "Sources:",
+      ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`),
+    );
   }
   return lines.join("\n") + "\n";
 }
@@ -570,13 +610,27 @@ export function asMarkdown(turn: Turn): string {
  * The pasted_texts field of a request body, or nothing: a body with no pastes
  * carries no key, so a turn that never saw one is sent exactly as before.
  */
-export function pastedField(pastes: PastedText[]): { pasted_texts?: PastedText[] } {
+export function pastedField(pastes: PastedText[]): {
+  pasted_texts?: PastedText[];
+} {
   return pastes.length > 0 ? { pasted_texts: pastes } : {};
 }
 
 /** The body of a fresh /api/ask, the question folded from what was typed and what was pasted. */
-export function askBody(typed: string, pastes: PastedText[], audience: Audience, language: string, threadId: string) {
-  return { question: fold(typed, pastes), audience, language, thread_id: threadId, ...pastedField(pastes) };
+export function askBody(
+  typed: string,
+  pastes: PastedText[],
+  audience: Audience,
+  language: string,
+  threadId: string,
+) {
+  return {
+    question: fold(typed, pastes),
+    audience,
+    language,
+    thread_id: threadId,
+    ...pastedField(pastes),
+  };
 }
 
 export const pill = "rounded-full px-2.5 py-0.5 text-xs whitespace-nowrap";

@@ -71,7 +71,11 @@ const renderOptions = { maxSvgSize: 0 };
  * PlantUML's own complaint in the picture. */
 function closeLazyFetches(): void {
   const g = globalThis as Record<string, unknown>;
-  g.PLANTUML_STDLIB_LOADER = (url: string, _ok: () => void, fail: (message: string) => void) => {
+  g.PLANTUML_STDLIB_LOADER = (
+    url: string,
+    _ok: () => void,
+    fail: (message: string) => void,
+  ) => {
     fail(`${url} is not bundled with rongo`);
     return true;
   };
@@ -126,7 +130,10 @@ function renderOne(e: Engine, lines: string[]): Promise<string> {
   const run = queue.then(
     () =>
       new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("the engine did not finish")), renderTimeoutMs);
+        const timer = setTimeout(
+          () => reject(new Error("the engine did not finish")),
+          renderTimeoutMs,
+        );
         e.renderToString(
           lines,
           (svg) => {
@@ -149,7 +156,9 @@ function renderOne(e: Engine, lines: string[]): Promise<string> {
  * no script and no handler (measured), and this is the guard that does not
  * depend on that staying true. */
 export function clean(svg: string): string {
-  return DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } });
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+  });
 }
 
 export type Drawn = { svgs: string[] } | { error: string };
@@ -167,7 +176,8 @@ export function drawPlantUml(text: string): Promise<Drawn> {
       try {
         const e = await engine();
         const svgs: string[] = [];
-        for (const lines of diagrams(text)) svgs.push(clean(await renderOne(e, lines)));
+        for (const lines of diagrams(text))
+          svgs.push(clean(await renderOne(e, lines)));
         return { svgs };
       } catch (err) {
         drawn.delete(text);

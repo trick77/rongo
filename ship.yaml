@@ -1,0 +1,26 @@
+go:
+  dir: backend
+  # httpapi drives threads and store: without it, code only another package's
+  # tests exercise reads as uncovered.
+  coverpkg: ./...
+ui:
+  dir: ui
+  embed: backend/web/dist
+steps:
+  - { name: universal-ctags, run: scripts/ctags.sh }
+images:
+  - { suffix: "", target: "", containerfile: backend/Containerfile, platforms: [linux/amd64] }
+visibility: public
+allow:
+  - { rule: distroless, image: "", why: "rongo shells out to git and universal-ctags, both need a userland" }
+  - { rule: handrolled, path: backend/internal/edges/extract.go, why: "health route strings it extracts from indexed code, not a route of rongo's" }
+  - { rule: handrolled, path: backend/cmd/rongo/main.go, why: "shutdown moves to kit/run and kit/httpx in the follow-up" }
+  - { rule: handrolled, path: backend/internal/auth/oidc.go, why: "OIDC moves to kit/auth in the follow-up" }
+dependabot:
+  ignore:
+    - ecosystem: gomod
+      dependency: github.com/ncruces/go-sqlite3
+      why: "sqlite-vec-go-bindings v0.1.7-alpha.2 is welded to v0.23.3: v0.32.0 builds then fails at runtime, v0.33.0 does not compile; bump both or neither"
+    - ecosystem: gomod
+      dependency: github.com/asg017/sqlite-vec-go-bindings
+      why: "wasm built against ncruces' SQLite: a lone bump skews the pair and breaks vector search at runtime; bump both or neither, by hand"

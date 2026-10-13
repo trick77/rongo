@@ -8,7 +8,11 @@ import { storedTurn, type Turn, type Usage } from "./turns";
 /* The pane on its own, with turns built the way the record builds them.
  * Driving it through Ask proves the wiring; this proves what it says. */
 
-function turnOf(question: string, usage: Usage | null, steps: unknown[] = []): Turn {
+function turnOf(
+  question: string,
+  usage: Usage | null,
+  steps: unknown[] = [],
+): Turn {
   const t = storedTurn({
     id: 1,
     thread_id: "1",
@@ -28,8 +32,23 @@ function turnOf(question: string, usage: Usage | null, steps: unknown[] = []): T
  * duration, and a registry that sizes the model. */
 const full: Usage = {
   calls: [
-    { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 420, completion_tokens: 90, cached_tokens: 380, ms: 880, cost_usd: 0.0001 },
-    { step: "embed", model: "text-embedding-3-small", prompt_tokens: 36, completion_tokens: 0, ms: 190, cost_usd: 0 },
+    {
+      step: "understand",
+      model: "mimo-v2.6-flash",
+      prompt_tokens: 420,
+      completion_tokens: 90,
+      cached_tokens: 380,
+      ms: 880,
+      cost_usd: 0.0001,
+    },
+    {
+      step: "embed",
+      model: "text-embedding-3-small",
+      prompt_tokens: 36,
+      completion_tokens: 0,
+      ms: 190,
+      cost_usd: 0,
+    },
     {
       step: "answer",
       model: "mimo-v2.6-pro",
@@ -51,8 +70,18 @@ const full: Usage = {
 /** A turn from before any of it was recorded: tokens and nothing else. */
 const plain: Usage = {
   calls: [
-    { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40 },
-    { step: "answer", model: "mimo-v2.6-pro", prompt_tokens: 2000, completion_tokens: 500 },
+    {
+      step: "understand",
+      model: "mimo-v2.6-flash",
+      prompt_tokens: 400,
+      completion_tokens: 40,
+    },
+    {
+      step: "answer",
+      model: "mimo-v2.6-pro",
+      prompt_tokens: 2000,
+      completion_tokens: 500,
+    },
   ],
   prompt_tokens: 2400,
   completion_tokens: 540,
@@ -76,15 +105,38 @@ const writingStep = {
 const gatherStep = {
   step: "gathering",
   at: 500,
-  detail: { hits: 12, references: 3, crossings: 1, sources: 9, repos: 1, tokens: 14780, budget: 24000 },
+  detail: {
+    hits: 12,
+    references: 3,
+    crossings: 1,
+    sources: 9,
+    repos: 1,
+    tokens: 14780,
+    budget: 24000,
+  },
 };
-const searchStep = { step: "searching", at: 300, detail: { hits: 31, per_repo: { rongo: 31 } } };
+const searchStep = {
+  step: "searching",
+  at: 300,
+  detail: { hits: 31, per_repo: { rongo: 31 } },
+};
 
 describe("StatsPane, this turn", () => {
-  const rich = () => turnOf("Where is the ceiling checked?", full, [searchStep, gatherStep, writingStep]);
+  const rich = () =>
+    turnOf("Where is the ceiling checked?", full, [
+      searchStep,
+      gatherStep,
+      writingStep,
+    ]);
 
   it("shows what the turn spent, what was cached and how long it took", () => {
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[rich()]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[rich()]}
+        onClose={() => {}}
+      />,
+    );
 
     const pane = screen.getByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("22,976");
@@ -99,7 +151,13 @@ describe("StatsPane, this turn", () => {
   });
 
   it("counts the calls, and the work that cost no tokens separately", () => {
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[rich()]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[rich()]}
+        onClose={() => {}}
+      />,
+    );
 
     const pane = screen.getByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("model calls");
@@ -110,7 +168,13 @@ describe("StatsPane, this turn", () => {
   });
 
   it("gives the window as a number and the prompt split as the bar", () => {
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[rich()]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[rich()]}
+        onClose={() => {}}
+      />,
+    );
 
     const pane = screen.getByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("22,010 of 1,048,576 · 2%");
@@ -124,26 +188,48 @@ describe("StatsPane, this turn", () => {
 
   it("every ⓘ opens one line and closes it again, one at a time", async () => {
     const user = userEvent.setup();
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[rich()]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[rich()]}
+        onClose={() => {}}
+      />,
+    );
 
-    await user.click(screen.getByRole("button", { name: "What an embedding call means" }));
+    await user.click(
+      screen.getByRole("button", { name: "What an embedding call means" }),
+    );
     expect(screen.getByText(/turned into a vector/)).toBeTruthy();
 
     // A second one replaces the first rather than stacking.
-    await user.click(screen.getByRole("button", { name: "What a search lane means" }));
+    await user.click(
+      screen.getByRole("button", { name: "What a search lane means" }),
+    );
     expect(screen.queryByText(/turned into a vector/)).toBeNull();
-    expect(screen.getByText(/one matches words, one matches meaning/)).toBeTruthy();
+    expect(
+      screen.getByText(/one matches words, one matches meaning/),
+    ).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "What a reference hop means" }));
+    await user.click(
+      screen.getByRole("button", { name: "What a reference hop means" }),
+    );
     expect(screen.getByText(/pointed at another/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "What a cached prompt means" }));
+    await user.click(
+      screen.getByRole("button", { name: "What a cached prompt means" }),
+    );
     expect(screen.getByText(/did not charge full price/)).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "What the context means" }));
-    expect(screen.getByText(/is the model's own, from its profile/)).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "What the context means" }),
+    );
+    expect(
+      screen.getByText(/is the model's own, from its profile/),
+    ).toBeTruthy();
 
-    const budget = screen.getByRole("button", { name: "What the source budget means" });
+    const budget = screen.getByRole("button", {
+      name: "What the source budget means",
+    });
     await user.click(budget);
     expect(screen.getByText(/the walk stops where it is/)).toBeTruthy();
     await user.click(budget);
@@ -151,7 +237,13 @@ describe("StatsPane, this turn", () => {
   });
 
   it("draws nothing it has no figures for", () => {
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Old one?", plain)]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[turnOf("Old one?", plain)]}
+        onClose={() => {}}
+      />,
+    );
 
     const pane = screen.getByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("2,940");
@@ -168,26 +260,44 @@ describe("StatsPane, this turn", () => {
     const user = userEvent.setup();
     const thinking: Usage = {
       ...full,
-      calls: full.calls.map((c) => (c.step === "answer" ? { ...c, reasoning_tokens: 260 } : c)),
+      calls: full.calls.map((c) =>
+        c.step === "answer" ? { ...c, reasoning_tokens: 260 } : c,
+      ),
     };
     const { rerender } = render(
-      <StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Why?", thinking, [writingStep])]} onClose={() => {}} />,
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[turnOf("Why?", thinking, [writingStep])]}
+        onClose={() => {}}
+      />,
     );
 
     expect(screen.getByText("spent thinking")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "What thinking means" }));
+    await user.click(
+      screen.getByRole("button", { name: "What thinking means" }),
+    );
     expect(screen.getByText(/thinking rather than writing/)).toBeTruthy();
 
     // Zero on every call: the row would be noise on every turn, and both
     // deployments have reported zero on everything measured so far.
     rerender(
-      <StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Why?", full, [writingStep])]} onClose={() => {}} />,
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[turnOf("Why?", full, [writingStep])]}
+        onClose={() => {}}
+      />,
     );
     expect(screen.queryByText("spent thinking")).toBeNull();
   });
 
   it("says so when the turn has no usage at all", () => {
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={[turnOf("Nothing?", null)]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={[turnOf("Nothing?", null)]}
+        onClose={() => {}}
+      />,
+    );
     expect(screen.getByText(/no usage on record/)).toBeTruthy();
   });
 });
@@ -199,7 +309,13 @@ describe("StatsPane, the thread", () => {
   ];
 
   it("sums the thread and says where the tokens went", () => {
-    render(<StatsPane target={{ kind: "thread" }} turns={turns} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "thread" }}
+        turns={turns}
+        onClose={() => {}}
+      />,
+    );
 
     const pane = screen.getByRole("dialog", { name: "Token stats" });
     expect(pane.textContent).toContain("Thread");
@@ -215,17 +331,35 @@ describe("StatsPane, the thread", () => {
 
   it("switches between the turn and the thread", async () => {
     const user = userEvent.setup();
-    render(<StatsPane target={{ kind: "turn", index: 0 }} turns={turns} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={turns}
+        onClose={() => {}}
+      />,
+    );
 
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Turn 1");
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+      "Turn 1",
+    );
     await user.click(screen.getByRole("button", { name: /^Thread$/ }));
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Thread");
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+      "Thread",
+    );
     await user.click(screen.getByRole("button", { name: "This turn" }));
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Turn 1");
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+      "Turn 1",
+    );
   });
 
   it("says so when no turn in the thread has usage", () => {
-    render(<StatsPane target={{ kind: "thread" }} turns={[turnOf("Nothing?", null)]} onClose={() => {}} />);
+    render(
+      <StatsPane
+        target={{ kind: "thread" }}
+        turns={[turnOf("Nothing?", null)]}
+        onClose={() => {}}
+      />,
+    );
     expect(screen.getByText(/no usage on record/)).toBeTruthy();
   });
 });
@@ -234,7 +368,12 @@ describe("The thread badge", () => {
   it("is a way into the stats where there is one, and a label where there is not", async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
-    const { rerender } = render(<ThreadUsageBadge total={{ tokens: 25916, cost: 0.013 }} onOpen={onOpen} />);
+    const { rerender } = render(
+      <ThreadUsageBadge
+        total={{ tokens: 25916, cost: 0.013 }}
+        onOpen={onOpen}
+      />,
+    );
 
     const button = screen.getByRole("button", { name: "Thread token stats" });
     expect(button.textContent).toContain("25,916 tok");
@@ -259,7 +398,11 @@ describe("StatsPane, closing it", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     const { container } = render(
-      <StatsPane target={{ kind: "turn", index: 0 }} turns={turns} onClose={onClose} />,
+      <StatsPane
+        target={{ kind: "turn", index: 0 }}
+        turns={turns}
+        onClose={onClose}
+      />,
     );
 
     await user.click(screen.getByRole("button", { name: "Close token stats" }));

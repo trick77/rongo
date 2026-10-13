@@ -17,7 +17,9 @@ describe("Narrow", () => {
     strict(<Narrow repos={repos} onAsk={() => {}} />);
 
     for (const r of repos) {
-      expect(screen.getByRole("button", { name: new RegExp(r.repo) })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: new RegExp(r.repo) }),
+      ).toBeTruthy();
     }
     expect(screen.getByText(/5 projects/)).toBeTruthy();
   });
@@ -64,23 +66,33 @@ describe("Narrow", () => {
     }
 
     // The three picked stay live, so the reader can swap one out.
-    expect(screen.getByRole("button", { name: /peeq/ }).hasAttribute("disabled")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: /peeq/ }).hasAttribute("disabled"),
+    ).toBe(false);
     for (const name of ["gateway", "ingest"]) {
-      expect(screen.getByRole("button", { name: new RegExp(name) }).hasAttribute("disabled")).toBe(true);
+      expect(
+        screen
+          .getByRole("button", { name: new RegExp(name) })
+          .hasAttribute("disabled"),
+      ).toBe(true);
     }
   });
 
   it("asks for nothing until something is picked", () => {
     strict(<Narrow repos={repos} onAsk={() => {}} />);
 
-    expect(screen.getByRole("button", { name: /^Ask/ }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: /^Ask/ }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   it("collapses to what it narrowed to once the turn went on", () => {
     // The panel stays in the thread for the reason the card does: it is the
     // record of a decision, and the answer below it only makes sense beside
     // the repositories it was narrowed to.
-    strict(<Narrow repos={repos} narrowedTo={["peeq", "ledger"]} onAsk={() => {}} />);
+    strict(
+      <Narrow repos={repos} narrowedTo={["peeq", "ledger"]} onAsk={() => {}} />,
+    );
 
     const header = screen.getByRole("button", { name: /Narrowed to/ });
     expect(header.textContent).toContain("peeq");
@@ -97,9 +109,10 @@ describe("Narrow", () => {
     await user.click(screen.getByRole("button", { name: /loom/ }));
 
     expect(onAsk).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /loom/ }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: /loom/ }).hasAttribute("disabled"),
+    ).toBe(true);
   });
-
 
   it("asks nobody to narrow on a page where nobody can", async () => {
     // A shared thread is read: the ochre and the buttons would leave a reader
@@ -122,11 +135,15 @@ describe("Narrow", () => {
 
     const header = screen.getByRole("button", { name: /Narrowed to/ });
     const before = header.querySelector("svg path")?.getAttribute("d");
-    expect(header.querySelector("svg")?.getAttribute("class")).not.toContain("rotate-90");
+    expect(header.querySelector("svg")?.getAttribute("class")).not.toContain(
+      "rotate-90",
+    );
 
     await user.click(header);
 
-    expect(header.querySelector("svg")?.getAttribute("class")).toContain("rotate-90");
+    expect(header.querySelector("svg")?.getAttribute("class")).toContain(
+      "rotate-90",
+    );
     expect(header.querySelector("svg path")?.getAttribute("d")).toBe(before);
   });
 });

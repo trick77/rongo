@@ -25,7 +25,7 @@ func stagesDB(t *testing.T) *sql.DB {
 }
 
 var declared = []repos.Stage{
-	{Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}},
+	{Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}}, //nolint:misspell // German stage alias
 	{Name: "intg", Prefix: "intg/"},
 }
 
@@ -46,7 +46,7 @@ func TestSyncAndLoad(t *testing.T) {
 	}
 	want := Set{
 		{Repo: "acme-infra", Name: "intg", Prefix: "intg/"},
-		{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}},
+		{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}}, //nolint:misspell // German stage alias
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load = %+v, want %+v", got, want)
@@ -64,7 +64,7 @@ func TestSyncAndLoad(t *testing.T) {
 
 func testSet() Set {
 	return Set{
-		{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}},
+		{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}}, //nolint:misspell // German stage alias
 		{Repo: "acme-infra", Name: "intg", Prefix: "intg/"},
 		{Repo: "other-infra", Name: "prod", Prefix: "overlays/prod/"},
 	}
@@ -75,7 +75,7 @@ func TestSet_namesAndResolve(t *testing.T) {
 	if got := s.Names(); !reflect.DeepEqual(got, []string{"intg", "prod"}) {
 		t.Errorf("Names = %v", got)
 	}
-	for word, want := range map[string]string{"prod": "prod", "Production": "prod", "PRODUKTION": "prod", "intg": "intg", "integration": "", "": ""} {
+	for word, want := range map[string]string{"prod": "prod", "Production": "prod", "PRODUKTION": "prod", "intg": "intg", "integration": "", "": ""} { //nolint:misspell // German stage alias
 		got, ok := s.Resolve(word)
 		if got != want || ok != (want != "") {
 			t.Errorf("Resolve(%q) = %q, %v; want %q", word, got, ok, want)
@@ -87,7 +87,7 @@ func TestSet_mentioned(t *testing.T) {
 	s := testSet()
 	cases := map[string][]string{
 		"how often is the digest sent in production?":          {"prod"},
-		"Wie oft wird der Digest in der Produktion verschickt": {"prod"},
+		"Wie oft wird der Digest in der Produktion verschickt": {"prod"}, //nolint:misspell // German stage alias
 		"and on intg, and prod?":                               {"intg", "prod"},
 		"how is the payment integration done":                  nil,
 		"the productive path through the code":                 nil,

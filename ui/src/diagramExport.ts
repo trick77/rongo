@@ -1,4 +1,9 @@
-import { diagramKind, parseDiagram, type DiagramSpec, type FlowKind } from "./diagram";
+import {
+  diagramKind,
+  parseDiagram,
+  type DiagramSpec,
+  type FlowKind,
+} from "./diagram";
 import { fenceRe } from "./markdown";
 
 /**
@@ -19,7 +24,10 @@ import { fenceRe } from "./markdown";
  * SVG's, and in a file a viewer paints white behind it and the warm off-white
  * labels all but disappear. The ground is read off the card rather than
  * named here, so there is one copy of the token. */
-export function toSvgFile(drawn: { svg: string }, card: Element | null): string {
+export function toSvgFile(
+  drawn: { svg: string },
+  card: Element | null,
+): string {
   const ground = card ? groundOf(card) : null;
   if (ground === null) return drawn.svg;
   return withGround(drawn.svg, ground);
@@ -34,7 +42,9 @@ export function withGround(svg: string, ground: string): string {
     // a flowchart at minus its padding), and a rect at 0,0 would leave a
     // bare band along the top and left edge of the file.
     const vb = /viewBox="([^"]*)"/.exec(open);
-    const [x, y, w, h] = vb ? vb[1].trim().split(/[\s,]+/) : ["0", "0", "100%", "100%"];
+    const [x, y, w, h] = vb
+      ? vb[1].trim().split(/[\s,]+/)
+      : ["0", "0", "100%", "100%"];
     return `${open}<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${ground}"/>`;
   });
 }
@@ -44,7 +54,8 @@ export function withGround(svg: string, ground: string): string {
 function groundOf(el: Element): string | null {
   for (let node: Element | null = el; node; node = node.parentElement) {
     const bg = getComputedStyle(node).backgroundColor;
-    if (bg !== "" && bg !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(bg)) return bg;
+    if (bg !== "" && bg !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(bg))
+      return bg;
   }
   return null;
 }
@@ -53,7 +64,10 @@ function groundOf(el: Element): string | null {
  * the blob it already is. There is no shared helper in the UI to reuse: this
  * is the first thing rongo lets anyone take away. */
 export function download(name: string, data: string | Blob): void {
-  const blob = typeof data === "string" ? new Blob([data], { type: "image/svg+xml;charset=utf-8" }) : data;
+  const blob =
+    typeof data === "string"
+      ? new Blob([data], { type: "image/svg+xml;charset=utf-8" })
+      : data;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -67,7 +81,9 @@ export function download(name: string, data: string | Blob): void {
 /** fileName is what the download is called: the kind of picture it is, so a
  * folder of them stays sortable. */
 export function fileName(src: string): string {
-  const kind = diagramKind(src).replace(/Diagram(-v2)?$/, "").toLowerCase();
+  const kind = diagramKind(src)
+    .replace(/Diagram(-v2)?$/, "")
+    .toLowerCase();
   if (kind === "") return "rongo-diagram.svg";
   return `rongo-${kind === "graph" ? "flowchart" : kind}-diagram.svg`;
 }
@@ -81,8 +97,13 @@ export function svgSize(svg: string): { w: number; h: number } | null {
   const w = parseFloat(/\swidth="([\d.]+)(?:px)?"/.exec(open)?.[1] ?? "");
   const h = parseFloat(/\sheight="([\d.]+)(?:px)?"/.exec(open)?.[1] ?? "");
   if (w > 0 && h > 0) return { w, h };
-  const vb = /viewBox="([^"]*)"/.exec(open)?.[1].trim().split(/[\s,]+/).map(Number);
-  if (vb && vb.length === 4 && vb[2] > 0 && vb[3] > 0) return { w: vb[2], h: vb[3] };
+  const vb = /viewBox="([^"]*)"/
+    .exec(open)?.[1]
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (vb && vb.length === 4 && vb[2] > 0 && vb[3] > 0)
+    return { w: vb[2], h: vb[3] };
   return null;
 }
 
@@ -91,7 +112,9 @@ export function svgSize(svg: string): { w: number; h: number } | null {
  * came out as &nbsp;, an entity no SVG viewer defines, and neither the file
  * nor the PNG made from it would open. */
 export function toXml(svg: string): string {
-  const el = new DOMParser().parseFromString(svg, "text/html").querySelector("svg");
+  const el = new DOMParser()
+    .parseFromString(svg, "text/html")
+    .querySelector("svg");
   return el ? new XMLSerializer().serializeToString(el) : svg;
 }
 
@@ -107,8 +130,17 @@ export const phoneCanvas: CanvasLimit = { side: 4096, area: 4096 * 4096 };
  * picture that stays sharp on a dense screen, less where that would not fit
  * the canvas. A diagram too large even at 1:1 is drawn smaller rather than
  * not at all. */
-export function pngScale(w: number, h: number, limit: CanvasLimit = desktopCanvas): number {
-  return Math.min(2, limit.side / w, limit.side / h, Math.sqrt(limit.area / (w * h)));
+export function pngScale(
+  w: number,
+  h: number,
+  limit: CanvasLimit = desktopCanvas,
+): number {
+  return Math.min(
+    2,
+    limit.side / w,
+    limit.side / h,
+    Math.sqrt(limit.area / (w * h)),
+  );
 }
 
 /** toPng paints a drawing on white, the paper it was drawn for, and encodes
@@ -129,7 +161,11 @@ export async function toPng(svg: string): Promise<Blob> {
   for (const limit of [desktopCanvas, phoneCanvas]) {
     const scale = pngScale(size.w, size.h, limit);
     try {
-      return await paint(img, Math.max(1, Math.round(size.w * scale)), Math.max(1, Math.round(size.h * scale)));
+      return await paint(
+        img,
+        Math.max(1, Math.round(size.w * scale)),
+        Math.max(1, Math.round(size.h * scale)),
+      );
     } catch (e) {
       last = e;
     }
@@ -151,7 +187,13 @@ function paint(img: HTMLImageElement, w: number, h: number): Promise<Blob> {
       ctx.fillStyle = "#FFFFFF";
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("the picture is too large for a PNG"))), "image/png");
+      canvas.toBlob(
+        (b) =>
+          b
+            ? resolve(b)
+            : reject(new Error("the picture is too large for a PNG")),
+        "image/png",
+      );
     } catch (e) {
       reject(e);
     }
@@ -225,7 +267,11 @@ function cited(src: number[]): string {
   return src.map((m) => ` [${m}]`).join("");
 }
 
-const arrows: Record<string, string> = { call: "->>", return: "-->>", async: "-)" };
+const arrows: Record<string, string> = {
+  call: "->>",
+  return: "-->>",
+  async: "-)",
+};
 
 function shape(kind: FlowKind, label: string): string {
   const l = quoted(label);
@@ -249,16 +295,20 @@ export function toMermaid(spec: DiagramSpec, cite = true): string {
     const out = ["sequenceDiagram"];
     // An empty label is a spec parseDiagram accepts, and `participant x as `
     // with nothing after it takes the whole diagram down with a parse error.
-    for (const a of spec.actors) out.push(`    participant ${id.get(a.id)} as ${bare(a.label) || a.id}`);
+    for (const a of spec.actors)
+      out.push(`    participant ${id.get(a.id)} as ${bare(a.label) || a.id}`);
     for (const s of spec.steps) {
       const arrow = arrows[s.kind] ?? arrows.call;
-      out.push(`    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}${markers(s.src)}`);
+      out.push(
+        `    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}${markers(s.src)}`,
+      );
     }
     return out.join("\n");
   }
   const id = safeIds(spec.nodes.map((n) => n.id));
   const out = ["flowchart TD"];
-  for (const n of spec.nodes) out.push(`    ${id.get(n.id)}${shape(n.kind, n.label + markers(n.src))}`);
+  for (const n of spec.nodes)
+    out.push(`    ${id.get(n.id)}${shape(n.kind, n.label + markers(n.src))}`);
   for (const e of spec.edges) {
     const link = e.label ? `-->|${quoted(e.label)}|` : "-->";
     out.push(`    ${id.get(e.from)} ${link} ${id.get(e.to)}`);
@@ -290,7 +340,11 @@ export function mermaidize(text: string): string {
       continue;
     }
     const spec = parseDiagram(body.join("\n"));
-    out.push("```mermaid", ...(spec ? toMermaid(spec).split("\n") : body), "```");
+    out.push(
+      "```mermaid",
+      ...(spec ? toMermaid(spec).split("\n") : body),
+      "```",
+    );
   }
   return out.join("\n");
 }

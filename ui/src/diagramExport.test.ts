@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { toMermaid, mermaidize, toSvgFile, fileName, withGround, svgSize, pngScale, toPng, toXml, phoneCanvas } from "./diagramExport";
+import {
+  toMermaid,
+  mermaidize,
+  toSvgFile,
+  fileName,
+  withGround,
+  svgSize,
+  pngScale,
+  toPng,
+  toXml,
+  phoneCanvas,
+} from "./diagramExport";
 import type { FlowSpec, SequenceSpec } from "./diagram";
 
 const seq: SequenceSpec = {
@@ -10,10 +21,34 @@ const seq: SequenceSpec = {
     { id: "idx", label: "Indexer" },
   ],
   steps: [
-    { from: "repos.yaml", to: "repos-yaml", label: "Load repository list", kind: "call", src: [1, 2] },
-    { from: "repos-yaml", to: "idx", label: "Sync specs", kind: "async", src: [] },
-    { from: "idx", to: "idx", label: "Keyword indexing", kind: "call", src: [8] },
-    { from: "idx", to: "repos-yaml", label: "Store files", kind: "return", src: [9] },
+    {
+      from: "repos.yaml",
+      to: "repos-yaml",
+      label: "Load repository list",
+      kind: "call",
+      src: [1, 2],
+    },
+    {
+      from: "repos-yaml",
+      to: "idx",
+      label: "Sync specs",
+      kind: "async",
+      src: [],
+    },
+    {
+      from: "idx",
+      to: "idx",
+      label: "Keyword indexing",
+      kind: "call",
+      src: [8],
+    },
+    {
+      from: "idx",
+      to: "repos-yaml",
+      label: "Store files",
+      kind: "return",
+      src: [9],
+    },
   ],
 };
 
@@ -44,7 +79,9 @@ describe("toMermaid", () => {
     // "repos.yaml" and "repos-yaml" both sanitize to repos_yaml.
     expect(out).toContain("participant repos_yaml as repos.yaml");
     expect(out).toContain("participant repos_yaml_2 as Startup");
-    expect(out).toContain("repos_yaml->>repos_yaml_2: Load repository list [1] [2]");
+    expect(out).toContain(
+      "repos_yaml->>repos_yaml_2: Load repository list [1] [2]",
+    );
   });
 
   it("draws call, async and return with their own arrows", () => {
@@ -101,7 +138,7 @@ describe("toMermaid", () => {
   });
 
   it("quotes an edge label so a marker survives the parser", () => {
-    expect(toMermaid(flow)).toContain('a --> b');
+    expect(toMermaid(flow)).toContain("a --> b");
     expect(toMermaid(flow)).toContain('b -->|"yes [3]"| c');
   });
 });
@@ -114,7 +151,9 @@ describe("mermaidize", () => {
   });
 
   it("replaces a diagram fence with a mermaid one", () => {
-    const out = mermaidize(`Before [1].\n\n\`\`\`diagram\n${body}\n\`\`\`\n\nAfter.`);
+    const out = mermaidize(
+      `Before [1].\n\n\`\`\`diagram\n${body}\n\`\`\`\n\nAfter.`,
+    );
     expect(out).toContain("```mermaid");
     expect(out).toContain("sequenceDiagram");
     expect(out).not.toContain("```diagram");
@@ -141,10 +180,13 @@ describe("mermaidize", () => {
 
 describe("toSvgFile", () => {
   afterEach(() => {
-    document.head.querySelectorAll("style[data-test]").forEach((s) => s.remove());
+    document.head
+      .querySelectorAll("style[data-test]")
+      .forEach((s) => s.remove());
   });
 
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -25 240 90"><style>.x{}</style><rect width="10" height="10"/></svg>';
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -25 240 90"><style>.x{}</style><rect width="10" height="10"/></svg>';
 
   function card(): HTMLElement {
     const style = document.createElement("style");
@@ -160,9 +202,13 @@ describe("toSvgFile", () => {
   it("carries the card's ground, so the pale labels are not lost on white", () => {
     const out = toSvgFile({ svg }, card());
     // Over the viewBox, which starts above and left of the origin.
-    expect(out).toContain('<rect x="-8" y="-25" width="240" height="90" fill="rgb(27, 27, 26)"/>');
+    expect(out).toContain(
+      '<rect x="-8" y="-25" width="240" height="90" fill="rgb(27, 27, 26)"/>',
+    );
     // First, so it sits behind the drawing rather than over it.
-    expect(out.indexOf('fill="rgb(27, 27, 26)"')).toBeLessThan(out.indexOf('width="10"'));
+    expect(out.indexOf('fill="rgb(27, 27, 26)"')).toBeLessThan(
+      out.indexOf('width="10"'),
+    );
   });
 
   it("leaves the renderer's file alone otherwise", () => {
@@ -175,7 +221,9 @@ describe("toSvgFile", () => {
 
 describe("fileName", () => {
   it("names the file after the kind of picture", () => {
-    expect(fileName("sequenceDiagram\n A->>B: x")).toBe("rongo-sequence-diagram.svg");
+    expect(fileName("sequenceDiagram\n A->>B: x")).toBe(
+      "rongo-sequence-diagram.svg",
+    );
     expect(fileName("flowchart TD\n a")).toBe("rongo-flowchart-diagram.svg");
     expect(fileName("graph LR\n a")).toBe("rongo-flowchart-diagram.svg");
     expect(fileName("stateDiagram-v2\n a")).toBe("rongo-state-diagram.svg");
@@ -189,9 +237,17 @@ describe("download", () => {
     const { download } = await import("./diagramExport");
     const create = vi.fn(() => "blob:x");
     const revoke = vi.fn();
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    Object.defineProperty(URL, "createObjectURL", { value: create, configurable: true });
-    Object.defineProperty(URL, "revokeObjectURL", { value: revoke, configurable: true });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    Object.defineProperty(URL, "createObjectURL", {
+      value: create,
+      configurable: true,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: revoke,
+      configurable: true,
+    });
     download("d.svg", "<svg/>");
     expect(create).toHaveBeenCalled();
     expect(click).toHaveBeenCalled();
@@ -202,9 +258,17 @@ describe("download", () => {
   it("hands over a blob it was given as it is", async () => {
     const { download } = await import("./diagramExport");
     const create = vi.fn((_b: Blob) => "blob:y");
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    Object.defineProperty(URL, "createObjectURL", { value: create, configurable: true });
-    Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+    Object.defineProperty(URL, "createObjectURL", {
+      value: create,
+      configurable: true,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      value: vi.fn(),
+      configurable: true,
+    });
     const png = new Blob(["x"], { type: "image/png" });
     download("d.png", png);
     expect(create).toHaveBeenCalledWith(png);
@@ -214,7 +278,9 @@ describe("download", () => {
 
 describe("withGround", () => {
   it("lays the colour over the viewBox, behind the drawing", () => {
-    expect(withGround('<svg viewBox="0 0 30 20"><rect width="4"/></svg>', "#FFFFFF")).toBe(
+    expect(
+      withGround('<svg viewBox="0 0 30 20"><rect width="4"/></svg>', "#FFFFFF"),
+    ).toBe(
       '<svg viewBox="0 0 30 20"><rect x="0" y="0" width="30" height="20" fill="#FFFFFF"/><rect width="4"/></svg>',
     );
   });
@@ -222,11 +288,16 @@ describe("withGround", () => {
 
 describe("svgSize", () => {
   it("reads the pixel size the engine wrote", () => {
-    expect(svgSize('<svg width="120px" height="80px" viewBox="0 0 240 160">')).toEqual({ w: 120, h: 80 });
+    expect(
+      svgSize('<svg width="120px" height="80px" viewBox="0 0 240 160">'),
+    ).toEqual({ w: 120, h: 80 });
   });
 
   it("falls back to the viewBox, and knows when there is neither", () => {
-    expect(svgSize('<svg viewBox="-5 -5 240 160">')).toEqual({ w: 240, h: 160 });
+    expect(svgSize('<svg viewBox="-5 -5 240 160">')).toEqual({
+      w: 240,
+      h: 160,
+    });
     expect(svgSize("<svg>")).toBeNull();
   });
 });
@@ -254,7 +325,8 @@ describe("toXml", () => {
   it("writes the drawing as XML, which a file must be", () => {
     // What DOMPurify hands back is HTML: a no-break space comes out as
     // &nbsp;, an entity no SVG viewer knows.
-    const html = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><text>a&nbsp;b</text><br></svg>';
+    const html =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><text>a&nbsp;b</text><br></svg>';
     const out = toXml(html);
     expect(out).not.toContain("&nbsp;");
     const doc = new DOMParser().parseFromString(out, "image/svg+xml");
@@ -275,8 +347,12 @@ describe("toPng", () => {
     ctx.fillStyle = "";
     ctx.fillRect.mockReset();
     ctx.drawImage.mockReset();
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
-    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb: BlobCallback) => cb(blob));
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      ctx as unknown as CanvasRenderingContext2D,
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
+      (cb: BlobCallback) => cb(blob),
+    );
     // jsdom loads no images: this one answers as soon as it has a source.
     vi.stubGlobal(
       "Image",
@@ -298,7 +374,13 @@ describe("toPng", () => {
     expect(await toPng('<svg width="100px" height="50px"></svg>')).toBe(blob);
     expect(ctx.fillStyle).toBe("#FFFFFF");
     expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 200, 100);
-    expect(ctx.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 200, 100);
+    expect(ctx.drawImage).toHaveBeenCalledWith(
+      expect.anything(),
+      0,
+      0,
+      200,
+      100,
+    );
   });
 
   it("fails when the picture has no size, will not load, or will not encode", async () => {
@@ -314,7 +396,9 @@ describe("toPng", () => {
     ctx.drawImage.mockImplementation(() => {
       throw new Error("SecurityError");
     });
-    await expect(toPng('<svg width="10" height="10"></svg>')).rejects.toThrow("SecurityError");
+    await expect(toPng('<svg width="10" height="10"></svg>')).rejects.toThrow(
+      "SecurityError",
+    );
   });
 
   it("draws again at a phone's size when the large canvas is refused", async () => {

@@ -402,7 +402,7 @@ func TestPollOnce_neverLogsATokenOrACredential(t *testing.T) {
 		t.Fatalf("SyncSpecs() err = %v", err)
 	}
 	p, _, cap := loggingPoller(t, s, (&recordingIndex{}).fn)
-	p.tokens = func(string) string { return "ghp_supersecrettokenvalue0000000000000000" }
+	p.tokens = func(string) string { return "ghp_supersecrettokenvalue0000000000000000" } // ship:allow-secret: invented fixture
 
 	// When
 	if err := p.PollOnce(ctx); err != nil {

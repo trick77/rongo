@@ -27,7 +27,11 @@ function api({
       const n = cursor === null ? 0 : Number(cursor.slice("page".length));
       const items = pages[n] ?? [];
       const next = n + 1 < pages.length ? `page${n + 1}` : null;
-      return { ok: true, status: 200, json: async () => ({ items, next_cursor: next }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ items, next_cursor: next }),
+      };
     }
     return { ok: true, status: 204, json: async () => null };
   });
@@ -55,7 +59,10 @@ function stubObserver() {
 }
 function reveal() {
   for (const o of observers) {
-    o.cb([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    o.cb(
+      [{ isIntersecting: true } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
   }
 }
 
@@ -72,7 +79,11 @@ function page(props: Partial<Parameters<typeof ThreadsPage>[0]> = {}) {
   );
 }
 
-const row = (id: string, title: string) => ({ id, title, created_at: "2026-08-17 10:00:00" });
+const row = (id: string, title: string) => ({
+  id,
+  title,
+  created_at: "2026-08-17 10:00:00",
+});
 
 beforeEach(stubObserver);
 afterEach(() => {
@@ -99,7 +110,10 @@ describe("ThreadsPage", () => {
 
     expect(await screen.findByText("Second")).toBeTruthy();
     expect(screen.getByText("First")).toBeTruthy();
-    expect(calls).toEqual(["/api/threads?limit=50", "/api/threads?limit=50&cursor=page1"]);
+    expect(calls).toEqual([
+      "/api/threads?limit=50",
+      "/api/threads?limit=50&cursor=page1",
+    ]);
     // The last page: nothing more to ask for.
     act(reveal);
     expect(calls).toHaveLength(2);
@@ -111,9 +125,18 @@ describe("ThreadsPage", () => {
       "fetch",
       vi.fn(async (input: string) => {
         calls++;
-        const cursor = new URL(String(input), "http://x").searchParams.get("cursor");
+        const cursor = new URL(String(input), "http://x").searchParams.get(
+          "cursor",
+        );
         if (cursor === null) {
-          return { ok: true, status: 200, json: async () => ({ items: [row("a", "First")], next_cursor: "page1" }) };
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              items: [row("a", "First")],
+              next_cursor: "page1",
+            }),
+          };
         }
         return { ok: false, status: 500, json: async () => ({}) };
       }),
@@ -139,7 +162,12 @@ describe("ThreadsPage", () => {
 
   it("searches once the typing has paused, and not per keystroke", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const calls = api({ pages: [[row("a", "First")]], hits: [{ ...row("b", "The mail digest"), snippet: "sent by «mail» at night" }] });
+    const calls = api({
+      pages: [[row("a", "First")]],
+      hits: [
+        { ...row("b", "The mail digest"), snippet: "sent by «mail» at night" },
+      ],
+    });
     page();
     await screen.findByText("First");
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -150,7 +178,11 @@ describe("ThreadsPage", () => {
       vi.advanceTimersByTime(300);
     });
 
-    await waitFor(() => expect(calls.filter((c) => c.includes("/search"))).toEqual(["/api/threads/search?q=mail&limit=200"]));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.includes("/search"))).toEqual([
+        "/api/threads/search?q=mail&limit=200",
+      ]),
+    );
     expect(await screen.findByText("The", { exact: false })).toBeTruthy();
     // The hit's title has the term in bold, and the passage is under it.
     expect(screen.getAllByText("mail", { selector: "strong" })).toHaveLength(2);
@@ -186,7 +218,9 @@ describe("ThreadsPage", () => {
     const onDeleted = vi.fn();
     page({ onDeleted });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Actions for First" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Actions for First" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
@@ -201,14 +235,18 @@ describe("ThreadsPage", () => {
     const onChanged = vi.fn();
     page({ onChanged });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Actions for First" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Actions for First" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Star" }));
 
     await waitFor(() => expect(calls).toContain("POST /api/threads/a/star"));
     expect(onChanged).toHaveBeenCalled();
     // No sections here: the list is paged by cursor. The row stays, and its
     // menu now offers the way back.
-    const titles = screen.getAllByRole("button", { name: /^(First|Second)$/ }).map((b) => b.textContent);
+    const titles = screen
+      .getAllByRole("button", { name: /^(First|Second)$/ })
+      .map((b) => b.textContent);
     expect(titles).toEqual(["First", "Second"]);
     await user.click(screen.getByRole("button", { name: "Actions for First" }));
     expect(screen.getByRole("menuitem", { name: "Unstar" })).toBeTruthy();
@@ -218,7 +256,13 @@ describe("ThreadsPage", () => {
     const calls = api({ pages: [[row("a", "First")], [row("b", "Second")]] });
     const onChanged = vi.fn();
     const { rerender } = render(
-      <ThreadsPage activeId={null} version={0} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+      <ThreadsPage
+        activeId={null}
+        version={0}
+        onSelect={() => {}}
+        onChanged={onChanged}
+        onDeleted={() => {}}
+      />,
     );
     await screen.findByText("First");
     act(reveal);
@@ -226,31 +270,59 @@ describe("ThreadsPage", () => {
     const user = userEvent.setup();
 
     // A rename on this page: patched in place, the rail told, no reload.
-    await user.click(screen.getByRole("button", { name: "Actions for Second" }));
+    await user.click(
+      screen.getByRole("button", { name: "Actions for Second" }),
+    );
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     await user.clear(within(screen.getByRole("dialog")).getByRole("textbox"));
-    await user.type(within(screen.getByRole("dialog")).getByRole("textbox"), "Renamed");
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await user.type(
+      within(screen.getByRole("dialog")).getByRole("textbox"),
+      "Renamed",
+    );
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }),
+    );
     await screen.findByText("Renamed");
     expect(onChanged).toHaveBeenCalledTimes(1);
     const before = calls.filter((c) => c.startsWith("/api/threads?")).length;
     rerender(
-      <ThreadsPage activeId={null} version={1} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+      <ThreadsPage
+        activeId={null}
+        version={1}
+        onSelect={() => {}}
+        onChanged={onChanged}
+        onDeleted={() => {}}
+      />,
     );
     await waitFor(() => expect(screen.getByText("Renamed")).toBeTruthy());
-    expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(before);
+    expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(
+      before,
+    );
     expect(screen.getByText("First")).toBeTruthy();
 
     // A change made elsewhere: page one again.
     rerender(
-      <ThreadsPage activeId={null} version={2} onSelect={() => {}} onChanged={onChanged} onDeleted={() => {}} />,
+      <ThreadsPage
+        activeId={null}
+        version={2}
+        onSelect={() => {}}
+        onChanged={onChanged}
+        onDeleted={() => {}}
+      />,
     );
-    await waitFor(() => expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(before + 1));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.startsWith("/api/threads?"))).toHaveLength(
+        before + 1,
+      ),
+    );
     await waitFor(() => expect(screen.queryByText("Renamed")).toBe(null));
   });
 
   it("reports when the list cannot be fetched", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
     page();
     expect(await screen.findByRole("alert")).toBeTruthy();
   });
@@ -265,19 +337,34 @@ describe("the row's words", () => {
   });
 
   it("bolds every term of the search in a title", () => {
-    const { container } = render(<>{mark("Mail and the mailer", "mail the")}</>);
+    const { container } = render(
+      <>{mark("Mail and the mailer", "mail the")}</>,
+    );
     expect(container.querySelectorAll("strong").length).toBe(3);
     expect(container.textContent).toBe("Mail and the mailer");
     // A term that is regex syntax is a character.
-    expect(render(<>{mark("a+b", "a+")}</>).container.querySelector("strong")?.textContent).toBe("a+");
-    expect(render(<>{mark("plain", "  ")}</>).container.textContent).toBe("plain");
+    expect(
+      render(<>{mark("a+b", "a+")}</>).container.querySelector("strong")
+        ?.textContent,
+    ).toBe("a+");
+    expect(render(<>{mark("plain", "  ")}</>).container.textContent).toBe(
+      "plain",
+    );
   });
 
   it("bolds the passage's matches and cuts a long lead at a word", () => {
-    const { container } = render(<>{snippet("one two three four five six seven eight nine ten «hit» after")}</>);
+    const { container } = render(
+      <>
+        {snippet(
+          "one two three four five six seven eight nine ten «hit» after",
+        )}
+      </>,
+    );
     expect(container.querySelector("strong")?.textContent).toBe("hit");
     expect(container.textContent?.startsWith("…")).toBe(true);
     expect(container.textContent).toContain("ten hit after");
-    expect(render(<>{snippet("short «hit»")}</>).container.textContent).toBe("short hit");
+    expect(render(<>{snippet("short «hit»")}</>).container.textContent).toBe(
+      "short hit",
+    );
   });
 });

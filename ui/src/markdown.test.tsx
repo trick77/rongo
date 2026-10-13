@@ -7,11 +7,17 @@ vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
     parse: async (src: string) => {
-      if (!/^(flowchart|sequenceDiagram|stateDiagram-v2|erDiagram)\b/.test(src.trim())) {
+      if (
+        !/^(flowchart|sequenceDiagram|stateDiagram-v2|erDiagram)\b/.test(
+          src.trim(),
+        )
+      ) {
         throw new Error("Parse error");
       }
     },
-    render: async (id: string, src: string) => ({ svg: `<svg id="${id}"><g class="drawn">${src.length}</g></svg>` }),
+    render: async (id: string, src: string) => ({
+      svg: `<svg id="${id}"><g class="drawn">${src.length}</g></svg>`,
+    }),
   },
 }));
 
@@ -19,13 +25,17 @@ import Markdown, { splitIntoSegments } from "./markdown";
 
 describe("Markdown", () => {
   it("turns # into a heading rather than rendering the character itself", () => {
-    const { container } = render(<Markdown text={"# The mechanism\n\nA paragraph."} />);
+    const { container } = render(
+      <Markdown text={"# The mechanism\n\nA paragraph."} />,
+    );
     expect(container.querySelector("h2")?.textContent).toBe("The mechanism");
     expect(container.textContent).not.toContain("#");
   });
 
   it("renders **bold** and `code` as markup", () => {
-    const { container } = render(<Markdown text={"The **job** calls `SendTeaser`."} />);
+    const { container } = render(
+      <Markdown text={"The **job** calls `SendTeaser`."} />,
+    );
     expect(container.querySelector("strong")?.textContent).toBe("job");
     expect(container.querySelector("code")?.textContent).toBe("SendTeaser");
     expect(container.textContent).toBe("The job calls SendTeaser.");
@@ -35,7 +45,9 @@ describe("Markdown", () => {
     const { container } = render(
       <Markdown text={"Before.\n\n```go\nfunc main() {}\n```\n\nAfter."} />,
     );
-    expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+    expect(container.querySelector("pre code")?.textContent).toBe(
+      "func main() {}",
+    );
     expect(container.textContent).not.toContain("```");
   });
 
@@ -59,7 +71,9 @@ describe("Markdown", () => {
     });
 
     it("reads a table without the outer pipes", () => {
-      const { container } = render(<Markdown text={"a | b\n--- | ---\n1 | 2"} />);
+      const { container } = render(
+        <Markdown text={"a | b\n--- | ---\n1 | 2"} />,
+      );
       expect(container.querySelectorAll("thead th")).toHaveLength(2);
       expect(container.querySelectorAll("tbody td")).toHaveLength(2);
     });
@@ -75,13 +89,16 @@ describe("Markdown", () => {
     });
 
     it("leaves a sentence with a pipe in it alone", () => {
-      const { container } = render(<Markdown text={"Read a | b as a choice."} />);
+      const { container } = render(
+        <Markdown text={"Read a | b as a choice."} />,
+      );
       expect(container.querySelector("table")).toBeNull();
       expect(container.textContent).toBe("Read a | b as a choice.");
     });
 
     it("keeps a pipe inside inline code in one cell", () => {
-      const src = "| Command | Note |\n| --- | --- |\n| `ps | grep go` | one cell |";
+      const src =
+        "| Command | Note |\n| --- | --- |\n| `ps | grep go` | one cell |";
       const { container } = render(<Markdown text={src} />);
       const cells = container.querySelectorAll("tbody td");
       expect(cells).toHaveLength(2);
@@ -90,7 +107,9 @@ describe("Markdown", () => {
 
     it("turns a marker in a cell into a citation chip", () => {
       const src = "| Field | Meaning |\n| --- | --- |\n| id | the row [1] |";
-      const { container } = render(<Markdown text={src} backed={new Set([1])} />);
+      const { container } = render(
+        <Markdown text={src} backed={new Set([1])} />,
+      );
       expect(container.querySelector("tbody td sup")?.textContent).toBe("[1]");
     });
 
@@ -122,7 +141,9 @@ describe("Markdown", () => {
       const row = "| `ps | grep go` | one cell |";
       const src = "| Command | Note |\n| --- | --- |\n" + row;
       for (let n = 1; n <= row.length; n++) {
-        const { container } = render(<Markdown text={src.slice(0, src.length - row.length + n)} />);
+        const { container } = render(
+          <Markdown text={src.slice(0, src.length - row.length + n)} />,
+        );
         const body = container.querySelector("tbody tr");
         if (body) expect(body.textContent?.trim()).not.toBe("");
       }
@@ -137,36 +158,57 @@ describe("Markdown", () => {
 
   describe("code block colouring", () => {
     it("colours a fence by its language tag, text unchanged", () => {
-      const { container } = render(<Markdown text={"```go\nfunc main() {}\n```"} />);
-      expect(container.querySelector("pre code .hljs-keyword")?.textContent).toBe("func");
-      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+      const { container } = render(
+        <Markdown text={"```go\nfunc main() {}\n```"} />,
+      );
+      expect(
+        container.querySelector("pre code .hljs-keyword")?.textContent,
+      ).toBe("func");
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "func main() {}",
+      );
     });
 
     it("does not open a blank line at the end of a fence still arriving", () => {
       // The newline the last line was written with is not content yet. Kept,
       // the block ends on an empty line that the next token closes again, and
       // the code block jumps by a line on every fence that streams.
-      const { container } = render(<Markdown text={"```go\nfunc main() {}\n"} />);
-      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+      const { container } = render(
+        <Markdown text={"```go\nfunc main() {}\n"} />,
+      );
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "func main() {}",
+      );
     });
 
     it("keeps the blank line of a fence that closed on one", () => {
-      const { container } = render(<Markdown text={"```go\nfunc main() {}\n\n```"} />);
-      expect(container.querySelector("pre code")?.textContent).toBe("func main() {}\n");
+      const { container } = render(
+        <Markdown text={"```go\nfunc main() {}\n\n```"} />,
+      );
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "func main() {}\n",
+      );
     });
 
     it("leaves an untagged or unknown fence as plain text", () => {
-      for (const src of ["```\nfunc main() {}\n```", "```nosuch\nfunc main() {}\n```"]) {
+      for (const src of [
+        "```\nfunc main() {}\n```",
+        "```nosuch\nfunc main() {}\n```",
+      ]) {
         const { container } = render(<Markdown text={src} />);
         expect(container.querySelector("pre code span")).toBeNull();
-        expect(container.querySelector("pre code")?.textContent).toBe("func main() {}");
+        expect(container.querySelector("pre code")?.textContent).toBe(
+          "func main() {}",
+        );
       }
     });
 
     it("keeps a marker-shaped expression inside code literal", () => {
       const { container } = render(<Markdown text={"```go\nx := a[1]\n```"} />);
       expect(container.querySelector("sup")).toBeNull();
-      expect(container.querySelector("pre code")?.textContent).toBe("x := a[1]");
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "x := a[1]",
+      );
     });
   });
 
@@ -182,9 +224,15 @@ describe("Markdown", () => {
   describe("citation markers", () => {
     it("stay visible in running text", () => {
       const { container } = render(
-        <Markdown text={"Shipping runs through a job [1], started by the scheduler [12]."} />,
+        <Markdown
+          text={
+            "Shipping runs through a job [1], started by the scheduler [12]."
+          }
+        />,
       );
-      expect(container.textContent).toBe("Shipping runs through a job [1], started by the scheduler [12].");
+      expect(container.textContent).toBe(
+        "Shipping runs through a job [1], started by the scheduler [12].",
+      );
     });
 
     it("are styled as superscripts, never consumed", () => {
@@ -199,7 +247,11 @@ describe("Markdown", () => {
       // source but a collapsed list under the answer.
       const onOpen = vi.fn();
       const { container } = render(
-        <Markdown text={"Real [12], invented [7]."} backed={new Set([12])} onMarkerOpen={onOpen} />,
+        <Markdown
+          text={"Real [12], invented [7]."}
+          backed={new Set([12])}
+          onMarkerOpen={onOpen}
+        />,
       );
       const buttons = container.querySelectorAll("sup button");
       expect(buttons.length).toBe(1);
@@ -210,7 +262,9 @@ describe("Markdown", () => {
 
     it("are not buttons while the citations are still unknown", () => {
       // Nothing to open yet: the list arrives last.
-      const { container } = render(<Markdown text={"A job [1] runs."} onMarkerOpen={() => {}} />);
+      const { container } = render(
+        <Markdown text={"A job [1] runs."} onMarkerOpen={() => {}} />,
+      );
       expect(container.querySelector("sup")).toBeTruthy();
       expect(container.querySelector("sup button")).toBeNull();
     });
@@ -218,7 +272,9 @@ describe("Markdown", () => {
     it("are only drawn as citations once a source is known to back them", () => {
       // The backend drops an invented marker from the citation list, never
       // from the text. A chip for [7] with no row 7 would look checkable.
-      const { container } = render(<Markdown text={"Real [1], invented [7]."} backed={new Set([1])} />);
+      const { container } = render(
+        <Markdown text={"Real [1], invented [7]."} backed={new Set([1])} />,
+      );
       const sups = container.querySelectorAll("sup");
       expect(sups.length).toBe(1);
       expect(sups[0].textContent).toBe("[1]");
@@ -229,7 +285,9 @@ describe("Markdown", () => {
       // The citations event is the last thing before done. Markers that
       // changed colour all at once at that moment read as a glitch.
       const streaming = render(<Markdown text={"A job [1] runs."} />);
-      const done = render(<Markdown text={"A job [1] runs."} backed={new Set([1])} />);
+      const done = render(
+        <Markdown text={"A job [1] runs."} backed={new Set([1])} />,
+      );
       expect(streaming.container.querySelector("sup")?.className).toBe(
         done.container.querySelector("sup")?.className,
       );
@@ -239,7 +297,9 @@ describe("Markdown", () => {
       // A claim resting on several sources comes out as [1, 2]. One chip
       // per number keeps every source reachable, and each chip is a whole
       // marker on its own, so a copy reads "[1], [12]".
-      const { container } = render(<Markdown text={"Compared on poll [1, 12]."} />);
+      const { container } = render(
+        <Markdown text={"Compared on poll [1, 12]."} />,
+      );
       const sups = container.querySelectorAll("sup");
       expect(sups.length).toBe(2);
       expect(sups[0].textContent).toBe("[1]");
@@ -280,12 +340,18 @@ describe("Markdown", () => {
     });
 
     it("stay visible in bold text", () => {
-      const { container } = render(<Markdown text={"**Only the job [3] writes.**"} />);
-      expect(container.querySelector("strong")?.textContent).toBe("Only the job [3] writes.");
+      const { container } = render(
+        <Markdown text={"**Only the job [3] writes.**"} />,
+      );
+      expect(container.querySelector("strong")?.textContent).toBe(
+        "Only the job [3] writes.",
+      );
     });
 
     it("stay visible next to inline code", () => {
-      const { container } = render(<Markdown text={"`SendTeaser` [7] is called."} />);
+      const { container } = render(
+        <Markdown text={"`SendTeaser` [7] is called."} />,
+      );
       expect(container.textContent).toBe("SendTeaser [7] is called.");
     });
 
@@ -299,9 +365,15 @@ describe("Markdown", () => {
   // is the normal case here, not an edge case.
   describe("while streaming", () => {
     it("does not swallow a code block that is still open", () => {
-      const { container } = render(<Markdown text={"Text.\n\n```go\nfunc main() {"} />);
-      expect(container.querySelector("pre code")?.textContent).toBe("func main() {");
-      expect(container.querySelector("pre code .hljs-keyword")?.textContent).toBe("func");
+      const { container } = render(
+        <Markdown text={"Text.\n\n```go\nfunc main() {"} />,
+      );
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "func main() {",
+      );
+      expect(
+        container.querySelector("pre code .hljs-keyword")?.textContent,
+      ).toBe("func");
       expect(container.textContent).toContain("Text.");
     });
 
@@ -320,11 +392,9 @@ describe("Markdown", () => {
   // answer does. The split is the visible unit of that fade.
   describe("the streaming fade", () => {
     it("cuts prose into segments at a clause end or a length", () => {
-      expect(splitIntoSegments("Short one. Then a much longer run of words here.")).toEqual([
-        "Short one. ",
-        "Then a much longer run of words ",
-        "here.",
-      ]);
+      expect(
+        splitIntoSegments("Short one. Then a much longer run of words here."),
+      ).toEqual(["Short one. ", "Then a much longer run of words ", "here."]);
     });
 
     it("keeps every character of the text it splits", () => {
@@ -333,7 +403,9 @@ describe("Markdown", () => {
     });
 
     it("wraps prose in segments without changing what the text reads", () => {
-      const { container } = render(<Markdown text={"The job runs, and then it stops."} fade />);
+      const { container } = render(
+        <Markdown text={"The job runs, and then it stops."} fade />,
+      );
       const segs = container.querySelectorAll(".stream-seg");
       expect(segs.length).toBeGreaterThan(1);
       expect(container.textContent).toBe("The job runs, and then it stops.");
@@ -343,9 +415,15 @@ describe("Markdown", () => {
       // A chip or a link that re-faded on every token would flicker, and a
       // segment span inside a highlighted block would fight the grammar.
       const { container } = render(
-        <Markdown text={"Calls `Send` [1] here.\n\n```go\nx := 1\n```"} backed={new Set([1])} fade />,
+        <Markdown
+          text={"Calls `Send` [1] here.\n\n```go\nx := 1\n```"}
+          backed={new Set([1])}
+          fade
+        />,
       );
-      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(0);
+      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(
+        0,
+      );
       expect(container.querySelector("code .stream-seg")).toBeNull();
       expect(container.querySelector("pre .stream-seg")).toBeNull();
       expect(container.querySelector("sup .stream-seg")).toBeNull();
@@ -358,7 +436,9 @@ describe("Markdown", () => {
       // so segments inside it would mount and start their fade at that
       // moment, dropping a phrase the reader has read back to a fifth of its
       // brightness. Confirmed in the browser before this was written.
-      const { container, rerender } = render(<Markdown text={"The job **runs fast"} fade />);
+      const { container, rerender } = render(
+        <Markdown text={"The job **runs fast"} fade />,
+      );
       expect(container.textContent).toBe("The job **runs fast");
       rerender(<Markdown text={"The job **runs fast** now."} fade />);
       expect(container.querySelector("strong")?.textContent).toBe("runs fast");
@@ -370,16 +450,27 @@ describe("Markdown", () => {
       // The whole answer re-renders on every token. If a settled segment
       // remounted, its fade would restart and the finished text would
       // flicker for the whole length of the answer.
-      const { container, rerender } = render(<Markdown text={"The job runs, and then"} fade />);
+      const { container, rerender } = render(
+        <Markdown text={"The job runs, and then"} fade />,
+      );
       const first = container.querySelector(".stream-seg");
       expect(first).not.toBeNull();
-      rerender(<Markdown text={"The job runs, and then it stops. A second sentence."} fade />);
+      rerender(
+        <Markdown
+          text={"The job runs, and then it stops. A second sentence."}
+          fade
+        />,
+      );
       expect(container.querySelector(".stream-seg")).toBe(first);
-      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(2);
+      expect(container.querySelectorAll(".stream-seg").length).toBeGreaterThan(
+        2,
+      );
     });
 
     it("stays off unless it is asked for: prose read from the record is not arriving", () => {
-      const { container } = render(<Markdown text={"The job runs, and then it stops."} />);
+      const { container } = render(
+        <Markdown text={"The job runs, and then it stops."} />,
+      );
       expect(container.querySelector(".stream-seg")).toBeNull();
       expect(container.textContent).toBe("The job runs, and then it stops.");
     });
@@ -396,11 +487,17 @@ describe("Markdown", () => {
       ],
       edges: [{ from: "a", to: "b" }],
     });
-    const mermaid = "flowchart LR\n  a[\"Answer()\"] --> b[\"stored\"]";
+    const mermaid = 'flowchart LR\n  a["Answer()"] --> b["stored"]';
 
     it("is drawn as SVG, not shown as text", async () => {
-      const { container } = render(<Markdown text={"Before.\n\n```mermaid\n" + mermaid + "\n```\n\nAfter."} />);
-      await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
+      const { container } = render(
+        <Markdown
+          text={"Before.\n\n```mermaid\n" + mermaid + "\n```\n\nAfter."}
+        />,
+      );
+      await waitFor(() =>
+        expect(container.querySelector("svg .drawn")).toBeTruthy(),
+      );
       expect(container.querySelector("pre")).toBeNull();
       expect(container.textContent).not.toContain("flowchart");
       expect(container.textContent).toContain("Before.");
@@ -408,29 +505,49 @@ describe("Markdown", () => {
     });
 
     it("still draws the older JSON spec", async () => {
-      const { container } = render(<Markdown text={"```diagram\n" + spec + "\n```"} />);
-      await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
+      const { container } = render(
+        <Markdown text={"```diagram\n" + spec + "\n```"} />,
+      );
+      await waitFor(() =>
+        expect(container.querySelector("svg .drawn")).toBeTruthy(),
+      );
       expect(container.textContent).not.toContain('"type"');
     });
 
     it("says so when a block meant to be a diagram did not draw", async () => {
       // For three releases this looked like an ordinary code block and the
       // reader could not tell whether the model or the renderer had slipped.
-      const { container } = render(<Markdown text={'```diagram\n{"type":"flow","nodes":[{"id"\n```'} />);
-      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
+      const { container } = render(
+        <Markdown text={'```diagram\n{"type":"flow","nodes":[{"id"\n```'} />,
+      );
+      await waitFor(() =>
+        expect(container.textContent).toContain("Diagram could not be drawn"),
+      );
       expect(container.querySelector("svg")).toBeNull();
-      expect(container.querySelector("pre code")?.textContent).toBe('{"type":"flow","nodes":[{"id"');
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        '{"type":"flow","nodes":[{"id"',
+      );
     });
 
     it("says the same about a spec the model fenced as something else", async () => {
-      const { container } = render(<Markdown text={'```json\n{"type":"sequence","actors":[{"id"\n```'} />);
-      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
+      const { container } = render(
+        <Markdown text={'```json\n{"type":"sequence","actors":[{"id"\n```'} />,
+      );
+      await waitFor(() =>
+        expect(container.textContent).toContain("Diagram could not be drawn"),
+      );
     });
 
     it("says the same about diagram syntax the renderer refuses", async () => {
-      const { container } = render(<Markdown text={"```mermaid\npie\n  x: 1\n```"} />);
-      await waitFor(() => expect(container.textContent).toContain("Diagram could not be drawn"));
-      expect(container.querySelector("pre code")?.textContent).toBe("pie\n  x: 1");
+      const { container } = render(
+        <Markdown text={"```mermaid\npie\n  x: 1\n```"} />,
+      );
+      await waitFor(() =>
+        expect(container.textContent).toContain("Diagram could not be drawn"),
+      );
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "pie\n  x: 1",
+      );
     });
 
     it("leaves an ordinary code block alone", () => {
@@ -438,13 +555,17 @@ describe("Markdown", () => {
       // failed picture: hiding it behind a defect notice would lose the
       // reader real content and the highlighting with it.
       const body = '{"pipeline":{"type": "flow","steps":2}}';
-      const { container } = render(<Markdown text={"```json\n" + body + "\n```"} />);
+      const { container } = render(
+        <Markdown text={"```json\n" + body + "\n```"} />,
+      );
       expect(container.textContent).not.toContain("Diagram could not be drawn");
       expect(container.querySelector("pre code")?.textContent).toBe(body);
     });
 
     it("promises the picture while the fence is still open", () => {
-      const { container } = render(<Markdown text={"```diagram\n" + spec.slice(0, 40)} />);
+      const { container } = render(
+        <Markdown text={"```diagram\n" + spec.slice(0, 40)} />,
+      );
       expect(container.textContent).toContain("Drawing the diagram");
       expect(container.querySelector("svg")).toBeNull();
       expect(container.querySelector("pre")).toBeNull();
@@ -453,9 +574,16 @@ describe("Markdown", () => {
     it("shows a fence left open by a finished turn as text, not a promise", () => {
       // A cut stream keeps its partial text, and a stored answer re-renders
       // it: a placeholder there would wait for a diagram that never comes.
-      const { container } = render(<Markdown text={"```diagram\n" + spec.slice(0, 40)} backed={new Set()} />);
+      const { container } = render(
+        <Markdown
+          text={"```diagram\n" + spec.slice(0, 40)}
+          backed={new Set()}
+        />,
+      );
       expect(container.textContent).not.toContain("Drawing the diagram");
-      expect(container.querySelector("pre code")?.textContent).toBe(spec.slice(0, 40));
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        spec.slice(0, 40),
+      );
     });
   });
 });

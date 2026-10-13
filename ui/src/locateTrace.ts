@@ -47,7 +47,8 @@ type WireStep = {
 
 type WirePlace = { repo?: string; path?: string; line?: number };
 
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
 
 function fileOf(path: string, repo?: string): LocateFile {
   const name = path.split("/").pop() || path;
@@ -65,23 +66,42 @@ const another: Record<string, string> = {
 function describe(s: WireStep): LocateLine {
   if (s.not_run && !s.arg && !s.path) {
     const where = s.repo ? ` in ${s.repo}` : "";
-    return { lead: `${another[s.tool ?? ""] ?? `another call to ${s.tool || "a tool"}`}${where}`, result: resultOf(s) };
+    return {
+      lead: `${another[s.tool ?? ""] ?? `another call to ${s.tool || "a tool"}`}${where}`,
+      result: resultOf(s),
+    };
   }
   const where = s.repo && s.tool !== "read" ? ` in ${s.repo}` : "";
   let line: Omit<LocateLine, "result">;
   switch (s.tool) {
     case "grep":
-      line = { lead: s.arg ? `searched the code for "${s.arg}"${where}` : `searched the code${where}` };
+      line = {
+        lead: s.arg
+          ? `searched the code for "${s.arg}"${where}`
+          : `searched the code${where}`,
+      };
       break;
     case "search":
-      line = { lead: s.arg ? `searched by meaning for "${s.arg}"${where}` : `searched by meaning${where}` };
+      line = {
+        lead: s.arg
+          ? `searched by meaning for "${s.arg}"${where}`
+          : `searched by meaning${where}`,
+      };
       break;
     case "symbol":
-      line = { lead: s.arg ? `looked up the symbol ${s.arg}${where}` : `looked up a symbol${where}` };
+      line = {
+        lead: s.arg
+          ? `looked up the symbol ${s.arg}${where}`
+          : `looked up a symbol${where}`,
+      };
       break;
     case "read":
       line = s.path
-        ? { lead: "opened ", file: fileOf(s.path, s.repo), tail: s.line ? ` at line ${s.line}` : "" }
+        ? {
+            lead: "opened ",
+            file: fileOf(s.path, s.repo),
+            tail: s.line ? ` at line ${s.line}` : "",
+          }
         : { lead: "opened a file" };
       break;
     default:
@@ -93,10 +113,12 @@ function describe(s: WireStep): LocateLine {
 function resultOf(s: WireStep): string {
   if (s.not_run) return `not run: ${s.not_run}`;
   const added = num(s.added);
-  if (s.cut) return `the token budget ran out partway, ${plural(added, "source", "sources")} added`;
+  if (s.cut)
+    return `the token budget ran out partway, ${plural(added, "source", "sources")} added`;
   if (added > 0) return `added ${plural(added, "source", "sources")}`;
   if (s.landed) return "added sources";
-  if (num(s.matches) > 0) return plural(num(s.matches), "matching line", "matching lines");
+  if (num(s.matches) > 0)
+    return plural(num(s.matches), "matching line", "matching lines");
   if (num(s.held) > 0) return "already among the sources";
   if (num(s.outside) > 0) return "found only code outside this turn's projects";
   return "nothing";
@@ -113,7 +135,10 @@ const refusalReasons: [RegExp, string][] = [
   [/^not tried$/, "the token budget for this step was spent"],
   [/^unparseable$/, "the call was malformed"],
   [/^unknown tool$/, "there is no tool by that name"],
-  [/: outside this turn's repositories$/, "that repository is outside this turn"],
+  [
+    /: outside this turn's repositories$/,
+    "that repository is outside this turn",
+  ],
   [/: not in the index$/, "that repository is not in the index"],
   [/^$/, "it named nothing to look up"],
 ];
@@ -125,14 +150,22 @@ function fromLabel(label: string, refused: boolean): WireStep {
   if (refused) {
     const reason = refusalReasons.find(([re]) => re.test(inner));
     if (reason) {
-      const repo = inner.includes(": ") ? inner.slice(0, inner.indexOf(": ")) : undefined;
+      const repo = inner.includes(": ")
+        ? inner.slice(0, inner.indexOf(": "))
+        : undefined;
       return { tool, repo, not_run: reason[1] };
     }
     return { tool, not_run: "not run" };
   }
   if (tool === "read") {
     const at = inner.lastIndexOf(":");
-    return at > 0 ? { tool, path: inner.slice(0, at), line: Number(inner.slice(at + 1)) || 0 } : { tool, path: inner };
+    return at > 0
+      ? {
+          tool,
+          path: inner.slice(0, at),
+          line: Number(inner.slice(at + 1)) || 0,
+        }
+      : { tool, path: inner };
   }
   return { tool, arg: inner, matches: lines ? Number(lines) : 0 };
 }
@@ -148,7 +181,10 @@ function legacySteps(detail: Record<string, unknown>): WireStep[] {
     if (!empty.has(label) && !step.matches) return { ...step, held: 1 };
     return step;
   });
-  return [...ran, ...strs(detail.locate_refused).map((label) => fromLabel(label, true))];
+  return [
+    ...ran,
+    ...strs(detail.locate_refused).map((label) => fromLabel(label, true)),
+  ];
 }
 
 // The old record's pointer was the model's sentence. Only its shape is read:
@@ -161,8 +197,13 @@ function legacyOutcome(found: string): LocateSummary["outcome"] {
   const at = tokens.findIndex((t) => /^[\w.\-/]+\.\w+:\d+/.test(t));
   if (at < 0) return undefined;
   const [, path, line] = /^([\w.\-/]+\.\w+):(\d+)/.exec(tokens[at])!;
-  const repo = at > 0 && !tokens[at - 1].includes("/") ? tokens[at - 1] : undefined;
-  return { lead: "Named ", file: fileOf(path, repo), tail: ` line ${line}${repo ? ` (${repo})` : ""} as the place to write the answer from.` };
+  const repo =
+    at > 0 && !tokens[at - 1].includes("/") ? tokens[at - 1] : undefined;
+  return {
+    lead: "Named ",
+    file: fileOf(path, repo),
+    tail: ` line ${line}${repo ? ` (${repo})` : ""} as the place to write the answer from.`,
+  };
 }
 
 const notFound = {
@@ -170,7 +211,10 @@ const notFound = {
   tail: "",
 };
 
-function outcomeOf(detail: Record<string, unknown>, ran: number): LocateSummary["outcome"] {
+function outcomeOf(
+  detail: Record<string, unknown>,
+  ran: number,
+): LocateSummary["outcome"] {
   const outcome = str(detail.locate_outcome);
   const place = (detail.locate_place ?? {}) as WirePlace;
   if (outcome === "pointed" && place.path) {
@@ -182,21 +226,32 @@ function outcomeOf(detail: Record<string, unknown>, ran: number): LocateSummary[
   }
   if (outcome === "not_found") return notFound;
   if (outcome === "unpinned") {
-    return { lead: "Named a place that is not among the sources, so their order was left unchanged.", tail: "" };
+    return {
+      lead: "Named a place that is not among the sources, so their order was left unchanged.",
+      tail: "",
+    };
   }
-  if (typeof detail.locate_found === "string") return legacyOutcome(detail.locate_found);
+  if (typeof detail.locate_found === "string")
+    return legacyOutcome(detail.locate_found);
   if (ran > 0 && Array.isArray(detail.locate_steps)) {
-    return { lead: "Came to no conclusion, so the sources keep their usual order.", tail: "" };
+    return {
+      lead: "Came to no conclusion, so the sources keep their usual order.",
+      tail: "",
+    };
   }
   return undefined;
 }
 
 /** The locate block of a gathering step, or null on a turn the loop did not run. */
-export function locateSummary(detail: Record<string, unknown>): LocateSummary | null {
+export function locateSummary(
+  detail: Record<string, unknown>,
+): LocateSummary | null {
   const rounds = num(detail.locate_rounds);
   const stop = str(detail.locate);
   if (rounds === 0 && stop === "") return null;
-  const wire = Array.isArray(detail.locate_steps) ? (detail.locate_steps as WireStep[]) : legacySteps(detail);
+  const wire = Array.isArray(detail.locate_steps)
+    ? (detail.locate_steps as WireStep[])
+    : legacySteps(detail);
   const ran = wire.filter((s) => !s.not_run).length;
   const header =
     ran === 0
@@ -205,7 +260,12 @@ export function locateSummary(detail: Record<string, unknown>): LocateSummary | 
   return {
     header,
     steps: wire.map(describe),
-    stopped: stop === "" ? undefined : stop === "call failed" ? "Stopped early: the model call failed." : `Stopped early: ${stop}.`,
+    stopped:
+      stop === ""
+        ? undefined
+        : stop === "call failed"
+          ? "Stopped early: the model call failed."
+          : `Stopped early: ${stop}.`,
     outcome: outcomeOf(detail, ran),
   };
 }

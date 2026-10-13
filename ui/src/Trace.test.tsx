@@ -14,7 +14,9 @@ describe("Trace", () => {
   it("shows every step as a node on one continuous line, with nothing to shut", () => {
     // Progress is watched, never shut: while the turn runs there is no toggle on
     // screen at all, because the reader twice rejected a trace that hid live steps.
-    const { container } = strict(<Trace steps={steps} state="running" startedAt={t0} />);
+    const { container } = strict(
+      <Trace steps={steps} state="running" startedAt={t0} />,
+    );
 
     expect(screen.getByText("Understanding the question")).toBeTruthy();
     expect(screen.getByText("Reading the code")).toBeTruthy();
@@ -40,8 +42,12 @@ describe("Trace", () => {
     // toggle. The steps behind it are collapsed, not unmounted.
     expect(screen.getByText("Done")).toBeTruthy();
     expect(container.querySelector(".trace-steps-open")).toBeNull();
-    expect(container.querySelector(".trace-steps")?.getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    expect(
+      container.querySelector(".trace-steps")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
   });
 
   it("opens again on the chevron", () => {
@@ -59,7 +65,9 @@ describe("Trace", () => {
     fireEvent.click(screen.getByRole("button"));
 
     expect(container.querySelector(".trace-steps-open")).toBeTruthy();
-    expect(container.querySelector(".trace-steps")?.getAttribute("aria-hidden")).toBeNull();
+    expect(
+      container.querySelector(".trace-steps")?.getAttribute("aria-hidden"),
+    ).toBeNull();
   });
 
   it("comes back rolled up when it mounts on a turn that already closed", () => {
@@ -77,9 +85,18 @@ describe("Trace", () => {
   it("says how the turn closed, not what the toggle does", () => {
     // The closing label is the button's name: the live region announces "Done"
     // or the ochre "your move", never "Show the steps".
-    strict(<Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace
+        steps={steps}
+        state="waiting"
+        startedAt={t0}
+        endedAt={t0 + 2300}
+      />,
+    );
 
-    expect(screen.getByRole("button").textContent).toContain("Waiting for a choice");
+    expect(screen.getByRole("button").textContent).toContain(
+      "Waiting for a choice",
+    );
   });
 
   it("does not shut a trace the reader opened, on a later state change", () => {
@@ -92,14 +109,24 @@ describe("Trace", () => {
     );
     rerender(
       <StrictMode>
-        <Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />
+        <Trace
+          steps={steps}
+          state="waiting"
+          startedAt={t0}
+          endedAt={t0 + 2300}
+        />
       </StrictMode>,
     );
     fireEvent.click(screen.getByRole("button"));
 
     rerender(
       <StrictMode>
-        <Trace steps={steps} state="decided" startedAt={t0} endedAt={t0 + 2300} />
+        <Trace
+          steps={steps}
+          state="decided"
+          startedAt={t0}
+          endedAt={t0 + 2300}
+        />
       </StrictMode>,
     );
 
@@ -116,7 +143,9 @@ describe("Trace", () => {
   });
 
   it("shows how long each finished step took", () => {
-    strict(<Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />,
+    );
 
     expect(screen.getByText("0.8s")).toBeTruthy(); // understanding → gathering
     expect(screen.getByText("1.5s")).toBeTruthy(); // gathering → closed
@@ -124,7 +153,9 @@ describe("Trace", () => {
   });
 
   it("ends a finished turn on the done node", () => {
-    strict(<Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} />,
+    );
 
     expect(screen.getByText("Done")).toBeTruthy();
     expect(screen.queryByText("Waiting for a choice")).toBeNull();
@@ -133,7 +164,14 @@ describe("Trace", () => {
   it("ends a clarification on the ochre waiting node, not the check", () => {
     // loom has no third state: complete = !active && !streaming would claim
     // "done" while a person is still being waited on.
-    strict(<Trace steps={steps} state="waiting" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace
+        steps={steps}
+        state="waiting"
+        startedAt={t0}
+        endedAt={t0 + 2300}
+      />,
+    );
 
     const waiting = screen.getByText("Waiting for a choice");
     expect(waiting).toBeTruthy();
@@ -144,15 +182,26 @@ describe("Trace", () => {
 
   it("loses the ochre once the choice has been made", () => {
     // Ochre means "your move". After the move it is a record, not a prompt.
-    strict(<Trace steps={steps} state="decided" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace
+        steps={steps}
+        state="decided"
+        startedAt={t0}
+        endedAt={t0 + 2300}
+      />,
+    );
 
     const row = screen.getByText("Asked back, choice made").closest("li");
-    expect(row?.querySelector("span[aria-hidden]")?.getAttribute("class")).not.toContain("ochre");
+    expect(
+      row?.querySelector("span[aria-hidden]")?.getAttribute("class"),
+    ).not.toContain("ochre");
     expect(screen.queryByText("Waiting for a choice")).toBeNull();
   });
 
   it("ends a broken turn on the failure node", () => {
-    strict(<Trace steps={steps} state="failed" startedAt={t0} endedAt={t0 + 2300} />);
+    strict(
+      <Trace steps={steps} state="failed" startedAt={t0} endedAt={t0 + 2300} />,
+    );
 
     expect(screen.getByText("The turn failed")).toBeTruthy();
     expect(screen.queryByText("Done")).toBeNull();
@@ -169,7 +218,9 @@ describe("Trace", () => {
     // The clock of the step in progress changes every second. Inside a live
     // region that is a new announcement every second, over the step names
     // that are the thing worth hearing.
-    const { container } = strict(<Trace steps={steps} state="running" startedAt={t0} />);
+    const { container } = strict(
+      <Trace steps={steps} state="running" startedAt={t0} />,
+    );
 
     const clocks = [...container.querySelectorAll("li time")];
     expect(clocks.at(-1)?.getAttribute("aria-hidden")).toBe("true");
@@ -181,11 +232,19 @@ describe("Trace", () => {
     // A record is not something happening. A thread of ten stored turns would
     // otherwise be ten live regions announcing themselves as the page loads.
     const { container } = strict(
-      <Trace steps={steps} state="done" startedAt={t0} endedAt={t0 + 2300} live={false} />,
+      <Trace
+        steps={steps}
+        state="done"
+        startedAt={t0}
+        endedAt={t0 + 2300}
+        live={false}
+      />,
     );
 
     expect(screen.queryByRole("status")).toBeNull();
-    expect(container.querySelector(".trace")?.getAttribute("aria-live")).toBeNull();
+    expect(
+      container.querySelector(".trace")?.getAttribute("aria-live"),
+    ).toBeNull();
     // Still there to read, still rolled up on its closing row.
     expect(screen.getByText("Done")).toBeTruthy();
   });

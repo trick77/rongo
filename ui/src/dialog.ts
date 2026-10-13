@@ -50,7 +50,10 @@ export function useTabTrap(dialog: RefObject<HTMLElement | null>): void {
       if (!e.shiftKey && (on === last || !dialog.current?.contains(on))) {
         e.preventDefault();
         first.focus();
-      } else if (e.shiftKey && (on === first || !dialog.current?.contains(on))) {
+      } else if (
+        e.shiftKey &&
+        (on === first || !dialog.current?.contains(on))
+      ) {
         e.preventDefault();
         last.focus();
       }

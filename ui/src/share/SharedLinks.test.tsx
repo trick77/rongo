@@ -19,7 +19,11 @@ const live: Share = {
 };
 
 function listing(shares: Share[]) {
-  const mock = vi.fn(async () => ({ ok: true, status: 200, json: async () => shares }));
+  const mock = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => shares,
+  }));
   vi.stubGlobal("fetch", mock);
   return mock;
 }
@@ -34,7 +38,10 @@ describe("SharedLinks", () => {
 
   it("says the list could not be read when the server refuses it, not that nothing is shared", async () => {
     // Given a listing the server answers with an error
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
     const onCount = vi.fn();
 
     // When
@@ -67,7 +74,10 @@ describe("SharedLinks", () => {
 
   it("copies the absolute link", async () => {
     const writeText = vi.fn(async () => {});
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
     listing([live]);
     render(<SharedLinks onOpenThread={() => {}} />);
     await screen.findByText("How does routing decide?");
@@ -92,7 +102,9 @@ describe("SharedLinks", () => {
     fireEvent.click(screen.getByRole("button", { name: /Revoke/ }));
 
     // A revoked link is not a link; the audit view is not a history.
-    await waitFor(() => expect(screen.queryByText("How does routing decide?")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("How does routing decide?")).toBeNull(),
+    );
     expect(onChange).toHaveBeenCalled();
   });
 
@@ -101,7 +113,9 @@ describe("SharedLinks", () => {
     const onOpenThread = vi.fn();
     render(<SharedLinks onOpenThread={onOpenThread} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "How does routing decide?" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "How does routing decide?" }),
+    );
 
     expect(onOpenThread).toHaveBeenCalledWith("7");
   });

@@ -18,7 +18,12 @@ describe("LanguageSelect", () => {
     await user.click(pill());
     expect(pill().getAttribute("aria-expanded")).toBe("true");
     const rows = screen.getAllByRole("option");
-    expect(rows.map((r) => r.textContent)).toEqual(["English", "Deutsch", "Français", "Italiano"]);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "English",
+      "Deutsch",
+      "Français",
+      "Italiano",
+    ]);
     expect(rows[1].getAttribute("aria-selected")).toBe("true");
   });
 

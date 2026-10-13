@@ -117,7 +117,7 @@ func titleOnce(ctx context.Context, c *llm.Client, msgs []llm.Message) (title st
 	}
 	title = strings.TrimSpace(out)
 	// Quotes and a full stop the prompt forbids, and the markdown emphasis a
-	// model wraps a label in anyway (`**Kafka-Topic-Produktion**`): all of it
+	// model wraps a label in anyway (`**Kafka-Topic-Übersicht**`): all of it
 	// is parsed off rather than argued out of the model.
 	title = strings.Trim(title, "\"'“”.*_`")
 	if title == "" && u.Attempts > 1 {

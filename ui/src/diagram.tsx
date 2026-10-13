@@ -35,13 +35,28 @@ import { DownloadIcon, ExpandIcon } from "./icons";
 // ---- legacy spec ----
 
 export type FlowKind = "start" | "end" | "step" | "decision";
-export type FlowNode = { id: string; label: string; kind: FlowKind; src: number[] };
+export type FlowNode = {
+  id: string;
+  label: string;
+  kind: FlowKind;
+  src: number[];
+};
 type FlowEdge = { from: string; to: string; label?: string };
 export type FlowSpec = { type: "flow"; nodes: FlowNode[]; edges: FlowEdge[] };
 type Actor = { id: string; label: string };
 type StepKind = "call" | "return" | "async";
-type SeqStep = { from: string; to: string; label: string; kind: StepKind; src: number[] };
-export type SequenceSpec = { type: "sequence"; actors: Actor[]; steps: SeqStep[] };
+type SeqStep = {
+  from: string;
+  to: string;
+  label: string;
+  kind: StepKind;
+  src: number[];
+};
+export type SequenceSpec = {
+  type: "sequence";
+  actors: Actor[];
+  steps: SeqStep[];
+};
 export type DiagramSpec = FlowSpec | SequenceSpec;
 
 const flowKinds: readonly string[] = ["start", "end", "step", "decision"];
@@ -90,7 +105,9 @@ export function parseDiagram(body: string): DiagramSpec | null {
     for (const n of nodes) {
       if (typeof n.id !== "string" || n.id === "" || known.has(n.id)) continue;
       if (typeof n.label !== "string") continue;
-      const kind = flowKinds.includes(n.kind as string) ? (n.kind as FlowKind) : "step";
+      const kind = flowKinds.includes(n.kind as string)
+        ? (n.kind as FlowKind)
+        : "step";
       known.add(n.id);
       out.push({ id: n.id, label: n.label, kind, src: src(n.src) });
     }
@@ -99,7 +116,11 @@ export function parseDiagram(body: string): DiagramSpec | null {
     for (const e of edges) {
       if (typeof e.from !== "string" || typeof e.to !== "string") continue;
       if (!known.has(e.from) || !known.has(e.to)) continue;
-      es.push({ from: e.from, to: e.to, label: typeof e.label === "string" ? e.label : undefined });
+      es.push({
+        from: e.from,
+        to: e.to,
+        label: typeof e.label === "string" ? e.label : undefined,
+      });
     }
     return { type: "flow", nodes: out, edges: es };
   }
@@ -117,10 +138,23 @@ export function parseDiagram(body: string): DiagramSpec | null {
     if (as.length === 0) return null;
     const ss: SeqStep[] = [];
     for (const s of steps) {
-      if (typeof s.from !== "string" || typeof s.to !== "string" || typeof s.label !== "string") continue;
+      if (
+        typeof s.from !== "string" ||
+        typeof s.to !== "string" ||
+        typeof s.label !== "string"
+      )
+        continue;
       if (!known.has(s.from) || !known.has(s.to)) continue;
-      const kind = stepKinds.includes(s.kind as string) ? (s.kind as StepKind) : "call";
-      ss.push({ from: s.from, to: s.to, label: s.label, kind, src: src(s.src) });
+      const kind = stepKinds.includes(s.kind as string)
+        ? (s.kind as StepKind)
+        : "call";
+      ss.push({
+        from: s.from,
+        to: s.to,
+        label: s.label,
+        kind,
+        src: src(s.src),
+      });
     }
     return { type: "sequence", actors: as, steps: ss };
   }
@@ -333,7 +367,13 @@ export function useDrawn(src: string): Drawn | null {
 /** MermaidSvg is the drawing itself, sized by the renderer: the SVG carries
  * a viewBox and a max-width of its own intrinsic width, so it fits a narrow
  * column by scaling down and never grows past 1:1. */
-export function MermaidSvg({ svg, title }: { svg: string; title: string }): ReactNode {
+export function MermaidSvg({
+  svg,
+  title,
+}: {
+  svg: string;
+  title: string;
+}): ReactNode {
   return (
     // font-sans explicitly: the diagram sits inside the answer's .ui-markdown
     // wrapper, which is serif prose. A node label is a name from the code,
@@ -378,7 +418,10 @@ export default function Diagram({ src }: { src: string }): ReactNode {
   }
 
   return (
-    <div ref={card} className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3">
+    <div
+      ref={card}
+      className="relative mt-3 rounded-ui-sm border border-border bg-panel p-3"
+    >
       {/* Always drawn, never revealed on hover: a phone has no hover, and the
           full view is the only way it can see a wide diagram whole. */}
       <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-0.5 bg-gradient-to-l from-panel from-70% to-transparent pl-6">
@@ -402,7 +445,9 @@ export default function Diagram({ src }: { src: string }): ReactNode {
         </button>
       </div>
       <MermaidSvg svg={out.svg} title={title} />
-      {full && <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />}
+      {full && (
+        <DiagramView src={src} svg={out.svg} onClose={() => setFull(false)} />
+      )}
     </div>
   );
 }

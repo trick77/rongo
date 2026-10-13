@@ -8,7 +8,8 @@ Rules, not description. Code is truth — implementation is discoverable, so it 
 - TDD: failing test first, then smallest implementation.
 - `.yaml` never `.yml`. `Containerfile` never `Dockerfile`.
 - No test hits a real LLM, embeddings endpoint or git remote. `httptest` fakes, fixture repo built locally.
-- Coverage floor 75%, both sides, plus 75% on changed lines. `scripts/coverage-*` and `scripts/strip-comment-lines.go` byte-identical with ../peeq's `scripts/` copies — fix in the family, never fork.
+- Gate is ship (`ship.yaml`, `make check`, pre-push via `make hooks`): coverage floor 75% both sides, 75% on changed lines. Files `ship init` owns are never edited here — fix in ship, never fork.
+- Commit subjects + PR titles: Go style `area: what` (`ask: …`, `ui: …`), gated by ship; release notes list them by area.
 - Tests need `-race` (cgo). Binary stays `CGO_ENABLED=0`.
 - New config → `BACKEND_*` env var, nowhere else. **A malformed value refuses to start; empty means the default.** `BACKEND_MEMORY=disabled` left memory on and `BACKEND_ROUTE_MARGIN=0` routed at 0.25 while both looked right in the environment.
 

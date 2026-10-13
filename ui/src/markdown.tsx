@@ -112,7 +112,12 @@ const markerRe = /\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g;
  * element whose children mount fresh whatever their keys. Segments inside it
  * would start their fade at that moment, so a phrase the reader had already
  * read would drop to a fifth of its brightness and climb back. */
-function text(src: string, key: string, hooks: MarkerHooks, fade = false): ReactNode[] {
+function text(
+  src: string,
+  key: string,
+  hooks: MarkerHooks,
+  fade = false,
+): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
   let n = 0;
@@ -141,7 +146,15 @@ function text(src: string, key: string, hooks: MarkerHooks, fade = false): React
     parts.forEach((part, p) => {
       if (p % 2 === 1) {
         const visible = plain(parts[p - 1]) || plain(parts[p + 1]);
-        out.push(visible ? part : <span key={`${key}-s${i}-${p}`} className="sr-only">{part}</span>);
+        out.push(
+          visible ? (
+            part
+          ) : (
+            <span key={`${key}-s${i}-${p}`} className="sr-only">
+              {part}
+            </span>
+          ),
+        );
         return;
       }
       const marker = Number(part);
@@ -198,7 +211,12 @@ function text(src: string, key: string, hooks: MarkerHooks, fade = false): React
 
 /** inline renders bold and inline code inside one block of text. `fade`
  * rides along to the prose runs; see text(). */
-function inline(src: string, key: string, hooks: MarkerHooks, fade: boolean): ReactNode[] {
+function inline(
+  src: string,
+  key: string,
+  hooks: MarkerHooks,
+  fade: boolean,
+): ReactNode[] {
   const out: ReactNode[] = [];
   let rest = src;
   let n = 0;
@@ -206,11 +224,12 @@ function inline(src: string, key: string, hooks: MarkerHooks, fade: boolean): Re
     const code = rest.indexOf("`");
     const bold = rest.indexOf("**");
     if (code < 0 && bold < 0) {
-      out.push(...text(rest, `${key}-t${n++}`, hooks, fade));
+      out.push(...text(rest, `${key}-t${n}`, hooks, fade));
       break;
     }
     const first = code < 0 ? bold : bold < 0 ? code : Math.min(code, bold);
-    if (first > 0) out.push(...text(rest.slice(0, first), `${key}-t${n++}`, hooks, fade));
+    if (first > 0)
+      out.push(...text(rest.slice(0, first), `${key}-t${n++}`, hooks, fade));
     if (first === code) {
       const end = rest.indexOf("`", first + 1);
       if (end < 0) {
@@ -335,7 +354,11 @@ type MarkerHooks = {
 };
 
 /** renderMarkdown turns one answer into block-level nodes. */
-export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = false): ReactNode[] {
+export function renderMarkdown(
+  src: string,
+  hooks: MarkerHooks = {},
+  fade = false,
+): ReactNode[] {
   const lines = src.split("\n");
   const out: ReactNode[] = [];
   let i = 0;
@@ -379,7 +402,8 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       // it. Kept, it opens a blank line inside the block that the next token
       // then closes again, and the code block jumps by a line on every fence
       // that streams.
-      if (!closed && body.length > 0 && body[body.length - 1] === "") body.pop();
+      if (!closed && body.length > 0 && body[body.length - 1] === "")
+        body.pop();
       // Coloured straight from the grammar, never through text(): a marker-
       // shaped a[1] inside code is code, as the backend's splitFences agrees.
       out.push(
@@ -389,7 +413,12 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
           // the syntax colouring and the source viewer are tuned to it.
           className="overflow-x-auto rounded-ui-sm border border-border bg-panel p-3 font-mono text-[13px] leading-relaxed"
         >
-          <code>{(closed ? highlightFinished : highlightBlock)(body.join("\n"), languageOf(tag))}</code>
+          <code>
+            {(closed ? highlightFinished : highlightBlock)(
+              body.join("\n"),
+              languageOf(tag),
+            )}
+          </code>
         </pre>,
       );
       continue;
@@ -400,11 +429,7 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       // The page already owns h1, so # starts at h2 and the outline stays sane.
       const level = Math.min(h[1].length + 1, 4);
       const Tag = `h${level}` as keyof JSX.IntrinsicElements;
-      out.push(
-        <Tag key={k++}>
-          {inline(h[2], `h${k}`, hooks, fade)}
-        </Tag>,
-      );
+      out.push(<Tag key={k++}>{inline(h[2], `h${k}`, hooks, fade)}</Tag>);
       i++;
       continue;
     }
@@ -420,7 +445,11 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
       while (i < lines.length) {
         const m = ordered ? orderedRe.exec(lines[i]) : bulletRe.exec(lines[i]);
         if (!m) break;
-        items.push(<li key={items.length}>{inline(m[1], `li${k}-${items.length}`, hooks, fade)}</li>);
+        items.push(
+          <li key={items.length}>
+            {inline(m[1], `li${k}-${items.length}`, hooks, fade)}
+          </li>,
+        );
         i++;
       }
       const List = ordered ? "ol" : "ul";
@@ -464,7 +493,9 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
             <thead>
               <tr>
                 {head.map((cell, c) => (
-                  <th key={c}>{inline(cell, `tb${key}-h${c}`, hooks, false)}</th>
+                  <th key={c}>
+                    {inline(cell, `tb${key}-h${c}`, hooks, false)}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -472,7 +503,9 @@ export function renderMarkdown(src: string, hooks: MarkerHooks = {}, fade = fals
               {rows.map((row, r) => (
                 <tr key={r}>
                   {row.map((cell, c) => (
-                    <td key={c}>{inline(cell, `tb${key}-${r}-${c}`, hooks, false)}</td>
+                    <td key={c}>
+                      {inline(cell, `tb${key}-${r}-${c}`, hooks, false)}
+                    </td>
                   ))}
                 </tr>
               ))}
@@ -523,7 +556,15 @@ function Markdown({
    * back in as if it were being written now. Off unless asked for. */
   fade?: boolean;
 }) {
-  return <>{renderMarkdown(src, { onHover: onMarkerHover, onOpen: onMarkerOpen, backed }, fade)}</>;
+  return (
+    <>
+      {renderMarkdown(
+        src,
+        { onHover: onMarkerHover, onOpen: onMarkerOpen, backed },
+        fade,
+      )}
+    </>
+  );
 }
 
 /**

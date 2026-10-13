@@ -37,8 +37,8 @@ func TestRedact_configLines(t *testing.T) {
 		{"url without credentials stays", "app.properties", "spring.datasource.url=jdbc:postgresql://db.example.invalid:5432/app", "spring.datasource.url=jdbc:postgresql://db.example.invalid:5432/app"},
 		{"basic auth value", "values.yaml", "  authorization: Basic YWJjOmRlZg==", "  authorization: <redacted>"},
 		{"bearer value", ".env", "AUTH=Bearer abc.def", "AUTH=<redacted>"},
-		{"aws key id value", "config.ini", "aws_access_key_id = AKIAIOSFODNN7EXAMPLE", "aws_access_key_id = <redacted>"},
-		{"vendor token prefix", "app.properties", "forge.pat=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8", "forge.pat=<redacted>"},
+		{"aws key id value", "config.ini", "aws_access_key_id = AKIAIOSFODNN7EXAMPLE", "aws_access_key_id = <redacted>"},        // ship:allow-secret: invented fixture
+		{"vendor token prefix", "app.properties", "forge.pat=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8", "forge.pat=<redacted>"}, // ship:allow-secret: invented fixture
 		{"access key name", "app.properties", "storage.accessKey=abc", "storage.accessKey=<redacted>"},
 		{"passphrase name", "app.properties", "ssh.passphrase=abc", "ssh.passphrase=<redacted>"},
 		{"pass as a segment", "app.properties", "acme.api.pass=abc", "acme.api.pass=<redacted>"},

@@ -35,7 +35,10 @@ export function useMenuPlacement(): {
     if (el === null || anchor === null) return;
     const bounds = nearestScrollParent(el)?.getBoundingClientRect();
     const topLimit = Math.max(bounds?.top ?? 0, 0);
-    const bottomLimit = Math.min(bounds?.bottom ?? window.innerHeight, window.innerHeight);
+    const bottomLimit = Math.min(
+      bounds?.bottom ?? window.innerHeight,
+      window.innerHeight,
+    );
     const anchorRect = anchor.getBoundingClientRect();
     const menuHeight = el.offsetHeight + 4;
     const spaceBelow = bottomLimit - anchorRect.bottom;
@@ -56,5 +59,8 @@ export function useMenuPlacement(): {
     };
   }, [measure]);
 
-  return { menuRef, verticalClass: dropUp ? "top-auto bottom-full mb-1" : "top-full mt-1" };
+  return {
+    menuRef,
+    verticalClass: dropUp ? "top-auto bottom-full mb-1" : "top-full mt-1",
+  };
 }

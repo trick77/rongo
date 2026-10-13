@@ -20,7 +20,12 @@ type StepDetail = Record<string, unknown>;
 // at is on the browser's clock. serverAt, on a live step, is the server's time
 // for it: the gaps between steps come from it, so buffering on the way cannot
 // move time from one step into another.
-export type Step = { step: string; at: number; serverAt?: number; detail?: StepDetail };
+export type Step = {
+  step: string;
+  at: number;
+  serverAt?: number;
+  detail?: StepDetail;
+};
 
 const doneLabel = "Done";
 const waitingLabel = "Waiting for a choice";
@@ -60,38 +65,49 @@ export function stepLabel(step: string): string {
  */
 const rungSentences: Record<string, Record<string, string>> = {
   answer: {
-    named_repos: "Answering directly: the question named the project, so there is nothing to choose.",
+    named_repos:
+      "Answering directly: the question named the project, so there is nothing to choose.",
     all_repos: "Answering across every project, as the question asked.",
-    repo_deps: "Answering directly: the matching repositories depend on each other, so they are one mechanism.",
+    repo_deps:
+      "Answering directly: the matching repositories depend on each other, so they are one mechanism.",
     margin: "Answering directly: one module matched far ahead of the rest.",
     judge: "Answering directly: the matches are parts of one mechanism.",
     role: "Answering directly: the options could only be told apart by code.",
   },
   ask: {
-    repository: "Asking back: the matches span several projects and the question named none.",
+    repository:
+      "Asking back: the matches span several projects and the question named none.",
     judge: "Asking back: the matches are independent alternatives.",
     margin: "Asking back: no module matched clearly ahead of the others.",
   },
   too_broad: {
-    too_broad: "Asking for a narrower question: more projects matched than a card can offer.",
+    too_broad:
+      "Asking for a narrower question: more projects matched than a card can offer.",
   },
 };
 
 function rungSentence(decision: string, rung: string): string {
-  return rungSentences[decision]?.[rung] ?? (decision === "ask" ? "Asking back." : "Answering directly.");
+  return (
+    rungSentences[decision]?.[rung] ??
+    (decision === "ask" ? "Asking back." : "Answering directly.")
+  );
 }
 
 function seconds(ms: number): string {
   return (Math.max(ms, 0) / 1000).toFixed(1) + "s";
 }
 
-const asNumber = (v: unknown): number | null => (typeof v === "number" ? v : null);
+const asNumber = (v: unknown): number | null =>
+  typeof v === "number" ? v : null;
 
 function Chips({ values, dim }: { values: string[]; dim?: boolean }) {
   return (
     <>
       {values.map((v, i) => (
-        <span key={i + v} className={"trace-chip" + (dim ? " trace-chip-dim" : "")}>
+        <span
+          key={i + v}
+          className={"trace-chip" + (dim ? " trace-chip-dim" : "")}
+        >
           {v}
         </span>
       ))}
@@ -139,7 +155,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       if (detail.intent === "rework") {
         return (
           <div className="trace-detail">
-            <span className="trace-k">Reworks</span> the previous answer from its own sources
+            <span className="trace-k">Reworks</span> the previous answer from
+            its own sources
           </div>
         );
       }
@@ -150,7 +167,9 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const outside = strs(detail.outside_repos);
       let scope: string;
       if (repos.length > 0) {
-        scope = repos.join(", ") + (detail.pinned ? ", the thread's scope" : ", named by the question");
+        scope =
+          repos.join(", ") +
+          (detail.pinned ? ", the thread's scope" : ", named by the question");
       } else if (detail.all_repos) {
         scope = "every indexed project, as the question asked";
       } else {
@@ -160,19 +179,23 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         <div className="trace-detail">
           {terms.length > 0 && (
             <>
-              <span className="trace-k">Looking for</span> <Chips values={terms} />
+              <span className="trace-k">Looking for</span>{" "}
+              <Chips values={terms} />
             </>
           )}
           {code.length > 0 && (
             <>
               {" "}
-              <span className="trace-k">in the code as</span> <Chips values={code} />
+              <span className="trace-k">in the code as</span>{" "}
+              <Chips values={code} />
             </>
           )}
           <br />
           <span className="trace-k">Scope</span> {scope}
           {unknown.length > 0 && <>; not indexed: {unknown.join(", ")}</>}
-          {outside.length > 0 && <>; outside this thread: {outside.join(", ")}</>}
+          {outside.length > 0 && (
+            <>; outside this thread: {outside.join(", ")}</>
+          )}
         </div>
       );
     }
@@ -189,7 +212,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         const infra = str(detail.infrastructure);
         return (
           <div className="trace-detail">
-            {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">between</span> {between[0]}{" "}
+            {commits} {commits === 1 ? "commit" : "commits"}{" "}
+            <span className="trace-k">between</span> {between[0]}{" "}
             <span className="trace-k">and</span> {between[1]}
             {" · "}
             {images} {images === 1 ? "image" : "images"}
@@ -212,12 +236,14 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         const topic = str(detail.topic);
         return (
           <div className="trace-detail">
-            {commits} {commits === 1 ? "commit" : "commits"} <span className="trace-k">in the last</span> {days}{" "}
+            {commits} {commits === 1 ? "commit" : "commits"}{" "}
+            <span className="trace-k">in the last</span> {days}{" "}
             {days === 1 ? "day" : "days"}
             {topic && (
               <>
                 {" "}
-                <span className="trace-k">about</span> <Chips values={[topic]} />
+                <span className="trace-k">about</span>{" "}
+                <Chips values={[topic]} />
               </>
             )}
             <Counts of={perRepo} />
@@ -225,8 +251,14 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         );
       }
       const hits = asNumber(detail.hits) ?? 0;
-      const best = (detail.best ?? null) as { repo?: string; path?: string; lanes?: string[] } | null;
-      const lanes = strs(best?.lanes).map((l) => l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"));
+      const best = (detail.best ?? null) as {
+        repo?: string;
+        path?: string;
+        lanes?: string[];
+      } | null;
+      const lanes = strs(best?.lanes).map((l) =>
+        l.replace("keyword:", "keyword ").replace(/^semantic:\d+$/, "semantic"),
+      );
       return (
         <div className="trace-detail">
           {hits} {hits === 1 ? "hit" : "hits"}
@@ -240,7 +272,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               {lanes.length > 0 && (
                 <>
                   {" "}
-                  <span className="trace-k">found by</span> <Chips dim values={[...new Set(lanes)]} />
+                  <span className="trace-k">found by</span>{" "}
+                  <Chips dim values={[...new Set(lanes)]} />
                 </>
               )}
             </>
@@ -261,7 +294,9 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               <Chips values={candidates} />
             </>
           )}
-          {rung !== "judge" && rung !== "role" && decision !== "answer" && <> · decided by rule, no model</>}
+          {rung !== "judge" && rung !== "role" && decision !== "answer" && (
+            <> · decided by rule, no model</>
+          )}
         </div>
       );
     }
@@ -273,7 +308,11 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       const repos = asNumber(detail.repos) ?? 0;
       const used = asNumber(detail.tokens);
       const budget = asNumber(detail.budget);
-      const crossed = (Array.isArray(detail.crossed) ? detail.crossed : []) as { from?: string; to?: string; via?: string }[];
+      const crossed = (Array.isArray(detail.crossed) ? detail.crossed : []) as {
+        from?: string;
+        to?: string;
+        via?: string;
+      }[];
       // The link census: how many navigation sites the index holds for the
       // repository, and how many of them landed as sources. Absent on every
       // turn that ran none.
@@ -295,7 +334,9 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {crossings > 0 && (
             <>
               {" "}
-              <span className="trace-chip trace-chip-edge">+{crossings} across a boundary</span>
+              <span className="trace-chip trace-chip-edge">
+                +{crossings} across a boundary
+              </span>
             </>
           )}
           {linkSites > 0 && (
@@ -307,7 +348,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
             </>
           )}
           {" · "}
-          {sources} sources in {repos} {repos === 1 ? "repository" : "repositories"}
+          {sources} sources in {repos}{" "}
+          {repos === 1 ? "repository" : "repositories"}
           {used !== null && budget !== null && (
             <>
               {" · "}
@@ -317,7 +359,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {crossed.map((c, i) => (
             <span key={i}>
               <br />
-              <span className="trace-k">Crossed</span> {c.from} → {c.to} <span className="trace-k">on the</span> {c.via}
+              <span className="trace-k">Crossed</span> {c.from} → {c.to}{" "}
+              <span className="trace-k">on the</span> {c.via}
             </span>
           ))}
           {locate && (
@@ -341,7 +384,9 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               {locate.outcome && (
                 <div className="trace-locate-outcome">
                   {locate.outcome.lead}
-                  {locate.outcome.file && <LocateFileName file={locate.outcome.file} />}
+                  {locate.outcome.file && (
+                    <LocateFileName file={locate.outcome.file} />
+                  )}
                   {locate.outcome.tail}
                 </div>
               )}
@@ -354,14 +399,16 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
       if (detail.refused === "full") {
         return (
           <div className="trace-detail">
-            <span className="trace-k">Refused</span> the memory is full; delete a rule on the Memory page
+            <span className="trace-k">Refused</span> the memory is full; delete
+            a rule on the Memory page
           </div>
         );
       }
       if (detail.refused === "failed") {
         return (
           <div className="trace-detail">
-            <span className="trace-k">Not kept</span> the rule could not be written; say it again
+            <span className="trace-k">Not kept</span> the rule could not be
+            written; say it again
           </div>
         );
       }
@@ -374,7 +421,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
         <div className="trace-detail">
           {memoryText && (
             <>
-              <span className="trace-k">Kept</span> <Chips values={[memoryText]} />
+              <span className="trace-k">Kept</span>{" "}
+              <Chips values={[memoryText]} />
               {scope && (
                 <>
                   {" "}
@@ -384,7 +432,8 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
               {dropped && (
                 <>
                   {" "}
-                  <span className="trace-k">everywhere:</span> {dropped} is not indexed
+                  <span className="trace-k">everywhere:</span> {dropped} is not
+                  indexed
                 </>
               )}
             </>
@@ -392,13 +441,15 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {replaced.length > 0 && (
             <>
               {memoryText ? " · " : ""}
-              <span className="trace-k">replaces</span> <Chips dim values={replaced} />
+              <span className="trace-k">replaces</span>{" "}
+              <Chips dim values={replaced} />
             </>
           )}
           {removed.length > 0 && (
             <>
               {memoryText || replaced.length > 0 ? " · " : ""}
-              <span className="trace-k">forgot</span> <Chips dim values={removed} />
+              <span className="trace-k">forgot</span>{" "}
+              <Chips dim values={removed} />
             </>
           )}
         </div>
@@ -421,8 +472,15 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {/* The cached share sits next to the figure it is part of, never
               added to it: the endpoint read this much of the prompt before
               and charged a fraction for it. */}
-          {cached !== null && cached > 0 && <span className="trace-k"> ({tokens(cached)} cached)</span>}
-          {outTok !== null && <>{inTok !== null ? " · " : ""}{tokens(outTok)} tokens out</>}
+          {cached !== null && cached > 0 && (
+            <span className="trace-k"> ({tokens(cached)} cached)</span>
+          )}
+          {outTok !== null && (
+            <>
+              {inTok !== null ? " · " : ""}
+              {tokens(outTok)} tokens out
+            </>
+          )}
           {cited !== null && sources !== null && (
             <>
               {" · "}
@@ -435,14 +493,17 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {readAt.length > 0 && (
             <>
               {" · "}
-              <span className="trace-k">read at</span> <Chips dim values={readAt} />
+              <span className="trace-k">read at</span>{" "}
+              <Chips dim values={readAt} />
             </>
           )}
           {/* The second call the answer took. A call is retried at most once
               (`llm.Client`, attempts is 1 or 2) and the pipeline sends the key
               only past one, so a turn that went through first time says
               nothing at all. */}
-          {attempts !== null && attempts > 1 && <span className="trace-k"> · retried once</span>}
+          {attempts !== null && attempts > 1 && (
+            <span className="trace-k"> · retried once</span>
+          )}
           {/* Where the prompt went. Measured at four characters per token
               rather than billed, which is why it is said in the same breath
               rather than dressed as another exact figure. */}
@@ -457,7 +518,10 @@ function Detail({ step, detail }: { step: string; detail: StepDetail }) {
           {memories !== null && memories > 0 && (
             <span className="trace-k">
               {" · "}
-              {memories} {memories === 1 ? "standing instruction" : "standing instructions"}
+              {memories}{" "}
+              {memories === 1
+                ? "standing instruction"
+                : "standing instructions"}
             </span>
           )}
         </div>
@@ -528,11 +592,19 @@ export default function Trace({
         : state === "decided"
           ? { label: decidedLabel, node: "node-decided", text: "text-muted" }
           : state === "failed"
-            ? { label: failedLabel, node: "node-fail", text: "text-accent-strong" }
+            ? {
+                label: failedLabel,
+                node: "node-fail",
+                text: "text-accent-strong",
+              }
             : null;
 
   return (
-    <div role={live ? "status" : undefined} aria-live={live ? "polite" : undefined} className="trace mt-4">
+    <div
+      role={live ? "status" : undefined}
+      aria-live={live ? "polite" : undefined}
+      className="trace mt-4"
+    >
       <div
         className={"trace-steps" + (open ? " trace-steps-open" : "")}
         aria-hidden={open ? undefined : true}
@@ -545,8 +617,17 @@ export default function Trace({
               const until = last ? closedAt : steps[i + 1].at;
               return (
                 <li key={i}>
-                  <span className={"node " + (running ? "node-now" : "")} aria-hidden="true" />
-                  <span className={"leading-7 " + (running ? "font-medium text-ink" : "")}>{stepLabel(s.step)}</span>
+                  <span
+                    className={"node " + (running ? "node-now" : "")}
+                    aria-hidden="true"
+                  />
+                  <span
+                    className={
+                      "leading-7 " + (running ? "font-medium text-ink" : "")
+                    }
+                  >
+                    {stepLabel(s.step)}
+                  </span>
                   {/* The running step's clock ticks; in a live region every
                       tick would be announced. */}
                   <time
@@ -565,14 +646,19 @@ export default function Trace({
       {closing && (
         <ol className="steps text-sm text-muted">
           <li>
-            <span className={"node node-end " + closing.node} aria-hidden="true" />
+            <span
+              className={"node node-end " + closing.node}
+              aria-hidden="true"
+            />
             <button
               type="button"
               aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
               className="flex items-center gap-1.5 text-left"
             >
-              <span className={"leading-7 font-medium " + closing.text}>{closing.label}</span>
+              <span className={"leading-7 font-medium " + closing.text}>
+                {closing.label}
+              </span>
               {/* Up, not down: the steps are above this row. And faint, the
                   weight of the copy control - the label is what carries the row. */}
               <span className="text-faint transition-colors">

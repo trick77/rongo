@@ -41,7 +41,10 @@ function stubLocation(href: (url: string) => void, search: string) {
  * makes, so every test that wants to see the UI has to get through it first.
  */
 async function renderSignedIn() {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })),
+  );
   render(<App />);
   await screen.findByRole("heading", { level: 1 });
 }
@@ -58,7 +61,10 @@ describe("App", () => {
     // and the user sees a broken app rather than a sign-in.
     const href = vi.fn();
     stubLocation(href, "");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })),
+    );
 
     render(<App />);
 
@@ -71,7 +77,12 @@ describe("App", () => {
     // user at the provider on every hiccup of the backend.
     const href = vi.fn();
     stubLocation(href, "");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
 
     render(<App />);
 
@@ -86,7 +97,11 @@ describe("App", () => {
     // same time are enough to trigger it.
     const href = vi.fn();
     stubLocation(href, "?auth_error=oidc_callback_failed");
-    const fetchMock = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -102,7 +117,10 @@ describe("App", () => {
     // sign-out button would visibly do nothing.
     const href = vi.fn();
     stubLocation(href, "?signed_out=1");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })),
+    );
 
     render(<App />);
 
@@ -114,7 +132,10 @@ describe("App", () => {
     // No provider, so no "sign out there as well".
     const href = vi.fn();
     stubLocation(href, "?signed_out=local");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })),
+    );
 
     render(<App />);
 
@@ -127,7 +148,11 @@ describe("App", () => {
     function renderForm(status: number) {
       const href = vi.fn();
       stubLocation(href, "?login=password");
-      const fetchMock = vi.fn(async () => ({ ok: status < 300, status, json: async () => ({}) }));
+      const fetchMock = vi.fn(async () => ({
+        ok: status < 300,
+        status,
+        json: async () => ({}),
+      }));
       vi.stubGlobal("fetch", fetchMock);
       render(<App />);
       return { href, fetchMock };
@@ -174,7 +199,9 @@ describe("App", () => {
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
       await screen.findByRole("alert");
-      expect(screen.getByRole("alert").textContent).toBe("Wrong username or password.");
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Wrong username or password.",
+      );
       expect(href).not.toHaveBeenCalled();
       expect(screen.getByRole("form", { name: "Sign in" })).toBeTruthy();
     });
@@ -209,7 +236,10 @@ describe("App", () => {
     // user less than one clear message does.
     const href = vi.fn();
     stubLocation(href, "");
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
 
     render(<App />);
 
@@ -224,7 +254,9 @@ describe("App", () => {
       ok: true,
       status: 200,
       json: async () =>
-        String(url) === "/api/auth/logout" ? { redirect_url: "/?signed_out=1" } : [],
+        String(url) === "/api/auth/logout"
+          ? { redirect_url: "/?signed_out=1" }
+          : [],
     }));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
@@ -234,7 +266,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
     await waitFor(() => expect(href).toHaveBeenCalledWith("/?signed_out=1"));
-    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/logout", {
+      method: "POST",
+    });
   });
 
   it("opens the Threads page from the rail and marks it current", async () => {
@@ -257,7 +291,10 @@ describe("App", () => {
     // turn is finished, so a stream interrupted this way is lost for good.
     await renderSignedIn();
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Question"), "A question that has to stay put");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "A question that has to stay put",
+    );
 
     const repos = screen.getByRole("button", { name: "Projects" });
     await user.click(repos);
@@ -268,9 +305,9 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "New question" }));
     expect(repos.getAttribute("aria-current")).toBe(null);
 
-    expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe(
-      "A question that has to stay put",
-    );
+    expect(
+      (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
+    ).toBe("A question that has to stay put");
   });
 
   // The action used to live inside the thread list, among the past
@@ -313,14 +350,19 @@ const noSuchAddr = "AAAAAAAAAAAAAAAAAAAAAA";
  * Answers the thread list, one thread's turns, and the starred list, which
  * is empty unless given: the rail reads it beside the page.
  */
-function apiFetch(threads: unknown, messages: unknown, starred: unknown[] = []) {
+function apiFetch(
+  threads: unknown,
+  messages: unknown,
+  starred: unknown[] = [],
+) {
   const mock = vi.fn(async (url: string) => ({
     ok: true,
     status: 200,
     json: async () => {
       const u = String(url);
       if (u.startsWith("/api/threads/")) return messages;
-      if (u.includes("starred=true")) return { items: starred, next_cursor: null };
+      if (u.includes("starred=true"))
+        return { items: starred, next_cursor: null };
       return { items: threads, next_cursor: null };
     },
   }));
@@ -328,7 +370,13 @@ function apiFetch(threads: unknown, messages: unknown, starred: unknown[] = []) 
   return mock;
 }
 
-const oneThread = [{ id: addr, title: "How does shipping work?", created_at: "2026-08-17T10:00:00Z" }];
+const oneThread = [
+  {
+    id: addr,
+    title: "How does shipping work?",
+    created_at: "2026-08-17T10:00:00Z",
+  },
+];
 const oneTurn = [
   {
     id: 1,
@@ -346,7 +394,11 @@ describe("App, the thread in the URL", () => {
   it("opens the thread its address names", async () => {
     atPath("/thread/" + addr);
     apiFetch(oneThread, oneTurn);
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     expect(await screen.findByText(/Through a job/)).toBeTruthy();
   });
 
@@ -355,15 +407,27 @@ describe("App, the thread in the URL", () => {
     // into, and reached with Back.
     apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
-    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/thread/" + addr));
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "How does shipping work?" }),
+    );
+    await waitFor(() =>
+      expect(window.location.pathname).toBe("/thread/" + addr),
+    );
   });
 
   it("names the unasked question /new rather than /", async () => {
     atPath("/");
     apiFetch([], []);
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByRole("heading", { level: 1 });
     await waitFor(() => expect(window.location.pathname).toBe("/new"));
   });
@@ -371,14 +435,24 @@ describe("App, the thread in the URL", () => {
   it("follows Back out of a thread", async () => {
     apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
-    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
-    await waitFor(() => expect(window.location.pathname).toBe("/thread/" + addr));
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "How does shipping work?" }),
+    );
+    await waitFor(() =>
+      expect(window.location.pathname).toBe("/thread/" + addr),
+    );
 
     window.history.back();
 
     await waitFor(() => expect(window.location.pathname).toBe("/new"));
-    await waitFor(() => expect(screen.getAllByText("New question").length).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(screen.getAllByText("New question").length).toBeGreaterThan(1),
+    );
   });
 
   // The placeholder title is the question's first 48 runes, cut mid-word. It
@@ -387,26 +461,58 @@ describe("App, the thread in the URL", () => {
   it("holds New question in the header while the title is still coming", async () => {
     atPath("/thread/" + addr);
     apiFetch(
-      [{ id: addr, title: "How does shipping work, and what happens when…", title_pending: true, created_at: "2026-08-17T10:00:00Z" }],
+      [
+        {
+          id: addr,
+          title: "How does shipping work, and what happens when…",
+          title_pending: true,
+          created_at: "2026-08-17T10:00:00Z",
+        },
+      ],
       oneTurn,
     );
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByRole("heading", { level: 1 });
 
     // The rail keeps the placeholder — there the first words are what tells
     // one pending row from another — and the header does not.
-    await screen.findByRole("button", { name: "How does shipping work, and what happens when…" });
-    expect(screen.queryAllByText("How does shipping work, and what happens when…").length).toBe(1);
+    await screen.findByRole("button", {
+      name: "How does shipping work, and what happens when…",
+    });
+    expect(
+      screen.queryAllByText("How does shipping work, and what happens when…")
+        .length,
+    ).toBe(1);
     expect(screen.getAllByText("New question").length).toBeGreaterThan(1);
   });
 
   it("puts the title in the header once it has settled", async () => {
     atPath("/thread/" + addr);
-    apiFetch([{ id: addr, title: "Shipping, end to end", title_pending: false, created_at: "2026-08-17T10:00:00Z" }], oneTurn);
-    render(<StrictMode><App /></StrictMode>);
+    apiFetch(
+      [
+        {
+          id: addr,
+          title: "Shipping, end to end",
+          title_pending: false,
+          created_at: "2026-08-17T10:00:00Z",
+        },
+      ],
+      oneTurn,
+    );
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
 
     // Twice: the rail row and the header.
-    await waitFor(() => expect(screen.getAllByText("Shipping, end to end").length).toBe(2));
+    await waitFor(() =>
+      expect(screen.getAllByText("Shipping, end to end").length).toBe(2),
+    );
   });
 
   // The rail is the latest 30, and a thread opened by its address can be any
@@ -417,17 +523,28 @@ describe("App, the thread in the URL", () => {
     const mock = vi.fn(async (url: string) => {
       const u = String(url);
       const body = u.endsWith("/summary")
-        ? { id: addr, title: "Older than the rail", title_pending: false, created_at: "2025-01-01 10:00:00" }
+        ? {
+            id: addr,
+            title: "Older than the rail",
+            title_pending: false,
+            created_at: "2025-01-01 10:00:00",
+          }
         : u.startsWith("/api/threads/")
           ? oneTurn
           : { items: [], next_cursor: null };
       return { ok: true, status: 200, json: async () => body };
     });
     vi.stubGlobal("fetch", mock);
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
 
     // Once: the header, with no rail row to go with it.
-    await waitFor(() => expect(screen.getAllByText("Older than the rail").length).toBe(1));
+    await waitFor(() =>
+      expect(screen.getAllByText("Older than the rail").length).toBe(1),
+    );
     expect(mock).toHaveBeenCalledWith(`/api/threads/${addr}/summary`);
   });
 
@@ -438,7 +555,11 @@ describe("App, the thread in the URL", () => {
   it("says so when a thread address leads nowhere, and keeps the address", async () => {
     atPath("/thread/" + noSuchAddr);
     apiFetch([], []);
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
 
     expect(await screen.findByText(/no longer available/)).toBeTruthy();
     expect(window.location.pathname).toBe("/thread/" + noSuchAddr);
@@ -472,7 +593,9 @@ describe("App, the rail on a phone", () => {
     await renderSignedIn();
     expect(rail().className).toContain("-translate-x-full");
     expect(rail().className).toContain("lg:translate-x-0");
-    expect(screen.getByRole("button", { name: "Open navigation" }).className).toContain("lg:hidden");
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }).className,
+    ).toContain("lg:hidden");
   });
 
   it("slides the rail in and lays a backdrop over the thread", async () => {
@@ -517,7 +640,9 @@ describe("App, the rail on a phone", () => {
     render(<App />);
     await screen.findByRole("heading", { level: 1 });
     const user = await openDrawer();
-    await user.click(await screen.findByRole("button", { name: "How does shipping work?" }));
+    await user.click(
+      await screen.findByRole("button", { name: "How does shipping work?" }),
+    );
     expect(rail().className).toContain("-translate-x-full");
   });
 
@@ -557,8 +682,18 @@ describe("App, the rail on a phone", () => {
             ? {
                 enabled: true,
                 memories: [
-                  { id: 1, text: "Never draw flowchart diagrams.", scope_live: true, created_at: "2026-09-18T10:00:00Z" },
-                  { id: 2, text: "Skip the tests.", scope_live: true, created_at: "2026-09-18T10:00:00Z" },
+                  {
+                    id: 1,
+                    text: "Never draw flowchart diagrams.",
+                    scope_live: true,
+                    created_at: "2026-09-18T10:00:00Z",
+                  },
+                  {
+                    id: 2,
+                    text: "Skip the tests.",
+                    scope_live: true,
+                    created_at: "2026-09-18T10:00:00Z",
+                  },
                 ],
               }
             : [],
@@ -583,9 +718,11 @@ describe("App, the rail on a phone", () => {
     await renderSignedIn();
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Question"), "A question");
-    expect(screen.getByRole("button", { name: "Open navigation" }).hasAttribute("disabled")).toBe(
-      false,
-    );
+    expect(
+      screen
+        .getByRole("button", { name: "Open navigation" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   // The cramped phone header hides the wordmark visually, never from the
@@ -608,30 +745,52 @@ describe("App, the header's thread menu", () => {
   it("is absent on the unasked question and present on an open thread, after the title", async () => {
     atPath("/new");
     apiFetch(oneThread, oneTurn);
-    const { unmount } = render(<StrictMode><App /></StrictMode>);
+    const { unmount } = render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByRole("heading", { level: 1 });
-    expect(within(screen.getByRole("banner")).queryByRole("button", { name: /^Actions for/ })).toBeNull();
+    expect(
+      within(screen.getByRole("banner")).queryByRole("button", {
+        name: /^Actions for/,
+      }),
+    ).toBeNull();
     unmount();
 
     atPath("/thread/" + addr);
     apiFetch(oneThread, oneTurn);
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByText(/Through a job/);
     const banner = screen.getByRole("banner");
-    const chevron = within(banner).getByRole("button", { name: "Actions for How does shipping work?" });
+    const chevron = within(banner).getByRole("button", {
+      name: "Actions for How does shipping work?",
+    });
     expect(chevron.getAttribute("aria-haspopup")).toBe("menu");
     const title = within(banner).getByText("How does shipping work?");
-    expect(title.compareDocumentPosition(chevron) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      title.compareDocumentPosition(chevron) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("opens the same menu, Star first, and turns the chevron towards it", async () => {
     atPath("/thread/" + addr);
     const mock = apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByText(/Through a job/);
     const banner = screen.getByRole("banner");
-    const chevron = within(banner).getByRole("button", { name: "Actions for How does shipping work?" });
+    const chevron = within(banner).getByRole("button", {
+      name: "Actions for How does shipping work?",
+    });
     const glyph = chevron.querySelector("[aria-hidden]") as HTMLElement;
     expect(glyph.className).not.toContain("rotate-90");
 
@@ -642,11 +801,19 @@ describe("App, the header's thread menu", () => {
     const items = within(menu).getAllByRole("menuitem");
     expect(items).toHaveLength(4);
     expect(items[0]).toBe(within(menu).getByRole("menuitem", { name: "Star" }));
-    expect(items[3]).toBe(within(menu).getByRole("menuitem", { name: "Delete" }));
+    expect(items[3]).toBe(
+      within(menu).getByRole("menuitem", { name: "Delete" }),
+    );
 
-    mock.mockResolvedValueOnce({ ok: true, status: 204, json: async () => null });
+    mock.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      json: async () => null,
+    });
     await user.click(within(menu).getByRole("menuitem", { name: "Star" }));
-    expect(mock).toHaveBeenCalledWith("/api/threads/" + addr + "/star", { method: "POST" });
+    expect(mock).toHaveBeenCalledWith("/api/threads/" + addr + "/star", {
+      method: "POST",
+    });
     expect(within(banner).queryByRole("menu")).toBeNull();
   });
 
@@ -656,11 +823,23 @@ describe("App, the header's thread menu", () => {
     atPath("/thread/" + addr);
     const mock = apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByText(/Through a job/);
     const rail = screen.getByRole("navigation", { name: "Threads" });
-    await user.click(within(rail).getByRole("button", { name: "Actions for How does shipping work?" }));
-    mock.mockResolvedValueOnce({ ok: true, status: 204, json: async () => null });
+    await user.click(
+      within(rail).getByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
+    mock.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      json: async () => null,
+    });
     // After the star the reload says the thread is starred.
     const starredThread = { ...oneThread[0], starred: true };
     mock.mockImplementation(async (url: string) => ({
@@ -669,15 +848,22 @@ describe("App, the header's thread menu", () => {
       json: async () => {
         const u = String(url);
         if (u.startsWith("/api/threads/")) return oneTurn;
-        if (u.includes("starred=true")) return { items: [starredThread], next_cursor: null };
+        if (u.includes("starred=true"))
+          return { items: [starredThread], next_cursor: null };
         return { items: [starredThread], next_cursor: null };
       },
     }));
     await user.click(within(rail).getByRole("menuitem", { name: "Star" }));
 
     const banner = screen.getByRole("banner");
-    await user.click(within(banner).getByRole("button", { name: "Actions for How does shipping work?" }));
-    expect(await within(banner).findByRole("menuitem", { name: "Unstar" })).toBeTruthy();
+    await user.click(
+      within(banner).getByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
+    expect(
+      await within(banner).findByRole("menuitem", { name: "Unstar" }),
+    ).toBeTruthy();
   });
 
   // The header's chevron and the rail's kebabs are on screen together, and
@@ -686,14 +872,26 @@ describe("App, the header's thread menu", () => {
     atPath("/thread/" + addr);
     apiFetch(oneThread, oneTurn);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByText(/Through a job/);
     const banner = screen.getByRole("banner");
     const rail = screen.getByRole("navigation", { name: "Threads" });
-    await user.click(within(banner).getByRole("button", { name: "Actions for How does shipping work?" }));
+    await user.click(
+      within(banner).getByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
     expect(within(banner).getByRole("menu")).toBeTruthy();
 
-    await user.click(within(rail).getByRole("button", { name: "Actions for How does shipping work?" }));
+    await user.click(
+      within(rail).getByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
 
     expect(within(banner).queryByRole("menu")).toBeNull();
     expect(within(rail).getByRole("menu")).toBeTruthy();
@@ -716,10 +914,20 @@ describe("App, the header's thread menu", () => {
     });
     vi.stubGlobal("fetch", mock);
     const user = userEvent.setup();
-    render(<StrictMode><App /></StrictMode>);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     await screen.findByText(/Through a job/);
     const banner = screen.getByRole("banner");
-    await user.click(await within(banner).findByRole("button", { name: "Actions for How does shipping work?" }));
-    expect(within(banner).getByRole("menuitem", { name: "Unstar" })).toBeTruthy();
+    await user.click(
+      await within(banner).findByRole("button", {
+        name: "Actions for How does shipping work?",
+      }),
+    );
+    expect(
+      within(banner).getByRole("menuitem", { name: "Unstar" }),
+    ).toBeTruthy();
   });
 });

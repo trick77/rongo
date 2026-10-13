@@ -31,13 +31,24 @@ describe("CommitView", () => {
       subject: "Test sources are labelled",
       body: "So the model can tell a fake from the client.\n\n- one\n- two",
       files: [
-        { path: "backend/internal/ask/answer.go", added: 12, deleted: 3, indexed: true },
+        {
+          path: "backend/internal/ask/answer.go",
+          added: 12,
+          deleted: 3,
+          indexed: true,
+        },
         { path: "docs/plans/x.html", added: 1, deleted: 0, indexed: false },
       ],
     });
     const opened: SourceRef[] = [];
 
-    render(<CommitView source={source} onClose={() => {}} onOpenFile={(r) => opened.push(r)} />);
+    render(
+      <CommitView
+        source={source}
+        onClose={() => {}}
+        onOpenFile={(r) => opened.push(r)}
+      />,
+    );
 
     await waitFor(() => expect(screen.getByText("2 files")).toBeTruthy());
     const url = String((fetchMock.mock.calls[0] as unknown[])[0]);
@@ -45,24 +56,50 @@ describe("CommitView", () => {
     expect(url).toContain("repo=rongo");
     expect(url).toContain("sha=7f2a492abcdef");
     const dialog = screen.getByRole("dialog");
-    expect(dialog.textContent).toContain("So the model can tell a fake from the client.");
+    expect(dialog.textContent).toContain(
+      "So the model can tell a fake from the client.",
+    );
     expect(dialog.textContent).toContain("7f2a492");
     expect(dialog.textContent).toContain("2026-09-17");
     expect(dialog.textContent).toContain("+12");
     // Only the indexed path is a button; the skipped one is text.
-    const buttons = screen.getAllByRole("button").filter((b) => b.textContent?.includes(".go") || b.textContent?.includes(".html"));
-    expect(buttons.map((b) => b.textContent)).toEqual(["backend/internal/ask/answer.go"]);
+    const buttons = screen
+      .getAllByRole("button")
+      .filter(
+        (b) =>
+          b.textContent?.includes(".go") || b.textContent?.includes(".html"),
+      );
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      "backend/internal/ask/answer.go",
+    ]);
 
     await userEvent.click(buttons[0]);
     expect(opened).toEqual([
-      { marker: 1, repo: "rongo", branch: "master", path: "backend/internal/ask/answer.go", start_line: 1, end_line: 0 },
+      {
+        marker: 1,
+        repo: "rongo",
+        branch: "master",
+        path: "backend/internal/ask/answer.go",
+        start_line: 1,
+        end_line: 0,
+      },
     ]);
   });
 
   it("reads through the endpoint it is given and reports a refusal", async () => {
     serve(404, "This commit is not in Rongo's checkout.");
-    render(<CommitView source={source} onClose={() => {}} endpoint="/api/shares/tok/commit" />);
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("not in Rongo's checkout"));
+    render(
+      <CommitView
+        source={source}
+        onClose={() => {}}
+        endpoint="/api/shares/tok/commit"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "not in Rongo's checkout",
+      ),
+    );
     // With no onOpenFile nothing in the body is a button but the close.
     expect(screen.getAllByRole("button").length).toBe(1);
   });
@@ -105,10 +142,25 @@ describe("CommitView", () => {
     // A shared page: every file is plain text, so Close is the only button.
     // A long message must still scroll by keyboard, which needs the body to
     // be a stop of its own rather than something the trap wraps past.
-    serve(200, { repo: "rongo", branch: "master", sha: "7f2a492abcdef", subject: "s", body: "long", files: [] });
-    render(<CommitView source={source} onClose={() => {}} endpoint="/api/shares/tok/commit" />);
+    serve(200, {
+      repo: "rongo",
+      branch: "master",
+      sha: "7f2a492abcdef",
+      subject: "s",
+      body: "long",
+      files: [],
+    });
+    render(
+      <CommitView
+        source={source}
+        onClose={() => {}}
+        endpoint="/api/shares/tok/commit"
+      />,
+    );
     await screen.findByText("long");
-    const body = screen.getByRole("dialog").querySelector<HTMLElement>('[tabindex="0"]');
+    const body = screen
+      .getByRole("dialog")
+      .querySelector<HTMLElement>('[tabindex="0"]');
     expect(body).not.toBeNull();
 
     // From the body, the last stop, Tab wraps to Close.
@@ -129,6 +181,8 @@ describe("CommitView", () => {
 
 describe("forgeLine", () => {
   it("writes a commit citation as sha, day and subject", () => {
-    expect(forgeLine(source)).toBe("rongo · 7f2a492 2026-09-17 Test sources are labelled (master)");
+    expect(forgeLine(source)).toBe(
+      "rongo · 7f2a492 2026-09-17 Test sources are labelled (master)",
+    );
   });
 });

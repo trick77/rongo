@@ -14,7 +14,15 @@ const turn = {
   answer: "It is a ladder [1].",
   error: "",
   citations: [
-    { marker: 1, repo: "rongo", branch: "master", path: "internal/ask/route.go", start_line: 1, end_line: 4, sha: "abc" },
+    {
+      marker: 1,
+      repo: "rongo",
+      branch: "master",
+      path: "internal/ask/route.go",
+      start_line: 1,
+      end_line: 4,
+      sha: "abc",
+    },
   ],
   from_candidate_idx: -1,
   from_clarification_id: 0,
@@ -27,7 +35,8 @@ function shared(body: unknown, status = 200) {
     ok: status === 200,
     status,
     text: async () => "",
-    json: async () => (String(url).includes("/source") ? { content: "package ask\n" } : body),
+    json: async () =>
+      String(url).includes("/source") ? { content: "package ask\n" } : body,
   }));
   vi.stubGlobal("fetch", mock);
   return mock;
@@ -38,13 +47,18 @@ describe("SharePage", () => {
     shared({ title: "How routing decides", messages: [turn] });
     render(<SharePage token="tok" />);
 
-    expect(await screen.findByRole("heading", { name: "How routing decides" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "How routing decides" }),
+    ).toBeTruthy();
     await screen.findByText(/It is a ladder/);
     expect(screen.getByText("Shared · read-only")).toBeTruthy();
   });
 
   it("offers nothing a reader could press", async () => {
-    shared({ title: "How routing decides", messages: [{ ...turn, followups: ["And then?"] }] });
+    shared({
+      title: "How routing decides",
+      messages: [{ ...turn, followups: ["And then?"] }],
+    });
     render(<SharePage token="tok" />);
     await screen.findByText(/It is a ladder/);
 
@@ -67,7 +81,13 @@ describe("SharePage", () => {
       messages: [
         {
           ...turn,
-          usage: { calls: [], prompt_tokens: 900, completion_tokens: 120, total_tokens: 1020, cost_usd: 0.004 },
+          usage: {
+            calls: [],
+            prompt_tokens: 900,
+            completion_tokens: 120,
+            total_tokens: 1020,
+            cost_usd: 0.004,
+          },
         },
       ],
     });
@@ -80,7 +100,12 @@ describe("SharePage", () => {
 
   it("shows the thread's total tokens and cost in the header", async () => {
     // The one figure the server does send: the whole thread, priced once.
-    shared({ title: "How routing decides", messages: [turn], total_tokens: 3410, cost_usd: 0.00372 });
+    shared({
+      title: "How routing decides",
+      messages: [turn],
+      total_tokens: 3410,
+      cost_usd: 0.00372,
+    });
     render(<SharePage token="tok" />);
     await screen.findByText(/It is a ladder/);
 
@@ -90,7 +115,11 @@ describe("SharePage", () => {
   });
 
   it("shows tokens only when the server sends no cost", async () => {
-    shared({ title: "How routing decides", messages: [turn], total_tokens: 550 });
+    shared({
+      title: "How routing decides",
+      messages: [turn],
+      total_tokens: 550,
+    });
     render(<SharePage token="tok" />);
     await screen.findByText(/It is a ladder/);
 
@@ -118,11 +147,17 @@ describe("SharePage", () => {
     fireEvent.click(await screen.findByText("route.go"));
 
     await waitFor(() =>
-      expect(mock.mock.calls.some(([url]) => String(url).startsWith("/api/shares/tok/source?"))).toBe(true),
+      expect(
+        mock.mock.calls.some(([url]) =>
+          String(url).startsWith("/api/shares/tok/source?"),
+        ),
+      ).toBe(true),
     );
     // /api/source takes any repo/path/sha and is a reader for the whole
     // indexed corpus. The public page must never reach it.
-    expect(mock.mock.calls.some(([url]) => String(url).startsWith("/api/source"))).toBe(false);
+    expect(
+      mock.mock.calls.some(([url]) => String(url).startsWith("/api/source")),
+    ).toBe(false);
   });
 
   it("says the link is gone without saying which kind of gone", async () => {
@@ -130,7 +165,9 @@ describe("SharePage", () => {
     render(<SharePage token="tok" />);
 
     // Revoked, mistyped and deleted are one answer, so the page has one line.
-    expect(await screen.findByText("This link is no longer available.")).toBeTruthy();
+    expect(
+      await screen.findByText("This link is no longer available."),
+    ).toBeTruthy();
   });
 
   it("marks itself noindex while it is on screen", async () => {
@@ -155,18 +192,24 @@ describe("SharePage", () => {
     const fades = Array.from(scroller.parentElement!.children).filter((el) =>
       el.className.includes("bg-gradient-to-"),
     );
-    expect(fades.map((el) => el.getAttribute("aria-hidden"))).toEqual(["true", "true"]);
+    expect(fades.map((el) => el.getAttribute("aria-hidden"))).toEqual([
+      "true",
+      "true",
+    ]);
     expect(fades[0].className).toContain("top-0");
     expect(fades[0].className).toContain("bg-gradient-to-b");
     expect(fades[1].className).toContain("bottom-0");
     expect(fades[1].className).toContain("bg-gradient-to-t");
     // A strip the reader can click is a strip that eats a citation chip.
-    for (const el of fades) expect(el.className).toContain("pointer-events-none");
+    for (const el of fades)
+      expect(el.className).toContain("pointer-events-none");
     // Both after the scroller: at z-10 a strip ties with the diagram card's
     // toolbar inside the column, and a tie is settled by tree order.
     expect(scroller.className).not.toContain("isolate");
     for (const el of fades)
-      expect(scroller.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        scroller.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
   });
 
   it("draws an unanswered card as a record, not as a question", async () => {
@@ -180,8 +223,20 @@ describe("SharePage", () => {
           clarification: {
             id: 3,
             candidates: [
-              { idx: 0, title: "Gather hop budget", summary: "How far a walk may travel.", repo: "rongo", branch: "master" },
-              { idx: 1, title: "Indexer fetch retries", summary: "What a failed fetch may try again.", repo: "rongo", branch: "master" },
+              {
+                idx: 0,
+                title: "Gather hop budget",
+                summary: "How far a walk may travel.",
+                repo: "rongo",
+                branch: "master",
+              },
+              {
+                idx: 1,
+                title: "Indexer fetch retries",
+                summary: "What a failed fetch may try again.",
+                repo: "rongo",
+                branch: "master",
+              },
             ],
           },
         },
@@ -192,7 +247,9 @@ describe("SharePage", () => {
     // Ochre means "your move", and a reader following a link has none.
     await screen.findByText("Asked back: which one was meant");
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
-    const candidate = screen.getByText("Gather hop budget").closest("button") as HTMLButtonElement;
+    const candidate = screen
+      .getByText("Gather hop budget")
+      .closest("button") as HTMLButtonElement;
     expect(candidate.disabled).toBe(true);
   });
 
@@ -213,8 +270,14 @@ describe("SharePage", () => {
 
     await screen.findByText(/It is a ladder/);
     expect(screen.getByText("Why does this fail?")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Pasted text · 2 lines" }).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("button", { name: "Remove pasted text" })).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Pasted text · 2 lines" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(
+      screen.queryByRole("button", { name: "Remove pasted text" }),
+    ).toBeNull();
     expect(screen.queryByText(/main\.go:12/)).toBeNull();
   });
 });

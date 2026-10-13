@@ -92,7 +92,10 @@ export default function SharePage({ token }: { token: string }) {
           turns: turnsFromRecord(list),
           // No total means the thread paid for nothing: show nothing, not a
           // zero. A total without a cost means no call was priced.
-          usage: body.total_tokens == null ? null : { tokens: body.total_tokens, cost: body.cost_usd ?? null },
+          usage:
+            body.total_tokens == null
+              ? null
+              : { tokens: body.total_tokens, cost: body.cost_usd ?? null },
         });
       } catch {
         if (!cancelled) setState({ s: "failed" });
@@ -106,21 +109,25 @@ export default function SharePage({ token }: { token: string }) {
   // The tab is named after the thread, so a reader with several links open can
   // tell them apart.
   useEffect(() => {
-    if (state.s === "ready" && state.title) document.title = `${state.title} · Rongo`;
+    if (state.s === "ready" && state.title)
+      document.title = `${state.title} · Rongo`;
   }, [state]);
 
   if (state.s !== "ready") {
     return (
       <div className="grid h-dvh place-items-center px-6 text-center">
         <div className="max-w-[44ch]">
-          {state.s === "loading" && <p className="text-muted">Opening the thread …</p>}
+          {state.s === "loading" && (
+            <p className="text-muted">Opening the thread …</p>
+          )}
           {state.s === "gone" && (
             <>
               <h1 className="font-serif text-[22px] font-medium leading-tight text-ink">
                 This link is no longer available.
               </h1>
               <p className="mt-2 text-muted">
-                It may have been revoked, or the thread it pointed at was deleted.
+                It may have been revoked, or the thread it pointed at was
+                deleted.
               </p>
             </>
           )}
@@ -148,7 +155,9 @@ export default function SharePage({ token }: { token: string }) {
           </span>
         </div>
         <div className="flex min-w-0 items-baseline gap-2.5 px-2 lg:px-6">
-          <h1 className="truncate font-serif text-[19px] font-medium text-accent-strong">{state.title}</h1>
+          <h1 className="truncate font-serif text-[19px] font-medium text-accent-strong">
+            {state.title}
+          </h1>
           {/* The app's own badge, in the app's own place. */}
           {state.usage && <ThreadUsageBadge total={state.usage} />}
         </div>
@@ -164,7 +173,9 @@ export default function SharePage({ token }: { token: string }) {
       <div
         className={
           "grid min-h-0 grid-cols-1" +
-          (showSources ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]" : "")
+          (showSources
+            ? " xl:grid-cols-[1fr_300px] 2xl:grid-cols-[1fr_340px]"
+            : "")
         }
       >
         {/* The same edges the answering column has, and both of them here:
@@ -174,7 +185,9 @@ export default function SharePage({ token }: { token: string }) {
             at rest. */}
         <div className="relative min-h-0 min-w-0">
           <div className="h-full overflow-auto">
-            <div className={`${pageColumn} px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10`}>
+            <div
+              className={`${pageColumn} px-4 pt-5 pb-8 sm:px-6 lg:px-10 lg:pt-8 lg:pb-10`}
+            >
               <ThreadView
                 turns={state.turns}
                 actions={null}

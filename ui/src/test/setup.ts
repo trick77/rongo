@@ -1,10 +1,4 @@
-import { afterEach } from "vitest";
-import { cleanup } from "@testing-library/react";
-
-// Cleanup after each test.
-afterEach(() => {
-  cleanup();
-});
+import "@testing-library/jest-dom/vitest";
 
 // jsdom hands out an empty object for localStorage here, not a Storage. The
 // open thread survives a reload through it, so a test asserting that has to run

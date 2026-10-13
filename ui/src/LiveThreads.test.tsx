@@ -30,7 +30,8 @@ function liveStream(stored: Record<string, unknown>) {
         getReader() {
           return {
             async read() {
-              while (queue.length === 0 && !ended) await new Promise<void>((r) => (wake = r));
+              while (queue.length === 0 && !ended)
+                await new Promise<void>((r) => (wake = r));
               const frame = queue.shift();
               if (frame === undefined) return { done: true, value: undefined };
               return { done: false, value: encoder.encode(frame) };
@@ -81,7 +82,10 @@ const other = [
 
 async function askNew() {
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText("Question"), "How does indexing decide what to embed?");
+  await user.type(
+    screen.getByLabelText("Question"),
+    "How does indexing decide what to embed?",
+  );
   await user.click(screen.getByRole("button", { name: "Ask" }));
 }
 
@@ -118,10 +122,14 @@ describe("Ask, a thread the reader walked away from", () => {
     // they were reading somewhere else. (Two text nodes — the streamed answer
     // is rendered a segment at a time.)
     await screen.findByText(/then the splitter cuts it/);
-    expect(screen.getAllByText(/The walker accepts a file/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/The walker accepts a file/).length,
+    ).toBeGreaterThan(0);
     // Restored from the parked copy, never fetched: the record carries no
     // answer until the turn ends, so a fetch would have shown an empty thread.
-    expect(stream.mock.mock.calls.some((c) => String(c[0]) === "/api/threads/1")).toBe(false);
+    expect(
+      stream.mock.mock.calls.some((c) => String(c[0]) === "/api/threads/1"),
+    ).toBe(false);
   });
 
   // The suggestions arrive after the answer. A reader who was elsewhere when
@@ -141,7 +149,9 @@ describe("Ask, a thread the reader walked away from", () => {
     await stream.push(ev("done", { message_id: 5 }));
 
     rerender(<Ask threadId="1" />);
-    expect(await screen.findByRole("button", { name: "What is the size ceiling?" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: "What is the size ceiling?" }),
+    ).toBeTruthy();
   });
 
   // A dimmed Ask button whose reason lives in another conversation explains
@@ -154,15 +164,23 @@ describe("Ask, a thread the reader walked away from", () => {
     await stream.push(ev("token", { text: "Still writing…" }));
     await screen.findByText(/Still writing/);
     // Not in the thread being written: the running turn is right there.
-    expect(screen.queryByText(/Another thread is still being answered/)).toBeNull();
+    expect(
+      screen.queryByText(/Another thread is still being answered/),
+    ).toBeNull();
 
     rerender(<Ask threadId="40" />);
     await screen.findByText(/On the callback that finishes sign-in/);
-    expect(screen.getByText(/Another thread is still being answered/)).toBeTruthy();
+    expect(
+      screen.getByText(/Another thread is still being answered/),
+    ).toBeTruthy();
 
     await stream.push(ev("done", { message_id: 5 }));
     await stream.end();
-    await waitFor(() => expect(screen.queryByText(/Another thread is still being answered/)).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Another thread is still being answered/),
+      ).toBeNull(),
+    );
   });
 
   // The thread id arrives after the question was sent. A reader who has moved
@@ -181,7 +199,9 @@ describe("Ask, a thread the reader walked away from", () => {
 
     expect(onThread).not.toHaveBeenCalledWith("1");
     expect(screen.queryByText(/Still writing/)).toBeNull();
-    expect(screen.getByText(/On the callback that finishes sign-in/)).toBeTruthy();
+    expect(
+      screen.getByText(/On the callback that finishes sign-in/),
+    ).toBeTruthy();
 
     // And the next question is filed where the reader is, not where the late
     // id came from. The turn taking the wrong thread id here is worse than a
@@ -195,7 +215,9 @@ describe("Ask, a thread the reader walked away from", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await waitFor(() => {
       const post = stream.mock.mock.calls.find(
-        (c) => String(c[0]) === "/api/ask" && String(c[1]?.body).includes("And then?"),
+        (c) =>
+          String(c[0]) === "/api/ask" &&
+          String(c[1]?.body).includes("And then?"),
       );
       expect(post).toBeTruthy();
       expect(JSON.parse(String(post![1]?.body)).thread_id).toBe("40");
@@ -219,7 +241,15 @@ describe("Ask, a thread the reader walked away from", () => {
         citations: [],
         clarification: {
           id: 7,
-          candidates: [{ idx: 0, title: "The indexer walk", summary: "", repo: "rongo", branch: "master" }],
+          candidates: [
+            {
+              idx: 0,
+              title: "The indexer walk",
+              summary: "",
+              repo: "rongo",
+              branch: "master",
+            },
+          ],
         },
         from_candidate_idx: -1,
         from_clarification_id: 0,
@@ -240,7 +270,15 @@ describe("Ask, a thread the reader walked away from", () => {
         citations: [],
         clarification: {
           id: 9,
-          candidates: [{ idx: 0, title: "The auth callback", summary: "", repo: "rongo", branch: "master" }],
+          candidates: [
+            {
+              idx: 0,
+              title: "The auth callback",
+              summary: "",
+              repo: "rongo",
+              branch: "master",
+            },
+          ],
         },
         from_candidate_idx: -1,
         from_clarification_id: 0,
@@ -264,7 +302,9 @@ describe("Ask, a thread the reader walked away from", () => {
     const stream = liveStream({ 7: open, 40: answered });
     const { rerender } = render(<Ask threadId="7" />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: /The indexer walk/ }));
+    await user.click(
+      await screen.findByRole("button", { name: /The indexer walk/ }),
+    );
 
     rerender(<Ask threadId="40" />);
     await screen.findByText(/Chosen: The auth callback/);
@@ -275,13 +315,19 @@ describe("Ask, a thread the reader walked away from", () => {
 
     // The card in front of them was answered and stays answered: unlocking it
     // would offer a second resume, which the backend refuses with 409.
-    await waitFor(() => expect(screen.queryByText(/Another thread is still being answered/)).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/Another thread is still being answered/),
+      ).toBeNull(),
+    );
     expect(screen.getByText(/Chosen: The auth callback/)).toBeTruthy();
     // Still folded, too: taking the choice back opens the card again, which
     // is how the reader would be offered the second resume.
-    expect(screen.getByRole("button", { name: /Chosen: The auth callback/ }).getAttribute("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      screen
+        .getByRole("button", { name: /Chosen: The auth callback/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
   });
 });

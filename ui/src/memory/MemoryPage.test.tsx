@@ -16,7 +16,8 @@ const rule: Memory = {
 
 function listing(enabled: boolean, memories: Memory[]) {
   const mock = vi.fn(async (_url: string, opts?: RequestInit) => {
-    if (opts?.method === "DELETE") return { ok: true, status: 204, json: async () => ({}) };
+    if (opts?.method === "DELETE")
+      return { ok: true, status: 204, json: async () => ({}) };
     return { ok: true, status: 200, json: async () => ({ enabled, memories }) };
   });
   vi.stubGlobal("fetch", mock);
@@ -34,13 +35,24 @@ describe("MemoryPage", () => {
     listing(false, []);
     const onCount = vi.fn();
     render(<MemoryPage onOpenThread={() => {}} onCount={onCount} />);
-    expect(await screen.findByText(/Memory is off for this deployment/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Memory is off for this deployment/),
+    ).toBeTruthy();
     // No count on a page that keeps nothing.
     expect(onCount).not.toHaveBeenCalledWith(0);
   });
 
   it("lists the rules with where they hold and where they came from", async () => {
-    listing(true, [rule, { ...rule, id: 8, text: "Skip the tests.", scope: "shop", thread_id: undefined }]);
+    listing(true, [
+      rule,
+      {
+        ...rule,
+        id: 8,
+        text: "Skip the tests.",
+        scope: "shop",
+        thread_id: undefined,
+      },
+    ]);
     const onCount = vi.fn();
     const onOpenThread = vi.fn();
     render(<MemoryPage onOpenThread={onOpenThread} onCount={onCount} />);
@@ -70,9 +82,15 @@ describe("MemoryPage", () => {
     render(<MemoryPage onOpenThread={() => {}} onCount={onCount} />);
     await screen.findByText("Never draw flowchart diagrams.");
 
-    fireEvent.click(screen.getByRole("button", { name: 'Forget "Never draw flowchart diagrams."' }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: 'Forget "Never draw flowchart diagrams."',
+      }),
+    );
 
-    await waitFor(() => expect(screen.queryByText("Never draw flowchart diagrams.")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("Never draw flowchart diagrams.")).toBeNull(),
+    );
     expect(mock).toHaveBeenCalledWith("/api/memory/7", { method: "DELETE" });
     // onCount fires from an effect, which the scheduler may run in a later task
     // than the render that drops the row. Asserting it straight after the
@@ -81,7 +99,10 @@ describe("MemoryPage", () => {
   });
 
   it("says so when the list cannot be fetched", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
     render(<MemoryPage onOpenThread={() => {}} />);
     expect(await screen.findByRole("alert")).toBeTruthy();
   });

@@ -58,13 +58,19 @@ afterEach(() => {
 
 describe("follow-up suggestions", () => {
   it("offers what to ask next once the answer is finished", async () => {
-    streamPerCall([answered(["What happens on a re-index?", "Where is the SHA recorded?"])]);
+    streamPerCall([
+      answered(["What happens on a re-index?", "Where is the SHA recorded?"]),
+    ]);
 
     await ask("How are citations stored?");
 
-    const nav = await screen.findByRole("navigation", { name: "Follow-up questions" });
+    const nav = await screen.findByRole("navigation", {
+      name: "Follow-up questions",
+    });
     expect(nav.textContent).toContain("What happens on a re-index?");
-    expect(screen.getByRole("button", { name: "Where is the SHA recorded?" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Where is the SHA recorded?" }),
+    ).toBeTruthy();
   });
 
   it("asks a suggested question in the answering turn's role and language", async () => {
@@ -72,7 +78,10 @@ describe("follow-up suggestions", () => {
     // Analyst in English would be a different product from the one the
     // reader clicked in, so the turn's own settings win over the composer's
     // current ones.
-    const mock = streamPerCall([answered(["Was passiert beim Neuindexieren?"]), answered([])]);
+    const mock = streamPerCall([
+      answered(["Was passiert beim Neuindexieren?"]),
+      answered([]),
+    ]);
     const user = userEvent.setup();
     render(
       <StrictMode>
@@ -81,7 +90,10 @@ describe("follow-up suggestions", () => {
     );
     await user.click(screen.getByRole("button", { name: "Developer" }));
     await pickLanguage(user, "de");
-    await user.type(screen.getByLabelText("Question"), "Wie werden Zitate gespeichert?");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "Wie werden Zitate gespeichert?",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByRole("navigation", { name: "Follow-up questions" });
 
@@ -91,10 +103,16 @@ describe("follow-up suggestions", () => {
     // gone from the composer once there is nothing left to offer.
     await user.click(screen.getByRole("button", { name: "Analyst" }));
     expect(screen.queryByLabelText("Answer language")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Was passiert beim Neuindexieren?" }));
+    await user.click(
+      screen.getByRole("button", { name: "Was passiert beim Neuindexieren?" }),
+    );
 
-    await waitFor(() => expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2));
-    const second = JSON.parse(String(mock.mock.calls.filter((c) => c[0] === "/api/ask")[1][1]?.body));
+    await waitFor(() =>
+      expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2),
+    );
+    const second = JSON.parse(
+      String(mock.mock.calls.filter((c) => c[0] === "/api/ask")[1][1]?.body),
+    );
     expect(second.question).toBe("Was passiert beim Neuindexieren?");
     expect(second.audience).toBe("dev");
     expect(second.language).toBe("de");
@@ -102,11 +120,16 @@ describe("follow-up suggestions", () => {
   });
 
   it("adds a turn and leaves the answer it came from alone", async () => {
-    streamPerCall([answered(["What happens on a re-index?"]), answered([], "It is rebuilt.")]);
+    streamPerCall([
+      answered(["What happens on a re-index?"]),
+      answered([], "It is rebuilt."),
+    ]);
 
     const user = await ask("How are citations stored?");
     await screen.findByRole("navigation", { name: "Follow-up questions" });
-    await user.click(screen.getByRole("button", { name: "What happens on a re-index?" }));
+    await user.click(
+      screen.getByRole("button", { name: "What happens on a re-index?" }),
+    );
 
     expect(await screen.findByText(/It is rebuilt/)).toBeTruthy();
     expect(screen.getByText(/Through a grant/)).toBeTruthy();
@@ -119,7 +142,10 @@ describe("follow-up suggestions", () => {
     // turn still counts as running, and only then learns it is over. A pill
     // clicked after that must ask — it is drawn enabled.
     const encoder = new TextEncoder();
-    const frames = [answered(["What happens on a re-index?"]), answered([], "It is rebuilt.")];
+    const frames = [
+      answered(["What happens on a re-index?"]),
+      answered([], "It is rebuilt."),
+    ];
     let call = 0;
     const mock = vi.fn(async (url: string, _opts?: RequestInit) => {
       if (String(url).startsWith("/api/threads/")) {
@@ -133,7 +159,8 @@ describe("follow-up suggestions", () => {
         body: {
           getReader: () => ({
             async read() {
-              if (i < set.length) return { done: false, value: encoder.encode(set[i++]) };
+              if (i < set.length)
+                return { done: false, value: encoder.encode(set[i++]) };
               await new Promise((r) => setTimeout(r, 30));
               return { done: true, value: undefined };
             },
@@ -144,11 +171,17 @@ describe("follow-up suggestions", () => {
     vi.stubGlobal("fetch", mock);
 
     const user = await ask("How are citations stored?");
-    const pill = await screen.findByRole("button", { name: "What happens on a re-index?" });
-    await waitFor(() => expect((pill as HTMLButtonElement).disabled).toBe(false));
+    const pill = await screen.findByRole("button", {
+      name: "What happens on a re-index?",
+    });
+    await waitFor(() =>
+      expect((pill as HTMLButtonElement).disabled).toBe(false),
+    );
     await user.click(pill);
 
-    await waitFor(() => expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2));
+    await waitFor(() =>
+      expect(mock.mock.calls.filter((c) => c[0] === "/api/ask").length).toBe(2),
+    );
   });
 
   it("moves the pills to the newest answer instead of stacking them up", async () => {
@@ -159,11 +192,19 @@ describe("follow-up suggestions", () => {
 
     const user = await ask("How are citations stored?");
     await screen.findByRole("navigation", { name: "Follow-up questions" });
-    await user.click(screen.getByRole("button", { name: "What happens on a re-index?" }));
+    await user.click(
+      screen.getByRole("button", { name: "What happens on a re-index?" }),
+    );
 
-    expect(await screen.findByRole("button", { name: "Where is the SHA recorded?" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "What happens on a re-index?" })).toBeNull();
-    expect(screen.getAllByRole("navigation", { name: "Follow-up questions" }).length).toBe(1);
+    expect(
+      await screen.findByRole("button", { name: "Where is the SHA recorded?" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "What happens on a re-index?" }),
+    ).toBeNull();
+    expect(
+      screen.getAllByRole("navigation", { name: "Follow-up questions" }).length,
+    ).toBe(1);
   });
 
   it("shows nothing when the turn was offered nothing", async () => {
@@ -172,7 +213,9 @@ describe("follow-up suggestions", () => {
     await ask("How are citations stored?");
 
     await screen.findByText(/Through a grant/);
-    expect(screen.queryByRole("navigation", { name: "Follow-up questions" })).toBeNull();
+    expect(
+      screen.queryByRole("navigation", { name: "Follow-up questions" }),
+    ).toBeNull();
   });
 
   it("restores the pills of a stored thread's last answer", async () => {
@@ -196,7 +239,17 @@ describe("follow-up suggestions", () => {
           ],
         };
       }
-      return { ok: true, status: 200, body: { getReader: () => ({ async read() { return { done: true, value: undefined }; } }) } };
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => ({
+            async read() {
+              return { done: true, value: undefined };
+            },
+          }),
+        },
+      };
     });
     vi.stubGlobal("fetch", mock);
 
@@ -206,6 +259,10 @@ describe("follow-up suggestions", () => {
       </StrictMode>,
     );
 
-    expect(await screen.findByRole("button", { name: "What happens on a re-index?" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", {
+        name: "What happens on a re-index?",
+      }),
+    ).toBeTruthy();
   });
 });

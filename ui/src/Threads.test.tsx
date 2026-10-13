@@ -6,7 +6,8 @@ import Threads from "./Threads";
 function threadList(list: unknown, ok = true, starred: unknown[] = []) {
   // The list comes in its envelope, as the API sends it. The rail reads two:
   // the recent page and the starred list, told apart by the query.
-  const envelope = (l: unknown) => (Array.isArray(l) ? { items: l, next_cursor: null } : l);
+  const envelope = (l: unknown) =>
+    Array.isArray(l) ? { items: l, next_cursor: null } : l;
   const body = envelope(list);
   const stars = envelope(starred);
   const fetchMock = vi.fn(async (url: string) => ({
@@ -72,10 +73,14 @@ describe("Threads", () => {
   it("marks the open thread", async () => {
     threadList(two);
     render(<Threads activeId="3" onSelect={() => {}} version={0} />);
-    const active = await screen.findByRole("button", { name: "Where does the token come from?" });
+    const active = await screen.findByRole("button", {
+      name: "Where does the token come from?",
+    });
     expect(active.getAttribute("aria-current")).toBe("true");
     expect(
-      screen.getByRole("button", { name: "How does shipping work?" }).getAttribute("aria-current"),
+      screen
+        .getByRole("button", { name: "How does shipping work?" })
+        .getAttribute("aria-current"),
     ).toBeNull();
   });
 
@@ -84,7 +89,11 @@ describe("Threads", () => {
     const onSelect = vi.fn();
     render(<Threads activeId={null} onSelect={onSelect} version={0} />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Where does the token come from?" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Where does the token come from?",
+      }),
+    );
     expect(onSelect).toHaveBeenCalledWith("3");
   });
 
@@ -93,7 +102,9 @@ describe("Threads", () => {
   // question until someone reloads the page.
   it("reloads when the version changes", async () => {
     const fetchMock = threadList(two);
-    const { rerender } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+    const { rerender } = render(
+      <Threads activeId={null} onSelect={() => {}} version={0} />,
+    );
     await screen.findByText("How does shipping work?");
     rerender(<Threads activeId={null} onSelect={() => {}} version={1} />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2 * loads));
@@ -115,8 +126,12 @@ describe("Threads", () => {
   it("opens another thread while an answer is streaming", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />);
-    const other = await screen.findByRole("button", { name: "Where does the token come from?" });
+    render(
+      <Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />,
+    );
+    const other = await screen.findByRole("button", {
+      name: "Where does the token come from?",
+    });
     expect((other as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
     await user.click(other);
@@ -128,8 +143,12 @@ describe("Threads", () => {
   it("keeps the running thread's own row clickable while it streams", async () => {
     threadList(two);
     const onSelect = vi.fn();
-    render(<Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />);
-    const own = await screen.findByRole("button", { name: "How does shipping work?" });
+    render(
+      <Threads activeId="7" onSelect={onSelect} version={0} busy busyId="7" />,
+    );
+    const own = await screen.findByRole("button", {
+      name: "How does shipping work?",
+    });
     expect((own as HTMLButtonElement).disabled).toBe(false);
     const user = userEvent.setup();
     await user.click(own);
@@ -143,7 +162,9 @@ describe("Threads", () => {
   it("keeps the desktop row height on a touch screen", async () => {
     threadList(two);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-    const title = await screen.findByRole("button", { name: "How does shipping work?" });
+    const title = await screen.findByRole("button", {
+      name: "How does shipping work?",
+    });
     expect(title.parentElement?.className).toContain("h-7");
     expect(title.parentElement?.className).not.toContain("pointer-coarse:");
   });
@@ -156,7 +177,9 @@ describe("Threads", () => {
   it("gives the title the whole height of its row to be tapped in", async () => {
     threadList(two);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
-    const title = await screen.findByRole("button", { name: "How does shipping work?" });
+    const title = await screen.findByRole("button", {
+      name: "How does shipping work?",
+    });
     expect(title.className).toContain("self-stretch");
     // And the actions button reaches the same 28px without its 24px hover
     // square growing with it.
@@ -193,7 +216,9 @@ describe("Threads", () => {
     // done to it is the only other thing the row has to say.
     it("shows no date on any row", async () => {
       threadList(mixed);
-      const { container } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const { container } = render(
+        <Threads activeId={null} onSelect={() => {}} version={0} />,
+      );
       await screen.findByRole("button", { name: "Asked this morning" });
       expect(container.querySelectorAll("time").length).toBe(0);
     });
@@ -203,7 +228,12 @@ describe("Threads", () => {
   // then the recent ones under "Recents". Starred is read separately, so a
   // star holds on a thread the 30 newest no longer carry.
   describe("sections", () => {
-    const older = { id: "1", title: "Asked long ago", created_at: days(40), starred: true };
+    const older = {
+      id: "1",
+      title: "Asked long ago",
+      created_at: days(40),
+      starred: true,
+    };
 
     it("heads the recent threads and files the starred ones above them", async () => {
       threadList(two, true, [{ ...two[1], starred: true }, older]);
@@ -211,14 +241,26 @@ describe("Threads", () => {
       const nav = await screen.findByRole("navigation", { name: "Threads" });
       const starred = within(nav).getByText("Starred");
       const recents = within(nav).getByText("Recents");
-      expect(starred.compareDocumentPosition(recents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(
+        starred.compareDocumentPosition(recents) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
 
       // The starred section carries the old thread the page does not.
-      const starredRows = within(starred.parentElement as HTMLElement).getAllByRole("button", { name: /^(?!Actions)/ });
-      expect(starredRows.map((b) => b.textContent)).toEqual(["Where does the token come from?", "Asked long ago"]);
+      const starredRows = within(
+        starred.parentElement as HTMLElement,
+      ).getAllByRole("button", { name: /^(?!Actions)/ });
+      expect(starredRows.map((b) => b.textContent)).toEqual([
+        "Where does the token come from?",
+        "Asked long ago",
+      ]);
       // And a starred thread is not listed a second time under Recents.
-      const recentRows = within(recents.parentElement as HTMLElement).getAllByRole("button", { name: /^(?!Actions)/ });
-      expect(recentRows.map((b) => b.textContent)).toEqual(["How does shipping work?"]);
+      const recentRows = within(
+        recents.parentElement as HTMLElement,
+      ).getAllByRole("button", { name: /^(?!Actions)/ });
+      expect(recentRows.map((b) => b.textContent)).toEqual([
+        "How does shipping work?",
+      ]);
     });
 
     it("shows no Starred heading until there is a star", async () => {
@@ -229,7 +271,12 @@ describe("Threads", () => {
     });
 
     it("shows no Recents heading when every recent thread is starred", async () => {
-      const starred = { id: "1", title: "Starred only", created_at: days(0), starred: true };
+      const starred = {
+        id: "1",
+        title: "Starred only",
+        created_at: days(0),
+        starred: true,
+      };
       threadList([starred], true, [starred]);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
       await screen.findByText("Starred");
@@ -245,7 +292,6 @@ describe("Threads", () => {
       await screen.findByText("Recents");
       expect(screen.queryByText("Today")).toBeNull();
       expect(screen.getByText("This week").className).toContain("mt-5");
-
     });
 
     // "Recents" over a "This week" is two labels stacked on the same rows,
@@ -253,7 +299,9 @@ describe("Threads", () => {
     // the day's only thread was deleted. With nothing from today the day
     // label heads the section, on a section heading's 20px.
     it("drops the Recents heading when nothing is from today", async () => {
-      threadList([{ id: "4", title: "Asked earlier in the week", created_at: days(3) }]);
+      threadList([
+        { id: "4", title: "Asked earlier in the week", created_at: days(3) },
+      ]);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
       await screen.findByRole("button", { name: "Asked earlier in the week" });
       expect(screen.queryByText("Recents")).toBeNull();
@@ -264,15 +312,28 @@ describe("Threads", () => {
       const fetchMock = threadList(two);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
       await screen.findByText("Recents");
-      expect(fetchMock).toHaveBeenCalledWith("/api/threads?starred=true&limit=1000");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/threads?starred=true&limit=1000",
+      );
     });
 
     it("reports the union of both lists upwards", async () => {
       const onList = vi.fn();
       threadList(two, true, [{ ...two[1], starred: true }, older]);
-      render(<Threads activeId={null} onSelect={() => {}} version={0} onList={onList} />);
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onList={onList}
+        />,
+      );
       await screen.findByText("Starred");
-      expect(onList.mock.calls[0][0].map((t: { id: string }) => t.id)).toEqual(["7", "3", "1"]);
+      expect(onList.mock.calls[0][0].map((t: { id: string }) => t.id)).toEqual([
+        "7",
+        "3",
+        "1",
+      ]);
     });
   });
 
@@ -280,46 +341,82 @@ describe("Threads", () => {
     /** Opens the menu on one row and hands back the user-event session. */
     async function openMenu(title: string) {
       const user = userEvent.setup();
-      await user.click(await screen.findByRole("button", { name: "Actions for " + title }));
+      await user.click(
+        await screen.findByRole("button", { name: "Actions for " + title }),
+      );
       return user;
     }
 
     it("offers Star first, and moves the row under Starred on the spot", async () => {
       threadList(two);
       const onStarred = vi.fn();
-      render(<Threads activeId={null} onSelect={() => {}} version={0} onStarred={onStarred} />);
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onStarred={onStarred}
+        />,
+      );
       const user = await openMenu("Where does the token come from?");
       const items = screen.getAllByRole("menuitem");
       expect(items[0]).toBe(screen.getByRole("menuitem", { name: "Star" }));
 
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
       await user.click(items[0]);
 
-      expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", { method: "POST" });
+      expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", {
+        method: "POST",
+      });
       expect(onStarred).toHaveBeenCalled();
       const starred = await screen.findByText("Starred");
-      expect(within(starred.parentElement as HTMLElement).getByRole("button", { name: "Where does the token come from?" })).toBeTruthy();
+      expect(
+        within(starred.parentElement as HTMLElement).getByRole("button", {
+          name: "Where does the token come from?",
+        }),
+      ).toBeTruthy();
       // Once, not twice: the row left Recents.
-      expect(screen.getAllByRole("button", { name: "Where does the token come from?" })).toHaveLength(1);
+      expect(
+        screen.getAllByRole("button", {
+          name: "Where does the token come from?",
+        }),
+      ).toHaveLength(1);
 
       // And back: the entry now reads Unstar and takes the row out again.
       await openMenu("Where does the token come from?");
       const unstar = screen.getAllByRole("menuitem")[0];
       expect(unstar).toBe(screen.getByRole("menuitem", { name: "Unstar" }));
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
       await user.click(unstar);
-      expect(fetch).toHaveBeenCalledWith("/api/threads/3/unstar", { method: "POST" });
+      expect(fetch).toHaveBeenCalledWith("/api/threads/3/unstar", {
+        method: "POST",
+      });
       await waitFor(() => expect(screen.queryByText("Starred")).toBeNull());
-      expect(screen.getByRole("button", { name: "Where does the token come from?" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Where does the token come from?" }),
+      ).toBeTruthy();
     });
 
     it("leaves the star where it was when the server refuses", async () => {
       threadList(two);
       render(<Threads activeId={null} onSelect={() => {}} version={0} />);
       const user = await openMenu("Where does the token come from?");
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 500 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
       await user.click(screen.getByRole("menuitem", { name: "Star" }));
-      await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", { method: "POST" }));
+      await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith("/api/threads/3/star", {
+          method: "POST",
+        }),
+      );
       expect(screen.queryByText("Starred")).toBeNull();
     });
 
@@ -343,7 +440,9 @@ describe("Threads", () => {
       render(<Threads activeId={null} onSelect={onSelect} version={0} />);
       const user = await openMenu("How does shipping work?");
 
-      await user.click(screen.getByRole("button", { name: "Where does the token come from?" }));
+      await user.click(
+        screen.getByRole("button", { name: "Where does the token come from?" }),
+      );
 
       expect(onSelect).toHaveBeenCalledWith("3");
       expect(screen.queryByRole("menu")).toBeNull();
@@ -354,11 +453,21 @@ describe("Threads", () => {
     // answer is landing on.
     it("closes when a turn starts under it", async () => {
       threadList(two);
-      const { rerender } = render(<Threads activeId={null} onSelect={() => {}} version={0} />);
+      const { rerender } = render(
+        <Threads activeId={null} onSelect={() => {}} version={0} />,
+      );
       await openMenu("How does shipping work?");
       expect(screen.getByRole("menu")).toBeTruthy();
 
-      rerender(<Threads activeId="7" onSelect={() => {}} version={0} busy busyId="7" />);
+      rerender(
+        <Threads
+          activeId="7"
+          onSelect={() => {}}
+          version={0}
+          busy
+          busyId="7"
+        />,
+      );
 
       expect(screen.queryByRole("menu")).toBeNull();
     });
@@ -368,10 +477,26 @@ describe("Threads", () => {
     // its actions, because nothing is being written into it.
     it("is withheld from the thread being written, and from no other", async () => {
       threadList(two);
-      render(<Threads activeId="7" onSelect={() => {}} version={0} busy busyId="7" />);
+      render(
+        <Threads
+          activeId="7"
+          onSelect={() => {}}
+          version={0}
+          busy
+          busyId="7"
+        />,
+      );
       await screen.findByRole("button", { name: "How does shipping work?" });
-      expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
-      expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
+      expect(
+        screen.queryByRole("button", {
+          name: "Actions for How does shipping work?",
+        }),
+      ).toBeNull();
+      expect(
+        screen.getByRole("button", {
+          name: "Actions for Where does the token come from?",
+        }),
+      ).toBeTruthy();
     });
 
     // The reader has walked away from the answer and is reading another
@@ -379,27 +504,57 @@ describe("Threads", () => {
     // written — wherever it sits — does not.
     it("follows the thread being written, not the one on screen", async () => {
       threadList(two);
-      render(<Threads activeId="3" onSelect={() => {}} version={0} busy busyId="7" />);
+      render(
+        <Threads
+          activeId="3"
+          onSelect={() => {}}
+          version={0}
+          busy
+          busyId="7"
+        />,
+      );
       await screen.findByRole("button", { name: "How does shipping work?" });
-      expect(screen.queryByRole("button", { name: "Actions for How does shipping work?" })).toBeNull();
-      expect(screen.getByRole("button", { name: "Actions for Where does the token come from?" })).toBeTruthy();
+      expect(
+        screen.queryByRole("button", {
+          name: "Actions for How does shipping work?",
+        }),
+      ).toBeNull();
+      expect(
+        screen.getByRole("button", {
+          name: "Actions for Where does the token come from?",
+        }),
+      ).toBeTruthy();
     });
 
     it("deletes the thread once the dialog is confirmed, and not before", async () => {
       threadList(two);
       const onDeleted = vi.fn();
-      render(<Threads activeId={null} onSelect={() => {}} version={0} onDeleted={onDeleted} />);
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onDeleted={onDeleted}
+        />,
+      );
       const user = await openMenu("How does shipping work?");
 
       await user.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(fetch).toHaveBeenCalledTimes(loads); // the list loads, and nothing more
 
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
       await user.click(screen.getByRole("button", { name: "Delete" }));
 
-      expect(fetch).toHaveBeenCalledWith("/api/threads/7", { method: "DELETE" });
+      expect(fetch).toHaveBeenCalledWith("/api/threads/7", {
+        method: "DELETE",
+      });
       expect(onDeleted).toHaveBeenCalledWith("7");
-      expect(screen.queryByRole("button", { name: "How does shipping work?" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "How does shipping work?" }),
+      ).toBeNull();
     });
 
     it("leaves the row alone when the delete is cancelled", async () => {
@@ -411,20 +566,32 @@ describe("Threads", () => {
       await user.click(screen.getByRole("button", { name: "Cancel" }));
 
       expect(screen.queryByRole("dialog")).toBeNull();
-      expect(screen.getByRole("button", { name: "How does shipping work?" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "How does shipping work?" }),
+      ).toBeTruthy();
     });
 
     it("writes the typed title and shows it", async () => {
       threadList(two);
       const onRenamed = vi.fn();
-      render(<Threads activeId={null} onSelect={() => {}} version={0} onRenamed={onRenamed} />);
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onRenamed={onRenamed}
+        />,
+      );
       const user = await openMenu("How does shipping work?");
 
       await user.click(screen.getByRole("menuitem", { name: "Rename" }));
       const box = screen.getByRole("textbox", { name: "Thread title" });
       await user.clear(box);
       await user.type(box, "Shipping, end to end");
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: true, status: 204 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       expect(fetch).toHaveBeenCalledWith("/api/threads/7", {
@@ -433,7 +600,9 @@ describe("Threads", () => {
         body: JSON.stringify({ title: "Shipping, end to end" }),
       });
       expect(onRenamed).toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Shipping, end to end" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Shipping, end to end" }),
+      ).toBeTruthy();
     });
 
     // A title the server refuses (too long, say) is the reader's to fix: a
@@ -447,16 +616,28 @@ describe("Threads", () => {
       const box = screen.getByRole("textbox", { name: "Thread title" });
       await user.clear(box);
       await user.type(box, "a".repeat(70));
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 400, text: async () => "title is too long\n" });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => "title is too long\n",
+      });
       await user.click(screen.getByRole("button", { name: "Save" }));
 
-      expect((await screen.findByRole("alert")).textContent).toBe("title is too long");
-      expect(screen.getByRole("textbox", { name: "Thread title" })).toBeTruthy();
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "title is too long",
+      );
+      expect(
+        screen.getByRole("textbox", { name: "Thread title" }),
+      ).toBeTruthy();
 
       // Cancelled and opened again, the dialog does not carry the old refusal.
       await user.click(screen.getByRole("button", { name: "Cancel" }));
       expect(screen.queryByRole("dialog")).toBeNull();
-      await user.click(screen.getByRole("button", { name: "Actions for How does shipping work?" }));
+      await user.click(
+        screen.getByRole("button", {
+          name: "Actions for How does shipping work?",
+        }),
+      );
       await user.click(screen.getByRole("menuitem", { name: "Rename" }));
       expect(screen.queryByRole("alert")).toBeNull();
     });
@@ -466,16 +647,28 @@ describe("Threads", () => {
     it("keeps the row and the dialog when the delete fails", async () => {
       threadList(two);
       const onDeleted = vi.fn();
-      render(<Threads activeId={null} onSelect={() => {}} version={0} onDeleted={onDeleted} />);
+      render(
+        <Threads
+          activeId={null}
+          onSelect={() => {}}
+          version={0}
+          onDeleted={onDeleted}
+        />,
+      );
       const user = await openMenu("How does shipping work?");
 
       await user.click(screen.getByRole("menuitem", { name: "Delete" }));
-      (fetch as unknown as Mock).mockResolvedValueOnce({ ok: false, status: 500 });
+      (fetch as unknown as Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+      });
       await user.click(screen.getByRole("button", { name: "Delete" }));
 
       expect(onDeleted).not.toHaveBeenCalled();
       expect(screen.getByRole("dialog")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "How does shipping work?" })).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "How does shipping work?" }),
+      ).toBeTruthy();
     });
   });
 });
@@ -491,19 +684,36 @@ describe("Threads, the latest 30", () => {
   it("opens the Threads page from the foot of the list", async () => {
     threadList(two);
     const onAllThreads = vi.fn();
-    render(<Threads activeId={null} onSelect={() => {}} version={0} onAllThreads={onAllThreads} />);
+    render(
+      <Threads
+        activeId={null}
+        onSelect={() => {}}
+        version={0}
+        onAllThreads={onAllThreads}
+      />,
+    );
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "All threads" }));
+    await user.click(
+      await screen.findByRole("button", { name: "All threads" }),
+    );
     expect(onAllThreads).toHaveBeenCalledTimes(1);
     // A door, not a place: never marked current.
-    expect(screen.getByRole("button", { name: "All threads" }).getAttribute("aria-current")).toBe(null);
+    expect(
+      screen
+        .getByRole("button", { name: "All threads" })
+        .getAttribute("aria-current"),
+    ).toBe(null);
   });
 
   it("has no foot under an empty list", async () => {
     threadList([]);
     render(<Threads activeId={null} onSelect={() => {}} version={0} />);
     const list = await screen.findByRole("navigation", { name: "Threads" });
-    await waitFor(() => expect(within(list).queryByRole("button", { name: "All threads" })).toBe(null));
+    await waitFor(() =>
+      expect(within(list).queryByRole("button", { name: "All threads" })).toBe(
+        null,
+      ),
+    );
   });
 
   it("reads an answer that is not the envelope as an empty list", async () => {

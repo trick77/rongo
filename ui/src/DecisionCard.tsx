@@ -24,7 +24,12 @@ export default function DecisionCard({
   children: () => ReactNode;
 }) {
   return (
-    <div className={"mt-4 rounded-ui border bg-panel " + (ochre ? "border-ochre" : "border-border")}>
+    <div
+      className={
+        "mt-4 rounded-ui border bg-panel " +
+        (ochre ? "border-ochre" : "border-border")
+      }
+    >
       <button
         type="button"
         aria-expanded={open}

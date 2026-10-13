@@ -46,7 +46,15 @@ function finished(question: string, startedAt: number): Turn {
     endedAt: startedAt + 1000,
     steps: [{ step: "understanding", at: startedAt }],
     citations: [
-      { marker: 1, repo: "peeq", branch: "master", path: "a.go", start_line: 1, end_line: 9, sha: "0123abc" },
+      {
+        marker: 1,
+        repo: "peeq",
+        branch: "master",
+        path: "a.go",
+        start_line: 1,
+        end_line: 9,
+        sha: "0123abc",
+      },
     ] as Turn["citations"],
   };
 }
@@ -61,7 +69,11 @@ describe("ThreadView, while an answer streams", () => {
     // Given a thread of two finished turns and a third being answered
     const one = finished("How is sign-in done?", 1000);
     const two = finished("Where is the token stored?", 2000);
-    const running: Turn = { ...freshTurn("And on logout?", "dev", "en"), startedAt: 3000, text: "It " };
+    const running: Turn = {
+      ...freshTurn("And on logout?", "dev", "en"),
+      startedAt: 3000,
+      text: "It ",
+    };
     // The caller's handlers are fresh arrows on every render of its own, as
     // Ask's and the share page's are.
     const view = (turns: Turn[]) => (
@@ -102,13 +114,23 @@ describe("ThreadView, while an answer streams", () => {
     const one = finished("How is sign-in done?", 1000);
     const two = finished("Where is the token stored?", 2000);
     const { rerender } = render(
-      <ThreadView turns={[one, two]} actions={actions} onOpenSource={() => {}} threadKey="t" />,
+      <ThreadView
+        turns={[one, two]}
+        actions={actions}
+        onOpenSource={() => {}}
+        threadKey="t"
+      />,
     );
     const before = traceRenders.get(1000) ?? 0;
 
     // When the first turn is replaced — a card answered, a choice taken back
     rerender(
-      <ThreadView turns={[{ ...one, notice: "x" }, two]} actions={actions} onOpenSource={() => {}} threadKey="t" />,
+      <ThreadView
+        turns={[{ ...one, notice: "x" }, two]}
+        actions={actions}
+        onOpenSource={() => {}}
+        threadKey="t"
+      />,
     );
 
     // Then it is drawn again, with what changed

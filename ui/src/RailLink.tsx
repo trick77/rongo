@@ -28,7 +28,12 @@ export function RailLink({
       type="button"
       aria-current={current ? "page" : undefined}
       onClick={onClick}
-      className={railRow + " " + (current ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover") + (extra ? " " + extra : "")}
+      className={
+        railRow +
+        " " +
+        (current ? "bg-rail-sel text-white" : "text-rail hover:bg-rail-hover") +
+        (extra ? " " + extra : "")
+      }
     >
       <span className="grid h-5 w-5 shrink-0 place-items-center">
         <Icon name={icon} size="21px" className="text-ink-dim" />

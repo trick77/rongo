@@ -1,3 +1,4 @@
+//nolint:misspell // German stage alias inside a raw-string fixture, where a line nolint cannot go
 package repos
 
 import (

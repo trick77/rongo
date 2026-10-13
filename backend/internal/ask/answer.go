@@ -1054,7 +1054,7 @@ var allDeniedNotice = map[Language]string{
 var docsOnlyNotice = map[Language]string{
 	LanguageEN: "Answered from documentation alone: no code for this was among the sources. Documentation can lag the code it describes.",
 	LanguageDE: "Nur aus der Dokumentation beantwortet: Zu dieser Frage lag kein Code in den Quellen. Dokumentation kann dem Code hinterherhinken.",
-	LanguageFR: "Réponse fondée sur la seule documentation : aucun code correspondant ne figurait dans les sources. La documentation peut être en retard sur le code.",
+	LanguageFR: "Réponse fondée sur la seule documentation : aucun code correspondant ne figurait dans les sources. La documentation peut être en retard sur le code.", //nolint:misspell // French UI copy
 	LanguageIT: "Risposta basata solo sulla documentazione: nessun codice corrispondente era tra le fonti. La documentazione può essere più vecchia del codice.",
 }
 

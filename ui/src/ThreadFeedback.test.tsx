@@ -11,7 +11,13 @@ import { freshTurn, type Turn } from "./turns";
  */
 
 function answered(id: number, headId: number | null = null): Turn {
-  return { ...freshTurn("How?", "ba", "en", headId), text: "Like so.", done: true, messageId: id, recorded: true };
+  return {
+    ...freshTurn("How?", "ba", "en", headId),
+    text: "Like so.",
+    done: true,
+    messageId: id,
+    recorded: true,
+  };
 }
 
 type Call = { url: string; method: string; body?: unknown };
@@ -24,9 +30,18 @@ function server(stored: unknown) {
     calls.push({ url, method, body });
     if (method === "PUT") {
       const b = body as { verdict: number; reason?: string };
-      return { ok: true, status: 200, json: async () => ({ verdict: b.verdict, reason: b.reason ?? "", upToMessageId: 2 }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          verdict: b.verdict,
+          reason: b.reason ?? "",
+          upToMessageId: 2,
+        }),
+      };
     }
-    if (method === "DELETE") return { ok: true, status: 204, json: async () => null };
+    if (method === "DELETE")
+      return { ok: true, status: 204, json: async () => null };
     return { ok: true, status: 200, json: async () => stored };
   });
   vi.stubGlobal("fetch", mock);
@@ -54,7 +69,11 @@ describe("ThreadFeedback", () => {
     const up = await screen.findByRole("button", { name: "Helpful" });
     await user.click(up);
     await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
-    expect(calls).toContainEqual({ url: "/api/threads/t1/feedback", method: "PUT", body: { verdict: 1, reason: "" } });
+    expect(calls).toContainEqual({
+      url: "/api/threads/t1/feedback",
+      method: "PUT",
+      body: { verdict: 1, reason: "" },
+    });
 
     await user.click(up);
     await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("false"));
@@ -72,7 +91,11 @@ describe("ThreadFeedback", () => {
     expect(await screen.findByText("What was off?")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Incomplete" }));
     await waitFor(() => expect(screen.queryByText("What was off?")).toBeNull());
-    expect(calls.at(-1)).toEqual({ url: "/api/threads/t1/feedback", method: "PUT", body: { verdict: -1, reason: "incomplete" } });
+    expect(calls.at(-1)).toEqual({
+      url: "/api/threads/t1/feedback",
+      method: "PUT",
+      body: { verdict: -1, reason: "incomplete" },
+    });
 
     await user.click(up);
     await user.click(down);
@@ -85,10 +108,17 @@ describe("ThreadFeedback", () => {
     const user = userEvent.setup();
     render(row([answered(2)]));
 
-    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Not helpful" }),
+    );
 
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1));
-    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({ verdict: -1, reason: "" });
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1),
+    );
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      verdict: -1,
+      reason: "",
+    });
     expect(screen.getByText("What was off?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "skip" })).toBeNull();
   });
@@ -98,7 +128,11 @@ describe("ThreadFeedback", () => {
     render(row([answered(1), answered(2), answered(3)]));
 
     expect(await screen.findByText("rated before turn 3")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen
+        .getByRole("button", { name: "Not helpful" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("counts a turn as covered when the verdict came after its answer, whatever was re-explained since", async () => {
@@ -108,7 +142,11 @@ describe("ThreadFeedback", () => {
     render(row([answered(1), answered(2), answered(3, 1)]));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Helpful" }).getAttribute("aria-pressed")).toBe("true"),
+      expect(
+        screen
+          .getByRole("button", { name: "Helpful" })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
     );
     expect(screen.queryByText(/rated before/)).toBeNull();
   });
@@ -118,7 +156,9 @@ describe("ThreadFeedback", () => {
     const user = userEvent.setup();
     const first = [answered(2)];
     const { rerender } = render(row(first));
-    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Not helpful" }),
+    );
     expect(await screen.findByText("What was off?")).toBeTruthy();
 
     rerender(row([...first, answered(4)]));
@@ -134,7 +174,11 @@ describe("ThreadFeedback", () => {
       vi.fn(async (_url: string, opts?: RequestInit) => {
         if (opts?.method === "PUT") {
           await gate;
-          return { ok: true, status: 200, json: async () => ({ verdict: -1, reason: "", upToMessageId: 2 }) };
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ verdict: -1, reason: "", upToMessageId: 2 }),
+          };
         }
         return { ok: true, status: 200, json: async () => null };
       }),
@@ -142,12 +186,18 @@ describe("ThreadFeedback", () => {
     const user = userEvent.setup();
     const first = [answered(2)];
     const { rerender } = render(row(first));
-    await user.click(await screen.findByRole("button", { name: "Not helpful" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Not helpful" }),
+    );
 
     rerender(row([...first, answered(4)]));
     release();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Not helpful" }).getAttribute("aria-pressed")).toBe("true"),
+      expect(
+        screen
+          .getByRole("button", { name: "Not helpful" })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
     );
 
     expect(screen.queryByText("What was off?")).toBeNull();
@@ -162,11 +212,16 @@ describe("ThreadFeedback", () => {
       "fetch",
       vi.fn(async (_url: string, opts?: RequestInit) => {
         const method = opts?.method ?? "GET";
-        if (method === "GET") return { ok: true, status: 200, json: async () => null };
+        if (method === "GET")
+          return { ok: true, status: 200, json: async () => null };
         const body = opts?.body ? JSON.parse(String(opts.body)) : null;
         writes.push(method === "DELETE" ? "DELETE" : body);
         await new Promise<void>((r) => releases.push(r));
-        return { ok: true, status: 200, json: async () => ({ ...body, upToMessageId: 2 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ...body, upToMessageId: 2 }),
+        };
       }),
     );
     const user = userEvent.setup();
@@ -215,7 +270,8 @@ describe("ThreadFeedback", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, opts?: RequestInit) => {
-        if ((opts?.method ?? "GET") === "GET") return { ok: true, status: 200, json: async () => null };
+        if ((opts?.method ?? "GET") === "GET")
+          return { ok: true, status: 200, json: async () => null };
         return { ok: false, status: 500, json: async () => null };
       }),
     );
@@ -238,7 +294,11 @@ describe("ThreadFeedback", () => {
           await gate;
           return { ok: true, status: 200, json: async () => null };
         }
-        return { ok: true, status: 200, json: async () => ({ verdict: 1, reason: "", upToMessageId: 2 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ verdict: 1, reason: "", upToMessageId: 2 }),
+        };
       }),
     );
     const user = userEvent.setup();

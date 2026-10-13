@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trick77/rongo/internal/version"
+	"github.com/trick77/ship/kit/version"
 )
 
 func TestHealthz_returnsOK(t *testing.T) {

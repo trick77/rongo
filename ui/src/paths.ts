@@ -2,7 +2,10 @@
  * the dim ink, the file name in the bright. */
 export function splitPath(path: string): { dir: string; base: string } {
   const slash = path.lastIndexOf("/");
-  return { dir: slash >= 0 ? path.slice(0, slash + 1) : "", base: path.slice(slash + 1) };
+  return {
+    dir: slash >= 0 ? path.slice(0, slash + 1) : "",
+    base: path.slice(slash + 1),
+  };
 }
 
 /** The first seven characters of a commit, the way git prints one. */

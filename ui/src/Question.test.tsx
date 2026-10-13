@@ -11,12 +11,16 @@ import Question from "./Question";
  */
 function heights(clipped: boolean) {
   const box = document.querySelector(".whitespace-pre-wrap") as HTMLElement;
-  Object.defineProperty(box, "scrollHeight", { configurable: true, value: clipped ? 400 : 60 });
+  Object.defineProperty(box, "scrollHeight", {
+    configurable: true,
+    value: clipped ? 400 : 60,
+  });
   Object.defineProperty(box, "clientHeight", { configurable: true, value: 60 });
   return box;
 }
 
-const long = "Why is indexing slow?\n\nIt takes six minutes on a cold cache.\n\nIs that the embeddings?";
+const long =
+  "Why is indexing slow?\n\nIt takes six minutes on a cold cache.\n\nIs that the embeddings?";
 
 describe("Question", () => {
   it("keeps the breaks the reader typed", () => {
@@ -31,7 +35,9 @@ describe("Question", () => {
     heights(true);
     rerender(<Question text={long + " "} />);
 
-    const toggle = await screen.findByRole("button", { name: "Show the whole question" });
+    const toggle = await screen.findByRole("button", {
+      name: "Show the whole question",
+    });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     // The text is in the DOM the whole time — the fold is a clamp, not a
     // truncation — so copy, export and find-in-page never lose it.
@@ -40,7 +46,11 @@ describe("Question", () => {
     await userEvent.setup().click(toggle);
 
     expect(document.querySelector(".max-h-\\[4\\.5em\\]")).toBeNull();
-    expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe("true");
+    expect(
+      screen
+        .getByRole("button", { name: "Show less" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
   });
 
   it("folds again when another thread's question arrives", async () => {
@@ -50,7 +60,11 @@ describe("Question", () => {
     const { rerender } = render(<Question text={long} />);
     heights(true);
     rerender(<Question text={long + " "} />);
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Show the whole question" }));
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "Show the whole question" }),
+      );
 
     heights(false);
     rerender(<Question text="How does shipping work?" />);

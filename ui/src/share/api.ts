@@ -29,7 +29,10 @@ export function shareURL(share: Share): string {
 /** ErrUnfinished's answer: the last turn is still being written. */
 export const conflict = 409;
 
-async function shareCall(method: string, path: string): Promise<Share | number> {
+async function shareCall(
+  method: string,
+  path: string,
+): Promise<Share | number> {
   const res = await fetch(path, { method });
   if (!res.ok) return res.status;
   return (await res.json()) as Share;
@@ -50,7 +53,9 @@ export async function shareFor(threadID: string): Promise<Share | null> {
 }
 
 export async function revokeShare(threadID: string): Promise<boolean> {
-  const res = await fetch(`/api/threads/${threadID}/share`, { method: "DELETE" });
+  const res = await fetch(`/api/threads/${threadID}/share`, {
+    method: "DELETE",
+  });
   // A 404 is a link that is already gone, which is what was asked for.
   return goneOk(res);
 }

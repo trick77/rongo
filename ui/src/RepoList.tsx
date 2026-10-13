@@ -76,7 +76,10 @@ export function byProject(repos: Repo[]): Project[] {
     else at.set(key, [r]);
   }
   return [...at.entries()]
-    .map(([name, rs]) => ({ name, repos: [...rs].sort((a, b) => a.name.localeCompare(b.name)) }))
+    .map(([name, rs]) => ({
+      name,
+      repos: [...rs].sort((a, b) => a.name.localeCompare(b.name)),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -118,7 +121,10 @@ export function usedBy(library: string, repos: Repo[]): string[] {
  * Returns null when there is no edge to draw. A project of one has no wiring,
  * and neither has a set of repositories nobody declared a connection between:
  * a picture of unconnected boxes says less than the table under it. */
-export function wiringSpec(p: Project, libraries: Set<string> = new Set()): FlowSpec | null {
+export function wiringSpec(
+  p: Project,
+  libraries: Set<string> = new Set(),
+): FlowSpec | null {
   const member = new Set(p.repos.map((r) => r.name));
   const edges = edgesOf(p, libraries);
   if (edges.length === 0) return null;
@@ -128,7 +134,9 @@ export function wiringSpec(p: Project, libraries: Set<string> = new Set()): Flow
   // in the line beneath it — the same fact twice, once as a picture that says
   // nothing. It belongs in the list alone.
   const touched = new Set(edges.flatMap((e) => [e.from, e.to]));
-  const external = [...new Set(edges.map((e) => e.to))].filter((u) => !member.has(u)).sort();
+  const external = [...new Set(edges.map((e) => e.to))]
+    .filter((u) => !member.has(u))
+    .sort();
   return {
     type: "flow",
     nodes: [
@@ -142,7 +150,12 @@ export function wiringSpec(p: Project, libraries: Set<string> = new Set()): Flow
           kind: (reached.has(r.name) ? "step" : "start") as FlowNode["kind"],
           src: [],
         })),
-      ...external.map((u) => ({ id: u, label: `${u} · library`, kind: "end" as const, src: [] })),
+      ...external.map((u) => ({
+        id: u,
+        label: `${u} · library`,
+        kind: "end" as const,
+        src: [],
+      })),
     ],
     edges,
   };
@@ -197,7 +210,10 @@ export function parkedSummary(repos: Repo[]): Parked | null {
         : whole === 1
           ? ", one project entirely"
           : `, ${whole} projects entirely`;
-  const they = parked.length === 1 ? "It keeps its index and is" : "They keep their index and are";
+  const they =
+    parked.length === 1
+      ? "It keeps its index and is"
+      : "They keep their index and are";
   return {
     count: `${what} disabled and not shown${entirely}.`,
     note: `${they} not polled.`,
@@ -208,7 +224,10 @@ export function parkedSummary(repos: Repo[]): Parked | null {
  * They are listed under the picture rather than drawn into it: nothing in the
  * project reaches them, and that is a fact worth stating — it is what keeps an
  * answer about the storefront from attributing a call to the admin API. */
-export function unconnected(p: Project, libraries: Set<string> = new Set()): Repo[] {
+export function unconnected(
+  p: Project,
+  libraries: Set<string> = new Set(),
+): Repo[] {
   const touched = new Set(edgesOf(p, libraries).flatMap((e) => [e.from, e.to]));
   return touched.size === 0 ? [] : p.repos.filter((r) => !touched.has(r.name));
 }
@@ -218,7 +237,10 @@ const projectOf = (r: Repo) => r.project || r.name;
 
 /** The declared uses edges that land on a member or a declared library. An
  * arrow to anything else is a dependency the page cannot draw. */
-function edgesOf(p: Project, libraries: Set<string>): { from: string; to: string }[] {
+function edgesOf(
+  p: Project,
+  libraries: Set<string>,
+): { from: string; to: string }[] {
   const member = new Set(p.repos.map((r) => r.name));
   return p.repos.flatMap((r) =>
     (r.uses ?? [])
@@ -241,7 +263,10 @@ function ago(iso: string | null): string {
   if (!iso) return "never";
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return "unknown";
-  return then.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" });
+  return then.toLocaleString("en-GB", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
 /** relative says how long ago a run happened, in the words a person uses. */
@@ -274,7 +299,8 @@ function rowState(r: Repo): string {
   return "ok";
 }
 
-const th = "px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-[.12em] text-faint";
+const th =
+  "px-3.5 py-2.5 text-left text-[11px] font-medium uppercase tracking-[.12em] text-faint";
 
 function Stat({
   label,
@@ -299,13 +325,22 @@ function Stat({
     // even:/last: rules this replaced did not: with eight stats the eighth,
     // spanning two columns as "the odd last one", fell onto a row of its own.
     <div
-      className={"border-r border-b border-border px-4 py-3 sm:px-5 sm:py-3.5 " + (wide ? "col-span-2" : "")}
+      className={
+        "border-r border-b border-border px-4 py-3 sm:px-5 sm:py-3.5 " +
+        (wide ? "col-span-2" : "")
+      }
       title={title}
     >
-      <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">{label}</div>
+      <div className="text-[11px] font-medium uppercase tracking-[.12em] text-faint">
+        {label}
+      </div>
       <div className="mt-0.5 font-serif text-[21px] leading-tight tabular-nums text-ink sm:text-[26px]">
         {value}
-        {note && <small className="ml-1.5 font-sans text-[12.5px] text-muted">{note}</small>}
+        {note && (
+          <small className="ml-1.5 font-sans text-[12.5px] text-muted">
+            {note}
+          </small>
+        )}
       </div>
     </div>
   );
@@ -323,13 +358,21 @@ type ReindexScope =
  * is embedded again — unchanged chunks hit the cache by content hash — so
  * after a rule change it is the files that rule touched, a fraction of a
  * first index. "All" is the same fact over the whole corpus, said louder. */
-export function reindexCopy(scope: ReindexScope): { title: string; body: string; button: string } {
+export function reindexCopy(scope: ReindexScope): {
+  title: string;
+  body: string;
+  button: string;
+} {
   const cost =
     "Every file is read and selected again, and every chunk whose text changed is embedded again at the " +
     "embedding endpoint's price. Unchanged content is not re-embedded. The run starts with the next poll cycle.";
   switch (scope.kind) {
     case "repo":
-      return { title: `Re-index ${scope.name}`, body: cost, button: "Re-index" };
+      return {
+        title: `Re-index ${scope.name}`,
+        body: cost,
+        button: "Re-index",
+      };
     case "project":
       return {
         title: `Re-index ${scope.name}`,
@@ -352,8 +395,13 @@ export function reindexCopy(scope: ReindexScope): { title: string; body: string;
  * not list it back as "1 repository (peeq)". */
 export function reindexScope(project: Project): ReindexScope {
   const only = project.repos.length === 1 ? project.repos[0] : undefined;
-  if (only && only.name === project.name) return { kind: "repo", name: only.name };
-  return { kind: "project", name: project.name, repos: project.repos.map((r) => r.name) };
+  if (only && only.name === project.name)
+    return { kind: "repo", name: only.name };
+  return {
+    kind: "project",
+    name: project.name,
+    repos: project.repos.map((r) => r.name),
+  };
 }
 
 /** reindexPaths is the request the confirmation sends: one POST per
@@ -363,7 +411,9 @@ export function reindexPaths(scope: ReindexScope): string[] {
     case "repo":
       return [`/api/repos/${encodeURIComponent(scope.name)}/reindex`];
     case "project":
-      return scope.repos.map((r) => `/api/repos/${encodeURIComponent(r)}/reindex`);
+      return scope.repos.map(
+        (r) => `/api/repos/${encodeURIComponent(r)}/reindex`,
+      );
     case "all":
       return ["/api/repos/reindex"];
   }
@@ -399,10 +449,20 @@ function ReindexModal({
       {/* Cancel takes the focus: the safe half of a paid choice is the one
           Enter should land on. */}
       <div className="mt-4 flex justify-end gap-2">
-        <button autoFocus type="button" className={cancelButton} onClick={onCancel}>
+        <button
+          autoFocus
+          type="button"
+          className={cancelButton}
+          onClick={onCancel}
+        >
           Cancel
         </button>
-        <button type="button" className={saveButton} disabled={busy} onClick={onConfirm}>
+        <button
+          type="button"
+          className={saveButton}
+          disabled={busy}
+          onClick={onConfirm}
+        >
           {copy.button}
         </button>
       </div>
@@ -540,7 +600,8 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
   const grouped = byProject(shown);
   const projects = grouped.filter((p) => !libraries.has(p.name));
   const shared = grouped.filter((p) => libraries.has(p.name));
-  const sum = (pick: (r: Repo) => number) => shown.reduce((n, r) => n + pick(r), 0);
+  const sum = (pick: (r: Repo) => number) =>
+    shown.reduce((n, r) => n + pick(r), 0);
   const lastRun = lastRunAt(shown);
 
   return (
@@ -554,37 +615,37 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
           optional stat, so the count is seven or eight, and only seven leaves
           a row to fill. */}
       <div className="mb-5 overflow-hidden rounded-ui border border-border bg-panel">
-      <div className="-mr-px -mb-px grid grid-cols-2 sm:grid-cols-4">
-        <Stat label="Projects" value={projects.length} />
-        {shared.length > 0 && (
-          <Stat
-            label="Libraries"
-            value={shared.length}
-            title="Shared libraries: declared once, used by repositories in any project."
-          />
-        )}
-        {/* No "n active" note any more: with parked rows out of the count there
+        <div className="-mr-px -mb-px grid grid-cols-2 sm:grid-cols-4">
+          <Stat label="Projects" value={projects.length} />
+          {shared.length > 0 && (
+            <Stat
+              label="Libraries"
+              value={shared.length}
+              title="Shared libraries: declared once, used by repositories in any project."
+            />
+          )}
+          {/* No "n active" note any more: with parked rows out of the count there
             is no second number left to give, and the line below says what is
             missing in words the note never had room for. */}
-        <Stat label="Repositories" value={shown.length} />
-        <Stat label="Files" value={sum((r) => r.files)} />
-        <Stat label="Chunks" value={sum((r) => r.chunks)} />
-        <Stat label="Modules" value={sum((r) => r.modules)} />
-        {/* The commit lane: what "what changed" can look back over. */}
-        <Stat
-          label="Commits"
-          value={sum((r) => r.commits ?? 0)}
-          title="Commits recorded for the indexed branches, for questions about what changed."
-        />
-        {/* The poll, not the index: one health signal for the whole corpus.
+          <Stat label="Repositories" value={shown.length} />
+          <Stat label="Files" value={sum((r) => r.files)} />
+          <Stat label="Chunks" value={sum((r) => r.chunks)} />
+          <Stat label="Modules" value={sum((r) => r.modules)} />
+          {/* The commit lane: what "what changed" can look back over. */}
+          <Stat
+            label="Commits"
+            value={sum((r) => r.commits ?? 0)}
+            title="Commits recorded for the indexed branches, for questions about what changed."
+          />
+          {/* The poll, not the index: one health signal for the whole corpus.
             Each row says when its own index was last written. */}
-        <Stat
-          label="Last poll"
-          value={relative(lastRun)}
-          title="The last time every repository was fetched and compared with its indexed commit."
-          wide={shared.length === 0}
-        />
-      </div>
+          <Stat
+            label="Last poll"
+            value={relative(lastRun)}
+            title="The last time every repository was fetched and compared with its indexed commit."
+            wide={shared.length === 0}
+          />
+        </div>
       </div>
       {/* Directly under the numbers it explains, and drawn only when there is
           something to explain. Faint, because an absence is not news. */}
@@ -599,17 +660,32 @@ export default function RepoList({ admin = false }: { admin?: boolean }) {
           reader chooses between. Each asks first and says what it costs. */}
       {ask && (
         <p className="mb-5 -mt-2 flex items-center gap-3 px-0.5 text-[12.5px] text-faint">
-          <button type="button" className={actionButton} onClick={() => ask({ kind: "all", count: shown.length })}>
+          <button
+            type="button"
+            className={actionButton}
+            onClick={() => ask({ kind: "all", count: shown.length })}
+          >
             <ReindexLabel text="Re-index all" />
           </button>
           <span>Re-reads every repository; embeds only what changed.</span>
         </p>
       )}
       {projects.map((p) => (
-        <ProjectPanel key={p.name} project={p} libraries={libraries} ask={ask} />
+        <ProjectPanel
+          key={p.name}
+          project={p}
+          libraries={libraries}
+          ask={ask}
+        />
       ))}
       {shared.map((p) => (
-        <ProjectPanel key={p.name} project={p} libraries={libraries} usedBy={usedBy(p.name, shown)} ask={ask} />
+        <ProjectPanel
+          key={p.name}
+          project={p}
+          libraries={libraries}
+          usedBy={usedBy(p.name, shown)}
+          ask={ask}
+        />
       ))}
       {modal}
     </>
@@ -647,7 +723,8 @@ function ProjectPanel({
 }) {
   const spec = wiringSpec(project, libraries);
   const loose = unconnected(project, libraries);
-  const sum = (pick: (r: Repo) => number) => project.repos.reduce((n, r) => n + pick(r), 0);
+  const sum = (pick: (r: Repo) => number) =>
+    project.repos.reduce((n, r) => n + pick(r), 0);
 
   // The header is the lid of the panel: painted bg-active, the one ground on
   // the page lighter than the panel, so a frame visibly begins where the
@@ -664,7 +741,8 @@ function ProjectPanel({
           {project.name}
         </h3>
         <span className="text-[12.5px] text-muted">
-          {project.repos.length} {project.repos.length === 1 ? "repository" : "repositories"} ·{" "}
+          {project.repos.length}{" "}
+          {project.repos.length === 1 ? "repository" : "repositories"} ·{" "}
           {sum((r) => r.files)} files · {sum((r) => r.chunks)} chunks
         </span>
         {usedBy && (
@@ -673,7 +751,10 @@ function ProjectPanel({
             {usedBy.length > 0 && (
               <>
                 {" "}
-                · used by <span className="font-mono text-ink-dim">{usedBy.join(", ")}</span>
+                · used by{" "}
+                <span className="font-mono text-ink-dim">
+                  {usedBy.join(", ")}
+                </span>
               </>
             )}
           </span>
@@ -698,14 +779,17 @@ function ProjectPanel({
           <Wiring spec={spec} />
           <p className="mt-1.5 text-[12px] text-faint">
             Arrows are <code className="font-mono">uses:</code> entries from{" "}
-            <code className="font-mono">repos.yaml</code>. A repository with no arrow is reached from
-            outside the project — a browser, a queue, another product. A node marked library is a
-            shared repository outside it.
+            <code className="font-mono">repos.yaml</code>. A repository with no
+            arrow is reached from outside the project — a browser, a queue,
+            another product. A node marked library is a shared repository
+            outside it.
           </p>
           {loose.length > 0 && (
             <p className="mt-1 text-[12px] text-faint">
               No declared connection:{" "}
-              <span className="font-mono text-muted">{loose.map((r) => r.name).join(", ")}</span>
+              <span className="font-mono text-muted">
+                {loose.map((r) => r.name).join(", ")}
+              </span>
             </p>
           )}
         </div>
@@ -726,7 +810,10 @@ function ProjectPanel({
                 </th>
               ))}
               {["Files", "Chunks", "Modules"].map((h) => (
-                <th key={h} className={th + " border-b border-border text-right"}>
+                <th
+                  key={h}
+                  className={th + " border-b border-border text-right"}
+                >
                   {h}
                 </th>
               ))}
@@ -737,139 +824,155 @@ function ProjectPanel({
               const st = rowState(r);
               return (
                 <Fragment key={r.name}>
-                <tr
-                  data-state={st}
-                  className={
-                    // The bottom border moves to the description row when there
-                    // is one, so a repository and its sentence close as a single
-                    // box rather than reading as two entries.
-                    "align-top [&>td]:border-border-soft " +
-                    (r.description ? "" : "[&>td]:border-b last:[&>td]:border-b-0 ") +
-                    (r.enabled ? "" : "text-faint")
-                  }
-                >
-                  {/* Name, then part and branch under it: two facts nobody
+                  <tr
+                    data-state={st}
+                    className={
+                      // The bottom border moves to the description row when there
+                      // is one, so a repository and its sentence close as a single
+                      // box rather than reading as two entries.
+                      "align-top [&>td]:border-border-soft " +
+                      (r.description
+                        ? ""
+                        : "[&>td]:border-b last:[&>td]:border-b-0 ") +
+                      (r.enabled ? "" : "text-faint")
+                    }
+                  >
+                    {/* Name, then part and branch under it: two facts nobody
                       compares down a column, so they cost no column. The name
                       is muted and mono and the project header is ink and
                       serif, which is what makes the header read as the
                       heading. */}
-                  <td
-                    className={
-                      "px-3.5 py-3 " +
-                      (r.last_error ? "shadow-[inset_3px_0_0_var(--color-danger)]" : "")
-                    }
-                  >
-                    <span className="font-mono text-muted">{r.name}</span>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[12px] text-faint">
-                      {r.part && (
-                        <span className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim">
-                          {r.part}
-                        </span>
-                      )}
-                      {/* The declared image, beside the part: the two are
+                    <td
+                      className={
+                        "px-3.5 py-3 " +
+                        (r.last_error
+                          ? "shadow-[inset_3px_0_0_var(--color-danger)]"
+                          : "")
+                      }
+                    >
+                      <span className="font-mono text-muted">{r.name}</span>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[12px] text-faint">
+                        {r.part && (
+                          <span className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim">
+                            {r.part}
+                          </span>
+                        )}
+                        {/* The declared image, beside the part: the two are
                           the entry's own words about what it is, and a
                           release turn reads this one. */}
-                      {r.image && <span className="text-faint">{r.image}</span>}
-                      {/* A snapshot has no branch anyone chose: rongo made
+                        {r.image && (
+                          <span className="text-faint">{r.image}</span>
+                        )}
+                        {/* A snapshot has no branch anyone chose: rongo made
                           one up to have something to commit to. Where the
                           branch would stand, the line says how the code got
                           here instead, which is the question a branch answers
                           for a clone. It is not under State because a snapshot
                           is not an outcome of the last run. */}
-                      {r.snapshot ? (
-                        <span
-                          className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim"
-                          title="Extracted by hand into the repository root. There is no remote, so this commit only changes when the archive is extracted again."
-                        >
-                          Snapshot
-                        </span>
-                      ) : (
-                        <span>{r.branch}</span>
-                      )}
-                    </div>
-                    {r.last_error && (
-                      <div className="mt-1 text-[13px] text-accent-strong">{r.last_error}</div>
-                    )}
-                  </td>
-                  <td className="w-px whitespace-nowrap px-3.5 py-3">
-                    {/* Disabled and error are independent facts: a repo the YAML
-                        disabled keeps its last error, and both are said. */}
-                    <span className="flex flex-wrap gap-1">
-                      {st === "ok" && (
-                        <span className="rounded-full bg-accent-dim px-2.5 py-0.5 text-xs font-medium text-accent-strong">
-                          Indexed
-                        </span>
-                      )}
+                        {r.snapshot ? (
+                          <span
+                            className="rounded-full bg-active px-2.5 py-0.5 text-[11px] text-ink-dim"
+                            title="Extracted by hand into the repository root. There is no remote, so this commit only changes when the archive is extracted again."
+                          >
+                            Snapshot
+                          </span>
+                        ) : (
+                          <span>{r.branch}</span>
+                        )}
+                      </div>
                       {r.last_error && (
-                        <span className="rounded-full bg-ochre-wash px-2.5 py-0.5 text-xs font-medium text-ochre">
-                          Error
-                        </span>
+                        <div className="mt-1 text-[13px] text-accent-strong">
+                          {r.last_error}
+                        </div>
                       )}
-                      {/* Muted, not ochre: ochre is "your move", and a
+                    </td>
+                    <td className="w-px whitespace-nowrap px-3.5 py-3">
+                      {/* Disabled and error are independent facts: a repo the YAML
+                        disabled keeps its last error, and both are said. */}
+                      <span className="flex flex-wrap gap-1">
+                        {st === "ok" && (
+                          <span className="rounded-full bg-accent-dim px-2.5 py-0.5 text-xs font-medium text-accent-strong">
+                            Indexed
+                          </span>
+                        )}
+                        {r.last_error && (
+                          <span className="rounded-full bg-ochre-wash px-2.5 py-0.5 text-xs font-medium text-ochre">
+                            Error
+                          </span>
+                        )}
+                        {/* Muted, not ochre: ochre is "your move", and a
                           request standing until the next cycle asks nothing
                           of the reader. From the record, so a reload shows
                           it too. */}
-                      {r.reindex_queued && (
-                        <span
-                          className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
-                          title="A full re-index was requested and runs with the next poll cycle."
-                        >
-                          Re-index queued
-                        </span>
-                      )}
-                      {/* Unreachable from this page since parked repositories
+                        {r.reindex_queued && (
+                          <span
+                            className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted"
+                            title="A full re-index was requested and runs with the next poll cycle."
+                          >
+                            Re-index queued
+                          </span>
+                        )}
+                        {/* Unreachable from this page since parked repositories
                           stopped being drawn at all — the line under the stats
                           says how many instead. Kept because rowState still
                           reports "disabled" into data-state, and because the
                           page is one `enabled` filter away from showing them
                           again. */}
-                      {!r.enabled && (
-                        <span className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted">
-                          Disabled
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                  {/* When the index was last written, and at which commit.
+                        {!r.enabled && (
+                          <span className="rounded-full bg-active px-2.5 py-0.5 text-xs font-medium text-muted">
+                            Disabled
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    {/* When the index was last written, and at which commit.
                       Not the poll: that moved every half hour whether or not
                       anything was indexed, and read as "indexed just now". */}
-                  <td
-                    className="w-px whitespace-nowrap px-3.5 py-3"
-                    title={`Indexed ${ago(r.last_indexed_at)}. Last poll ${ago(r.last_run_at)}. ${historyLine(r)}`}
-                  >
-                    {relative(r.last_indexed_at)}
-                    {/* Its own line: beside the time it cost the column 70px,
+                    <td
+                      className="w-px whitespace-nowrap px-3.5 py-3"
+                      title={`Indexed ${ago(r.last_indexed_at)}. Last poll ${ago(r.last_run_at)}. ${historyLine(r)}`}
+                    >
+                      {relative(r.last_indexed_at)}
+                      {/* Its own line: beside the time it cost the column 70px,
                         which at 1024px with the sidebar open was the 25px
                         that pushed Modules out of the panel. */}
-                    <code className="block font-mono text-xs text-faint">{shortSha(r.last_sha)}</code>
-                  </td>
-                  {[r.files, r.chunks, r.modules].map((n, i) => (
-                    <td key={i} className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums">
-                      {n}
+                      <code className="block font-mono text-xs text-faint">
+                        {shortSha(r.last_sha)}
+                      </code>
                     </td>
-                  ))}
-                </tr>
-                {/* The description gets the whole table width instead of the
+                    {[r.files, r.chunks, r.modules].map((n, i) => (
+                      <td
+                        key={i}
+                        className="w-px whitespace-nowrap px-3.5 py-3 text-right font-mono tabular-nums"
+                      >
+                        {n}
+                      </td>
+                    ))}
+                  </tr>
+                  {/* The description gets the whole table width instead of the
                     name column, where 180 characters wrapped to six lines and
                     grew the row while every other cell stayed one line tall.
                     No description, no row: absence takes no marker. */}
-                {r.description && (
-                  <tr
-                    data-state={st}
-                    className={
-                      "[&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0 " +
-                      (r.enabled ? "" : "text-faint")
-                    }
-                  >
-                    {/* Capped: the row has the whole table to spend, and a
+                  {r.description && (
+                    <tr
+                      data-state={st}
+                      className={
+                        "[&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0 " +
+                        (r.enabled ? "" : "text-faint")
+                      }
+                    >
+                      {/* Capped: the row has the whole table to spend, and a
                         sentence run across a wide monitor is one long measure
                         nobody reads to the end of. The cell still spans every
                         column so the text starts at the repository name. */}
-                    <td colSpan={6} className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted">
-                      <div className="max-w-[64rem]">{r.description}</div>
-                    </td>
-                  </tr>
-                )}
+                      <td
+                        colSpan={6}
+                        className="px-3.5 pt-0 pb-3 text-[12.5px] text-muted"
+                      >
+                        <div className="max-w-[64rem]">{r.description}</div>
+                      </td>
+                    </tr>
+                  )}
                 </Fragment>
               );
             })}
@@ -879,4 +982,3 @@ function ProjectPanel({
     </section>
   );
 }
-

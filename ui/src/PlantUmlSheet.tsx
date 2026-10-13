@@ -23,12 +23,19 @@ export default function PlantUmlSheet({
 }): ReactNode {
   const out = useResolved(text, drawPlantUml);
 
-  if (out === null) return <p className="px-5 py-3 font-sans text-muted">Drawing the diagram…</p>;
+  if (out === null)
+    return (
+      <p className="px-5 py-3 font-sans text-muted">Drawing the diagram…</p>
+    );
   if ("error" in out) {
     return (
       <p role="alert" className="px-5 py-3 font-sans text-muted">
         The diagram could not be drawn ({out.error}).{" "}
-        <button type="button" onClick={onSource} className="text-accent-strong underline underline-offset-2">
+        <button
+          type="button"
+          onClick={onSource}
+          className="text-accent-strong underline underline-offset-2"
+        >
           Show the source
         </button>
       </p>
@@ -41,7 +48,11 @@ export default function PlantUmlSheet({
         <Sheet
           key={i}
           svg={svg}
-          label={out.svgs.length > 1 ? `Diagram ${i + 1} of ${out.svgs.length}` : "Diagram"}
+          label={
+            out.svgs.length > 1
+              ? `Diagram ${i + 1} of ${out.svgs.length}`
+              : "Diagram"
+          }
           // The first picture carries the file's name, the rest a number,
           // so a one-diagram file downloads as itself.
           name={i === 0 ? stem : `${stem}-${i + 1}`}
@@ -54,7 +65,15 @@ export default function PlantUmlSheet({
 /** Sheet is one picture, with its two ways out. The file is drawn on white
  * like the sheet, never transparent: a viewer's own ground under a diagram
  * styled for white paper is how its connectors got lost in dark mode. */
-function Sheet({ svg, label, name }: { svg: string; label: string; name: string }): ReactNode {
+function Sheet({
+  svg,
+  label,
+  name,
+}: {
+  svg: string;
+  label: string;
+  name: string;
+}): ReactNode {
   const [failed, setFailed] = useState<string | null>(null);
   const file = () => withGround(toXml(svg), "#FFFFFF");
 
@@ -85,7 +104,13 @@ function Sheet({ svg, label, name }: { svg: string; label: string; name: string 
           <DownloadIcon />
           SVG
         </button>
-        <button type="button" onClick={png} title="Download PNG" aria-label={`${label}: download PNG`} className={button}>
+        <button
+          type="button"
+          onClick={png}
+          title="Download PNG"
+          aria-label={`${label}: download PNG`}
+          className={button}
+        >
           <DownloadIcon />
           PNG
         </button>

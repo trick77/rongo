@@ -12,15 +12,20 @@ describe("tabTitle", () => {
   });
 
   it("names an open thread by its settled title", () => {
-    expect(tabTitle({ view: "thread", id: "v76BBy2b1nMYOFl2Lnm9JQ" }, "Wie wird ein Fall eröffnet")).toBe(
-      "Wie wird ein Fall eröffnet · Rongo",
-    );
+    expect(
+      tabTitle(
+        { view: "thread", id: "v76BBy2b1nMYOFl2Lnm9JQ" },
+        "Wie wird ein Fall eröffnet",
+      ),
+    ).toBe("Wie wird ein Fall eröffnet · Rongo");
   });
 
   it("stays plain until the thread has a title", () => {
     // Pending title, thread not yet fetched, or a dead address: the tab does
     // not say "New question" about a thread, and never shows the placeholder.
-    expect(tabTitle({ view: "thread", id: "v76BBy2b1nMYOFl2Lnm9JQ" }, null)).toBe("Rongo");
+    expect(
+      tabTitle({ view: "thread", id: "v76BBy2b1nMYOFl2Lnm9JQ" }, null),
+    ).toBe("Rongo");
   });
 
   it("leaves the share page to SharePage", () => {

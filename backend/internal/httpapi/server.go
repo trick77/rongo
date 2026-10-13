@@ -15,8 +15,8 @@ import (
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
-	"github.com/trick77/rongo/internal/version"
 	"github.com/trick77/rongo/web"
+	"github.com/trick77/ship/kit/version"
 )
 
 // Threads is everything the HTTP layer needs from the thread record. An

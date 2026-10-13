@@ -10,7 +10,7 @@ import (
 )
 
 var declaredStages = stages.Set{
-	{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}},
+	{Repo: "acme-infra", Name: "prod", Prefix: "prod/", Aliases: []string{"production", "produktion"}}, //nolint:misspell // German stage alias
 	{Repo: "acme-infra", Name: "intg", Prefix: "intg/"},
 }
 

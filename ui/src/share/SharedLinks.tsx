@@ -17,7 +17,8 @@ import { listShares, revokeShare, shareURL, type Share } from "./api";
  * badge; the place to act on it is the thread's own dialog, where the reader
  * can see the turns that would be added.
  */
-const th = "px-3.5 py-2.5 text-[11px] font-medium uppercase tracking-[.09em] text-faint";
+const th =
+  "px-3.5 py-2.5 text-[11px] font-medium uppercase tracking-[.09em] text-faint";
 const action =
   "ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-panel px-3 " +
   "text-[13px] text-ink-dim transition-colors hover:border-elevated-border hover:bg-active disabled:opacity-50";
@@ -27,7 +28,12 @@ function day(iso: string): { date: string; ago: string } {
   if (Number.isNaN(d.getTime())) return { date: "", ago: "" };
   const days = Math.round((Date.now() - d.getTime()) / 86400000);
   return {
-    date: d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+    date: d.toLocaleString("en-GB", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
     ago: days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`,
   };
 }
@@ -43,7 +49,10 @@ export default function SharedLinks({
   onCount?: (n: number | null) => void;
   onOpenThread: (id: string) => void;
 }) {
-  const [state, setState] = useLoaded(async () => ({ shares: await listShares() }), []);
+  const [state, setState] = useLoaded(
+    async () => ({ shares: await listShares() }),
+    [],
+  );
   const [copied, flashCopied] = useFlash<string>();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -60,7 +69,12 @@ export default function SharedLinks({
     try {
       if (!(await revokeShare(share.thread_id))) return;
       setState((prev) =>
-        prev.state === "ready" ? { ...prev, shares: prev.shares.filter((x) => x.token !== share.token) } : prev,
+        prev.state === "ready"
+          ? {
+              ...prev,
+              shares: prev.shares.filter((x) => x.token !== share.token),
+            }
+          : prev,
       );
       onChange();
     } catch {
@@ -82,8 +96,14 @@ export default function SharedLinks({
     return (
       <p className="text-muted">
         No thread is shared. A thread's{" "}
-        <Icon name="moreVertical" size="15px" label="actions" className="align-[-2px]" /> menu in the sidebar
-        has <span className="font-medium text-ink-dim">Share</span>.
+        <Icon
+          name="moreVertical"
+          size="15px"
+          label="actions"
+          className="align-[-2px]"
+        />{" "}
+        menu in the sidebar has{" "}
+        <span className="font-medium text-ink-dim">Share</span>.
       </p>
     );
 
@@ -93,7 +113,9 @@ export default function SharedLinks({
         <thead>
           <tr className="bg-bg">
             <th className={th + " border-b border-border text-left"}>Thread</th>
-            <th className={th + " border-b border-border text-left"}>Frozen at</th>
+            <th className={th + " border-b border-border text-left"}>
+              Frozen at
+            </th>
             <th className={th + " border-b border-border text-right"}>Turns</th>
             <th className={th + " border-b border-border text-left"}>State</th>
             <th className={th + " border-b border-border"} />
@@ -103,7 +125,10 @@ export default function SharedLinks({
           {state.shares.map((share) => {
             const when = day(share.updated_at);
             return (
-              <tr key={share.token} className="align-top [&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0">
+              <tr
+                key={share.token}
+                className="align-top [&>td]:border-b [&>td]:border-border-soft last:[&>td]:border-b-0"
+              >
                 <td className="px-3.5 py-3">
                   <button
                     type="button"
@@ -112,13 +137,17 @@ export default function SharedLinks({
                   >
                     {share.title}
                   </button>
-                  <span className="mt-0.5 block font-mono text-[11.5px] break-all text-faint">{share.path}</span>
+                  <span className="mt-0.5 block font-mono text-[11.5px] break-all text-faint">
+                    {share.path}
+                  </span>
                 </td>
                 <td className="px-3.5 py-3 whitespace-nowrap text-muted">
                   {when.date}
                   <span className="block text-xs text-faint">{when.ago}</span>
                 </td>
-                <td className="px-3.5 py-3 text-right font-mono tabular-nums text-muted">{share.turns}</td>
+                <td className="px-3.5 py-3 text-right font-mono tabular-nums text-muted">
+                  {share.turns}
+                </td>
                 <td className="px-3.5 py-3">
                   {share.newer > 0 ? (
                     <span className="rounded-full bg-ochre-wash px-2.5 py-0.5 text-xs font-medium text-ochre">
@@ -131,7 +160,11 @@ export default function SharedLinks({
                   )}
                 </td>
                 <td className="px-3.5 py-3 text-right whitespace-nowrap">
-                  <button type="button" onClick={() => void copy(share)} className={action}>
+                  <button
+                    type="button"
+                    onClick={() => void copy(share)}
+                    className={action}
+                  >
                     <Icon name="upload" size="14px" />
                     {copied === share.token ? "Copied" : "Copy link"}
                   </button>
