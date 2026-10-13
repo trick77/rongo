@@ -1,6 +1,6 @@
 module github.com/trick77/rongo
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.7-alpha.2
