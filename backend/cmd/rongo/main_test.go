@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +18,27 @@ import (
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/store/storetest"
 )
+
+// The container healthcheck is what Traefik routes on, and Docker never
+// restarts an unhealthy container: it must report readiness, so a process
+// that serves but cannot reach its database leaves rotation.
+func TestHealthcheck_probesReadiness(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	ready := http.StatusServiceUnavailable
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(ready) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	if got := healthcheck(addr); got != 1 {
+		t.Errorf("healthcheck with /readyz failing = %d, want 1", got)
+	}
+	ready = http.StatusOK
+	if got := healthcheck(addr); got != 0 {
+		t.Errorf("healthcheck with /readyz passing = %d, want 0", got)
+	}
+}
 
 // kit's OIDC defaults are not rongo's: its transient cookies must carry the
 // app prefix, or a sibling app on the parent domain overwrites a half-finished

@@ -106,7 +106,7 @@ func hashPassword(in io.Reader, out io.Writer) error {
 func main() {
 	// Parsed before the config is read: hashing a password needs no
 	// environment, and an operator setting rongo up has none yet.
-	healthcheck := flag.Bool("healthcheck", false, "probe /healthz and exit; used by the container healthcheck")
+	probe := flag.Bool("healthcheck", false, "probe /readyz and exit; used by the container healthcheck")
 	hashPw := flag.Bool("hash-password", false, "read a password from stdin, print its bcrypt hash for BACKEND_ADMIN_PASSWORD_HASH, and exit")
 	flag.Parse()
 	if *hashPw {
@@ -132,8 +132,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *healthcheck {
-		os.Exit(httpx.Healthcheck(httpx.LocalURL(cfg.Addr, "/healthz")))
+	if *probe {
+		os.Exit(healthcheck(cfg.Addr))
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -544,6 +544,15 @@ func main() {
 	// shutdown above; here for the server stopping on its own.
 	stopPolling()
 	workers.Wait()
+}
+
+// healthcheck is the container probe's exit code. Readiness, not liveness:
+// Traefik routes on the container's health and Docker never restarts an
+// unhealthy one, so the failure that matters is a process that serves but
+// cannot reach its database. Under Kubernetes the manifest's probes take
+// over: liveness on /healthz, readiness on /readyz.
+func healthcheck(addr string) int {
+	return httpx.Healthcheck(httpx.LocalURL(addr, "/readyz"))
 }
 
 // oidcConfig is kit's OIDC flow as rongo runs it. No Group: admin is decided
