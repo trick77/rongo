@@ -407,18 +407,7 @@ func main() {
 	// provider would otherwise hang the process instead of reporting it.
 	if cfg.AuthMode == config.AuthModeOIDC {
 		discoverCtx, cancelDiscover := context.WithTimeout(ctx, 30*time.Second)
-		oidcSvc, err := kitauth.NewOIDC(discoverCtx, kitauth.OIDCConfig{
-			Issuer:       cfg.OIDCIssuer,
-			ClientID:     cfg.OIDCClientID,
-			ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL:  cfg.OIDCRedirectURL,
-			// Not kit's default: an Authelia client that does not list the groups
-			// scope refuses the whole request. Groups come off the ID token
-			// (auth.Claims), and admin is decided from them, never a login gate.
-			Scopes:       []string{"openid", "profile", "email"},
-			CookiePrefix: "rongo_",
-			Secure:       cfg.CookieSecure,
-		})
+		oidcSvc, err := kitauth.NewOIDC(discoverCtx, oidcConfig(cfg))
 		cancelDiscover()
 		if err != nil {
 			slog.Error("oidc provider discovery failed", "issuer", cfg.OIDCIssuer, "err", err)
@@ -537,7 +526,9 @@ func main() {
 			os.Exit(1)
 		}
 	case <-stopping.Done():
-		slog.Info("shutting down")
+		// The cause names the signal: an orchestrator's stop reads apart from a
+		// Ctrl-C.
+		slog.Info("shutting down", "cause", context.Cause(stopping).Error())
 		cut, err := shutdown(httpServer, cancelHandlers, stopPolling, &workers, shutdownLimit)
 		if cut {
 			slog.Warn("answers still streaming were cut short", "limit", shutdownLimit.String())
@@ -553,6 +544,25 @@ func main() {
 	// shutdown above; here for the server stopping on its own.
 	stopPolling()
 	workers.Wait()
+}
+
+// oidcConfig is kit's OIDC flow as rongo runs it. No Group: admin is decided
+// from the ID token's groups at session time, never a login gate.
+func oidcConfig(cfg config.Config) kitauth.OIDCConfig {
+	return kitauth.OIDCConfig{
+		Issuer:       cfg.OIDCIssuer,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+		RedirectURL:  cfg.OIDCRedirectURL,
+		// Not kit's default: an Authelia client that does not list the groups
+		// scope refuses the whole request. Groups come off the ID token
+		// (auth.Claims) through claims_policy 'legacy'.
+		Scopes: []string{"openid", "profile", "email"},
+		// rongo_oidc_state and the rest: a sibling app on the parent domain
+		// must not overwrite a half-finished login.
+		CookiePrefix: "rongo_",
+		Secure:       cfg.CookieSecure,
+	}
 }
 
 // parseLevel maps BACKEND_LOG_LEVEL, already lower-cased and checked by

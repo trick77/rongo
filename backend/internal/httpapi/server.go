@@ -132,8 +132,8 @@ type Threads interface {
 // the feature is unconfigured; its endpoints answer 503.
 type Deps struct {
 	Auth *auth.Service
-	// OIDC drives the login redirect and the callback. An interface, not kit's
-	// concrete *auth.OIDC, so a test can make a callback fail without a
+	// OIDC drives the login redirect and the callback. An interface, not
+	// ship/kit/auth's concrete *OIDC, so a test can make a callback fail without a
 	// provider. Nil means this deployment has no OIDC (dev or token mode), and
 	// the two auth routes say so with a 503.
 	OIDC OIDCService
@@ -188,7 +188,7 @@ type Memories interface {
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.
-// kit's *auth.OIDC satisfies it structurally; Callback clears the transient
+// ship/kit/auth's *OIDC satisfies it structurally; Callback clears the transient
 // cookies whatever the outcome.
 type OIDCService interface {
 	Start(w http.ResponseWriter, r *http.Request)

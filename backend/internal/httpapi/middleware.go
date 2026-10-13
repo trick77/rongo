@@ -57,10 +57,13 @@ func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // path is masked too, because a share link's token is a path segment and is
 // the link's whole authorisation; see maskPath.
 //
-// A healthy /healthz or /readyz is not logged. The container probes them every
-// few seconds, and a log that is mostly probes hides the requests a reader is
-// looking for; a probe that fails still logs, since that is the one worth
-// seeing.
+// /healthz and /readyz are not logged, whatever the status. The container
+// probes them every few seconds, and a log that is mostly probes hides the
+// requests a reader is looking for. A failing readiness check is kit's to
+// log: once when it starts failing, once when it recovers.
+// probePaths are where httpx.Health mounts the probes, read once.
+var probePaths = httpx.DefaultProbePaths()
+
 func logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -68,7 +71,7 @@ func logging(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
-		if slices.Contains(httpx.DefaultProbePaths(), r.URL.Path) && rec.status < 400 {
+		if slices.Contains(probePaths, r.URL.Path) {
 			return
 		}
 		attrs := []any{

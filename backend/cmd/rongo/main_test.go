@@ -17,6 +17,26 @@ import (
 	"github.com/trick77/rongo/internal/store/storetest"
 )
 
+// kit's OIDC defaults are not rongo's: its transient cookies must carry the
+// app prefix, or a sibling app on the parent domain overwrites a half-finished
+// login, and the scopes must not ask for groups, which an Authelia client
+// without that scope refuses outright.
+func TestOIDCConfig_keepsRongosCookiesAndScopes(t *testing.T) {
+	got := oidcConfig(config.Config{OIDCIssuer: "https://auth.example", OIDCClientID: "rongo",
+		OIDCClientSecret: "s", OIDCRedirectURL: "https://rongo.example/api/auth/callback", CookieSecure: true})
+
+	if got.CookiePrefix != "rongo_" {
+		t.Errorf("CookiePrefix = %q, want rongo_", got.CookiePrefix)
+	}
+	if strings.Join(got.Scopes, " ") != "openid profile email" {
+		t.Errorf("Scopes = %v, want openid profile email", got.Scopes)
+	}
+	if !got.Secure || got.Group != "" || got.Issuer != "https://auth.example" || got.ClientID != "rongo" ||
+		got.ClientSecret != "s" || got.RedirectURL != "https://rongo.example/api/auth/callback" {
+		t.Errorf("config = %+v, want the environment's values, Secure, no login group", got)
+	}
+}
+
 // The hosts are llmwire's profiles' and the keys are llmwire's to read from
 // the environment; what main owns is refusing to boot, with the variable
 // named, when a key is missing. The chat lanes run on synthetic models; the
