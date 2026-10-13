@@ -1,4 +1,3 @@
-//nolint:misspell // German stage aliases and labels are test data
 package ask
 
 import (
@@ -157,8 +156,8 @@ func TestTitle_aTitleOnTheFirstTryCostsOneCall(t *testing.T) {
 }
 
 func TestTitle_markdownEmphasisIsStripped(t *testing.T) {
-	c, up := titleLLM(t, titleReply{status: http.StatusOK, content: "**Kafka-Topic-Produktion nach Situation**"})
-	if got := Title(context.Background(), c, "Wann produziere ich auf welches Kafka-Topic?", LanguageDE); got != "Kafka-Topic-Produktion nach Situation" {
+	c, up := titleLLM(t, titleReply{status: http.StatusOK, content: "**Kafka-Topic-Produktion nach Situation**"})                                          //nolint:misspell // German label
+	if got := Title(context.Background(), c, "Wann produziere ich auf welches Kafka-Topic?", LanguageDE); got != "Kafka-Topic-Produktion nach Situation" { //nolint:misspell // German label
 		t.Fatalf("title = %q", got)
 	}
 	if up.count() != 1 {

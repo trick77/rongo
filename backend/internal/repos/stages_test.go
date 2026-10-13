@@ -1,4 +1,4 @@
-//nolint:misspell // German stage aliases and labels are test data
+//nolint:misspell // German stage alias inside a raw-string fixture, where a line nolint cannot go
 package repos
 
 import (

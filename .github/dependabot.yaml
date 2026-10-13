@@ -24,6 +24,8 @@ updates:
     ignore:
       # sqlite-vec-go-bindings v0.1.7-alpha.2 is welded to v0.23.3: v0.32.0 builds then fails at runtime, v0.33.0 does not compile; bump both or neither
       - dependency-name: "github.com/ncruces/go-sqlite3"
+      # wasm built against ncruces' SQLite: a lone bump skews the pair and breaks vector search at runtime; bump both or neither, by hand
+      - dependency-name: "github.com/asg017/sqlite-vec-go-bindings"
 
   - package-ecosystem: npm
     directory: /ui
@@ -40,9 +42,10 @@ updates:
       # provider are one dependency family: vitest pins a vite major range and
       # @vitest/coverage-v8 pins vitest's exact version, so bumping any one
       # alone fails npm ci on ERESOLVE (or nests a second vite). They always
-      # travel together. @tailwindcss/vite peer-depends on vite's major too.
+      # travel together. @tailwindcss/vite peer-depends on vite's major too,
+      # and pins tailwindcss exactly: split, the plugin nests its own core.
       vite-and-vitest:
-        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "@tailwindcss/vite"]
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "@tailwindcss/vite", "tailwindcss"]
       # Pinned exact; a release may format differently and fail the gate's
       # format:check, so it never blocks the other bumps: its own PR,
       # reformatted there.

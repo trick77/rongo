@@ -21,3 +21,6 @@ dependabot:
     - ecosystem: gomod
       dependency: github.com/ncruces/go-sqlite3
       why: "sqlite-vec-go-bindings v0.1.7-alpha.2 is welded to v0.23.3: v0.32.0 builds then fails at runtime, v0.33.0 does not compile; bump both or neither"
+    - ecosystem: gomod
+      dependency: github.com/asg017/sqlite-vec-go-bindings
+      why: "wasm built against ncruces' SQLite: a lone bump skews the pair and breaks vector search at runtime; bump both or neither, by hand"
