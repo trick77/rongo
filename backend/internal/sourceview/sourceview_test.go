@@ -173,7 +173,7 @@ func TestRead_refusesAnOlderCommitWhoseBodyTheIndexerWouldSkip(t *testing.T) {
 	// Given: internal/aws.go is indexed today; an older commit held a key.
 	f := newFixture(t, 1<<20)
 	dir := filepath.Join(f.root, "peeq")
-	leaky := gittest.Commit(t, dir, "internal/aws.go", []byte("package a\n\nconst key = \"AKIAABCDEFGHIJKLMNOP\"\n"), "oops")
+	leaky := gittest.Commit(t, dir, "internal/aws.go", []byte("package a\n\nconst key = \"AKIAABCDEFGHIJKLMNOP\"\n"), "oops") // ship:allow-secret: invented fixture
 	clean := gittest.Commit(t, dir, "internal/aws.go", []byte("package a\n\nvar key = os.Getenv(\"K\")\n"), "fix")
 	if _, err := f.db.Exec(`INSERT INTO files (repo, path, sha, skip_reason) VALUES ('peeq', 'internal/aws.go', ?, '')`, clean); err != nil {
 		t.Fatal(err)

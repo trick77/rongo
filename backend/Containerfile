@@ -20,8 +20,8 @@ COPY --from=ui /backend/web/dist ./web/dist
 # Declared last on purpose: it changes on every release, and an ARG above the
 # module download puts it in that layer's environment.
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build \
-      -ldflags="-s -w -X github.com/trick77/rongo/internal/version.Version=${VERSION}" \
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X github.com/trick77/ship/kit/version.Version=${VERSION}" \
       -o /out/rongo ./cmd/rongo
 
 # --- Stage 3: runtime -------------------------------------------------------

@@ -115,7 +115,7 @@ var memoryTexts = map[Language]memoryText{
 		scoped:       "Vale per %s.",
 		scopeDropped: "Nessun progetto o repository chiamato \"%s\" è indicizzato, quindi vale ovunque.",
 		full:         "La memoria è piena: sono salvate %d istruzioni. Eliminane una nella pagina Memory per aggiungere questa.",
-		nothing:      "Nessuna istruzione salvata corrisponde. La pagina Memory elenca ciò che è conservato.",
+		nothing:      "Nessuna istruzione salvata corrisponde. La pagina Memory elenca ciò che è conservato.", //nolint:misspell // Italian UI copy
 	},
 }
 

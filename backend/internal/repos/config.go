@@ -111,8 +111,8 @@ type Stage struct {
 	// Every path under it is that stage's; a path under none is no stage's.
 	Prefix string
 	// Aliases are other whole words that name this stage, lower-cased:
-	// production, produktion. A question containing one narrows to the
-	// stage, so an ordinary word is refused here.
+	// "production", or its German spelling. A question containing one narrows
+	// to the stage, so an ordinary word is refused here.
 	Aliases []string
 }
 

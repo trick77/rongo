@@ -719,7 +719,7 @@ func TestPipeline_theUnderstandingsWordsReachTheCrossing(t *testing.T) {
 	p := newTestPipeline(t, withUpstream(twoStepUpstream(t, reply, "So [1].")),
 		withDB(db), withSearch(&fakeSearch{hits: []retrieve.Hit{hitInFor(t, db, hitID)}}), withRouter(&fakeRouter{projects: pm}))
 
-	answer, _, err := p.Run(context.Background(), "Ist die Konsole in Produktion aktiviert?",
+	answer, _, err := p.Run(context.Background(), "Ist die Konsole in Produktion aktiviert?", //nolint:misspell // German question
 		AudienceDev, LanguageEN, Thread{}, Events{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

@@ -759,7 +759,7 @@ var releaseNotes = map[string]map[Language]string{
 		LanguageFR: "%s : %s commits entre les versions ne sont pas dans l'historique enregistré.", LanguageIT: "%s: %s commit tra le versioni non sono nella cronologia registrata."},
 	NoteUndetermined: {
 		LanguageEN: "%s: the range could not be determined.", LanguageDE: "%s: der Bereich konnte nicht bestimmt werden.",
-		LanguageFR: "%s : l'écart n'a pas pu être déterminé.", LanguageIT: "%s: impossibile determinare l'intervallo."},
+		LanguageFR: "%s : l'écart n'a pas pu être déterminé.", LanguageIT: "%s: impossibile determinare l'intervallo."}, //nolint:misspell // Italian UI copy
 }
 
 // NoRelease is the answer when no component has a range: the sentence,

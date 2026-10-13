@@ -1,3 +1,4 @@
+//nolint:misspell // German stage aliases and labels are test data
 package stages
 
 import (
