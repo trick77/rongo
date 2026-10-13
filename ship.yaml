@@ -13,7 +13,6 @@ images:
 visibility: public
 allow:
   - { rule: distroless, image: "", why: "rongo shells out to git and universal-ctags, both need a userland" }
-  - { rule: handrolled, path: backend/internal/edges/extract.go, why: "health route strings it extracts from indexed code, not a route of rongo's" }
 dependabot:
   ignore:
     - ecosystem: gomod
