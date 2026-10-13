@@ -63,10 +63,10 @@ func TestLogging_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
 	}
 }
 
-// TestLogging_aHealthyProbeIsNotLogged: the container probes /healthz every
-// few seconds, and a log that is mostly probes hides everything else. A
-// failing probe still logs.
-func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
+// TestLogging_aProbeIsNotLogged: the container probes /healthz and /readyz
+// every few seconds, and a log that is mostly probes hides everything else.
+// A failing one neither: kit logs readiness transitions, not probes.
+func TestLogging_aProbeIsNotLogged(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
@@ -77,7 +77,9 @@ func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
 		w.WriteHeader(status)
 	}))
 
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	for _, p := range []string{"/healthz", "/readyz"} {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, p, nil))
+	}
 	if buf.Len() != 0 {
 		t.Errorf("a healthy probe was logged: %s", buf.String())
 	}
@@ -89,9 +91,9 @@ func TestLogging_aHealthyProbeIsNotLogged(t *testing.T) {
 
 	buf.Reset()
 	status = http.StatusServiceUnavailable
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if !strings.Contains(buf.String(), "path=/healthz") {
-		t.Errorf("a failing probe was not logged: %s", buf.String())
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if buf.Len() != 0 {
+		t.Errorf("a failing probe was logged per request: %s", buf.String())
 	}
 }
 

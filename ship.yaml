@@ -14,8 +14,6 @@ visibility: public
 allow:
   - { rule: distroless, image: "", why: "rongo shells out to git and universal-ctags, both need a userland" }
   - { rule: handrolled, path: backend/internal/edges/extract.go, why: "health route strings it extracts from indexed code, not a route of rongo's" }
-  - { rule: handrolled, path: backend/cmd/rongo/main.go, why: "shutdown moves to kit/run and kit/httpx in the follow-up" }
-  - { rule: handrolled, path: backend/internal/auth/oidc.go, why: "OIDC moves to kit/auth in the follow-up" }
 dependabot:
   ignore:
     - ecosystem: gomod

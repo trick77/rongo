@@ -16,6 +16,7 @@ import (
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
+	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/version"
 )
 
@@ -131,14 +132,16 @@ type Threads interface {
 // the feature is unconfigured; its endpoints answer 503.
 type Deps struct {
 	Auth *auth.Service
-	// OIDC drives the login redirect and the callback. An interface, not the
-	// concrete *auth.OIDCService, so a test can make a callback fail without a
+	// OIDC drives the login redirect and the callback. An interface, not
+	// ship/kit/auth's concrete *OIDC, so a test can make a callback fail without a
 	// provider. Nil means this deployment has no OIDC (dev or token mode), and
 	// the two auth routes say so with a 503.
 	OIDC OIDCService
 	// OIDCAdminGroup is the group that grants admin. Empty means no check; see
 	// auth.Service.CreateSessionFromClaims.
 	OIDCAdminGroup string
+	// Ready is what /readyz checks; none means ready while the process serves.
+	Ready []httpx.Check
 	// CookieSecure marks the session cookie Secure. It comes from the OIDC
 	// redirect URL or, in password mode, BACKEND_COOKIE_SECURE, because
 	// behind a TLS-terminating proxy the process only ever sees plain HTTP
@@ -185,11 +188,11 @@ type Memories interface {
 }
 
 // OIDCService is the login half of authentication, as the HTTP layer needs it.
-// *auth.OIDCService satisfies it structurally.
+// ship/kit/auth's *OIDC satisfies it structurally; Callback clears the transient
+// cookies whatever the outcome.
 type OIDCService interface {
-	StartLogin(w http.ResponseWriter, r *http.Request)
-	HandleCallback(r *http.Request) (auth.Claims, error)
-	ClearTransientCookies(w http.ResponseWriter)
+	Start(w http.ResponseWriter, r *http.Request)
+	Callback(w http.ResponseWriter, r *http.Request) (auth.Claims, error)
 }
 
 // Server routes requests and owns the middleware chain.
@@ -225,7 +228,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // routes is the single place every route is registered.
 func (s *Server) routes() {
-	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	// kit's probes: /healthz is liveness and checks nothing, /readyz runs
+	// Ready. The access log leaves healthy ones out.
+	httpx.Health(s.mux, slog.Default(), s.deps.Ready...)
 	// Login and callback sit outside requireAuth: a caller who still has to
 	// sign in has no session, and gating them would be a redirect loop.
 	// Logout does not, because revoking a session needs one.
@@ -348,11 +353,6 @@ func crossSite(r *http.Request) bool {
 	// sees only 403s.
 	slog.Warn("cross-site request refused", "origin_host", u.Host, "host", r.Host, "forwarded_host", fwd)
 	return true
-}
-
-func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
