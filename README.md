@@ -74,9 +74,10 @@ password is stored as a bcrypt hash made with `rongo -hash-password`, see
 ## Development
 
 ```
+make hooks       # once per clone: ship's pre-push gate
+make check       # the whole gate CI runs (ship, configured in ship.yaml)
 make test        # Go tests
 make fe-test     # typecheck and frontend tests
-make coverage    # both, with the 75% floor CI enforces
 make build       # bin/rongo with the UI embedded
 ```
 

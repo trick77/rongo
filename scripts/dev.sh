@@ -1,14 +1,14 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
 # Documented in the README as the way to set anything for `make dev`.
 # Values below still win where this script forces dev-specific settings
 # (addr, auth mode); only unset ones fall through from .env.
 if [ -f "$ROOT/.env" ]; then
   set -a
-  # shellcheck disable=SC1090
+  # shellcheck disable=SC1090,SC1091
   . "$ROOT/.env"
   set +a
 fi

@@ -1,73 +1,117 @@
 version: 2
 updates:
-  # Go backend
   - package-ecosystem: gomod
     directory: /backend
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
     schedule:
       interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
     groups:
-      go-minor-and-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
+      gomod-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      gomod-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
     ignore:
-      # PINNED AT v0.23.3 BY sqlite-vec-go-bindings, NOT BY PREFERENCE.
-      #
-      # rongo uses sqlite-vec for semantic search, and its Go bindings are welded
-      # to this driver's older API and host-function ABI. Two distinct breakages,
-      # both verified against the real suite in peeq (peeq PR #2; same driver
-      # and bindings versions here):
-      #
-      #   >= v0.33.0  compile error: sqlite-vec-go-bindings/ncruces/init.go
-      #               references sqlite3.Binary, removed in v0.33.0. (Present
-      #               through v0.32.0, absent from v0.33.0 on.)
-      #
-      #   == v0.32.0  COMPILES, then fails at runtime with
-      #               `ping sqlite: "go_final" is not exported in module "env"`,
-      #               a wazero host-ABI mismatch. This is the dangerous one:
-      #               `go build` passes, so a version-only review would call it
-      #               safe and ship a backend that cannot open a database.
-      #
-      # No fix is available upstream: sqlite-vec-go-bindings' latest release is
-      # v0.1.7-alpha.2, which is exactly what backend/go.mod already pins.
-      #
-      # TO REVISIT: when sqlite-vec-go-bindings publishes a release above
-      # v0.1.7-alpha.2, drop this ignore and let Dependabot retry. Verify with
-      # `CGO_ENABLED=1 go test -race ./...`, never with `go build` alone; see
-      # the v0.32.0 case above for why.
-      - dependency-name: github.com/ncruces/go-sqlite3
+      # sqlite-vec-go-bindings v0.1.7-alpha.2 is welded to v0.23.3: v0.32.0 builds then fails at runtime, v0.33.0 does not compile; bump both or neither
+      - dependency-name: "github.com/ncruces/go-sqlite3"
 
-  # React frontend
   - package-ecosystem: npm
     directory: /ui
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
     schedule:
       interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
     groups:
-      # First matching group wins, so the specific group comes first and the
-      # catch-all stays last. vite, its react plugin, vitest and its coverage
+      # First matching group wins, so the specific groups come first and the
+      # catch-alls stay last. vite, its react plugin, vitest and its coverage
       # provider are one dependency family: vitest pins a vite major range and
       # @vitest/coverage-v8 pins vitest's exact version, so bumping any one
       # alone fails npm ci on ERESOLVE (or nests a second vite). They always
-      # travel together.
+      # travel together. @tailwindcss/vite peer-depends on vite's major too.
       vite-and-vitest:
-        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*"]
-      npm-minor-and-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "@tailwindcss/vite"]
+      # Pinned exact; a release may format differently and fail the gate's
+      # format:check, so it never blocks the other bumps: its own PR,
+      # reformatted there.
+      prettier:
+        patterns: ["prettier"]
+      # A new rule or recommended-set change can fail the gate's lint: its own
+      # PR, findings fixed there. typescript-eslint, @eslint/js and the
+      # eslint-config-*/eslint-plugin-* packages track eslint's major.
+      eslint:
+        patterns: ["eslint", "eslint-*", "typescript-eslint", "@eslint/*"]
+      npm-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      npm-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    ignore:
+      # typescript-eslint's peer dependency takes typescript <6.1.0: any newer
+      # one, minor included, fails npm ci on ERESOLVE. Lift this (and
+      # conform's typescriptCap) once typescript-eslint supports newer TS.
+      - dependency-name: "typescript"
+        versions: [">=6.1.0"]
 
-  # GitHub Actions
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ["*"]
-
-  # Container base image (backend/Containerfile).
+  # Base images in the Containerfile.
   - package-ecosystem: docker
     directory: /backend
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
     schedule:
       interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
     groups:
-      docker:
-        patterns: ["*"]
+      docker-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      docker-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+
+  - package-ecosystem: github-actions
+    directory: /
+    commit-message: { prefix: deps }   # Go style: "deps: bump …"
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    groups:
+      actions-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+      actions-major:
+        patterns:
+          - "*"
+        update-types:
+          - major

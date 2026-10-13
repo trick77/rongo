@@ -1,7 +1,7 @@
 name: CI
 
-# Tests run on pull requests (feature branches). Master does not run tests — it
-# builds and pushes the image (see release.yaml). No image build happens here.
+# Every pull request, fork PRs included (read-only token, no secrets): Dependabot and outside contributors have no
+# pre-push hook. Own pushes are gated by the hook already. By hand: gh workflow run CI --ref <branch>
 on:
   pull_request:
     branches: [master]
@@ -15,105 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: golangci-lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: backend/go.mod
-          cache: false
-      # Pinned so CI runs the same version developers run locally. The family
-      # moved off v2.11 because its G706 log-injection check went red here on
-      # findings that did not reproduce locally; the linter version is a
-      # free-form input, so Dependabot cannot keep this honest.
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13
-          working-directory: backend
-
-  backend:
-    name: Backend (build + test)
-    runs-on: ubuntu-latest
-    steps:
-      # fetch-depth: 0 — scripts/patch-coverage.sh diffs the branch against the PR
-      # base, which needs real history. The default shallow checkout leaves the
-      # base ref unresolvable and the gate exits 2.
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          # Read the version from go.mod rather than pinning it here, so the
-          # toolchain cannot drift from what the module actually declares.
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      # coverage-gate.test.sh exercises the gate's ui branch, which parses the
-      # vitest summary with node, so the backend job needs a node too.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-      - run: pip install diff-cover==10.3.0
-      # universal-ctags is not a test fixture: the indexer shells out to
-      # it, and rongo verifies at startup that ctags is the universal
-      # build rather than the BSD one. Without it the tests that walk a real
-      # fixture repository fail for the wrong reason.
-      - name: Install universal-ctags
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
-      - run: cd backend && go build ./...
-      - run: cd backend && go vet ./...
-      # gofmt is not covered by `go vet`. Run it from the repo root, not
-      # backend/: scripts/strip-comment-lines.go is outside the module, so
-      # `go vet ./...` above never sees it, and patch-coverage.sh runs it on
-      # every build.
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "::error::These files are not gofmt'd. Run: gofmt -w ."
-            echo "$unformatted"
-            exit 1
-          fi
-      # The floor gate (inside make backend-coverage) runs before the patch
-      # gate: when a PR drops the project below the floor the absolute number
-      # is the more actionable failure.
-      # The gate scripts decide whether a PR may merge, so they run before the
-      # gates themselves: a fail-closed regression in coverage-gate.sh aborts
-      # the job at the gate step, and a self-test after it would never run to
-      # explain why.
-      - name: Gate self-tests
-        run: |
-          ./scripts/coverage-gate.test.sh
-          ./scripts/strip-comment-lines.test.sh
-      - run: make backend-coverage
-      - name: Backend patch coverage
-        run: ./scripts/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
-
-  ui:
-    name: UI (build + test)
-    runs-on: ubuntu-latest
-    steps:
-      # fetch-depth: 0 — see the backend job.
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install diff-cover==10.3.0
-      - run: cd ui && npm ci
-      # `npm run build` is `tsc -b && vite build`, so this is the typecheck too.
-      - run: cd ui && npm run build
-      - run: make fe-coverage
-      - name: UI patch coverage
-        run: ./scripts/patch-coverage.sh "origin/${{ github.base_ref || 'master' }}"
+  check:
+    uses: trick77/ship/.github/workflows/check.yaml@master
+    with:
+      go-dir: backend
+      node-version: "26"
