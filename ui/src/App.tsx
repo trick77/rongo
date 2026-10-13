@@ -17,12 +17,22 @@ import { RailLink } from "./RailLink";
 import SharedLinks from "./share/SharedLinks";
 import MemoryPage from "./memory/MemoryPage";
 import { PlusIcon } from "./icons";
-import { navigate, pathForRoute, routeFromLocation, type Route } from "./routing";
+import {
+  navigate,
+  pathForRoute,
+  routeFromLocation,
+  type Route,
+} from "./routing";
 import { tabTitle } from "./tabTitle";
 
 type Page = "ask" | "threads" | "projects" | "shared" | "memory";
 
-type Me = { subject: string; email: string; is_admin: boolean; version: string };
+type Me = {
+  subject: string;
+  email: string;
+  is_admin: boolean;
+  version: string;
+};
 
 /**
  * The session gate. /api/me is the one request the app makes before it renders
@@ -90,7 +100,9 @@ function useSession(): Session {
       // Password mode: /api/auth/login sent the browser back here with the
       // marker, and the form is the whole sign-in. No /api/me first: it
       // would 401 and send the browser to the login route again.
-      if (new URLSearchParams(window.location.search).get("login") === "password") {
+      if (
+        new URLSearchParams(window.location.search).get("login") === "password"
+      ) {
         setSession({ state: "login" });
         return;
       }
@@ -102,7 +114,10 @@ function useSession(): Session {
         // bounce the user to the provider every time the connection drops, so
         // the app renders and its panels report their own failures.
         if (!cancelled)
-          setSession({ state: "in", me: { subject: "", email: "", is_admin: false, version: "" } });
+          setSession({
+            state: "in",
+            me: { subject: "", email: "", is_admin: false, version: "" },
+          });
         return;
       }
       if (cancelled) return;
@@ -236,15 +251,20 @@ function LoginForm() {
   );
 }
 
-
 /**
  * The index line at the foot of the rail: whether the index is current, and
  * when it last ran. Read from /api/repos, the same status the Repos page
  * shows in full; a list that cannot be loaded shows nothing rather than a
  * warning nobody can act on from here.
  */
-function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when: string } | null {
-  const [status, setStatus] = useState<{ ok: boolean; last: string | null } | null>(null);
+function useIndexStatus(
+  enabled: boolean,
+  version: number,
+): { ok: boolean; when: string } | null {
+  const [status, setStatus] = useState<{
+    ok: boolean;
+    last: string | null;
+  } | null>(null);
   useEffect(() => {
     // Nothing is fetched before the session gate has let the app through:
     // the gate is the one place that decides whether to talk to the server.
@@ -261,7 +281,10 @@ function useIndexStatus(enabled: boolean, version: number): { ok: boolean; when:
         // Only repos still being indexed count: one disabled in the YAML keeps
         // its last error in the record, but nobody is going to fix it here.
         const live = repos.filter((r) => r.enabled);
-        setStatus({ ok: live.every((r) => !r.last_error), last: lastRunAt(live) });
+        setStatus({
+          ok: live.every((r) => !r.last_error),
+          last: lastRunAt(live),
+        });
       } catch {
         // See above.
       }
@@ -289,7 +312,10 @@ export default function App() {
     setNavOpen(false);
   };
   const page: Page =
-    route.view === "threads" || route.view === "projects" || route.view === "shared" || route.view === "memory"
+    route.view === "threads" ||
+    route.view === "projects" ||
+    route.view === "shared" ||
+    route.view === "memory"
       ? route.view
       : "ask";
   const threadId = route.view === "thread" ? route.id : null;
@@ -342,7 +368,14 @@ export default function App() {
   // or not theirs, or they just deleted it. The address is CORRECTED rather
   // than added to, or Back would return to the dead one, the correction would
   // fire again, and Back could never leave the app.
-  const closeDeadThread = useCallback(() => selectThread(null, true), [selectThread]);
+  const closeDeadThread = useCallback(
+    () => selectThread(null, true),
+    [selectThread],
+  );
+  const refreshThreads = useCallback(
+    () => setThreadsVersion((v) => v + 1),
+    [setThreadsVersion],
+  );
   // A thread was deleted from a list: if it is the one on screen, close it,
   // so the view falls back to the empty ask page rather than holding a
   // conversation whose record is gone.
@@ -361,13 +394,12 @@ export default function App() {
   // so this is the only listener needed.
   useEffect(() => {
     const settled = pathForRoute(routeFromLocation());
-    if (window.location.pathname !== settled) window.history.replaceState({}, "", settled);
+    if (window.location.pathname !== settled)
+      window.history.replaceState({}, "", settled);
     const onPop = () => setRoute(routeFromLocation());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-
-  const refreshThreads = useCallback(() => setThreadsVersion((v) => v + 1), []);
 
   // The header's own menu, ../loom's chevron beside the title: the same
   // actions the row offers, for a thread opened by its address whose row
@@ -388,6 +420,7 @@ export default function App() {
   const inRail = threadId !== null && threads.some((t) => t.id === threadId);
   useEffect(() => {
     if (threadId === null || inRail) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the rail's row stands in for the summary
       setSummary(null);
       return;
     }
@@ -422,8 +455,10 @@ export default function App() {
   const openThread =
     threadId === null
       ? null
-      : (threads.find((t) => t.id === threadId) ?? (summary?.id === threadId ? summary : null));
-  const openTitle = openThread && !openThread.title_pending ? openThread.title : null;
+      : (threads.find((t) => t.id === threadId) ??
+        (summary?.id === threadId ? summary : null));
+  const openTitle =
+    openThread && !openThread.title_pending ? openThread.title : null;
 
   // The tab follows the header: the same settled title, the same page name,
   // so a row of tabs can be told apart and a rename reaches the tab strip.
@@ -511,45 +546,57 @@ export default function App() {
               <span className="truncate font-serif text-[19px] font-medium text-accent-strong">
                 {openTitle ?? "New question"}
               </span>
-              {total && <ThreadUsageBadge total={total} onOpen={() => setThreadStats(true)} />}
+              {total && (
+                <ThreadUsageBadge
+                  total={total}
+                  onOpen={() => setThreadStats(true)}
+                />
+              )}
               {/* Last in the row, after the usage: the title is what the
                   reader came for and the figure is what it cost, so the
                   handle on the record comes after both. Withheld, like the
                   row's kebab, while the answer is still being written into
                   this thread. self-center: the row aligns its baselines and
                   a glyph has none worth sitting on. */}
-              {openThread && openTitle !== null && !(busy && busyThread === threadId) && (
-                <span className="relative self-center">
-                  <button
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={headerMenu}
-                    aria-label={"Actions for " + openTitle}
-                    onClick={() => setHeaderMenu((open) => !open)}
-                    className="grid h-6 w-6 place-items-center rounded-md text-muted transition-colors hover:bg-active hover:text-ink"
-                  >
-                    {/* One glyph, turned towards what it opened: down onto
+              {openThread &&
+                openTitle !== null &&
+                !(busy && busyThread === threadId) && (
+                  <span className="relative self-center">
+                    <button
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={headerMenu}
+                      aria-label={"Actions for " + openTitle}
+                      onClick={() => setHeaderMenu((open) => !open)}
+                      className="grid h-6 w-6 place-items-center rounded-md text-muted transition-colors hover:bg-active hover:text-ink"
+                    >
+                      {/* One glyph, turned towards what it opened: down onto
                         the menu below it. Never a swap. */}
-                    <Icon
-                      name="chevronRight"
-                      size="16px"
-                      className={"transition-transform " + (headerMenu ? "rotate-90" : "")}
-                    />
-                  </button>
-                  {headerMenu && (
-                    <ThreadMenuFor
-                      className="right-0"
-                      thread={openThread}
-                      actions={headerActions}
-                      onPick={() => setHeaderMenu(false)}
-                    />
-                  )}
-                </span>
-              )}
+                      <Icon
+                        name="chevronRight"
+                        size="16px"
+                        className={
+                          "transition-transform " +
+                          (headerMenu ? "rotate-90" : "")
+                        }
+                      />
+                    </button>
+                    {headerMenu && (
+                      <ThreadMenuFor
+                        className="right-0"
+                        thread={openThread}
+                        actions={headerActions}
+                        onPick={() => setHeaderMenu(false)}
+                      />
+                    )}
+                  </span>
+                )}
             </>
           ) : (
             <>
-              <span className="font-serif text-[19px] font-medium text-accent-strong">{pageTitles[page]}</span>
+              <span className="font-serif text-[19px] font-medium text-accent-strong">
+                {pageTitles[page]}
+              </span>
               {page === "memory" && memoryCount !== null && (
                 <span className="rounded-full bg-active px-2.5 py-0.5 text-xs">
                   {memoryCount === 1 ? "1 rule" : `${memoryCount} rules`}
@@ -564,8 +611,16 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2 px-2 text-[13px] text-muted lg:gap-3.5 lg:px-5">
-          {session.me.email && <span className="hidden truncate md:inline">{session.me.email}</span>}
-          <button type="button" onClick={() => void logout()} className="hover:text-ink">
+          {session.me.email && (
+            <span className="hidden truncate md:inline">
+              {session.me.email}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="hover:text-ink"
+          >
             Sign out
           </button>
         </div>
@@ -632,16 +687,36 @@ export default function App() {
             {/* Every thread, under the one action, as ../loom's Sidebar has
                 it: the history below is the latest 30, and this is where the
                 rest of it is. */}
-            <RailLink icon="messages" label="Threads" current={page === "threads"} onClick={() => goNav({ view: "threads" })} />
+            <RailLink
+              icon="messages"
+              label="Threads"
+              current={page === "threads"}
+              onClick={() => goNav({ view: "threads" })}
+            />
             {/* The audit view for the links this reader has handed out. On
                 the rail rather than in a settings modal Rongo does not have: a
                 live link is a place, and it has to be somewhere you can go. */}
-            <RailLink icon="upload" label="Shared" current={page === "shared"} onClick={() => goNav({ view: "shared" })} />
-            <RailLink icon="code" label="Projects" current={page === "projects"} onClick={() => goNav({ view: "projects" })} />
+            <RailLink
+              icon="upload"
+              label="Shared"
+              current={page === "shared"}
+              onClick={() => goNav({ view: "shared" })}
+            />
+            <RailLink
+              icon="code"
+              label="Projects"
+              current={page === "projects"}
+              onClick={() => goNav({ view: "projects" })}
+            />
             {/* What rongo keeps in mind for this reader. A place, like Shared:
                 a rule given in chat has to be somewhere you can go and take
                 back. */}
-            <RailLink icon="memory" label="Memory" current={page === "memory"} onClick={() => goNav({ view: "memory" })} />
+            <RailLink
+              icon="memory"
+              label="Memory"
+              current={page === "memory"}
+              onClick={() => goNav({ view: "memory" })}
+            />
           </div>
           {/* No heading over the list: everything below the two actions is
               history, and a label saying so named the obvious. The 20px that
@@ -675,7 +750,10 @@ export default function App() {
               <div className="flex items-center gap-2 rounded-ui border border-border bg-bg px-3.5 py-3 text-[13px] text-muted">
                 <span
                   aria-hidden="true"
-                  className={"h-[7px] w-[7px] rounded-full " + (index.ok ? "bg-online" : "bg-ochre")}
+                  className={
+                    "h-[7px] w-[7px] rounded-full " +
+                    (index.ok ? "bg-online" : "bg-ochre")
+                  }
                 />
                 {index.ok ? "Index current" : "Index has errors"} · {index.when}
               </div>
@@ -712,7 +790,9 @@ export default function App() {
               // Null from Ask is never a reader's choice: it is the thread
               // turning out to be deleted or not theirs. Correct the address
               // rather than push a second entry over the dead one.
-              onThread={(id) => (id === null ? closeDeadThread() : selectThread(id))}
+              onThread={(id) =>
+                id === null ? closeDeadThread() : selectThread(id)
+              }
               onActivity={refreshThreads}
               onBusy={(b, id) => {
                 setBusy(b);
@@ -725,7 +805,9 @@ export default function App() {
                 // list, which is once per streamed token, and a fresh object
                 // each time would re-render the whole shell per token.
                 setUsageTotal((prev) =>
-                  prev && u && prev.tokens === u.tokens && prev.cost === u.cost ? prev : u,
+                  prev && u && prev.tokens === u.tokens && prev.cost === u.cost
+                    ? prev
+                    : u,
                 )
               }
             />
@@ -750,9 +832,11 @@ export default function App() {
               title="Projects"
               intro={
                 <>
-                  A project is one product and the repositories it is built from; the list is
-                  maintained in <code className="font-mono">repos.yaml</code>, and credentials never live
-                  in it. A repo that drops out of the file is removed here too, index and checkout with it.
+                  A project is one product and the repositories it is built
+                  from; the list is maintained in{" "}
+                  <code className="font-mono">repos.yaml</code>, and credentials
+                  never live in it. A repo that drops out of the file is removed
+                  here too, index and checkout with it.
                 </>
               }
             >
@@ -764,13 +848,18 @@ export default function App() {
               title="Memory"
               intro={
                 <>
-                  What rongo keeps in mind for every answer you get. Tell it in chat: “never …”, “from now
-                  on …”, “don't mention … anymore”. A rule outranks the answer's own style rules and never
-                  its sources, its language or your role. A rule stays until you delete it here.
+                  What rongo keeps in mind for every answer you get. Tell it in
+                  chat: “never …”, “from now on …”, “don't mention … anymore”. A
+                  rule outranks the answer's own style rules and never its
+                  sources, its language or your role. A rule stays until you
+                  delete it here.
                 </>
               }
             >
-              <MemoryPage onCount={setMemoryCount} onOpenThread={(id) => selectThread(id)} />
+              <MemoryPage
+                onCount={setMemoryCount}
+                onOpenThread={(id) => selectThread(id)}
+              />
             </PageShell>
           )}
           {page === "shared" && (
@@ -778,8 +867,9 @@ export default function App() {
               title="Shared threads"
               intro={
                 <>
-                  Every link below is readable by anyone who has it, without signing in. A link is frozen at
-                  the turn it was made: later questions are not on it until you update it. Revoking is
+                  Every link below is readable by anyone who has it, without
+                  signing in. A link is frozen at the turn it was made: later
+                  questions are not on it until you update it. Revoking is
                   immediate, and sharing again returns the same link.
                 </>
               }
@@ -801,4 +891,9 @@ export default function App() {
 }
 
 /** The header of each page that is not a thread. */
-const pageTitles = { threads: "Threads", projects: "Projects", memory: "Memory", shared: "Shared" } as const;
+const pageTitles = {
+  threads: "Threads",
+  projects: "Projects",
+  memory: "Memory",
+  shared: "Shared",
+} as const;

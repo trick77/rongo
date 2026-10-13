@@ -12,7 +12,15 @@ import { Chevron } from "./icons";
  * screen of their own stack trace above it. Open, the text is a <pre> capped
  * in height with its own scroll, so a long log never pushes the turn away.
  */
-export default function PasteChip({ text, lines, onRemove }: { text: string; lines: number; onRemove?: () => void }) {
+export default function PasteChip({
+  text,
+  lines,
+  onRemove,
+}: {
+  text: string;
+  lines: number;
+  onRemove?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const label = `Pasted text · ${lines} ${lines === 1 ? "line" : "lines"}`;
 

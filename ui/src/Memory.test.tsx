@@ -20,22 +20,32 @@ afterEach(() => {
 
 describe("memory in the thread", () => {
   it("draws the rule the turn kept, under the answer, with an undo", async () => {
-    streamFrames([
-      ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
-      ev("status", { step: "understanding" }),
-      ev("status", { step: "remembering" }),
-      ev("memory", { id: 7, text: "Never draw flowchart diagrams.", replaced: ["Always draw one."] }),
-      ev("token", { text: 'Noted: "Never draw flowchart diagrams."' }),
-      ev("citations", []),
-      ev("done", { message_id: 5 }),
-    ], { threads: [] });
+    streamFrames(
+      [
+        ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
+        ev("status", { step: "understanding" }),
+        ev("status", { step: "remembering" }),
+        ev("memory", {
+          id: 7,
+          text: "Never draw flowchart diagrams.",
+          replaced: ["Always draw one."],
+        }),
+        ev("token", { text: 'Noted: "Never draw flowchart diagrams."' }),
+        ev("citations", []),
+        ev("done", { message_id: 5 }),
+      ],
+      { threads: [] },
+    );
     const user = userEvent.setup();
     render(
       <StrictMode>
         <Ask />
       </StrictMode>,
     );
-    await user.type(screen.getByLabelText("Question"), "Zeig mir nie wieder Flowcharts.");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "Zeig mir nie wieder Flowcharts.",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     expect(await screen.findByText("Remembered")).toBeTruthy();
@@ -46,20 +56,30 @@ describe("memory in the thread", () => {
   });
 
   it("a turn that only forgot draws the chip with nothing to undo", async () => {
-    streamFrames([
-      ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
-      ev("memory", { removed: ["Keep it short."], scope: "shop", scope_dropped: "" }),
-      ev("token", { text: 'Forgotten: "Keep it short."' }),
-      ev("citations", []),
-      ev("done", { message_id: 5 }),
-    ], { threads: [] });
+    streamFrames(
+      [
+        ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
+        ev("memory", {
+          removed: ["Keep it short."],
+          scope: "shop",
+          scope_dropped: "",
+        }),
+        ev("token", { text: 'Forgotten: "Keep it short."' }),
+        ev("citations", []),
+        ev("done", { message_id: 5 }),
+      ],
+      { threads: [] },
+    );
     const user = userEvent.setup();
     render(
       <StrictMode>
         <Ask />
       </StrictMode>,
     );
-    await user.type(screen.getByLabelText("Question"), "Forget the rule about length.");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "Forget the rule about length.",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     const chip = await screen.findByRole("note", { name: "Memory" });
@@ -69,20 +89,26 @@ describe("memory in the thread", () => {
   });
 
   it("a turn answered by a template shows its text live and offers no re-explain", async () => {
-    streamFrames([
-      ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
-      ev("status", { step: "understanding" }),
-      ev("token", { text: 'Noted: "Never draw flowchart diagrams".' }),
-      ev("citations", []),
-      ev("done", { message_id: 5, sourceless: true }),
-    ], { threads: [] });
+    streamFrames(
+      [
+        ev("thread", { thread_id: "1", title: "x", message_id: 5 }),
+        ev("status", { step: "understanding" }),
+        ev("token", { text: 'Noted: "Never draw flowchart diagrams".' }),
+        ev("citations", []),
+        ev("done", { message_id: 5, sourceless: true }),
+      ],
+      { threads: [] },
+    );
     const user = userEvent.setup();
     render(
       <StrictMode>
         <Ask />
       </StrictMode>,
     );
-    await user.type(screen.getByLabelText("Question"), "Zeig mir nie wieder Flowcharts.");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "Zeig mir nie wieder Flowcharts.",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await screen.findByText(/Noted:/);
@@ -142,7 +168,12 @@ describe("Trace, the remembering step", () => {
             {
               step: "remembering",
               at: t0,
-              detail: { memory: "Never draw flowchart diagrams.", scope: "shop", replaced: ["Always draw one."], removed: ["Keep it short."] },
+              detail: {
+                memory: "Never draw flowchart diagrams.",
+                scope: "shop",
+                replaced: ["Always draw one."],
+                removed: ["Keep it short."],
+              },
             },
           ]}
           state="done"
@@ -163,34 +194,63 @@ describe("Trace, the remembering step", () => {
     const { container } = render(
       <StrictMode>
         <Trace
-          steps={[{ step: "remembering", at: t0, detail: { memory: "Skip the tests.", scope_dropped: "warehouse" } }]}
+          steps={[
+            {
+              step: "remembering",
+              at: t0,
+              detail: { memory: "Skip the tests.", scope_dropped: "warehouse" },
+            },
+          ]}
           state="done"
           startedAt={t0}
           endedAt={t0 + 100}
         />
       </StrictMode>,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("everywhere: warehouse is not indexed");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "everywhere: warehouse is not indexed",
+    );
   });
 
   it("says one standing instruction in the singular", () => {
     const { container } = render(
       <StrictMode>
         <Trace
-          steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 100, completion_tokens: 10, cited: 1, sources: 2, memories: 1 } }]}
+          steps={[
+            {
+              step: "writing",
+              at: t0,
+              detail: {
+                prompt_tokens: 100,
+                completion_tokens: 10,
+                cited: 1,
+                sources: 2,
+                memories: 1,
+              },
+            },
+          ]}
           state="done"
           startedAt={t0}
           endedAt={t0 + 1}
         />
       </StrictMode>,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("1 standing instruction");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "1 standing instruction",
+    );
   });
 
   it("says a rule that could not be written was not kept", () => {
     render(
       <StrictMode>
-        <Trace steps={[{ step: "remembering", at: t0, detail: { refused: "failed" } }]} state="done" startedAt={t0} endedAt={t0 + 1} />
+        <Trace
+          steps={[
+            { step: "remembering", at: t0, detail: { refused: "failed" } },
+          ]}
+          state="done"
+          startedAt={t0}
+          endedAt={t0 + 1}
+        />
       </StrictMode>,
     );
     expect(screen.getByText(/could not be written/)).toBeTruthy();
@@ -199,7 +259,12 @@ describe("Trace, the remembering step", () => {
   it("says a full memory refused the rule", () => {
     render(
       <StrictMode>
-        <Trace steps={[{ step: "remembering", at: t0, detail: { refused: "full" } }]} state="done" startedAt={t0} endedAt={t0 + 1} />
+        <Trace
+          steps={[{ step: "remembering", at: t0, detail: { refused: "full" } }]}
+          state="done"
+          startedAt={t0}
+          endedAt={t0 + 1}
+        />
       </StrictMode>,
     );
     expect(screen.getByText(/the memory is full/)).toBeTruthy();
@@ -209,13 +274,27 @@ describe("Trace, the remembering step", () => {
     const { container } = render(
       <StrictMode>
         <Trace
-          steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 100, completion_tokens: 10, cited: 1, sources: 2, memories: 2 } }]}
+          steps={[
+            {
+              step: "writing",
+              at: t0,
+              detail: {
+                prompt_tokens: 100,
+                completion_tokens: 10,
+                cited: 1,
+                sources: 2,
+                memories: 2,
+              },
+            },
+          ]}
           state="done"
           startedAt={t0}
           endedAt={t0 + 1}
         />
       </StrictMode>,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("2 standing instructions");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "2 standing instructions",
+    );
   });
 });

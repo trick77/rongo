@@ -22,7 +22,9 @@ describe("Icon", () => {
 
   it("hides itself from the accessibility tree without a label", () => {
     const { container } = render(<Icon name="code" />);
-    expect(container.querySelector("span")?.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector("span")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
   });
 
   it("becomes an image with a name when it carries the meaning", () => {

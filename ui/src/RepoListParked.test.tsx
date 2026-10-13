@@ -9,7 +9,8 @@ function respondWith(status: number, body: unknown) {
       ok: status >= 200 && status < 300,
       status,
       json: async () => body,
-      text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+      text: async () =>
+        typeof body === "string" ? body : JSON.stringify(body),
     })),
   );
 }
@@ -48,11 +49,15 @@ describe("parkedSummary", () => {
   it("says nothing at all when nothing is parked", () => {
     // The ordinary case, and the one that has to stay completely quiet: null,
     // not an empty string, so the component draws no paragraph.
-    expect(parkedSummary([repo({}), repo({ name: "shop-backend" })])).toBeNull();
+    expect(
+      parkedSummary([repo({}), repo({ name: "shop-backend" })]),
+    ).toBeNull();
   });
 
   it("counts one parked repository in the singular", () => {
-    expect(line([repo({}), repo({ name: "shop-events", enabled: false })])).toBe(
+    expect(
+      line([repo({}), repo({ name: "shop-events", enabled: false })]),
+    ).toBe(
       "1 repository is disabled and not shown. It keeps its index and is not polled.",
     );
   });
@@ -100,7 +105,9 @@ describe("parkedSummary", () => {
 
   it("treats a repository with no project as a project of its own", () => {
     // The same fallback the page groups by, so the two counts cannot disagree.
-    expect(line([repo({}), repo({ name: "loner", project: "", enabled: false })])).toBe(
+    expect(
+      line([repo({}), repo({ name: "loner", project: "", enabled: false })]),
+    ).toBe(
       "1 repository is disabled and not shown, the project entirely. It keeps its index and is not polled.",
     );
   });
@@ -127,7 +134,13 @@ describe("RepoList with parked repositories", () => {
     // would leave the numbers arguing with the page.
     respondWith(200, [
       repo({ files: 100, chunks: 500, modules: 4 }),
-      repo({ name: "shop-events", enabled: false, files: 999, chunks: 999, modules: 9 }),
+      repo({
+        name: "shop-events",
+        enabled: false,
+        files: 999,
+        chunks: 999,
+        modules: 9,
+      }),
     ]);
 
     render(<RepoList />);
@@ -138,18 +151,25 @@ describe("RepoList with parked repositories", () => {
     expect(screen.getAllByText("100")).toHaveLength(2);
     expect(screen.queryByText("1099")).toBeNull();
     expect(screen.queryByText("999")).toBeNull();
-    expect(screen.getByText(/1 repository is disabled and not shown/)).toBeTruthy();
+    expect(
+      screen.getByText(/1 repository is disabled and not shown/),
+    ).toBeTruthy();
   });
 
   it("says all of it is switched off rather than showing six zeros", async () => {
     // "Nothing is configured" and "all of it is parked" are different facts
     // with different fixes.
-    respondWith(200, [repo({ enabled: false }), repo({ name: "shop-backend", enabled: false })]);
+    respondWith(200, [
+      repo({ enabled: false }),
+      repo({ name: "shop-backend", enabled: false }),
+    ]);
 
     render(<RepoList />);
 
     expect(
-      await screen.findByText(/2 repositories in 1 project are disabled and not shown/),
+      await screen.findByText(
+        /2 repositories in 1 project are disabled and not shown/,
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -157,7 +177,12 @@ describe("RepoList with parked repositories", () => {
   it("groups only what it was given, so the page and the line cannot disagree", () => {
     // byProject is fed the filtered list, which is what drops a wholly parked
     // project's panel; this pins that it is the caller's filter doing it.
-    const all = [repo({}), repo({ name: "crm-api", project: "crm", enabled: false })];
-    expect(byProject(all.filter((r) => r.enabled)).map((p) => p.name)).toEqual(["shop"]);
+    const all = [
+      repo({}),
+      repo({ name: "crm-api", project: "crm", enabled: false }),
+    ];
+    expect(byProject(all.filter((r) => r.enabled)).map((p) => p.name)).toEqual([
+      "shop",
+    ]);
   });
 });

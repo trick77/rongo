@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -21,13 +21,14 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    setupFiles: ["./src/test-setup.ts"],
+    // Globals let Testing Library register its own cleanup after each test.
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
     coverage: {
       provider: "v8",
-      // json-summary is what scripts/coverage-gate.sh reads (the project floor);
-      // lcov is what diff-cover reads in scripts/patch-coverage.sh (patch
-      // coverage); text-summary is for humans reading the CI log.
-      reporter: ["text-summary", "json-summary", "lcov"],
+      // lcov feeds ship's UI floor and patch gate; text-summary is for humans
+      // reading the log.
+      reporter: ["text-summary", "lcov"],
       reportsDirectory: "../coverage/ui",
       // Without an explicit include, the v8 provider only instruments files that
       // some test actually imports. A source file nobody tests then contributes

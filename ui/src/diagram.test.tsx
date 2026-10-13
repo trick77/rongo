@@ -13,7 +13,11 @@ const renderSvg = vi.fn(async (id: string, src: string) => ({
   svg: `<svg id="${id}" data-src="${src.length}"><g class="drawn"></g></svg>`,
 }));
 vi.mock("mermaid", () => ({
-  default: { initialize: vi.fn(), parse: (s: string) => parse(s), render: (i: string, s: string) => renderSvg(i, s) },
+  default: {
+    initialize: vi.fn(),
+    parse: (s: string) => parse(s),
+    render: (i: string, s: string) => renderSvg(i, s),
+  },
 }));
 
 import Diagram, {
@@ -34,13 +38,33 @@ beforeEach(() => {
 
 describe("parseDiagram", () => {
   it("accepts a flow and a sequence, defaulting kind and src", () => {
-    const f = parseDiagram(JSON.stringify({ type: "flow", nodes: [{ id: "a", label: "x" }], edges: [] }));
-    expect(f).toEqual({ type: "flow", nodes: [{ id: "a", label: "x", kind: "step", src: [] }], edges: [] });
+    const f = parseDiagram(
+      JSON.stringify({
+        type: "flow",
+        nodes: [{ id: "a", label: "x" }],
+        edges: [],
+      }),
+    );
+    expect(f).toEqual({
+      type: "flow",
+      nodes: [{ id: "a", label: "x", kind: "step", src: [] }],
+      edges: [],
+    });
     const s = parseDiagram(
-      JSON.stringify({ type: "sequence", actors: [{ id: "u", label: "UI" }], steps: [{ from: "u", to: "u", label: "tick" }] }),
+      JSON.stringify({
+        type: "sequence",
+        actors: [{ id: "u", label: "UI" }],
+        steps: [{ from: "u", to: "u", label: "tick" }],
+      }),
     );
     expect(s?.type).toBe("sequence");
-    expect((s as SequenceSpec).steps[0]).toEqual({ from: "u", to: "u", label: "tick", kind: "call", src: [] });
+    expect((s as SequenceSpec).steps[0]).toEqual({
+      from: "u",
+      to: "u",
+      label: "tick",
+      kind: "call",
+      src: [],
+    });
   });
 
   it("returns null only when there is nothing to draw", () => {
@@ -106,10 +130,11 @@ describe("parseDiagram", () => {
   });
 });
 
-
 describe("diagramSource", () => {
   it("takes a mermaid fence as it is", () => {
-    expect(diagramSource("mermaid", "flowchart LR\n a --> b")).toBe("flowchart LR\n a --> b");
+    expect(diagramSource("mermaid", "flowchart LR\n a --> b")).toBe(
+      "flowchart LR\n a --> b",
+    );
   });
 
   it("converts the older JSON spec whatever the fence says", () => {
@@ -120,21 +145,27 @@ describe("diagramSource", () => {
   });
 
   it("takes a diagram fence holding mermaid text as mermaid", () => {
-    expect(diagramSource("diagram", "sequenceDiagram\n A->>B: hi")).toBe("sequenceDiagram\n A->>B: hi");
+    expect(diagramSource("diagram", "sequenceDiagram\n A->>B: hi")).toBe(
+      "sequenceDiagram\n A->>B: hi",
+    );
   });
 
   it("leaves code alone", () => {
     expect(diagramSource("json", '{"type":"config"}')).toBeNull();
     expect(diagramSource("go", "func main() {}")).toBeNull();
     // A spec the parser rejects is handed on, so the card can say it broke.
-    expect(diagramSource("json", '{"type":"flow","nodes":[]}')).toBe('{"type":"flow","nodes":[]}');
+    expect(diagramSource("json", '{"type":"flow","nodes":[]}')).toBe(
+      '{"type":"flow","nodes":[]}',
+    );
   });
 });
 
 describe("diagramKind and diagramTitle", () => {
   it("reads the type off the first word, past directives and blank lines", () => {
     expect(diagramKind("flowchart LR\n a-->b")).toBe("flowchart");
-    expect(diagramKind("\n%%{init: {}}%%\nsequenceDiagram\n A->>B: x")).toBe("sequenceDiagram");
+    expect(diagramKind("\n%%{init: {}}%%\nsequenceDiagram\n A->>B: x")).toBe(
+      "sequenceDiagram",
+    );
     expect(diagramKind("stateDiagram-v2\n [*] --> A")).toBe("stateDiagram-v2");
     expect(diagramKind("")).toBe("");
     expect(diagramKind('{"type":"flow"}')).toBe("");
@@ -175,30 +206,50 @@ describe("draw", () => {
 
 describe("Diagram", () => {
   it("says a picture is on its way, then draws it", async () => {
-    const { container, getByText } = render(<Diagram src={"sequenceDiagram\n A->>B: hi"} />);
+    const { container, getByText } = render(
+      <Diagram src={"sequenceDiagram\n A->>B: hi"} />,
+    );
     expect(getByText("Drawing the diagram…")).toBeTruthy();
-    await waitFor(() => expect(container.querySelector("svg .drawn")).toBeTruthy());
-    expect(container.querySelector('[role="img"]')?.getAttribute("aria-label")).toBe("Sequence diagram");
+    await waitFor(() =>
+      expect(container.querySelector("svg .drawn")).toBeTruthy(),
+    );
+    expect(
+      container.querySelector('[role="img"]')?.getAttribute("aria-label"),
+    ).toBe("Sequence diagram");
   });
 
   it("says so when the renderer refuses the source, and keeps the source", async () => {
-    const { getByText, container } = render(<Diagram src={"flowchart LR\n bad["} />);
-    await waitFor(() => expect(getByText("Diagram could not be drawn")).toBeTruthy());
-    expect(container.querySelector("details pre code")?.textContent).toBe("flowchart LR\n bad[");
+    const { getByText, container } = render(
+      <Diagram src={"flowchart LR\n bad["} />,
+    );
+    await waitFor(() =>
+      expect(getByText("Diagram could not be drawn")).toBeTruthy(),
+    );
+    expect(container.querySelector("details pre code")?.textContent).toBe(
+      "flowchart LR\n bad[",
+    );
     expect(container.querySelector("svg")).toBeNull();
   });
 
   it("offers the full view and the file, without being hovered first", async () => {
     // A phone has no hover, and the full view is the only way it sees a wide
     // diagram whole.
-    const { getByLabelText } = render(<Diagram src={"sequenceDiagram\n A->>B: x"} />);
-    await waitFor(() => expect(getByLabelText("Sequence diagram: full view")).toBeTruthy());
+    const { getByLabelText } = render(
+      <Diagram src={"sequenceDiagram\n A->>B: x"} />,
+    );
+    await waitFor(() =>
+      expect(getByLabelText("Sequence diagram: full view")).toBeTruthy(),
+    );
     expect(getByLabelText("Sequence diagram: download SVG")).toBeTruthy();
   });
 
   it("opens the full view on the button and closes it again", async () => {
-    const { getByLabelText, queryByRole } = render(<Diagram src={"sequenceDiagram\n A->>B: y"} />);
-    await waitFor(() => expect(getByLabelText("Sequence diagram: full view")).toBeTruthy());
+    const { getByLabelText, queryByRole } = render(
+      <Diagram src={"sequenceDiagram\n A->>B: y"} />,
+    );
+    await waitFor(() =>
+      expect(getByLabelText("Sequence diagram: full view")).toBeTruthy(),
+    );
     expect(queryByRole("dialog")).toBeNull();
     fireEvent.click(getByLabelText("Sequence diagram: full view"));
     expect(queryByRole("dialog")).toBeTruthy();
@@ -209,15 +260,25 @@ describe("Diagram", () => {
 
   it("downloads the drawing under the kind of picture it is", async () => {
     let written = "";
-    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:x" });
-    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
-      this: HTMLAnchorElement,
-    ) {
-      written = this.download;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: () => "blob:x",
     });
-    const { getByLabelText } = render(<Diagram src={"stateDiagram-v2\n [*] --> A"} />);
-    await waitFor(() => expect(getByLabelText("State diagram: download SVG")).toBeTruthy());
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: () => {},
+    });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        written = this.download;
+      });
+    const { getByLabelText } = render(
+      <Diagram src={"stateDiagram-v2\n [*] --> A"} />,
+    );
+    await waitFor(() =>
+      expect(getByLabelText("State diagram: download SVG")).toBeTruthy(),
+    );
     fireEvent.click(getByLabelText("State diagram: download SVG"));
     expect(written).toBe("rongo-state-diagram.svg");
     click.mockRestore();

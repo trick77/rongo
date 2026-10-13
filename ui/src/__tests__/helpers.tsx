@@ -13,7 +13,8 @@ import Ask from "../Ask";
 import { languages } from "../turns";
 
 /** One SSE frame as the server writes it. */
-export const ev = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+export const ev = (name: string, data: unknown) =>
+  `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
 
 export const strict = (ui: ReactNode) => render(<StrictMode>{ui}</StrictMode>);
 
@@ -24,7 +25,10 @@ export const strict = (ui: ReactNode) => render(<StrictMode>{ui}</StrictMode>);
  * finished. threads, when given, is what the thread list request gets
  * instead of the stream.
  */
-export function streamFrames(frames: string[], { status = 200, threads }: { status?: number; threads?: unknown } = {}) {
+export function streamFrames(
+  frames: string[],
+  { status = 200, threads }: { status?: number; threads?: unknown } = {},
+) {
   const encoder = new TextEncoder();
   vi.stubGlobal(
     "fetch",
@@ -65,7 +69,10 @@ export function serve(status: number, body: unknown) {
 
 /** The language list is a listbox, not a native select: the pill opens it
  * and the row is clicked, as the reader does it. */
-export async function pickLanguage(user: ReturnType<typeof userEvent.setup>, code: string) {
+export async function pickLanguage(
+  user: ReturnType<typeof userEvent.setup>,
+  code: string,
+) {
   const name = languages.find((l) => l.code === code)?.name ?? code;
   await user.click(screen.getByRole("combobox", { name: "Answer language" }));
   await user.click(screen.getByRole("option", { name }));

@@ -18,12 +18,22 @@ describe("shouldCollapse", () => {
   });
 
   it("folds on lines as well as on length", () => {
-    expect(shouldCollapse(Array(PASTE_LINE_THRESHOLD).fill("x").join("\n"))).toBe(false);
-    expect(shouldCollapse(Array(PASTE_LINE_THRESHOLD + 1).fill("x").join("\n"))).toBe(true);
+    expect(
+      shouldCollapse(Array(PASTE_LINE_THRESHOLD).fill("x").join("\n")),
+    ).toBe(false);
+    expect(
+      shouldCollapse(
+        Array(PASTE_LINE_THRESHOLD + 1)
+          .fill("x")
+          .join("\n"),
+      ),
+    ).toBe(true);
   });
 
   it("does not count the trailing newline every clipboard carries", () => {
-    expect(shouldCollapse(Array(PASTE_LINE_THRESHOLD).fill("x").join("\n") + "\n")).toBe(false);
+    expect(
+      shouldCollapse(Array(PASTE_LINE_THRESHOLD).fill("x").join("\n") + "\n"),
+    ).toBe(false);
   });
 });
 
@@ -44,7 +54,10 @@ describe("byteLength", () => {
 
 describe("stagePaste", () => {
   it("trims the block and counts its lines", () => {
-    expect(stagePaste("  panic: boom\nmain.go:12\n\n")).toEqual({ text: "panic: boom\nmain.go:12", lines: 2 });
+    expect(stagePaste("  panic: boom\nmain.go:12\n\n")).toEqual({
+      text: "panic: boom\nmain.go:12",
+      lines: 2,
+    });
   });
 });
 
@@ -63,11 +76,17 @@ describe("fold and strip", () => {
 
   it("strips what fold joined, in order", () => {
     const q = fold("Why?", [trace, log]);
-    expect(strip(q, [trace, log])).toEqual({ typed: "Why?", matched: [true, true] });
+    expect(strip(q, [trace, log])).toEqual({
+      typed: "Why?",
+      matched: [true, true],
+    });
   });
 
   it("strips a paste-only question down to nothing", () => {
-    expect(strip(fold("", [trace]), [trace])).toEqual({ typed: "", matched: [true] });
+    expect(strip(fold("", [trace]), [trace])).toEqual({
+      typed: "",
+      matched: [true],
+    });
   });
 
   it("leaves a block inline when it is not where fold put it", () => {
@@ -81,10 +100,16 @@ describe("fold and strip", () => {
 
   it("stops at the first block that does not match, from the tail", () => {
     const q = fold("Why?", [trace, log]);
-    expect(strip(q, [log, trace])).toEqual({ typed: q, matched: [false, false] });
+    expect(strip(q, [log, trace])).toEqual({
+      typed: q,
+      matched: [false, false],
+    });
   });
 
   it("copes with a question the server trimmed", () => {
-    expect(strip(fold("Why?", [trace]).trim(), [trace])).toEqual({ typed: "Why?", matched: [true] });
+    expect(strip(fold("Why?", [trace]).trim(), [trace])).toEqual({
+      typed: "Why?",
+      matched: [true],
+    });
   });
 });

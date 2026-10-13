@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 /** One page of a cursor-paged list: the rows and the cursor for the next. */
 export type Page<T> = { items: T[]; next_cursor: string | null };
@@ -26,7 +32,9 @@ export function useInfiniteList<T>(
   // The latest fetchPage without making it a reset dependency: it is a fresh
   // closure each render and would otherwise reload on every one.
   const fetchPageRef = useRef(fetchPage);
-  fetchPageRef.current = fetchPage;
+  useLayoutEffect(() => {
+    fetchPageRef.current = fetchPage;
+  });
 
   // A reset bumps the request number so a slower request from a previous
   // search cannot land its rows over the newer list.
@@ -34,6 +42,7 @@ export function useInfiniteList<T>(
 
   useEffect(() => {
     const seq = ++requestSeq.current;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a reset keyed on resetKeys, before page one is asked for
     setItems([]);
     setLoaded(false);
     setCursor(null);
@@ -86,7 +95,9 @@ export function useInfiniteList<T>(
   // One observer per sentinel node, routed through a ref so it always calls
   // the latest loadMore, which closes over the current cursor.
   const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
+  useLayoutEffect(() => {
+    loadMoreRef.current = loadMore;
+  });
   const observerRef = useRef<IntersectionObserver | null>(null);
   const nodeRef = useRef<HTMLElement | null>(null);
 
@@ -98,7 +109,8 @@ export function useInfiniteList<T>(
     // rootMargin loads the next page a little before the sentinel is reached.
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current();
+        if (entries.some((entry) => entry.isIntersecting))
+          loadMoreRef.current();
       },
       { rootMargin: "300px" },
     );
@@ -121,5 +133,14 @@ export function useInfiniteList<T>(
 
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
-  return { items, setItems, loaded, loadingMore, hasMore, failed, sentinelRef, loadMore };
+  return {
+    items,
+    setItems,
+    loaded,
+    loadingMore,
+    hasMore,
+    failed,
+    sentinelRef,
+    loadMore,
+  };
 }

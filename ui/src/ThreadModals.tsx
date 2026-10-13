@@ -115,7 +115,11 @@ export function RenameThreadModal({
           <button type="button" className={cancelButton} onClick={onCancel}>
             Cancel
           </button>
-          <button type="submit" className={saveButton} disabled={busy || value.trim() === ""}>
+          <button
+            type="submit"
+            className={saveButton}
+            disabled={busy || value.trim() === ""}
+          >
             Save
           </button>
         </div>
@@ -138,15 +142,26 @@ export function DeleteThreadModal({
   return (
     <ModalShell title="Delete thread" onCancel={onCancel}>
       <p className="mt-3 text-sm/6 text-ink-dim">
-        “{title}” and every question and answer in it are deleted. This cannot be undone.
+        “{title}” and every question and answer in it are deleted. This cannot
+        be undone.
       </p>
       {/* Cancel takes the focus, not Delete: the safe half of an irreversible
           choice is the one Enter should land on. */}
       <div className="mt-4 flex justify-end gap-2">
-        <button autoFocus type="button" className={cancelButton} onClick={onCancel}>
+        <button
+          autoFocus
+          type="button"
+          className={cancelButton}
+          onClick={onCancel}
+        >
           Cancel
         </button>
-        <button type="button" className={dangerButton} disabled={busy} onClick={onDelete}>
+        <button
+          type="button"
+          className={dangerButton}
+          disabled={busy}
+          onClick={onDelete}
+        >
           Delete
         </button>
       </div>

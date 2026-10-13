@@ -9,10 +9,14 @@ import { useEffect, useState } from "react";
  * drawings that use this (Mermaid, PlantUML) are module functions that turn a
  * failure into a value.
  */
-export function useResolved<T>(key: string, load: (key: string) => Promise<T>): T | null {
+export function useResolved<T>(
+  key: string,
+  load: (key: string) => Promise<T>,
+): T | null {
   const [out, setOut] = useState<T | null>(null);
   useEffect(() => {
     let live = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- null from the moment the key changes, see above
     setOut(null);
     load(key).then((d) => {
       if (live) setOut(d);

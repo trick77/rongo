@@ -38,7 +38,10 @@ export function useThreadActions({
   // The thread whose link is being handed out, and the link it already has.
   // Fetched before the dialog opens, so it never flashes "Share thread" at
   // someone whose thread is already shared.
-  const [sharing, setSharing] = useState<{ thread: Thread; share: Share | null } | null>(null);
+  const [sharing, setSharing] = useState<{
+    thread: Thread;
+    share: Share | null;
+  } | null>(null);
   const [pending, setPending] = useState(false);
 
   /**
@@ -50,7 +53,10 @@ export function useThreadActions({
   async function star(t: Thread) {
     const starred = !t.starred;
     try {
-      const res = await fetch(`/api/threads/${t.id}/${starred ? "star" : "unstar"}`, { method: "POST" });
+      const res = await fetch(
+        `/api/threads/${t.id}/${starred ? "star" : "unstar"}`,
+        { method: "POST" },
+      );
       if (!res.ok) return;
       onStarred(t.id, starred);
     } catch {

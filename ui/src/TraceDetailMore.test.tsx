@@ -10,44 +10,98 @@ describe("Trace, the remaining step details", () => {
   it("says what the answer cost and how much of the material it cited", () => {
     strict(
       <Trace
-        steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 26300, completion_tokens: 897, cited: 10, sources: 155 } }]}
+        steps={[
+          {
+            step: "writing",
+            at: t0,
+            detail: {
+              prompt_tokens: 26300,
+              completion_tokens: 897,
+              cited: 10,
+              sources: 155,
+            },
+          },
+        ]}
         state="done"
         startedAt={t0}
         endedAt={t0 + 100}
       />,
     );
-    expect(screen.getByText(/26.3k tokens in · 897 tokens out · 10 of 155 sources cited/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /26.3k tokens in · 897 tokens out · 10 of 155 sources cited/,
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText(/retried/)).toBeNull();
   });
 
   it("says that the answer took a second call", () => {
     const { container } = strict(
       <Trace
-        steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 12000, completion_tokens: 800, cited: 3, sources: 12, attempts: 2 } }]}
+        steps={[
+          {
+            step: "writing",
+            at: t0,
+            detail: {
+              prompt_tokens: 12000,
+              completion_tokens: 800,
+              cited: 3,
+              sources: 12,
+              attempts: 2,
+            },
+          },
+        ]}
         state="done"
         startedAt={t0}
         endedAt={t0 + 100}
       />,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("3 of 12 sources cited · retried once");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "3 of 12 sources cited · retried once",
+    );
   });
 
   it("says which commits a basis re-read from the record came from", () => {
     const { container } = strict(
       <Trace
-        steps={[{ step: "writing", at: t0, detail: { prompt_tokens: 9000, completion_tokens: 400, cited: 2, sources: 5, read_at: ["peeq 0123456", "loom abcdef0"] } }]}
+        steps={[
+          {
+            step: "writing",
+            at: t0,
+            detail: {
+              prompt_tokens: 9000,
+              completion_tokens: 400,
+              cited: 2,
+              sources: 5,
+              read_at: ["peeq 0123456", "loom abcdef0"],
+            },
+          },
+        ]}
         state="done"
         startedAt={t0}
         endedAt={t0 + 100}
       />,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("2 of 5 sources cited · read at peeq 0123456loom abcdef0");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "2 of 5 sources cited · read at peeq 0123456loom abcdef0",
+    );
   });
 
   it("names a pinned thread's scope, a corpus-wide ask, and the repositories left out", () => {
     const { rerender } = strict(
       <Trace
-        steps={[{ step: "understanding", at: t0, detail: { repos: ["peeq"], pinned: true, unknown_repos: ["loom"], outside_repos: ["rongo"] } }]}
+        steps={[
+          {
+            step: "understanding",
+            at: t0,
+            detail: {
+              repos: ["peeq"],
+              pinned: true,
+              unknown_repos: ["loom"],
+              outside_repos: ["rongo"],
+            },
+          },
+        ]}
         state="running"
         startedAt={t0}
       />,
@@ -58,34 +112,65 @@ describe("Trace, the remaining step details", () => {
 
     rerender(
       <StrictMode>
-        <Trace steps={[{ step: "understanding", at: t0, detail: { all_repos: true } }]} state="running" startedAt={t0} />
+        <Trace
+          steps={[
+            { step: "understanding", at: t0, detail: { all_repos: true } },
+          ]}
+          state="running"
+          startedAt={t0}
+        />
       </StrictMode>,
     );
-    expect(screen.getByText(/every indexed project, as the question asked/)).toBeTruthy();
+    expect(
+      screen.getByText(/every indexed project, as the question asked/),
+    ).toBeTruthy();
   });
 
   it("draws a search that found nothing, and an answer decided by the judge without the rule note", () => {
     const { container, rerender } = strict(
-      <Trace steps={[{ step: "searching", at: t0, detail: { hits: 0 } }]} state="running" startedAt={t0} />,
+      <Trace
+        steps={[{ step: "searching", at: t0, detail: { hits: 0 } }]}
+        state="running"
+        startedAt={t0}
+      />,
     );
-    expect(container.querySelector(".trace-detail")?.textContent).toContain("0 hits");
+    expect(container.querySelector(".trace-detail")?.textContent).toContain(
+      "0 hits",
+    );
 
     rerender(
       <StrictMode>
         <Trace
-          steps={[{ step: "routing", at: t0, detail: { decision: "ask", rung: "judge", candidates: ["a", "b"] } }]}
+          steps={[
+            {
+              step: "routing",
+              at: t0,
+              detail: {
+                decision: "ask",
+                rung: "judge",
+                candidates: ["a", "b"],
+              },
+            },
+          ]}
           state="waiting"
           startedAt={t0}
           endedAt={t0 + 1}
         />
       </StrictMode>,
     );
-    expect(screen.getByText(/Asking back: the matches are independent alternatives/)).toBeTruthy();
+    expect(
+      screen.getByText(/Asking back: the matches are independent alternatives/),
+    ).toBeTruthy();
     expect(screen.queryByText(/decided by rule/)).toBeNull();
 
     rerender(
       <StrictMode>
-        <Trace steps={[{ step: "suggesting", at: t0, detail: { anything: 1 } }]} state="done" startedAt={t0} endedAt={t0 + 1} />
+        <Trace
+          steps={[{ step: "suggesting", at: t0, detail: { anything: 1 } }]}
+          state="done"
+          startedAt={t0}
+          endedAt={t0 + 1}
+        />
       </StrictMode>,
     );
     expect(container.querySelector(".trace-detail")).toBeNull();

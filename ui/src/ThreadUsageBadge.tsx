@@ -12,7 +12,13 @@ import { money, tokens, type ThreadTotal } from "./turns";
  * becomes the way into the thread's stats; the shared page passes none and it
  * stays a label, because a share carries the total and nothing behind it.
  */
-export default function ThreadUsageBadge({ total, onOpen }: { total: ThreadTotal; onOpen?: () => void }) {
+export default function ThreadUsageBadge({
+  total,
+  onOpen,
+}: {
+  total: ThreadTotal;
+  onOpen?: () => void;
+}) {
   const figures = (
     <>
       thread <span className="text-muted">{tokens(total.tokens)}</span>
@@ -24,7 +30,8 @@ export default function ThreadUsageBadge({ total, onOpen }: { total: ThreadTotal
       )}
     </>
   );
-  const shape = "ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block";
+  const shape =
+    "ml-2 hidden shrink-0 whitespace-nowrap font-mono text-xs text-faint sm:inline-block";
   if (!onOpen) {
     return (
       <span aria-label="Thread usage" className={shape}>
@@ -33,7 +40,12 @@ export default function ThreadUsageBadge({ total, onOpen }: { total: ThreadTotal
     );
   }
   return (
-    <button type="button" aria-label="Thread token stats" onClick={onOpen} className={shape + " hover:text-muted"}>
+    <button
+      type="button"
+      aria-label="Thread token stats"
+      onClick={onOpen}
+      className={shape + " hover:text-muted"}
+    >
       {figures}
     </button>
   );

@@ -119,7 +119,10 @@ const FINISHED_MAX = 256;
  * Never for a fence still being written — every token would add an entry for
  * a text that is gone a moment later, and push the finished blocks out.
  */
-export function highlightFinished(code: string, lang: string | null): ReactNode[] {
+export function highlightFinished(
+  code: string,
+  lang: string | null,
+): ReactNode[] {
   if (!lang) return [code];
   const key = lang + "\u0000" + code;
   const hit = finished.get(key);
@@ -146,7 +149,10 @@ export function highlightFinished(code: string, lang: string | null): ReactNode[
  * first one. The tree is split at every newline; the spans open at that
  * point are re-opened on the next line.
  */
-export function highlightLines(code: string, lang: string | null): ReactNode[][] {
+export function highlightLines(
+  code: string,
+  lang: string | null,
+): ReactNode[][] {
   if (!lang) return code.split("\n").map((l) => [l]);
   const tree: Root = low.highlight(lang, code);
   const lines: ElementContent[][] = [[]];
@@ -174,7 +180,9 @@ export function highlightLines(code: string, lang: string | null): ReactNode[][]
   // tip is the children array new nodes go into: the innermost open element
   // on the current line, or the line itself.
   function tip(stack: Element[]): ElementContent[] {
-    return stack.length > 0 ? stack[stack.length - 1].children : lines[lines.length - 1];
+    return stack.length > 0
+      ? stack[stack.length - 1].children
+      : lines[lines.length - 1];
   }
 
   // reopen builds the next line with empty copies of the open elements nested

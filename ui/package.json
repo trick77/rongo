@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "lint": "eslint . --max-warnings 0 && npm run format:check",
+    "format": "prettier --write 'src/**/*.{ts,tsx,css}' '*.ts'",
+    "format:check": "prettier --check 'src/**/*.{ts,tsx,css}' '*.ts'",
     "test": "vitest run"
   },
   "keywords": [],
@@ -22,7 +25,9 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.4",
     "@types/hast": "^3.0.5",
@@ -30,9 +35,14 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^5.0.0",
+    "eslint": "10.12.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
     "jsdom": "^30.0.1",
+    "prettier": "3.9.10",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.2",
     "vite": "^8.2.1",
     "vitest": "^5.0.0"
   }

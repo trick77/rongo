@@ -14,7 +14,13 @@ import { withStep, type Turn, type Usage } from "./turns";
  * defensively, field by field, because a turn must survive an event shaped
  * by a newer or an older backend than this page.
  */
-export function applyEvent(t: Turn, name: string, payload: any, now: number): Turn {
+export function applyEvent(
+  t: Turn,
+  name: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- read defensively, field by field, see above
+  payload: any,
+  now: number,
+): Turn {
   switch (name) {
     case "thread":
       // The turn is on record now, in the language the record took. That is
@@ -23,7 +29,12 @@ export function applyEvent(t: Turn, name: string, payload: any, now: number): Tu
       // composer, follow the server rather than the guess.
       return { ...t, recorded: true, language: payload.language ?? t.language };
     case "status":
-      return withStep(t, payload.step, now, typeof payload.at === "number" ? payload.at : undefined);
+      return withStep(
+        t,
+        payload.step,
+        now,
+        typeof payload.at === "number" ? payload.at : undefined,
+      );
     case "detail": {
       // What the step found, attached to the LATEST step of that name: a
       // step's detail arrives once the step is done, and "searching" can run
@@ -70,7 +81,13 @@ export function applyEvent(t: Turn, name: string, payload: any, now: number): Tu
       // The id comes with the failure too, not only with done: asking again
       // is another attempt at THIS question, and the request can only say so
       // if the turn knows which row it is.
-      return { ...t, error: payload.message, done: true, endedAt: now, messageId: payload.message_id ?? t.messageId };
+      return {
+        ...t,
+        error: payload.message,
+        done: true,
+        endedAt: now,
+        messageId: payload.message_id ?? t.messageId,
+      };
     case "done":
       return {
         ...t,

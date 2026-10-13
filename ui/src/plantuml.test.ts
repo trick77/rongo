@@ -7,7 +7,13 @@ const renderToString = vi.fn();
 vi.mock("@plantuml/core", () => ({ renderToString }));
 vi.mock("@plantuml/core/themes.js", () => ({}));
 
-import { clean, diagrams, drawPlantUml, isPlantUml, renderTimeoutMs } from "./plantuml";
+import {
+  clean,
+  diagrams,
+  drawPlantUml,
+  isPlantUml,
+  renderTimeoutMs,
+} from "./plantuml";
 
 beforeEach(() => {
   renderToString.mockReset();
@@ -27,7 +33,8 @@ describe("isPlantUml", () => {
 
 describe("diagrams", () => {
   it("splits a file into its blocks and drops what lies between them", () => {
-    const text = "' header\n@startuml\nA -> B\n@enduml\n\nnoise\n@startmindmap\n* root\n@endmindmap\n";
+    const text =
+      "' header\n@startuml\nA -> B\n@enduml\n\nnoise\n@startmindmap\n* root\n@endmindmap\n";
     expect(diagrams(text)).toEqual([
       ["@startuml", "A -> B", "@enduml"],
       ["@startmindmap", "* root", "@endmindmap"],
@@ -35,14 +42,18 @@ describe("diagrams", () => {
   });
 
   it("keeps an unclosed block, and hands a file with none over whole", () => {
-    expect(diagrams("@startuml\r\nA -> B\r\n")).toEqual([["@startuml", "A -> B", ""]]);
+    expect(diagrams("@startuml\r\nA -> B\r\n")).toEqual([
+      ["@startuml", "A -> B", ""],
+    ]);
     expect(diagrams("A -> B")).toEqual([["A -> B"]]);
   });
 });
 
 describe("clean", () => {
   it("strips script and handlers and keeps the drawing", () => {
-    const out = clean('<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>x()</script><rect width="4"/></svg>');
+    const out = clean(
+      '<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>x()</script><rect width="4"/></svg>',
+    );
     expect(out).not.toContain("script");
     expect(out).not.toContain("onload");
     expect(out).toContain("<rect");
@@ -53,19 +64,26 @@ describe("drawPlantUml", () => {
   it("draws every block, one at a time, and closes the engine's own fetches", async () => {
     let running = 0;
     let most = 0;
-    renderToString.mockImplementation((lines: string[], ok: (s: string) => void) => {
-      most = Math.max(most, ++running);
-      setTimeout(() => {
-        running--;
-        ok(`<svg><text>${lines[1]}</text></svg>`);
-      }, 1);
+    renderToString.mockImplementation(
+      (lines: string[], ok: (s: string) => void) => {
+        most = Math.max(most, ++running);
+        setTimeout(() => {
+          running--;
+          ok(`<svg><text>${lines[1]}</text></svg>`);
+        }, 1);
+      },
+    );
+
+    const out = await drawPlantUml(
+      "@startuml\nfirst\n@enduml\n@startuml\nsecond\n@enduml",
+    );
+
+    expect(out).toEqual({
+      svgs: ["<svg><text>first</text></svg>", "<svg><text>second</text></svg>"],
     });
-
-    const out = await drawPlantUml("@startuml\nfirst\n@enduml\n@startuml\nsecond\n@enduml");
-
-    expect(out).toEqual({ svgs: ["<svg><text>first</text></svg>", "<svg><text>second</text></svg>"] });
     expect(most).toBe(1);
-    const loader = (globalThis as Record<string, unknown>).PLANTUML_STDLIB_LOADER as (
+    const loader = (globalThis as Record<string, unknown>)
+      .PLANTUML_STDLIB_LOADER as (
       url: string,
       ok: () => void,
       fail: (m: string) => void,
@@ -76,24 +94,36 @@ describe("drawPlantUml", () => {
   });
 
   it("draws a diagram of any size: the engine's own cap is off", async () => {
-    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) =>
+      ok("<svg></svg>"),
+    );
     await drawPlantUml("@startuml\nBig -> Diagram\n@enduml");
     expect(renderToString.mock.calls[0][3]).toEqual({ maxSvgSize: 0 });
   });
 
   it("draws a file once, however often it is opened", async () => {
-    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) =>
+      ok("<svg></svg>"),
+    );
     await drawPlantUml("@startuml\nonce\n@enduml");
     await drawPlantUml("@startuml\nonce\n@enduml");
     expect(renderToString).toHaveBeenCalledTimes(1);
   });
 
   it("answers an engine failure with its message and tries again next time", async () => {
-    renderToString.mockImplementationOnce((_l: string[], _ok: unknown, fail: (m: string) => void) => fail("boom"));
-    expect(await drawPlantUml("@startuml\nretry\n@enduml")).toEqual({ error: "boom" });
+    renderToString.mockImplementationOnce(
+      (_l: string[], _ok: unknown, fail: (m: string) => void) => fail("boom"),
+    );
+    expect(await drawPlantUml("@startuml\nretry\n@enduml")).toEqual({
+      error: "boom",
+    });
 
-    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
-    expect(await drawPlantUml("@startuml\nretry\n@enduml")).toEqual({ svgs: ["<svg></svg>"] });
+    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) =>
+      ok("<svg></svg>"),
+    );
+    expect(await drawPlantUml("@startuml\nretry\n@enduml")).toEqual({
+      svgs: ["<svg></svg>"],
+    });
   });
 });
 
@@ -106,8 +136,12 @@ describe("a render that never answers", () => {
       await vi.advanceTimersByTimeAsync(renderTimeoutMs);
       expect(await stuck).toEqual({ error: "the engine did not finish" });
 
-      renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
-      expect(await drawPlantUml("@startuml\nnext\n@enduml")).toEqual({ svgs: ["<svg></svg>"] });
+      renderToString.mockImplementation(
+        (_l: string[], ok: (s: string) => void) => ok("<svg></svg>"),
+      );
+      expect(await drawPlantUml("@startuml\nnext\n@enduml")).toEqual({
+        svgs: ["<svg></svg>"],
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -119,18 +153,26 @@ describe("loading the layout engine", () => {
     vi.resetModules();
     delete (globalThis as Record<string, unknown>).Viz;
     const fresh = await import("./plantuml");
-    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) => ok("<svg></svg>"));
+    renderToString.mockImplementation((_l: string[], ok: (s: string) => void) =>
+      ok("<svg></svg>"),
+    );
 
     const failed = fresh.drawPlantUml("@startuml\nA\n@enduml");
-    await vi.waitFor(() => expect(document.head.querySelector("script")).not.toBeNull());
+    await vi.waitFor(() =>
+      expect(document.head.querySelector("script")).not.toBeNull(),
+    );
     const first = document.head.querySelector("script") as HTMLScriptElement;
     expect(first.src).toContain("viz-global");
     first.onerror?.(new Event("error"));
-    expect(await failed).toEqual({ error: "The diagram engine could not be loaded." });
+    expect(await failed).toEqual({
+      error: "The diagram engine could not be loaded.",
+    });
     expect(document.head.querySelector("script")).toBeNull();
 
     const drawn = fresh.drawPlantUml("@startuml\nA\n@enduml");
-    await vi.waitFor(() => expect(document.head.querySelector("script")).not.toBeNull());
+    await vi.waitFor(() =>
+      expect(document.head.querySelector("script")).not.toBeNull(),
+    );
     const second = document.head.querySelector("script") as HTMLScriptElement;
     second.onload?.(new Event("load"));
     expect(await drawn).toEqual({ svgs: ["<svg></svg>"] });

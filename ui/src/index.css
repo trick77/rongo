@@ -93,7 +93,9 @@
   --color-rail-label: #97958c;
   --color-rail-hover: #2a2a28;
   --color-rail-sel: #10100f;
-  --font-sans: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans:
+    "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
   --font-serif: "Anthropic Serif", Georgia, "Times New Roman", Times, serif;
   --font-mono: "Anthropic Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --radius-ui: 10px;
@@ -462,7 +464,12 @@ body {
   right: 0;
   top: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-accent-strong) 50%, transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent-strong) 50%,
+    transparent
+  );
   background-size: 35% 100%;
   background-repeat: no-repeat;
   animation: slide 1.3s ease-in-out infinite;

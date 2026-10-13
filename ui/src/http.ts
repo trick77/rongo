@@ -12,6 +12,7 @@ export class Refused extends Error {}
 /** Reads one JSON resource. A refusal is thrown as Refused carrying the
  * server's message; the body comes back as res.json() hands it over, the
  * server's shape and not a typed one. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped by design, see above
 export async function fetchJSON(url: string): Promise<any> {
   const res = await fetch(url);
   if (!res.ok) throw new Refused(await serverMessage(res));

@@ -20,11 +20,25 @@ const actions: ThreadActions = {
 };
 
 function answered(question: string, id: number): Turn {
-  return { ...freshTurn(question, "ba", "en"), text: `About ${question}.`, done: true, live: false, recorded: true, messageId: id };
+  return {
+    ...freshTurn(question, "ba", "en"),
+    text: `About ${question}.`,
+    done: true,
+    live: false,
+    recorded: true,
+    messageId: id,
+  };
 }
 
 function failed(question: string, id: number): Turn {
-  return { ...freshTurn(question, "ba", "en"), error: "boom", done: true, live: false, recorded: true, messageId: id };
+  return {
+    ...freshTurn(question, "ba", "en"),
+    error: "boom",
+    done: true,
+    live: false,
+    recorded: true,
+    messageId: id,
+  };
 }
 
 afterEach(() => {
@@ -39,27 +53,50 @@ function stubFetch() {
 }
 
 /** The article a question's answer is drawn in. */
-const turnOf = (text: string) => screen.getByText(text).closest("article") as HTMLElement;
+const turnOf = (text: string) =>
+  screen.getByText(text).closest("article") as HTMLElement;
 
 describe("ThreadView, the thread's verdict", () => {
   it("sits under the newest answer only", () => {
     stubFetch();
-    render(<ThreadView onOpenSource={() => {}} turns={[answered("first", 1), answered("second", 2)]} actions={actions} threadKey="t1" />);
+    render(
+      <ThreadView
+        onOpenSource={() => {}}
+        turns={[answered("first", 1), answered("second", 2)]}
+        actions={actions}
+        threadKey="t1"
+      />,
+    );
 
     expect(screen.getAllByRole("button", { name: "Helpful" })).toHaveLength(1);
-    expect(within(turnOf("About second.")).getByRole("button", { name: "Helpful" })).toBeTruthy();
+    expect(
+      within(turnOf("About second.")).getByRole("button", { name: "Helpful" }),
+    ).toBeTruthy();
   });
 
   it("stays on the newest answer when a failure follows it", () => {
     stubFetch();
-    render(<ThreadView onOpenSource={() => {}} turns={[answered("first", 1), failed("second", 2)]} actions={actions} threadKey="t1" />);
+    render(
+      <ThreadView
+        onOpenSource={() => {}}
+        turns={[answered("first", 1), failed("second", 2)]}
+        actions={actions}
+        threadKey="t1"
+      />,
+    );
 
-    expect(within(turnOf("About first.")).getByRole("button", { name: "Helpful" })).toBeTruthy();
+    expect(
+      within(turnOf("About first.")).getByRole("button", { name: "Helpful" }),
+    ).toBeTruthy();
   });
 
   it("sits under the answer drawn last, not under a re-explain grouped above it", () => {
     stubFetch();
-    const reexplain: Turn = { ...answered("first", 3), text: "About first, again.", headId: 1 };
+    const reexplain: Turn = {
+      ...answered("first", 3),
+      text: "About first, again.",
+      headId: 1,
+    };
     render(
       <ThreadView
         onOpenSource={() => {}}
@@ -69,20 +106,37 @@ describe("ThreadView, the thread's verdict", () => {
       />,
     );
 
-    expect(within(turnOf("About second.")).getByRole("button", { name: "Helpful" })).toBeTruthy();
+    expect(
+      within(turnOf("About second.")).getByRole("button", { name: "Helpful" }),
+    ).toBeTruthy();
   });
 
   it("is not drawn while a turn runs", () => {
     stubFetch();
     const running: Turn = { ...freshTurn("second", "ba", "en"), text: "It " };
-    render(<ThreadView onOpenSource={() => {}} turns={[answered("first", 1), running]} actions={actions} threadKey="t1" busy />);
+    render(
+      <ThreadView
+        onOpenSource={() => {}}
+        turns={[answered("first", 1), running]}
+        actions={actions}
+        threadKey="t1"
+        busy
+      />,
+    );
 
     expect(screen.queryByRole("button", { name: "Helpful" })).toBeNull();
   });
 
   it("is not drawn on a shared page", () => {
     stubFetch();
-    render(<ThreadView onOpenSource={() => {}} turns={[answered("first", 1)]} actions={null} threadKey="t1" />);
+    render(
+      <ThreadView
+        onOpenSource={() => {}}
+        turns={[answered("first", 1)]}
+        actions={null}
+        threadKey="t1"
+      />,
+    );
 
     expect(screen.queryByRole("button", { name: "Helpful" })).toBeNull();
   });

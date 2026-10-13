@@ -19,13 +19,23 @@ const reasons: [string, string][] = [
 function asFeedback(v: unknown): Feedback | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
   const f = v as Partial<Feedback>;
-  if ((f.verdict !== 1 && f.verdict !== -1) || typeof f.upToMessageId !== "number") return null;
-  return { verdict: f.verdict, reason: typeof f.reason === "string" ? f.reason : "", upToMessageId: f.upToMessageId };
+  if (
+    (f.verdict !== 1 && f.verdict !== -1) ||
+    typeof f.upToMessageId !== "number"
+  )
+    return null;
+  return {
+    verdict: f.verdict,
+    reason: typeof f.reason === "string" ? f.reason : "",
+    upToMessageId: f.upToMessageId,
+  };
 }
 
 /** The stored verdict on a thread: null for none, undefined when the server
  * would not say. */
-async function readFeedback(threadId: string): Promise<Feedback | null | undefined> {
+async function readFeedback(
+  threadId: string,
+): Promise<Feedback | null | undefined> {
   const res = await fetch(`/api/threads/${threadId}/feedback`);
   if (!res.ok) return undefined;
   return asFeedback(await res.json());
@@ -34,7 +44,11 @@ async function readFeedback(threadId: string): Promise<Feedback | null | undefin
 /** A turn the server counts as a finished answer, the one thing a verdict can
  * cover: written, not failed, not a card asking back. */
 export const finished = (t: Turn) =>
-  t.done && t.text !== "" && !t.error && !t.clarification && t.messageId !== null;
+  t.done &&
+  t.text !== "" &&
+  !t.error &&
+  !t.clarification &&
+  t.messageId !== null;
 
 /** The first turn holding an answer written after the verdict, or null when
  * the verdict covers everything on screen. By message id, not by position:
@@ -60,7 +74,13 @@ const thumb =
  * are flex items of that button row: the reasons after a thumbs down take a
  * row of their own beneath it.
  */
-export default function ThreadFeedback({ threadId, turns }: { threadId: string; turns: Turn[] }) {
+export default function ThreadFeedback({
+  threadId,
+  turns,
+}: {
+  threadId: string;
+  turns: Turn[];
+}) {
   const [fb, setFb] = useState<Feedback | null>(null);
   // The picker belongs to the newest answer on screen when it was opened, and
   // shows only while that is still the newest. A reason picked after the next
@@ -68,7 +88,10 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   // judged — whatever order the save, the running turn and the answer arrive
   // in, a newer answer closes it.
   const [pickingAt, setPickingAt] = useState<number | null>(null);
-  const newest = turns.reduce((m, t) => (finished(t) ? Math.max(m, t.messageId ?? 0) : m), 0);
+  const newest = turns.reduce(
+    (m, t) => (finished(t) ? Math.max(m, t.messageId ?? 0) : m),
+    0,
+  );
   const picking = pickingAt !== null && pickingAt === newest;
   // The thread the state on screen belongs to; a reply for another one is late.
   const shown = useRef(threadId);
@@ -79,12 +102,14 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   useEffect(() => {
     shown.current = threadId;
     touched.current = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a reset keyed on the thread, before its read
     setFb(null);
     setPickingAt(null);
     (async () => {
       try {
         const got = await readFeedback(threadId);
-        if (got !== undefined && shown.current === threadId && !touched.current) setFb(got);
+        if (got !== undefined && shown.current === threadId && !touched.current)
+          setFb(got);
       } catch {
         // No verdict on screen is what a failed read leaves: the thumbs still
         // work, and the next click writes the truth.
@@ -97,7 +122,9 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   // server stored them in — and while one is out, further clicks only move
   // `want`, so the next write sends the reader's latest choice and the ones
   // in between are never sent. undefined: nothing waiting; null: clear.
-  const want = useRef<{ verdict: 1 | -1; reason: string } | null | undefined>(undefined);
+  const want = useRef<{ verdict: 1 | -1; reason: string } | null | undefined>(
+    undefined,
+  );
   const inflight = useRef(false);
 
   const reload = async () => {
@@ -120,11 +147,16 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
           `/api/threads/${threadId}/feedback`,
           target === null
             ? { method: "DELETE" }
-            : { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target) },
+            : {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(target),
+              },
         );
         if (!res.ok) throw new Error(`feedback ${res.status}`);
         // The server's own figures, unless the reader has moved on since.
-        if (want.current === undefined && target !== null) setFb(asFeedback(await res.json()));
+        if (want.current === undefined && target !== null)
+          setFb(asFeedback(await res.json()));
       }
     } catch {
       // A write the server refused leaves the screen claiming what it does
@@ -166,7 +198,9 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
   const label =
     fb?.verdict === 1
       ? "Helpful"
-      : (fb?.verdict === -1 && reasons.find(([value]) => value === fb.reason)?.[1]) || "Helpful?";
+      : (fb?.verdict === -1 &&
+          reasons.find(([value]) => value === fb.reason)?.[1]) ||
+        "Helpful?";
 
   return (
     <>
@@ -193,7 +227,11 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
           <ThumbDownIcon />
         </button>
       </span>
-      {uncovered !== null && <span className="text-[13.5px] text-muted">rated before turn {uncovered}</span>}
+      {uncovered !== null && (
+        <span className="text-[13.5px] text-muted">
+          rated before turn {uncovered}
+        </span>
+      )}
       {/* No way to dismiss it: the thumbs down is already stored without a
           reason, and a reason is the reader's to add or not. */}
       {picking && (
@@ -202,7 +240,12 @@ export default function ThreadFeedback({ threadId, turns }: { threadId: string; 
         <div className="order-last mt-1 flex basis-full flex-wrap items-center gap-2 text-[13.5px] text-ink-dim">
           <span className="mr-1">What was off?</span>
           {reasons.map(([value, text]) => (
-            <button key={value} type="button" className={chip} onClick={() => void pick(value)}>
+            <button
+              key={value}
+              type="button"
+              className={chip}
+              onClick={() => void pick(value)}
+            >
               {text}
             </button>
           ))}

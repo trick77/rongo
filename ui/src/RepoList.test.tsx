@@ -7,11 +7,21 @@ vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
     parse: async () => undefined,
-    render: async (id: string) => ({ svg: `<svg id="${id}"><g class="drawn"></g></svg>` }),
+    render: async (id: string) => ({
+      svg: `<svg id="${id}"><g class="drawn"></g></svg>`,
+    }),
   },
 }));
 
-import RepoList, { byProject, historyLine, reindexCopy, reindexPaths, reindexScope, unconnected, wiringSpec } from "./RepoList";
+import RepoList, {
+  byProject,
+  historyLine,
+  reindexCopy,
+  reindexPaths,
+  reindexScope,
+  unconnected,
+  wiringSpec,
+} from "./RepoList";
 
 /** Every test drives the component through fetch. Nothing here reaches a network. */
 function respondWith(status: number, body: unknown) {
@@ -21,7 +31,8 @@ function respondWith(status: number, body: unknown) {
       ok: status >= 200 && status < 300,
       status,
       json: async () => body,
-      text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
+      text: async () =>
+        typeof body === "string" ? body : JSON.stringify(body),
     })),
   );
 }
@@ -50,21 +61,37 @@ afterEach(() => {
 
 describe("historyLine", () => {
   it("says what the commit lane holds, and that a snapshot has none", () => {
-    expect(historyLine({ ...peeq, commits: 483, newest_commit_at: "2026-09-17T10:00:00Z" })).toMatch(
-      /^483 commits recorded, newest /,
-    );
-    expect(historyLine({ ...peeq, commits: 1, newest_commit_at: "2026-09-17T10:00:00Z" })).toMatch(/^1 commit recorded/);
+    expect(
+      historyLine({
+        ...peeq,
+        commits: 483,
+        newest_commit_at: "2026-09-17T10:00:00Z",
+      }),
+    ).toMatch(/^483 commits recorded, newest /);
+    expect(
+      historyLine({
+        ...peeq,
+        commits: 1,
+        newest_commit_at: "2026-09-17T10:00:00Z",
+      }),
+    ).toMatch(/^1 commit recorded/);
     expect(historyLine(peeq)).toBe("No commits recorded yet.");
-    expect(historyLine({ ...peeq, snapshot: true, commits: 1 })).toBe("No history: a snapshot has no commits.");
+    expect(historyLine({ ...peeq, snapshot: true, commits: 1 })).toBe(
+      "No history: a snapshot has no commits.",
+    );
   });
 });
 
 describe("RepoList", () => {
   it("sums the commits in the strip and carries the lane in the indexed cell's tooltip", async () => {
-    respondWith(200, [{ ...peeq, commits: 483, newest_commit_at: "2026-09-17T10:00:00Z" }]);
+    respondWith(200, [
+      { ...peeq, commits: 483, newest_commit_at: "2026-09-17T10:00:00Z" },
+    ]);
     render(<RepoList />);
     await screen.findByRole("heading", { name: "peeq" });
-    expect(screen.getByText("Commits").parentElement?.textContent).toContain("483");
+    expect(screen.getByText("Commits").parentElement?.textContent).toContain(
+      "483",
+    );
     const cell = screen.getByTitle(/483 commits recorded/);
     expect(cell.textContent).toContain("611255a");
   });
@@ -91,7 +118,12 @@ describe("RepoList", () => {
     // A silent stop leaves the index frozen at months-old code while the page
     // looks healthy — the one failure this page exists to make visible.
     respondWith(200, [
-      { ...peeq, name: "shop-backend", branch: "release-2024.3", last_error: "branch release-2024.3 is gone upstream" },
+      {
+        ...peeq,
+        name: "shop-backend",
+        branch: "release-2024.3",
+        last_error: "branch release-2024.3 is gone upstream",
+      },
     ]);
 
     render(<RepoList />);
@@ -106,13 +138,18 @@ describe("RepoList", () => {
     // repository now leaves the page entirely — it is not polled, not
     // retrieved and not offered on a card, so a row for it was a product the
     // page listed and nothing else would ever mention again.
-    respondWith(200, [peeq, { ...peeq, name: "legacy-crm", project: "legacy-crm", enabled: false }]);
+    respondWith(200, [
+      peeq,
+      { ...peeq, name: "legacy-crm", project: "legacy-crm", enabled: false },
+    ]);
 
     render(<RepoList />);
 
     await screen.findByRole("heading", { name: "peeq" });
     expect(screen.queryByRole("row", { name: /legacy-crm/ })).toBeNull();
-    expect(screen.getByText(/1 repository is disabled and not shown/)).toBeTruthy();
+    expect(
+      screen.getByText(/1 repository is disabled and not shown/),
+    ).toBeTruthy();
   });
 
   it("tells 'nothing indexed yet' apart from an error", async () => {
@@ -131,7 +168,9 @@ describe("RepoList", () => {
     render(<RepoList />);
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toMatch(/cannot be fetched/i);
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /cannot be fetched/i,
+      );
     });
     expect(screen.queryByText(/No repositories/)).toBeNull();
   });
@@ -140,7 +179,12 @@ describe("RepoList", () => {
   // overflowed the page's, dragging the whole Repos page sideways.
   it("keeps every column inside the panel, the name cell the only one that flexes", async () => {
     respondWith(200, [
-      { ...peeq, name: "peeq-workflow-engine-intranet-service", part: "workflow", image: "registry.example.invalid/acme/wf" },
+      {
+        ...peeq,
+        name: "peeq-workflow-engine-intranet-service",
+        part: "workflow",
+        image: "registry.example.invalid/acme/wf",
+      },
     ]);
 
     render(<RepoList />);
@@ -151,15 +195,28 @@ describe("RepoList", () => {
     // name it scrolled the numbers off the right edge of the panel.
     expect(table.className).not.toContain("min-w-");
     expect(table.parentElement!.className).toContain("overflow-x-auto");
-    const headers = within(table).getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Repository", "State", "Indexed", "Files", "Chunks", "Modules"]);
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent);
+    expect(headers).toEqual([
+      "Repository",
+      "State",
+      "Indexed",
+      "Files",
+      "Chunks",
+      "Modules",
+    ]);
     // Part and branch sit under the name rather than in columns of their own.
-    const name = within(table).getByText("peeq-workflow-engine-intranet-service").closest("td")!;
+    const name = within(table)
+      .getByText("peeq-workflow-engine-intranet-service")
+      .closest("td")!;
     expect(within(name).getByText("workflow")).toBeTruthy();
     expect(within(name).getByText("master")).toBeTruthy();
     // The declared image beside them: what a release turn pairs a deployed
     // version with. A row without one shows nothing there.
-    expect(within(name).getByText("registry.example.invalid/acme/wf")).toBeTruthy();
+    expect(
+      within(name).getByText("registry.example.invalid/acme/wf"),
+    ).toBeTruthy();
     expect(name.className).not.toContain("whitespace-nowrap");
     // Every other cell is sized to its content.
     const cells = within(table).getAllByRole("cell");
@@ -170,18 +227,27 @@ describe("RepoList", () => {
   });
 
   it("keeps the error stripe on the name cell", async () => {
-    respondWith(200, [{ ...peeq, last_error: "fetch: could not read from remote repository" }]);
+    respondWith(200, [
+      { ...peeq, last_error: "fetch: could not read from remote repository" },
+    ]);
     render(<RepoList />);
     await screen.findByRole("heading", { name: "peeq" });
     const name = screen.getByText("peeq", { selector: "span" }).closest("td")!;
-    expect(name.className).toContain("shadow-[inset_3px_0_0_var(--color-danger)]");
-    expect(within(name).getByText("fetch: could not read from remote repository")).toBeTruthy();
+    expect(name.className).toContain(
+      "shadow-[inset_3px_0_0_var(--color-danger)]",
+    );
+    expect(
+      within(name).getByText("fetch: could not read from remote repository"),
+    ).toBeTruthy();
   });
 
   it("shows when the index was written, not when the poller last looked", async () => {
     // Polled at 09:30 on the 17th, indexed at 06:00 on the 15th: the row says
     // the 15th, the top stat says the 17th, and neither is called "last run".
-    vi.useFakeTimers({ now: new Date("2026-08-17T10:00:00Z"), toFake: ["Date"] });
+    vi.useFakeTimers({
+      now: new Date("2026-08-17T10:00:00Z"),
+      toFake: ["Date"],
+    });
     try {
       respondWith(200, [peeq]);
       render(<RepoList />);
@@ -212,7 +278,9 @@ describe("RepoList", () => {
     expect(heading.parentElement?.className).not.toContain("bg-bg");
     // And no second page-coloured band under it: the column headings sit
     // on the panel.
-    expect(screen.getByText("Repository").closest("tr")?.className).not.toContain("bg-bg");
+    expect(
+      screen.getByText("Repository").closest("tr")?.className,
+    ).not.toContain("bg-bg");
     const name = screen.getByText("peeq", { selector: "span" });
     expect(name.className).toContain("font-mono");
     expect(name.className).toContain("text-muted");
@@ -224,7 +292,8 @@ describe("RepoList", () => {
 
     render(<RepoList />);
     // label div -> the Stat -> the grid holding all seven.
-    const stats = (await screen.findByText("Repositories")).parentElement!.parentElement!;
+    const stats = (await screen.findByText("Repositories")).parentElement!
+      .parentElement!;
     expect(stats.className).toContain("grid-cols-2");
     expect(stats.className).toContain("sm:grid-cols-4");
     expect(stats.className).not.toContain("flex");
@@ -235,10 +304,14 @@ describe("RepoList", () => {
   });
 
   it("keeps the last stat one column wide when a library makes it eight", async () => {
-    respondWith(200, [peeq, { ...peeq, name: "commons", project: "commons", library: true }]);
+    respondWith(200, [
+      peeq,
+      { ...peeq, name: "commons", project: "commons", library: true },
+    ]);
 
     render(<RepoList />);
-    const stats = (await screen.findByText("Repositories")).parentElement!.parentElement!;
+    const stats = (await screen.findByText("Repositories")).parentElement!
+      .parentElement!;
     expect(stats.children).toHaveLength(8);
     expect(stats.lastElementChild!.className).not.toContain("col-span-2");
   });
@@ -247,15 +320,44 @@ describe("RepoList", () => {
 /** shop is one product in four repositories: a storefront UI calling one of two
  * backends, and a queue consumer nothing in the project reaches. */
 const shop = [
-  { ...peeq, name: "shop-ui", project: "shop", part: "ui", description: "Storefront, React.", uses: ["shop-backend"] },
-  { ...peeq, name: "shop-backend", project: "shop", part: "backend", description: "Checkout." },
-  { ...peeq, name: "shop-admin-backend", project: "shop", part: "backend", description: "Admin API." },
-  { ...peeq, name: "shop-events", project: "shop", part: "consumer", description: "Kafka consumer." },
+  {
+    ...peeq,
+    name: "shop-ui",
+    project: "shop",
+    part: "ui",
+    description: "Storefront, React.",
+    uses: ["shop-backend"],
+  },
+  {
+    ...peeq,
+    name: "shop-backend",
+    project: "shop",
+    part: "backend",
+    description: "Checkout.",
+  },
+  {
+    ...peeq,
+    name: "shop-admin-backend",
+    project: "shop",
+    part: "backend",
+    description: "Admin API.",
+  },
+  {
+    ...peeq,
+    name: "shop-events",
+    project: "shop",
+    part: "consumer",
+    description: "Kafka consumer.",
+  },
 ];
 
 describe("project grouping", () => {
   it("groups by project whatever order the rows arrive in", () => {
-    const got = byProject([shop[3], { ...peeq, name: "legacy-crm", project: "legacy-crm" }, shop[0]]);
+    const got = byProject([
+      shop[3],
+      { ...peeq, name: "legacy-crm", project: "legacy-crm" },
+      shop[0],
+    ]);
 
     expect(got.map((p) => p.name)).toEqual(["legacy-crm", "shop"]);
     expect(got[1].repos.map((r) => r.name)).toEqual(["shop-events", "shop-ui"]);
@@ -281,7 +383,10 @@ describe("wiringSpec", () => {
     // Only what an edge touches. A member nothing connects to would be a box
     // floating beside the graph and named in the line beneath it — the same
     // fact twice, once as a picture that says nothing.
-    expect(spec.nodes.map((n) => n.id).sort()).toEqual(["shop-backend", "shop-ui"]);
+    expect(spec.nodes.map((n) => n.id).sort()).toEqual([
+      "shop-backend",
+      "shop-ui",
+    ]);
     // Configuration is not code, so no node cites anything. AGENTS.md: a node
     // cites code or nothing, and is still drawn with no sources.
     expect(spec.nodes.every((n) => n.src.length === 0)).toBe(true);
@@ -295,8 +400,12 @@ describe("wiringSpec", () => {
       repos: [shop[0], { ...shop[1], part: "" }],
     })!;
 
-    expect(spec.nodes.find((n) => n.id === "shop-ui")!.label).toBe("shop-ui · ui");
-    expect(spec.nodes.find((n) => n.id === "shop-backend")!.label).toBe("shop-backend");
+    expect(spec.nodes.find((n) => n.id === "shop-ui")!.label).toBe(
+      "shop-ui · ui",
+    );
+    expect(spec.nodes.find((n) => n.id === "shop-backend")!.label).toBe(
+      "shop-backend",
+    );
   });
 
   it("draws nothing for a project with no declared edge", () => {
@@ -320,16 +429,17 @@ describe("wiringSpec", () => {
   it("names the members no declared edge reaches", () => {
     // The disambiguating half: two repositories say "backend", and this is what
     // keeps an answer about the storefront away from the admin API.
-    expect(unconnected({ name: "shop", repos: shop }).map((r) => r.name)).toEqual([
-      "shop-admin-backend",
-      "shop-events",
-    ]);
+    expect(
+      unconnected({ name: "shop", repos: shop }).map((r) => r.name),
+    ).toEqual(["shop-admin-backend", "shop-events"]);
   });
 
   it("calls nothing unconnected when there are no edges at all", () => {
     // "Nothing uses any of them" is noise when there is no arrow to contrast
     // with, and the useful fact — one product — is already in the heading.
-    expect(unconnected({ name: "shop", repos: [shop[1], shop[3]] })).toEqual([]);
+    expect(unconnected({ name: "shop", repos: [shop[1], shop[3]] })).toEqual(
+      [],
+    );
   });
 });
 
@@ -350,7 +460,12 @@ describe("the Projects page", () => {
     // In the 17rem name column a real description wrapped to six lines and grew
     // the row with it, while every other cell stayed one line tall. Its own row
     // spanning every column is one line at the same size.
-    respondWith(200, [{ ...peeq, description: "Turns a codebase into something the company can ask." }]);
+    respondWith(200, [
+      {
+        ...peeq,
+        description: "Turns a codebase into something the company can ask.",
+      },
+    ]);
 
     render(<RepoList />);
 
@@ -387,7 +502,13 @@ describe("the Projects page", () => {
     // and it stands in for the branch: the made-up ref "snapshot" is not a
     // branch anyone chose, and a snapshot is not an outcome of the last run.
     respondWith(200, [
-      { ...peeq, name: "acme-core", project: "acme", snapshot: true, branch: "snapshot" },
+      {
+        ...peeq,
+        name: "acme-core",
+        project: "acme",
+        snapshot: true,
+        branch: "snapshot",
+      },
     ]);
 
     render(<RepoList />);
@@ -450,12 +571,21 @@ describe("re-index", () => {
     render(<RepoList admin />);
 
     await screen.findByRole("heading", { name: "commons" });
-    expect(screen.getAllByRole("button", { name: /re-index/i })).toHaveLength(4);
-    for (const name of ["Re-index all", "Re-index commons", "Re-index peeq", "Re-index shop"]) {
+    expect(screen.getAllByRole("button", { name: /re-index/i })).toHaveLength(
+      4,
+    );
+    for (const name of [
+      "Re-index all",
+      "Re-index commons",
+      "Re-index peeq",
+      "Re-index shop",
+    ]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
     for (const table of screen.getAllByRole("table")) {
-      expect(within(table).queryByRole("button", { name: /re-index/i })).toBeNull();
+      expect(
+        within(table).queryByRole("button", { name: /re-index/i }),
+      ).toBeNull();
     }
   });
 
@@ -465,7 +595,8 @@ describe("re-index", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
+        if (init?.method === "POST")
+          return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
         return {
           ok: true,
           status: 200,
@@ -478,12 +609,20 @@ describe("re-index", () => {
     );
     render(<RepoList admin />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Re-index shop" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Re-index shop" }),
+    );
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(/2 repositories \(shop-api, shop-ui\)/)).toBeTruthy();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index 2 repositories" }));
+    expect(
+      within(dialog).getByText(/2 repositories \(shop-api, shop-ui\)/),
+    ).toBeTruthy();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Re-index 2 repositories" }),
+    );
 
-    await waitFor(() => expect(calls).toContain("POST /api/repos/shop-ui/reindex"));
+    await waitFor(() =>
+      expect(calls).toContain("POST /api/repos/shop-ui/reindex"),
+    );
     expect(calls).toContain("POST /api/repos/shop-api/reindex");
   });
 
@@ -493,26 +632,43 @@ describe("re-index", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
+        if (init?.method === "POST")
+          return { ok: true, status: 202, json: async () => ({ queued: 1 }) };
         const queued = calls.filter((c) => c.startsWith("POST")).length > 0;
-        return { ok: true, status: 200, json: async () => [{ ...peeq, reindex_queued: queued }] };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [{ ...peeq, reindex_queued: queued }],
+        };
       }),
     );
     render(<RepoList admin />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Re-index peeq" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Re-index peeq" }),
+    );
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(/embedded again/)).toBeTruthy();
     expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index" }));
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Re-index" }),
+    );
 
-    await waitFor(() => expect(calls).toContain("POST /api/repos/peeq/reindex"));
+    await waitFor(() =>
+      expect(calls).toContain("POST /api/repos/peeq/reindex"),
+    );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // Reloaded from the record: the row says the request is queued and the
     // header button rests until it is served.
     expect(await screen.findByText("Re-index queued")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Re-index peeq" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Re-index peeq",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
   });
 
   it("warns louder about the cost of re-indexing everything and posts the corpus request", async () => {
@@ -521,16 +677,29 @@ describe("re-index", () => {
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         calls.push(`${init?.method ?? "GET"} ${url}`);
-        if (init?.method === "POST") return { ok: true, status: 202, json: async () => ({ queued: 2 }) };
-        return { ok: true, status: 200, json: async () => [peeq, { ...peeq, name: "loom", project: "loom" }] };
+        if (init?.method === "POST")
+          return { ok: true, status: 202, json: async () => ({ queued: 2 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [peeq, { ...peeq, name: "loom", project: "loom" }],
+        };
       }),
     );
     render(<RepoList admin />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Re-index all" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Re-index all" }),
+    );
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText(/incurs embedding costs across the whole corpus/)).toBeTruthy();
-    await userEvent.click(within(dialog).getByRole("button", { name: "Re-index all 2" }));
+    expect(
+      within(dialog).getByText(
+        /incurs embedding costs across the whole corpus/,
+      ),
+    ).toBeTruthy();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Re-index all 2" }),
+    );
 
     await waitFor(() => expect(calls).toContain("POST /api/repos/reindex"));
   });
@@ -539,28 +708,51 @@ describe("re-index", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (init?.method === "POST") return { ok: false, status: 403, json: async () => null };
+        if (init?.method === "POST")
+          return { ok: false, status: 403, json: async () => null };
         return { ok: true, status: 200, json: async () => [peeq] };
       }),
     );
     render(<RepoList admin />);
-    await userEvent.click(await screen.findByRole("button", { name: "Re-index peeq" }));
-    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Re-index" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Re-index peeq" }),
+    );
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Re-index",
+      }),
+    );
 
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
   it("phrases a project as its members and sends one request per member", () => {
-    const scope = { kind: "project" as const, name: "shop", repos: ["shop-api", "shop-ui"] };
-    expect(reindexCopy(scope).body).toContain("2 repositories (shop-api, shop-ui)");
-    expect(reindexPaths(scope)).toEqual(["/api/repos/shop-api/reindex", "/api/repos/shop-ui/reindex"]);
-    expect(reindexPaths({ kind: "all", count: 3 })).toEqual(["/api/repos/reindex"]);
+    const scope = {
+      kind: "project" as const,
+      name: "shop",
+      repos: ["shop-api", "shop-ui"],
+    };
+    expect(reindexCopy(scope).body).toContain(
+      "2 repositories (shop-api, shop-ui)",
+    );
+    expect(reindexPaths(scope)).toEqual([
+      "/api/repos/shop-api/reindex",
+      "/api/repos/shop-ui/reindex",
+    ]);
+    expect(reindexPaths({ kind: "all", count: 3 })).toEqual([
+      "/api/repos/reindex",
+    ]);
   });
 
   it("asks about a lone member by its own name only when it is the project's", () => {
-    expect(reindexScope({ name: "peeq", repos: [peeq] })).toEqual({ kind: "repo", name: "peeq" });
-    expect(reindexScope({ name: "shop", repos: [{ ...peeq, name: "shop-api" }] })).toEqual({
+    expect(reindexScope({ name: "peeq", repos: [peeq] })).toEqual({
+      kind: "repo",
+      name: "peeq",
+    });
+    expect(
+      reindexScope({ name: "shop", repos: [{ ...peeq, name: "shop-api" }] }),
+    ).toEqual({
       kind: "project",
       name: "shop",
       repos: ["shop-api"],

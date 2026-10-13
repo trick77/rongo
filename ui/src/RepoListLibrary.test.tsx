@@ -5,11 +5,19 @@ vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
     parse: async () => undefined,
-    render: async (id: string) => ({ svg: `<svg id="${id}"><g class="drawn"></g></svg>` }),
+    render: async (id: string) => ({
+      svg: `<svg id="${id}"><g class="drawn"></g></svg>`,
+    }),
   },
 }));
 
-import RepoList, { libraryNames, unconnected, usedBy, wiringSpec, type Repo } from "./RepoList";
+import RepoList, {
+  libraryNames,
+  unconnected,
+  usedBy,
+  wiringSpec,
+  type Repo,
+} from "./RepoList";
 
 const base: Repo = {
   name: "",
@@ -31,10 +39,32 @@ const base: Repo = {
 
 /** A library two products are built on: shop's backend and billing's api both
  * name it; shop's ui names nothing. */
-const commons: Repo = { ...base, name: "acme-commons", project: "acme-commons", library: true };
-const shopBackend: Repo = { ...base, name: "shop-backend", project: "shop", part: "backend", uses: ["acme-commons"] };
-const shopUi: Repo = { ...base, name: "shop-ui", project: "shop", part: "ui", uses: ["shop-backend"] };
-const billingApi: Repo = { ...base, name: "billing-api", project: "billing", uses: ["acme-commons"] };
+const commons: Repo = {
+  ...base,
+  name: "acme-commons",
+  project: "acme-commons",
+  library: true,
+};
+const shopBackend: Repo = {
+  ...base,
+  name: "shop-backend",
+  project: "shop",
+  part: "backend",
+  uses: ["acme-commons"],
+};
+const shopUi: Repo = {
+  ...base,
+  name: "shop-ui",
+  project: "shop",
+  part: "ui",
+  uses: ["shop-backend"],
+};
+const billingApi: Repo = {
+  ...base,
+  name: "billing-api",
+  project: "billing",
+  uses: ["acme-commons"],
+};
 const all = [commons, shopBackend, shopUi, billingApi];
 
 afterEach(() => {
@@ -43,7 +73,10 @@ afterEach(() => {
 
 describe("a shared library", () => {
   it("is drawn into the wiring of a project using it, as a terminal marked library", () => {
-    const spec = wiringSpec({ name: "shop", repos: [shopBackend, shopUi] }, libraryNames(all))!;
+    const spec = wiringSpec(
+      { name: "shop", repos: [shopBackend, shopUi] },
+      libraryNames(all),
+    )!;
 
     expect(spec.edges).toEqual([
       { from: "shop-backend", to: "acme-commons" },
@@ -57,8 +90,14 @@ describe("a shared library", () => {
   it("makes a project of one with only a library edge draw its wiring", () => {
     // Without the library the picture would be null; the edge is the one
     // thing this project declares.
-    const spec = wiringSpec({ name: "billing", repos: [billingApi] }, libraryNames(all))!;
-    expect(spec.nodes.map((n) => n.id).sort()).toEqual(["acme-commons", "billing-api"]);
+    const spec = wiringSpec(
+      { name: "billing", repos: [billingApi] },
+      libraryNames(all),
+    )!;
+    expect(spec.nodes.map((n) => n.id).sort()).toEqual([
+      "acme-commons",
+      "billing-api",
+    ]);
   });
 
   it("is still ignored as a target when it is not on the page", () => {
@@ -68,29 +107,52 @@ describe("a shared library", () => {
   });
 
   it("counts a member as connected when its only edge is to a library", () => {
-    expect(unconnected({ name: "shop", repos: [shopBackend, shopUi] }, libraryNames(all))).toEqual([]);
-    expect(unconnected({ name: "billing", repos: [billingApi] }, libraryNames(all))).toEqual([]);
+    expect(
+      unconnected(
+        { name: "shop", repos: [shopBackend, shopUi] },
+        libraryNames(all),
+      ),
+    ).toEqual([]);
+    expect(
+      unconnected({ name: "billing", repos: [billingApi] }, libraryNames(all)),
+    ).toEqual([]);
   });
 
   it("knows which repositories are built on it", () => {
-    expect(usedBy("acme-commons", all)).toEqual(["billing-api", "shop-backend"]);
+    expect(usedBy("acme-commons", all)).toEqual([
+      "billing-api",
+      "shop-backend",
+    ]);
     expect(usedBy("shop-backend", all)).toEqual(["shop-ui"]);
   });
 
   it("gets its own panel after the projects, saying who uses it, and its own count", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => all, text: async () => "" })),
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => all,
+        text: async () => "",
+      })),
     );
 
     render(<RepoList />);
 
     await screen.findByRole("heading", { name: "acme-commons" });
-    const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    const headings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((h) => h.textContent);
     expect(headings).toEqual(["billing", "shop", "acme-commons"]);
-    expect(screen.getByText(/used by/).textContent).toContain("billing-api, shop-backend");
+    expect(screen.getByText(/used by/).textContent).toContain(
+      "billing-api, shop-backend",
+    );
     // Two products, one library: the Projects count says products.
-    expect(screen.getByText("Projects").parentElement?.textContent).toContain("2");
-    expect(screen.getByText("Libraries").parentElement?.textContent).toContain("1");
+    expect(screen.getByText("Projects").parentElement?.textContent).toContain(
+      "2",
+    );
+    expect(screen.getByText("Libraries").parentElement?.textContent).toContain(
+      "1",
+    );
   });
 });

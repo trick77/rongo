@@ -1,4 +1,11 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { Icon } from "./Icon";
 import { ThreadMenuFor } from "./ThreadMenu";
@@ -57,7 +64,10 @@ export default function ThreadsPage({
 
   // The box is debounced into the term that reaches the API.
   useEffect(() => {
-    const handle = window.setTimeout(() => setTerm(input.trim()), searchDebounceMs);
+    const handle = window.setTimeout(
+      () => setTerm(input.trim()),
+      searchDebounceMs,
+    );
     return () => window.clearTimeout(handle);
   }, [input]);
 
@@ -69,7 +79,10 @@ export default function ThreadsPage({
       if (!res.ok) throw new Error(String(res.status));
       const body: unknown = await res.json();
       const next = (body as { next_cursor?: unknown })?.next_cursor;
-      return { items: pageItems(body), next_cursor: typeof next === "string" ? next : null };
+      return {
+        items: pageItems(body),
+        next_cursor: typeof next === "string" ? next : null,
+      };
     },
     [],
   );
@@ -101,21 +114,29 @@ export default function ThreadsPage({
   };
   const list = useInfiniteList(fetchPage, [searching, reload]);
 
-  const [search, setSearch] = useState<{ term: string; hits: Hit[]; failed: boolean } | null>(null);
+  const [search, setSearch] = useState<{
+    term: string;
+    hits: Hit[];
+    failed: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!searching) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- leaving search drops its hits
       setSearch(null);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/threads/search?q=${encodeURIComponent(term)}&limit=${searchLimit}`);
+        const res = await fetch(
+          `/api/threads/search?q=${encodeURIComponent(term)}&limit=${searchLimit}`,
+        );
         if (!res.ok) throw new Error(String(res.status));
         const body: unknown = await res.json();
         // Answered for the term that was asked, never for a term that was
         // typed over while the request was out.
-        if (!cancelled) setSearch({ term, hits: pageItems(body) as Hit[], failed: false });
+        if (!cancelled)
+          setSearch({ term, hits: pageItems(body) as Hit[], failed: false });
       } catch {
         if (!cancelled) setSearch({ term, hits: [], failed: true });
       }
@@ -129,14 +150,19 @@ export default function ThreadsPage({
   // screen, so the change shows without a reload.
   const patchRow = (id: string, change: Partial<Thread>) => {
     list.setItems(patch(id, change));
-    setSearch((prev) => prev && { ...prev, hits: patch<Hit>(id, change)(prev.hits) });
+    setSearch(
+      (prev) => prev && { ...prev, hits: patch<Hit>(id, change)(prev.hits) },
+    );
     changed();
   };
   const actions = useThreadActions({
     onRenamed: (id, title) => patchRow(id, { title }),
     onDeleted: (id) => {
       list.setItems((prev) => prev.filter((x) => x.id !== id));
-      setSearch((prev) => prev && { ...prev, hits: prev.hits.filter((x) => x.id !== id) });
+      setSearch(
+        (prev) =>
+          prev && { ...prev, hits: prev.hits.filter((x) => x.id !== id) },
+      );
       ownBumps.current++;
       onDeleted(id);
     },
@@ -149,7 +175,11 @@ export default function ThreadsPage({
   // The search's answer is only shown once it is for the term in the box:
   // until then the previous list would flash under a term it has nothing to
   // do with.
-  const rows: Hit[] = searching ? (search?.term === term ? search.hits : []) : list.items;
+  const rows: Hit[] = searching
+    ? search?.term === term
+      ? search.hits
+      : []
+    : list.items;
   const settled = searching ? search?.term === term : list.loaded;
   const failed = searching ? search?.failed === true : list.failed;
 
@@ -182,13 +212,18 @@ export default function ThreadsPage({
 
       <ul className="mt-3">
         {rows.length === 0 && !failed && settled && (
-          <li className="py-10 text-center text-muted">{searching ? "No thread matches." : "No threads yet."}</li>
+          <li className="py-10 text-center text-muted">
+            {searching ? "No thread matches." : "No threads yet."}
+          </li>
         )}
         {rows.map((t) => {
           const active = t.id === activeId;
           const menuOpen = openMenu === t.id;
           return (
-            <li key={t.id} className="relative border-b border-border-soft last:border-b-0">
+            <li
+              key={t.id}
+              className="relative border-b border-border-soft last:border-b-0"
+            >
               <div
                 className={
                   "group flex items-center gap-3 rounded-ui-sm px-3 " +
@@ -207,16 +242,23 @@ export default function ThreadsPage({
                       {searching ? mark(t.title, term) : t.title}
                     </span>
                     {t.shared && (
-                      <span title="Shared with a link" className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent-strong">
+                      <span
+                        title="Shared with a link"
+                        className="h-[7px] w-[7px] shrink-0 rounded-full bg-accent-strong"
+                      >
                         <span className="sr-only">Shared</span>
                       </span>
                     )}
                   </span>
                   {t.snippet && (
-                    <span className="mt-0.5 w-full truncate text-[13px] text-muted">{snippet(t.snippet)}</span>
+                    <span className="mt-0.5 w-full truncate text-[13px] text-muted">
+                      {snippet(t.snippet)}
+                    </span>
                   )}
                 </button>
-                <span className="shrink-0 text-[13px] whitespace-nowrap text-muted">{when(t.created_at)}</span>
+                <span className="shrink-0 text-[13px] whitespace-nowrap text-muted">
+                  {when(t.created_at)}
+                </span>
                 <button
                   type="button"
                   aria-haspopup="menu"
@@ -225,14 +267,20 @@ export default function ThreadsPage({
                   onClick={() => setOpenMenu(menuOpen ? null : t.id)}
                   className={
                     "grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-elevated hover:text-ink " +
-                    (menuOpen ? "" : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
+                    (menuOpen
+                      ? ""
+                      : "invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible")
                   }
                 >
                   <Icon name="moreVertical" size="18px" />
                 </button>
               </div>
               {menuOpen && (
-                <ThreadMenuFor thread={t} actions={actions} onPick={() => setOpenMenu(null)} />
+                <ThreadMenuFor
+                  thread={t}
+                  actions={actions}
+                  onPick={() => setOpenMenu(null)}
+                />
               )}
             </li>
           );
@@ -240,7 +288,10 @@ export default function ThreadsPage({
       </ul>
       {/* The sentinel the scroll is watched through; the next page loads
           when it comes into view. Not while searching, which is one answer. */}
-      {!searching && <div ref={list.sentinelRef} aria-hidden="true" className="h-px" />}
+      {!searching && (
+        <div ref={list.sentinelRef} aria-hidden="true" className="h-px" />
+      )}
+      {/* eslint-disable-next-line react-hooks/refs -- state, not refs: the rule reads useInfiniteList's whole return as a ref for its sentinelRef */}
       {!searching && list.loadingMore && list.hasMore && (
         <p className="mt-3 px-3 text-[13px] text-muted">Loading more…</p>
       )}

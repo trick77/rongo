@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import { highlightBlock, highlightLines, languageForPath, languageOf } from "./highlight";
+import {
+  highlightBlock,
+  highlightLines,
+  languageForPath,
+  languageOf,
+} from "./highlight";
 
 describe("languageOf", () => {
   it("accepts a registered grammar and rejects the rest", () => {
@@ -37,7 +42,9 @@ describe("highlightBlock", () => {
   });
 
   it("renders plain text without a language, and never throws", () => {
-    const { container } = render(<code>{highlightBlock("[1] plain", null)}</code>);
+    const { container } = render(
+      <code>{highlightBlock("[1] plain", null)}</code>,
+    );
     expect(container.querySelector("span")).toBeNull();
     expect(container.textContent).toBe("[1] plain");
   });
@@ -66,7 +73,9 @@ describe("highlightLines", () => {
   it("reproduces every line's text exactly", () => {
     const code = 'package x\n\n// c\nfunc F() string { return "a\\nb" }';
     const lines = highlightLines(code, "go");
-    const back = lines.map((nodes) => render(<div>{nodes}</div>).container.textContent);
+    const back = lines.map(
+      (nodes) => render(<div>{nodes}</div>).container.textContent,
+    );
     expect(back).toEqual(code.split("\n"));
   });
 

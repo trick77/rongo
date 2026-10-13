@@ -9,7 +9,8 @@ describe("the scope notice", () => {
     // The search drops an unknown name on purpose, so this sentence is the
     // only thing standing between the reader and an answer about code they
     // did not ask about.
-    const notice = 'No repository called "loom" in the index. Answered for "rongo" alone.';
+    const notice =
+      'No repository called "loom" in the index. Answered for "rongo" alone.';
     streamFrames([
       ev("thread", { thread_id: "1", title: "t", message_id: 7 }),
       ev("notice", { text: notice }),
@@ -24,7 +25,9 @@ describe("the scope notice", () => {
     // Above the answer, not inside it: it is about the answer, not part of it.
     const shown = screen.getByText(notice);
     const answer = screen.getByText(/rongo keeps no session/);
-    expect(shown.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      shown.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("says nothing on an ordinary turn", async () => {
@@ -37,7 +40,9 @@ describe("the scope notice", () => {
 
     await ask("How does indexing work?");
 
-    await waitFor(() => expect(screen.getByText(/It works like this/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/It works like this/)).toBeTruthy(),
+    );
     expect(screen.queryByRole("note")).toBeNull();
   });
 });

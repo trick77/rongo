@@ -11,7 +11,15 @@ export const pageColumn = "mx-auto max-w-[900px]";
  * every page but the thread and the share. leading-tight like Ask's welcome
  * heading: without it the taller line box puts the title 3px below the other
  * page's. */
-export function PageShell({ title, intro, children }: { title: string; intro?: ReactNode; children: ReactNode }) {
+export function PageShell({
+  title,
+  intro,
+  children,
+}: {
+  title: string;
+  intro?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="h-full overflow-auto">
       <div className={`${pageColumn} px-4 py-6 sm:px-6 lg:px-10 lg:py-8`}>

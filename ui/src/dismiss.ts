@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 /**
  * Dismissal for a full-screen overlay whose scrim closes it.
@@ -25,7 +25,9 @@ export function useBackdropDismiss(onClose: () => void) {
   // The overlays pass a fresh arrow every render; the listener reads the
   // latest one instead of being torn down and rebound each time.
   const close = useRef(onClose);
-  close.current = onClose;
+  useLayoutEffect(() => {
+    close.current = onClose;
+  });
 
   useEffect(() => {
     const el = scrim.current;

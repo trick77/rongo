@@ -9,7 +9,10 @@ const shareToken = "kd8Qw1rZx3Yv9pLmN0aB_c";
 
 describe("routeFromPath", () => {
   it("reads a thread out of its address", () => {
-    expect(routeFromPath(`/thread/${address}`)).toEqual({ view: "thread", id: address });
+    expect(routeFromPath(`/thread/${address}`)).toEqual({
+      view: "thread",
+      id: address,
+    });
   });
 
   it("lands a malformed address on the unasked question rather than a blank page", () => {
@@ -23,7 +26,10 @@ describe("routeFromPath", () => {
     expect(routeFromPath("/projects")).toEqual({ view: "projects" });
     expect(routeFromPath("/shared")).toEqual({ view: "shared" });
     expect(routeFromPath("/memory")).toEqual({ view: "memory" });
-    expect(routeFromPath(`/share/${shareToken}`)).toEqual({ view: "share", token: shareToken });
+    expect(routeFromPath(`/share/${shareToken}`)).toEqual({
+      view: "share",
+      token: shareToken,
+    });
   });
 
   it("falls back to the unasked question", () => {
@@ -38,9 +44,18 @@ describe("routeFromPath", () => {
     // boundaries of the shape itself: one character too many, one too few, and
     // one outside the alphabet.
     for (const path of [
-      "/", "/new", "/thread/", "/thread/abc", "/thread/19",
-      `/thread/${address}x`, `/thread/${address.slice(1)}`,
-      "/thread/v76BBy2b1nMYOFl2Lnm9J.", "/share/", "/share/kd8Qw1rZ", `/share/${shareToken}x`, "/nope",
+      "/",
+      "/new",
+      "/thread/",
+      "/thread/abc",
+      "/thread/19",
+      `/thread/${address}x`,
+      `/thread/${address.slice(1)}`,
+      "/thread/v76BBy2b1nMYOFl2Lnm9J.",
+      "/share/",
+      "/share/kd8Qw1rZ",
+      `/share/${shareToken}x`,
+      "/nope",
     ]) {
       expect(routeFromPath(path)).toEqual({ view: "new" });
     }

@@ -4,7 +4,11 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
 import { asMarkdown, freshTurn } from "./turns";
-import { PASTE_CHAR_THRESHOLD, PASTE_LINE_THRESHOLD, MAX_QUESTION_BYTES } from "./pastes";
+import {
+  PASTE_CHAR_THRESHOLD,
+  PASTE_LINE_THRESHOLD,
+  MAX_QUESTION_BYTES,
+} from "./pastes";
 
 /**
  * The paste path of the composer. Kept apart from Ask.test.tsx, which is
@@ -42,11 +46,15 @@ function queuedFetch(responses: string[][], threadsJson: unknown = []) {
 }
 
 const posts = (mock: ReturnType<typeof vi.fn>) =>
-  mock.mock.calls.filter((c) => c[1]?.method === "POST").map((c) => [c[0], JSON.parse(String(c[1]?.body))] as const);
+  mock.mock.calls
+    .filter((c) => c[1]?.method === "POST")
+    .map((c) => [c[0], JSON.parse(String(c[1]?.body))] as const);
 
 /** A paste event as a browser fires it; false back means the composer took it. */
 function paste(text: string) {
-  return fireEvent.paste(screen.getByLabelText("Question"), { clipboardData: { getData: () => text } });
+  return fireEvent.paste(screen.getByLabelText("Question"), {
+    clipboardData: { getData: () => text },
+  });
 }
 
 afterEach(() => {
@@ -54,7 +62,10 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const trace = Array.from({ length: PASTE_LINE_THRESHOLD + 5 }, (_, i) => `main.go:${i + 1}`).join("\n");
+const trace = Array.from(
+  { length: PASTE_LINE_THRESHOLD + 5 },
+  (_, i) => `main.go:${i + 1}`,
+).join("\n");
 
 describe("Ask, pasting", () => {
   it("stages a wall of lines as a chip and leaves the textarea alone", () => {
@@ -63,8 +74,12 @@ describe("Ask, pasting", () => {
 
     expect(paste(trace + "\n")).toBe(false);
 
-    expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe("");
-    const chip = screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` });
+    expect(
+      (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
+    ).toBe("");
+    const chip = screen.getByRole("button", {
+      name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines`,
+    });
     expect(chip.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText(/main\.go:1/)).toBeNull();
   });
@@ -75,7 +90,9 @@ describe("Ask, pasting", () => {
 
     expect(paste("x".repeat(PASTE_CHAR_THRESHOLD + 1))).toBe(false);
 
-    expect(screen.getByRole("button", { name: "Pasted text · 1 line" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Pasted text · 1 line" }),
+    ).toBeTruthy();
   });
 
   it("lets a short paste through to the browser", () => {
@@ -92,7 +109,9 @@ describe("Ask, pasting", () => {
     strict(<Ask />);
     paste(trace);
 
-    await userEvent.setup().click(screen.getByRole("button", { name: "Remove pasted text" }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Remove pasted text" }));
 
     expect(screen.queryByRole("button", { name: /Pasted text/ })).toBeNull();
   });
@@ -104,17 +123,32 @@ describe("Ask, pasting", () => {
     paste(trace);
     paste("x".repeat(PASTE_CHAR_THRESHOLD + 1));
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` }));
+    await user.click(
+      screen.getByRole("button", {
+        name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines`,
+      }),
+    );
 
     // When the unfolded one is removed
-    await user.click(screen.getAllByRole("button", { name: "Remove pasted text" })[0]);
+    await user.click(
+      screen.getAllByRole("button", { name: "Remove pasted text" })[0],
+    );
 
     // Then the one left is still folded: it was never opened
-    expect(screen.getByRole("button", { name: "Pasted text · 1 line" }).getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen
+        .getByRole("button", { name: "Pasted text · 1 line" })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 
   it("sends a paste-only question folded, and says which part was pasted", async () => {
-    const mock = queuedFetch([[ev("thread", { thread_id: "1", message_id: 5 }), ev("done", { message_id: 5 })]]);
+    const mock = queuedFetch([
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("done", { message_id: 5 }),
+      ],
+    ]);
     strict(<Ask />);
     paste(trace + "\n");
 
@@ -129,14 +163,25 @@ describe("Ask, pasting", () => {
       pasted_texts: [{ text: trace, lines: PASTE_LINE_THRESHOLD + 5 }],
     });
     // The composer is clear for the next question, chips included.
-    expect(screen.queryByRole("button", { name: "Remove pasted text" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove pasted text" }),
+    ).toBeNull();
     // The turn shows the chip, folded, and no prose above it: nothing was typed.
-    expect(screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines`,
+      }),
+    ).toBeTruthy();
     expect(screen.queryByText(/main\.go:1/)).toBeNull();
   });
 
   it("puts the typed words first and the paste after them", async () => {
-    const mock = queuedFetch([[ev("thread", { thread_id: "1", message_id: 5 }), ev("done", { message_id: 5 })]]);
+    const mock = queuedFetch([
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("done", { message_id: 5 }),
+      ],
+    ]);
     strict(<Ask />);
     const user = userEvent.setup();
     paste(trace);
@@ -147,11 +192,20 @@ describe("Ask, pasting", () => {
     await waitFor(() => expect(posts(mock).length).toBe(1));
     expect(posts(mock)[0][1].question).toBe("Why does this fail?\n\n" + trace);
     expect(await screen.findByText("Why does this fail?")).toBeTruthy();
-    expect(screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` })).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines`,
+      }),
+    ).toBeTruthy();
   });
 
   it("drops the selection a paste replaces, so select-all and paste does not keep the old draft", async () => {
-    const mock = queuedFetch([[ev("thread", { thread_id: "1", message_id: 5 }), ev("done", { message_id: 5 })]]);
+    const mock = queuedFetch([
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("done", { message_id: 5 }),
+      ],
+    ]);
     strict(<Ask />);
     const user = userEvent.setup();
     const box = screen.getByLabelText("Question") as HTMLTextAreaElement;
@@ -178,8 +232,12 @@ describe("Ask, pasting", () => {
     expect(paste("ä".repeat(MAX_QUESTION_BYTES / 2))).toBe(false);
 
     expect(screen.getByRole("alert").textContent).toContain("32 KB");
-    expect((screen.getByLabelText("Question") as HTMLTextAreaElement).value).toBe("Why?");
-    expect(screen.getAllByRole("button", { name: /Pasted text/ }).length).toBe(1);
+    expect(
+      (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
+    ).toBe("Why?");
+    expect(screen.getAllByRole("button", { name: /Pasted text/ }).length).toBe(
+      1,
+    );
     expect(globalThis.fetch).not.toHaveBeenCalled();
 
     // Typing clears the notice.
@@ -203,8 +261,15 @@ describe("Ask, pasting", () => {
 
   it("carries the fold on a retry and on a re-explain", async () => {
     const mock = queuedFetch([
-      [ev("thread", { thread_id: "1", message_id: 5 }), ev("error", { message: "The turn failed.", message_id: 5 })],
-      [ev("thread", { thread_id: "1", message_id: 6 }), ev("token", { text: "The answer." }), ev("done", { message_id: 6 })],
+      [
+        ev("thread", { thread_id: "1", message_id: 5 }),
+        ev("error", { message: "The turn failed.", message_id: 5 }),
+      ],
+      [
+        ev("thread", { thread_id: "1", message_id: 6 }),
+        ev("token", { text: "The answer." }),
+        ev("done", { message_id: 6 }),
+      ],
     ]);
     strict(<Ask />);
     const user = userEvent.setup();
@@ -225,18 +290,30 @@ describe("Ask, pasting", () => {
     });
     // One question, one article, the chip drawn once for the whole turn.
     expect(screen.getAllByRole("article").length).toBe(1);
-    expect(screen.getAllByRole("button", { name: /Pasted text/ }).length).toBe(1);
+    expect(screen.getAllByRole("button", { name: /Pasted text/ }).length).toBe(
+      1,
+    );
   });
 
   it("carries the fold when a candidate is chosen off a card", async () => {
-    const candidate = { idx: 0, title: "Through the login service", summary: "Sign-in.", repo: "peeq", branch: "master" };
+    const candidate = {
+      idx: 0,
+      title: "Through the login service",
+      summary: "Sign-in.",
+      repo: "peeq",
+      branch: "master",
+    };
     const mock = queuedFetch([
       [
         ev("thread", { thread_id: "7", message_id: 5 }),
         ev("clarification", { message_id: 5, candidates: [candidate] }),
         ev("done", { message_id: 5 }),
       ],
-      [ev("thread", { thread_id: "7", message_id: 6 }), ev("token", { text: "Done." }), ev("done", { message_id: 6 })],
+      [
+        ev("thread", { thread_id: "7", message_id: 6 }),
+        ev("token", { text: "Done." }),
+        ev("done", { message_id: 6 }),
+      ],
     ]);
     strict(<Ask />);
     const user = userEvent.setup();
@@ -276,31 +353,50 @@ describe("Ask, a stored turn with a paste", () => {
     strict(<Ask threadId="7" />);
 
     expect(await screen.findByText("Why does this fail?")).toBeTruthy();
-    const chip = screen.getByRole("button", { name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines` });
+    const chip = screen.getByRole("button", {
+      name: `Pasted text · ${PASTE_LINE_THRESHOLD + 5} lines`,
+    });
     expect(chip.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("button", { name: "Remove pasted text" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove pasted text" }),
+    ).toBeNull();
 
     await userEvent.setup().click(chip);
-    expect(screen.getByText(trace, { collapseWhitespace: false }).tagName).toBe("PRE");
+    expect(screen.getByText(trace, { collapseWhitespace: false }).tagName).toBe(
+      "PRE",
+    );
   });
 
   it("leaves a block in the prose when it is not where the fold put it", async () => {
-    queuedFetch([], [{ ...stored, pasted_texts: [{ text: "something else", lines: 1 }] }]);
+    queuedFetch(
+      [],
+      [{ ...stored, pasted_texts: [{ text: "something else", lines: 1 }] }],
+    );
     strict(<Ask threadId="7" />);
 
-    expect(await screen.findByText(new RegExp("Why does this fail\\?"))).toBeTruthy();
+    expect(
+      await screen.findByText(new RegExp("Why does this fail\\?")),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Pasted text/ })).toBeNull();
     expect(screen.getByText(/main\.go:1/)).toBeTruthy();
   });
 
   it("builds a retry that carries the fold from a failed stored row", async () => {
     const mock = queuedFetch(
-      [[ev("thread", { thread_id: "7", message_id: 10 }), ev("token", { text: "Now." }), ev("done", { message_id: 10 })]],
+      [
+        [
+          ev("thread", { thread_id: "7", message_id: 10 }),
+          ev("token", { text: "Now." }),
+          ev("done", { message_id: 10 }),
+        ],
+      ],
       [{ ...stored, answer: "", error: "The turn failed." }],
     );
     strict(<Ask threadId="7" />);
 
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Retry" }));
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(posts(mock).length).toBe(1));
     expect(posts(mock)[0][1]).toMatchObject({
@@ -313,12 +409,24 @@ describe("Ask, a stored turn with a paste", () => {
 
 describe("asMarkdown with a paste", () => {
   it("heads with the typed words and fences the paste", () => {
-    const turn = { ...freshTurn("Why?\n\npanic: boom", "ba", "en", null, [{ text: "panic: boom", lines: 1 }]), text: "Because." };
-    expect(asMarkdown(turn)).toBe("# Why?\n\n```\npanic: boom\n```\n\nBecause.\n");
+    const turn = {
+      ...freshTurn("Why?\n\npanic: boom", "ba", "en", null, [
+        { text: "panic: boom", lines: 1 },
+      ]),
+      text: "Because.",
+    };
+    expect(asMarkdown(turn)).toBe(
+      "# Why?\n\n```\npanic: boom\n```\n\nBecause.\n",
+    );
   });
 
   it("has no heading for a paste-only turn", () => {
-    const turn = { ...freshTurn("panic: boom", "ba", "en", null, [{ text: "panic: boom", lines: 1 }]), text: "Because." };
+    const turn = {
+      ...freshTurn("panic: boom", "ba", "en", null, [
+        { text: "panic: boom", lines: 1 },
+      ]),
+      text: "Because.",
+    };
     expect(asMarkdown(turn)).toBe("```\npanic: boom\n```\n\nBecause.\n");
   });
 

@@ -36,28 +36,43 @@ describe("MemoryChip", () => {
   });
 
   it("keeps the rule when the server refuses", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 500 })),
+    );
     render(<MemoryChip memory={kept} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy(),
+    );
     expect(screen.queryByText("Forgotten")).toBeNull();
   });
 
   it("names what the rule replaced and where it holds", () => {
-    render(<MemoryChip memory={{ ...kept, scope: "shop", replaced: ["Always draw one."] }} />);
+    render(
+      <MemoryChip
+        memory={{ ...kept, scope: "shop", replaced: ["Always draw one."] }}
+      />,
+    );
     expect(screen.getByText("shop")).toBeTruthy();
     expect(screen.getByText(/replaces "Always draw one\."/)).toBeTruthy();
   });
 
   it("says a scope the index does not carry applies everywhere", () => {
     render(<MemoryChip memory={{ ...kept, scopeDropped: "warehouse" }} />);
-    expect(screen.getByText(/warehouse is not indexed, so it applies everywhere/)).toBeTruthy();
+    expect(
+      screen.getByText(/warehouse is not indexed, so it applies everywhere/),
+    ).toBeTruthy();
   });
 
   it("a turn that only forgot has nothing to undo", () => {
-    render(<MemoryChip memory={{ ...kept, id: null, text: "", removed: ["Keep it short."] }} />);
+    render(
+      <MemoryChip
+        memory={{ ...kept, id: null, text: "", removed: ["Keep it short."] }}
+      />,
+    );
     expect(screen.getByText(/Forgotten/)).toBeTruthy();
     expect(screen.getByText(/"Keep it short\."/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();

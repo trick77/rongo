@@ -61,7 +61,9 @@ export default function Narrow({
   const [picked, setPicked] = useState<string[]>([]);
 
   const toggle = (repo: string) =>
-    setPicked((p) => (p.includes(repo) ? p.filter((r) => r !== repo) : [...p, repo]));
+    setPicked((p) =>
+      p.includes(repo) ? p.filter((r) => r !== repo) : [...p, repo],
+    );
 
   return (
     <DecisionCard
@@ -70,26 +72,30 @@ export default function Narrow({
       onToggle={() => setOpen((o) => !o)}
       title={
         <>
-        {decided ? (
-          <>
-            <span>Narrowed to</span>
-            <span className="font-mono text-[12.5px] font-medium text-ochre">
-              {narrowedTo!.join(", ")}
+          {decided ? (
+            <>
+              <span>Narrowed to</span>
+              <span className="font-mono text-[12.5px] font-medium text-ochre">
+                {narrowedTo!.join(", ")}
+              </span>
+            </>
+          ) : readOnly ? (
+            <span className="text-muted">Asked back: too broad to answer</span>
+          ) : (
+            <span className="font-medium text-ochre">
+              That is too broad to ask about.
             </span>
-          </>
-        ) : readOnly ? (
-          <span className="text-muted">Asked back: too broad to answer</span>
-        ) : (
-          <span className="font-medium text-ochre">That is too broad to ask about.</span>
-        )}
+          )}
         </>
       }
     >
       {() => (
         <div className="px-4 pb-4">
           <p className="m-0 mb-3 max-w-[70ch] text-sm text-muted">
-            <span className="font-medium text-ink-dim">{repos.length} projects</span> match this
-            question about equally well.{" "}
+            <span className="font-medium text-ink-dim">
+              {repos.length} projects
+            </span>{" "}
+            match this question about equally well.{" "}
             {readOnly
               ? "The question was too broad to answer from any one of them."
               : `Pick the ones you meant — at most ${maxPicked} — or ask again with a project name in your question.`}
@@ -113,12 +119,16 @@ export default function Narrow({
                       (on
                         ? "border-accent bg-accent-dim text-ink"
                         : "border-elevated-border bg-elevated text-ink-dim") +
-                      (decided || readOnly || full ? " opacity-40" : " hover:border-accent")
+                      (decided || readOnly || full
+                        ? " opacity-40"
+                        : " hover:border-accent")
                     }
                   >
                     <span>{r.repo}</span>
                     {r.members && r.members.length > 1 ? (
-                      <span className="font-sans text-faint">{r.members.length} repos</span>
+                      <span className="font-sans text-faint">
+                        {r.members.length} repos
+                      </span>
                     ) : (
                       <span className="text-faint">{r.branch}</span>
                     )}

@@ -64,7 +64,13 @@ function LanguageList({
  * see-through list that hung below the browser's edge. This list is page
  * DOM, on the thread menu's surface, placed by the thread menu's hook.
  */
-export default function LanguageSelect({ value, onChange }: { value: string; onChange: (code: string) => void }) {
+export default function LanguageSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (code: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   // The row the keyboard is on while the list is open; the pointer ignores it.
   const [active, setActive] = useState(0);
@@ -73,7 +79,12 @@ export default function LanguageSelect({ value, onChange }: { value: string; onC
   const current = languages.find((l) => l.code === value) ?? languages[0];
 
   function show() {
-    setActive(Math.max(0, languages.findIndex((l) => l.code === value)));
+    setActive(
+      Math.max(
+        0,
+        languages.findIndex((l) => l.code === value),
+      ),
+    );
     setOpen(true);
   }
 
@@ -90,7 +101,11 @@ export default function LanguageSelect({ value, onChange }: { value: string; onC
     if (!open) return;
     function onPointerDown(e: PointerEvent) {
       const target = e.target;
-      if (target instanceof Element && target.closest('[role="listbox"], [aria-haspopup="listbox"]')) return;
+      if (
+        target instanceof Element &&
+        target.closest('[role="listbox"], [aria-haspopup="listbox"]')
+      )
+        return;
       setOpen(false);
     }
     function onKeyDown(e: KeyboardEvent) {
@@ -165,7 +180,9 @@ export default function LanguageSelect({ value, onChange }: { value: string; onC
         aria-expanded={open}
         aria-labelledby="lang-label"
         aria-controls={open ? "lang-listbox" : undefined}
-        aria-activedescendant={open ? "lang-option-" + languages[active].code : undefined}
+        aria-activedescendant={
+          open ? "lang-option-" + languages[active].code : undefined
+        }
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onKeyDown}
         onKeyUp={(e) => {
@@ -174,16 +191,27 @@ export default function LanguageSelect({ value, onChange }: { value: string; onC
         className={
           "relative inline-flex cursor-pointer items-center rounded-full border border-border bg-bg p-0.5 text-xs " +
           "outline-none focus-visible:ring-2 focus-visible:ring-accent-dim " +
-          (open ? "border-elevated-border text-ink" : "text-muted hover:border-elevated-border hover:text-ink")
+          (open
+            ? "border-elevated-border text-ink"
+            : "text-muted hover:border-elevated-border hover:text-ink")
         }
       >
-        <span className="py-1 pr-6 pl-3 font-medium pointer-coarse:text-base">{current.name}</span>
+        <span className="py-1 pr-6 pl-3 font-medium pointer-coarse:text-base">
+          {current.name}
+        </span>
         <span className="pointer-events-none absolute right-2">
           {/* Down at rest as the select's was; up while the list is out. */}
           <Chevron open up={open} />
         </span>
       </button>
-      {open && <LanguageList value={value} active={active} onActive={setActive} onChoose={choose} />}
+      {open && (
+        <LanguageList
+          value={value}
+          active={active}
+          onActive={setActive}
+          onChoose={choose}
+        />
+      )}
     </div>
   );
 }

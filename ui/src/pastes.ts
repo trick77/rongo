@@ -36,7 +36,9 @@ export function countLines(text: string): number {
 /** Whether a paste is a chip rather than text. Measured trimmed: nearly every clipboard ends in a newline. */
 export function shouldCollapse(text: string): boolean {
   const t = text.trim();
-  return t.length > PASTE_CHAR_THRESHOLD || countLines(t) > PASTE_LINE_THRESHOLD;
+  return (
+    t.length > PASTE_CHAR_THRESHOLD || countLines(t) > PASTE_LINE_THRESHOLD
+  );
 }
 
 const encoder = new TextEncoder();
@@ -73,7 +75,9 @@ const SEP = "\n\n";
 
 /** The question as sent: what was typed, then each paste, a blank line between. */
 export function fold(typed: string, pastes: PastedText[]): string {
-  return [typed.trim(), ...pastes.map((p) => p.text)].filter((s) => s !== "").join(SEP);
+  return [typed.trim(), ...pastes.map((p) => p.text)]
+    .filter((s) => s !== "")
+    .join(SEP);
 }
 
 /**
@@ -84,7 +88,10 @@ export function fold(typed: string, pastes: PastedText[]): string {
  * is ever drawn twice. Peeling stops at the first miss: everything before it
  * is, by construction, not at the tail either.
  */
-export function strip(question: string, pastes: PastedText[]): { typed: string; matched: boolean[] } {
+export function strip(
+  question: string,
+  pastes: PastedText[],
+): { typed: string; matched: boolean[] } {
   let rest = question;
   const matched = pastes.map(() => false);
   for (let i = pastes.length - 1; i >= 0; i--) {

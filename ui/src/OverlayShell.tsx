@@ -4,7 +4,8 @@ import { useBackdropDismiss } from "./dismiss";
 
 /** The header the source and commit viewers share; the diagram passes its own
  * gap. */
-export const overlayHeader = "flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3.5 sm:px-4.5 sm:py-3";
+export const overlayHeader =
+  "flex items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3.5 sm:px-4.5 sm:py-3";
 
 /** The close button: a 44px target on a phone, 32px from sm up. */
 export const overlayClose =
@@ -45,7 +46,11 @@ export default function OverlayShell({
 }) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
-  const dismiss = useBackdropDismiss(onClose);
+  const {
+    ref: scrim,
+    onPointerDown,
+    onPointerUp,
+  } = useBackdropDismiss(onClose);
 
   useFocusOnOpen(closeButton);
   useEscape(onClose);
@@ -54,14 +59,26 @@ export default function OverlayShell({
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/55 p-0 sm:p-6 md:p-10"
-      ref={dismiss.ref}
-      onPointerDown={dismiss.onPointerDown}
-      onPointerUp={dismiss.onPointerUp}
+      ref={scrim}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
     >
-      <div ref={dialog} role="dialog" aria-modal="true" aria-label={label} className={dialogClassName}>
+      <div
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        className={dialogClassName}
+      >
         <header className={headerClassName}>
           {header}
-          <button ref={closeButton} type="button" onClick={onClose} aria-label="Close" className={closeClassName}>
+          <button
+            ref={closeButton}
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className={closeClassName}
+          >
             ×
           </button>
         </header>

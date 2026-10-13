@@ -21,7 +21,10 @@ const live: Share = {
 
 function clipboard() {
   const writeText = vi.fn(async () => {});
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
   return writeText;
 }
 
@@ -49,7 +52,10 @@ describe("ShareDialog", () => {
   });
 
   it("makes the link and shows it", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => live })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => live })),
+    );
     const onChange = open(null);
     const user = userEvent.setup();
 
@@ -75,7 +81,9 @@ describe("ShareDialog", () => {
 
   it("says so when the clipboard refuses, and leaves the link on screen", async () => {
     Object.defineProperty(navigator, "clipboard", {
-      value: { writeText: vi.fn(async () => Promise.reject(new Error("denied"))) },
+      value: {
+        writeText: vi.fn(async () => Promise.reject(new Error("denied"))),
+      },
       configurable: true,
     });
     open(live);
@@ -90,19 +98,27 @@ describe("ShareDialog", () => {
 
   it("offers to update when the thread has moved on, and keeps the same link", async () => {
     const raised = { ...live, newer: 0, turns: 5 };
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => raised })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => raised })),
+    );
     open({ ...live, newer: 3 });
     const user = userEvent.setup();
     expect(screen.getByText(/3 questions have been asked since/)).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Update link" }));
 
-    await waitFor(() => expect(screen.queryByText(/questions have been asked since/)).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText(/questions have been asked since/)).toBeNull(),
+    );
     expect(screen.getByText(new RegExp(live.token))).toBeTruthy();
   });
 
   it("takes the link back without asking twice", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 204 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 204 })),
+    );
     const onChange = open(live);
     const user = userEvent.setup();
 
@@ -115,12 +131,17 @@ describe("ShareDialog", () => {
   });
 
   it("explains a 409 rather than showing a bare failure", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 409 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 409 })),
+    );
     open(null);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Create link" }));
 
-    expect((await screen.findByRole("alert")).textContent).toMatch(/still being written/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /still being written/,
+    );
   });
 });

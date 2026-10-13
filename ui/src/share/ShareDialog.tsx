@@ -3,7 +3,14 @@ import { useState } from "react";
 import { copyText } from "../http";
 import { useFlash } from "../hooks";
 import { ModalShell, cancelButton, saveButton } from "../ThreadModals";
-import { conflict, createShare, revokeShare, shareURL, updateShare, type Share } from "./api";
+import {
+  conflict,
+  createShare,
+  revokeShare,
+  shareURL,
+  updateShare,
+  type Share,
+} from "./api";
 
 /**
  * Where a thread is handed out, and taken back.
@@ -91,21 +98,30 @@ export default function ShareDialog({
   const when = share ? new Date(share.updated_at) : null;
   const frozen =
     when && !Number.isNaN(when.getTime())
-      ? when.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      ? when.toLocaleString("en-GB", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
       : "";
 
   return (
-    <ModalShell title={share ? "Thread shared" : "Share thread"} onCancel={onCancel}>
+    <ModalShell
+      title={share ? "Thread shared" : "Share thread"}
+      onCancel={onCancel}
+    >
       <p className="mt-3 text-sm/6 text-muted">
         {share ? (
           <>
-            Anyone with the link can read “{title}” as it stood{frozen ? ` at ${frozen}` : " when it was made"}.
-            Questions asked later are not included.
+            Anyone with the link can read “{title}” as it stood
+            {frozen ? ` at ${frozen}` : " when it was made"}. Questions asked
+            later are not included.
           </>
         ) : (
           <>
-            Anyone with the link can read “{title}” as it stands now, without signing in. Questions asked
-            later are not included.
+            Anyone with the link can read “{title}” as it stands now, without
+            signing in. Questions asked later are not included.
           </>
         )}
       </p>
@@ -136,11 +152,17 @@ export default function ShareDialog({
               never collides with the button beside it. */}
           <span
             className="min-w-0 flex-1 overflow-hidden font-mono text-xs whitespace-nowrap text-muted"
-            style={{ maskImage: "linear-gradient(to right, #000 82%, transparent)" }}
+            style={{
+              maskImage: "linear-gradient(to right, #000 82%, transparent)",
+            }}
           >
             {shareURL(share)}
           </span>
-          <button type="button" onClick={() => void copy()} className={saveButton + " shrink-0"}>
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className={saveButton + " shrink-0"}
+          >
             {copied ? "Copied" : "Copy link"}
           </button>
         </div>
@@ -153,8 +175,9 @@ export default function ShareDialog({
       )}
 
       <p className="mt-3 text-xs/5 text-faint">
-        The answers, the sources they cite and the files behind them are readable without signing in.
-        The thread's total token count and cost are shared; the per-turn breakdown is not.
+        The answers, the sources they cite and the files behind them are
+        readable without signing in. The thread's total token count and cost are
+        shared; the per-turn breakdown is not.
       </p>
 
       <div className="mt-4 flex items-center justify-end gap-2">

@@ -60,16 +60,26 @@ export default function SourceView({
   // nothing to an Analyst. The source stays one click away, because the
   // cited lines are marked there and nowhere in the picture.
   const drawable = isPlantUml(source.path);
-  const [view, setView] = useState<"diagram" | "source">(drawable ? "diagram" : "source");
+  const [view, setView] = useState<"diagram" | "source">(
+    drawable ? "diagram" : "source",
+  );
 
   const [loaded] = useLoaded(async () => {
-    const q = new URLSearchParams({ repo: source.repo, path: source.path, sha: source.sha ?? "" });
+    const q = new URLSearchParams({
+      repo: source.repo,
+      path: source.path,
+      sha: source.sha ?? "",
+    });
     const file = await fetchJSON(`${endpoint}?${q}`);
     const content: string = file.content ?? "";
     const lines = content.split("\n");
     // A file ending in a newline has no empty last line to show.
     if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-    return { sha: (file.sha ?? "") as string, branch: (file.branch ?? source.branch) as string, lines };
+    return {
+      sha: (file.sha ?? "") as string,
+      branch: (file.branch ?? source.branch) as string,
+      lines,
+    };
   }, [source, endpoint]);
 
   // Once the file is there, the cited range comes into view with a little
@@ -90,12 +100,16 @@ export default function SourceView({
   // last indexed at, which can be newer than the answer. If the file has
   // shrunk past the cited range since, nothing would be marked and the
   // reader would take the answer for unbacked. Say what happened instead.
-  const moved = loaded.state === "ready" && source.start_line > loaded.lines.length;
+  const moved =
+    loaded.state === "ready" && source.start_line > loaded.lines.length;
   // Coloured once per file, not per render: the grammar is the file's, and
   // the per-line grid below keeps its numbers, anchors and cited-range mark.
   const lines = loaded.state === "ready" ? loaded.lines : null;
   const coloured = useMemo(
-    () => (lines ? highlightLines(lines.join("\n"), languageForPath(source.path)) : []),
+    () =>
+      lines
+        ? highlightLines(lines.join("\n"), languageForPath(source.path))
+        : [],
     [lines, source.path],
   );
 
@@ -113,7 +127,9 @@ export default function SourceView({
       onClose={onClose}
       header={
         <>
-          <span className="font-mono font-semibold text-accent-strong">{source.marker}</span>
+          <span className="font-mono font-semibold text-accent-strong">
+            {source.marker}
+          </span>
           <span className="min-w-0 truncate font-mono text-[13.5px] text-muted">
             {source.repo} · {dir}
             <b className="font-medium text-ink">{base}</b>
@@ -122,8 +138,14 @@ export default function SourceView({
               needs from a 360px header; the branch, the sha and the range are
               all in the citation list under the answer as well. */}
           <span className="ml-auto hidden shrink-0 items-center gap-2.5 font-mono text-[11.5px] text-faint sm:flex">
-            <span className="rounded-full border border-border px-2 py-px">{branch}</span>
-            {sha && <span className="rounded-full border border-border px-2 py-px">{sha}</span>}
+            <span className="rounded-full border border-border px-2 py-px">
+              {branch}
+            </span>
+            {sha && (
+              <span className="rounded-full border border-border px-2 py-px">
+                {sha}
+              </span>
+            )}
             {/* No range on a file opened whole from a commit view. */}
             {source.end_line >= source.start_line && (
               <span>
@@ -147,7 +169,9 @@ export default function SourceView({
                   onClick={() => setView(v)}
                   className={
                     "rounded-[3px] px-2.5 py-1 " +
-                    (view === v ? "bg-active text-ink" : "text-muted hover:text-ink-dim")
+                    (view === v
+                      ? "bg-active text-ink"
+                      : "text-muted hover:text-ink-dim")
                   }
                 >
                   {v === "diagram" ? "Diagram" : "Source"}
@@ -159,19 +183,29 @@ export default function SourceView({
       }
     >
       <div className="min-h-0 overflow-auto py-2.5 font-mono text-[12.5px] leading-[1.55]">
-        {loaded.state === "loading" && <p className="px-5 py-3 text-muted">Reading the file…</p>}
+        {loaded.state === "loading" && (
+          <p className="px-5 py-3 text-muted">Reading the file…</p>
+        )}
         {loaded.state === "error" && (
           <p role="alert" className="px-5 py-3 text-muted">
             {loaded.message}
           </p>
         )}
         {loaded.state === "ready" && view === "diagram" && (
-          <PlantUmlSheet text={loaded.lines.join("\n")} path={source.path} onSource={() => setView("source")} />
+          <PlantUmlSheet
+            text={loaded.lines.join("\n")}
+            path={source.path}
+            onSource={() => setView("source")}
+          />
         )}
         {view === "source" && moved && (
-          <p role="status" className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted">
-            The file has changed since the answer was written: it has {loaded.lines.length} lines at this
-            commit, and the cited range starts at line {source.start_line}.
+          <p
+            role="status"
+            className="mx-5 my-2 rounded-ui-sm border border-border bg-active px-3 py-2 text-muted"
+          >
+            The file has changed since the answer was written: it has{" "}
+            {loaded.lines.length} lines at this commit, and the cited range
+            starts at line {source.start_line}.
           </p>
         )}
         {loaded.state === "ready" &&
@@ -189,12 +223,17 @@ export default function SourceView({
                   // 40px still holds a four-digit line number and gives the
                   // code back 16px of a 360px screen.
                   "grid grid-cols-[40px_1fr] sm:grid-cols-[56px_1fr] border-l-2 whitespace-pre " +
-                  (hit ? "border-accent bg-accent-dim/35" : "border-transparent")
+                  (hit
+                    ? "border-accent bg-accent-dim/35"
+                    : "border-transparent")
                 }
               >
                 <span
                   aria-hidden="true"
-                  className={"pr-2 text-right select-none sm:pr-4 " + (hit ? "text-accent-strong" : "text-faint")}
+                  className={
+                    "pr-2 text-right select-none sm:pr-4 " +
+                    (hit ? "text-accent-strong" : "text-faint")
+                  }
                 >
                   {n}
                 </span>

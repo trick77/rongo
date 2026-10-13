@@ -34,7 +34,8 @@ function fence(text: string): { tag: string; body: string } | null {
     const open = fenceRe.exec(lines[i]);
     if (!open) continue;
     const body: string[] = [];
-    for (i++; i < lines.length && !fenceRe.test(lines[i]); i++) body.push(lines[i]);
+    for (i++; i < lines.length && !fenceRe.test(lines[i]); i++)
+      body.push(lines[i]);
     const src = diagramSource(open[1], body.join("\n"));
     if (src !== null) return { tag: open[1], body: src };
   }

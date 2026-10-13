@@ -28,7 +28,10 @@ export async function listMemories(): Promise<MemoryPage> {
   const res = await fetch("/api/memory");
   if (!res.ok) throw new Error(`memory: ${res.status}`);
   const page = (await res.json()) as MemoryPage;
-  return { enabled: page.enabled === true, memories: Array.isArray(page.memories) ? page.memories : [] };
+  return {
+    enabled: page.enabled === true,
+    memories: Array.isArray(page.memories) ? page.memories : [],
+  };
 }
 
 /** True when the rule is gone, whether this call removed it or it already

@@ -1,7 +1,14 @@
 import { StrictMode } from "react";
 import { ask, ev, pickLanguage, streamFrames } from "./__tests__/helpers";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
 
@@ -29,13 +36,19 @@ describe("Ask", () => {
   it("greets in the answer language", async () => {
     // The select says Deutsch and the page still says "Ask about the code."
     render(<Ask />);
-    expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Ask about the code." }),
+    ).toBeTruthy();
     const user = userEvent.setup();
     await pickLanguage(user, "de");
-    expect(screen.getByRole("heading", { name: "Frag den Code." })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Frag den Code." }),
+    ).toBeTruthy();
     expect(screen.queryByText(/Ask about the code/)).toBeNull();
     await pickLanguage(user, "en");
-    expect(screen.getByRole("heading", { name: "Ask about the code." })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Ask about the code." }),
+    ).toBeTruthy();
   });
 
   // The composer sits next to the language select and is the place the answer
@@ -56,7 +69,14 @@ describe("Ask", () => {
       ev("token", { text: "Shipping " }),
       ev("token", { text: "runs through a job [1]." }),
       ev("citations", [
-        { marker: 1, repo: "peeq", branch: "master", path: "a.go", start_line: 1, end_line: 9 },
+        {
+          marker: 1,
+          repo: "peeq",
+          branch: "master",
+          path: "a.go",
+          start_line: 1,
+          end_line: 9,
+        },
       ]),
       ev("done", { message_id: 1 }),
     ]);
@@ -79,7 +99,10 @@ describe("Ask", () => {
     const onActivity = vi.fn();
     const user = userEvent.setup();
     render(<Ask onActivity={onActivity} />);
-    await user.type(screen.getByLabelText("Question"), "How does shipping work?");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "How does shipping work?",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await screen.findByText(/Still writing/);
@@ -88,12 +111,17 @@ describe("Ask", () => {
   });
 
   it("shows the running step while nothing is finished", async () => {
-    streamFrames([ev("thread", { thread_id: "1" }), ev("status", { step: "gathering" })]);
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("status", { step: "gathering" }),
+    ]);
 
     await ask("How?");
 
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("Reading the code");
+      expect(screen.getByRole("status").textContent).toContain(
+        "Reading the code",
+      );
     });
   });
 
@@ -104,7 +132,10 @@ describe("Ask", () => {
       ev("thread", { thread_id: "1" }),
       ev("status", { step: "searching" }),
       ev("status", { step: "gathering" }),
-      ev("detail", { step: "searching", detail: { hits: 20, per_repo: { orders: 12, payment: 8 } } }),
+      ev("detail", {
+        step: "searching",
+        detail: { hits: 20, per_repo: { orders: 12, payment: 8 } },
+      }),
     ]);
 
     await ask("How?");
@@ -148,7 +179,15 @@ describe("Ask", () => {
       ev("thread", { thread_id: "1" }),
       ev("token", { text: "So [1]." }),
       ev("citations", [
-        { marker: 1, repo: "peeq", branch: "master", path: "internal/a.go", start_line: 2, end_line: 3, sha: "0123abcdef" },
+        {
+          marker: 1,
+          repo: "peeq",
+          branch: "master",
+          path: "internal/a.go",
+          start_line: 2,
+          end_line: 3,
+          sha: "0123abcdef",
+        },
       ]),
       ev("done", {}),
     ]);
@@ -159,7 +198,13 @@ describe("Ask", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ repo: "peeq", branch: "master", path: "internal/a.go", sha: "0123abcdef", content: "a\nb\nc\n" }),
+      json: async () => ({
+        repo: "peeq",
+        branch: "master",
+        path: "internal/a.go",
+        sha: "0123abcdef",
+        content: "a\nb\nc\n",
+      }),
       text: async () => "",
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -174,14 +219,21 @@ describe("Ask", () => {
       "/api/source?repo=peeq&path=internal%2Fa.go&sha=0123abcdef",
     );
     await screen.findByText("b");
-    expect(Array.from(dialog.querySelectorAll("[data-hit]")).map((h) => h.getAttribute("data-line"))).toEqual(["2", "3"]);
+    expect(
+      Array.from(dialog.querySelectorAll("[data-hit]")).map((h) =>
+        h.getAttribute("data-line"),
+      ),
+    ).toEqual(["2", "3"]);
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows an error as an error, not as an empty answer", async () => {
-    streamFrames([ev("thread", { thread_id: "1" }), ev("error", { message: "The turn failed." })]);
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("error", { message: "The turn failed." }),
+    ]);
 
     await ask("How?");
 
@@ -199,7 +251,9 @@ describe("Ask", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await waitFor(() => {
-      const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
+      );
       expect(body.audience).toBe("dev");
     });
   });
@@ -213,7 +267,9 @@ describe("Ask", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await waitFor(() => {
-      const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
+      );
       expect(body.language).toBe("de");
     });
   });
@@ -222,11 +278,16 @@ describe("Ask", () => {
     streamFrames([ev("thread", { thread_id: "1" }), ev("done", {})]);
     const user = userEvent.setup();
     render(<Ask />);
-    await user.type(screen.getByLabelText("Question"), "First line{Shift>}{Enter}{/Shift}second");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "First line{Shift>}{Enter}{/Shift}second",
+    );
     expect(globalThis.fetch).not.toHaveBeenCalled();
     await user.type(screen.getByLabelText("Question"), "{Enter}");
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
-    const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+    const body = JSON.parse(
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
+    );
     expect(body.question).toBe("First line\nsecond");
   });
 
@@ -242,7 +303,9 @@ describe("Ask", () => {
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
     await waitFor(() => {
-      const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
+      const body = JSON.parse(
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body,
+      );
       expect(body.thread_id).toBe("42");
     });
   });
@@ -252,9 +315,22 @@ describe("Ask, the Sources pane", () => {
   // One citation is all any of these need: what is under test is whether the
   // pane is on screen, never what it holds.
   const cited = [
-    { marker: 1, repo: "peeq", branch: "master", path: "internal/a.go", start_line: 2, end_line: 3, sha: "0123abcdef" },
+    {
+      marker: 1,
+      repo: "peeq",
+      branch: "master",
+      path: "internal/a.go",
+      start_line: 2,
+      end_line: 3,
+      sha: "0123abcdef",
+    },
   ];
-  const answered = () => [ev("thread", { thread_id: "1" }), ev("token", { text: "So [1]." }), ev("citations", cited), ev("done", {})];
+  const answered = () => [
+    ev("thread", { thread_id: "1" }),
+    ev("token", { text: "So [1]." }),
+    ev("citations", cited),
+    ev("done", {}),
+  ];
 
   const pane = () => screen.queryByRole("complementary", { name: "Sources" });
   const chip = () => screen.queryByRole("button", { name: /Sources/ });
@@ -309,9 +385,22 @@ describe("Ask, the Sources pane", () => {
     await screen.findByRole("button", { name: /Sources/ });
 
     const later = [
-      { marker: 1, repo: "peeq", branch: "master", path: "internal/b.go", start_line: 5, end_line: 6, sha: "0123abcdef" },
+      {
+        marker: 1,
+        repo: "peeq",
+        branch: "master",
+        path: "internal/b.go",
+        start_line: 5,
+        end_line: 6,
+        sha: "0123abcdef",
+      },
     ];
-    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", later), ev("done", {})]);
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("token", { text: "And so [1]." }),
+      ev("citations", later),
+      ev("done", {}),
+    ]);
     await user.type(screen.getByLabelText("Question"), "And then?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/And so/);
@@ -367,7 +456,12 @@ describe("Ask, the Sources pane", () => {
     await user.click(chip()!);
     expect(pane()).toBeTruthy();
 
-    streamFrames([ev("thread", { thread_id: "1" }), ev("token", { text: "And so [1]." }), ev("citations", cited), ev("done", {})]);
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("token", { text: "And so [1]." }),
+      ev("citations", cited),
+      ev("done", {}),
+    ]);
     await user.type(screen.getByLabelText("Question"), "And then?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await screen.findByText(/And so/);
@@ -443,14 +537,18 @@ describe("Ask, a stored thread", () => {
     routedFetch([storedTurn]);
     strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
-    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe("Continue the discussion…");
+    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe(
+      "Continue the discussion…",
+    );
   });
 
   it("invites the next turn in the thread's language", async () => {
     routedFetch([{ ...storedTurn, language: "de" }]);
     strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
-    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe("Diskussion weiterführen …");
+    expect(screen.getByLabelText("Question").getAttribute("placeholder")).toBe(
+      "Diskussion weiterführen …",
+    );
   });
 
   it("restores an old turn including its sources from the record", async () => {
@@ -458,10 +556,16 @@ describe("Ask, a stored thread", () => {
     strict(<Ask threadId="7" />);
 
     expect(await screen.findByText(/Through a grant/)).toBeTruthy();
-    expect(screen.getByText(/How does an Apple TV get at the file/)).toBeTruthy();
+    expect(
+      screen.getByText(/How does an Apple TV get at the file/),
+    ).toBeTruthy();
     // A Developer's turn: the pane is open with it, and lists the file.
-    expect(screen.getByRole("button", { name: /Sources/ }).textContent).toContain("1");
-    expect(screen.getByRole("complementary", { name: "Sources" }).textContent).toContain("store.go:3-40");
+    expect(
+      screen.getByRole("button", { name: /Sources/ }).textContent,
+    ).toContain("1");
+    expect(
+      screen.getByRole("complementary", { name: "Sources" }).textContent,
+    ).toContain("store.go:3-40");
     // A turn written before timelines were stored has none, and draws none:
     // an empty frame under an old answer would be a claim about a turn nobody
     // watched.
@@ -492,18 +596,26 @@ describe("Ask, a stored thread", () => {
     ]);
     strict(<Ask threadId="7" />);
 
-    expect(await screen.findByText(/Test sources are labelled now/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Test sources are labelled now/),
+    ).toBeTruthy();
     const pane = screen.getByRole("complementary", { name: "Sources" });
     expect(pane.textContent).toContain("7f2a492 · 2026-09-17");
     expect(pane.textContent).toContain("Test sources are labelled");
     expect(pane.textContent).not.toContain(":0-0");
 
     // The row opens the commit, not a file: the request goes to /api/commit.
-    await userEvent.click(within(pane).getByRole("button", { name: /Test sources are labelled/ }));
+    await userEvent.click(
+      within(pane).getByRole("button", { name: /Test sources are labelled/ }),
+    );
     const dialog = await screen.findByRole("dialog", { name: /Commit 1/ });
     expect(dialog).toBeTruthy();
     const urls = mock.mock.calls.map((c) => String(c[0]));
-    expect(urls.some((u) => u.startsWith("/api/commit?") && u.includes("sha=7f2a492abcdef"))).toBe(true);
+    expect(
+      urls.some(
+        (u) => u.startsWith("/api/commit?") && u.includes("sha=7f2a492abcdef"),
+      ),
+    ).toBe(true);
     expect(urls.some((u) => u.startsWith("/api/source"))).toBe(false);
   });
 
@@ -543,14 +655,21 @@ describe("Ask, a stored thread", () => {
     const spec = JSON.stringify({
       type: "sequence",
       actors: [{ id: "ui", label: "Ask.tsx" }],
-      steps: [{ from: "ui", to: "ui", label: "render", kind: "call", src: [1] }],
+      steps: [
+        { from: "ui", to: "ui", label: "render", kind: "call", src: [1] },
+      ],
     });
     const written: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: (t: string) => (written.push(t), Promise.resolve()) },
     });
-    routedFetch([{ ...storedTurn, answer: "Through a grant [1].\n\n```diagram\n" + spec + "\n```" }]);
+    routedFetch([
+      {
+        ...storedTurn,
+        answer: "Through a grant [1].\n\n```diagram\n" + spec + "\n```",
+      },
+    ]);
     strict(<Ask threadId="7" />);
 
     fireEvent.click(await screen.findByText("Copy as Markdown"));
@@ -559,7 +678,9 @@ describe("Ask, a stored thread", () => {
     expect(written[0]).toContain("ui->>ui: render [1]");
     expect(written[0]).not.toContain("```diagram");
     // The markers still point into the list underneath.
-    expect(written[0]).toContain("[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)");
+    expect(written[0]).toContain(
+      "[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)",
+    );
   });
 
   it("copies the question as it was typed, from the question's own control", async () => {
@@ -574,7 +695,9 @@ describe("Ask, a stored thread", () => {
     routedFetch([storedTurn]);
     strict(<Ask threadId="7" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Copy the question" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Copy the question" }),
+    );
     await screen.findByRole("button", { name: "Question copied" });
     expect(written).toEqual([storedTurn.question]);
   });
@@ -588,7 +711,12 @@ describe("Ask, a stored thread", () => {
       ordinal: 1,
       question: "And the token?",
       answer: "From the header [1].",
-      citations: [{ ...storedTurn.citations[0], path: "backend/internal/httpapi/token.go" }],
+      citations: [
+        {
+          ...storedTurn.citations[0],
+          path: "backend/internal/httpapi/token.go",
+        },
+      ],
     };
     routedFetch([storedTurn, newer]);
     strict(<Ask threadId="7" />);
@@ -597,7 +725,13 @@ describe("Ask, a stored thread", () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ repo: "peeq", branch: "master", path: "backend/internal/playbackgrant/store.go", sha: "", content: "a\n" }),
+      json: async () => ({
+        repo: "peeq",
+        branch: "master",
+        path: "backend/internal/playbackgrant/store.go",
+        sha: "",
+        content: "a\n",
+      }),
       text: async () => "",
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -607,8 +741,12 @@ describe("Ask, a stored thread", () => {
     await user.click(older.querySelector("sup button")!);
 
     const dialog = await screen.findByRole("dialog");
-    expect(dialog.getAttribute("aria-label")).toContain("playbackgrant/store.go");
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("playbackgrant%2Fstore.go");
+    expect(dialog.getAttribute("aria-label")).toContain(
+      "playbackgrant/store.go",
+    );
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain(
+      "playbackgrant%2Fstore.go",
+    );
   });
 
   it("restores the role the question was answered in", async () => {
@@ -616,7 +754,9 @@ describe("Ask, a stored thread", () => {
     strict(<Ask threadId="7" />);
     // The eyebrow over the question, not the composer's toggle button.
     await screen.findByText(/Through a grant/);
-    expect(screen.getAllByText("Developer").some((el) => el.tagName !== "BUTTON")).toBe(true);
+    expect(
+      screen.getAllByText("Developer").some((el) => el.tagName !== "BUTTON"),
+    ).toBe(true);
   });
 
   // Messages() puts the subject inside the WHERE clause and returns an empty
@@ -636,7 +776,10 @@ describe("Ask, a stored thread", () => {
   // tell anyone which addresses are real — so the API does, and this is where
   // it is read.
   it("says the same for an address the API answers 404", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 404, json: async () => null })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 404, json: async () => null })),
+    );
     strict(<Ask threadId="AAAAAAAAAAAAAAAAAAAAAA" onThread={() => {}} />);
     expect(await screen.findByText(/no longer available/)).toBeTruthy();
   });
@@ -645,11 +788,17 @@ describe("Ask, a stored thread", () => {
   // NEW thread: sent with the dead address it comes back 403, and the Retry on
   // that failure resends the same dead address for ever.
   it("asks into a new thread from a thread that is gone", async () => {
-    const mock = routedFetch([], [ev("thread", { thread_id: "42" }), ev("done", {})]);
+    const mock = routedFetch(
+      [],
+      [ev("thread", { thread_id: "42" }), ev("done", {})],
+    );
     strict(<Ask threadId="999" onThread={() => {}} />);
     await screen.findByText(/no longer available/);
 
-    await userEvent.type(screen.getByRole("textbox"), "How does shipping work?");
+    await userEvent.type(
+      screen.getByRole("textbox"),
+      "How does shipping work?",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
 
     const post = mock.mock.calls.find((c) => String(c[0]) === "/api/ask");
@@ -661,20 +810,32 @@ describe("Ask, a stored thread", () => {
   // is drawn. With the screen still standing in the dead thread, the thread
   // event was ignored and every token streamed into a turn nobody saw.
   it("shows the answer of the new thread asked from a thread that is gone", async () => {
-    routedFetch([], [
-      ev("thread", { thread_id: "v76BBy2b1nMYOFl2Lnm9JQ", message_id: 7, language: "en" }),
-      ev("token", { text: "Shipping is " }),
-      ev("token", { text: "by boat." }),
-      ev("done", {}),
-    ]);
+    routedFetch(
+      [],
+      [
+        ev("thread", {
+          thread_id: "v76BBy2b1nMYOFl2Lnm9JQ",
+          message_id: 7,
+          language: "en",
+        }),
+        ev("token", { text: "Shipping is " }),
+        ev("token", { text: "by boat." }),
+        ev("done", {}),
+      ],
+    );
     const onThread = vi.fn();
     strict(<Ask threadId="999" onThread={onThread} />);
     await screen.findByText(/no longer available/);
 
-    await userEvent.type(screen.getByRole("textbox"), "How does shipping work?");
+    await userEvent.type(
+      screen.getByRole("textbox"),
+      "How does shipping work?",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => expect(onThread).toHaveBeenCalledWith("v76BBy2b1nMYOFl2Lnm9JQ"));
+    await waitFor(() =>
+      expect(onThread).toHaveBeenCalledWith("v76BBy2b1nMYOFl2Lnm9JQ"),
+    );
     expect(await screen.findByText(/by boat/)).toBeTruthy();
     expect(screen.queryByText(/no longer available/)).toBeNull();
   });
@@ -689,7 +850,9 @@ describe("Ask, a stored thread", () => {
 
     rerender(<Ask threadId={null} onThread={() => {}} />);
 
-    await waitFor(() => expect(screen.queryByText(/no longer available/)).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText(/no longer available/)).toBeNull(),
+    );
   });
 
   it("does not reload its own running thread mid-stream", async () => {
@@ -698,7 +861,11 @@ describe("Ask, a stored thread", () => {
     // stored record, which does not have it yet.
     const mock = routedFetch(
       [storedTurn],
-      [ev("thread", { thread_id: "42" }), ev("token", { text: "Shipping runs." }), ev("done", {})],
+      [
+        ev("thread", { thread_id: "42" }),
+        ev("token", { text: "Shipping runs." }),
+        ev("done", {}),
+      ],
     );
     const user = userEvent.setup();
     const { rerender } = render(<Ask threadId={null} onThread={() => {}} />);
@@ -711,8 +878,11 @@ describe("Ask, a stored thread", () => {
     // itself would replace the half-written answer.
     await waitFor(() =>
       expect(
-        mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/threads/") && !String(c[0]).endsWith("/feedback"))
-          .length,
+        mock.mock.calls.filter(
+          (c) =>
+            String(c[0]).startsWith("/api/threads/") &&
+            !String(c[0]).endsWith("/feedback"),
+        ).length,
       ).toBe(0),
     );
     expect(screen.getByText(/Shipping runs/)).toBeTruthy();
@@ -724,14 +894,22 @@ describe("Ask, a stored thread", () => {
    * its answer arriving, and a fake that resolves immediately closes exactly
    * that window.
    */
-  function slowThreadFetch(messages: unknown, frames: string[] = [], status = 200) {
+  function slowThreadFetch(
+    messages: unknown,
+    frames: string[] = [],
+    status = 200,
+  ) {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     const encoder = new TextEncoder();
     const mock = vi.fn(async (url: string) => {
       if (String(url).startsWith("/api/threads/")) {
         await gate;
-        return { ok: status >= 200 && status < 300, status, json: async () => messages };
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          json: async () => messages,
+        };
       }
       return {
         ok: true,
@@ -779,7 +957,13 @@ describe("Ask, a stored thread", () => {
       vi.fn(async (url: string) => {
         if (String(url).startsWith("/api/threads/8")) {
           await hold;
-          return { ok: true, status: 200, json: async () => [{ ...storedTurn, id: 11, answer: "A different record [1]." }] };
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { ...storedTurn, id: 11, answer: "A different record [1]." },
+            ],
+          };
         }
         return { ok: true, status: 200, json: async () => [storedTurn] };
       }),
@@ -806,11 +990,14 @@ describe("Ask, a stored thread", () => {
     // A reload onto a remembered thread while the backend is slow: the question
     // is already sent when the record arrives. Without a guard the running turn
     // is dropped and the remaining tokens land in a finished, stored answer.
-    const { release } = slowThreadFetch([storedTurn], [
-      ev("thread", { thread_id: "7" }),
-      ev("token", { text: "The new answer." }),
-      ev("done", {}),
-    ]);
+    const { release } = slowThreadFetch(
+      [storedTurn],
+      [
+        ev("thread", { thread_id: "7" }),
+        ev("token", { text: "The new answer." }),
+        ev("done", {}),
+      ],
+    );
     const user = userEvent.setup();
     render(<Ask threadId="7" onThread={() => {}} />);
     await user.type(screen.getByLabelText("Question"), "And now?");
@@ -854,11 +1041,20 @@ describe("Ask, a stored thread", () => {
       }),
     );
     rerender(<Ask threadId="8" onThread={() => {}} />);
-    await waitFor(() => expect(screen.queryByText(/Through a grant/)).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText(/Through a grant/)).toBeNull(),
+    );
   });
 
   it("reports the thread upwards as soon as it exists, and when the turn is done", async () => {
-    routedFetch([], [ev("thread", { thread_id: "42" }), ev("token", { text: "So." }), ev("done", {})]);
+    routedFetch(
+      [],
+      [
+        ev("thread", { thread_id: "42" }),
+        ev("token", { text: "So." }),
+        ev("done", {}),
+      ],
+    );
     const onActivity = vi.fn();
     const user = userEvent.setup();
     render(<Ask threadId={null} onActivity={onActivity} />);
@@ -883,7 +1079,10 @@ describe("Ask, a stored thread", () => {
  * resumes it: the two POSTs are told apart by what they say, so nothing
  * depends on which other request the page happened to make in between.
  */
-function postFetchByRequest(frames: (body: Record<string, unknown>) => string[], threadsJson: unknown = []) {
+function postFetchByRequest(
+  frames: (body: Record<string, unknown>) => string[],
+  threadsJson: unknown = [],
+) {
   const encoder = new TextEncoder();
   const mock = vi.fn(async (_url: string, opts?: RequestInit) => {
     if (opts?.method !== "POST") {
@@ -941,9 +1140,24 @@ function queuedPostFetch(responses: string[][], threadsJson: unknown = []) {
 describe("Ask, what a turn cost", () => {
   const usage = {
     calls: [
-      { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40 },
-      { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0 },
-      { step: "answer", model: "mimo-v2.6-pro", prompt_tokens: 2000, completion_tokens: 500 },
+      {
+        step: "understand",
+        model: "mimo-v2.6-flash",
+        prompt_tokens: 400,
+        completion_tokens: 40,
+      },
+      {
+        step: "embed",
+        model: "text-embedding-3-small",
+        prompt_tokens: 12,
+        completion_tokens: 0,
+      },
+      {
+        step: "answer",
+        model: "mimo-v2.6-pro",
+        prompt_tokens: 2000,
+        completion_tokens: 500,
+      },
     ],
     prompt_tokens: 2412,
     completion_tokens: 540,
@@ -962,7 +1176,9 @@ describe("Ask, what a turn cost", () => {
     const user = await ask("How?");
 
     // Tokens only: no price is configured, so no money anywhere.
-    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
+    const pill = await screen.findByRole("button", {
+      name: "Token stats of turn 1",
+    });
     expect(pill.textContent).toContain("2,952 tok");
     expect(pill.textContent).not.toContain("$");
     expect(screen.queryByText("understand")).toBeNull();
@@ -1007,8 +1223,21 @@ describe("Ask, what a turn cost", () => {
         cost_usd: 0.004,
         cached_tokens: 1800,
         calls: [
-          { step: "understand", model: "mimo-v2.6-flash", prompt_tokens: 400, completion_tokens: 40, ms: 900, cached_tokens: 0 },
-          { step: "embed", model: "text-embedding-3-small", prompt_tokens: 12, completion_tokens: 0, ms: 120 },
+          {
+            step: "understand",
+            model: "mimo-v2.6-flash",
+            prompt_tokens: 400,
+            completion_tokens: 40,
+            ms: 900,
+            cached_tokens: 0,
+          },
+          {
+            step: "embed",
+            model: "text-embedding-3-small",
+            prompt_tokens: 12,
+            completion_tokens: 0,
+            ms: 120,
+          },
           {
             step: "answer",
             model: "mimo-v2.6-pro",
@@ -1027,7 +1256,9 @@ describe("Ask, what a turn cost", () => {
     const user = await ask("How?");
 
     // When
-    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Token stats of turn 1" }),
+    );
 
     // Then the figures the old table had nowhere to put
     const pane = await screen.findByRole("dialog", { name: "Token stats" });
@@ -1048,9 +1279,13 @@ describe("Ask, what a turn cost", () => {
       ev("done", { message_id: 1 }),
     ]);
     const user = await ask("How?");
-    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Token stats of turn 1" }),
+    );
 
-    const info = await screen.findByRole("button", { name: "What an embedding call means" });
+    const info = await screen.findByRole("button", {
+      name: "What an embedding call means",
+    });
     expect(screen.queryByText(/turned into a vector/)).toBeNull();
 
     await user.click(info);
@@ -1070,7 +1305,9 @@ describe("Ask, what a turn cost", () => {
     ]);
     const user = await ask("How?");
 
-    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Token stats of turn 1" }),
+    );
 
     // Then no empty scaffolding: no duration column, no cache column, and no
     // context section at all.
@@ -1092,7 +1329,9 @@ describe("Ask, what a turn cost", () => {
 
     // Then the pane opens on the thread, not on a turn
     const pane = await screen.findByRole("dialog", { name: "Token stats" });
-    expect(within(pane).getByRole("heading", { level: 2 }).textContent).toBe("Thread");
+    expect(within(pane).getByRole("heading", { level: 2 }).textContent).toBe(
+      "Thread",
+    );
 
     // And closing it is reported up: the flag lives in the shell.
     const user = userEvent.setup();
@@ -1104,9 +1343,13 @@ describe("Ask, what a turn cost", () => {
     // Given the pane open on turn 1 of one thread
     const onClose = vi.fn();
     routedFetch([{ ...storedTurn, usage }]);
-    const { rerender } = render(<Ask threadId="7" onCloseThreadStats={onClose} />);
+    const { rerender } = render(
+      <Ask threadId="7" onCloseThreadStats={onClose} />,
+    );
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Token stats of turn 1" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Token stats of turn 1" }),
+    );
     await screen.findByRole("dialog", { name: "Token stats" });
 
     // When the reader moves to another thread - Back, or the rail
@@ -1114,7 +1357,9 @@ describe("Ask, what a turn cost", () => {
 
     // Then it does not stay open over someone else's figures: the index it
     // holds means a different turn now.
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Token stats" })).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Token stats" })).toBeNull(),
+    );
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -1128,20 +1373,28 @@ describe("Ask, what a turn cost", () => {
 
     await ask("How?");
 
-    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
+    const pill = await screen.findByRole("button", {
+      name: "Token stats of turn 1",
+    });
     expect(pill.textContent).toContain("$0.008");
   });
 
   it("keeps the pill on a turn that asked back or failed - the gates were paid for", async () => {
     streamFrames([
       ev("thread", { thread_id: "1" }),
-      ev("usage", { ...usage, calls: usage.calls.slice(0, 2), total_tokens: 452 }),
+      ev("usage", {
+        ...usage,
+        calls: usage.calls.slice(0, 2),
+        total_tokens: 452,
+      }),
       ev("error", { message: "The turn failed." }),
     ]);
 
     await ask("How?");
 
-    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
+    const pill = await screen.findByRole("button", {
+      name: "Token stats of turn 1",
+    });
     expect(pill.textContent).toContain("452 tok");
     // But no actions: there is no answer to re-explain or copy.
     expect(screen.queryByRole("button", { name: /Explain as/ })).toBeNull();
@@ -1164,7 +1417,9 @@ describe("Ask, what a turn cost", () => {
     await user.type(screen.getByLabelText("Question"), "How?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.01 }));
+    await waitFor(() =>
+      expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.01 }),
+    );
 
     // A second turn adds to it.
     streamFrames([
@@ -1175,7 +1430,9 @@ describe("Ask, what a turn cost", () => {
     ]);
     await user.type(screen.getByLabelText("Question"), "And then?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
-    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 5904, cost: 0.03 }));
+    await waitFor(() =>
+      expect(onUsage).toHaveBeenLastCalledWith({ tokens: 5904, cost: 0.03 }),
+    );
   });
 
   it("restores a stored turn's usage from the record", async () => {
@@ -1187,10 +1444,14 @@ describe("Ask, what a turn cost", () => {
       </StrictMode>,
     );
 
-    const pill = await screen.findByRole("button", { name: "Token stats of turn 1" });
+    const pill = await screen.findByRole("button", {
+      name: "Token stats of turn 1",
+    });
     expect(pill.textContent).toContain("2,952 tok");
     expect(pill.textContent).toContain("$0.005");
-    await waitFor(() => expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.005 }));
+    await waitFor(() =>
+      expect(onUsage).toHaveBeenLastCalledWith({ tokens: 2952, cost: 0.005 }),
+    );
   });
 });
 
@@ -1217,7 +1478,10 @@ describe("Ask, the clarification and re-explaining", () => {
       [
         ev("thread", { thread_id: "1", message_id: 5 }),
         ev("status", { step: "understanding" }),
-        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("clarification", {
+          message_id: 5,
+          candidates: [loginCandidate, legacyCandidate],
+        }),
         ev("done", { message_id: 5 }),
       ],
     ]);
@@ -1228,7 +1492,9 @@ describe("Ask, the clarification and re-explaining", () => {
     expect(screen.getByText("Through the login service")).toBeTruthy();
     expect(screen.getByText("Through the legacy adapter")).toBeTruthy();
     // The waiting node, not the check: a person is being waited on.
-    expect(screen.getByRole("status").textContent).toContain("Waiting for a choice");
+    expect(screen.getByRole("status").textContent).toContain(
+      "Waiting for a choice",
+    );
     expect(screen.getByRole("status").textContent).not.toContain("Done");
   });
 
@@ -1236,7 +1502,10 @@ describe("Ask, the clarification and re-explaining", () => {
     const mock = queuedPostFetch([
       [
         ev("thread", { thread_id: "7", message_id: 5 }),
-        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("clarification", {
+          message_id: 5,
+          candidates: [loginCandidate, legacyCandidate],
+        }),
         ev("done", { message_id: 5 }),
       ],
       [
@@ -1254,11 +1523,17 @@ describe("Ask, the clarification and re-explaining", () => {
     // The answer's prose is cut into segments for the streaming fade, so the
     // sentence spans several elements and only the paragraph holds it whole.
     await screen.findByText(
-      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Sign-in runs through the login service"),
+      (_, el) =>
+        el?.tagName === "P" &&
+        (el.textContent ?? "").includes(
+          "Sign-in runs through the login service",
+        ),
     );
     // The card itself is marked, not overwritten — it still shows both
     // candidates when reopened, the chosen one included.
-    expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Chosen: Through the login service/),
+    ).toBeTruthy();
 
     const postBodies = mock.mock.calls
       .filter((c) => c[1]?.method === "POST")
@@ -1269,7 +1544,6 @@ describe("Ask, the clarification and re-explaining", () => {
       choice: 0,
     });
   });
-
 
   it("renders the narrowing panel, not a card, when the question was too broad", async () => {
     queuedPostFetch([
@@ -1292,10 +1566,14 @@ describe("Ask, the clarification and re-explaining", () => {
 
     await ask("How is retry done?");
 
-    expect(await screen.findByText("That is too broad to ask about.")).toBeTruthy();
+    expect(
+      await screen.findByText("That is too broad to ask about."),
+    ).toBeTruthy();
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
     expect(screen.getByRole("button", { name: /gateway/ })).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Waiting for a choice");
+    expect(screen.getByRole("status").textContent).toContain(
+      "Waiting for a choice",
+    );
   });
 
   it("sends the picked repositories and streams the answer into a new turn", async () => {
@@ -1305,7 +1583,9 @@ describe("Ask, the clarification and re-explaining", () => {
       body.clarification_message_id
         ? [
             ev("thread", { thread_id: "7", message_id: 6 }),
-            ev("token", { text: "Both retry with capped exponential backoff." }),
+            ev("token", {
+              text: "Both retry with capped exponential backoff.",
+            }),
             ev("done", { message_id: 6 }),
           ]
         : [
@@ -1314,9 +1594,27 @@ describe("Ask, the clarification and re-explaining", () => {
               message_id: 5,
               too_broad: true,
               candidates: [
-                { idx: 0, title: "", summary: "", repo: "peeq", branch: "master" },
-                { idx: 1, title: "", summary: "", repo: "loom", branch: "main" },
-                { idx: 2, title: "", summary: "", repo: "ledger", branch: "main" },
+                {
+                  idx: 0,
+                  title: "",
+                  summary: "",
+                  repo: "peeq",
+                  branch: "master",
+                },
+                {
+                  idx: 1,
+                  title: "",
+                  summary: "",
+                  repo: "loom",
+                  branch: "main",
+                },
+                {
+                  idx: 2,
+                  title: "",
+                  summary: "",
+                  repo: "ledger",
+                  branch: "main",
+                },
               ],
             }),
             ev("done", { message_id: 5 }),
@@ -1327,7 +1625,11 @@ describe("Ask, the clarification and re-explaining", () => {
     await screen.findByText("That is too broad to ask about.");
     // Waited for, not assumed: narrowing is refused while a turn is still
     // streaming, and clicking into that window loses the click in silence.
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Waiting for a choice"));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "Waiting for a choice",
+      ),
+    );
 
     await user.click(screen.getByRole("button", { name: /peeq/ }));
     await user.click(screen.getByRole("button", { name: /ledger/ }));
@@ -1350,13 +1652,17 @@ describe("Ask, the clarification and re-explaining", () => {
     // And the answer lands in a turn of its own. The prose is cut into
     // segments for the streaming fade, so only the paragraph holds it whole.
     await screen.findByText(
-      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("capped exponential backoff"),
+      (_, el) =>
+        el?.tagName === "P" &&
+        (el.textContent ?? "").includes("capped exponential backoff"),
       {},
       { timeout: 5000 },
     );
     // The panel stays, collapsed to what it narrowed to — the answer only
     // reads correctly beside the repositories it came from.
-    expect(await screen.findByRole("button", { name: /Narrowed to/ })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /Narrowed to/ }),
+    ).toBeTruthy();
   });
 
   it("sends nothing when an answered card is clicked again", async () => {
@@ -1365,7 +1671,10 @@ describe("Ask, the clarification and re-explaining", () => {
     const mock = queuedPostFetch([
       [
         ev("thread", { thread_id: "7", message_id: 5 }),
-        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("clarification", {
+          message_id: 5,
+          candidates: [loginCandidate, legacyCandidate],
+        }),
         ev("done", { message_id: 5 }),
       ],
       [
@@ -1396,10 +1705,16 @@ describe("Ask, the clarification and re-explaining", () => {
     queuedPostFetch([
       [
         ev("thread", { thread_id: "7", message_id: 5 }),
-        ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+        ev("clarification", {
+          message_id: 5,
+          candidates: [loginCandidate, legacyCandidate],
+        }),
         ev("done", { message_id: 5 }),
       ],
-      [ev("thread", { thread_id: "7", message_id: 6 }), ev("error", { message: "The turn failed." })],
+      [
+        ev("thread", { thread_id: "7", message_id: 6 }),
+        ev("error", { message: "The turn failed." }),
+      ],
     ]);
 
     const user = await ask("How is sign-in done?");
@@ -1407,7 +1722,12 @@ describe("Ask, the clarification and re-explaining", () => {
     await user.click(screen.getByText("Through the login service"));
 
     expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
-    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(false);
+    expect(
+      screen
+        .getByText("Through the legacy adapter")
+        .closest("button")
+        ?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("unlocks the card again when the server refuses the choice", async () => {
@@ -1417,14 +1737,18 @@ describe("Ask, the clarification and re-explaining", () => {
     const encoder = new TextEncoder();
     const frames = [
       ev("thread", { thread_id: "7", message_id: 5 }),
-      ev("clarification", { message_id: 5, candidates: [loginCandidate, legacyCandidate] }),
+      ev("clarification", {
+        message_id: 5,
+        candidates: [loginCandidate, legacyCandidate],
+      }),
       ev("done", { message_id: 5 }),
     ];
     let posts = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (String(url).startsWith("/api/threads/")) return { ok: true, status: 200, json: async () => [] };
+        if (String(url).startsWith("/api/threads/"))
+          return { ok: true, status: 200, json: async () => [] };
         if (posts++ > 0) return { ok: false, status: 409 };
         let i = 0;
         return {
@@ -1447,7 +1771,12 @@ describe("Ask, the clarification and re-explaining", () => {
     await user.click(screen.getByText("Through the login service"));
 
     expect(await screen.findByText("Which one do you mean?")).toBeTruthy();
-    expect(screen.getByText("Through the login service").closest("button")?.hasAttribute("disabled")).toBe(false);
+    expect(
+      screen
+        .getByText("Through the login service")
+        .closest("button")
+        ?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   const clarifyingMessage = {
@@ -1483,7 +1812,9 @@ describe("Ask, the clarification and re-explaining", () => {
     routedFetch([clarifyingMessage, resumedMessage]);
     strict(<Ask threadId="7" />);
 
-    expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Chosen: Through the login service/),
+    ).toBeTruthy();
     expect(screen.queryByText("Which one do you mean?")).toBeNull();
     // This fixture predates stored timelines, so there is none to draw.
     expect(screen.queryByRole("status")).toBeNull();
@@ -1540,8 +1871,20 @@ describe("Ask, the clarification and re-explaining", () => {
       clarification: {
         id: 101,
         candidates: [
-          { idx: 0, title: "Through the billing job", summary: "A batch job.", repo: "peeq", branch: "master" },
-          { idx: 1, title: "Through checkout", summary: "Directly at checkout.", repo: "peeq", branch: "master" },
+          {
+            idx: 0,
+            title: "Through the billing job",
+            summary: "A batch job.",
+            repo: "peeq",
+            branch: "master",
+          },
+          {
+            idx: 1,
+            title: "Through checkout",
+            summary: "Directly at checkout.",
+            repo: "peeq",
+            branch: "master",
+          },
         ],
       },
       from_candidate_idx: -1,
@@ -1565,7 +1908,9 @@ describe("Ask, the clarification and re-explaining", () => {
     strict(<Ask threadId="7" />);
 
     // c1's card is collapsed and marked with the choice r1 recorded.
-    expect(await screen.findByText(/Chosen: Through the login service/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Chosen: Through the login service/),
+    ).toBeTruthy();
     // c2 was never resolved, so its card is still open, asking.
     expect(screen.getByText("Which one do you mean?")).toBeTruthy();
     expect(screen.getByText("Through the billing job")).toBeTruthy();
@@ -1575,25 +1920,34 @@ describe("Ask, the clarification and re-explaining", () => {
     // thread_id 7, the thread being read: a stream that named a different one
     // is a turn the reader walked away from, and its tokens deliberately stop
     // repainting the conversation in front of them.
-    const mock = routedFetch([storedTurn], [
-      ev("thread", { thread_id: "7", message_id: 20 }),
-      ev("token", { text: "An answer for the BA." }),
-      ev("done", { message_id: 20 }),
-    ]);
+    const mock = routedFetch(
+      [storedTurn],
+      [
+        ev("thread", { thread_id: "7", message_id: 20 }),
+        ev("token", { text: "An answer for the BA." }),
+        ev("done", { message_id: 20 }),
+      ],
+    );
     strict(<Ask threadId="7" />);
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
     // storedTurn is audience "dev", so the button offers the Analyst re-explain.
-    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
+    await user.click(
+      screen.getByRole("button", { name: "Explain as Analyst" }),
+    );
 
     await screen.findByText(/An answer for the BA/);
 
     const postCalls = mock.mock.calls.filter((c) => c[1]?.method === "POST");
     expect(postCalls.length).toBe(1);
     expect(String(postCalls[0][0])).toBe("/api/messages/9/reexplain");
-    expect(JSON.parse(String(postCalls[0][1]?.body))).toEqual({ audience: "ba" });
-    expect(mock.mock.calls.some((c) => String(c[0]).startsWith("/api/ask"))).toBe(false);
+    expect(JSON.parse(String(postCalls[0][1]?.body))).toEqual({
+      audience: "ba",
+    });
+    expect(
+      mock.mock.calls.some((c) => String(c[0]).startsWith("/api/ask")),
+    ).toBe(false);
   });
 });
 
@@ -1626,9 +1980,11 @@ function pushableStream(messages: unknown = null) {
           getReader() {
             return {
               async read() {
-                while (queue.length === 0 && !ended) await new Promise<void>((r) => (wake = r));
+                while (queue.length === 0 && !ended)
+                  await new Promise<void>((r) => (wake = r));
                 const frame = queue.shift();
-                if (frame === undefined) return { done: true, value: undefined };
+                if (frame === undefined)
+                  return { done: true, value: undefined };
                 return { done: false, value: encoder.encode(frame) };
               },
             };
@@ -1657,14 +2013,21 @@ function pushableStream(messages: unknown = null) {
 /** The scrolling element, given the heights jsdom never lays out. */
 function scroller(container: HTMLElement, height = 2000) {
   const el = container.querySelector(".overflow-auto") as HTMLElement;
-  Object.defineProperty(el, "scrollHeight", { configurable: true, value: height });
+  Object.defineProperty(el, "scrollHeight", {
+    configurable: true,
+    value: height,
+  });
   Object.defineProperty(el, "clientHeight", { configurable: true, value: 500 });
   return el;
 }
 
-async function askInto(container: HTMLElement, role: "Analyst" | "Developer" = "Analyst") {
+async function askInto(
+  container: HTMLElement,
+  role: "Analyst" | "Developer" = "Analyst",
+) {
   const user = userEvent.setup();
-  if (role !== "Analyst") await user.click(screen.getByRole("button", { name: role }));
+  if (role !== "Analyst")
+    await user.click(screen.getByRole("button", { name: role }));
   await user.type(screen.getByLabelText("Question"), "How?");
   await user.click(screen.getByRole("button", { name: "Ask" }));
   return container;
@@ -1690,7 +2053,9 @@ describe("Ask, the edges of the reading column", () => {
     expect(head.className).toContain("z-20");
     expect(head.className).toContain("h-5 shrink-0 -mb-5");
     expect(head.className).toContain("lg:h-8 lg:-mb-8");
-    expect(head.className).toContain("[@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3");
+    expect(head.className).toContain(
+      "[@media(max-height:500px)]:h-3 [@media(max-height:500px)]:-mb-3",
+    );
     const scroll = container.querySelector(".overflow-auto") as HTMLElement;
     expect(scroll.className).not.toContain("isolate");
     expect(scroll.firstElementChild).toBe(head);
@@ -1895,7 +2260,9 @@ describe("Ask, following the answer", () => {
 
   it("opens a stored thread at its top, never at the foot", async () => {
     routedFetch([storedTurn]);
-    const { container, rerender } = render(<Ask threadId={null} onThread={() => {}} />);
+    const { container, rerender } = render(
+      <Ask threadId={null} onThread={() => {}} />,
+    );
     const view = scroller(container);
     view.scrollTop = 1500;
 
@@ -1907,7 +2274,9 @@ describe("Ask, following the answer", () => {
 
   it("follows the answer again once a question is asked in the opened thread", async () => {
     const stream = pushableStream([storedTurn]);
-    const { container, rerender } = render(<Ask threadId={null} onThread={() => {}} />);
+    const { container, rerender } = render(
+      <Ask threadId={null} onThread={() => {}} />,
+    );
     const view = scroller(container);
     rerender(<Ask threadId="7" onThread={() => {}} />);
     await screen.findByText(/Through a grant/);
@@ -1955,7 +2324,9 @@ describe("Ask, the answer language across a reload", () => {
 
     unmount();
     render(<Ask />);
-    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("Deutsch");
+    expect(
+      screen.getByRole("combobox", { name: "Answer language" }).textContent,
+    ).toBe("Deutsch");
   });
 
   // A code the backend's allowlist does not carry would be rejected on the
@@ -1963,17 +2334,23 @@ describe("Ask, the answer language across a reload", () => {
   it("falls back to English on a stored code that is not on the allowlist", () => {
     localStorage.setItem("rongo.language", "kl");
     render(<Ask />);
-    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("English");
+    expect(
+      screen.getByRole("combobox", { name: "Answer language" }).textContent,
+    ).toBe("English");
   });
 
   // Safari's private mode throws on storage access. A forgotten preference is
   // a small annoyance; a blank page instead of the composer is not.
   it("still renders where storage throws", () => {
-    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("denied");
-    });
+    const get = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("denied");
+      });
     render(<Ask />);
-    expect(screen.getByRole("combobox", { name: "Answer language" }).textContent).toBe("English");
+    expect(
+      screen.getByRole("combobox", { name: "Answer language" }).textContent,
+    ).toBe("English");
     get.mockRestore();
   });
 });
@@ -1991,7 +2368,9 @@ describe("Ask, the language a thread is answered in", () => {
     await user.type(screen.getByLabelText("Question"), "Wie?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => expect(screen.queryByLabelText("Answer language")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Answer language")).toBeNull(),
+    );
     expect(screen.getByText("Deutsch")).toBeTruthy();
   });
 
@@ -2015,7 +2394,10 @@ describe("Ask, the language a thread is answered in", () => {
   // another one: the request must match what the record will file the turn as.
   it("asks a follow-up in the thread's language", async () => {
     localStorage.setItem("rongo.language", "en");
-    const mock = routedFetch([{ ...storedTurn, language: "fr" }], [ev("thread", { thread_id: "7" }), ev("done", {})]);
+    const mock = routedFetch(
+      [{ ...storedTurn, language: "fr" }],
+      [ev("thread", { thread_id: "7" }), ev("done", {})],
+    );
     const user = userEvent.setup();
     render(
       <StrictMode>
@@ -2040,13 +2422,18 @@ describe("Ask, a language the record decided", () => {
   // thread's. The stream says which one it took, and the turn - with it the
   // pill it carries - follows the record rather than the guess.
   it("follows the language the stream reports", async () => {
-    streamFrames([ev("thread", { thread_id: "3", message_id: 4, language: "fr" }), ev("done", { message_id: 4 })]);
+    streamFrames([
+      ev("thread", { thread_id: "3", message_id: 4, language: "fr" }),
+      ev("done", { message_id: 4 }),
+    ]);
     const user = userEvent.setup();
     render(<Ask />);
     await user.type(screen.getByLabelText("Question"), "How?");
     await user.click(screen.getByRole("button", { name: "Ask" }));
 
-    await waitFor(() => expect(screen.queryByLabelText("Answer language")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Answer language")).toBeNull(),
+    );
     expect(screen.getByText("Français")).toBeTruthy();
   });
 
@@ -2084,13 +2471,18 @@ describe("Ask, the streaming mark on an answer", () => {
         <Ask />
       </StrictMode>,
     );
-    await user.type(screen.getByLabelText("Question"), "How does indexing work?");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "How does indexing work?",
+    );
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await stream.push(ev("thread", { thread_id: "1", message_id: 2 }));
     await stream.push(ev("token", { text: "Indexing walks the repo." }));
 
     const para = await screen.findByText(
-      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Indexing walks the repo"),
+      (_, el) =>
+        el?.tagName === "P" &&
+        (el.textContent ?? "").includes("Indexing walks the repo"),
     );
     const block = document.querySelector(".ui-markdown.streaming");
     expect(block).toBeTruthy();
@@ -2107,9 +2499,13 @@ describe("Ask, the streaming mark on an answer", () => {
     await ask("How does indexing work?");
 
     await screen.findByText(
-      (_, el) => el?.tagName === "P" && (el.textContent ?? "").includes("Indexing walks the repo"),
+      (_, el) =>
+        el?.tagName === "P" &&
+        (el.textContent ?? "").includes("Indexing walks the repo"),
     );
-    await waitFor(() => expect(document.querySelector(".ui-markdown.streaming")).toBe(null));
+    await waitFor(() =>
+      expect(document.querySelector(".ui-markdown.streaming")).toBe(null),
+    );
     expect(document.querySelector(".ui-markdown")).toBeTruthy();
   });
 });
@@ -2147,7 +2543,9 @@ describe("Ask, the composer on a phone", () => {
     const hint = screen.getByText("Shift+Enter for a new line");
     expect(hint.className).not.toContain("ml-auto");
     expect(hint.parentElement?.className).toContain("ml-auto");
-    expect(hint.parentElement?.contains(screen.getByRole("button", { name: "Ask" }))).toBe(true);
+    expect(
+      hint.parentElement?.contains(screen.getByRole("button", { name: "Ask" })),
+    ).toBe(true);
   });
 });
 
@@ -2211,10 +2609,16 @@ describe("Ask, retrying a failed turn", () => {
 
     // The error has landed but the connection is still open: nothing may be
     // started on top of it.
-    expect((await screen.findByRole("button", { name: "Retry" })).hasAttribute("disabled")).toBe(true);
+    expect(
+      (await screen.findByRole("button", { name: "Retry" })).hasAttribute(
+        "disabled",
+      ),
+    ).toBe(true);
     await stream.end();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled")).toBe(false),
+      expect(
+        screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled"),
+      ).toBe(false),
     );
   });
 
@@ -2222,12 +2626,17 @@ describe("Ask, retrying a failed turn", () => {
     // A proxy FIN or a backend restart mid-answer closes the stream cleanly.
     // Without a terminal event the turn used to tick forever with no error
     // and no way out.
-    streamFrames([ev("thread", { thread_id: "1" }), ev("status", { step: "answering" })]);
+    streamFrames([
+      ev("thread", { thread_id: "1" }),
+      ev("status", { step: "answering" }),
+    ]);
 
     await ask("How?");
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("The connection was lost."),
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The connection was lost.",
+      ),
     );
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
@@ -2262,7 +2671,10 @@ describe("Ask, retrying a failed turn", () => {
     };
     const mock = routedFetch(
       [failed],
-      [ev("thread", { thread_id: "7", message_id: 10 }), ev("done", { message_id: 10 })],
+      [
+        ev("thread", { thread_id: "7", message_id: 10 }),
+        ev("done", { message_id: 10 }),
+      ],
     );
     strict(<Ask threadId="7" />);
 
@@ -2289,25 +2701,47 @@ describe("Ask, retrying a failed turn", () => {
         ev("clarification", {
           message_id: 5,
           candidates: [
-            { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
-            { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+            {
+              idx: 0,
+              title: "Through the login service",
+              summary: "A service.",
+              repo: "peeq",
+              branch: "master",
+            },
+            {
+              idx: 1,
+              title: "Through the legacy adapter",
+              summary: "An adapter.",
+              repo: "peeq",
+              branch: "master",
+            },
           ],
         }),
         ev("done", { message_id: 5 }),
       ],
-      [ev("thread", { thread_id: "7", message_id: 6 }), ev("error", { message: "The turn failed." })],
+      [
+        ev("thread", { thread_id: "7", message_id: 6 }),
+        ev("error", { message: "The turn failed." }),
+      ],
     ]);
 
     const user = await ask("How is sign-in done?");
     await user.click(await screen.findByText("Through the login service"));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The turn failed.",
+      ),
+    );
     // The card took the choice back; a Retry button beside the error would be
     // a second way to spend the same resume.
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
-      false,
-    );
+    expect(
+      screen
+        .getByText("Through the legacy adapter")
+        .closest("button")
+        ?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("leaves a failed resume to its card after a reload", async () => {
@@ -2323,8 +2757,20 @@ describe("Ask, retrying a failed turn", () => {
       clarification: {
         id: 100,
         candidates: [
-          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
-          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+          {
+            idx: 0,
+            title: "Through the login service",
+            summary: "A service.",
+            repo: "peeq",
+            branch: "master",
+          },
+          {
+            idx: 1,
+            title: "Through the legacy adapter",
+            summary: "An adapter.",
+            repo: "peeq",
+            branch: "master",
+          },
         ],
       },
       from_candidate_idx: -1,
@@ -2355,11 +2801,18 @@ describe("Ask, retrying a failed turn", () => {
     routedFetch([card, failedResume]);
     strict(<Ask threadId="7" />);
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
-    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
-      false,
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The turn failed.",
+      ),
     );
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(
+      screen
+        .getByText("Through the legacy adapter")
+        .closest("button")
+        ?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 
   it("retries a failed re-explain as a re-explain, never as a fresh question", async () => {
@@ -2368,7 +2821,10 @@ describe("Ask, retrying a failed turn", () => {
     // code than the reader was shown.
     const mock = queuedPostFetch(
       [
-        [ev("thread", { thread_id: "7", message_id: 20 }), ev("error", { message: "The turn failed." })],
+        [
+          ev("thread", { thread_id: "7", message_id: 20 }),
+          ev("error", { message: "The turn failed." }),
+        ],
         [
           ev("thread", { thread_id: "7", message_id: 21 }),
           ev("token", { text: "An answer for the BA." }),
@@ -2381,15 +2837,21 @@ describe("Ask, retrying a failed turn", () => {
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
+    await user.click(
+      screen.getByRole("button", { name: "Explain as Analyst" }),
+    );
     await user.click(await screen.findByRole("button", { name: "Retry" }));
 
     await screen.findByText(/An answer for the BA/);
-    const posts = mock.mock.calls.filter((c) => String(c[0]).startsWith("/api/messages/"));
+    const posts = mock.mock.calls.filter((c) =>
+      String(c[0]).startsWith("/api/messages/"),
+    );
     expect(posts.length).toBe(2);
     expect(String(posts[1][0])).toBe("/api/messages/9/reexplain");
     expect(JSON.parse(String(posts[1][1]?.body))).toEqual({ audience: "ba" });
-    expect(mock.mock.calls.some((c) => String(c[0]) === "/api/ask")).toBe(false);
+    expect(mock.mock.calls.some((c) => String(c[0]) === "/api/ask")).toBe(
+      false,
+    );
   });
 
   it("leaves a second failed resume to the same card after a reload", async () => {
@@ -2409,8 +2871,20 @@ describe("Ask, retrying a failed turn", () => {
       clarification: {
         id: 100,
         candidates: [
-          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
-          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+          {
+            idx: 0,
+            title: "Through the login service",
+            summary: "A service.",
+            repo: "peeq",
+            branch: "master",
+          },
+          {
+            idx: 1,
+            title: "Through the legacy adapter",
+            summary: "An adapter.",
+            repo: "peeq",
+            branch: "master",
+          },
         ],
       },
       from_candidate_idx: -1,
@@ -2432,7 +2906,11 @@ describe("Ask, retrying a failed turn", () => {
       head_message_id: 10,
       created_at: at,
     });
-    routedFetch([card, failedResume(11, "2026-08-17T10:01:00Z"), failedResume(12, "2026-08-17T10:02:00Z")]);
+    routedFetch([
+      card,
+      failedResume(11, "2026-08-17T10:01:00Z"),
+      failedResume(12, "2026-08-17T10:02:00Z"),
+    ]);
     strict(<Ask threadId="7" />);
 
     // Both failures are in the record and both are on the page — the newest
@@ -2440,9 +2918,12 @@ describe("Ask, retrying a failed turn", () => {
     await waitFor(() => expect(screen.getAllByRole("alert").length).toBe(1));
     expect(screen.getAllByRole("button", { name: "Show" }).length).toBe(1);
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.getByText("Through the legacy adapter").closest("button")?.hasAttribute("disabled")).toBe(
-      false,
-    );
+    expect(
+      screen
+        .getByText("Through the legacy adapter")
+        .closest("button")
+        ?.hasAttribute("disabled"),
+    ).toBe(false);
   });
 });
 
@@ -2468,8 +2949,20 @@ describe("Ask, one question and its attempts", () => {
     clarification: {
       id: 100,
       candidates: [
-        { idx: 0, title: "Codefragen mit Quellenangaben", summary: "A.", repo: "rongo", branch: "master" },
-        { idx: 1, title: "Freitext", summary: "B.", repo: "rongo", branch: "master" },
+        {
+          idx: 0,
+          title: "Codefragen mit Quellenangaben",
+          summary: "A.",
+          repo: "rongo",
+          branch: "master",
+        },
+        {
+          idx: 1,
+          title: "Freitext",
+          summary: "B.",
+          repo: "rongo",
+          branch: "master",
+        },
       ],
     },
     from_candidate_idx: -1,
@@ -2556,13 +3049,17 @@ describe("Ask, one question and its attempts", () => {
     await screen.findByText(/Through a grant/);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Explain as Analyst" }));
+    await user.click(
+      screen.getByRole("button", { name: "Explain as Analyst" }),
+    );
     await screen.findByText(/An answer for the BA/);
 
     // Same question, so still one article and the question printed once.
     expect(screen.getAllByRole("article").length).toBe(1);
     expect(screen.getAllByText(storedTurn.question).length).toBe(1);
-    expect(mock.mock.calls.some((c) => String(c[0]) === "/api/messages/9/reexplain")).toBe(true);
+    expect(
+      mock.mock.calls.some((c) => String(c[0]) === "/api/messages/9/reexplain"),
+    ).toBe(true);
   });
 });
 
@@ -2587,8 +3084,20 @@ describe("Ask, turns written before the head link existed", () => {
       clarification: {
         id: 100,
         candidates: [
-          { idx: 0, title: "Through the login service", summary: "A service.", repo: "peeq", branch: "master" },
-          { idx: 1, title: "Through the legacy adapter", summary: "An adapter.", repo: "peeq", branch: "master" },
+          {
+            idx: 0,
+            title: "Through the login service",
+            summary: "A service.",
+            repo: "peeq",
+            branch: "master",
+          },
+          {
+            idx: 1,
+            title: "Through the legacy adapter",
+            summary: "An adapter.",
+            repo: "peeq",
+            branch: "master",
+          },
         ],
       },
       from_candidate_idx: -1,
@@ -2613,7 +3122,11 @@ describe("Ask, turns written before the head link existed", () => {
     routedFetch([card, legacyFailedResume]);
     strict(<Ask threadId="7" />);
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("The turn failed."));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "The turn failed.",
+      ),
+    );
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
@@ -2708,12 +3221,18 @@ describe("the composer's own box", () => {
     expect(box.style.height).not.toBe("0px");
 
     // Given a box again, it goes back to following the question.
-    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 60 });
+    Object.defineProperty(box, "scrollHeight", {
+      configurable: true,
+      value: 60,
+    });
     await user.type(box, "How?");
     expect(box.style.height).toBe("60px");
 
     // And never past the few lines it is allowed to grow to.
-    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 900 });
+    Object.defineProperty(box, "scrollHeight", {
+      configurable: true,
+      value: 900,
+    });
     await user.type(box, "!");
     expect(box.style.height).toBe("200px");
   });
@@ -2733,7 +3252,11 @@ describe("the composer's own box", () => {
   it.each(["", "dev"])("drops the version sentence for %o", (version) => {
     strict(<Ask version={version} />);
 
-    expect(screen.getByText("Rongo can make mistakes. Please double-check responses.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Rongo can make mistakes. Please double-check responses.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByText(/You're talking to/)).toBeNull();
   });
 
@@ -2745,7 +3268,13 @@ describe("the composer's own box", () => {
     const role = container.querySelector("fieldset");
     const language = screen.getByRole("combobox", { name: "Answer language" });
     const select = language.querySelector("span");
-    for (const cls of ["rounded-full", "border", "border-border", "bg-bg", "p-0.5"]) {
+    for (const cls of [
+      "rounded-full",
+      "border",
+      "border-border",
+      "bg-bg",
+      "p-0.5",
+    ]) {
       expect(role?.className).toContain(cls);
       expect(language?.className).toContain(cls);
     }

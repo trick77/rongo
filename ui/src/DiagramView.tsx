@@ -39,7 +39,9 @@ export default function DiagramView({
       onClose={onClose}
       header={
         <>
-          <span className="min-w-0 truncate text-[13.5px] text-ink">{title}</span>
+          <span className="min-w-0 truncate text-[13.5px] text-ink">
+            {title}
+          </span>
           <span className="ml-auto" />
           <button
             type="button"
@@ -55,7 +57,10 @@ export default function DiagramView({
       {/* The drawing scales to the sheet's width and no further: the SVG
           carries its own max-width, so a small diagram stays 1:1 and is
           centred, and a wide one fits. */}
-      <div ref={body} className="grid min-h-0 place-items-center overflow-auto p-6">
+      <div
+        ref={body}
+        className="grid min-h-0 place-items-center overflow-auto p-6"
+      >
         <div className="w-full">
           <MermaidSvg svg={svg} title={title} />
         </div>

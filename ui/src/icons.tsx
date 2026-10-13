@@ -16,10 +16,19 @@
  * the timeline), and there a down chevron would point at the answer instead of
  * at the steps it just revealed. `up` turns it the other way.
  */
-export function Chevron({ open = false, up = false }: { open?: boolean; up?: boolean }) {
+export function Chevron({
+  open = false,
+  up = false,
+}: {
+  open?: boolean;
+  up?: boolean;
+}) {
   return (
     <svg
-      className={"inline-block h-3 w-3 transition-transform " + (open ? (up ? "-rotate-90" : "rotate-90") : "")}
+      className={
+        "inline-block h-3 w-3 transition-transform " +
+        (open ? (up ? "-rotate-90" : "rotate-90") : "")
+      }
       viewBox="0 0 12 12"
       aria-hidden="true"
     >
@@ -136,7 +145,11 @@ export function CheckIcon() {
  */
 export function ThumbUpIcon() {
   return (
-    <svg className="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+    <svg
+      className="h-[14px] w-[14px] shrink-0"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
       <path
         d="M5 7v7H2.5V7zM5 7l2.6-4.6c.9 0 1.6.8 1.4 1.7L8.6 6.5h3.9c.9 0 1.6.9 1.4 1.8l-1 4.4c-.2.8-.8 1.3-1.6 1.3H5"
         fill="none"
@@ -150,7 +163,11 @@ export function ThumbUpIcon() {
 
 export function ThumbDownIcon() {
   return (
-    <svg className="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+    <svg
+      className="h-[14px] w-[14px] shrink-0"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
       <path
         d="M5 9V2H2.5v7zM5 9l2.6 4.6c.9 0 1.6-.8 1.4-1.7L8.6 9.5h3.9c.9 0 1.6-.9 1.4-1.8l-1-4.4C12.7 2.5 12.1 2 11.3 2H5"
         fill="none"

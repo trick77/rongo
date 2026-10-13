@@ -17,11 +17,16 @@ const plainEntry = entry + " text-elevated-ink enabled:hover:bg-elevated-hover";
  * entry that cannot be taken back, and the only place danger is a ground
  * rather than a word.
  */
-const dangerEntry = entry + " text-danger-ink enabled:hover:bg-danger-fill enabled:hover:text-white";
+const dangerEntry =
+  entry +
+  " text-danger-ink enabled:hover:bg-danger-fill enabled:hover:text-white";
 
 function MenuIcon({ name }: { name: IconName }) {
   return (
-    <span aria-hidden="true" className="grid h-[21px] w-[21px] shrink-0 place-items-center text-[19px] leading-none">
+    <span
+      aria-hidden="true"
+      className="grid h-[21px] w-[21px] shrink-0 place-items-center text-[19px] leading-none"
+    >
       <Icon name={name} size="19px" />
     </span>
   );
@@ -104,22 +109,45 @@ export default function ThreadMenu({
     >
       {/* Star first, ../loom's order: the one entry that changes nothing
           about the record, only where the rail files it. */}
-      <button type="button" role="menuitem" className={plainEntry} onClick={onStar}>
+      <button
+        type="button"
+        role="menuitem"
+        className={plainEntry}
+        onClick={onStar}
+      >
         <MenuIcon name={starred ? "starOff" : "star"} />
         {starred ? "Unstar" : "Star"}
       </button>
-      <button type="button" role="menuitem" className={plainEntry} onClick={onShare}>
+      <button
+        type="button"
+        role="menuitem"
+        className={plainEntry}
+        onClick={onShare}
+      >
         <MenuIcon name="upload" />
         Share
       </button>
-      <button type="button" role="menuitem" className={plainEntry} onClick={onRename}>
+      <button
+        type="button"
+        role="menuitem"
+        className={plainEntry}
+        onClick={onRename}
+      >
         <MenuIcon name="edit" />
         Rename
       </button>
       {/* The separator is the whole point of the order: Delete must not sit
           one slip of the finger away from Rename. */}
-      <div role="separator" className="mx-[14px] my-[5px] h-px bg-elevated-border" />
-      <button type="button" role="menuitem" className={dangerEntry} onClick={onDelete}>
+      <div
+        role="separator"
+        className="mx-[14px] my-[5px] h-px bg-elevated-border"
+      />
+      <button
+        type="button"
+        role="menuitem"
+        className={dangerEntry}
+        onClick={onDelete}
+      >
         <MenuIcon name="trash" />
         Delete
       </button>
