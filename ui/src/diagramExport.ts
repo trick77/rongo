@@ -261,12 +261,6 @@ function bare(label: string): string {
   return label.replace(/[;#]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** cited renders a step's sources the way the prose writes them, so the
- * numbers in a pasted diagram still point into the `Sources:` block under it. */
-function cited(src: number[]): string {
-  return src.map((m) => ` [${m}]`).join("");
-}
-
 const arrows: Record<string, string> = {
   call: "->>",
   return: "-->>",
@@ -283,13 +277,11 @@ function shape(kind: FlowKind, label: string): string {
 /** toMermaid writes the spec as the diagram syntax GitHub, GitLab, Obsidian
  * and Notion draw, and that reads as plain text everywhere else.
  *
- * cite says whether a node's markers go into its label. On the clipboard
- * they do: the numbers point into the Sources block pasted under the text.
- * Drawn in the answer they do not: the picture no longer cites, and a spec
- * the backend never renumbered would draw the prompt's numbers as if they
- * were the reader's. */
-export function toMermaid(spec: DiagramSpec, cite = true): string {
-  const markers = cite ? cited : () => "";
+ * A node's markers never go into its label. Drawn, the picture does not
+ * cite, and a spec the backend never renumbered would draw the prompt's
+ * numbers as if they were the reader's; copied, an answer carries no
+ * markers at all. */
+export function toMermaid(spec: DiagramSpec): string {
   if (spec.type === "sequence") {
     const id = safeIds(spec.actors.map((a) => a.id));
     const out = ["sequenceDiagram"];
@@ -300,7 +292,7 @@ export function toMermaid(spec: DiagramSpec, cite = true): string {
     for (const s of spec.steps) {
       const arrow = arrows[s.kind] ?? arrows.call;
       out.push(
-        `    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}${markers(s.src)}`,
+        `    ${id.get(s.from)}${arrow}${id.get(s.to)}: ${bare(s.label)}`,
       );
     }
     return out.join("\n");
@@ -308,7 +300,7 @@ export function toMermaid(spec: DiagramSpec, cite = true): string {
   const id = safeIds(spec.nodes.map((n) => n.id));
   const out = ["flowchart TD"];
   for (const n of spec.nodes)
-    out.push(`    ${id.get(n.id)}${shape(n.kind, n.label + markers(n.src))}`);
+    out.push(`    ${id.get(n.id)}${shape(n.kind, n.label)}`);
   for (const e of spec.edges) {
     const link = e.label ? `-->|${quoted(e.label)}|` : "-->";
     out.push(`    ${id.get(e.from)} ${link} ${id.get(e.to)}`);

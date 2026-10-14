@@ -79,23 +79,22 @@ describe("toMermaid", () => {
     // "repos.yaml" and "repos-yaml" both sanitize to repos_yaml.
     expect(out).toContain("participant repos_yaml as repos.yaml");
     expect(out).toContain("participant repos_yaml_2 as Startup");
-    expect(out).toContain(
-      "repos_yaml->>repos_yaml_2: Load repository list [1] [2]",
-    );
+    expect(out).toContain("repos_yaml->>repos_yaml_2: Load repository list");
   });
 
   it("draws call, async and return with their own arrows", () => {
     const out = toMermaid(seq);
     expect(out).toContain("repos_yaml_2-)idx: Sync specs");
-    expect(out).toContain("idx-->>repos_yaml_2: Store files [9]");
+    expect(out).toContain("idx-->>repos_yaml_2: Store files");
   });
 
   it("keeps a self-message on one actor", () => {
-    expect(toMermaid(seq)).toContain("idx->>idx: Keyword indexing [8]");
+    expect(toMermaid(seq)).toContain("idx->>idx: Keyword indexing");
   });
 
-  it("carries the markers so they still match the sources block", () => {
-    expect(toMermaid(seq)).toContain("[1] [2]");
+  it("carries no markers, drawn or copied", () => {
+    expect(toMermaid(seq)).not.toMatch(/\[\d+\]/);
+    expect(toMermaid(flow)).not.toMatch(/\[\d+\]"\]/);
   });
 
   it("renames an id mermaid reads as syntax", () => {
@@ -128,8 +127,8 @@ describe("toMermaid", () => {
   it("writes a flow with the kind in the node shape", () => {
     const out = toMermaid(flow);
     expect(out.split("\n")[0]).toBe("flowchart TD");
-    expect(out).toContain('a(["Answer() [3]"])');
-    expect(out).toContain('d["Stream to the model [4]"]');
+    expect(out).toContain('a(["Answer()"])');
+    expect(out).toContain('d["Stream to the model"]');
     expect(out).toContain("{");
   });
 

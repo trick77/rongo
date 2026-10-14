@@ -177,7 +177,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
 export function diagramSource(tag: string, body: string): string | null {
   if (specRe.test(body)) {
     const spec = parseDiagram(body);
-    return spec ? toMermaid(spec, false) : body;
+    return spec ? toMermaid(spec) : body;
   }
   if (tag === "mermaid" || tag === "diagram") return body;
   return null;

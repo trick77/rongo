@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Ask from "./Ask";
-import { asMarkdown, freshTurn } from "./turns";
+import { asMarkdown, freshTurn, type Turn } from "./turns";
 import {
   PASTE_CHAR_THRESHOLD,
   PASTE_LINE_THRESHOLD,
@@ -433,5 +433,29 @@ describe("asMarkdown with a paste", () => {
   it("is unchanged for a turn without one", () => {
     const turn = { ...freshTurn("Why?", "ba", "en"), text: "Because." };
     expect(asMarkdown(turn)).toBe("# Why?\n\nBecause.\n");
+  });
+});
+
+describe("asMarkdown with citations", () => {
+  const cite = (marker: number, path: string) => ({
+    marker,
+    repo: "peeq",
+    branch: "master",
+    path,
+    start_line: 1,
+    end_line: 9,
+    sha: "0123abc",
+  });
+
+  it("carries no markers and lists each source once, unnumbered", () => {
+    const turn = {
+      ...freshTurn("Why?", "dev", "en"),
+      text: "Because [1] of `a[1]` [2, 3].",
+      citations: [cite(1, "a.go"), cite(2, "b.go"), cite(3, "a.go")],
+    } as Turn;
+    expect(asMarkdown(turn)).toBe(
+      "# Why?\n\nBecause of `a[1]`.\n\nSources:\n" +
+        "- peeq · a.go:1-9 (master)\n- peeq · b.go:1-9 (master)\n",
+    );
   });
 });

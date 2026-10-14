@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { chip } from "./chip";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
@@ -74,6 +74,12 @@ function TurnAttempt({
   onToggleFailure,
   feedback = null,
 }: TurnAttemptProps) {
+  // Whether this answer draws its markers: hidden for an Analyst, who got an
+  // explanation with no paths on purpose, shown for a Developer. The reader's
+  // click flips it for this answer alone and is never stored; a shared page
+  // has no footer, so it stays with the role.
+  const [markersShown, setMarkersShown] = useState<boolean | null>(null);
+  const showMarkers = markersShown ?? turn.audience === "dev";
   return (
     <div>
       {label !== null && (
@@ -181,6 +187,8 @@ function TurnAttempt({
                 // the answer ends. Nothing re-fades, because the
                 // segments keep their keys and never remount.
                 fade={turn.live}
+                // The markers stay in the text either way; see showMarkers.
+                hideMarkers={!showMarkers}
               />
             </div>
           )}
@@ -305,6 +313,15 @@ function TurnAttempt({
                       >
                         {copied ? "Copied" : "Copy as Markdown"}
                       </button>
+                      {turn.citations.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setMarkersShown(!showMarkers)}
+                          className={chip}
+                        >
+                          {showMarkers ? "Hide citations" : "Show citations"}
+                        </button>
+                      )}
                       {feedback}
                     </>
                   )}

@@ -675,11 +675,14 @@ describe("Ask, a stored thread", () => {
     fireEvent.click(await screen.findByText("Copy as Markdown"));
     await screen.findByText("Copied");
     expect(written[0]).toContain("```mermaid");
-    expect(written[0]).toContain("ui->>ui: render [1]");
+    expect(written[0]).toContain("ui->>ui: render\n");
     expect(written[0]).not.toContain("```diagram");
-    // The markers still point into the list underneath.
+    // No markers anywhere a paste carries them, for any reader; the sources
+    // still travel under the answer, unnumbered.
+    expect(written[0]).toContain("Through a grant.");
+    expect(written[0]).not.toMatch(/\[\d+\]/);
     expect(written[0]).toContain(
-      "[1] peeq · backend/internal/playbackgrant/store.go:3-40 (master)",
+      "- peeq · backend/internal/playbackgrant/store.go:3-40 (master)",
     );
   });
 
