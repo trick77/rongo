@@ -8,8 +8,8 @@ require (
 	github.com/trick77/llmwire v0.0.43
 	github.com/trick77/ship/kit v0.6.0
 	github.com/trick77/ship/kit/auth v0.3.0
-	golang.org/x/crypto v0.57.0
-	golang.org/x/mod v0.41.0
+	golang.org/x/crypto v0.58.0
+	golang.org/x/mod v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -19,5 +19,5 @@ require (
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/tetratelabs/wazero v1.9.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )
