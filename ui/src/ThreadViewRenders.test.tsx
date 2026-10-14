@@ -201,6 +201,26 @@ describe("ThreadView, citation markers by audience", () => {
     expect(container.querySelector(".ui-markdown sup")).toBeNull();
   });
 
+  it("does not carry a reader's choice to another thread's answer in the same place", async () => {
+    // ThreadView is not remounted between threads, and turns are keyed by
+    // their place: the choice must belong to the answer, not the slot.
+    const thread = (turn: Turn) => (
+      <ThreadView
+        turns={[turn]}
+        actions={actions}
+        onOpenSource={() => {}}
+        threadKey="t"
+      />
+    );
+    const a = { ...finished("How is sign-in done?", 1000), audience: "ba" };
+    const b = { ...finished("And on logout?", 2000), audience: "ba" };
+    const { container, getByRole, rerender } = render(thread(a as Turn));
+    await userEvent.click(getByRole("button", { name: "Show citations" }));
+    rerender(thread(b as Turn));
+    expect(container.querySelector(".ui-markdown sup")).toBeNull();
+    expect(getByRole("button", { name: "Show citations" })).toBeTruthy();
+  });
+
   it("offers no toggle for an answer that cites nothing", () => {
     const { queryByRole } = view({
       ...finished("How is sign-in done?", 1000),

@@ -598,7 +598,8 @@ export function asMarkdown(turn: Turn): string {
     if (matched[i])
       lines.push(...(lines.length ? [""] : []), "```", p.text, "```");
   });
-  lines.push("", stripMarkers(mermaidize(turn.text.trim())));
+  const backed = new Set(turn.citations.map((c) => c.marker));
+  lines.push("", stripMarkers(mermaidize(turn.text.trim()), backed));
   if (turn.citations.length > 0) {
     const sources = new Set(turn.citations.map(forgeLine));
     lines.push("", "Sources:", ...[...sources].map((s) => `- ${s}`));

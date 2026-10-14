@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 describe("parseDiagram", () => {
-  it("accepts a flow and a sequence, defaulting kind and src", () => {
+  it("accepts a flow and a sequence, defaulting kind", () => {
     const f = parseDiagram(
       JSON.stringify({
         type: "flow",
@@ -47,7 +47,7 @@ describe("parseDiagram", () => {
     );
     expect(f).toEqual({
       type: "flow",
-      nodes: [{ id: "a", label: "x", kind: "step", src: [] }],
+      nodes: [{ id: "a", label: "x", kind: "step" }],
       edges: [],
     });
     const s = parseDiagram(
@@ -63,7 +63,6 @@ describe("parseDiagram", () => {
       to: "u",
       label: "tick",
       kind: "call",
-      src: [],
     });
   });
 
@@ -109,24 +108,15 @@ describe("parseDiagram", () => {
     expect(danglingStep.steps).toHaveLength(0);
   });
 
-  // A src array the backend never renumbered still carries the prompt's own
-  // indices. Renumbering misses the whole array on one bad entry, so keeping
-  // the well-formed ones would draw chips naming the wrong files.
-  it("drops a src array renumbering would have missed, whole", () => {
-    for (const body of [
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":["1"]}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[0]}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[1.5]}],"edges":[]}',
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":"1"}],"edges":[]}',
-    ]) {
-      expect((parseDiagram(body) as FlowSpec).nodes[0].src, body).toEqual([]);
+  // Stored specs carry a src array per node; nothing draws or copies it any
+  // more, and however it was written it never costs the node (#45).
+  it("ignores a node's src, whatever shape it came in", () => {
+    for (const src of ['["1"]', "[1.5]", '"1"', "[2,4]"]) {
+      const body = `{"type":"flow","nodes":[{"id":"a","label":"x","src":${src}}],"edges":[]}`;
+      expect((parseDiagram(body) as FlowSpec).nodes, body).toEqual([
+        { id: "a", label: "x", kind: "step" },
+      ]);
     }
-    // The backend leaves this array exactly as it came, so 2 and 4 are still
-    // the prompt's numbers: drawn as chips they would name the wrong files.
-    const mixed = parseDiagram(
-      '{"type":"flow","nodes":[{"id":"a","label":"x","src":[2,"3",4]}],"edges":[]}',
-    ) as FlowSpec;
-    expect(mixed.nodes[0].src).toEqual([]);
   });
 });
 

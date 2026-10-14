@@ -450,11 +450,11 @@ describe("asMarkdown with citations", () => {
   it("carries no markers and lists each source once, unnumbered", () => {
     const turn = {
       ...freshTurn("Why?", "dev", "en"),
-      text: "Because [1] of `a[1]` [2, 3].",
+      text: "Because [1] of `a[1]` [2, 3]. Codes [200].",
       citations: [cite(1, "a.go"), cite(2, "b.go"), cite(3, "a.go")],
     } as Turn;
     expect(asMarkdown(turn)).toBe(
-      "# Why?\n\nBecause of `a[1]`.\n\nSources:\n" +
+      "# Why?\n\nBecause of `a[1]`. Codes [200].\n\nSources:\n" +
         "- peeq · a.go:1-9 (master)\n- peeq · b.go:1-9 (master)\n",
     );
   });

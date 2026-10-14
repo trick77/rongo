@@ -376,16 +376,28 @@ describe("Markdown", () => {
       expect(container.textContent).toBe("A job runs, then stops.");
     });
 
-    it("hide a grouped, an adjacent and an invented marker alike", () => {
-      // An invented [7] left visible would pop in when the citations arrive.
+    it("hide a grouped and an adjacent marker alike", () => {
       const { container } = render(
         <Markdown
-          text={"Polled [1, 2] and pushed [1][2], or so [7] says."}
+          text={"Polled [1, 2] and pushed [1][2], or [2, 7] says."}
           backed={new Set([1, 2])}
           hideMarkers
         />,
       );
-      expect(container.textContent).toBe("Polled and pushed, or so says.");
+      expect(container.textContent).toBe("Polled and pushed, or says.");
+    });
+
+    it("leave a number no source backs as written, once the citations are known", () => {
+      // "[200, 201]" is a list of status codes, not a citation; before the
+      // citations arrive there is no telling, so it is held back until then.
+      const text = "Returns one of [200, 201].";
+      const streaming = render(<Markdown text={text} hideMarkers />);
+      expect(streaming.container.textContent).toBe("Returns one of.");
+      streaming.unmount();
+      const done = render(
+        <Markdown text={text} backed={new Set([1])} hideMarkers />,
+      );
+      expect(done.container.textContent).toBe(text);
     });
 
     it("leave no leading space at the head of a paragraph or list item", () => {
@@ -482,6 +494,16 @@ describe("Markdown", () => {
 
     it("keeps an unclosed inline code span as written", () => {
       expect(stripMarkers("A [1] then `a[2] b")).toBe("A then `a[2] b");
+    });
+
+    it("keeps a line's indentation when a marker heads it", () => {
+      expect(stripMarkers("- Job\n  [2] then runs")).toBe("- Job\n  then runs");
+    });
+
+    it("strips only markers a source backs, when told which", () => {
+      expect(stripMarkers("Codes [200, 201] per [1, 7].", new Set([1]))).toBe(
+        "Codes [200, 201] per.",
+      );
     });
   });
 

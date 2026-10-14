@@ -107,19 +107,30 @@ const markerRe = new RegExp(markerBody, "g");
 
 /** A marker taken out of prose takes one side's spaces with it: the ones
  * before it ("total [1]." → "total."), or, heading a line, the ones after
- * ("[1] The cart" → "The cart"). */
-const leadMarkersRe = new RegExp(String.raw`^[ \t]*(?:${markerBody}[ \t]*)+`);
+ * ("[1] The cart" → "The cart") - never the line's indentation, which nests
+ * a list item. */
+const leadMarkerRe = new RegExp(String.raw`^([ \t]*)${markerBody}[ \t]*`);
 const markerSpaceRe = new RegExp(String.raw`[ \t]*${markerBody}`, "g");
 
 /** A marker still being written at the very end of a streaming answer: an
  * opening bracket and as much of a number list as has arrived. */
 const partialMarkerRe = /[ \t]*\[(?:\d{1,3}(?:\s*,\s*\d{0,3})*)?$/;
 
-/** stripMarkers takes every citation marker out of an answer's prose and
+/** stripMarkers takes the citation markers out of an answer's prose and
  * leaves code as written: a fenced block, and an inline span - an unclosed
  * one to the end of its line, as the renderer shows it. "Copy as Markdown"
- * carries no markers, and an Analyst answer is drawn without them. */
-export function stripMarkers(src: string): string {
+ * carries no markers, and an Analyst answer is drawn without them.
+ *
+ * backed, once the citations are known, limits it to markers a source
+ * stands behind, as the chips are: "[200, 201]" with no source is a list of
+ * status codes, and stays. A group with one backed number is a marker. */
+export function stripMarkers(src: string, backed?: Set<number>): string {
+  const cited = (nums: string) =>
+    backed === undefined || nums.split(/\s*,\s*/).some((n) => backed.has(+n));
+  const lead = (piece: string): string => {
+    const m = leadMarkerRe.exec(piece);
+    return m && cited(m[2]) ? lead(m[1] + piece.slice(m[0].length)) : piece;
+  };
   let fenced = false;
   return src
     .split("\n")
@@ -133,8 +144,10 @@ export function stripMarkers(src: string): string {
         .split(/(`[^`]*`|`[^`]*$)/)
         .map((piece, p) => {
           if (p % 2 === 1) return piece;
-          const rest = p === 0 ? piece.replace(leadMarkersRe, "") : piece;
-          return rest.replace(markerSpaceRe, "");
+          const rest = p === 0 ? lead(piece) : piece;
+          return rest.replace(markerSpaceRe, (m, nums: string) =>
+            cited(nums) ? "" : m,
+          );
         })
         .join("");
     })
@@ -616,7 +629,7 @@ function Markdown({
   hideMarkers?: boolean;
 }) {
   if (hideMarkers) {
-    src = stripMarkers(src);
+    src = stripMarkers(src, backed);
     if (backed === undefined) src = holdBack(src);
   }
   return (

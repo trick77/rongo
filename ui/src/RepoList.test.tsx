@@ -387,9 +387,6 @@ describe("wiringSpec", () => {
       "shop-backend",
       "shop-ui",
     ]);
-    // Configuration is not code, so no node cites anything. AGENTS.md: a node
-    // cites code or nothing, and is still drawn with no sources.
-    expect(spec.nodes.every((n) => n.src.length === 0)).toBe(true);
   });
 
   it("labels a node with its part, and with the bare name when it has none", () => {

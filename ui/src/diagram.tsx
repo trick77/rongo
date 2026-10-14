@@ -39,7 +39,6 @@ export type FlowNode = {
   id: string;
   label: string;
   kind: FlowKind;
-  src: number[];
 };
 type FlowEdge = { from: string; to: string; label?: string };
 export type FlowSpec = { type: "flow"; nodes: FlowNode[]; edges: FlowEdge[] };
@@ -50,7 +49,6 @@ type SeqStep = {
   to: string;
   label: string;
   kind: StepKind;
-  src: number[];
 };
 export type SequenceSpec = {
   type: "sequence";
@@ -64,17 +62,6 @@ const stepKinds: readonly string[] = ["call", "return", "async"];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/** src keeps a node's markers only when every one of them is a reader's
- * number, all or nothing: the backend of the time renumbered a src array all
- * or nothing, so one quoted or fractional entry left the whole array at the
- * prompt's indices. They reach the clipboard (toMermaid, cite), never the
- * picture. */
-function src(v: unknown): number[] {
-  if (!Array.isArray(v)) return [];
-  if (!v.every((n) => Number.isInteger(n) && (n as number) > 0)) return [];
-  return v as number[];
 }
 
 /** parseDiagram reads the older JSON spec, or returns null when there is no
@@ -109,7 +96,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
         ? (n.kind as FlowKind)
         : "step";
       known.add(n.id);
-      out.push({ id: n.id, label: n.label, kind, src: src(n.src) });
+      out.push({ id: n.id, label: n.label, kind });
     }
     if (out.length === 0) return null;
     const es: FlowEdge[] = [];
@@ -148,13 +135,7 @@ export function parseDiagram(body: string): DiagramSpec | null {
       const kind = stepKinds.includes(s.kind as string)
         ? (s.kind as StepKind)
         : "call";
-      ss.push({
-        from: s.from,
-        to: s.to,
-        label: s.label,
-        kind,
-        src: src(s.src),
-      });
+      ss.push({ from: s.from, to: s.to, label: s.label, kind });
     }
     return { type: "sequence", actors: as, steps: ss };
   }

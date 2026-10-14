@@ -26,28 +26,24 @@ const seq: SequenceSpec = {
       to: "repos-yaml",
       label: "Load repository list",
       kind: "call",
-      src: [1, 2],
     },
     {
       from: "repos-yaml",
       to: "idx",
       label: "Sync specs",
       kind: "async",
-      src: [],
     },
     {
       from: "idx",
       to: "idx",
       label: "Keyword indexing",
       kind: "call",
-      src: [8],
     },
     {
       from: "idx",
       to: "repos-yaml",
       label: "Store files",
       kind: "return",
-      src: [9],
     },
   ],
 };
@@ -55,10 +51,10 @@ const seq: SequenceSpec = {
 const flow: FlowSpec = {
   type: "flow",
   nodes: [
-    { id: "a", label: "Answer()", kind: "start", src: [3] },
-    { id: "b", label: 'sources "empty"?', kind: "decision", src: [] },
-    { id: "c", label: "NothingFound", kind: "end", src: [] },
-    { id: "d", label: "Stream to the model", kind: "step", src: [4] },
+    { id: "a", label: "Answer()", kind: "start" },
+    { id: "b", label: 'sources "empty"?', kind: "decision" },
+    { id: "c", label: "NothingFound", kind: "end" },
+    { id: "d", label: "Stream to the model", kind: "step" },
   ],
   edges: [
     { from: "a", to: "b" },
@@ -104,8 +100,8 @@ describe("toMermaid", () => {
     const out = toMermaid({
       type: "flow",
       nodes: [
-        { id: "start", label: "Begin", kind: "start", src: [] },
-        { id: "end", label: "Done", kind: "end", src: [] },
+        { id: "start", label: "Begin", kind: "start" },
+        { id: "end", label: "Done", kind: "end" },
       ],
       edges: [{ from: "start", to: "end" }],
     });
@@ -118,7 +114,7 @@ describe("toMermaid", () => {
     const out = toMermaid({
       type: "sequence",
       actors: [{ id: "ui", label: "" }],
-      steps: [{ from: "ui", to: "ui", label: "tick", kind: "call", src: [] }],
+      steps: [{ from: "ui", to: "ui", label: "tick", kind: "call" }],
     });
     expect(out).toContain("participant ui as ui");
     expect(out).not.toMatch(/ as\s*$/m);
@@ -146,7 +142,7 @@ describe("mermaidize", () => {
   const body = JSON.stringify({
     type: "sequence",
     actors: [{ id: "ui", label: "Ask.tsx" }],
-    steps: [{ from: "ui", to: "ui", label: "render", kind: "call", src: [1] }],
+    steps: [{ from: "ui", to: "ui", label: "render", kind: "call" }],
   });
 
   it("replaces a diagram fence with a mermaid one", () => {
