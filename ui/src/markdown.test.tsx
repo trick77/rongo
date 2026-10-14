@@ -496,6 +496,18 @@ describe("Markdown", () => {
       expect(stripMarkers("A [1] then `a[2] b")).toBe("A then `a[2] b");
     });
 
+    it("never glues the words on either side of a marker together", () => {
+      expect(stripMarkers("in Cart [1]and stored, A[2]B")).toBe(
+        "in Cart and stored, A B",
+      );
+    });
+
+    it("drops a line that held nothing but a marker, keeping the paragraph whole", () => {
+      expect(stripMarkers("Computed in Cart.\n[1]\nShipping later.")).toBe(
+        "Computed in Cart.\nShipping later.",
+      );
+    });
+
     it("keeps a line's indentation when a marker heads it", () => {
       expect(stripMarkers("- Job\n  [2] then runs")).toBe("- Job\n  then runs");
     });

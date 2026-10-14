@@ -90,7 +90,12 @@ describe("toMermaid", () => {
 
   it("carries no markers, drawn or copied", () => {
     expect(toMermaid(seq)).not.toMatch(/\[\d+\]/);
-    expect(toMermaid(flow)).not.toMatch(/\[\d+\]"\]/);
+    // Node lines only: the fixture's edge label "yes [3]" is the model's
+    // own text, not a marker toMermaid added.
+    const nodes = toMermaid(flow)
+      .split("\n")
+      .filter((l) => !l.includes("-->"));
+    expect(nodes.join("\n")).not.toMatch(/\[\d+\]/);
   });
 
   it("renames an id mermaid reads as syntax", () => {

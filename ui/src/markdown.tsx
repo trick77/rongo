@@ -131,25 +131,34 @@ export function stripMarkers(src: string, backed?: Set<number>): string {
     const m = leadMarkerRe.exec(piece);
     return m && cited(m[2]) ? lead(m[1] + piece.slice(m[0].length)) : piece;
   };
+  // Between two words a space survives, or "Cart [1]and" reads "Cartand".
+  const word = (ch: string | undefined) => !!ch && /[\p{L}\p{N}]/u.test(ch);
   let fenced = false;
   return src
     .split("\n")
-    .map((line) => {
+    .flatMap((line) => {
       if (fenceRe.test(line)) {
         fenced = !fenced;
-        return line;
+        return [line];
       }
-      if (fenced) return line;
-      return line
+      if (fenced) return [line];
+      const out = line
         .split(/(`[^`]*`|`[^`]*$)/)
         .map((piece, p) => {
           if (p % 2 === 1) return piece;
           const rest = p === 0 ? lead(piece) : piece;
-          return rest.replace(markerSpaceRe, (m, nums: string) =>
-            cited(nums) ? "" : m,
+          return rest.replace(
+            markerSpaceRe,
+            (m, nums: string, at: number, all: string) => {
+              if (!cited(nums)) return m;
+              return word(all[at - 1]) && word(all[at + m.length]) ? " " : "";
+            },
           );
         })
         .join("");
+      // A line that was nothing but a marker goes whole: left empty, it
+      // would end the paragraph it sat in.
+      return out.trim() === "" && line.trim() !== "" ? [] : [out];
     })
     .join("\n");
 }
