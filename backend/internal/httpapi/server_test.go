@@ -15,14 +15,21 @@ import (
 	"github.com/trick77/ship/kit/version"
 )
 
+// probe is a request to a probe path from loopback: kit answers the probes
+// for a direct local caller only.
+func probe(path string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = "127.0.0.1:40000"
+	return req
+}
+
 func TestHealthz_returnsOK(t *testing.T) {
 	// Given
 	srv := NewServer(Deps{})
 
 	// When
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	srv.ServeHTTP(rec, probe("/healthz"))
 
 	// Then
 	if rec.Code != http.StatusOK {
@@ -43,9 +50,9 @@ func TestReadyz_failsOnAFailingCheck(t *testing.T) {
 
 	// When
 	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	srv.ServeHTTP(rec, probe("/readyz"))
 	live := httptest.NewRecorder()
-	srv.ServeHTTP(live, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	srv.ServeHTTP(live, probe("/healthz"))
 
 	// Then
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"check":"database"`) {
