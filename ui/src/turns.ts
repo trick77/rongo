@@ -11,6 +11,7 @@ import { type ClarifyCandidate } from "./Clarify";
 import { type Step, type TraceState } from "./Trace";
 import { isCommit, type SourceRef } from "./SourceView";
 import { mermaidize } from "./diagramExport";
+import { stripMarkers } from "./markdown";
 import { fold, strip, type PastedText } from "./pastes";
 
 export type Citation = SourceRef;
@@ -581,7 +582,9 @@ export function clock(iso: string): string {
 }
 
 /** asMarkdown is what "Copy as Markdown" puts on the clipboard: the answer
- * with its markers, and the sources they point at.
+ * without its markers, for every reader, and its sources under it, each
+ * once and unnumbered - with nothing pointing at them, a number would only
+ * suggest it did.
  *
  * A diagram travels as mermaid rather than as the `diagram` fence it is
  * written in. The fence is rongo's own shape and draws nowhere else, so a
@@ -595,13 +598,11 @@ export function asMarkdown(turn: Turn): string {
     if (matched[i])
       lines.push(...(lines.length ? [""] : []), "```", p.text, "```");
   });
-  lines.push("", mermaidize(turn.text.trim()));
+  const backed = new Set(turn.citations.map((c) => c.marker));
+  lines.push("", stripMarkers(mermaidize(turn.text.trim()), backed));
   if (turn.citations.length > 0) {
-    lines.push(
-      "",
-      "Sources:",
-      ...turn.citations.map((c) => `[${c.marker}] ${forgeLine(c)}`),
-    );
+    const sources = new Set(turn.citations.map(forgeLine));
+    lines.push("", "Sources:", ...[...sources].map((s) => `- ${s}`));
   }
   return lines.join("\n") + "\n";
 }

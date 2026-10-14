@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // The trace of a turn is drawn once per render of that turn, so counting its
 // renders per start time says which turns a change re-rendered.
@@ -135,5 +136,96 @@ describe("ThreadView, while an answer streams", () => {
 
     // Then it is drawn again, with what changed
     expect((traceRenders.get(1000) ?? 0) - before).toBe(1);
+  });
+});
+
+describe("ThreadView, citation markers by audience", () => {
+  const view = (turn: Turn) =>
+    render(
+      <ThreadView
+        turns={[turn]}
+        actions={actions}
+        onOpenSource={() => {}}
+        onToggleSources={() => {}}
+        threadKey="t"
+      />,
+    );
+
+  it("draws no markers in an Analyst answer and keeps its Sources chip", () => {
+    const { container, getByRole } = view({
+      ...finished("How is sign-in done?", 1000),
+      audience: "ba",
+    });
+    const answer = container.querySelector(".ui-markdown");
+    expect(answer?.querySelector("sup")).toBeNull();
+    expect(answer?.textContent).toBe("The answer to How is sign-in done?.");
+    expect(getByRole("button", { name: /1\s*Sources/ })).toBeTruthy();
+  });
+
+  it("draws the markers in a Developer answer", () => {
+    const { container } = view(finished("How is sign-in done?", 1000));
+    expect(container.querySelector(".ui-markdown sup")?.textContent).toBe(
+      "[1]",
+    );
+  });
+
+  it("lets the reader show an Analyst answer's markers, that answer only", async () => {
+    const { container, getAllByRole } = render(
+      <ThreadView
+        turns={[
+          { ...finished("How is sign-in done?", 1000), audience: "ba" },
+          { ...finished("And on logout?", 2000), audience: "ba" },
+        ]}
+        actions={actions}
+        onOpenSource={() => {}}
+        threadKey="t"
+      />,
+    );
+    const answers = container.querySelectorAll(".ui-markdown");
+    await userEvent.click(
+      getAllByRole("button", { name: "Show citations" })[0],
+    );
+    expect(answers[0].querySelector("sup")?.textContent).toBe("[1]");
+    expect(answers[1].querySelector("sup")).toBeNull();
+    await userEvent.click(
+      getAllByRole("button", { name: "Hide citations" })[0],
+    );
+    expect(answers[0].querySelector("sup")).toBeNull();
+  });
+
+  it("lets the reader hide a Developer answer's markers", async () => {
+    const { container, getByRole } = view(
+      finished("How is sign-in done?", 1000),
+    );
+    await userEvent.click(getByRole("button", { name: "Hide citations" }));
+    expect(container.querySelector(".ui-markdown sup")).toBeNull();
+  });
+
+  it("does not carry a reader's choice to another thread's answer in the same place", async () => {
+    // ThreadView is not remounted between threads, and turns are keyed by
+    // their place: the choice must belong to the answer, not the slot.
+    const thread = (turn: Turn) => (
+      <ThreadView
+        turns={[turn]}
+        actions={actions}
+        onOpenSource={() => {}}
+        threadKey="t"
+      />
+    );
+    const a = { ...finished("How is sign-in done?", 1000), audience: "ba" };
+    const b = { ...finished("And on logout?", 2000), audience: "ba" };
+    const { container, getByRole, rerender } = render(thread(a as Turn));
+    await userEvent.click(getByRole("button", { name: "Show citations" }));
+    rerender(thread(b as Turn));
+    expect(container.querySelector(".ui-markdown sup")).toBeNull();
+    expect(getByRole("button", { name: "Show citations" })).toBeTruthy();
+  });
+
+  it("offers no toggle for an answer that cites nothing", () => {
+    const { queryByRole } = view({
+      ...finished("How is sign-in done?", 1000),
+      citations: [],
+    });
+    expect(queryByRole("button", { name: /citations$/ })).toBeNull();
   });
 });

@@ -106,9 +106,6 @@ export function usedBy(library: string, repos: Repo[]): string[] {
  * it already says what a node is, and a test can assert on it without
  * parsing diagram syntax.
  *
- * Every node carries src: [] because the graph is CONFIGURATION, not code:
- * there is nothing to cite.
- *
  * An entry point — a repository nothing in the project uses — comes out as a
  * pill, which is what `start` draws as.
  *
@@ -148,13 +145,11 @@ export function wiringSpec(
           // A diagram node's own kind, unrelated to the repository's part: it
           // says whether layoutFlow draws a pill or a box.
           kind: (reached.has(r.name) ? "step" : "start") as FlowNode["kind"],
-          src: [],
         })),
       ...external.map((u) => ({
         id: u,
         label: `${u} · library`,
         kind: "end" as const,
-        src: [],
       })),
     ],
     edges,

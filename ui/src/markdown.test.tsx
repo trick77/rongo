@@ -21,7 +21,7 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-import Markdown, { splitIntoSegments } from "./markdown";
+import Markdown, { splitIntoSegments, stripMarkers } from "./markdown";
 
 describe("Markdown", () => {
   it("turns # into a heading rather than rendering the character itself", () => {
@@ -358,6 +358,164 @@ describe("Markdown", () => {
     it("stay visible in a heading", () => {
       const { container } = render(<Markdown text={"## Shipping [2]"} />);
       expect(container.querySelector("h3")?.textContent).toBe("Shipping [2]");
+    });
+  });
+
+  // An Analyst reads an explanation, not a list of files: the markers keep
+  // the model honest and stay in the text, but are not drawn.
+  describe("citation markers, hidden", () => {
+    it("are not drawn, and take the space before them along", () => {
+      const { container } = render(
+        <Markdown
+          text={"A job [1] runs, then stops [2]."}
+          backed={new Set([1, 2])}
+          hideMarkers
+        />,
+      );
+      expect(container.querySelector("sup")).toBeNull();
+      expect(container.textContent).toBe("A job runs, then stops.");
+    });
+
+    it("hide a grouped and an adjacent marker alike", () => {
+      const { container } = render(
+        <Markdown
+          text={"Polled [1, 2] and pushed [1][2], or [2, 7] says."}
+          backed={new Set([1, 2])}
+          hideMarkers
+        />,
+      );
+      expect(container.textContent).toBe("Polled and pushed, or says.");
+    });
+
+    it("leave a number no source backs as written, once the citations are known", () => {
+      // "[200, 201]" is a list of status codes, not a citation; before the
+      // citations arrive there is no telling, so it is held back until then.
+      const text = "Returns one of [200, 201].";
+      const streaming = render(<Markdown text={text} hideMarkers />);
+      expect(streaming.container.textContent).toBe("Returns one of.");
+      streaming.unmount();
+      const done = render(
+        <Markdown text={text} backed={new Set([1])} hideMarkers />,
+      );
+      expect(done.container.textContent).toBe(text);
+    });
+
+    it("leave no leading space at the head of a paragraph or list item", () => {
+      const { container } = render(
+        <Markdown
+          text={"[1] The cart.\n\n- [2] The job.\n- Then [3] it."}
+          hideMarkers
+        />,
+      );
+      expect(container.querySelector("p")?.textContent).toBe("The cart.");
+      const items = [...container.querySelectorAll("li")].map(
+        (li) => li.textContent,
+      );
+      expect(items).toEqual(["The job.", "Then it."]);
+    });
+
+    it("are hidden in headings, bold and table cells", () => {
+      const { container } = render(
+        <Markdown
+          text={
+            "## Shipping [2]\n\n**Only the job [3] writes.**\n\n| a | b |\n|---|---|\n| x [4] | [5] |"
+          }
+          hideMarkers
+        />,
+      );
+      expect(container.querySelector("h3")?.textContent).toBe("Shipping");
+      expect(container.querySelector("strong")?.textContent).toBe(
+        "Only the job writes.",
+      );
+      const cells = [...container.querySelectorAll("td")].map(
+        (td) => td.textContent,
+      );
+      expect(cells).toEqual(["x", ""]);
+    });
+
+    it("leave code alone", () => {
+      const { container } = render(
+        <Markdown
+          text={"Read `arr[1]` here [2].\n\n```go\nx := arr[1]\n```"}
+          hideMarkers
+        />,
+      );
+      expect(container.querySelector("p code")?.textContent).toBe("arr[1]");
+      expect(container.querySelector("p")?.textContent).toBe(
+        "Read arr[1] here.",
+      );
+      expect(container.querySelector("pre code")?.textContent).toBe(
+        "x := arr[1]",
+      );
+    });
+
+    it("hold back a marker still being written while streaming", () => {
+      // Without it "[1" flashes on screen until its bracket arrives.
+      for (const tail of ["[", "[1", "[1, ", "[12, 3"]) {
+        const { container, unmount } = render(
+          <Markdown text={"A job " + tail} hideMarkers />,
+        );
+        expect(container.textContent).toBe("A job");
+        unmount();
+      }
+    });
+
+    it("never hold back code still being written", () => {
+      const fenced = render(
+        <Markdown text={"Text.\n\n```go\nx := arr[1"} hideMarkers />,
+      );
+      expect(fenced.container.querySelector("pre code")?.textContent).toBe(
+        "x := arr[1",
+      );
+      fenced.unmount();
+      const inline = render(<Markdown text={"Read `arr[1"} hideMarkers />);
+      expect(inline.container.textContent).toBe("Read `arr[1");
+    });
+
+    it("show a finished answer's trailing bracket as written", () => {
+      // Once the citations are known nothing more arrives.
+      const { container } = render(
+        <Markdown text={"See [1"} backed={new Set()} hideMarkers />,
+      );
+      expect(container.textContent).toBe("See [1");
+    });
+  });
+
+  describe("stripMarkers", () => {
+    it("removes markers from prose and keeps code as written", () => {
+      expect(
+        stripMarkers(
+          "[1] Head.\n\nA job [1, 2] runs [3].\n\n- [4] item `a[1]`\n\n```go\nx := a[1]\n```\n",
+        ),
+      ).toBe(
+        "Head.\n\nA job runs.\n\n- item `a[1]`\n\n```go\nx := a[1]\n```\n",
+      );
+    });
+
+    it("keeps an unclosed inline code span as written", () => {
+      expect(stripMarkers("A [1] then `a[2] b")).toBe("A then `a[2] b");
+    });
+
+    it("never glues the words on either side of a marker together", () => {
+      expect(stripMarkers("in Cart [1]and stored, A[2]B")).toBe(
+        "in Cart and stored, A B",
+      );
+    });
+
+    it("drops a line that held nothing but a marker, keeping the paragraph whole", () => {
+      expect(stripMarkers("Computed in Cart.\n[1]\nShipping later.")).toBe(
+        "Computed in Cart.\nShipping later.",
+      );
+    });
+
+    it("keeps a line's indentation when a marker heads it", () => {
+      expect(stripMarkers("- Job\n  [2] then runs")).toBe("- Job\n  then runs");
+    });
+
+    it("strips only markers a source backs, when told which", () => {
+      expect(stripMarkers("Codes [200, 201] per [1, 7].", new Set([1]))).toBe(
+        "Codes [200, 201] per.",
+      );
     });
   });
 

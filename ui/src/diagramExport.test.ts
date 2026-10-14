@@ -26,28 +26,24 @@ const seq: SequenceSpec = {
       to: "repos-yaml",
       label: "Load repository list",
       kind: "call",
-      src: [1, 2],
     },
     {
       from: "repos-yaml",
       to: "idx",
       label: "Sync specs",
       kind: "async",
-      src: [],
     },
     {
       from: "idx",
       to: "idx",
       label: "Keyword indexing",
       kind: "call",
-      src: [8],
     },
     {
       from: "idx",
       to: "repos-yaml",
       label: "Store files",
       kind: "return",
-      src: [9],
     },
   ],
 };
@@ -55,10 +51,10 @@ const seq: SequenceSpec = {
 const flow: FlowSpec = {
   type: "flow",
   nodes: [
-    { id: "a", label: "Answer()", kind: "start", src: [3] },
-    { id: "b", label: 'sources "empty"?', kind: "decision", src: [] },
-    { id: "c", label: "NothingFound", kind: "end", src: [] },
-    { id: "d", label: "Stream to the model", kind: "step", src: [4] },
+    { id: "a", label: "Answer()", kind: "start" },
+    { id: "b", label: 'sources "empty"?', kind: "decision" },
+    { id: "c", label: "NothingFound", kind: "end" },
+    { id: "d", label: "Stream to the model", kind: "step" },
   ],
   edges: [
     { from: "a", to: "b" },
@@ -79,23 +75,27 @@ describe("toMermaid", () => {
     // "repos.yaml" and "repos-yaml" both sanitize to repos_yaml.
     expect(out).toContain("participant repos_yaml as repos.yaml");
     expect(out).toContain("participant repos_yaml_2 as Startup");
-    expect(out).toContain(
-      "repos_yaml->>repos_yaml_2: Load repository list [1] [2]",
-    );
+    expect(out).toContain("repos_yaml->>repos_yaml_2: Load repository list");
   });
 
   it("draws call, async and return with their own arrows", () => {
     const out = toMermaid(seq);
     expect(out).toContain("repos_yaml_2-)idx: Sync specs");
-    expect(out).toContain("idx-->>repos_yaml_2: Store files [9]");
+    expect(out).toContain("idx-->>repos_yaml_2: Store files");
   });
 
   it("keeps a self-message on one actor", () => {
-    expect(toMermaid(seq)).toContain("idx->>idx: Keyword indexing [8]");
+    expect(toMermaid(seq)).toContain("idx->>idx: Keyword indexing");
   });
 
-  it("carries the markers so they still match the sources block", () => {
-    expect(toMermaid(seq)).toContain("[1] [2]");
+  it("carries no markers, drawn or copied", () => {
+    expect(toMermaid(seq)).not.toMatch(/\[\d+\]/);
+    // Node lines only: the fixture's edge label "yes [3]" is the model's
+    // own text, not a marker toMermaid added.
+    const nodes = toMermaid(flow)
+      .split("\n")
+      .filter((l) => !l.includes("-->"));
+    expect(nodes.join("\n")).not.toMatch(/\[\d+\]/);
   });
 
   it("renames an id mermaid reads as syntax", () => {
@@ -105,8 +105,8 @@ describe("toMermaid", () => {
     const out = toMermaid({
       type: "flow",
       nodes: [
-        { id: "start", label: "Begin", kind: "start", src: [] },
-        { id: "end", label: "Done", kind: "end", src: [] },
+        { id: "start", label: "Begin", kind: "start" },
+        { id: "end", label: "Done", kind: "end" },
       ],
       edges: [{ from: "start", to: "end" }],
     });
@@ -119,7 +119,7 @@ describe("toMermaid", () => {
     const out = toMermaid({
       type: "sequence",
       actors: [{ id: "ui", label: "" }],
-      steps: [{ from: "ui", to: "ui", label: "tick", kind: "call", src: [] }],
+      steps: [{ from: "ui", to: "ui", label: "tick", kind: "call" }],
     });
     expect(out).toContain("participant ui as ui");
     expect(out).not.toMatch(/ as\s*$/m);
@@ -128,8 +128,8 @@ describe("toMermaid", () => {
   it("writes a flow with the kind in the node shape", () => {
     const out = toMermaid(flow);
     expect(out.split("\n")[0]).toBe("flowchart TD");
-    expect(out).toContain('a(["Answer() [3]"])');
-    expect(out).toContain('d["Stream to the model [4]"]');
+    expect(out).toContain('a(["Answer()"])');
+    expect(out).toContain('d["Stream to the model"]');
     expect(out).toContain("{");
   });
 
@@ -147,7 +147,7 @@ describe("mermaidize", () => {
   const body = JSON.stringify({
     type: "sequence",
     actors: [{ id: "ui", label: "Ask.tsx" }],
-    steps: [{ from: "ui", to: "ui", label: "render", kind: "call", src: [1] }],
+    steps: [{ from: "ui", to: "ui", label: "render", kind: "call" }],
   });
 
   it("replaces a diagram fence with a mermaid one", () => {

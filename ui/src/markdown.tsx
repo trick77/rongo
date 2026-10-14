@@ -36,6 +36,12 @@ import Diagram, { DiagramPending, diagramSource } from "./diagram";
  * for the list, because until then there is no row to point at and no file
  * to open.
  *
+ * An Analyst answer is drawn with its markers taken out (hideMarkers). The
+ * stored text, the prompt and the citation list keep them - they are what
+ * keeps the model honest - but a reader given an explanation with no paths
+ * gets no chips pointing at paths either, until they ask for them under the
+ * answer. Copy as Markdown strips them for every reader.
+ *
  * Unterminated markup renders as text rather than swallowing the rest. The
  * answer is re-rendered on every streamed token, so half-written markup is the
  * normal case here, not an edge case.
@@ -96,7 +102,78 @@ function faded(src: string, key: string, base: number): ReactNode[] {
 /** One marker, or a grouped one: the prompt asks for [1][2], but a claim
  * resting on several sources still comes out as [1, 2] often enough. Read as
  * a single marker it matched nothing and stayed plain text next to chips. */
-const markerRe = /\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]/g;
+const markerBody = String.raw`\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]`;
+const markerRe = new RegExp(markerBody, "g");
+
+/** A marker taken out of prose takes one side's spaces with it: the ones
+ * before it ("total [1]." → "total."), or, heading a line, the ones after
+ * ("[1] The cart" → "The cart") - never the line's indentation, which nests
+ * a list item. */
+const leadMarkerRe = new RegExp(String.raw`^([ \t]*)${markerBody}[ \t]*`);
+const markerSpaceRe = new RegExp(String.raw`[ \t]*${markerBody}`, "g");
+
+/** A marker still being written at the very end of a streaming answer: an
+ * opening bracket and as much of a number list as has arrived. */
+const partialMarkerRe = /[ \t]*\[(?:\d{1,3}(?:\s*,\s*\d{0,3})*)?$/;
+
+/** stripMarkers takes the citation markers out of an answer's prose and
+ * leaves code as written: a fenced block, and an inline span - an unclosed
+ * one to the end of its line, as the renderer shows it. "Copy as Markdown"
+ * carries no markers, and an Analyst answer is drawn without them.
+ *
+ * backed, once the citations are known, limits it to markers a source
+ * stands behind, as the chips are: "[200, 201]" with no source is a list of
+ * status codes, and stays. A group with one backed number is a marker. */
+export function stripMarkers(src: string, backed?: Set<number>): string {
+  const cited = (nums: string) =>
+    backed === undefined || nums.split(/\s*,\s*/).some((n) => backed.has(+n));
+  const lead = (piece: string): string => {
+    const m = leadMarkerRe.exec(piece);
+    return m && cited(m[2]) ? lead(m[1] + piece.slice(m[0].length)) : piece;
+  };
+  // Between two words a space survives, or "Cart [1]and" reads "Cartand".
+  const word = (ch: string | undefined) => !!ch && /[\p{L}\p{N}]/u.test(ch);
+  let fenced = false;
+  return src
+    .split("\n")
+    .flatMap((line) => {
+      if (fenceRe.test(line)) {
+        fenced = !fenced;
+        return [line];
+      }
+      if (fenced) return [line];
+      const out = line
+        .split(/(`[^`]*`|`[^`]*$)/)
+        .map((piece, p) => {
+          if (p % 2 === 1) return piece;
+          const rest = p === 0 ? lead(piece) : piece;
+          return rest.replace(
+            markerSpaceRe,
+            (m, nums: string, at: number, all: string) => {
+              if (!cited(nums)) return m;
+              return word(all[at - 1]) && word(all[at + m.length]) ? " " : "";
+            },
+          );
+        })
+        .join("");
+      // A line that was nothing but a marker goes whole: left empty, it
+      // would end the paragraph it sat in.
+      return out.trim() === "" && line.trim() !== "" ? [] : [out];
+    })
+    .join("\n");
+}
+
+/** holdBack drops a marker still being written from the end of a streaming
+ * answer whose markers are hidden, so "[1" never flashes on screen until its
+ * bracket arrives. Code still arriving is shown as it comes: inside an open
+ * fence or an open inline span, "[1" is code. */
+function holdBack(src: string): string {
+  const lines = src.split("\n");
+  if (lines.filter((l) => fenceRe.test(l)).length % 2 === 1) return src;
+  const last = lines[lines.length - 1];
+  if ((last.match(/`/g)?.length ?? 0) % 2 === 1) return src;
+  return src.replace(partialMarkerRe, "");
+}
 
 /** text renders one run of plain text, with complete citation markers as
  * superscripts, one per number of a grouped marker. onMarker lets the view
@@ -542,6 +619,7 @@ function Markdown({
   onMarkerOpen,
   backed,
   fade = false,
+  hideMarkers = false,
 }: {
   text: string;
   onMarkerHover?: (marker: number | null) => void;
@@ -555,7 +633,14 @@ function Markdown({
    * and fading them would wash a conversation the reader had already read
    * back in as if it were being written now. Off unless asked for. */
   fade?: boolean;
+  /** Draws the answer without its citation markers: an Analyst's view. The
+   * text keeps them; see the header comment. */
+  hideMarkers?: boolean;
 }) {
+  if (hideMarkers) {
+    src = stripMarkers(src, backed);
+    if (backed === undefined) src = holdBack(src);
+  }
   return (
     <>
       {renderMarkdown(

@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { chip } from "./chip";
 import Markdown from "./markdown";
 import Clarify from "./Clarify";
@@ -74,6 +74,18 @@ function TurnAttempt({
   onToggleFailure,
   feedback = null,
 }: TurnAttemptProps) {
+  // Whether this answer draws its markers: hidden for an Analyst, who got an
+  // explanation with no paths on purpose, shown for a Developer. The reader's
+  // click flips it for this answer alone and is never stored; a shared page
+  // has no footer, so it stays with the role.
+  //
+  // Held against the answer's id, not this component: turns are keyed by
+  // their place and the thread view is not remounted between threads, so a
+  // bare flag would hand the click on to the answer that next sits here.
+  const [flipped, setFlipped] = useState<number | null>(null);
+  const role = turn.audience === "dev";
+  const showMarkers =
+    flipped !== null && flipped === turn.messageId ? !role : role;
   return (
     <div>
       {label !== null && (
@@ -181,6 +193,8 @@ function TurnAttempt({
                 // the answer ends. Nothing re-fades, because the
                 // segments keep their keys and never remount.
                 fade={turn.live}
+                // The markers stay in the text either way; see showMarkers.
+                hideMarkers={!showMarkers}
               />
             </div>
           )}
@@ -305,6 +319,21 @@ function TurnAttempt({
                       >
                         {copied ? "Copied" : "Copy as Markdown"}
                       </button>
+                      {turn.citations.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFlipped(
+                              flipped === turn.messageId
+                                ? null
+                                : turn.messageId,
+                            )
+                          }
+                          className={chip}
+                        >
+                          {showMarkers ? "Hide citations" : "Show citations"}
+                        </button>
+                      )}
                       {feedback}
                     </>
                   )}
