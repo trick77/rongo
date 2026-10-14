@@ -31,7 +31,10 @@ FROM debian:13-slim
 # The passwd entry is for ssh, which looks its own uid up and exits 255 ("No
 # user exists for uid 1000") when nothing is there, even though the key and
 # known_hosts are named explicitly and the home directory is never read.
+# The upgrade takes Debian fixes the base tag has not caught up with; a cached
+# layer holds them back until this line changes.
 RUN apt-get update \
+ && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends \
       ca-certificates git openssh-client universal-ctags \
  && rm -rf /var/lib/apt/lists/* \
