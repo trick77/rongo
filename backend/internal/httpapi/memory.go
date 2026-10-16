@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/trick77/rongo/internal/memory"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // memoryPage is what the Memory page reads: whether the deployment keeps
@@ -37,7 +38,7 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 // answer that saved it. Unknown and not-yours are one 404, as with threads.
 func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Memory == nil {
-		http.Error(w, "memory unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "memory unavailable")
 		return
 	}
 	u, ok := requireUser(w, r)
@@ -46,7 +47,7 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		http.Error(w, "no such memory", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such memory")
 		return
 	}
 	found, err := s.deps.Memory.Remove(r.Context(), u.Subject, id)
@@ -55,7 +56,7 @@ func (s *Server) handleForgetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		http.Error(w, "no such memory", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such memory")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

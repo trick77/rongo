@@ -17,6 +17,7 @@ import (
 	"github.com/trick77/rongo/internal/retrieve"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // Asker runs one question end to end. An interface so the HTTP layer can be
@@ -208,7 +209,7 @@ func addUnique(dst []string, seen map[string]bool, names ...string) []string {
 // has already started believing.
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Ask == nil || s.deps.Threads == nil {
-		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "the question pipeline is unavailable")
 		return
 	}
 	u, ok := requireUser(w, r)
@@ -222,21 +223,21 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
-		http.Error(w, "the question is empty", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "the question is empty")
 		return
 	}
 	if len(req.Question) > maxQuestionBytes {
-		http.Error(w, "the question is too long", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "the question is too long")
 		return
 	}
 	for _, p := range req.PastedTexts {
 		if strings.TrimSpace(p.Text) == "" {
-			http.Error(w, "a pasted text is empty", http.StatusBadRequest)
+			httpx.WriteError(w, http.StatusBadRequest, "a pasted text is empty")
 			return
 		}
 	}
 	if blob, err := json.Marshal(req.PastedTexts); err != nil || len(blob) > maxQuestionBytes {
-		http.Error(w, "the pasted texts are too long", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "the pasted texts are too long")
 		return
 	}
 	audience := parseAudience(req.Audience)
@@ -265,7 +266,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ThreadID != "" && !found {
-		http.Error(w, "no such thread", http.StatusForbidden)
+		httpx.WriteError(w, http.StatusForbidden, "no such thread")
 		return
 	}
 
@@ -304,14 +305,14 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		if c == nil {
 			// Refused, not explained: whether the id exists at all is not
 			// something to confirm to someone who does not own it.
-			http.Error(w, "no such clarification", http.StatusForbidden)
+			httpx.WriteError(w, http.StatusForbidden, "no such clarification")
 			return
 		}
 		if reqThreadID != 0 && reqThreadID != c.ThreadID {
 			// The card names its thread. A thread_id that disagrees is
 			// refused rather than quietly preferring one of them, the way a
 			// retry's head is — and before the claim, so the card stays open.
-			http.Error(w, "no such clarification", http.StatusForbidden)
+			httpx.WriteError(w, http.StatusForbidden, "no such clarification")
 			return
 		}
 		narrowing := len(req.Repos) > 0
@@ -319,7 +320,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// A card is one question with one answer. Narrowing to a handful
 			// is the other panel's move, and accepting it here would answer
 			// from repositories the card never offered as a set.
-			http.Error(w, "this clarification is a card, not a narrowing", http.StatusBadRequest)
+			httpx.WriteError(w, http.StatusBadRequest, "this clarification is a card, not a narrowing")
 			return
 		}
 		if !narrowing && c.TooBroad {
@@ -327,13 +328,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// defaults to 0, the panel always has a row 0, and the turn would
 			// answer from the highest-scoring repository the reader never
 			// picked — then record it as a choice they never made.
-			http.Error(w, "this clarification is a narrowing, not a card", http.StatusBadRequest)
+			httpx.WriteError(w, http.StatusBadRequest, "this clarification is a narrowing, not a card")
 			return
 		}
 		if !narrowing && (req.Choice < 0 || req.Choice >= len(c.Candidates)) {
 			// Answering from a candidate nobody offered is worse than
 			// refusing: it would look like an answer to the question asked.
-			http.Error(w, "choice out of range", http.StatusBadRequest)
+			httpx.WriteError(w, http.StatusBadRequest, "choice out of range")
 			return
 		}
 		var narrowed []string
@@ -349,7 +350,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				if !offered[r] {
 					// Not "unknown repository": the panel is the offer, and
 					// anything outside it was never put to the reader.
-					http.Error(w, "that repository was not offered", http.StatusBadRequest)
+					httpx.WriteError(w, http.StatusBadRequest, "that repository was not offered")
 					return
 				}
 				// A repeat is one repository named twice, not two sides of
@@ -358,7 +359,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 				narrowed = addUnique(narrowed, seen, r)
 			}
 			if len(narrowed) > maxNarrowRepos {
-				http.Error(w, "too many repositories to compare at once", http.StatusBadRequest)
+				httpx.WriteError(w, http.StatusBadRequest, "too many repositories to compare at once")
 				return
 			}
 		}
@@ -366,7 +367,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 			// A card is answered once. The answer it produced is in the
 			// thread, and a second one would be a second answer to a question
 			// already decided — refused here, before it costs a model call.
-			http.Error(w, "this clarification was already answered", http.StatusConflict)
+			httpx.WriteError(w, http.StatusConflict, "this clarification was already answered")
 			return
 		}
 		// Answered is read off the record, and the record closes the card
@@ -374,7 +375,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// so a second choice arriving mid-turn is refused the same way.
 		release, ok := s.claims.claim(c.ID)
 		if !ok {
-			http.Error(w, "this clarification is being answered", http.StatusConflict)
+			httpx.WriteError(w, http.StatusConflict, "this clarification is being answered")
 			return
 		}
 		defer release()
@@ -463,7 +464,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		// not own it. A thread_id that disagrees with the head is refused
 		// too rather than quietly preferring one of them.
 		if !ok || (reqThreadID != 0 && reqThreadID != head.ThreadID) {
-			http.Error(w, "no such message", http.StatusForbidden)
+			httpx.WriteError(w, http.StatusForbidden, "no such message")
 			return
 		}
 		retryHead = &head
@@ -547,7 +548,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	default:
 		t, err := s.thread(ctx, u.Subject, reqThreadID, req)
 		if errors.Is(err, errNotYours) {
-			http.Error(w, "no such thread", http.StatusForbidden)
+			httpx.WriteError(w, http.StatusForbidden, "no such thread")
 			return
 		}
 		if err != nil {
@@ -882,7 +883,7 @@ func (s *Server) writeTitle(
 // into a ticket.
 func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Ask == nil || s.deps.Threads == nil {
-		http.Error(w, "the question pipeline is unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "the question pipeline is unavailable")
 		return
 	}
 	u, ok := requireUser(w, r)
@@ -891,7 +892,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "malformed message id", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "malformed message id")
 		return
 	}
 
@@ -919,7 +920,7 @@ func (s *Server) handleReexplain(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		// Whether the message exists is not something to confirm to someone
 		// who does not own it.
-		http.Error(w, "no such message", http.StatusForbidden)
+		httpx.WriteError(w, http.StatusForbidden, "no such message")
 		return
 	}
 	// A re-explain is another turn in the same conversation, so it pins to the
@@ -1087,7 +1088,7 @@ func internalError(ctx context.Context, w http.ResponseWriter, msg string, err e
 	} else {
 		slog.Error(msg, "err", err)
 	}
-	http.Error(w, "internal server error", http.StatusInternalServerError)
+	httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 }
 
 // thread returns the thread this turn belongs to, creating one when the request

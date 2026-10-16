@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // Sharing: a thread readable by anyone holding the link.
@@ -53,7 +54,7 @@ func noindex(w http.ResponseWriter) {
 // unknown, revoked, or whose thread is gone. Telling those apart would let
 // someone guessing tokens learn which guesses were once real.
 func notFound(w http.ResponseWriter) {
-	http.Error(w, "no such share", http.StatusNotFound)
+	httpx.WriteError(w, http.StatusNotFound, "no such share")
 }
 
 func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
@@ -83,13 +84,13 @@ func (s *Server) shareAction(w http.ResponseWriter, r *http.Request,
 	switch {
 	case err == nil:
 	case errors.Is(err, threads.ErrNoShare):
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	case errors.Is(err, threads.ErrUnfinished):
 		// 409, not 400: the request is well formed and will work in a moment.
 		// It only reaches here when NOTHING in the thread has finished — a
 		// thread with any finished turn freezes below the one in flight.
-		http.Error(w, "This thread's first answer is still being written.", http.StatusConflict)
+		httpx.WriteError(w, http.StatusConflict, "This thread's first answer is still being written.")
 		return
 	default:
 		serverError(w, "share thread failed", err)
@@ -128,7 +129,7 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	noindex(w)
 	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return
 	}
 	sh, msgs, err := s.deps.Threads.SharedThread(r.Context(), r.PathValue("token"))
@@ -238,7 +239,7 @@ func (s *Server) sharedCited(w http.ResponseWriter, r *http.Request, logMsg stri
 
 	noindex(w)
 	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return false
 	}
 	cited, err := check(r.Context(), r.PathValue("token"))

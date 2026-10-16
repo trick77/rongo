@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"github.com/trick77/ship/kit/httpx"
 	"log/slog"
 	"net/http"
 	"time"
@@ -89,7 +90,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request) {
 		// Not an empty list: "no repositories configured" and "this deployment
 		// cannot tell you" are different facts, and the page must not show the
 		// first when the second is true.
-		http.Error(w, "repository status unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "repository status unavailable")
 		return
 	}
 	list, err := s.deps.Repos.RepoStatus(r.Context())
@@ -156,11 +157,11 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !u.IsAdmin {
-		http.Error(w, "re-indexing is for an administrator", http.StatusForbidden)
+		httpx.WriteError(w, http.StatusForbidden, "re-indexing is for an administrator")
 		return
 	}
 	if s.deps.Reindex == nil {
-		http.Error(w, "re-indexing unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "re-indexing unavailable")
 		return
 	}
 	var queued int
@@ -173,7 +174,7 @@ func (s *Server) handleReindex(w http.ResponseWriter, r *http.Request) {
 		if !found {
 			// Unknown and parked read the same: neither is a repository the
 			// poller serves.
-			http.Error(w, "no such active repository", http.StatusNotFound)
+			httpx.WriteError(w, http.StatusNotFound, "no such active repository")
 			return
 		}
 		queued = 1

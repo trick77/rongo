@@ -10,8 +10,8 @@ import (
 
 	"github.com/trick77/llmwire"
 
-	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/ship/kit/run"
 )
 
 // One retry, one policy, for every call rongo makes. A night's run ended one
@@ -40,10 +40,10 @@ const (
 	retryPause = 250 * time.Millisecond
 )
 
-// sleep is sched.Sleep, indirect so a test can hold the clock still: the waits
+// sleep is run.Sleep, indirect so a test can hold the clock still: the waits
 // here are short but real, and a suite honouring them spends that time doing
 // nothing.
-var sleep = sched.Sleep
+var sleep = run.Sleep
 
 // jitter is the random part of a retry wait, indirect for the same reason.
 var jitter = func() time.Duration { return time.Duration(rand.Int64N(int64(retryPause))) } //nolint:gosec // jitter and backoff, not a secret: no security property depends on this value

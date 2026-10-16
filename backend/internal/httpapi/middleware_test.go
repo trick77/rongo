@@ -9,40 +9,45 @@ import (
 	"testing"
 )
 
-// TestLogging_flushSucceedsThroughTheChain guards against the status writer
-// hiding http.Flusher from a wrapped handler. Without Unwrap(), a phase-2 SSE
+// captureLog routes slog's default, which chain reads, into a buffer for the
+// test's lifetime, at debug: kit logs a routine request (2xx, 3xx) there.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+// TestChain_flushSucceedsThroughTheChain guards against the status writer
+// hiding http.Flusher from a wrapped handler. Without Unwrap(), an SSE
 // handler calling http.NewResponseController(w).Flush() from inside the
-// logging middleware would get http.ErrNotSupported and, if that error is
-// ignored, buffer the whole streamed response instead of flushing it.
-func TestLogging_flushSucceedsThroughTheChain(t *testing.T) {
-	// Given
+// access log would get http.ErrNotSupported and, if that error is ignored,
+// buffer the whole streamed response instead of flushing it.
+func TestChain_flushSucceedsThroughTheChain(t *testing.T) {
 	var flushErr error
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("chunk"))
 		flushErr = http.NewResponseController(w).Flush()
 	}))
 
-	// When
-	req := httptest.NewRequest(http.MethodGet, "/stream", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/stream", nil))
 
-	// Then
 	if flushErr != nil {
 		t.Fatalf("Flush() err = %v, want nil", flushErr)
 	}
 }
 
-// TestLogging_flusherTypeAssertionSucceedsThroughTheChain guards the other
+// TestChain_flusherTypeAssertionSucceedsThroughTheChain guards the other
 // path to Flush: the conventional `w.(http.Flusher)` type assertion a
 // handler does directly, without going through http.ResponseController.
-// Unwrap() alone does not satisfy this — kit's StatusWriter needs its own
-// Flush method so the assertion sees ok == true.
-func TestLogging_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
-	// Given
+// Unwrap() alone does not satisfy this; kit's StatusWriter has its own Flush
+// so the assertion sees ok == true.
+func TestChain_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
 	var asserted bool
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("chunk"))
 		f, ok := w.(http.Flusher)
@@ -52,28 +57,20 @@ func TestLogging_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
 		}
 	}))
 
-	// When
-	req := httptest.NewRequest(http.MethodGet, "/stream", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/stream", nil))
 
-	// Then
 	if !asserted {
 		t.Fatal("w.(http.Flusher) ok = false, want true")
 	}
 }
 
-// TestLogging_aProbeIsNotLogged: the container probes /healthz and /readyz
+// TestChain_aProbeIsNotLogged: the container probes /healthz and /readyz
 // every few seconds, and a log that is mostly probes hides everything else.
 // A failing one neither: kit logs readiness transitions, not probes.
-func TestLogging_aProbeIsNotLogged(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
+func TestChain_aProbeIsNotLogged(t *testing.T) {
+	buf := captureLog(t)
 	status := http.StatusOK
-	handler := logging(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
 	}))
 
@@ -99,13 +96,10 @@ func TestLogging_aProbeIsNotLogged(t *testing.T) {
 
 // A share link's token is its whole authorisation, and it travels in the
 // path, so the access log masks it the way it leaves a query string out.
-func TestLoggingMasksShareToken(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+func TestChain_masksShareTokenInTheAccessLog(t *testing.T) {
+	buf := captureLog(t)
 	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
-	handler := logging(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	handler := chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	for _, path := range []string{
 		"/api/shares/" + token,
@@ -133,20 +127,46 @@ func TestLoggingMasksShareToken(t *testing.T) {
 	}
 }
 
-func TestRecoveryMasksShareToken(t *testing.T) {
-	var buf bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+// The panic line masks the token the same way, and the 500 carries the
+// family's error body.
+func TestChain_masksShareTokenInThePanicLine(t *testing.T) {
+	buf := captureLog(t)
 	const token = "kd8Qw1rZx3Yv9pLmN0aB_c"
-	handler := recovery(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+	handler := chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
 
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/share/"+token, nil))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/share/"+token, nil))
 
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Errorf("response = %d %s, want a 500 with an error body", rec.Code, rec.Body.String())
+	}
 	if strings.Contains(buf.String(), token) {
 		t.Errorf("token in the panic log: %s", buf.String())
 	}
 	if !strings.Contains(buf.String(), "path=/share/{token}") {
 		t.Errorf("panic log does not say which route: %s", buf.String())
+	}
+}
+
+// The security headers and the cross-site refusal are kit's, on every
+// response: a cross-site POST never reaches the router.
+func TestChain_refusesACrossSitePostAndSetsTheHeaders(t *testing.T) {
+	handler := chain(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("cross-site POST = %d, want 403", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/me", nil))
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "'wasm-unsafe-eval'") {
+		t.Errorf("Content-Security-Policy = %q, want the WebAssembly allowance the diagrams need", got)
+	}
+	if rec.Header().Get("X-Content-Type-Options") == "" {
+		t.Error("no X-Content-Type-Options: the security headers are missing")
 	}
 }

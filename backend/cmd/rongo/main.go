@@ -10,8 +10,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +18,9 @@ import (
 
 	kitauth "github.com/trick77/ship/kit/auth"
 	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/logging"
 	"github.com/trick77/ship/kit/run"
+	"github.com/trick77/ship/kit/version"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -38,13 +38,16 @@ import (
 	"github.com/trick77/rongo/internal/repos"
 	"github.com/trick77/rongo/internal/repostatus"
 	"github.com/trick77/rongo/internal/retrieve"
-	"github.com/trick77/rongo/internal/sched"
 	"github.com/trick77/rongo/internal/sourceview"
 	"github.com/trick77/rongo/internal/store"
 	"github.com/trick77/rongo/internal/symbols"
 	"github.com/trick77/rongo/internal/threads"
-	"golang.org/x/crypto/bcrypt"
 )
+
+// shutdownTimeout bounds the drain on a stop signal: in-flight requests get
+// this long, then kit's Serve closes the server, answers still streaming
+// included. The family's value.
+const shutdownTimeout = 15 * time.Second
 
 // sweepExcluded applies BACKEND_INDEX_EXCLUDE and the built-in skip rules to
 // every repository's existing index and refreshes the Repos page totals where
@@ -74,7 +77,7 @@ func sweepExcluded(ctx context.Context, state *indexer.StateStore, pipeline *ind
 // sweepSessions deletes expired sessions once a day until ctx ends. The boot
 // already ran one; this is for a rongo that stays up for months.
 func sweepSessions(ctx context.Context, authSvc *auth.Service) {
-	for sched.Sleep(ctx, 24*time.Hour) {
+	for run.Sleep(ctx, 24*time.Hour) {
 		if n, err := authSvc.DeleteExpiredSessions(ctx, time.Now()); err != nil {
 			slog.Warn("delete expired sessions", "err", err)
 		} else if n > 0 {
@@ -95,11 +98,11 @@ func hashPassword(in io.Reader, out io.Writer) error {
 	if pw == "" {
 		return errors.New("read an empty password from stdin")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	hash, err := kitauth.HashPassword(pw)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(out, string(hash))
+	_, err = fmt.Fprintln(out, hash)
 	return err
 }
 
@@ -136,9 +139,12 @@ func main() {
 		os.Exit(healthcheck(cfg.Addr))
 	}
 
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: parseLevel(cfg.LogLevel),
-	})))
+	// kit's text log on stderr, as every other service of the family writes
+	// it; config already refused a level kit would not parse.
+	if _, err := logging.Setup(logging.Options{Level: cfg.LogLevel, LevelVar: "BACKEND_LOG_LEVEL"}); err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
 
 	tools, err := exttools.Resolve()
 	if err != nil {
@@ -156,9 +162,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ctx is the process-wide root: startup work and the background workers all
-	// hang off it, so a shutdown cancels everything from one place.
-	ctx := context.Background()
+	// ctx is the process-wide root: startup work, the background workers and
+	// the server all hang off it, and a stop signal ends it, so Ctrl-C during
+	// a slow boot (OIDC discovery, the first migration) ends that too.
+	ctx, stop := run.Context(context.Background())
+	defer stop()
 
 	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o750); err != nil {
 		slog.Error("create data directory", "err", err)
@@ -471,32 +479,6 @@ func main() {
 	}
 	srv := httpapi.NewServer(deps)
 
-	// Every handler's context hangs off this one, so a shutdown that runs
-	// out of patience can cancel the answers still streaming instead of
-	// abandoning them to os.Exit.
-	handlerCtx, cancelHandlers := context.WithCancel(ctx)
-	defer cancelHandlers()
-	httpServer := &http.Server{
-		Addr:        cfg.Addr,
-		Handler:     srv,
-		BaseContext: func(net.Listener) context.Context { return handlerCtx },
-		// Reap connections that dawdle on headers or sit idle, e.g. a
-		// misbehaving client or a scanner. Deliberately no WriteTimeout:
-		// phase 4 streams SSE responses for minutes, and a global
-		// WriteTimeout would cut those streams mid-response. Do not add one
-		// here — per-handler deadlines, if ever needed, belong at the
-		// handler level instead.
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
-
-	// The listen is the last thing that can refuse to boot, so it happens
-	// before the workers start.
-	ln, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		slog.Error("listen failed", "addr", cfg.Addr, "err", err)
-		os.Exit(1)
-	}
 	if indexing {
 		workers.Add(1)
 		go func() {
@@ -510,40 +492,19 @@ func main() {
 		defer workers.Done()
 		sweepSessions(pollCtx, authSvc)
 	}()
-	serveErr := make(chan error, 1)
-	go func() {
-		slog.Info("listening", "addr", cfg.Addr, "auth_mode", string(cfg.AuthMode))
-		serveErr <- httpServer.Serve(ln)
-	}()
-
-	stopping, stopSignals := run.Context(context.Background())
-	defer stopSignals()
-
-	select {
-	case err := <-serveErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server stopped", "err", err)
-			os.Exit(1)
-		}
-	case <-stopping.Done():
-		// The cause names the signal: an orchestrator's stop reads apart from a
-		// Ctrl-C.
-		slog.Info("shutting down", "cause", context.Cause(stopping).Error())
-		cut, err := shutdown(httpServer, cancelHandlers, stopPolling, &workers, shutdownLimit)
-		if cut {
-			slog.Warn("answers still streaming were cut short", "limit", shutdownLimit.String())
-		}
-		if err != nil {
-			slog.Error("graceful shutdown failed", "err", err)
-			os.Exit(1)
-		}
-	}
-
-	// Stop the background workers and wait for them, so a shutdown cannot leave
-	// a git command or a half-written transaction behind. A no-op after
-	// shutdown above; here for the server stopping on its own.
+	// kit's server: header and idle timeouts, no WriteTimeout (an answer
+	// streams for minutes). Serve returns when ctx ends and the drain is done,
+	// or when the listen fails. Then the background workers are stopped and
+	// waited for, so a shutdown cannot leave a git command or a half-written
+	// transaction behind.
+	slog.Info("listening", "addr", cfg.Addr, "auth_mode", string(cfg.AuthMode), "version", version.String())
+	err = httpx.Serve(ctx, httpx.NewServer(cfg.Addr, srv), shutdownTimeout)
 	stopPolling()
 	workers.Wait()
+	if err != nil {
+		slog.Error("server stopped", "err", err)
+		os.Exit(1)
+	}
 }
 
 // healthcheck is the container probe's exit code. Readiness, not liveness:
@@ -571,21 +532,6 @@ func oidcConfig(cfg config.Config) kitauth.OIDCConfig {
 		// must not overwrite a half-finished login.
 		CookiePrefix: "rongo_",
 		Secure:       cfg.CookieSecure,
-	}
-}
-
-// parseLevel maps BACKEND_LOG_LEVEL, already lower-cased and checked by
-// config, onto slog levels.
-func parseLevel(s string) slog.Level {
-	switch s {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
 	}
 }
 

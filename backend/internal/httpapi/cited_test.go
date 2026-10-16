@@ -35,11 +35,11 @@ func TestServeCited(t *testing.T) {
 		status int
 		body   string
 	}{
-		{"a listed error is its row", fmt.Errorf("%w: x", errTestMiss), nil, http.StatusNotFound, "This is not here."},
-		{"an unlisted error is 500", errors.New("disk I/O error"), nil, http.StatusInternalServerError, "internal server error"},
+		{"a listed error is its row", fmt.Errorf("%w: x", errTestMiss), nil, http.StatusNotFound, `{"error":"This is not here."}`},
+		{"an unlisted error is 500", errors.New("disk I/O error"), nil, http.StatusInternalServerError, `{"error":"internal server error"}`},
 		{"a cited miss is read from the record", errTestMiss, alwaysCited, http.StatusOK, `"recorded"`},
-		{"an uncited miss stays a miss", errTestMiss, func(context.Context) (bool, error) { return false, nil }, http.StatusNotFound, "This is not here."},
-		{"a citation check that fails is 500", errTestMiss, func(context.Context) (bool, error) { return false, errors.New("locked") }, http.StatusInternalServerError, "internal server error"},
+		{"an uncited miss stays a miss", errTestMiss, func(context.Context) (bool, error) { return false, nil }, http.StatusNotFound, `{"error":"This is not here."}`},
+		{"a citation check that fails is 500", errTestMiss, func(context.Context) (bool, error) { return false, errors.New("locked") }, http.StatusInternalServerError, `{"error":"internal server error"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

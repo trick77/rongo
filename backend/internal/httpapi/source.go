@@ -8,6 +8,7 @@ import (
 
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // SourceReader serves a cited file out of rongo's own checkout.
@@ -65,7 +66,7 @@ func (s *Server) ownerCited(r *http.Request, check func(ctx context.Context, sub
 // over every citation, and nearly every click is a file still indexed.
 func (s *Server) serveSource(w http.ResponseWriter, r *http.Request, repo, path, sha string, cited citedFunc) {
 	if s.deps.Source == nil {
-		http.Error(w, "source view unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "source view unavailable")
 		return
 	}
 	serveCited(w, r, cited, citedView[sourceview.File]{
@@ -140,7 +141,7 @@ func serveCited[T any](w http.ResponseWriter, r *http.Request, cited citedFunc, 
 			if st.log != nil {
 				st.log(err)
 			}
-			http.Error(w, st.body, st.status)
+			httpx.WriteError(w, st.status, st.body)
 			return
 		}
 		serverError(w, v.readLog, err)

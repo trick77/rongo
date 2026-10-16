@@ -63,7 +63,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		case "token":
 			presented, ok := httpx.Bearer(r)
 			if !ok || !secret.Match(presented, s.adminToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			s.admit(w, r, next, "admin token login", "admin-token", "")
@@ -77,7 +77,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			// <user>@cluster.local, not a mailbox.
 			subject := strings.TrimSpace(r.Header.Get(ProxyUserHeader))
 			if subject == "" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			s.admitAs(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)),
@@ -87,17 +87,17 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		case "password":
 			// No header form: the only way in is the form posting to
 			// /api/auth/password, which sets the cookie checked above.
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 
 		case "oidc":
 			// The seam. Until the OIDC flow lands, an unauthenticated caller
 			// gets 401 rather than a misleading 500.
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 
 		default:
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 	})
@@ -181,7 +181,7 @@ func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Hand
 			return
 		}
 		slog.Error(what+" failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // handleAuthLogin sends the browser to the provider. It is registered outside
@@ -36,7 +37,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.OIDC == nil {
-		http.Error(w, "oidc is not configured", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "oidc is not configured")
 		return
 	}
 	s.deps.OIDC.Start(w, r)
@@ -58,7 +59,7 @@ func (s *Server) proxyMode() bool {
 // is the same 401: which half was wrong is exactly what a guesser wants.
 func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 	if !s.passwordMode() {
-		http.Error(w, "password login is not configured", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "password login is not configured")
 		return
 	}
 	var in struct {
@@ -66,14 +67,14 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "bad request")
 		return
 	}
 	key := loginKey(remoteHost(r), in.Username)
 	if !s.logins.wait(r.Context(), key) {
 		// The caller left, or the server is shutting down. Never a bare
 		// return: no status is a 200, which the SPA reads as signed in.
-		http.Error(w, "login not checked", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "login not checked")
 		return
 	}
 	token, expiresAt, err := s.deps.Auth.LoginPassword(r.Context(), in.Username, in.Password)
@@ -82,7 +83,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 		// throttle, which counted the attempt as it started, slower once it
 		// repeats; the log keeps it visible.
 		slog.Warn("password login rejected", "remote", r.RemoteAddr)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if err != nil {
@@ -97,7 +98,7 @@ func (s *Server) handleAuthPassword(w http.ResponseWriter, r *http.Request) {
 // handleAuthCallback finishes the flow and mints the session.
 func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if s.deps.OIDC == nil || s.deps.Auth == nil {
-		http.Error(w, "oidc is not configured", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "oidc is not configured")
 		return
 	}
 	// Callback clears the transient cookies whether it worked or not, so a

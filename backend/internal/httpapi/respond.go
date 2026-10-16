@@ -7,22 +7,17 @@ import (
 	"net/http"
 
 	"github.com/trick77/rongo/internal/auth"
+	"github.com/trick77/ship/kit/httpx"
 )
 
-// writeJSON encodes v as the response body. The encoder's error is dropped on
-// purpose: by the time it fails the status line is out, and there is nothing
-// left to tell the client.
+// writeJSON encodes v as the response body, never cached (kit's WriteJSON).
 func writeJSON(w http.ResponseWriter, v any) {
-	writeJSONStatus(w, http.StatusOK, v)
+	httpx.WriteJSON(w, http.StatusOK, v)
 }
 
-// writeJSONStatus is writeJSON under another status line. The header goes
-// before WriteHeader, which is why a handler cannot set the status itself and
-// then call writeJSON.
+// writeJSONStatus is writeJSON under another status line.
 func writeJSONStatus(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	httpx.WriteJSON(w, status, v)
 }
 
 // serverError logs the cause and answers 500 with a body that says nothing
@@ -30,7 +25,7 @@ func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 // log a cancelled turn at Warn, and these handlers have no turn to cancel.
 func serverError(w http.ResponseWriter, msg string, err error, attrs ...any) {
 	slog.Error(msg, append([]any{"err", err}, attrs...)...)
-	http.Error(w, "internal server error", http.StatusInternalServerError)
+	httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 }
 
 // requireUser is the signed-in reader, or a 401 already written. requireAuth
@@ -39,7 +34,7 @@ func serverError(w http.ResponseWriter, msg string, err error, attrs ...any) {
 func requireUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 	u, ok := auth.UserFrom(r.Context())
 	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 	}
 	return u, ok
 }
@@ -48,7 +43,7 @@ func requireUser(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 // no record is a 503 before anyone is asked who they are.
 func (s *Server) reader(w http.ResponseWriter, r *http.Request) (auth.User, bool) {
 	if s.deps.Threads == nil {
-		http.Error(w, "threads unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "threads unavailable")
 		return auth.User{}, false
 	}
 	return requireUser(w, r)
@@ -59,7 +54,7 @@ func (s *Server) reader(w http.ResponseWriter, r *http.Request) (auth.User, bool
 // pasted texts, and the rest are a line of text or a verdict.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(v); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "malformed request")
 		return false
 	}
 	return true
@@ -75,7 +70,7 @@ func actionOutcome(w http.ResponseWriter, found bool, err error, logMsg, notFoun
 		return false
 	}
 	if !found {
-		http.Error(w, notFoundMsg, http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, notFoundMsg)
 		return false
 	}
 	return true

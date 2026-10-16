@@ -20,7 +20,7 @@ func TestDecodeJSON_malformedBodyIs400(t *testing.T) {
 	if decodeJSON(rec, req, &v) {
 		t.Fatal("decodeJSON = true on a malformed body")
 	}
-	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != "malformed request" {
+	if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != `{"error":"malformed request"}` {
 		t.Errorf("got %d %q, want 400 malformed request", rec.Code, rec.Body.String())
 	}
 }
@@ -47,7 +47,7 @@ func TestReader_noThreadsIs503(t *testing.T) {
 	if _, ok := s.reader(rec, req); ok {
 		t.Fatal("reader = ok with no thread store")
 	}
-	if rec.Code != http.StatusServiceUnavailable || strings.TrimSpace(rec.Body.String()) != "threads unavailable" {
+	if rec.Code != http.StatusServiceUnavailable || strings.TrimSpace(rec.Body.String()) != `{"error":"threads unavailable"}` {
 		t.Errorf("got %d %q, want 503 threads unavailable", rec.Code, rec.Body.String())
 	}
 }
@@ -59,7 +59,7 @@ func TestReader_noUserIs401(t *testing.T) {
 	if _, ok := s.reader(rec, httptest.NewRequest(http.MethodGet, "/", nil)); ok {
 		t.Fatal("reader = ok with no user")
 	}
-	if rec.Code != http.StatusUnauthorized || strings.TrimSpace(rec.Body.String()) != "unauthorized" {
+	if rec.Code != http.StatusUnauthorized || strings.TrimSpace(rec.Body.String()) != `{"error":"unauthorized"}` {
 		t.Errorf("got %d %q, want 401 unauthorized", rec.Code, rec.Body.String())
 	}
 }
@@ -85,8 +85,8 @@ func TestActionOutcome(t *testing.T) {
 		status int
 		body   string
 	}{
-		{"store error is 500", false, errors.New("disk is full"), false, http.StatusInternalServerError, "internal server error"},
-		{"no row is the given 404", false, nil, false, http.StatusNotFound, "no such share"},
+		{"store error is 500", false, errors.New("disk is full"), false, http.StatusInternalServerError, `{"error":"internal server error"}`},
+		{"no row is the given 404", false, nil, false, http.StatusNotFound, `{"error":"no such share"}`},
 		{"a row writes nothing", true, nil, true, http.StatusOK, ""},
 	}
 	for _, c := range cases {

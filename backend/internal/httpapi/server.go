@@ -5,8 +5,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -216,9 +214,7 @@ type Server struct {
 func NewServer(deps Deps) *Server {
 	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(), logins: newLoginThrottle()}
 	s.routes()
-	// logging outermost: a panicked request must still produce an access-log
-	// line (as a 500), so recovery has to run inside logging, not around it.
-	s.handler = logging(recovery(s.mux))
+	s.handler = chain(s.mux)
 	return s
 }
 
@@ -292,67 +288,19 @@ func (s *Server) authed(pattern string, h http.HandlerFunc) {
 	s.mux.Handle(pattern, s.requireAuth(h))
 }
 
-// requireAuth is the single gate every authenticated route goes through.
-//
-// A request that changes something and comes from another site is refused
-// before auth runs. Dev and proxy mode admit a request that carries no cookie,
-// so SameSite protects only password and OIDC; without this a cross-site form
-// could post to a bodiless action (reindex, star, share, logout) in the
-// operator's own browser.
+// requireAuth is the single gate every authenticated route goes through. A
+// request that changes something and comes from another site never reaches
+// it: kit's CrossOrigin in the chain refuses it first. Dev and proxy mode
+// admit a request that carries no cookie, so SameSite alone would protect only
+// password and OIDC; without that refusal a cross-site form could post to a
+// bodiless action (reindex, star, share, logout) in the operator's own browser.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	if s.deps.Auth == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
+			httpx.WriteError(w, http.StatusServiceUnavailable, "auth unavailable")
 		})
 	}
-	authed := s.deps.Auth.Middleware(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if crossSite(r) {
-			http.Error(w, "cross-site request refused", http.StatusForbidden)
-			return
-		}
-		authed.ServeHTTP(w, r)
-	})
-}
-
-// crossSite reports whether a request that is not a read came from another
-// origin. Fetch metadata decides when the browser sent it: only same-origin
-// and none (typed, bookmarked) pass — same-site is a sibling subdomain, which
-// SameSite would let through and is still not rongo. Only an older browser
-// without it falls back to Origin, which is compared with both the host the
-// request reached and the one the proxy says it was sent to — behind a proxy
-// r.Host can be the loopback listener. A request with neither header is no
-// browser's and passes: a token-mode script sends none.
-func crossSite(r *http.Request) bool {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return false
-	}
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
-		return site != "same-origin" && site != "none"
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		// "null" is an opaque origin: a sandboxed frame, a data: URL.
-		return true
-	}
-	if strings.EqualFold(u.Host, r.Host) {
-		return false
-	}
-	fwd, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
-	fwd = strings.TrimSpace(fwd)
-	if fwd != "" && strings.EqualFold(u.Host, fwd) {
-		return false
-	}
-	// A proxy that rewrites Host and forwards no X-Forwarded-Host lands here
-	// for every write from such a browser; without the hosts the operator
-	// sees only 403s.
-	slog.Warn("cross-site request refused", "origin_host", u.Host, "host", r.Host, "forwarded_host", fwd)
-	return true
+	return s.deps.Auth.Middleware(next)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -367,6 +315,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"subject":  u.Subject,
 		"email":    u.Email,
 		"is_admin": u.IsAdmin,
-		"version":  version.Version,
+		"version":  version.String(),
 	})
 }

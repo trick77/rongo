@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/trick77/rongo/internal/sched"
+	"github.com/trick77/ship/kit/run"
 )
 
 // The password login's brake. bcrypt makes one guess slow, not a thousand of
@@ -57,7 +57,7 @@ type loginAttempts struct {
 }
 
 func newLoginThrottle() *loginThrottle {
-	return &loginThrottle{seen: map[string]loginAttempts{}, max: loginMaxTracked, sweepEvery: loginSweepEvery, now: time.Now, sleep: sched.Sleep}
+	return &loginThrottle{seen: map[string]loginAttempts{}, max: loginMaxTracked, sweepEvery: loginSweepEvery, now: time.Now, sleep: run.Sleep}
 }
 
 // loginKey is what an attempt is counted against: the address without the

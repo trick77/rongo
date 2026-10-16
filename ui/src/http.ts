@@ -1,8 +1,25 @@
 /** What a failed response says to the reader: the server's own message when
  * it wrote one (not in the checkout, too long, binary), else the status. A
- * bare status is not a message. */
+ * bare status is not a message. The server answers in the family's shape,
+ * {"error": "..."}; a plain-text body is read as it is. */
 export async function serverMessage(res: Response): Promise<string> {
-  return (await res.text()).trim() || `The server answered with ${res.status}.`;
+  const text = (await res.text()).trim();
+  if (text.startsWith("{")) {
+    try {
+      const body: unknown = JSON.parse(text);
+      if (
+        body !== null &&
+        typeof body === "object" &&
+        "error" in body &&
+        typeof body.error === "string"
+      ) {
+        return body.error;
+      }
+    } catch {
+      // Not JSON after all: the text stands.
+    }
+  }
+  return text || `The server answered with ${res.status}.`;
 }
 
 /** A server that answered and said no, with what it said. Told apart from a

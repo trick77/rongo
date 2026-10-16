@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/trick77/rongo/internal/sourceview"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // CommitReader serves a cited commit out of rongo's own checkout.
@@ -48,7 +49,7 @@ func (s *Server) handlePublicShareCommit(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) serveCommit(w http.ResponseWriter, r *http.Request, repo, sha string, cited citedFunc) {
 	if s.deps.Commit == nil {
-		http.Error(w, "commit view unavailable", http.StatusServiceUnavailable)
+		httpx.WriteError(w, http.StatusServiceUnavailable, "commit view unavailable")
 		return
 	}
 	serveCited(w, r, cited, citedView[sourceview.Commit]{
