@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -18,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/trick77/ship/kit/secret"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -132,7 +132,7 @@ func (s *Service) LoginPassword(ctx context.Context, user, password string) (str
 	if s.mode != "password" || len(s.passwordHash) == 0 {
 		return "", time.Time{}, ErrBadCredentials
 	}
-	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.adminUser)) == 1
+	userOK := secret.Match(user, s.adminUser)
 	pwErr := bcrypt.CompareHashAndPassword(s.passwordHash, []byte(password))
 	if !userOK || pwErr != nil {
 		return "", time.Time{}, ErrBadCredentials

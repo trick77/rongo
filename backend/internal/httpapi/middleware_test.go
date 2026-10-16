@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestLogging_flushSucceedsThroughTheChain guards against statusRecorder
+// TestLogging_flushSucceedsThroughTheChain guards against the status writer
 // hiding http.Flusher from a wrapped handler. Without Unwrap(), a phase-2 SSE
 // handler calling http.NewResponseController(w).Flush() from inside the
 // logging middleware would get http.ErrNotSupported and, if that error is
@@ -37,7 +37,7 @@ func TestLogging_flushSucceedsThroughTheChain(t *testing.T) {
 // TestLogging_flusherTypeAssertionSucceedsThroughTheChain guards the other
 // path to Flush: the conventional `w.(http.Flusher)` type assertion a
 // handler does directly, without going through http.ResponseController.
-// Unwrap() alone does not satisfy this — statusRecorder needs its own
+// Unwrap() alone does not satisfy this — kit's StatusWriter needs its own
 // Flush method so the assertion sees ok == true.
 func TestLogging_flusherTypeAssertionSucceedsThroughTheChain(t *testing.T) {
 	// Given

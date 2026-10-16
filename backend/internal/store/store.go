@@ -5,7 +5,6 @@ package store
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 	_ "github.com/asg017/sqlite-vec-go-bindings/ncruces"
 	// registers the "sqlite3" database/sql driver.
 	_ "github.com/ncruces/go-sqlite3/driver"
+	"github.com/trick77/ship/kit/sqlitex"
 )
 
 // Open opens (creating if needed) the database at path with the pragmas rongo
@@ -31,14 +31,10 @@ import (
 // read of the transaction behind it, and the other writer is the one that
 // waits. Read-only transactions pass ReadOnly and keep the plain BEGIN.
 //
-// busy_timeout comes first so the pragmas after it already wait on a locked
-// database instead of failing a connection open under load.
+// sqlitex.DSN puts busy_timeout first, so the pragmas after it wait on a
+// locked database instead of failing a connection open under load.
 func Open(path string) (*sql.DB, error) {
-	dsn := fmt.Sprintf(
-		"file:%s?_txlock=immediate&_pragma=busy_timeout(10000)&_pragma=journal_mode(wal)&_pragma=foreign_keys(on)",
-		url.PathEscape(path),
-	)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite3", sqlitex.DSN(path, "_txlock=immediate"))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
