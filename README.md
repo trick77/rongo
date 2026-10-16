@@ -69,7 +69,10 @@ OIDC login, which is how the rest of the company gets in. The comment at the top
 that file covers the first run. Without an identity provider,
 `BACKEND_AUTH_MODE=password` signs one admin in through a login form; the
 password is stored as a bcrypt hash made with `rongo -hash-password`, see
-`.env.example`.
+`.env.example`. Either way the session is a signed cookie under
+`BACKEND_SESSION_SECRET`: nothing is stored server-side, and rotating the
+secret signs everyone out. Logs are text on stderr; successful requests show
+at `BACKEND_LOG_LEVEL=debug`.
 
 ## Development
 

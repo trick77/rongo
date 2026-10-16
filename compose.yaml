@@ -108,6 +108,7 @@ services:
       # .env.example.
       BACKEND_LLM_MODEL: ${BACKEND_LLM_MODEL:?set it in .env, an llmwire profile id; see .env.example}
       BACKEND_LLM_GATE_MODEL: ${BACKEND_LLM_GATE_MODEL:?set it in .env, an llmwire profile id; see .env.example}
+      BACKEND_SESSION_SECRET: ${BACKEND_SESSION_SECRET:?set it in .env, 32 bytes or more (openssl rand -base64 48); see .env.example}
       # Repo-relative globs kept out of the index; see .env.example.
       BACKEND_INDEX_EXCLUDE: ${BACKEND_INDEX_EXCLUDE:-docs/plans/**}
       BACKEND_INDEX_MAX_DATA_FILE_BYTES: ${BACKEND_INDEX_MAX_DATA_FILE_BYTES:-8192}
