@@ -2,10 +2,11 @@ package httpapi
 
 import (
 	"context"
-	"github.com/trick77/ship/kit/httpx"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // RepoStatus is one row of the Repos page. The page is read-only status, never
