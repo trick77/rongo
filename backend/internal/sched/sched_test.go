@@ -31,35 +31,6 @@ func TestJittered_passesThroughNonPositive(t *testing.T) {
 	}
 }
 
-func TestSleep_returnsFalseWhenContextEnds(t *testing.T) {
-	// Given: a context cancelled while the sleep is in flight.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
-
-	// When
-	start := time.Now()
-	ok := Sleep(ctx, time.Hour)
-
-	// Then: it returns promptly, not in an hour.
-	if ok {
-		t.Error("Sleep() = true after cancellation, want false")
-	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("Sleep() took %v, want it to return as soon as the context ended", elapsed)
-	}
-}
-
-func TestSleep_returnsTrueWhenTheTimerFires(t *testing.T) {
-	ok := Sleep(context.Background(), time.Millisecond)
-
-	if !ok {
-		t.Error("Sleep() = false, want true when the timer fired normally")
-	}
-}
-
 func TestHeartbeat_firesUntilStoppedAndNotAfter(t *testing.T) {
 	// Given: a beat every millisecond, counted under a lock because the
 	// ticker runs on its own goroutine.
@@ -141,16 +112,5 @@ func TestHeartbeat_nonPositiveIntervalIsOff(t *testing.T) {
 	// Then
 	if fired {
 		t.Error("Heartbeat(-1) fired, want it off")
-	}
-}
-
-func TestSleep_reportsAnAlreadyCancelledContext(t *testing.T) {
-	// Given: a zero duration takes the fast path, which must still honour a
-	// context that is already done — otherwise a shutdown could be swallowed.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if ok := Sleep(ctx, 0); ok {
-		t.Error("Sleep(ctx, 0) = true for a cancelled context, want false")
 	}
 }

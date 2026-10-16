@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 // protected reports whether the wrapped handler was reached.
@@ -279,22 +278,20 @@ func TestMiddleware_failsClosedForUnauthenticatedModes(t *testing.T) {
 	}
 }
 
+// A session kit issued wins in token mode too: the cookie, not the bearer,
+// is what the browser carries.
 func TestMiddleware_acceptsSessionCookie(t *testing.T) {
-	// Given
 	svc := newService(t)
 	svc.mode = "token"
 	svc.adminToken = "s3cret-token"
-	user, _ := svc.UpsertUser(context.Background(), "someone", "someone@example.invalid", false)
-	token, _ := svc.CreateSession(context.Background(), user.ID, time.Hour)
+	sessions := withSessions(t, svc, "")
 	var reached bool
 
-	// When
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	req.AddCookie(&http.Cookie{Name: SessionCookie, Value: token})
+	req.AddCookie(issued(t, sessions, Claims{Subject: "someone", Email: "someone@example.invalid"}))
 	rec := httptest.NewRecorder()
 	svc.Middleware(protected(&reached)).ServeHTTP(rec, req)
 
-	// Then
 	if !reached {
 		t.Fatalf("handler not reached; status = %d", rec.Code)
 	}

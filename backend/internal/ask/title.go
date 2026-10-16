@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/trick77/rongo/internal/llm"
-	"github.com/trick77/rongo/internal/sched"
+	kitrun "github.com/trick77/ship/kit/run"
 )
 
 // titleMaxTokens is tiny by design: this is a label of a few words, and a model
@@ -83,7 +83,7 @@ func Title(ctx context.Context, c *llm.Client, question string, lang Language) s
 		if attempt > 0 {
 			// Past the first attempt the reply was a paragraph, so the
 			// correction goes with the question.
-			if !sched.Sleep(ctx, titleRetryPause) {
+			if !kitrun.Sleep(ctx, titleRetryPause) {
 				// The caller's ceiling ran out mid-run. What is left of it is
 				// not worth another call.
 				return ""

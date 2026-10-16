@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/secret"
@@ -47,10 +46,16 @@ func UserFrom(ctx context.Context) (User, bool) {
 // does not positively identify a caller answers 401.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A valid session cookie wins in every mode.
-		if c, err := r.Cookie(SessionCookie); err == nil {
-			if u, ok := s.UserByToken(r.Context(), c.Value); ok {
-				next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))
+		// A valid session cookie wins in the modes that issue one. Admin is
+		// read off the claims on every request, as the family does, so a
+		// changed admin group reaches live sessions; the password account is
+		// admin by mode, in password mode only. HasGroup folds case like
+		// kit's own group cap does, so a group spelled unlike the IdP's still
+		// grants.
+		if s.sessions != nil {
+			if c, ok := s.sessions.Read(r); ok {
+				admin := (s.mode == "password" && c.Subject == passwordSubject) || c.HasGroup(s.oidcAdminGroup)
+				s.admitAs(w, r, next, "session", c.Subject, c.Email, admin)
 				return
 			}
 		}
@@ -63,7 +68,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		case "token":
 			presented, ok := httpx.Bearer(r)
 			if !ok || !secret.Match(presented, s.adminToken) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			s.admit(w, r, next, "admin token login", "admin-token", "")
@@ -77,7 +82,7 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			// <user>@cluster.local, not a mailbox.
 			subject := strings.TrimSpace(r.Header.Get(ProxyUserHeader))
 			if subject == "" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
 			s.admitAs(w, r, next, "proxy login", subject, strings.TrimSpace(r.Header.Get(ProxyEmailHeader)),
@@ -87,51 +92,19 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		case "password":
 			// No header form: the only way in is the form posting to
 			// /api/auth/password, which sets the cookie checked above.
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 
 		case "oidc":
 			// The seam. Until the OIDC flow lands, an unauthenticated caller
 			// gets 401 rather than a misleading 500.
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 
 		default:
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpx.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-	})
-}
-
-// SetSessionCookie writes the session cookie. secure comes from the OIDC
-// redirect URL: behind a TLS-terminating proxy the process only ever sees
-// plain HTTP, so nothing it can observe about the request says otherwise.
-func SetSessionCookie(w http.ResponseWriter, token string, secure bool, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
-		Name:     SessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-		Expires:  time.Now().Add(ttl),
-	})
-}
-
-// ClearSessionCookie expires the session cookie. Every attribute other than the
-// value matches what SetSessionCookie wrote: a browser keys a cookie by name,
-// domain and path, so a clear that differs in Path or Secure leaves the
-// original in place and the user stays signed in.
-func ClearSessionCookie(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{ //nolint:gosec // HttpOnly and SameSite are set; Secure is config-driven so local development over plain HTTP still works
-		Name:     SessionCookie,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-		Expires:  time.Unix(0, 0),
-		MaxAge:   -1,
 	})
 }
 
@@ -181,7 +154,7 @@ func (s *Service) admitAs(w http.ResponseWriter, r *http.Request, next http.Hand
 			return
 		}
 		slog.Error(what+" failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpx.WriteError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 	next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), u)))

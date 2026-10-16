@@ -5,8 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"strings"
+	"time"
 
 	"github.com/trick77/rongo/internal/ask"
 	"github.com/trick77/rongo/internal/auth"
@@ -16,8 +15,17 @@ import (
 	"github.com/trick77/rongo/internal/timeline"
 	"github.com/trick77/rongo/internal/usage"
 	"github.com/trick77/rongo/web"
+	kitauth "github.com/trick77/ship/kit/auth"
 	"github.com/trick77/ship/kit/httpx"
 	"github.com/trick77/ship/kit/version"
+)
+
+// The password login's brake, kit's Throttle keyed by client: one attempt per
+// loginGap per client, queued up to loginMaxWait, refused past that with the
+// time until the queue takes the client again.
+const (
+	loginGap     = 500 * time.Millisecond
+	loginMaxWait = 5 * time.Second
 )
 
 // Threads is everything the HTTP layer needs from the thread record. An
@@ -137,16 +145,12 @@ type Deps struct {
 	// provider. Nil means this deployment has no OIDC (dev or token mode), and
 	// the two auth routes say so with a 503.
 	OIDC OIDCService
-	// OIDCAdminGroup is the group that grants admin. Empty means no check; see
-	// auth.Service.CreateSessionFromClaims.
-	OIDCAdminGroup string
+	// Sessions is kit's signed-cookie store, issued by the password form and
+	// the OIDC callback, read by Auth. Nil in the modes that admit per
+	// request; the login routes answer 503 then.
+	Sessions *kitauth.Sessions
 	// Ready is what /readyz checks; none means ready while the process serves.
 	Ready []httpx.Check
-	// CookieSecure marks the session cookie Secure. It comes from the OIDC
-	// redirect URL or, in password mode, BACKEND_COOKIE_SECURE, because
-	// behind a TLS-terminating proxy the process only ever sees plain HTTP
-	// and nothing about the request says otherwise.
-	CookieSecure bool
 	// Repos backs the Repos page. Nil means this deployment cannot report
 	// repository status, which its endpoint says with a 503 rather than an
 	// empty list.
@@ -206,19 +210,17 @@ type Server struct {
 	// claims is the clarifications being answered right now, so a card
 	// cannot be chosen twice before its first answer has closed it.
 	claims *claims
-	// logins is the password login's failures per address; see
-	// loginThrottle.
-	logins *loginThrottle
+	// logins is the password login's brake; see loginGap.
+	logins *httpx.Throttle
 }
 
 // NewServer builds the router and wraps it in the middleware chain once,
 // rather than per request.
 func NewServer(deps Deps) *Server {
-	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(), logins: newLoginThrottle()}
+	s := &Server{deps: deps, mux: http.NewServeMux(), turns: newTurns(), claims: newClaims(),
+		logins: httpx.NewThrottle(loginGap, loginMaxWait)}
 	s.routes()
-	// logging outermost: a panicked request must still produce an access-log
-	// line (as a 500), so recovery has to run inside logging, not around it.
-	s.handler = logging(recovery(s.mux))
+	s.handler = chain(s.mux)
 	return s
 }
 
@@ -284,7 +286,7 @@ func (s *Server) routes() {
 	// The shell is handed the share title so a link unfurls in Slack and X
 	// with the thread's own question — no crawler runs the JavaScript that
 	// would otherwise set it.
-	s.mux.Handle("/", web.HandlerWithShareTitles(s.shareTitle))
+	s.mux.Handle("/", web.Handler(s.shareTitle))
 }
 
 // authed mounts h behind requireAuth.
@@ -292,67 +294,19 @@ func (s *Server) authed(pattern string, h http.HandlerFunc) {
 	s.mux.Handle(pattern, s.requireAuth(h))
 }
 
-// requireAuth is the single gate every authenticated route goes through.
-//
-// A request that changes something and comes from another site is refused
-// before auth runs. Dev and proxy mode admit a request that carries no cookie,
-// so SameSite protects only password and OIDC; without this a cross-site form
-// could post to a bodiless action (reindex, star, share, logout) in the
-// operator's own browser.
+// requireAuth is the single gate every authenticated route goes through. A
+// request that changes something and comes from another site never reaches
+// it: kit's CrossOrigin in the chain refuses it first. Dev and proxy mode
+// admit a request that carries no cookie, so SameSite alone would protect only
+// password and OIDC; without that refusal a cross-site form could post to a
+// bodiless action (reindex, star, share, logout) in the operator's own browser.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	if s.deps.Auth == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "auth unavailable", http.StatusServiceUnavailable)
+			httpx.WriteError(w, http.StatusServiceUnavailable, "auth unavailable")
 		})
 	}
-	authed := s.deps.Auth.Middleware(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if crossSite(r) {
-			http.Error(w, "cross-site request refused", http.StatusForbidden)
-			return
-		}
-		authed.ServeHTTP(w, r)
-	})
-}
-
-// crossSite reports whether a request that is not a read came from another
-// origin. Fetch metadata decides when the browser sent it: only same-origin
-// and none (typed, bookmarked) pass — same-site is a sibling subdomain, which
-// SameSite would let through and is still not rongo. Only an older browser
-// without it falls back to Origin, which is compared with both the host the
-// request reached and the one the proxy says it was sent to — behind a proxy
-// r.Host can be the loopback listener. A request with neither header is no
-// browser's and passes: a token-mode script sends none.
-func crossSite(r *http.Request) bool {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return false
-	}
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
-		return site != "same-origin" && site != "none"
-	}
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		// "null" is an opaque origin: a sandboxed frame, a data: URL.
-		return true
-	}
-	if strings.EqualFold(u.Host, r.Host) {
-		return false
-	}
-	fwd, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Host"), ",")
-	fwd = strings.TrimSpace(fwd)
-	if fwd != "" && strings.EqualFold(u.Host, fwd) {
-		return false
-	}
-	// A proxy that rewrites Host and forwards no X-Forwarded-Host lands here
-	// for every write from such a browser; without the hosts the operator
-	// sees only 403s.
-	slog.Warn("cross-site request refused", "origin_host", u.Host, "host", r.Host, "forwarded_host", fwd)
-	return true
+	return s.deps.Auth.Middleware(next)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -367,6 +321,6 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"subject":  u.Subject,
 		"email":    u.Email,
 		"is_admin": u.IsAdmin,
-		"version":  version.Version,
+		"version":  version.String(),
 	})
 }

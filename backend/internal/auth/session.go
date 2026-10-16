@@ -1,28 +1,40 @@
-// Package auth identifies callers. Phase 1 ships the dev and token modes; the
-// OIDC seam exists so a later phase adds a mode, not a redesign.
+// Package auth identifies callers: the dev, token and proxy modes admit a
+// request on what it carries, password and OIDC mode on kit's signed session
+// cookie, issued at login.
 package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/trick77/ship/kit/secret"
-	"golang.org/x/crypto/bcrypt"
+	kitauth "github.com/trick77/ship/kit/auth"
 )
 
-// SessionCookie is the cookie carrying the opaque session token.
+// SessionCookie carries kit's signed session.
 const SessionCookie = "rongo_session"
+
+// SessionTTL is how long a session stays valid after it is issued; nothing
+// renews it. Authelia runs its own, shorter inactivity window; this one only
+// bounds how long rongo's own cookie is worth anything if the provider is
+// never consulted again.
+const SessionTTL = 30 * 24 * time.Hour
+
+// NewSessions is the family's session store for rongo: the claims travel in
+// the cookie, base64 JSON plus an HMAC, so there is no session table and
+// nothing revokes a single session; rotating the key signs everyone out.
+// adminGroup survives kit's cap on the groups kept in the cookie, since admin
+// is read off them on every request.
+func NewSessions(key []byte, secure bool, adminGroup string) (*kitauth.Sessions, error) {
+	return kitauth.NewSessions(kitauth.SessionConfig{
+		Name: SessionCookie, Key: key, TTL: SessionTTL, Secure: secure, KeepGroup: adminGroup,
+	})
+}
 
 // User is an authenticated identity.
 type User struct {
@@ -32,15 +44,20 @@ type User struct {
 	IsAdmin bool
 }
 
-// Service owns users and sessions.
+// Service owns users and admits requests.
 type Service struct {
 	db         *sql.DB
 	mode       string
 	adminToken string
-	// The password-mode account. adminUser is compared in constant time,
-	// passwordHash is bcrypt.
-	adminUser    string
-	passwordHash []byte
+	// sessions reads the cookie password and OIDC mode issue; nil in the
+	// modes that admit every request on what it carries.
+	sessions *kitauth.Sessions
+	// verifier is the password-mode account: kit's bcrypt compare, the
+	// username compared by digest.
+	verifier kitauth.Verifier
+	// oidcAdminGroup is the group whose members an OIDC session admits as
+	// admins; empty admits every user the provider let through as one.
+	oidcAdminGroup string
 	// proxyAdminGroup is the group whose members proxy mode admits as
 	// admins; empty admits every forwarded user as one.
 	proxyAdminGroup string
@@ -72,6 +89,12 @@ func NewService(db *sql.DB, mode string, adminToken string) *Service {
 	return &Service{db: db, mode: mode, adminToken: adminToken, admitted: map[string]admission{}}
 }
 
+// SetSessions installs the cookie store password and OIDC mode issue and
+// read.
+func (s *Service) SetSessions(sessions *kitauth.Sessions) {
+	s.sessions = sessions
+}
+
 // Admit is UpsertUser for the request path: the row is written once per
 // admitTTL per subject and remembered in between, so a page of thirty
 // requests is one write, not thirty.
@@ -101,10 +124,21 @@ func (s *Service) Admit(ctx context.Context, subject, email string, isAdmin bool
 }
 
 // SetPasswordAccount installs the one account password mode signs in. The
-// hash is bcrypt; config has already refused anything else.
-func (s *Service) SetPasswordAccount(user, hash string) {
-	s.adminUser = user
-	s.passwordHash = []byte(hash)
+// hash is bcrypt; config has already refused anything else, kit refuses it
+// again.
+func (s *Service) SetPasswordAccount(user, hash string) error {
+	v, err := kitauth.BcryptVerifier(user, hash)
+	if err != nil {
+		return err
+	}
+	s.verifier = v
+	return nil
+}
+
+// SetOIDCAdminGroup installs the group an OIDC session's claims must carry
+// for admin. Empty is no check.
+func (s *Service) SetOIDCAdminGroup(group string) {
+	s.oidcAdminGroup = group
 }
 
 // SetProxyAdminGroup installs the group proxy mode reads from the proxy's
@@ -123,29 +157,23 @@ const passwordSubject = "admin-password"
 
 // ErrBadCredentials is the one answer a failed password login gets. Username
 // and password failures are indistinguishable from outside on purpose.
-var ErrBadCredentials = errors.New("bad credentials")
+var ErrBadCredentials = kitauth.ErrBadCredentials
 
-// LoginPassword checks the form credentials and mints a session. The bcrypt
-// compare runs even when the username is wrong, so the response time does
-// not tell an attacker which half they got right.
-func (s *Service) LoginPassword(ctx context.Context, user, password string) (string, time.Time, error) {
-	if s.mode != "password" || len(s.passwordHash) == 0 {
-		return "", time.Time{}, ErrBadCredentials
+// LoginPassword checks the form credentials and admits the one account. The
+// claims are the session to issue: kit's verifier takes the same time
+// whichever half is wrong, so the response time does not tell an attacker
+// which one they got right.
+func (s *Service) LoginPassword(ctx context.Context, user, password string) (Claims, error) {
+	if s.mode != "password" || s.verifier == nil {
+		return Claims{}, ErrBadCredentials
 	}
-	userOK := secret.Match(user, s.adminUser)
-	pwErr := bcrypt.CompareHashAndPassword(s.passwordHash, []byte(password))
-	if !userOK || pwErr != nil {
-		return "", time.Time{}, ErrBadCredentials
+	if _, err := s.verifier.Check(user, password); err != nil {
+		return Claims{}, ErrBadCredentials
 	}
-	u, err := s.UpsertUser(ctx, passwordSubject, "", true)
-	if err != nil {
-		return "", time.Time{}, err
+	if _, err := s.UpsertUser(ctx, passwordSubject, "", true); err != nil {
+		return Claims{}, err
 	}
-	token, err := s.CreateSession(ctx, u.ID, SessionTTL)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return token, time.Now().Add(SessionTTL), nil
+	return Claims{Subject: passwordSubject}, nil
 }
 
 // UpsertUser inserts the subject or returns the existing row.
@@ -173,110 +201,25 @@ func (s *Service) UpsertUser(ctx context.Context, subject, email string, isAdmin
 	return u, nil
 }
 
-// CreateSession mints a random token, stores only its SHA-256, and returns the
-// raw token to hand to the client exactly once.
-func (s *Service) CreateSession(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("generate session token: %w", err)
-	}
-	token := base64.RawURLEncoding.EncodeToString(raw)
-	if _, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)`,
-		hashToken(token), userID, time.Now().Add(ttl).UTC().Format(time.RFC3339),
-	); err != nil {
-		return "", fmt.Errorf("store session: %w", err)
-	}
-	return token, nil
-}
-
-// UserByToken resolves a raw token to its user, rejecting expired sessions.
-func (s *Service) UserByToken(ctx context.Context, token string) (User, bool) {
-	var u User
-	var adminInt int
-	var expiresAt string
-	err := s.db.QueryRowContext(ctx,
-		`SELECT u.id, u.subject, u.email, u.is_admin, s.expires_at
-		 FROM sessions s JOIN users u ON u.id = s.user_id
-		 WHERE s.token_hash = ?`,
-		hashToken(token),
-	).Scan(&u.ID, &u.Subject, &u.Email, &adminInt, &expiresAt)
-	if err != nil {
-		// A bad or unknown cookie is sql.ErrNoRows — expected, not logged.
-		// Anything else is a broken database, and collapsing it into the same
-		// silent "not authenticated" would hide that from operators. A
-		// request its client abandoned is neither.
-		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, context.Canceled) {
-			slog.Error("session lookup failed", "err", err)
-		}
-		return User{}, false
-	}
-	exp, err := time.Parse(time.RFC3339, expiresAt)
-	if err != nil || time.Now().After(exp) {
-		return User{}, false
-	}
-	u.IsAdmin = adminInt == 1
-	return u, true
-}
-
-// DeleteExpiredSessions removes every session past its expiry. Nothing else
-// ever does: a session is deleted by its own token on logout and otherwise
-// only stops resolving, so the table grew by every login for good. Reports
-// how many rows went.
-func (s *Service) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at < ?`, now.UTC().Format(time.RFC3339))
-	if err != nil {
-		return 0, fmt.Errorf("delete expired sessions: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("delete expired sessions: %w", err)
-	}
-	return n, nil
-}
-
-// DeleteSession revokes one session.
-func (s *Service) DeleteSession(ctx context.Context, token string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
-	return err
-}
-
-func hashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
-}
-
-// SessionTTL is how long a session stays valid after it is created. Authelia
-// runs its own, shorter inactivity window; this one only bounds how long
-// rongo's own cookie is worth anything if the provider is never consulted
-// again.
-const SessionTTL = 30 * 24 * time.Hour
-
-// CreateSessionFromClaims turns a verified OIDC identity into a local user and
-// a session, and reports when that session expires.
+// AdmitClaims turns a verified OIDC identity into a local user; the claims
+// are the session to issue, and admin is decided again from their groups on
+// every request (Middleware), so a changed admin group reaches live sessions.
 //
-// adminGroup is the group whose members are admins. Empty means no group check
-// at all: every user the provider let through is an admin. That is peeq's
+// The admin group (SetOIDCAdminGroup) is the group whose members are admins,
+// compared as kit compares groups, case folded. Empty means no group check at
+// all: every user the provider let through is an admin. That is peeq's
 // default and the honest one while the authorization decision still lives
 // entirely in Authelia's authorization_policy — a group name invented here
 // would look like a second gate without being one.
-func (s *Service) CreateSessionFromClaims(ctx context.Context, claims Claims, adminGroup string) (string, time.Time, User, error) {
+func (s *Service) AdmitClaims(ctx context.Context, claims Claims) (User, error) {
 	if claims.Subject == "" {
-		return "", time.Time{}, User{}, errors.New("oidc claims carry no subject")
+		return User{}, errors.New("oidc claims carry no subject")
 	}
-	u, err := s.UpsertUser(ctx, claims.Subject, claims.Email, isAdmin(claims.Groups, adminGroup))
-	if err != nil {
-		return "", time.Time{}, User{}, err
-	}
-	token, err := s.CreateSession(ctx, u.ID, SessionTTL)
-	if err != nil {
-		return "", time.Time{}, User{}, err
-	}
-	return token, time.Now().Add(SessionTTL), u, nil
+	return s.UpsertUser(ctx, claims.Subject, claims.Email, claims.HasGroup(s.oidcAdminGroup))
 }
 
-// isAdmin reports whether the claims carry the admin group. An empty group name
-// means the check is off; see CreateSessionFromClaims.
+// isAdmin reports whether the proxy's groups carry the admin group, spelled
+// as the proxy sends it. An empty group name means the check is off.
 func isAdmin(groups []string, adminGroup string) bool {
 	return adminGroup == "" || slices.Contains(groups, adminGroup)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/trick77/rongo/internal/auth"
 	"github.com/trick77/rongo/internal/threads"
 	"github.com/trick77/rongo/internal/usage"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // handleThreads answers one page of the reader's threads: the rail asks for
@@ -47,7 +48,7 @@ func listLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < 1 || n > threads.MaxListLimit {
-		http.Error(w, "limit must be between 1 and 1000", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "limit must be between 1 and 1000")
 		return 0, false
 	}
 	return n, true
@@ -62,7 +63,7 @@ func (s *Server) handleSearchThreads(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	limit, ok := listLimit(w, r)
@@ -95,7 +96,7 @@ func (s *Server) handleThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !owns {
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	}
 	msgs, err := s.deps.Threads.Messages(r.Context(), u.Subject, id)
@@ -131,7 +132,7 @@ func (s *Server) handleThreadSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	}
 	writeJSON(w, t)
@@ -157,14 +158,14 @@ func (s *Server) handleRenameThread(w http.ResponseWriter, r *http.Request) {
 	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
-		http.Error(w, "title is required", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "title is required")
 		return
 	}
 	// The model's own cap, so a typed title can be as long as any it writes.
 	// Refused rather than truncated: the rail would otherwise show something
 	// nobody asked for.
 	if len([]rune(title)) > ask.MaxTitleRunes {
-		http.Error(w, "title is too long", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "title is too long")
 		return
 	}
 	renamed, err := s.deps.Threads.Rename(r.Context(), u.Subject, id, title)
@@ -231,7 +232,7 @@ func (s *Server) threadTarget(w http.ResponseWriter, r *http.Request) (auth.User
 		return auth.User{}, 0, false
 	}
 	if !ok {
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return auth.User{}, 0, false
 	}
 	return u, id, true

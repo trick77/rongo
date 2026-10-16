@@ -7,10 +7,11 @@ import (
 	"math"
 	"net"
 	"os"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/trick77/ship/kit/env"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -185,7 +186,16 @@ type Config struct {
 	// a loopback listener may switch it off. Set in any other mode, it is
 	// refused: there it would look active and change nothing.
 	CookieSecure bool
+	// SessionKey signs kit's session cookie: BACKEND_SESSION_SECRET, required
+	// in password and oidc mode (the modes that issue one) and refused
+	// elsewhere. Rotating it signs everyone out; a generated one would do
+	// that on every restart.
+	SessionKey []byte
 }
+
+// minSessionSecret is the shortest BACKEND_SESSION_SECRET accepted, kit's
+// floor for the HMAC key.
+const minSessionSecret = 32
 
 // DefaultLLMTimeout bounds one model call, body included. The answer call is
 // the longest: it streams its whole cap, which is ask's 16384-token answer
@@ -207,84 +217,83 @@ const SlowestStreamTokensPerSecond = 20
 // ignored is the failure rongo refuses everywhere else.
 var retiredEnv = []string{"BACKEND_LLM_GATE_REASONING"}
 
-// Load reads and validates the environment. It returns the first problem it
-// finds rather than starting a half-configured server.
+// Load reads and validates the environment with kit's reader: every malformed
+// setting is reported, in order, rather than starting a half-configured
+// server. A value that does not parse is a fault, never silently its default:
+// BACKEND_MEMORY=disabled leaving memory on and BACKEND_ROUTE_MARGIN=0 routing
+// at 0.25 would each look right in the environment and wrong in every
+// decision, the same reason an invalid repos.yaml refuses to boot.
 func Load() (Config, error) {
-	r := &envReader{}
+	r := env.New(os.Getenv)
 	// Read in every mode so a malformed value is refused in every mode, and
 	// kept only where it means something: password mode, below.
-	cookieSecure := r.boolOr("BACKEND_COOKIE_SECURE", true)
+	cookieSecure := r.Bool("BACKEND_COOKIE_SECURE", true)
+	sessionSecret := r.String("BACKEND_SESSION_SECRET", "")
 	cfg := Config{
-		Addr:      envOr("BACKEND_ADDR", "127.0.0.1:8080"),
-		DBPath:    envOr("BACKEND_DB_PATH", "./data/rongo.db"),
-		RepoRoot:  envOr("BACKEND_REPO_ROOT", "./repos"),
-		ReposFile: envOr("BACKEND_REPOS_FILE", "./repos.yaml"),
+		Addr:      r.String("BACKEND_ADDR", "127.0.0.1:8080"),
+		DBPath:    r.String("BACKEND_DB_PATH", "./data/rongo.db"),
+		RepoRoot:  r.String("BACKEND_REPO_ROOT", "./repos"),
+		ReposFile: r.String("BACKEND_REPOS_FILE", "./repos.yaml"),
 		// 1 MiB. A source file above that is machine-written or a data blob,
 		// not something a person asks how it works.
-		IndexMaxFileBytes: r.intOr("BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
+		IndexMaxFileBytes: positive(r, "BACKEND_INDEX_MAX_FILE_BYTES", 1<<20),
 		// 8 KiB. The json and xml that answer questions (tsconfig, a small
 		// fixture) stay under 1 KB; a data blob or a translation catalogue
 		// starts at 30 KB. Measured in docs/measurements/2026-09-17-data-file-cap.md.
-		IndexMaxDataFileBytes: r.intOr("BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
+		IndexMaxDataFileBytes: positive(r, "BACKEND_INDEX_MAX_DATA_FILE_BYTES", 8<<10),
 		// 256 KiB: the syrius service schemas run to 69 KB; what stays above
 		// is two code tables and one VO catalogue (2026-09-17-data-file-cap.md,
 		// Schemas).
-		IndexMaxSchemaFileBytes: r.intOr("BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
+		IndexMaxSchemaFileBytes: positive(r, "BACKEND_INDEX_MAX_SCHEMA_FILE_BYTES", 256<<10),
 		// 500 commits: a year of a busy repository, bounded for a monorepo's
 		// first run. A "what changed" question looks back a year at most.
-		HistoryDepth:     r.intOr("BACKEND_HISTORY_DEPTH", 500),
-		IndexEnabled:     r.boolOr("BACKEND_INDEX_ENABLED", true),
-		IndexComments:    r.boolOr("BACKEND_INDEX_COMMENTS", true),
-		IndexExclude:     r.listOr("BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
-		GitSSHKey:        strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KEY")),
-		GitSSHKnownHosts: strings.TrimSpace(os.Getenv("BACKEND_GIT_SSH_KNOWN_HOSTS")),
-		GitCAFile:        strings.TrimSpace(os.Getenv("BACKEND_GIT_CA_FILE")),
-		ModuleMinChunks:  r.intOr("BACKEND_MODULE_MIN_CHUNKS", 8),
-		ModuleMaxChunks:  r.intOr("BACKEND_MODULE_MAX_CHUNKS", 150),
-		RouteMargin:      r.floatOr("BACKEND_ROUTE_MARGIN", 0.25),
+		HistoryDepth:     positive(r, "BACKEND_HISTORY_DEPTH", 500),
+		IndexEnabled:     r.Bool("BACKEND_INDEX_ENABLED", true),
+		IndexComments:    r.Bool("BACKEND_INDEX_COMMENTS", true),
+		IndexExclude:     listOrNone(r, "BACKEND_INDEX_EXCLUDE", []string{"docs/plans/**"}),
+		GitSSHKey:        r.String("BACKEND_GIT_SSH_KEY", ""),
+		GitSSHKnownHosts: r.String("BACKEND_GIT_SSH_KNOWN_HOSTS", ""),
+		GitCAFile:        r.String("BACKEND_GIT_CA_FILE", ""),
+		ModuleMinChunks:  positive(r, "BACKEND_MODULE_MIN_CHUNKS", 8),
+		ModuleMaxChunks:  positive(r, "BACKEND_MODULE_MAX_CHUNKS", 150),
+		RouteMargin:      positiveFloat(r, "BACKEND_ROUTE_MARGIN", 0.25),
 		// The locate loop, on at three rounds: look, narrow, confirm. opencode
 		// answered the flagship in 38 calls; one round of six never had room
 		// to read what its grep showed. 0 switches it off, and more than
 		// three is capped.
-		LocateRounds:      r.intOrOff("BACKEND_LOCATE_ROUNDS", 3),
-		GatherMaxHops:     r.intOr("BACKEND_GATHER_MAX_HOPS", 2),
-		GatherTokenBudget: r.intOr("BACKEND_GATHER_TOKEN_BUDGET", 24000),
-		TurnMaxTokens:     r.intOrOff("BACKEND_TURN_MAX_TOKENS", 250000),
-		Memory:            r.boolOr("BACKEND_MEMORY", true),
-		LLMModel:          strings.TrimSpace(os.Getenv("BACKEND_LLM_MODEL")),
-		LLMGateModel:      strings.TrimSpace(os.Getenv("BACKEND_LLM_GATE_MODEL")),
-		LLMReasoning:      strings.TrimSpace(os.Getenv("BACKEND_LLM_REASONING")),
-		AuthMode:          AuthMode(envOr("BACKEND_AUTH_MODE", string(AuthModeDev))),
-		AdminToken:        strings.TrimSpace(os.Getenv("BACKEND_ADMIN_TOKEN")),
-		AdminUser:         strings.TrimSpace(os.Getenv("BACKEND_ADMIN_USER")),
-		AdminPasswordHash: strings.TrimSpace(os.Getenv("BACKEND_ADMIN_PASSWORD_HASH")),
-		LogLevel:          r.oneOf("BACKEND_LOG_LEVEL", "info", "debug", "info", "warn", "error"),
+		LocateRounds:      positiveOrOff(r, "BACKEND_LOCATE_ROUNDS", 3),
+		GatherMaxHops:     positive(r, "BACKEND_GATHER_MAX_HOPS", 2),
+		GatherTokenBudget: positive(r, "BACKEND_GATHER_TOKEN_BUDGET", 24000),
+		TurnMaxTokens:     positiveOrOff(r, "BACKEND_TURN_MAX_TOKENS", 250000),
+		Memory:            r.Bool("BACKEND_MEMORY", true),
+		LLMModel:          r.String("BACKEND_LLM_MODEL", ""),
+		LLMGateModel:      r.String("BACKEND_LLM_GATE_MODEL", ""),
+		LLMReasoning:      r.String("BACKEND_LLM_REASONING", ""),
+		AuthMode:          AuthMode(r.String("BACKEND_AUTH_MODE", string(AuthModeDev))),
+		AdminToken:        r.String("BACKEND_ADMIN_TOKEN", ""),
+		AdminUser:         r.String("BACKEND_ADMIN_USER", ""),
+		AdminPasswordHash: r.String("BACKEND_ADMIN_PASSWORD_HASH", ""),
+		LogLevel:          logLevel(r),
 		// The issuer is trimmed of its trailing slash for the same reason the
 		// endpoint URLs above are: a discovery URL built from
 		// "https://auth.example.com/" gets a double slash and 404s.
-		OIDCIssuer:       strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_OIDC_ISSUER")), "/"),
-		OIDCClientID:     strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_ID")),
-		OIDCClientSecret: strings.TrimSpace(os.Getenv("BACKEND_OIDC_CLIENT_SECRET")),
-		OIDCRedirectURL:  strings.TrimSpace(os.Getenv("BACKEND_OIDC_REDIRECT_URL")),
-		OIDCAdminGroup:   strings.TrimSpace(os.Getenv("BACKEND_OIDC_ADMIN_GROUP")),
-		ProxyAdminGroup:  strings.TrimSpace(os.Getenv("BACKEND_PROXY_ADMIN_GROUP")),
+		OIDCIssuer:       strings.TrimRight(r.String("BACKEND_OIDC_ISSUER", ""), "/"),
+		OIDCClientID:     r.String("BACKEND_OIDC_CLIENT_ID", ""),
+		OIDCClientSecret: r.String("BACKEND_OIDC_CLIENT_SECRET", ""),
+		OIDCRedirectURL:  r.String("BACKEND_OIDC_REDIRECT_URL", ""),
+		OIDCAdminGroup:   r.String("BACKEND_OIDC_ADMIN_GROUP", ""),
+		ProxyAdminGroup:  r.String("BACKEND_PROXY_ADMIN_GROUP", ""),
 	}
-	if r.err != nil {
-		return Config{}, r.err
+	cfg.LLMGateTemperature = optionalFloat(r, "BACKEND_LLM_GATE_TEMPERATURE", 0)
+	cfg.LLMTimeout = positiveDuration(r, "BACKEND_LLM_TIMEOUT", DefaultLLMTimeout)
+	if err := r.Err(); err != nil {
+		return Config{}, err
 	}
 	for _, name := range retiredEnv {
 		if strings.TrimSpace(os.Getenv(name)) != "" {
 			return Config{}, fmt.Errorf("%s is no longer read: gate reasoning follows each call's intent, rendered for the model by llmwire; remove it", name)
 		}
 	}
-	var err error
-	if cfg.LLMGateTemperature, err = envOptionalFloat("BACKEND_LLM_GATE_TEMPERATURE", 0); err != nil {
-		return Config{}, err
-	}
-	if cfg.LLMTimeout, err = envDurationOr("BACKEND_LLM_TIMEOUT", DefaultLLMTimeout); err != nil {
-		return Config{}, err
-	}
-
 	if cfg.LLMModel == "" {
 		return Config{}, fmt.Errorf("BACKEND_LLM_MODEL is required: the llmwire profile id that answers")
 	}
@@ -310,6 +319,9 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=token requires BACKEND_ADMIN_TOKEN")
 		}
 	case AuthModePassword:
+		if err := sessionKey(&cfg, sessionSecret); err != nil {
+			return Config{}, err
+		}
 		if cfg.AdminUser == "" {
 			return Config{}, fmt.Errorf("BACKEND_AUTH_MODE=password requires BACKEND_ADMIN_USER")
 		}
@@ -329,6 +341,9 @@ func Load() (Config, error) {
 				"BACKEND_COOKIE_SECURE=false sends the session cookie over plain HTTP and is only allowed on a loopback address, got BACKEND_ADDR=%q", cfg.Addr)
 		}
 	case AuthModeOIDC:
+		if err := sessionKey(&cfg, sessionSecret); err != nil {
+			return Config{}, err
+		}
 		// Every one of these is fatal rather than a warning. A half-configured
 		// OIDC deployment starts, serves the SPA, and then refuses every login
 		// with a callback error — which looks like a provider outage rather
@@ -361,6 +376,9 @@ func Load() (Config, error) {
 	// A mode-bound setting set under a mode that never reads it looks
 	// active and changes nothing, which is the failure every other setting
 	// refuses: BACKEND_OIDC_ADMIN_GROUP under proxy mode gated nothing.
+	if sessionSecret != "" && cfg.SessionKey == nil {
+		return Config{}, fmt.Errorf("BACKEND_SESSION_SECRET is read in password and oidc mode only, got BACKEND_AUTH_MODE=%s; remove it", cfg.AuthMode)
+	}
 	for _, b := range modeBound {
 		if strings.TrimSpace(os.Getenv(b.name)) == "" || b.mode == cfg.AuthMode {
 			continue
@@ -426,6 +444,16 @@ var modeBound = []struct {
 
 // cookieSource says where a mode other than password takes the session
 // cookie's Secure flag from, for the refusal of BACKEND_COOKIE_SECURE.
+// sessionKey installs the session secret in a mode that issues a cookie.
+func sessionKey(cfg *Config, secret string) error {
+	if len(secret) < minSessionSecret {
+		return fmt.Errorf("BACKEND_AUTH_MODE=%s requires BACKEND_SESSION_SECRET of at least %d bytes, e.g. openssl rand -base64 48",
+			cfg.AuthMode, minSessionSecret)
+	}
+	cfg.SessionKey = []byte(secret)
+	return nil
+}
+
 func cookieSource(mode AuthMode) string {
 	if mode == AuthModeOIDC {
 		return "it derives the flag from BACKEND_OIDC_REDIRECT_URL"
@@ -433,152 +461,94 @@ func cookieSource(mode AuthMode) string {
 	return "it signs in without a session cookie"
 }
 
-// listOr reads a comma-separated list. Unset or blank means the default,
-// like every other setting; the literal "none" is how an operator switches
-// the list off, since an empty value cannot say "nothing" here. A value of
-// separators alone is neither, and is refused.
-func (r *envReader) listOr(key string, fallback []string) []string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
+// logLevel reads BACKEND_LOG_LEVEL, any case: kit's logging folds it, and a
+// deployment spelling INFO must keep booting. Lower-cased for the log line
+// that names it.
+func logLevel(r *env.Reader) string {
+	const name = "BACKEND_LOG_LEVEL"
+	v := strings.ToLower(r.String(name, "info"))
+	if !slices.Contains([]string{"debug", "info", "warn", "error"}, v) {
+		r.Fail("%s: %q, want one of debug, info, warn, error", name, v)
+		return "info"
 	}
-	if strings.EqualFold(v, "none") {
-		return nil
-	}
-	var out []string
-	for _, item := range strings.Split(v, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			out = append(out, item)
-		}
-	}
-	if len(out) == 0 {
-		r.fail(fmt.Errorf("%s=%q has only empty items; unset it for the default, or write none", key, v))
-		return fallback
-	}
-	return out
+	return v
 }
 
-// envReader reads the typed settings and keeps the first malformed one. Empty
-// means the default; anything else that does not parse is an error, and Load
-// refuses to start on it. A fallback here would let BACKEND_MEMORY=disabled
-// leave memory on and BACKEND_ROUTE_MARGIN=0 route at 0.25, each looking
-// right in the environment and wrong in every decision — the same reason an
-// invalid repos.yaml refuses to boot.
-type envReader struct {
-	err error
-}
-
-func (r *envReader) fail(err error) {
-	if r.err == nil {
-		r.err = err
-	}
-}
-
-// intOr reads a positive integer setting.
-func (r *envReader) intOr(key string, fallback int) int {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n <= 0 {
-		r.fail(fmt.Errorf("%s=%q is not a positive integer", key, v))
-		return fallback
+// positive is r.Int for a setting that must be above zero.
+func positive(r *env.Reader, name string, def int) int {
+	n := r.Int(name, def)
+	if n <= 0 {
+		r.Fail("%s: %d, want a positive integer", name, n)
+		return def
 	}
 	return n
 }
 
-// intOrOff is intOr for a limit that can be switched off: an explicit 0
-// means off and is kept.
-func (r *envReader) intOrOff(key string, fallback int) int {
-	if strings.TrimSpace(os.Getenv(key)) == "0" {
+// positiveOrOff is positive for a limit that can be switched off: an explicit
+// 0 means off and is kept.
+func positiveOrOff(r *env.Reader, name string, def int) int {
+	if r.String(name, "") == "0" {
 		return 0
 	}
-	return r.intOr(key, fallback)
+	return positive(r, name, def)
 }
 
-// floatOr reads a positive float setting.
-func (r *envReader) floatOr(key string, fallback float64) float64 {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f <= 0 || math.IsNaN(f) || math.IsInf(f, 0) {
-		r.fail(fmt.Errorf("%s=%q is not a positive number", key, v))
-		return fallback
+// positiveFloat is r.Float for a setting that must be above zero.
+func positiveFloat(r *env.Reader, name string, def float64) float64 {
+	f := r.Float(name, def)
+	if f <= 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+		r.Fail("%s: %v, want a positive number", name, f)
+		return def
 	}
 	return f
 }
 
-// boolOr reads an on/off setting.
-func (r *envReader) boolOr(key string, fallback bool) bool { //nolint:unparam // a general on/off reader: every current setting happens to default to true, which is not a property of the function
-	v := strings.TrimSpace(os.Getenv(key))
-	switch strings.ToLower(v) {
-	case "":
-		return fallback
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	default:
-		r.fail(fmt.Errorf("%s=%q is not on or off; want true or false", key, v))
-		return fallback
+// positiveDuration is r.Duration for a setting that must be above zero.
+func positiveDuration(r *env.Reader, name string, def time.Duration) time.Duration {
+	d := r.Duration(name, def)
+	if d <= 0 {
+		r.Fail("%s: %s, want a duration above zero, e.g. 15m or 90s", name, d)
+		return def
 	}
+	return d
 }
 
-// oneOf reads a setting that must be one of a fixed set of words, case
-// folded, and returns it lower-cased.
-func (r *envReader) oneOf(key, fallback string, allowed ...string) string {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+// listOrNone is r.List with a way to switch the list off: unset or blank
+// means the default, like every other setting; the literal "none" is how an
+// operator says "nothing", since an empty value cannot say it here. A value
+// of separators alone is neither, and is refused.
+func listOrNone(r *env.Reader, name string, def []string) []string {
+	v := r.String(name, "")
 	if v == "" {
-		return fallback
+		return def
 	}
-	for _, a := range allowed {
-		if v == a {
-			return v
-		}
+	if strings.EqualFold(v, "none") {
+		return nil
 	}
-	r.fail(fmt.Errorf("%s=%q is not one of %s", key, v, strings.Join(allowed, ", ")))
-	return fallback
+	out := r.List(name, nil)
+	if len(out) == 0 {
+		r.Fail("%s: %q has only empty items; unset it for the default, or write none", name, v)
+		return def
+	}
+	return out
 }
 
-// envOptionalFloat reads a float setting that may also be switched off:
-// "default" (or "none") returns nil, meaning "send nothing". Malformed is an
-// error, not a fallback: see Config.LLMGateTemperature.
-func envOptionalFloat(key string, fallback float64) (*float64, error) {
-	v := strings.TrimSpace(os.Getenv(key))
-	switch strings.ToLower(v) {
+// optionalFloat reads a float setting that may also be switched off:
+// "default" (or "none") returns nil, meaning "send nothing". Malformed is a
+// fault, not a fallback: see Config.LLMGateTemperature.
+func optionalFloat(r *env.Reader, name string, def float64) *float64 {
+	switch strings.ToLower(r.String(name, "")) {
 	case "":
-		return &fallback, nil
+		return &def
 	case "default", "none":
-		return nil, nil
+		return nil
 	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
-		return nil, fmt.Errorf("%s=%q is not a temperature; want a number >= 0, or default", key, v)
+	f := r.Float(name, def)
+	if f < 0 || math.IsNaN(f) || math.IsInf(f, 0) {
+		r.Fail("%s: %v is not a temperature; want a number >= 0, or default", name, f)
+		return &def
 	}
-	return &f, nil
-}
-
-// envDurationOr reads a Go duration ("15m", "90s"). Malformed is an error.
-func envDurationOr(key string, fallback time.Duration) (time.Duration, error) {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback, nil
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("%s=%q is not a duration; want e.g. 15m or 90s", key, v)
-	}
-	return d, nil
-}
-
-func envOr(key, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return v
-	}
-	return fallback
+	return &f
 }
 
 // isLoopback reports whether addr's host resolves to a loopback address. An

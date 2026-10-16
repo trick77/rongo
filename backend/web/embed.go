@@ -1,4 +1,8 @@
-// Package web serves the embedded single-page application.
+// Package web serves the built SPA through kit's spa.Handler, with rongo's
+// two additions: an allowlist of the pages the client router has, so a path
+// nowhere gets a real 404 instead of a shell that quietly renders the
+// unasked question, and the share link's title in the HTML for link
+// previews, since a crawler does not run JavaScript.
 package web
 
 import (
@@ -9,55 +13,36 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/trick77/ship/kit/spa"
 )
 
-// Go's MIME table has no .webmanifest entry, so http.FileServer would answer
-// text/plain for it. Chrome rejects a manifest served that way and silently
-// drops the PWA icons and theme colour — no console error, nothing in the
-// network tab beyond a 200.
 func init() {
+	// Go's mime table has no entry for the manifest; without one the file
+	// goes out as text/plain and the browser ignores it.
 	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
 }
 
 //go:embed all:dist
 var distFS embed.FS
 
-// placeholderHTML ships separately from dist/. `vite build` runs with
-// emptyOutDir: false (see ui/vite.config.ts) so the tracked dist/.gitkeep
-// survives; the Makefile's fe-build target does `rm -rf dist/assets` instead
-// to remove stale hashed assets a build no longer produces. Embedding the
-// placeholder inside dist would mean a build permanently overwrites the
-// tracked placeholder with the built shell the first time anyone runs
-// `make build`.
+// placeholderHTML is what an unbuilt dist serves on an app route: a dev
+// checkout that has not run the UI build yet.
 //
 //go:embed placeholder.html
 var placeholderHTML []byte
 
-// HasBuiltIndex reports whether the embedded dist/ contains a real built
-// index.html (as opposed to just the tracked .gitkeep). Callers — notably
-// tests — use this to know which of the two legitimate states (built vs.
-// fresh clone) the binary is actually serving, without duplicating the
-// embed.FS lookup.
+// HasBuiltIndex reports whether the embedded dist holds a built shell.
 func HasBuiltIndex() bool {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return false
 	}
-	_, err = fs.Stat(sub, "index.html")
-	return err == nil
+	return spa.Built(sub)
 }
 
-// isRoute reports whether a path is one the SPA actually has a page for. It is
-// the same set ui/src/routing.ts parses, kept here so an address that leads
-// nowhere gets a real 404 instead of 200 and a shell that quietly renders the
-// unasked question — a soft 404 tells a reader, a crawler and a monitor that
-// the link worked.
-//
-// A thread address is checked by SHAPE only: 22 URL-safe characters, what the
-// store mints. Whether that thread exists is a question this handler cannot
-// answer — it has no session, and the only thing it may ask the record is a
-// share link's title — and answering it here would tell anyone, signed in or
-// not, which addresses are real. The app asks the API and says so itself.
+// isRoute is the client router's page list: what gets the shell. Everything
+// else is a real 404, so a typo in a link does not look like an empty page.
 func isRoute(path string) bool {
 	switch path {
 	case "/", "/new", "/threads", "/projects", "/shared", "/memory":
@@ -88,38 +73,18 @@ func isAddress(s string) bool {
 	return true
 }
 
-// addressLen is 16 random bytes in base64url without padding, which is what
-// threads.newToken mints.
+// addressLen is the length of the base64url string threads.newToken mints.
 const addressLen = 22
 
 // ShareTitle answers the one question the shell asks about a share link: what
 // the shared thread is called. It reports found == false for a token that is
 // unknown or revoked, and the page answers 404, exactly as GET
 // /api/shares/{token} already does for those — so this tells a crawler nothing
-// that endpoint does not. An error is a record that could not answer, never a
-// verdict on the link: the shell is served and the SPA asks the API itself.
+// the API would not.
 type ShareTitle func(ctx context.Context, token string) (title string, found bool, err error)
 
-// HandlerWithShareTitles serves the built SPA. A path the SPA has a page for
-// falls back to index.html so the client-side router can take over; anything
-// else is a 404.
-// /api paths are excluded first so a typo in an endpoint stays a 404 instead
-// of silently returning HTML.
-// /assets/ is excluded the same way: those are content-hashed files vite
-// emits, so a missing one means a browser holding a stale cached index.html
-// is asking for a chunk that no longer exists after a redeploy. Falling back
-// to the SPA shell there would return 200 text/html for a JS module request,
-// which reads to the browser as a broken script instead of the 404 a
-// reload-on-stale-chunk heuristic can act on. If the SPA has never been
-// built, dist/index.html is absent (only .gitkeep is tracked there) and the
-// handler serves the placeholder instead.
-//
-// It wires up the link-preview title for /share/. Crawlers do not run
-// JavaScript, so a share link unfurls with whatever the served HTML says;
-// SharePage sets document.title long after Slack has read the page and left.
-// Passing nil serves the site-wide card everywhere, which is what a binary
-// without a thread record has to do anyway.
-func HandlerWithShareTitles(shareTitle ShareTitle) http.Handler {
+// Handler serves the built SPA with the share link's title in its card.
+func Handler(shareTitle ShareTitle) http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		panic("web: dist directory missing from embed: " + err.Error())
@@ -127,103 +92,51 @@ func HandlerWithShareTitles(shareTitle ShareTitle) http.Handler {
 	return handler(sub, shareTitle)
 }
 
-// handler is HandlerWithShareTitles over any file system, so a test can serve
-// a shell of its own. The embedded dist/ is only built by `make fe-build` and
-// is gitignored, so CI runs the Go job against a tree that has none — a test
-// that needed the real one would skip there and assert nothing.
-func handler(sub fs.FS, shareTitle ShareTitle) http.Handler {
-	files := http.FileServer(http.FS(sub))
-	_, builtIndexErr := fs.Stat(sub, "index.html")
-	// Read once. The shell is a few kilobytes and every SPA route serves it.
-	// A shell that stats but cannot be read is the same situation as no build
-	// at all, so it takes the placeholder path rather than serving nothing.
-	shell, shellErr := fs.ReadFile(sub, "index.html")
-	if builtIndexErr == nil && shellErr != nil {
-		builtIndexErr = shellErr
-	}
-
-	// share looks a share link up for the page about to be served. A share
-	// link carries the thread's own title and a noindex header, matching what
-	// the public API sends for the same token: unfurl it, do not put it in a
-	// search index. A link that is not live is the API's 404, not a 200 telling
-	// a crawler and a monitor it works — the body is still the app, which
-	// renders its own "no longer available" page off that same API 404.
-	share := func(w http.ResponseWriter, r *http.Request) (title, desc string, status int) {
-		status = http.StatusOK
+// handler is kit's spa.Handler over dist: the router's page list as Routes,
+// the site card rendered into the shell per request (Index), and the share
+// pages answered whole in Gate, where the status and the headers can be
+// rongo's. A share page is looked up once; a crawler reads the title off the
+// HTML, a reader's browser renders it again from the API.
+func handler(dist fs.FS, shareTitle ShareTitle) http.Handler {
+	shell, shellErr := fs.ReadFile(dist, "index.html")
+	sharePage := func(w http.ResponseWriter, r *http.Request) bool {
 		token, ok := strings.CutPrefix(r.URL.Path, "/share/")
 		if !ok || token == "" {
-			return "", "", status
+			return false
 		}
+		// Never indexed, never cached: the link is the whole authorisation and
+		// a revoked one must not come back from a cache.
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow")
-		// Re-sharing a revoked thread returns the SAME token, so a 404 cached
-		// in front would outlive the link coming back.
 		w.Header().Set("Cache-Control", "no-store")
-		if shareTitle == nil {
-			return "", "", status
+		title, desc, status := "", "", http.StatusOK
+		if shareTitle != nil {
+			t, found, err := shareTitle(r.Context(), token)
+			switch {
+			case found:
+				title, desc = t, shareDesc
+			case err == nil:
+				// Unknown or revoked: a real 404, with the site card, the same
+				// answer a crawler and a monitor get for a page nowhere.
+				status = http.StatusNotFound
+			}
+			// An error keeps the shell with the site card: an outage must not
+			// turn every open link into a dead one.
 		}
-		t, found, err := shareTitle(r.Context(), token)
-		switch {
-		case found:
-			// Both together, or neither: a link described as "a shared
-			// thread, frozen where it was shared" under the bare site title
-			// is a card for something that may be gone.
-			return t, shareDesc, status
-		case err == nil:
-			return "", "", http.StatusNotFound
+		body := placeholderHTML
+		if shellErr == nil {
+			body = renderShell(shell, r, title, desc)
 		}
-		// A record that cannot answer is not a revocation.
-		return "", "", status
-	}
-
-	// serveShell writes the SPA shell with its link-preview placeholders
-	// filled in.
-	serveShell := func(w http.ResponseWriter, r *http.Request) {
-		title, desc, status := share(w, r)
-		body := renderShell(shell, r, title, desc)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		// The card is built from the request, so a cache in front keyed on
-		// path alone would serve one reader's host and title to the next.
-		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Vary", "X-Forwarded-Host, X-Forwarded-Proto")
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
+		return true
 	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// "/api" (no trailing slash) must also be excluded, not just "/api/" —
-		// a prefix-only check on "/api/" lets the bare form fall through to
-		// the SPA shell instead of a 404.
-		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r)
-			return
-		}
-		if builtIndexErr != nil {
-			// Nothing under dist/ is built yet, so /assets/ can't contain a
-			// real file either; a missing built dist and a missing asset
-			// both mean "not found", not the placeholder.
-			if strings.HasPrefix(r.URL.Path, "/assets/") || !isRoute(r.URL.Path) {
-				http.NotFound(w, r)
-				return
-			}
-			_, _, status := share(w, r)
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(status)
-			_, _ = w.Write(placeholderHTML)
-			return
-		}
-		// "/" comes through here too, and lands on the shell: the trimmed name
-		// is "", which no fs.FS will stat, so the root never reaches the file
-		// server. "/index.html" does, and the file server answers it with its
-		// usual 301 to "./" rather than the raw shell.
-		if _, err := fs.Stat(sub, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
-			if strings.HasPrefix(r.URL.Path, "/assets/") || !isRoute(r.URL.Path) {
-				http.NotFound(w, r)
-				return
-			}
-			serveShell(w, r)
-			return
-		}
-		files.ServeHTTP(w, r)
+	return spa.Handler(dist, spa.Options{
+		Routes:      isRoute,
+		Placeholder: placeholderHTML,
+		Gate:        func(w http.ResponseWriter, r *http.Request) bool { return !sharePage(w, r) },
+		Index:       func(index []byte, r *http.Request) []byte { return renderShell(index, r, "", "") },
 	})
 }

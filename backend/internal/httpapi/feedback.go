@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/trick77/rongo/internal/threads"
+	"github.com/trick77/ship/kit/httpx"
 )
 
 // feedbackRequest is the verdict the reader clicked. The answers it covers are
@@ -28,7 +29,7 @@ func (s *Server) handleGetFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !owns {
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	}
 	fb, found, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)
@@ -56,12 +57,12 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Verdict != 1 && req.Verdict != -1 {
-		http.Error(w, "verdict must be 1 or -1", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "verdict must be 1 or -1")
 		return
 	}
 	// A reason says what was off, so only a thumbs down carries one.
 	if !threads.ValidFeedbackReason(req.Reason) || (req.Verdict == 1 && req.Reason != "") {
-		http.Error(w, "unknown reason", http.StatusBadRequest)
+		httpx.WriteError(w, http.StatusBadRequest, "unknown reason")
 		return
 	}
 	found, err := s.deps.Threads.SetFeedback(r.Context(), u.Subject, id, req.Verdict, req.Reason)
@@ -70,7 +71,7 @@ func (s *Server) handlePutFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		http.Error(w, "no such thread", http.StatusNotFound)
+		httpx.WriteError(w, http.StatusNotFound, "no such thread")
 		return
 	}
 	fb, _, err := s.deps.Threads.Feedback(r.Context(), u.Subject, id)

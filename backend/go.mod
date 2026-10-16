@@ -6,7 +6,7 @@ require (
 	github.com/asg017/sqlite-vec-go-bindings v0.1.7-alpha.2
 	github.com/ncruces/go-sqlite3 v0.23.3
 	github.com/trick77/llmwire v0.0.43
-	github.com/trick77/ship/kit v0.13.1
+	github.com/trick77/ship/kit v0.15.0
 	github.com/trick77/ship/kit/auth v0.3.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0

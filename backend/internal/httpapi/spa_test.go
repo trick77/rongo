@@ -18,15 +18,19 @@ func TestSPA_servesIndexAtRoot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	// Then
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	// Then: dist/index.html is gitignored, so it can never be committed
+	// broken — but it can be legitimately absent (fresh clone, no `make
+	// fe-build` yet) or present (built). Both are valid states with their own
+	// contract: a build must keep the mount point and answer 200, a fresh
+	// clone must serve the placeholder, as kit does, with a 503 that says the
+	// build is missing rather than something that merely looks like HTML.
+	want := http.StatusOK
+	if !web.HasBuiltIndex() {
+		want = http.StatusServiceUnavailable
 	}
-	// dist/index.html is gitignored, so it can never be committed broken —
-	// but it can be legitimately absent (fresh clone, no `make fe-build` yet)
-	// or present (built). Both are valid states with their own contract:
-	// a build must keep the mount point, a fresh clone must serve the
-	// placeholder rather than something that merely looks like HTML.
+	if rec.Code != want {
+		t.Fatalf("status = %d, want %d", rec.Code, want)
+	}
 	if web.HasBuiltIndex() {
 		if !strings.Contains(rec.Body.String(), `id="root"`) {
 			t.Errorf("body does not look like the built SPA shell: %q", rec.Body.String())
@@ -51,8 +55,14 @@ func TestSPA_fallsBackForClientRoutes(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s: status = %d, want %d", path, rec.Code, http.StatusOK)
+		// Unbuilt, kit answers an app route with the placeholder as a 503; a
+		// share page is rongo's own answer and stays 200.
+		want := http.StatusOK
+		if !web.HasBuiltIndex() && !strings.HasPrefix(path, "/share/") {
+			want = http.StatusServiceUnavailable
+		}
+		if rec.Code != want {
+			t.Errorf("%s: status = %d, want %d", path, rec.Code, want)
 		}
 	}
 }

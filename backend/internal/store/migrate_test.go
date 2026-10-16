@@ -31,7 +31,7 @@ func TestMigrate_createsSchemaAndIsIdempotent(t *testing.T) {
 	}
 
 	// Then: the tables exist ...
-	for _, table := range []string{"users", "sessions", "schema_migrations"} {
+	for _, table := range []string{"users", "schema_migrations"} {
 		var name string
 		err := db.QueryRow(
 			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
@@ -87,7 +87,7 @@ func TestMigrateBuildsTheWholeSchemaFromOneFile(t *testing.T) {
 	}
 
 	for _, table := range []string{
-		"users", "sessions", "repo_state", "files", "symbols", "chunks",
+		"users", "repo_state", "files", "symbols", "chunks",
 		"embed_cache", "repo_deps", "threads", "messages", "citations",
 		"clarifications", "clarification_candidates", "message_sources", "commits", "commits_fts",
 	} {

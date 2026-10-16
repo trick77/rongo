@@ -2,130 +2,94 @@ package auth
 
 import (
 	"context"
-	"net/http/httptest"
 	"testing"
-	"time"
 )
 
-func TestCreateSessionFromClaims_mintsResolvableSession(t *testing.T) {
-	// Given
+func TestAdmitClaims_admitsAMemberOfTheGroupAsAdmin(t *testing.T) {
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com", Groups: []string{"Rongo"}}
 
-	// When
-	token, expiresAt, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "Rongo")
+	svc.SetOIDCAdminGroup("Rongo")
 
-	// Then
+	user, err := svc.AdmitClaims(context.Background(), claims)
+
 	if err != nil {
-		t.Fatalf("CreateSessionFromClaims() err = %v", err)
+		t.Fatalf("AdmitClaims() err = %v", err)
 	}
-	if user.Subject != "authelia-sub-1" {
-		t.Errorf("Subject = %q, want %q", user.Subject, "authelia-sub-1")
+	if user.Subject != "authelia-sub-1" || user.Email != "jan@example.com" {
+		t.Errorf("user = %+v, want the subject and email of the claims", user)
 	}
 	if !user.IsAdmin {
 		t.Error("IsAdmin = false, want true for a member of the admin group")
-	}
-	if got, ok := svc.UserByToken(context.Background(), token); !ok || got.ID != user.ID {
-		t.Errorf("UserByToken() = (%+v, %v), want the user just created", got, ok)
-	}
-	if until := time.Until(expiresAt); until <= 0 || until > SessionTTL {
-		t.Errorf("expiresAt is %v away, want within (0, %v]", until, SessionTTL)
 	}
 }
 
 // The same subject signing in twice is one user, not two: threads are keyed by
 // subject, so a second row would hide the first login's history.
-func TestCreateSessionFromClaims_reusesUserForSameSubject(t *testing.T) {
-	// Given
+func TestAdmitClaims_reusesUserForSameSubject(t *testing.T) {
 	svc := newService(t)
 	claims := Claims{Subject: "authelia-sub-1", Email: "jan@example.com"}
-	_, _, first, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
+
+	first, err := svc.AdmitClaims(context.Background(), claims)
 	if err != nil {
-		t.Fatalf("first CreateSessionFromClaims() err = %v", err)
+		t.Fatal(err)
+	}
+	second, err := svc.AdmitClaims(context.Background(), claims)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// When
-	_, _, second, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
-
-	// Then
-	if err != nil {
-		t.Fatalf("second CreateSessionFromClaims() err = %v", err)
-	}
-	if second.ID != first.ID {
-		t.Errorf("second login user id = %d, want %d", second.ID, first.ID)
+	if first.ID != second.ID {
+		t.Errorf("ids = %d and %d, want the same user", first.ID, second.ID)
 	}
 }
 
-func TestCreateSessionFromClaims_deniesAdminWithoutTheGroup(t *testing.T) {
-	// Given
+func TestAdmitClaims_deniesAdminWithoutTheGroup(t *testing.T) {
 	svc := newService(t)
-	claims := Claims{Subject: "sub-2", Groups: []string{"Loom", "Tools"}}
+	claims := Claims{Subject: "authelia-sub-2", Groups: []string{"Readers"}}
+	svc.SetOIDCAdminGroup("Rongo")
 
-	// When
-	_, _, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "Rongo")
+	user, err := svc.AdmitClaims(context.Background(), claims)
 
-	// Then
 	if err != nil {
-		t.Fatalf("CreateSessionFromClaims() err = %v", err)
+		t.Fatalf("AdmitClaims() err = %v", err)
 	}
 	if user.IsAdmin {
-		t.Error("IsAdmin = true, want false for a user outside the admin group")
+		t.Error("IsAdmin = true, want false outside the admin group")
 	}
 }
 
-// An empty admin group means the check is off, not that nobody is admin — the
-// opposite reading would lock every deployment out of the admin surface by
-// default.
-func TestCreateSessionFromClaims_emptyAdminGroupGrantsAdmin(t *testing.T) {
-	// Given
+// Empty means no group check: every user the provider let through is admin.
+func TestAdmitClaims_emptyAdminGroupGrantsAdmin(t *testing.T) {
 	svc := newService(t)
-	claims := Claims{Subject: "sub-3"}
 
-	// When
-	_, _, user, err := svc.CreateSessionFromClaims(context.Background(), claims, "")
+	user, err := svc.AdmitClaims(context.Background(), Claims{Subject: "authelia-sub-3"})
 
-	// Then
 	if err != nil {
-		t.Fatalf("CreateSessionFromClaims() err = %v", err)
+		t.Fatalf("AdmitClaims() err = %v", err)
 	}
 	if !user.IsAdmin {
-		t.Error("IsAdmin = false, want true when no admin group is configured")
+		t.Error("IsAdmin = false, want true with no admin group configured")
 	}
 }
 
-func TestCreateSessionFromClaims_rejectsClaimsWithoutSubject(t *testing.T) {
-	// Given
+func TestAdmitClaims_rejectsClaimsWithoutSubject(t *testing.T) {
 	svc := newService(t)
 
-	// When
-	_, _, _, err := svc.CreateSessionFromClaims(context.Background(), Claims{Email: "jan@example.com"}, "")
-
-	// Then
-	if err == nil {
-		t.Fatal("CreateSessionFromClaims() err = nil, want an error for empty subject")
+	if _, err := svc.AdmitClaims(context.Background(), Claims{Email: "jan@example.com"}); err == nil {
+		t.Fatal("AdmitClaims() err = nil, want an error for claims without a subject")
 	}
 }
 
-// A clear that differs from SetSessionCookie in Path or Secure leaves the
-// original cookie in the browser and the user signed in.
-func TestClearSessionCookie_matchesTheAttributesItClears(t *testing.T) {
-	// Given
-	const secure = true
-	set := httptest.NewRecorder()
-	SetSessionCookie(set, "token", secure, time.Hour)
-	want := set.Result().Cookies()[0]
+// The group is compared as kit compares groups, case folded: an operator who
+// typed it unlike the IdP spells it still gets admins.
+func TestAdmitClaims_foldsTheGroupsCase(t *testing.T) {
+	svc := newService(t)
+	svc.SetOIDCAdminGroup("rongo")
 
-	// When
-	rec := httptest.NewRecorder()
-	ClearSessionCookie(rec, secure)
+	user, err := svc.AdmitClaims(context.Background(), Claims{Subject: "sub-4", Groups: []string{"Rongo"}})
 
-	// Then
-	got := rec.Result().Cookies()[0]
-	if got.Name != want.Name || got.Path != want.Path || got.Secure != want.Secure ||
-		got.HttpOnly != want.HttpOnly || got.SameSite != want.SameSite {
-		t.Fatalf("cleared cookie = %+v, want the attributes of %+v", got, want)
-	}
-	if got.Value != "" || got.MaxAge >= 0 {
-		t.Errorf("cleared cookie value = %q, MaxAge = %d; want empty and negative", got.Value, got.MaxAge)
+	if err != nil || !user.IsAdmin {
+		t.Errorf("user = %+v %v, want admin by the folded group", user, err)
 	}
 }

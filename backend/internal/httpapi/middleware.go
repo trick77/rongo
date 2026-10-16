@@ -2,71 +2,56 @@ package httpapi
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/trick77/ship/kit/httpx"
 )
 
-// logging emits one access line per request. It logs the path and never the
-// query string or full URL: query strings carry tokens and OIDC codes. The
-// path is masked too, because a share link's token is a path segment and is
-// the link's whole authorisation; see maskPath.
-//
-// /healthz and /readyz are not logged, whatever the status. The container
-// probes them every few seconds, and a log that is mostly probes hides the
-// requests a reader is looking for. A failing readiness check is kit's to
-// log: once when it starts failing, once when it recovers.
-// probePaths are where httpx.Health mounts the probes, read once.
-var probePaths = httpx.DefaultProbePaths()
+// trustedHops is the number of proxies in front of rongo when there is one:
+// Traefik, so the X-Forwarded-For entry it wrote is the client.
+const trustedHops = 1
 
-func logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		// kit's status writer: Flush and Hijack reach the wrapped writer, so an
-		// SSE handler's `w.(http.Flusher)` holds through the chain.
-		rec := httpx.NewStatusWriter(w)
+// csp is kit's default policy plus what the diagrams need: PlantUML renders
+// through graphviz compiled to WebAssembly (@plantuml/core's viz-global.js),
+// which 'self' alone does not let instantiate, and an exported diagram is
+// handed to the browser as a blob.
+const csp = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; " +
+	"style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 
-		next.ServeHTTP(rec, r)
-
-		// 0: the handler wrote nothing, net/http sends 200 when it returns.
-		status := rec.Status()
-		if status == 0 {
-			status = http.StatusOK
-		}
-		if slices.Contains(probePaths, r.URL.Path) {
-			return
-		}
-		attrs := []any{
-			"method", r.Method,
-			"path", maskPath(r.URL.Path),
-			"status", status,
-			"duration_ms", time.Since(start).Milliseconds(),
-		}
-		switch {
-		case status >= 500:
-			slog.Error("request", attrs...)
-		case status >= 400:
-			slog.Warn("request", attrs...)
-		default:
-			slog.Info("request", attrs...)
-		}
-	})
+// chain is the family's middleware order around the router: the access log
+// outermost, so a panicked request still produces a line (as a 500); the
+// security headers next, outside recovery, because kit's Recover restores the
+// header as it found it before writing the 500 and would undo headers set
+// inside it; recovery; the cross-site refusal innermost. Both log lines carry
+// maskPath's view of the path, never a share token.
+func chain(h http.Handler) http.Handler {
+	log := slog.Default()
+	return httpx.Chain(h,
+		httpx.AccessLog(log, httpx.AccessLogOptions{ClientIP: clientIP, Path: maskedPath}),
+		httpx.SecurityHeaders(csp),
+		httpx.RecoverWith(log, httpx.RecoverOptions{Path: maskedPath}),
+		httpx.CrossOrigin,
+	)
 }
 
-// recovery turns a panic into a 500 without killing the process.
-func recovery(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if v := recover(); v != nil {
-				slog.Error("panic recovered", "err", v, "path", maskPath(r.URL.Path))
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
+// clientIP is the address the access log and the login throttle see: the
+// X-Forwarded-For entry the proxy wrote when one is in front, which is when
+// the TCP peer is not loopback (Traefik on the compose network); the peer
+// itself when rongo is reached directly, where the header would be the
+// caller's to forge and a guesser could buy a fresh throttle turn per value.
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return httpx.ClientIP(r, 0)
+		}
+	}
+	return httpx.ClientIP(r, trustedHops)
+}
+
+func maskedPath(r *http.Request) string {
+	return maskPath(r.URL.Path)
 }
 
 // sharePrefixes are the routes whose next path segment is a share token:
