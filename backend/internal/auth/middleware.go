@@ -2,12 +2,14 @@ package auth
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/trick77/ship/kit/httpx"
+	"github.com/trick77/ship/kit/secret"
 )
 
 type contextKey struct{}
@@ -59,10 +61,8 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			return
 
 		case "token":
-			presented, ok := bearerToken(r)
-			// Constant-time compare: a length-independent equality check on a
-			// shared secret leaks it a byte at a time.
-			if !ok || subtle.ConstantTimeCompare([]byte(presented), []byte(s.adminToken)) != 1 {
+			presented, ok := httpx.Bearer(r)
+			if !ok || !secret.Match(presented, s.adminToken) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -133,15 +133,6 @@ func ClearSessionCookie(w http.ResponseWriter, secure bool) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
-}
-
-func bearerToken(r *http.Request) (string, bool) {
-	h := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
-		return "", false
-	}
-	return h[len(prefix):], true
 }
 
 // proxyAdmin decides admin for a proxied caller. No group configured is no
